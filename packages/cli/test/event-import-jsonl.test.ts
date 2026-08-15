@@ -118,6 +118,38 @@ async function rewriteDocumentEvent(
   throw new Error(`Could not locate document event ${eventId}.`)
 }
 
+async function removeDocumentSourceAudits(vaultRoot: string): Promise<void> {
+  const auditRoot = path.join(vaultRoot, 'audit')
+  const relativePaths = (await readdir(auditRoot, { recursive: true }))
+    .filter((relativePath) => relativePath.endsWith('.jsonl'))
+  let removed = 0
+
+  for (const relativePath of relativePaths) {
+    const absolutePath = path.join(auditRoot, relativePath)
+    const lines = (await readFile(absolutePath, 'utf8')).split('\n').filter(Boolean)
+    const retained = lines.filter((line) => {
+      const record: unknown = JSON.parse(line)
+      const isDocumentSourceAudit = typeof record === 'object'
+        && record !== null
+        && 'commandName' in record
+        && record.commandName === 'core.importDocument'
+      if (isDocumentSourceAudit) {
+        removed += 1
+      }
+      return !isDocumentSourceAudit
+    })
+    await writeFile(
+      absolutePath,
+      retained.length > 0 ? `${retained.join('\n')}\n` : '',
+      'utf8',
+    )
+  }
+
+  if (removed === 0) {
+    throw new Error('Could not locate the document source receipt audit.')
+  }
+}
+
 async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, string]>> {
   const entries = await readdir(vaultRoot, { recursive: true })
   const snapshot: Array<[string, string]> = []
@@ -350,8 +382,24 @@ test('damaged exact-source evidence stops before replacement identity or workout
 
 test('orphaned exact-source evidence stops before replacement identity or workout replay', async () => {
   const cases = [
-    { mode: 'remove', name: 'missing-document-event' },
-    { mode: 'invalidate', name: 'contract-invalid-document-event' },
+    {
+      mode: 'remove',
+      name: 'missing-document-event',
+      removeManifest: false,
+      removeSourceAudit: false,
+    },
+    {
+      mode: 'invalidate',
+      name: 'contract-invalid-document-event',
+      removeManifest: false,
+      removeSourceAudit: false,
+    },
+    {
+      mode: 'remove',
+      name: 'completion-without-source-owner',
+      removeManifest: true,
+      removeSourceAudit: true,
+    },
   ] as const
 
   for (const testCase of cases) {
@@ -379,6 +427,12 @@ test('orphaned exact-source evidence stops before replacement identity or workou
     assert.equal(requireData(applied).createdCount, 1)
 
     await rewriteDocumentEvent(vaultRoot, source.eventId, testCase.mode)
+    if (testCase.removeManifest) {
+      await rm(path.join(vaultRoot, source.manifestFile))
+    }
+    if (testCase.removeSourceAudit) {
+      await removeDocumentSourceAudits(vaultRoot)
+    }
     const filesBeforeReplay = await snapshotVaultFiles(vaultRoot)
     const rejectedReplay = await runCli<DocumentImportResult>([
       'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,

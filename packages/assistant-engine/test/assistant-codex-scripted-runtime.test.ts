@@ -1521,6 +1521,13 @@ grep -q '"requiredManifestPresent":false' source-evidence-state.json`,
 grep -q '"rawManifestPresent":true' source-evidence-state.json
 grep -q '"rawArtifactVerified":true' source-evidence-state.json`,
     },
+    {
+      evidenceState: '{"canonicalSourceReceiptPresent":false,"guardedCompletionReceiptPresent":true,"workoutProvenancePresent":true}\n',
+      name: 'completion receipt without source owner',
+      stateAssertions: `grep -q '"canonicalSourceReceiptPresent":false' source-evidence-state.json
+grep -q '"guardedCompletionReceiptPresent":true' source-evidence-state.json
+grep -q '"workoutProvenancePresent":true' source-evidence-state.json`,
+    },
   ])('stops before transformation when preserved exact-source evidence is damaged ($name)', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({ evidenceState, stateAssertions }) => {

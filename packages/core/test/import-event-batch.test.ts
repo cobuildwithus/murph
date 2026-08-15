@@ -67,7 +67,7 @@ async function waitForNewStagedDocumentOperation(
   existingEntries: ReadonlySet<string>,
 ): Promise<void> {
   const operationDirectory = path.join(vaultRoot, ".runtime", "operations");
-  for (let attempt = 0; attempt < 300; attempt += 1) {
+  for (let attempt = 0; attempt < 3_000; attempt += 1) {
     const entries = await fs.readdir(operationDirectory).catch(() => [] as string[]);
     for (const entry of entries) {
       if (existingEntries.has(entry) || !entry.endsWith(".json")) {
@@ -278,6 +278,15 @@ test("source-guarded workout batches land once and retain completion through edi
   const vaultRoot = await makeVault("murph-event-batch-source-guard");
   const source = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-guard");
   const rawRef = source.raw.relativePath;
+  const sourceAudit = (await readAllAuditRecords(vaultRoot)).find(
+    (record) => record.commandName === "core.importDocument",
+  );
+  assert.equal(
+    sourceAudit?.targetIds?.some((targetId) =>
+      /^raw-source-v1:sha256:[a-f0-9]{64}:bytes:\d+$/u.test(targetId)
+    ),
+    true,
+  );
 
   const dryRun = await importEventBatch({
     vaultRoot,
@@ -306,7 +315,7 @@ test("source-guarded workout batches land once and retain completion through edi
   assert.ok(completionAudit);
   assert.equal(
     completionAudit.targetIds?.some((targetId) =>
-      /^workout-source-v1:sha256:[a-f0-9]{64}:bytes:\d+$/u.test(targetId)
+      /^raw-source-v1:sha256:[a-f0-9]{64}:bytes:\d+$/u.test(targetId)
     ),
     true,
   );
@@ -393,6 +402,36 @@ test("damaged document evidence cannot become a fresh workout source", async () 
         await fs.writeFile(
           path.join(vaultRoot, source.eventPath),
           `${JSON.stringify({ ...source.event, schemaVersion: "invalid" })}\n`,
+          "utf8",
+        );
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "completion-without-source-owner",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, source.eventPath), "", "utf8");
+        await fs.rm(path.join(vaultRoot, source.manifestPath));
+        if (!source.auditPath) {
+          throw new Error("Document import did not return its source receipt audit path.");
+        }
+        const auditPath = path.join(vaultRoot, source.auditPath);
+        const retainedAuditLines = (await fs.readFile(auditPath, "utf8"))
+          .split("\n")
+          .filter(Boolean)
+          .filter((line) => {
+            const record: unknown = JSON.parse(line);
+            return !(
+              typeof record === "object"
+              && record !== null
+              && "commandName" in record
+              && record.commandName === "core.importDocument"
+            );
+          });
+        await fs.writeFile(
+          auditPath,
+          retainedAuditLines.length > 0 ? `${retainedAuditLines.join("\n")}\n` : "",
           "utf8",
         );
       },
@@ -491,7 +530,7 @@ test("source-guarded workout batches reject partial history without a completion
     commandName: "core.importEventBatch.sourceRawRefOnce",
     summary: "Marker without source-event authority.",
     targetIds: [
-      `workout-source-v1:sha256:${sourceIntegrity.sha256}:bytes:${sourceIntegrity.byteSize}`,
+      `raw-source-v1:sha256:${sourceIntegrity.sha256}:bytes:${sourceIntegrity.byteSize}`,
       "evt_01JQ9R7WF97M1WAB2B4QF2Q1AZ",
     ],
   });

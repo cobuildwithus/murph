@@ -95,7 +95,6 @@ import {
   normalizeMealNutrition,
 } from "./nutrition.ts";
 import {
-  isRawManifestFileName,
   parseRawImportManifest,
   resolveRawManifestPath,
   stageRawImportManifest,
@@ -3815,126 +3814,179 @@ interface ExactDocumentSource {
   rawRef: string;
 }
 
+const DOCUMENT_SOURCE_AUDIT_COMMAND = "core.importDocument";
+const WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND = "core.importEventBatch.sourceRawRefOnce";
+
+function buildRawSourceReceiptTarget(
+  sourceReceipt: CommittedPayloadReceipt,
+): string {
+  return `raw-source-v1:sha256:${sourceReceipt.sha256}:bytes:${sourceReceipt.byteLength}`;
+}
+
 interface ExactDocumentSourceSet {
+  activityEventIdsByRawRef: ReadonlyMap<string, ReadonlySet<string>>;
+  completionAuditEventIds: ReadonlySet<string>;
   deletedExactSourceExists: boolean;
   liveSources: ExactDocumentSource[];
 }
 
 function rejectDamagedExactDocumentEvidence(input: {
   documentId: string;
-  manifestPath: string;
+  manifestPath?: string;
   reason: string;
 }): never {
   throw new VaultError(
     "RAW_MANIFEST_INVALID",
     "Preserved exact source evidence is incomplete or damaged. Exact reuse will not create a replacement identity.",
-    input,
+    {
+      documentId: input.documentId,
+      ...(input.manifestPath ? { manifestPath: input.manifestPath } : {}),
+      reason: input.reason,
+    },
   );
 }
 
-async function inspectVerifiedExactDocumentManifestClaims(input: {
+async function inspectExactSourceAuditEvidence(input: {
   vaultRoot: string;
   sourceReceipt: CommittedPayloadReceipt;
-}): Promise<Map<string, string>> {
-  const manifestPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.rawDocumentsDirectory, {
-    extension: ".json",
+}): Promise<{
+  completionTargetEventIds: ReadonlySet<string>;
+  documentIdsByEventId: ReadonlyMap<string, string>;
+}> {
+  const targetId = buildRawSourceReceiptTarget(input.sourceReceipt);
+  const auditPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.auditDirectory, {
+    extension: ".jsonl",
   });
-  const claims = new Map<string, string>();
+  const completionTargetEventIds = new Set<string>();
+  const documentIdsByEventId = new Map<string, string>();
 
-  for (const manifestPath of manifestPaths) {
-    const fileName = manifestPath.slice(manifestPath.lastIndexOf("/") + 1);
-    if (!isRawManifestFileName(fileName)) {
-      continue;
+  for (const relativePath of auditPaths) {
+    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      const parsed = safeParseContract(auditRecordSchema, rawRecord);
+      if (
+        !parsed.success
+        || parsed.data.status !== "success"
+        || parsed.data.targetIds?.includes(targetId) !== true
+      ) {
+        continue;
+      }
+      const targetIds = parsed.data.targetIds;
+      if (parsed.data.commandName === DOCUMENT_SOURCE_AUDIT_COMMAND) {
+        let documentId: string;
+        let eventId: string;
+        try {
+          if (targetIds.length !== 3 || targetIds[0] !== targetId) {
+            throw new TypeError("source receipt audit must retain exactly one owner");
+          }
+          documentId = assertContractId(targetIds[1], ID_PREFIXES.document, "documentId");
+          eventId = assertContractId(targetIds[2], ID_PREFIXES.event, "eventId");
+        } catch {
+          rejectDamagedExactDocumentEvidence({
+            documentId: typeof targetIds[1] === "string" ? targetIds[1] : "unknown",
+            reason: "source receipt audit does not retain one valid document owner",
+          });
+        }
+        const existing = documentIdsByEventId.get(eventId);
+        if (existing && existing !== documentId) {
+          rejectDamagedExactDocumentEvidence({
+            documentId,
+            reason: "source receipt audit assigns one event to multiple document owners",
+          });
+        }
+        documentIdsByEventId.set(eventId, documentId);
+        continue;
+      }
+      if (parsed.data.commandName === WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND) {
+        for (const candidate of targetIds.slice(1)) {
+          try {
+            completionTargetEventIds.add(assertContractId(candidate, ID_PREFIXES.event, "eventId"));
+          } catch {
+            // The bounded audit target list may contain non-event context.
+          }
+        }
+      }
     }
-    const manifestText = await readUtf8File(input.vaultRoot, manifestPath);
-    let manifest: ReturnType<typeof parseRawImportManifest>;
-    try {
-      manifest = parseRawImportManifest(JSON.parse(manifestText));
-    } catch {
-      // A member document may legitimately have a manifest-like name. It is
-      // evidence only when the full internal manifest contract is intact.
-      continue;
-    }
-    const sourceArtifacts = manifest.artifacts.filter((artifact) =>
-      artifact.role === "source_document"
-    );
-    const artifact = sourceArtifacts[0];
-    if (
-      manifest.importKind !== "document"
-      || manifest.owner.kind !== "document"
-      || manifest.owner.id !== manifest.importId
-      || !rawDirectoryMatchesOwner(manifest.rawDirectory, manifest.owner)
-      || sourceArtifacts.length !== 1
-      || !artifact
-      || artifact.byteSize !== input.sourceReceipt.byteLength
-      || artifact.sha256 !== input.sourceReceipt.sha256
-    ) {
-      continue;
-    }
-    let resolvedManifestPath: string;
-    try {
-      resolvedManifestPath = resolveRawManifestPath({
-        artifacts: manifest.artifacts,
-        rawDirectory: manifest.rawDirectory,
-        importId: manifest.importId,
-        importedAt: manifest.importedAt,
-      });
-    } catch {
-      continue;
-    }
-    if (resolvedManifestPath !== manifestPath) {
-      continue;
-    }
-
-    const integrity = await statAndHashVaultFile(input.vaultRoot, artifact.relativePath);
-    if (!integrity) {
-      throw new VaultError(
-        "RAW_REFERENCE_MISSING",
-        "Preserved exact source evidence is missing its immutable raw artifact. Exact reuse will not create a replacement identity.",
-        { documentId: manifest.importId, manifestPath, relativePath: artifact.relativePath },
-      );
-    }
-    if (
-      integrity.byteSize !== artifact.byteSize
-      || integrity.sha256 !== artifact.sha256
-    ) {
-      rejectDamagedExactDocumentEvidence({
-        documentId: manifest.importId,
-        manifestPath,
-        reason: "raw artifact bytes do not match the immutable manifest",
-      });
-    }
-
-    const existing = claims.get(manifest.importId);
-    if (existing && existing !== manifestPath) {
-      rejectDamagedExactDocumentEvidence({
-        documentId: manifest.importId,
-        manifestPath,
-        reason: "multiple immutable manifests claim one exact document identity",
-      });
-    }
-    claims.set(manifest.importId, manifestPath);
   }
 
-  return claims;
+  return { completionTargetEventIds, documentIdsByEventId };
 }
 
 async function inspectExactDocumentSourceSet(input: {
   vaultRoot: string;
   sourceReceipt: CommittedPayloadReceipt;
 }): Promise<ExactDocumentSourceSet> {
+  const auditEvidence = await inspectExactSourceAuditEvidence(input);
+  const emptyActivityIndex = new Map<string, ReadonlySet<string>>();
+  if (
+    auditEvidence.documentIdsByEventId.size === 0
+    && auditEvidence.completionTargetEventIds.size === 0
+  ) {
+    return {
+      activityEventIdsByRawRef: emptyActivityIndex,
+      completionAuditEventIds: new Set<string>(),
+      deletedExactSourceExists: false,
+      liveSources: [],
+    };
+  }
+
   const shardPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
   const entries: EventSpineEntry<DocumentEventRecord>[] = [];
+  const activityEventIds = new Set<string>();
+  const activityEventIdsByRawRef = new Map<string, Set<string>>();
 
   for (const relativePath of shardPaths) {
     for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
       const parsed = safeParseContract(eventRecordSchema, rawRecord);
-      if (parsed.success && parsed.data.kind === "document") {
+      const rawEventId = typeof rawRecord === "object"
+        && rawRecord !== null
+        && "id" in rawRecord
+        && typeof rawRecord.id === "string"
+        ? rawRecord.id
+        : null;
+      if (!parsed.success) {
+        if (rawEventId && auditEvidence.documentIdsByEventId.has(rawEventId)) {
+          rejectDamagedExactDocumentEvidence({
+            documentId: auditEvidence.documentIdsByEventId.get(rawEventId) ?? "unknown",
+            reason: "source receipt audit points to a contract-invalid document event",
+          });
+        }
+        continue;
+      }
+      if (
+        parsed.data.kind === "document"
+        && auditEvidence.documentIdsByEventId.has(parsed.data.id)
+      ) {
         entries.push({ relativePath, record: parsed.data });
       }
+      if (parsed.data.kind === "activity_session") {
+        activityEventIds.add(parsed.data.id);
+        for (const rawRef of collectEventRawReferencePaths(parsed.data)) {
+          const ids = activityEventIdsByRawRef.get(rawRef) ?? new Set<string>();
+          ids.add(parsed.data.id);
+          activityEventIdsByRawRef.set(rawRef, ids);
+        }
+      }
     }
+  }
+
+  const completionAuditEventIds = new Set(
+    [...auditEvidence.completionTargetEventIds].filter((eventId) => activityEventIds.has(eventId)),
+  );
+  if (auditEvidence.documentIdsByEventId.size === 0) {
+    if (completionAuditEventIds.size > 0) {
+      rejectDamagedExactDocumentEvidence({
+        documentId: "unknown",
+        reason: "whole-source completion survives without its source receipt owner",
+      });
+    }
+    return {
+      activityEventIdsByRawRef,
+      completionAuditEventIds,
+      deletedExactSourceExists: false,
+      liveSources: [],
+    };
   }
 
   // Exact-source identity needs the latest revision even when it is a
@@ -3947,42 +3999,40 @@ async function inspectExactDocumentSourceSet(input: {
       latestDocuments.set(entry.record.id, entry);
     }
   }
-  // Reconcile the lifecycle ledger with immutable manifest evidence. A valid
-  // event supplies canonical lifecycle; a fully owner-bound manifest preserves
-  // the identity needed to distinguish an absent/invalid event from true source
-  // absence. Member files with manifest-like names do not satisfy that proof.
+  // The content-derived import audit owns source recreation identity. Its
+  // document/event targets select the lifecycle row; that row derives the one
+  // manifest and raw artifact to verify. No vault-wide manifest discovery or
+  // compatibility reader participates in the decision.
   const claims = new Map<string, {
     entry: EventSpineEntry<DocumentEventRecord>;
     raw: EventAttachment;
   }>();
-  for (const entry of entries) {
-    const raw = entry.record.attachments?.find((attachment) =>
-      attachment.role === "source_document"
-      && attachment.sha256 === input.sourceReceipt.sha256
-    );
-    if (!raw) {
-      continue;
+  for (const [eventId, documentId] of auditEvidence.documentIdsByEventId) {
+    let origin: EventSpineEntry<DocumentEventRecord> | null = null;
+    let raw: EventAttachment | null = null;
+    for (const entry of entries) {
+      if (entry.record.id !== eventId || entry.record.documentId !== documentId) {
+        continue;
+      }
+      const candidateRaw = entry.record.attachments?.find((attachment) =>
+        attachment.role === "source_document"
+        && attachment.sha256 === input.sourceReceipt.sha256
+      );
+      if (
+        candidateRaw
+        && (!origin || compareEventSpineEntries(entry, origin) < 0)
+      ) {
+        origin = entry;
+        raw = candidateRaw;
+      }
     }
-    const current = claims.get(entry.record.id);
-    if (!current || compareEventSpineEntries(entry, current.entry) < 0) {
-      claims.set(entry.record.id, { entry, raw });
-    }
-  }
-  const manifestClaims = await inspectVerifiedExactDocumentManifestClaims(input);
-  if (claims.size === 0 && manifestClaims.size === 0) {
-    return { deletedExactSourceExists: false, liveSources: [] };
-  }
-  const eventClaimDocumentIds = new Set(
-    [...claims.values()].map((claim) => claim.entry.record.documentId),
-  );
-  for (const [documentId, manifestPath] of manifestClaims) {
-    if (!eventClaimDocumentIds.has(documentId)) {
+    if (!origin || !raw) {
       rejectDamagedExactDocumentEvidence({
         documentId,
-        manifestPath,
-        reason: "immutable source evidence has no valid canonical document event",
+        reason: "source receipt audit has no matching canonical document event",
       });
     }
+    claims.set(eventId, { entry: origin, raw });
   }
 
   const verified = new Map<string, {
@@ -4073,11 +4123,22 @@ async function inspectExactDocumentSourceSet(input: {
         reason: "raw manifest does not match its canonical document owner",
       });
     }
-    if (manifestClaims.get(documentId) !== manifestPath) {
+    const integrity = await statAndHashVaultFile(input.vaultRoot, artifact.relativePath);
+    if (!integrity) {
+      throw new VaultError(
+        "RAW_REFERENCE_MISSING",
+        "Preserved exact source evidence is missing its immutable raw artifact. Exact reuse will not create a replacement identity.",
+        { documentId, manifestPath, relativePath: artifact.relativePath },
+      );
+    }
+    if (
+      integrity.byteSize !== artifact.byteSize
+      || integrity.sha256 !== artifact.sha256
+    ) {
       rejectDamagedExactDocumentEvidence({
         documentId,
         manifestPath,
-        reason: "raw manifest and artifact do not form one verified source claim",
+        reason: "raw artifact bytes do not match the immutable manifest",
       });
     }
 
@@ -4131,7 +4192,12 @@ async function inspectExactDocumentSourceSet(input: {
     });
   }
 
-  return { deletedExactSourceExists, liveSources };
+  return {
+    activityEventIdsByRawRef,
+    completionAuditEventIds,
+    deletedExactSourceExists,
+    liveSources,
+  };
 }
 
 async function findExactDocumentImport(input: {
@@ -4156,61 +4222,6 @@ export const WORKOUT_SOURCE_IMPORT_STATUS_VALUES = [
 
 export type WorkoutSourceImportStatus =
   (typeof WORKOUT_SOURCE_IMPORT_STATUS_VALUES)[number];
-
-const WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND = "core.importEventBatch.sourceRawRefOnce";
-
-function buildWorkoutSourceCompletionTarget(
-  sourceReceipt: CommittedPayloadReceipt,
-): string {
-  return `workout-source-v1:sha256:${sourceReceipt.sha256}:bytes:${sourceReceipt.byteLength}`;
-}
-
-async function hasWorkoutSourceCompletionAudit(input: {
-  vaultRoot: string;
-  targetId: string;
-  sourceEventIds: ReadonlySet<string>;
-}): Promise<boolean> {
-  const auditPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.auditDirectory, {
-    extension: ".jsonl",
-  });
-  for (const relativePath of auditPaths) {
-    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
-      const parsed = safeParseContract(auditRecordSchema, rawRecord);
-      if (
-        parsed.success
-        && parsed.data.commandName === WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND
-        && parsed.data.targetIds?.includes(input.targetId) === true
-        && parsed.data.targetIds.some((targetId) => input.sourceEventIds.has(targetId))
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-async function findActivitySessionIdsForAnyRawRef(input: {
-  vaultRoot: string;
-  rawRefs: ReadonlySet<string>;
-}): Promise<Set<string>> {
-  const eventIds = new Set<string>();
-  const eventPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
-  for (const relativePath of eventPaths) {
-    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
-      const parsed = safeParseContract(eventRecordSchema, rawRecord);
-      if (
-        parsed.success
-        && parsed.data.kind === "activity_session"
-        && collectEventRawReferencePaths(parsed.data).some((rawRef) => input.rawRefs.has(rawRef))
-      ) {
-        eventIds.add(parsed.data.id);
-      }
-    }
-  }
-  return eventIds;
-}
 
 async function inspectWorkoutSourceImportStatus(input: {
   vaultRoot: string;
@@ -4245,17 +4256,15 @@ async function inspectWorkoutSourceImportStatus(input: {
     );
   }
 
-  const completionTargetId = buildWorkoutSourceCompletionTarget(sourceReceipt);
+  const completionTargetId = buildRawSourceReceiptTarget(sourceReceipt);
   const exactRawRefs = new Set(exactSources.liveSources.map((source) => source.rawRef));
-  const sourceEventIds = await findActivitySessionIdsForAnyRawRef({
-    vaultRoot: input.vaultRoot,
-    rawRefs: exactRawRefs,
-  });
-  if (await hasWorkoutSourceCompletionAudit({
-    vaultRoot: input.vaultRoot,
-    targetId: completionTargetId,
-    sourceEventIds,
-  })) {
+  const sourceEventIds = new Set<string>();
+  for (const rawRef of exactRawRefs) {
+    for (const eventId of exactSources.activityEventIdsByRawRef.get(rawRef) ?? []) {
+      sourceEventIds.add(eventId);
+    }
+  }
+  if ([...exactSources.completionAuditEventIds].some((eventId) => sourceEventIds.has(eventId))) {
     return { status: "completed", completionTargetId };
   }
 
@@ -4282,8 +4291,8 @@ export async function importDocument({
   reuseExact = false,
 }: ImportDocumentInput): Promise<ImportDocumentResult> {
   const vault = await loadVault({ vaultRoot });
-  const sourceReceipt = reuseExact ? await hashSourceFile(sourcePath) : null;
-  if (sourceReceipt) {
+  const sourceReceipt = await hashSourceFile(sourcePath);
+  if (reuseExact) {
     const existing = await findExactDocumentImport({ vaultRoot, sourceReceipt });
     if (existing) {
       const verifiedSourceReceipt = await hashSourceFile(sourcePath);
@@ -4310,7 +4319,7 @@ export async function importDocument({
         role: "source_document",
         kind: "document",
         sourcePath,
-        ...(sourceReceipt ? { expectedSourceReceipt: sourceReceipt } : {}),
+        expectedSourceReceipt: sourceReceipt,
       },
     ],
   });
@@ -4359,6 +4368,19 @@ export async function importDocument({
       if (!stagedAttachments) {
         throw new VaultError("EVENT_ATTACHMENTS_MISSING", "Document import expected one staged attachment.");
       }
+      const stagedSourceAttachment = stagedAttachments.attachments.find((attachment) =>
+        attachment.role === "source_document"
+      );
+      if (!stagedSourceAttachment) {
+        throw new VaultError(
+          "EVENT_ATTACHMENTS_MISSING",
+          "Document import expected one source attachment receipt.",
+        );
+      }
+      const sourceTargetId = buildRawSourceReceiptTarget({
+        byteLength: sourceReceipt.byteLength,
+        sha256: stagedSourceAttachment.sha256,
+      });
       const event = prepareStoredEventLedgerEntry(
         {
           ...eventSeed,
@@ -4380,7 +4402,7 @@ export async function importDocument({
         summary: `Imported document ${raw.originalFileName}.`,
         occurredAt,
         files: [raw.relativePath, manifestPath, event.relativePath],
-        targetIds: [documentId, event.record.id],
+        targetIds: [sourceTargetId, documentId, event.record.id],
       });
 
       return {
