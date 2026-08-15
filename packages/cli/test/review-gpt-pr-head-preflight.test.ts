@@ -36,6 +36,10 @@ function createHarness() {
     path.join(harnessRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'),
   )
   cpSync(
+    path.join(repoRoot, 'scripts', 'review-gpt-duration-contract.sh'),
+    path.join(harnessRoot, 'scripts', 'review-gpt-duration-contract.sh'),
+  )
+  cpSync(
     path.join(
       repoRoot,
       'scripts',
@@ -181,6 +185,78 @@ describe('ReviewGPT PR context guard', () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('assembled completion-specialists prompt is')
     expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+  })
+
+  it.each(['5m', '7m30s'])(
+    'keeps PR context guarded when the marked-response threshold is %s',
+    (threshold) => {
+      const harness = createHarness()
+      const result = runHarness(harness, [
+        '--minimum-marked-response-time',
+        threshold,
+        'completion-specialists',
+        '--dry-run',
+      ])
+
+      expect(result.status, result.stderr).toBe(0)
+      expect(readFileSync(harness.capturePath, 'utf8')).toBe(
+        `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time ${threshold} completion-specialists --dry-run\n`,
+      )
+    },
+  )
+
+  it.each([
+    ['--minimum-marked-response-time', '299999'],
+    ['--minimumMarkedResponseTime', '4m59s'],
+  ])('rejects a PR threshold below five minutes for %s', (option, threshold) => {
+    const harness = createHarness()
+    const result = runHarness(harness, [option, threshold, 'pr-review'])
+
+    expect(result.status).toBe(64)
+    expect(result.stderr).toContain(`${option} must be at least 5m`)
+    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+  })
+
+  it('rejects a sub-five-minute threshold from the sourced local config', () => {
+    const harness = createHarness()
+    const configRoot = path.join(harness.harnessRoot, 'config')
+    const localConfigDir = path.join(configRoot, 'murph')
+    mkdirSync(localConfigDir, { recursive: true })
+    writeFileSync(
+      path.join(localConfigDir, 'review-gpt.conf'),
+      'minimum_marked_response_ms="4m59s"\n',
+      'utf8',
+    )
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-c',
+        [
+          'review_gpt_register_dir_preset() { :; }',
+          'review_gpt_register_preset_group() { :; }',
+          'source "$1"',
+        ].join('\n'),
+        'review-gpt-config-test',
+        path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
+      ],
+      {
+        cwd: harness.harnessRoot,
+        encoding: 'utf8',
+        env: {
+          ...harness.env,
+          REVIEW_GPT_BROWSER_LANE: 'phlebas',
+          REVIEW_GPT_PR_URL: '42',
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          XDG_CONFIG_HOME: configRoot,
+        },
+      },
+    )
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      'minimum_marked_response_ms must be at least 5m',
+    )
   })
 
   it('counts the accepted camelCase promptFile spelling in the specialist budget', () => {

@@ -2086,6 +2086,14 @@ describe('monorepo release flow coverage audit', () => {
     )
     writeHarnessFile(
       controlledRepoRoot,
+      'scripts/review-gpt-duration-contract.sh',
+      readFileSync(
+        path.join(repoRoot, 'scripts', 'review-gpt-duration-contract.sh'),
+        'utf8',
+      ),
+    )
+    writeHarnessFile(
+      controlledRepoRoot,
       'output-packages/review-gpt-profiles/eragon/Eragon.app/Contents/MacOS/Brave Browser',
       '#!/usr/bin/env bash\nexit 0\n',
       true,

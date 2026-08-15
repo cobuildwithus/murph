@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 review_gpt_completion_specialists_prompt_max_bytes=6500
+# shellcheck source=review-gpt-duration-contract.sh
+source "$ROOT_DIR/scripts/review-gpt-duration-contract.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -104,11 +106,42 @@ review_gpt_option_requires_value() {
       | --token-limit \
       | --tokenLimit \
       | --token-offset \
-      | --tokenOffset)
+      | --tokenOffset \
+      | --minimum-marked-response-time \
+      | --minimumMarkedResponseTime)
       return 0
       ;;
   esac
   return 1
+}
+
+review_gpt_require_pr_minimum_marked_response_options() {
+  local argument
+  local pending_option=""
+  local raw_value
+
+  for argument in "$@"; do
+    if [[ -n "$pending_option" ]]; then
+      review_gpt_require_pr_minimum_marked_response_time "$pending_option" "$argument" || return
+      pending_option=""
+      continue
+    fi
+
+    case "$argument" in
+      --minimum-marked-response-time | --minimumMarkedResponseTime)
+        pending_option="$argument"
+        ;;
+      --minimum-marked-response-time=* | --minimumMarkedResponseTime=*)
+        raw_value="${argument#*=}"
+        review_gpt_require_pr_minimum_marked_response_time "${argument%%=*}" "$raw_value" || return
+        ;;
+    esac
+  done
+
+  if [[ -n "$pending_option" ]]; then
+    echo "Error: $pending_option requires a value." >&2
+    return 64
+  fi
 }
 
 review_gpt_detect_pr_phase() {
@@ -282,6 +315,7 @@ review_gpt_run() {
       echo "Error: REVIEW_GPT_REVIEW_PHASE=$explicit_phase conflicts with the selected $detected_phase PR review preset." >&2
       exit 64
     fi
+    review_gpt_require_pr_minimum_marked_response_options "$@"
     if [[ "$detected_phase" == "preliminary" ]]; then
       review_gpt_require_completion_specialists_prompt_budget "$@"
     fi

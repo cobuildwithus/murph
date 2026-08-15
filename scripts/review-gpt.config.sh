@@ -4,6 +4,8 @@ review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pw
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
 review_gpt_local_config="${XDG_CONFIG_HOME:-$HOME/.config}/murph/review-gpt.conf"
 readonly review_gpt_direct_browser_lane="${REVIEW_GPT_BROWSER_LANE-}"
+# shellcheck source=review-gpt-duration-contract.sh
+source "$review_gpt_config_dir/review-gpt-duration-contract.sh"
 
 if [[ -r "$review_gpt_local_config" ]]; then
   # This optional user-owned file contains local workflow preferences only.
@@ -82,6 +84,18 @@ review_gpt_browser_lane_is_usable() {
 }
 
 review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
+review_gpt_pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
+if [[ -n "$review_gpt_pr_ref" && -n "${minimum_marked_response_ms:-}" ]]; then
+  case "$review_gpt_review_phase" in
+    preliminary | final)
+      review_gpt_require_pr_minimum_marked_response_time \
+        "minimum_marked_response_ms" \
+        "$minimum_marked_response_ms" || {
+        return 1 2>/dev/null || exit 1
+      }
+      ;;
+  esac
+fi
 review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
 review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
 review_gpt_pr_review_prompt_file="pr-deep-review.md"
