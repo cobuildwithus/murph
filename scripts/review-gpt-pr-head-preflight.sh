@@ -295,6 +295,7 @@ review_gpt_run() {
   local detected_phase
   local explicit_phase="${REVIEW_GPT_REVIEW_PHASE:-}"
   local pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
+  local -a package_arguments=("$@")
 
   detected_phase="$(review_gpt_detect_pr_phase "$@")"
   if [[ -n "$detected_phase" ]]; then
@@ -320,9 +321,17 @@ review_gpt_run() {
     export REVIEW_GPT_PR_URL="$pr_ref"
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
     review_gpt_reject_pr_minimum_marked_response_override "$@"
+    case "$detected_phase" in
+      preliminary)
+        package_arguments=(--minimum-marked-response-time 5m "${package_arguments[@]}")
+        ;;
+      final)
+        package_arguments=(--minimum-marked-response-time 7m30s "${package_arguments[@]}")
+        ;;
+    esac
   fi
 
-  exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "$@"
+  exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "${package_arguments[@]}"
 }
 
 review_gpt_main() {

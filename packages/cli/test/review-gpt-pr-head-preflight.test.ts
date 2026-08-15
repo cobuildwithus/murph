@@ -126,10 +126,11 @@ describe('ReviewGPT PR context guard', () => {
   ])('derives exact PR context for %s', (preset, expectedPhase) => {
     const harness = createHarness()
     const result = runHarness(harness, [preset, '--dry-run'])
+    const expectedThreshold = expectedPhase === 'preliminary' ? '5m' : '7m30s'
 
     expect(result.status, result.stderr).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      `pr=42\nphase=${expectedPhase}\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${preset} --dry-run\n`,
+      `pr=42\nphase=${expectedPhase}\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time ${expectedThreshold} ${preset} --dry-run\n`,
     )
     expect(result.stdout).toContain(
       `ReviewGPT PR attachment preflight passed for 42 at ${harness.head}.`,
@@ -247,9 +248,9 @@ describe('ReviewGPT PR context guard', () => {
   })
 
   it.each([
-    ['preliminary', '5m'],
-    ['final', '7m30s'],
-  ])('fixes the %s PR threshold after sourcing local config', (phase, threshold) => {
+    ['preliminary'],
+    ['final'],
+  ])('preserves the %s invocation context while local config stays generic', (phase) => {
     const harness = createHarness()
     const configRoot = path.join(harness.harnessRoot, 'config')
     const localConfigDir = path.join(configRoot, 'murph')
@@ -260,12 +261,8 @@ describe('ReviewGPT PR context guard', () => {
         'REVIEW_GPT_PR_URL=',
         'REVIEW_GPT_PR_REF=',
         `REVIEW_GPT_REVIEW_PHASE="${phase === 'final' ? 'preliminary' : 'final'}"`,
-        'minimum_marked_response_ms="4m59s"',
-        'eval "$(declare -f review_gpt_register_preset_group | sed \'1s/review_gpt_register_preset_group/review_gpt_original_register_preset_group/\')"',
-        'review_gpt_register_preset_group() {',
-        '  review_gpt_original_register_preset_group "$@"',
-        '  minimum_marked_response_ms="1s"',
-        '}',
+        'set +e',
+        'readonly minimum_marked_response_ms="1s"',
         '',
       ].join('\n'),
       'utf8',
@@ -279,7 +276,7 @@ describe('ReviewGPT PR context guard', () => {
           'review_gpt_register_dir_preset() { :; }',
           'review_gpt_register_preset_group() { :; }',
           'source "$1"',
-          'printf "%s\\n" "$minimum_marked_response_ms"',
+          'printf "%s|%s|%s\\n" "$review_gpt_effective_review_phase" "$REVIEW_GPT_PR_URL" "$minimum_marked_response_ms"',
         ].join('\n'),
         'review-gpt-config-test',
         path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
@@ -298,7 +295,7 @@ describe('ReviewGPT PR context guard', () => {
     )
 
     expect(result.status, result.stderr).toBe(0)
-    expect(result.stdout.trim()).toBe(threshold)
+    expect(result.stdout.trim()).toBe(`${phase}|42|1s`)
   })
 
   it('preserves a local threshold for generic non-PR runs', () => {
@@ -354,7 +351,7 @@ describe('ReviewGPT PR context guard', () => {
 
     expect(result.status).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${option} ${value} completion-specialists --dry-run\n`,
+      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m ${option} ${value} completion-specialists --dry-run\n`,
     )
   })
 

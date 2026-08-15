@@ -2041,7 +2041,12 @@ describe('monorepo release flow coverage audit', () => {
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'response_timeout_ms=7654321\n',
+        [
+          'response_timeout_ms=7654321',
+          'set +e',
+          'readonly minimum_marked_response_ms="1s"',
+          '',
+        ].join('\n'),
       )
       const localResult = runDry()
       expect(localResult.status, localResult.stderr).toBe(0)
@@ -2058,7 +2063,18 @@ describe('monorepo release flow coverage audit', () => {
         'Idle draft cleanup: close hidden, inactive unsent drafts after 2000ms',
       )
 
-      const preliminaryPrResult = runDry(['--response-marker', 'REVIEW_COMPLETE'], {
+      const genericMarkedResult = runDry(['--response-marker', 'REVIEW_COMPLETE'])
+      expect(genericMarkedResult.status, genericMarkedResult.stderr).toBe(0)
+      expect(genericMarkedResult.stdout).toContain(
+        'Minimum marked response time: 1000ms',
+      )
+
+      const preliminaryPrResult = runDry([
+        '--response-marker',
+        'REVIEW_COMPLETE',
+        '--minimum-marked-response-time',
+        '5m',
+      ], {
         REVIEW_GPT_PR_URL: '42',
         REVIEW_GPT_REVIEW_PHASE: 'preliminary',
       })
@@ -2067,7 +2083,12 @@ describe('monorepo release flow coverage audit', () => {
         'Minimum marked response time: 300000ms',
       )
 
-      const finalPrResult = runDry(['--response-marker', 'REVIEW_COMPLETE'], {
+      const finalPrResult = runDry([
+        '--response-marker',
+        'REVIEW_COMPLETE',
+        '--minimum-marked-response-time',
+        '7m30s',
+      ], {
         REVIEW_GPT_PR_URL: '42',
         REVIEW_GPT_REVIEW_PHASE: 'final',
       })

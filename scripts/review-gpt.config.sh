@@ -7,6 +7,17 @@ readonly review_gpt_direct_browser_lane="${REVIEW_GPT_BROWSER_LANE-}"
 readonly review_gpt_direct_pr_url="${REVIEW_GPT_PR_URL-}"
 readonly review_gpt_direct_pr_ref="${REVIEW_GPT_PR_REF-}"
 readonly review_gpt_direct_review_phase="${REVIEW_GPT_REVIEW_PHASE-}"
+readonly review_gpt_effective_review_phase="${review_gpt_direct_review_phase:-final}"
+
+if [[ -n "$review_gpt_direct_pr_url" ]]; then
+  readonly REVIEW_GPT_PR_URL
+fi
+if [[ -n "$review_gpt_direct_pr_ref" ]]; then
+  readonly REVIEW_GPT_PR_REF
+fi
+if [[ -n "$review_gpt_direct_review_phase" ]]; then
+  readonly REVIEW_GPT_REVIEW_PHASE
+fi
 
 if [[ -r "$review_gpt_local_config" ]]; then
   # This optional user-owned file contains local workflow preferences only.
@@ -86,8 +97,6 @@ review_gpt_browser_lane_is_usable() {
   [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
 }
 
-readonly review_gpt_review_phase="${review_gpt_direct_review_phase:-final}"
-readonly review_gpt_pr_ref="${review_gpt_direct_pr_url:-$review_gpt_direct_pr_ref}"
 review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
 review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
 review_gpt_pr_review_prompt_file="pr-deep-review.md"
@@ -97,7 +106,7 @@ if [[ -n "$review_gpt_full_review_reason" ]] \
   echo "Error: REVIEW_GPT_FULL_REVIEW_REASON must contain a concrete reason." >&2
   return 1 2>/dev/null || exit 1
 fi
-if [[ "$review_gpt_review_phase" == "final" ]] \
+if [[ "$review_gpt_effective_review_phase" == "final" ]] \
   && [[ "$review_gpt_round_number" =~ ^([2-9]|[1-9][0-9]+)$ ]]; then
   if [[ -n "$review_gpt_full_review_reason" ]]; then
     : # A full-patch audit starts a new ChatGPT conversation.
@@ -329,13 +338,3 @@ review_gpt_register_preset_group "all" \
   "bug-hunt" \
   "legacy-removal" \
   "package-boundaries"
-
-# Local preferences are sourced before preset registration and may wrap those
-# callbacks. Apply the invocation-owned PR evidence floor at the final config
-# boundary so no local callback can restore a lower threshold afterward.
-if [[ -n "$review_gpt_pr_ref" ]]; then
-  case "$review_gpt_review_phase" in
-    preliminary) readonly minimum_marked_response_ms="5m" ;;
-    final) readonly minimum_marked_response_ms="7m30s" ;;
-  esac
-fi
