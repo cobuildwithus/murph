@@ -131,7 +131,6 @@ const DEFAULT_PROVIDER_CHILD_TIMEOUT_MS = 195_000;
 const MAX_PROVIDER_EVIDENCE_BYTES = 256 * 1_024;
 const MAX_SUBPROCESS_OUTPUT_BYTES = 1 * 1_024 * 1_024;
 const MAX_CODEX_EVENT_BYTES = 512 * 1_024;
-const VERCEL_MAX_RESPONSE_BYTES = 4 * MAX_SUBPROCESS_OUTPUT_BYTES;
 const SCHEDULER_INTERVAL_MS = 300_000;
 const LAUNCHD_LABEL = "com.murph.prod-watch";
 const LAUNCHD_MANAGED_MARKER = "murph-prod-watch-managed:v1";
@@ -142,15 +141,6 @@ const CODEX_SHA256_ENV = "MURPH_PROD_WATCH_CODEX_SHA256";
 const APPROVED_HEAD_ENV = "MURPH_PROD_WATCH_APPROVED_HEAD";
 const VERCEL_PROJECT = "murph";
 const VERCEL_SCOPE = "cobuildwithus";
-const VERCEL_DETAIL_CHUNK_MS = 5 * 60_000;
-const VERCEL_MIN_DETAIL_CHUNK_MS = 15_000;
-const VERCEL_MAX_DETAIL_PARTITIONS = 128;
-const VERCEL_MAX_PARTITION_ROWS = 2_000;
-const VERCEL_MAX_DETAIL_ROWS = 20_000;
-const VERCEL_SAMPLE_MS = 10_000;
-const VERCEL_MIN_SAMPLE_MS = 100;
-const VERCEL_MAX_PAGES = 20;
-const STRIPE_EVENT_LIMIT = 100;
 const CLOUDFLARE_WORKER = "murph-hosted";
 const CLOUDFLARE_OBSERVABILITY_MCP = "cloudflare_observability_oauth";
 const CLOUDFLARE_OBSERVABILITY_MCP_URL = "https://observability.mcp.cloudflare.com/mcp";
@@ -1083,153 +1073,25 @@ export async function collectVercelEvidence(input: {
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
 }): Promise<AdapterEvidence> {
-  const access = await createVercelApiAccess(input.signal, input.env);
-  const { detailPages, previousSample, currentSample } = await collectVercelRowsForEvidence(access, input);
-  const records = deduplicateVercelRows(detailPages.flat());
-  const currentSummary = summarizeVercelWindow(records, input.currentStart, input.end);
-  const previousSummary = summarizeVercelWindow(records, input.previousStart, input.currentStart);
-  const windowDurationMs = input.end.getTime() - input.currentStart.getTime();
-  const current = {
-    ...currentSummary,
-    requestCount: Math.round(currentSample.rows.length * windowDurationMs / currentSample.durationMs),
-  };
-  const previous = {
-    ...previousSummary,
-    requestCount: Math.round(previousSample.rows.length * windowDurationMs / previousSample.durationMs),
-  };
-  const collectedAt = new Date();
-  const fingerprints = [
-    buildAggregateFingerprint({
-      rawFingerprint: "vercel:http_error",
-      source: "vercel",
-      component: "production",
-      phase: "request",
-      severity: "high",
-      count: current.errorCount,
-      previousCount: previous.errorCount,
-      firstSeenAt: current.firstErrorAt,
-      lastSeenAt: current.lastErrorAt,
-    }),
-    buildAggregateFingerprint({
-      rawFingerprint: "vercel:runtime_warning",
-      source: "vercel",
-      component: "production",
-      phase: "runtime",
-      severity: "medium",
-      count: current.warningCount,
-      previousCount: previous.warningCount,
-      firstSeenAt: current.firstWarningAt,
-      lastSeenAt: current.lastWarningAt,
-    }),
-  ].filter((fingerprint): fingerprint is NonNullable<typeof fingerprint> => fingerprint !== undefined);
-  return parseAdapterEvidence({
-    schemaVersion: "prod-watch.adapter-evidence.v1",
-    source: "vercel",
-    collectedAt: collectedAt.toISOString(),
-    status: "ok",
-    auth: "ok",
-    freshnessSeconds: Math.max(0, Math.round((collectedAt.getTime() - input.end.getTime()) / 1_000)),
-    releaseContext: [],
-    counters: providerCounters("vercel", current.requestCount, previous.requestCount, current.errorCount, previous.errorCount, current.timeoutCount, previous.timeoutCount),
-    latency: [],
-    fingerprints,
-  });
-}
-
-export async function collectVercelRowsForEvidence(
-  access: VercelApiAccess,
-  input: {
-    previousStart: Date;
-    currentStart: Date;
-    end: Date;
-    signal?: AbortSignal;
-  },
-): Promise<{
-  detailPages: Array<Array<Record<string, unknown>>>;
-  previousSample: { rows: Array<Record<string, unknown>>; durationMs: number };
-  currentSample: { rows: Array<Record<string, unknown>>; durationMs: number };
-}> {
-  const branchController = new AbortController();
-  const forwardAbort = () => branchController.abort(input.signal?.reason);
-  if (input.signal?.aborted) {
-    forwardAbort();
-  } else {
-    input.signal?.addEventListener("abort", forwardAbort, { once: true });
-  }
-  if (branchController.signal.aborted) {
-    input.signal?.removeEventListener("abort", forwardAbort);
-    throw branchController.signal.reason
-      ?? Object.assign(new Error("vercel_collection_aborted"), { code: "ABORT_ERR" });
-  }
-
-  const detailQueries = [
-    { statusCode: "5xx" },
-    { level: "error,fatal" },
-    { level: "warning" },
-    { statusCode: "504" },
-    { search: "timeout" },
-  ];
-  let primaryFailure: unknown;
-  let hasPrimaryFailure = false;
-  const abortSiblingsOnFailure = async <T>(operation: () => Promise<T>): Promise<T> => {
-    try {
-      return await operation();
-    } catch (error) {
-      if (!hasPrimaryFailure) {
-        primaryFailure = error;
-        hasPrimaryFailure = true;
-        branchController.abort(error);
-      }
-      throw error;
-    }
-  };
-
-  try {
-    const detailPromises = detailQueries.map((query) => abortSiblingsOnFailure(
-      async () => await fetchVercelRowsByChunks(access, {
-        start: input.previousStart,
-        end: input.end,
-        ...query,
-      }, branchController.signal),
-    ));
-    const previousSamplePromise = abortSiblingsOnFailure(
-      async () => await fetchVercelRequestSample(access, input.currentStart, branchController.signal),
-    );
-    const currentSamplePromise = abortSiblingsOnFailure(
-      async () => await fetchVercelRequestSample(access, input.end, branchController.signal),
-    );
-    const [detailResults, sampleResults] = await Promise.all([
-      Promise.allSettled(detailPromises),
-      Promise.allSettled([previousSamplePromise, currentSamplePromise] as const),
-    ]);
-    if (hasPrimaryFailure) {
-      throw primaryFailure;
-    }
-    if (branchController.signal.aborted) {
-      throw branchController.signal.reason
-        ?? Object.assign(new Error("vercel_collection_aborted"), { code: "ABORT_ERR" });
-    }
-    const detailPages = detailResults.map((result) => {
-      if (result.status !== "fulfilled") {
-        throw result.reason;
-      }
-      return result.value;
-    });
-    const [previousResult, currentResult] = sampleResults;
-    if (previousResult.status !== "fulfilled") {
-      throw previousResult.reason;
-    }
-    if (currentResult.status !== "fulfilled") {
-      throw currentResult.reason;
-    }
-    return {
-      detailPages,
-      previousSample: previousResult.value,
-      currentSample: currentResult.value,
-    };
-  } finally {
-    input.signal?.removeEventListener("abort", forwardAbort);
-  }
+  const result = await spawnStatusOnly(
+    "vercel",
+    [
+      "project",
+      "inspect",
+      VERCEL_PROJECT,
+      "--scope",
+      VERCEL_SCOPE,
+      "--non-interactive",
+      "--no-color",
+    ],
+    {
+      timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
+      signal: input.signal,
+      env: input.env,
+    },
+  );
+  assertProviderCommandSucceeded("vercel", result);
+  return availabilityOnlyProviderEvidence("vercel", input.end);
 }
 
 export async function collectStripeEvidence(input: {
@@ -1239,733 +1101,47 @@ export async function collectStripeEvidence(input: {
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
 }): Promise<AdapterEvidence> {
-  const createdGte = Math.floor(input.previousStart.getTime() / 1_000);
-  throwIfAborted(input.signal);
-  const branchController = new AbortController();
-  const forwardAbort = () => branchController.abort(input.signal?.reason);
-  if (input.signal?.aborted) {
-    forwardAbort();
-  } else {
-    input.signal?.addEventListener("abort", forwardAbort, { once: true });
-  }
-  let primaryFailure: unknown;
-  let hasPrimaryFailure = false;
-  const publishFailure = (error: unknown) => {
-    if (!hasPrimaryFailure) {
-      primaryFailure = error;
-      hasPrimaryFailure = true;
-      branchController.abort(error);
-    }
-  };
-  const runQuery = async (args: string[]) => {
-    try {
-      const result = await spawnCaptured("stripe", args, {
-        timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
-        signal: branchController.signal,
-        outputLimitBytes: 4 * MAX_SUBPROCESS_OUTPUT_BYTES,
-        env: input.env,
-        onFailureDetected: publishFailure,
-      });
-      assertProviderCommandSucceeded("stripe", result);
-      return result;
-    } catch (error) {
-      publishFailure(error);
-      throw error;
-    }
-  };
-  let allResult: Awaited<ReturnType<typeof spawnCaptured>>;
-  let failedDeliveryResult: Awaited<ReturnType<typeof spawnCaptured>>;
-  try {
-    const settled = await Promise.allSettled([
-      runQuery([
-        "events", "list", "--live", "--limit", String(STRIPE_EVENT_LIMIT), "-d", `created[gte]=${createdGte}`,
-      ]),
-      runQuery([
-        "events", "list", "--live", "--delivery-success=false", "--limit", String(STRIPE_EVENT_LIMIT), "-d", `created[gte]=${createdGte}`,
-      ]),
-    ] as const);
-    if (hasPrimaryFailure) {
-      throw primaryFailure;
-    }
-    throwIfAborted(input.signal);
-    const [allSettled, failedDeliverySettled] = settled;
-    if (allSettled.status !== "fulfilled") {
-      throw allSettled.reason;
-    }
-    if (failedDeliverySettled.status !== "fulfilled") {
-      throw failedDeliverySettled.reason;
-    }
-    allResult = allSettled.value;
-    failedDeliveryResult = failedDeliverySettled.value;
-  } finally {
-    input.signal?.removeEventListener("abort", forwardAbort);
-  }
-  const allEvents = parseStripeEventList(allResult.stdout);
-  const failedDeliveryEvents = parseStripeEventList(failedDeliveryResult.stdout);
-  if (allEvents.hasMore || failedDeliveryEvents.hasMore) {
-    throw Object.assign(new Error("stripe_window_truncated"), { code: "EOVERFLOW" });
-  }
-  const current = summarizeStripeWindow(
-    allEvents.data,
-    failedDeliveryEvents.data,
-    input.currentStart,
-    input.end,
+  const result = await spawnStatusOnly(
+    "stripe",
+    ["balance", "retrieve", "--live"],
+    {
+      timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
+      signal: input.signal,
+      env: input.env,
+    },
   );
-  const previous = summarizeStripeWindow(
-    allEvents.data,
-    failedDeliveryEvents.data,
-    input.previousStart,
-    input.currentStart,
-  );
+  assertProviderCommandSucceeded("stripe", result);
+  return availabilityOnlyProviderEvidence("stripe", input.end);
+}
+
+function availabilityOnlyProviderEvidence(
+  source: "vercel" | "stripe",
+  end: Date,
+): AdapterEvidence {
   const collectedAt = new Date();
-  const fingerprints = [
-    buildAggregateFingerprint({
-      rawFingerprint: "stripe:event_failure",
-      source: "stripe",
-      component: "payments",
-      phase: "event",
-      severity: "high",
-      count: current.eventFailureCount,
-      previousCount: previous.eventFailureCount,
-      firstSeenAt: current.firstFailureAt,
-      lastSeenAt: current.lastFailureAt,
-    }),
-    buildAggregateFingerprint({
-      rawFingerprint: "stripe:webhook_delivery_failure",
-      source: "stripe",
-      component: "webhooks",
-      phase: "delivery",
-      severity: "high",
-      count: current.deliveryFailureCount,
-      previousCount: previous.deliveryFailureCount,
-      firstSeenAt: current.firstDeliveryFailureAt,
-      lastSeenAt: current.lastDeliveryFailureAt,
-    }),
-  ].filter((fingerprint): fingerprint is NonNullable<typeof fingerprint> => fingerprint !== undefined);
   return parseAdapterEvidence({
     schemaVersion: "prod-watch.adapter-evidence.v1",
-    source: "stripe",
+    source,
     collectedAt: collectedAt.toISOString(),
     status: "ok",
     auth: "ok",
-    freshnessSeconds: Math.max(0, Math.round((collectedAt.getTime() - input.end.getTime()) / 1_000)),
+    freshnessSeconds: Math.max(0, Math.round((collectedAt.getTime() - end.getTime()) / 1_000)),
     releaseContext: [],
-    counters: providerCounters("stripe", current.requestCount, previous.requestCount, current.errorCount, previous.errorCount, current.timeoutCount, previous.timeoutCount),
+    counters: [],
     latency: [],
-    fingerprints,
+    fingerprints: [],
   });
-}
-
-export interface VercelApiAccess {
-  token: string;
-  teamId: string;
-  projectId: string;
-}
-
-async function createVercelApiAccess(
-  signal?: AbortSignal,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<VercelApiAccess> {
-  const token = await readVercelCliToken(env);
-  const teams = await fetchVercelJson("https://api.vercel.com/v2/teams?limit=100", token, signal);
-  const teamList = typeof teams === "object" && teams !== null && !Array.isArray(teams)
-    ? (teams as Record<string, unknown>).teams
-    : undefined;
-  const team = Array.isArray(teamList)
-    ? teamList.find((candidate) => typeof candidate === "object" && candidate !== null
-      && (candidate as Record<string, unknown>).slug === VERCEL_SCOPE)
-    : undefined;
-  const teamId = typeof team === "object" && team !== null
-    ? (team as Record<string, unknown>).id
-    : undefined;
-  if (typeof teamId !== "string" || teamId.length === 0) {
-    throw Object.assign(new Error("vercel_team_unavailable"), { code: "EAUTH" });
-  }
-  const project = await fetchVercelJson(
-    `https://api.vercel.com/v9/projects/${encodeURIComponent(VERCEL_PROJECT)}?teamId=${encodeURIComponent(teamId)}`,
-    token,
-    signal,
-  );
-  const projectId = typeof project === "object" && project !== null && !Array.isArray(project)
-    ? (project as Record<string, unknown>).id
-    : undefined;
-  if (typeof projectId !== "string" || projectId.length === 0) {
-    throw Object.assign(new Error("vercel_project_unavailable"), { code: "EAUTH" });
-  }
-  return { token, teamId, projectId };
-}
-
-async function readVercelCliToken(env: NodeJS.ProcessEnv = process.env): Promise<string> {
-  const candidates = [
-    path.join(os.homedir(), "Library", "Application Support", "com.vercel.cli", "auth.json"),
-    ...(env.XDG_DATA_HOME === undefined
-      ? []
-      : [path.join(env.XDG_DATA_HOME, "com.vercel.cli", "auth.json")]),
-    path.join(os.homedir(), ".local", "share", "com.vercel.cli", "auth.json"),
-    path.join(os.homedir(), ".config", "com.vercel.cli", "auth.json"),
-  ];
-  for (const candidate of candidates) {
-    try {
-      const handle = await open(candidate, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-      try {
-        const metadata = await handle.stat();
-        const currentUid = process.getuid?.();
-        if (
-          !metadata.isFile()
-          || metadata.size > 64 * 1_024
-          || (process.platform !== "win32" && (metadata.mode & 0o077) !== 0)
-          || (currentUid !== undefined && metadata.uid !== currentUid)
-        ) {
-          throw Object.assign(new Error("vercel_auth_file_invalid"), { code: "EAUTH" });
-        }
-        const parsed = JSON.parse(await handle.readFile("utf8")) as unknown;
-        const token = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>).token
-          : undefined;
-        if (typeof token !== "string" || token.length < 16 || token.length > 4_096 || token.includes("\0")) {
-          throw Object.assign(new Error("vercel_auth_token_invalid"), { code: "EAUTH" });
-        }
-        return token;
-      } finally {
-        await handle.close();
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-  throw Object.assign(new Error("vercel_auth_file_missing"), { code: "EAUTH" });
-}
-
-type VercelRowOverflowCode = "EOVERFLOW_PARTITION_ROWS" | "EOVERFLOW_ROWS";
-
-export async function fetchVercelRows(
-  access: VercelApiAccess,
-  input: {
-    start: Date;
-    end: Date;
-    statusCode?: string;
-    level?: string;
-    search?: string;
-  },
-  signal?: AbortSignal,
-  rowBudget = VERCEL_MAX_PARTITION_ROWS,
-  rowOverflowCode: VercelRowOverflowCode = "EOVERFLOW_PARTITION_ROWS",
-): Promise<Array<Record<string, unknown>>> {
-  if (!Number.isSafeInteger(rowBudget)
-    || rowBudget < 0
-    || rowBudget > VERCEL_MAX_PARTITION_ROWS
-    || (rowOverflowCode !== "EOVERFLOW_PARTITION_ROWS" && rowOverflowCode !== "EOVERFLOW_ROWS")) {
-    throw new Error("vercel_row_budget_invalid");
-  }
-  const rowBudgetExceeded = (): NodeJS.ErrnoException => Object.assign(
-    new Error(rowOverflowCode === "EOVERFLOW_ROWS"
-      ? "vercel_detail_row_budget_exceeded"
-      : "vercel_partition_row_budget_exceeded"),
-    { code: rowOverflowCode },
-  );
-  const rows: Array<Record<string, unknown>> = [];
-  for (let page = 0; page < VERCEL_MAX_PAGES; page += 1) {
-    if (rows.length >= rowBudget) {
-      throw rowBudgetExceeded();
-    }
-    const query = new URLSearchParams({
-      projectId: access.projectId,
-      ownerId: access.teamId,
-      page: String(page),
-      startDate: String(input.start.getTime()),
-      endDate: String(input.end.getTime()),
-      environment: "production",
-    });
-    if (input.statusCode !== undefined) query.set("statusCode", input.statusCode);
-    if (input.level !== undefined) query.set("level", input.level);
-    if (input.search !== undefined) query.set("search", input.search);
-    const parsed = await fetchVercelJson(
-      `https://vercel.com/api/logs/request-logs?${query.toString()}`,
-      access.token,
-      signal,
-    );
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
-    }
-    const object = parsed as Record<string, unknown>;
-    if (!Array.isArray(object.rows)) {
-      throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
-    }
-    if (object.rows.length > 0 && typeof object.hasMoreRows !== "boolean") {
-      throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
-    }
-    if (object.rows.length > rowBudget - rows.length) {
-      throw rowBudgetExceeded();
-    }
-    if (object.rows.some((row) => typeof row !== "object" || row === null || Array.isArray(row))) {
-      throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
-    }
-    const pageRows = object.rows as Array<Record<string, unknown>>;
-    for (const row of pageRows) {
-      rows.push(normalizeVercelRow(row));
-    }
-    if (!shouldContinueVercelPagination(pageRows.length, object.hasMoreRows)) {
-      return rows;
-    }
-  }
-  throw Object.assign(new Error("vercel_window_truncated"), { code: "EOVERFLOW_PAGES" });
-}
-
-export async function fetchVercelRowsByChunks(
-  access: VercelApiAccess,
-  input: {
-    start: Date;
-    end: Date;
-    statusCode?: string;
-    level?: string;
-    search?: string;
-  },
-  signal?: AbortSignal,
-): Promise<Array<Record<string, unknown>>> {
-  const rows: Array<Record<string, unknown>> = [];
-  const pending = splitVercelWindow(input.start, input.end);
-  let partitionCount = 0;
-  while (pending.length > 0) {
-    const window = pending.shift()!;
-    partitionCount += 1;
-    if (partitionCount > VERCEL_MAX_DETAIL_PARTITIONS) {
-      throw Object.assign(new Error("vercel_partition_budget_exceeded"), { code: "EOVERFLOW_PARTITIONS" });
-    }
-    const remainingRowBudget = VERCEL_MAX_DETAIL_ROWS - rows.length;
-    if (remainingRowBudget <= 0) {
-      throw Object.assign(new Error("vercel_detail_row_budget_exceeded"), { code: "EOVERFLOW_ROWS" });
-    }
-    let partitionRows: Array<Record<string, unknown>>;
-    try {
-      const partitionRowBudget = Math.min(VERCEL_MAX_PARTITION_ROWS, remainingRowBudget);
-      partitionRows = await fetchVercelRows(
-        access,
-        { ...input, ...window },
-        signal,
-        partitionRowBudget,
-        partitionRowBudget < VERCEL_MAX_PARTITION_ROWS
-          ? "EOVERFLOW_ROWS"
-          : "EOVERFLOW_PARTITION_ROWS",
-      );
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "EOVERFLOW_PAGES" && code !== "EOVERFLOW_PARTITION_ROWS") {
-        throw error;
-      }
-      const halves = bisectVercelWindow(window.start, window.end);
-      if (halves === undefined) {
-        throw error;
-      }
-      pending.unshift(...halves);
-      continue;
-    }
-    if (rows.length + partitionRows.length > VERCEL_MAX_DETAIL_ROWS) {
-      throw Object.assign(new Error("vercel_detail_row_budget_exceeded"), { code: "EOVERFLOW_ROWS" });
-    }
-    for (const row of partitionRows) {
-      rows.push(row);
-    }
-  }
-  return rows;
-}
-
-export async function fetchVercelRequestSample(
-  access: VercelApiAccess,
-  end: Date,
-  signal?: AbortSignal,
-): Promise<{ rows: Array<Record<string, unknown>>; durationMs: number }> {
-  let durationMs = VERCEL_SAMPLE_MS;
-  while (true) {
-    try {
-      const rows = await fetchVercelRows(access, {
-        start: new Date(end.getTime() - durationMs),
-        end,
-      }, signal);
-      return { rows, durationMs };
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "EOVERFLOW_PAGES" && code !== "EOVERFLOW_PARTITION_ROWS") {
-        throw error;
-      }
-      const nextDuration = nextVercelSampleDuration(durationMs);
-      if (nextDuration === undefined) {
-        throw Object.assign(new Error("vercel_sample_budget_exceeded"), { code: "EOVERFLOW_SAMPLE" });
-      }
-      durationMs = nextDuration;
-    }
-  }
-}
-
-export function nextVercelSampleDuration(durationMs: number): number | undefined {
-  if (durationMs <= VERCEL_MIN_SAMPLE_MS) {
-    return undefined;
-  }
-  return Math.max(VERCEL_MIN_SAMPLE_MS, Math.floor(durationMs / 2));
-}
-
-export function splitVercelWindow(start: Date, end: Date): Array<{ start: Date; end: Date }> {
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end) {
-    throw new Error("vercel_window_invalid");
-  }
-  if (end.getTime() - start.getTime() < VERCEL_MIN_DETAIL_CHUNK_MS) {
-    throw new Error("vercel_window_below_minimum");
-  }
-  const windows: Array<{ start: Date; end: Date }> = [];
-  for (let cursor = start.getTime(); cursor < end.getTime();) {
-    const remainingMs = end.getTime() - cursor;
-    let durationMs = Math.min(VERCEL_DETAIL_CHUNK_MS, remainingMs);
-    const tailMs = remainingMs - durationMs;
-    if (tailMs > 0 && tailMs < VERCEL_MIN_DETAIL_CHUNK_MS) {
-      durationMs = remainingMs - VERCEL_MIN_DETAIL_CHUNK_MS;
-    }
-    windows.push({
-      start: new Date(cursor),
-      end: new Date(cursor + durationMs),
-    });
-    cursor += durationMs;
-  }
-  return windows;
-}
-
-export function bisectVercelWindow(
-  start: Date,
-  end: Date,
-): [{ start: Date; end: Date }, { start: Date; end: Date }] | undefined {
-  const durationMs = end.getTime() - start.getTime();
-  if (durationMs < 2 * VERCEL_MIN_DETAIL_CHUNK_MS) {
-    return undefined;
-  }
-  const midpoint = new Date(start.getTime() + Math.floor(durationMs / 2));
-  return [{ start, end: midpoint }, { start: midpoint, end }];
-}
-
-export function shouldContinueVercelPagination(rowCount: number, hasMoreRows: unknown): boolean {
-  return rowCount > 0 && hasMoreRows === true;
-}
-
-async function readResponseTextWithinLimit(
-  response: Response,
-  maxBytes: number,
-  onLimitExceeded?: () => void,
-): Promise<string> {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
-    throw new Error("response_byte_limit_invalid");
-  }
-
-  const rejectOversizedResponse = async (cancel: () => Promise<unknown>): Promise<never> => {
-    try {
-      onLimitExceeded?.();
-    } catch {
-      // The size-limit error remains authoritative even if abort notification fails.
-    }
-    try {
-      await cancel();
-    } catch {
-      // Cancellation is best effort after the response has already been rejected.
-    }
-    throw Object.assign(new Error("vercel_api_output_too_large"), { code: "EFBIG" });
-  };
-
-  const advertisedLength = response.headers.get("content-length");
-  if (advertisedLength !== null
-    && /^\d+$/u.test(advertisedLength)
-    && BigInt(advertisedLength) > BigInt(maxBytes)) {
-    return await rejectOversizedResponse(async () => await response.body?.cancel());
-  }
-
-  if (response.body === null) {
-    return "";
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      if (value.byteLength > maxBytes - totalBytes) {
-        return await rejectOversizedResponse(async () => await reader.cancel());
-      }
-      if (value.byteLength > 0) {
-        chunks.push(value);
-        totalBytes += value.byteLength;
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return Buffer.concat(
-    chunks.map((chunk) => Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)),
-    totalBytes,
-  ).toString("utf8");
-}
-
-export async function fetchVercelJson(url: string, token: string, signal?: AbortSignal): Promise<unknown> {
-  const controller = new AbortController();
-  const onAbort = () => controller.abort(signal?.reason);
-  if (signal?.aborted) {
-    controller.abort(signal.reason);
-  } else {
-    signal?.addEventListener("abort", onAbort, { once: true });
-  }
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_ADAPTER_TIMEOUT_MS);
-  timeout.unref();
-  try {
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: controller.signal,
-    });
-    const responseFailure = response.status === 401 || response.status === 403
-      ? Object.assign(new Error("vercel_api_auth_failed"), { code: "EAUTH" })
-      : !response.ok
-        ? Object.assign(new Error("vercel_api_failed"), { code: "EHELPER" })
-        : undefined;
-    if (responseFailure !== undefined) {
-      controller.abort(responseFailure);
-      try {
-        await response.body?.cancel(responseFailure);
-      } catch {
-        // Preserve the bounded status failure even if the body was already cancelled.
-      }
-      throw responseFailure;
-    }
-    const raw = await readResponseTextWithinLimit(
-      response,
-      VERCEL_MAX_RESPONSE_BYTES,
-      () => controller.abort(),
-    );
-    return JSON.parse(raw) as unknown;
-  } catch (error) {
-    if ((error as { name?: unknown }).name === "AbortError") {
-      throw Object.assign(new Error("vercel_api_timeout"), { code: "ETIMEDOUT" });
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-    signal?.removeEventListener("abort", onAbort);
-  }
-}
-
-function normalizeVercelRow(row: Record<string, unknown>): Record<string, unknown> {
-  const logs = Array.isArray(row.logs)
-    ? row.logs.filter((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry))
-      .map((entry) => {
-        const object = entry as Record<string, unknown>;
-        return {
-          level: typeof object.level === "string" ? object.level : "info",
-          message: typeof object.message === "string" ? object.message : "",
-        };
-      })
-    : [];
-  const timestamp = typeof row.timestamp === "string"
-    ? Date.parse(row.timestamp)
-    : typeof row.timestamp === "number"
-      ? row.timestamp
-      : Number.NaN;
-  const displayLevel = logs.find((entry) => entry.level === "fatal" || entry.level === "error")?.level
-    ?? logs.find((entry) => entry.level === "warning" || entry.level === "warn")?.level
-    ?? "info";
-  const levels = [displayLevel, ...logs.map((entry) => entry.level)].map((level) => level.toLowerCase());
-  const status = typeof row.statusCode === "number" ? row.statusCode : 0;
-  const isTimeout = status === 504
-    || logs.some((entry) => /time(?:d|s)?[ _-]?out|deadline exceeded/iu.test(entry.message));
-  return {
-    id: typeof row.requestId === "string" ? row.requestId : "",
-    timestamp,
-    isError: status >= 500 || levels.some((level) => level === "error" || level === "fatal"),
-    isTimeout,
-    isWarning: levels.includes("warning") || levels.includes("warn"),
-  };
-}
-
-function deduplicateVercelRows(pages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-  const merged = new Map<string, Record<string, unknown>>();
-  for (const [index, row] of pages.entries()) {
-    const id = typeof row.id === "string" && row.id.length > 0 ? row.id : `row:${index}`;
-    const previous = merged.get(id);
-    if (previous === undefined) {
-      merged.set(id, row);
-      continue;
-    }
-    previous.isError = previous.isError === true || row.isError === true;
-    previous.isTimeout = previous.isTimeout === true || row.isTimeout === true;
-    previous.isWarning = previous.isWarning === true || row.isWarning === true;
-  }
-  return [...merged.values()];
-}
-
-function summarizeVercelWindow(records: Array<Record<string, unknown>>, start: Date, end: Date) {
-  let requestCount = 0;
-  let errorCount = 0;
-  let timeoutCount = 0;
-  let warningCount = 0;
-  const errorTimes: number[] = [];
-  const warningTimes: number[] = [];
-  for (const record of records) {
-    const timestamp = typeof record.timestamp === "number" ? record.timestamp : Number.NaN;
-    if (!Number.isFinite(timestamp) || timestamp < start.getTime() || timestamp >= end.getTime()) {
-      continue;
-    }
-    requestCount += 1;
-    const isTimeout = record.isTimeout === true;
-    const isError = record.isError === true;
-    const isWarning = record.isWarning === true;
-    if (isError) {
-      errorCount += 1;
-      errorTimes.push(timestamp);
-    }
-    if (isTimeout) {
-      timeoutCount += 1;
-    }
-    if (isWarning) {
-      warningCount += 1;
-      warningTimes.push(timestamp);
-    }
-  }
-  return {
-    requestCount,
-    errorCount,
-    timeoutCount,
-    warningCount,
-    firstErrorAt: minimumTimestamp(errorTimes),
-    lastErrorAt: maximumTimestamp(errorTimes),
-    firstWarningAt: minimumTimestamp(warningTimes),
-    lastWarningAt: maximumTimestamp(warningTimes),
-  };
-}
-
-export function parseStripeEventList(raw: string): { data: Array<Record<string, unknown>>; hasMore: boolean } {
-  const parsed = JSON.parse(raw) as unknown;
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw Object.assign(new Error("stripe_event_list_invalid"), { code: "EBADMSG" });
-  }
-  const object = parsed as Record<string, unknown>;
-  if (
-    object.object !== "list"
-    || !Array.isArray(object.data)
-    || object.data.length > STRIPE_EVENT_LIMIT
-    || object.data.some((entry) => typeof entry !== "object" || entry === null || Array.isArray(entry))
-    || typeof object.has_more !== "boolean"
-  ) {
-    throw Object.assign(new Error("stripe_event_list_invalid"), { code: "EBADMSG" });
-  }
-  return {
-    data: object.data as Array<Record<string, unknown>>,
-    hasMore: object.has_more,
-  };
-}
-
-function summarizeStripeWindow(
-  events: Array<Record<string, unknown>>,
-  failedDeliveries: Array<Record<string, unknown>>,
-  start: Date,
-  end: Date,
-) {
-  const inWindow = (event: Record<string, unknown>) => {
-    const created = typeof event.created === "number" ? event.created * 1_000 : Number.NaN;
-    return Number.isFinite(created) && created >= start.getTime() && created < end.getTime();
-  };
-  const windowEvents = events.filter(inWindow);
-  const windowDeliveries = failedDeliveries.filter(inWindow);
-  const failureEvents = windowEvents.filter((event) => typeof event.type === "string" && isStripeFailureType(event.type));
-  const timeoutEvents = windowEvents.filter((event) => typeof event.type === "string" && /timeout/iu.test(event.type));
-  const failureIds = new Set([
-    ...failureEvents.map((event, index) => stripeEventIdentity(event, `event:${index}`)),
-    ...windowDeliveries.map((event, index) => stripeEventIdentity(event, `delivery:${index}`)),
-  ]);
-  const failureTimes = [...failureEvents, ...windowDeliveries]
-    .map((event) => typeof event.created === "number" ? event.created * 1_000 : Number.NaN)
-    .filter(Number.isFinite);
-  const deliveryTimes = windowDeliveries
-    .map((event) => typeof event.created === "number" ? event.created * 1_000 : Number.NaN)
-    .filter(Number.isFinite);
-  return {
-    requestCount: windowEvents.length,
-    errorCount: failureIds.size,
-    timeoutCount: timeoutEvents.length,
-    eventFailureCount: failureEvents.length,
-    deliveryFailureCount: windowDeliveries.length,
-    firstFailureAt: minimumTimestamp(failureTimes),
-    lastFailureAt: maximumTimestamp(failureTimes),
-    firstDeliveryFailureAt: minimumTimestamp(deliveryTimes),
-    lastDeliveryFailureAt: maximumTimestamp(deliveryTimes),
-  };
-}
-
-function isStripeFailureType(type: string): boolean {
-  return /(?:^|\.)(?:failed|failure)$|payment_failed|marked_uncollectible|dispute\.created|early_fraud_warning\.created/iu.test(type);
-}
-
-function stripeEventIdentity(event: Record<string, unknown>, fallback: string): string {
-  return typeof event.id === "string" && event.id.length > 0 ? event.id : fallback;
-}
-
-function providerCounters(
-  source: "vercel" | "stripe",
-  currentRequests: number,
-  previousRequests: number,
-  currentErrors: number,
-  previousErrors: number,
-  currentTimeouts: number,
-  previousTimeouts: number,
-) {
-  return [
-    { metric: "provider_request_count", dimensions: { source }, unit: "count", current: currentRequests, previous: previousRequests },
-    { metric: "provider_error_count", dimensions: { source }, unit: "count", current: currentErrors, previous: previousErrors },
-    { metric: "provider_timeout_count", dimensions: { source }, unit: "count", current: currentTimeouts, previous: previousTimeouts },
-  ];
-}
-
-function buildAggregateFingerprint(input: {
-  rawFingerprint: string;
-  source: "vercel" | "stripe";
-  component: string;
-  phase: string;
-  severity: "medium" | "high";
-  count: number;
-  previousCount: number;
-  firstSeenAt?: string;
-  lastSeenAt?: string;
-}) {
-  if (input.count <= 0 || input.firstSeenAt === undefined || input.lastSeenAt === undefined) {
-    return undefined;
-  }
-  return {
-    rawFingerprint: input.rawFingerprint,
-    source: input.source,
-    component: input.component,
-    phase: input.phase,
-    severity: input.severity,
-    count: input.count,
-    previousCount: input.previousCount,
-    firstSeenAt: input.firstSeenAt,
-    lastSeenAt: input.lastSeenAt,
-  };
-}
-
-function minimumTimestamp(values: number[]): string | undefined {
-  return values.length === 0 ? undefined : new Date(Math.min(...values)).toISOString();
-}
-
-function maximumTimestamp(values: number[]): string | undefined {
-  return values.length === 0 ? undefined : new Date(Math.max(...values)).toISOString();
 }
 
 function assertProviderCommandSucceeded(
   source: "vercel" | "stripe",
-  result: { status: number; stderr: string; timedOut: boolean },
+  result: { status: number; timedOut: boolean },
 ): void {
   if (result.timedOut) {
     throw Object.assign(new Error(`${source}_command_timeout`), { code: "ETIMEDOUT" });
   }
   if (result.status !== 0) {
-    const authFailure = /auth|credential|forbidden|log(?:ged)?[ -]?in|unauthori[sz]ed/iu.test(result.stderr);
-    throw Object.assign(new Error(`${source}_command_failed`), { code: authFailure ? "EAUTH" : "EHELPER" });
+    throw Object.assign(new Error(`${source}_command_failed`), { code: "EHELPER" });
   }
 }
 
@@ -1974,32 +1150,8 @@ function classifyDeterministicProviderFailure(
   error: unknown,
 ): CollectorFailure {
   const code = safeErrorCode(error);
-  if (code === "EAUTH") {
-    return { source, class: "auth", code: "provider_cli_auth_failed", retryable: false };
-  }
   if (code === "ETIMEDOUT" || code === "ABORT_ERR") {
     return { source, class: "timeout", code: "provider_cli_timeout", retryable: true };
-  }
-  if (code === "EOVERFLOW_PAGES") {
-    return { source, class: "unavailable", code: "provider_window_truncated", retryable: true };
-  }
-  if (code === "EOVERFLOW_PARTITION_ROWS") {
-    return { source, class: "unavailable", code: "provider_row_budget_exceeded", retryable: true };
-  }
-  if (code === "EOVERFLOW_PARTITIONS") {
-    return { source, class: "unavailable", code: "provider_partition_budget_exceeded", retryable: true };
-  }
-  if (code === "EOVERFLOW_ROWS") {
-    return { source, class: "unavailable", code: "provider_row_budget_exceeded", retryable: true };
-  }
-  if (code === "EOVERFLOW_SAMPLE") {
-    return { source, class: "unavailable", code: "provider_sample_budget_exceeded", retryable: true };
-  }
-  if (code === "EOVERFLOW") {
-    return { source, class: "unavailable", code: "provider_window_truncated", retryable: true };
-  }
-  if (code === "EBADMSG" || error instanceof SyntaxError) {
-    return { source, class: "schema", code: "provider_cli_output_invalid", retryable: false };
   }
   if (code === "ENOENT") {
     return { source, class: "unavailable", code: "provider_cli_not_found", retryable: false };
@@ -2309,6 +1461,73 @@ export async function spawnCaptured(
     } else {
       child.stdin?.end();
     }
+  });
+}
+
+export async function spawnStatusOnly(
+  command: string,
+  args: string[],
+  options: {
+    timeoutMs: number;
+    signal?: AbortSignal;
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+  },
+): Promise<{ status: number; timedOut: boolean }> {
+  if (options.signal?.aborted === true) {
+    throw Object.assign(new Error("subprocess_aborted"), { code: "ABORT_ERR" });
+  }
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd ?? repoRoot,
+      detached: process.platform !== "win32",
+      env: options.env ?? process.env,
+      stdio: "ignore",
+    });
+    let settled = false;
+    let timedOut = false;
+    let terminationPromise: Promise<void> | undefined;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", onAbort);
+    };
+    const fail = (error: unknown) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const terminate = () => {
+      terminationPromise ??= terminateOwnedProcessGroup(child.pid);
+    };
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      terminate();
+    }, options.timeoutMs);
+    timeout.unref();
+    const onAbort = () => {
+      timedOut = true;
+      terminate();
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    child.on("error", fail);
+    child.on("close", (status, signal) => {
+      void (async () => {
+        terminationPromise ??= terminateOwnedProcessGroup(child.pid);
+        await terminationPromise;
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve({
+          status: status ?? (signal === undefined || signal === null ? 1 : 128),
+          timedOut,
+        });
+      })().catch(fail);
+    });
   });
 }
 
@@ -3222,8 +2441,8 @@ async function installScheduler(): Promise<void> {
   const launchAgents = path.join(os.homedir(), "Library", "LaunchAgents");
   const plistPath = path.join(launchAgents, `${LAUNCHD_LABEL}.plist`);
   const existing = await readManagedSchedulerFile(plistPath);
-  const codex = await verifySchedulerPreflight();
   const pinned = await preparePinnedSchedulerRuntime(approvedHead);
+  const codex = await verifyPinnedSchedulerPreflight(pinned.root, pinned.head);
   const renderedPlist = await renderPinnedLaunchdPlist(
     pinned.root,
     pinned.head,
@@ -3232,35 +2451,166 @@ async function installScheduler(): Promise<void> {
   );
   await ensurePrivateDirectory(operationRoot);
   const domain = `gui/${process.getuid?.() ?? 0}`;
-  if (existing !== undefined) {
-    await stopLaunchdService(domain, plistPath);
-  } else {
-    const priorState = await inspectLaunchdService(domain);
-    if (priorState === "loaded") {
-      throw new Error("launchd_service_loaded_without_managed_plist");
-    }
-    if (priorState === "unknown") {
-      throw new Error("launchd_service_state_unknown");
-    }
+  const previousState = await inspectLaunchdService(domain);
+  if (previousState === "unknown") {
+    throw new Error("launchd_service_state_unknown");
   }
-  await atomicWriteText(plistPath, renderedPlist, { privateDirectory: false });
-  const bootstrap = await spawnCaptured("launchctl", ["bootstrap", domain, plistPath], { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 });
-  if (bootstrap.status !== 0) {
-    await stopLaunchdService(domain, plistPath).catch(() => undefined);
+  if (existing === undefined && previousState === "loaded") {
+    throw new Error("launchd_service_loaded_without_managed_plist");
+  }
+  const previousWasLoaded = previousState === "loaded";
+  if (previousWasLoaded) {
+    await stopLaunchdService(domain, plistPath);
+  }
+
+  try {
+    await atomicWriteText(plistPath, renderedPlist, { privateDirectory: false });
+    await startLaunchdService(domain, plistPath);
+  } catch (error) {
+    await failSchedulerCutover({
+      domain,
+      plistPath,
+      previousPlist: existing,
+      previousWasLoaded,
+      candidateError: error,
+    });
+  }
+}
+
+async function verifyPinnedSchedulerPreflight(
+  pinnedRepositoryRoot: string,
+  approvedHead: string,
+): Promise<ApprovedCodexRuntime> {
+  await assertPinnedSchedulerRuntime(pinnedRepositoryRoot, approvedHead);
+  const codexExecutable = await resolveTrustedCodexExecutable();
+  const codexSha256 = await sha256File(codexExecutable);
+  const env = {
+    ...buildSchedulerCodexEnvironment(os.homedir(), codexExecutable, codexSha256),
+    MURPH_PROD_WATCH_RUNTIME_ROOT: runtimeRoot,
+    ...(testOverrides === undefined ? {} : {
+      NODE_ENV: "test",
+      TMPDIR: os.tmpdir(),
+      MURPH_PROD_WATCH_TEST_RUNTIME_ROOT: testOverrides.runtimeRoot,
+      ...(testOverrides.providerFixture === undefined
+        ? {}
+        : { TEST_PROVIDER_FIXTURE: testOverrides.providerFixture }),
+      ...(testOverrides.nodeModulesSource === undefined
+        ? {}
+        : { TEST_NODE_MODULES_SOURCE: testOverrides.nodeModulesSource }),
+      ...(testOverrides.codexBin === undefined
+        ? {}
+        : { [CODEX_BIN_ENV]: testOverrides.codexBin }),
+      ...(testOverrides.mcpRemoteBin === undefined
+        ? {}
+        : { TEST_MCP_REMOTE_BIN: testOverrides.mcpRemoteBin }),
+      ...(testOverrides.extraMcp === true ? { TEST_CODEX_EXTRA_MCP: "1" } : {}),
+    }),
+  };
+  const preflightEntry = testOverrides === undefined
+    ? path.join(pinnedRepositoryRoot, "scripts", "prod-watch.ts")
+    : path.join(pinnedRepositoryRoot, "scripts", "prod-watch.test-entry.ts");
+  const result = await spawnCaptured(
+    process.execPath,
+    [
+      path.join(pinnedRepositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+      preflightEntry,
+      "scheduler",
+      "preflight",
+    ],
+    {
+      cwd: pinnedRepositoryRoot,
+      timeoutMs: DEFAULT_PROVIDER_CHILD_TIMEOUT_MS + 45_000,
+      outputLimitBytes: 64 * 1_024,
+      env,
+    },
+  );
+  if (result.status !== 0 || result.timedOut) {
+    if (testOverrides !== undefined) {
+      const testFailure = /^prod-watch-test: ([A-Za-z0-9._-]{1,64})\s*$/u.exec(result.stderr)?.[1];
+      if (testFailure !== undefined) {
+        throw new Error(testFailure);
+      }
+    }
+    throw new Error("scheduler_pinned_preflight_failed");
+  }
+  await assertPinnedSchedulerRuntime(pinnedRepositoryRoot, approvedHead);
+  return { executable: codexExecutable, sha256: codexSha256 };
+}
+
+async function startLaunchdService(domain: string, plistPath: string): Promise<void> {
+  const bootstrap = await spawnCaptured(
+    "launchctl",
+    ["bootstrap", domain, plistPath],
+    { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 },
+  );
+  if (bootstrap.status !== 0 || bootstrap.timedOut) {
     throw new Error("launchd_bootstrap_failed");
   }
-  const enable = await spawnCaptured("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`], { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 });
-  if (enable.status !== 0) {
-    try {
-      await stopLaunchdService(domain, plistPath);
-    } catch {
-      throw new Error("launchd_enable_cleanup_failed");
-    }
+  const enable = await spawnCaptured(
+    "launchctl",
+    ["enable", `${domain}/${LAUNCHD_LABEL}`],
+    { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 },
+  );
+  if (enable.status !== 0 || enable.timedOut) {
     throw new Error("launchd_enable_failed");
   }
   if (await inspectLaunchdService(domain) !== "loaded") {
     throw new Error("launchd_install_state_unconfirmed");
   }
+}
+
+async function failSchedulerCutover(input: {
+  domain: string;
+  plistPath: string;
+  previousPlist?: string;
+  previousWasLoaded: boolean;
+  candidateError: unknown;
+}): Promise<never> {
+  const candidateCode = safeErrorCode(input.candidateError);
+  try {
+    await spawnCaptured(
+      "launchctl",
+      ["bootout", input.domain, input.plistPath],
+      { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 },
+    );
+    const candidateState = await inspectLaunchdService(input.domain);
+    if (candidateState === "loaded") {
+      throw new Error("launchd_candidate_still_loaded");
+    }
+
+    if (input.previousPlist === undefined) {
+      if (candidateState !== "absent") {
+        throw new Error("launchd_candidate_cleanup_unconfirmed");
+      }
+      await unlink(input.plistPath).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+      });
+    } else {
+      await atomicWriteText(input.plistPath, input.previousPlist, { privateDirectory: false });
+      if (input.previousWasLoaded) {
+        await startLaunchdService(input.domain, input.plistPath);
+      } else if (candidateState !== "absent" || await inspectLaunchdService(input.domain) !== "absent") {
+        throw new Error("launchd_previous_absent_state_unconfirmed");
+      }
+    }
+  } catch (restoreError) {
+    const outcomeCode = input.previousPlist === undefined
+      ? `${candidateCode}_cleanup_failed`
+      : `${candidateCode}_previous_restore_failed`;
+    throw Object.assign(new Error(outcomeCode), {
+      cause: restoreError,
+      code: outcomeCode,
+    });
+  }
+  const outcomeCode = input.previousPlist === undefined
+    ? `${candidateCode}_absent`
+    : `${candidateCode}_previous_restored`;
+  throw Object.assign(new Error(outcomeCode), {
+    cause: input.candidateError,
+    code: outcomeCode,
+  });
 }
 
 async function uninstallScheduler(): Promise<void> {

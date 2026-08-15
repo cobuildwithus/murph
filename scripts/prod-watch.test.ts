@@ -45,20 +45,9 @@ import {
 } from "./prod-watch/core.ts";
 import {
   assertCloudflareOnlyMcpList,
-  bisectVercelWindow,
-  collectStripeEvidence,
-  collectVercelRowsForEvidence,
-  fetchVercelJson,
-  fetchVercelRequestSample,
-  fetchVercelRows,
-  fetchVercelRowsByChunks,
-  nextVercelSampleDuration,
-  parseStripeEventList,
   renderLaunchdPlistTemplate,
-  shouldContinueVercelPagination,
   spawnCaptured,
   spawnCodexJsonChild,
-  splitVercelWindow,
   verifySchedulerExecutableChain,
 } from "./prod-watch.ts";
 
@@ -92,174 +81,6 @@ describe("production-watch snapshot contract", () => {
     expect(() => assertCloudflareOnlyMcpList(JSON.stringify([
       { name: "cloudflare_observability_oauth", enabled: "true" },
     ]))).toThrow("provider_mcp_allowlist_invalid");
-  });
-
-  it("stops Vercel pagination when an empty page reports a stale continuation flag", () => {
-    expect(shouldContinueVercelPagination(0, true)).toBe(false);
-    expect(shouldContinueVercelPagination(100, true)).toBe(true);
-    expect(shouldContinueVercelPagination(100, false)).toBe(false);
-  });
-
-  it.each([undefined, "true", 1])(
-    "rejects malformed Vercel continuation metadata on a non-empty page: %s",
-    async (hasMoreRows) => {
-      await withMockedFetch(async () => new Response(JSON.stringify({
-        rows: [{}],
-        ...(hasMoreRows === undefined ? {} : { hasMoreRows }),
-      }), { status: 200 }), async () => {
-        await expect(fetchVercelRows(testVercelAccess(), testVercelWindow()))
-          .rejects.toMatchObject({ code: "EBADMSG" });
-      });
-    },
-  );
-
-  it("allows an empty Vercel page to terminate despite stale continuation metadata", async () => {
-    await withMockedFetch(async () => new Response(JSON.stringify({
-      rows: [],
-      hasMoreRows: "true",
-    }), { status: 200 }), async () => {
-      await expect(fetchVercelRows(testVercelAccess(), testVercelWindow()))
-        .resolves.toEqual([]);
-    });
-  });
-
-  it.each([
-    {},
-    { has_more: "false" },
-    { has_more: 0 },
-  ])("rejects malformed Stripe continuation metadata: %j", (continuation) => {
-    expect(() => parseStripeEventList(JSON.stringify({
-      object: "list",
-      data: [],
-      ...continuation,
-    }))).toThrow("stripe_event_list_invalid");
-  });
-
-  it("rejects an oversized or non-list Stripe response", () => {
-    expect(() => parseStripeEventList(JSON.stringify({
-      object: "list",
-      data: Array.from({ length: 101 }, () => ({})),
-      has_more: false,
-    }))).toThrow("stripe_event_list_invalid");
-    expect(() => parseStripeEventList(JSON.stringify({
-      object: "event",
-      data: [],
-      has_more: false,
-    }))).toThrow("stripe_event_list_invalid");
-  });
-
-  it("partitions Vercel detail coverage into contiguous bounded windows", () => {
-    const start = new Date("2026-08-09T20:00:00.000Z");
-    const end = new Date("2026-08-09T20:12:00.000Z");
-    expect(splitVercelWindow(start, end)).toEqual([
-      { start, end: new Date("2026-08-09T20:05:00.000Z") },
-      { start: new Date("2026-08-09T20:05:00.000Z"), end: new Date("2026-08-09T20:10:00.000Z") },
-      { start: new Date("2026-08-09T20:10:00.000Z"), end },
-    ]);
-    expect(splitVercelWindow(start, new Date(start.getTime() + 5 * 60_000 + 5_000))).toEqual([
-      { start, end: new Date(start.getTime() + 4 * 60_000 + 50_000) },
-      {
-        start: new Date(start.getTime() + 4 * 60_000 + 50_000),
-        end: new Date(start.getTime() + 5 * 60_000 + 5_000),
-      },
-    ]);
-    expect(() => splitVercelWindow(start, new Date(start.getTime() + 14_999)))
-      .toThrow("vercel_window_below_minimum");
-    expect(() => splitVercelWindow(end, start)).toThrow("vercel_window_invalid");
-    expect(bisectVercelWindow(start, new Date("2026-08-09T20:05:00.000Z"))).toEqual([
-      { start, end: new Date("2026-08-09T20:02:30.000Z") },
-      { start: new Date("2026-08-09T20:02:30.000Z"), end: new Date("2026-08-09T20:05:00.000Z") },
-    ]);
-    expect(bisectVercelWindow(start, new Date("2026-08-09T20:00:30.000Z"))).toEqual([
-      { start, end: new Date("2026-08-09T20:00:15.000Z") },
-      { start: new Date("2026-08-09T20:00:15.000Z"), end: new Date("2026-08-09T20:00:30.000Z") },
-    ]);
-    expect(bisectVercelWindow(start, new Date("2026-08-09T20:00:29.999Z"))).toBeUndefined();
-    expect(bisectVercelWindow(start, new Date("2026-08-09T20:00:15.000Z"))).toBeUndefined();
-    expect(nextVercelSampleDuration(10_000)).toBe(5_000);
-    expect(nextVercelSampleDuration(101)).toBe(100);
-    expect(nextVercelSampleDuration(100)).toBeUndefined();
-  });
-
-  it("cancels an oversized Vercel response stream before consuming the remaining body", async () => {
-    const responseLimitBytes = 4 * 1_024 * 1_024;
-    const chunkBytes = 256 * 1_024;
-    const totalChunks = 256;
-    let generatedBytes = 0;
-    let cancelled = false;
-    let abortObserved = false;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (_input, init) => {
-      init?.signal?.addEventListener("abort", () => {
-        abortObserved = true;
-      }, { once: true });
-      const body = new ReadableStream<Uint8Array>({
-        pull(controller) {
-          if (generatedBytes >= totalChunks * chunkBytes) {
-            controller.close();
-            return;
-          }
-          generatedBytes += chunkBytes;
-          controller.enqueue(new Uint8Array(chunkBytes).fill(0x20));
-        },
-        cancel() {
-          cancelled = true;
-        },
-      });
-      return new Response(body, { status: 200 });
-    }) as typeof fetch;
-
-    try {
-      await expect(fetchVercelJson("https://example.invalid/vercel", "test-token"))
-        .rejects.toMatchObject({ code: "EFBIG" });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-
-    expect(abortObserved).toBe(true);
-    expect(cancelled).toBe(true);
-    expect(generatedBytes).toBeLessThanOrEqual(responseLimitBytes + 2 * chunkBytes);
-    expect(generatedBytes).toBeLessThan(totalChunks * chunkBytes);
-  });
-
-  it.each([
-    [401, "EAUTH"],
-    [403, "EAUTH"],
-    [429, "EHELPER"],
-    [500, "EHELPER"],
-  ] as const)("cancels a streaming Vercel %i response before returning %s", async (status, code) => {
-    let generatedBytes = 0;
-    let cancelled = false;
-    let abortObserved = false;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (_input, init) => {
-      init?.signal?.addEventListener("abort", () => {
-        abortObserved = true;
-      }, { once: true });
-      const body = new ReadableStream<Uint8Array>({
-        pull(controller) {
-          generatedBytes += 64 * 1_024;
-          controller.enqueue(new Uint8Array(64 * 1_024));
-        },
-        cancel() {
-          cancelled = true;
-        },
-      });
-      return new Response(body, { status });
-    }) as typeof fetch;
-
-    try {
-      await expect(fetchVercelJson("https://example.invalid/vercel", "test-token"))
-        .rejects.toMatchObject({ code });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-
-    expect(abortObserved).toBe(true);
-    expect(cancelled).toBe(true);
-    const bytesAtReturn = generatedBytes;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(generatedBytes).toBe(bytesAtReturn);
   });
 
   it("does not spawn a Codex child for an already-aborted signal", async () => {
@@ -430,225 +251,6 @@ describe("production-watch snapshot contract", () => {
     }
   });
 
-  it("aborts and settles the sibling Stripe process after an output-limit failure", async () => {
-    const runtimeRoot = makeTempRoot();
-    const binRoot = path.join(runtimeRoot, "bin");
-    const markerPath = path.join(runtimeRoot, "stripe-events");
-    mkdirSync(binRoot, { recursive: true });
-    const stripePath = path.join(binRoot, "stripe");
-    writeFileSync(stripePath, [
-      "#!/usr/bin/env node",
-      "const { appendFileSync } = require('node:fs');",
-      "const failedDelivery = process.argv.includes('--delivery-success=false');",
-      "if (!failedDelivery) {",
-      "  process.on('SIGTERM', () => appendFileSync(process.env.TEST_STRIPE_MARKER, 'oversized-terminated\\n'));",
-      "  const ready = setInterval(() => {",
-      "    if (!require('node:fs').existsSync(process.env.TEST_STRIPE_MARKER)) return;",
-      "    const events = require('node:fs').readFileSync(process.env.TEST_STRIPE_MARKER, 'utf8');",
-      "    if (events.includes('sibling-started\\n')) { clearInterval(ready); process.stdout.write('x'.repeat(5 * 1024 * 1024)); }",
-      "  }, 25);",
-      "  setInterval(() => {}, 1000);",
-      "} else {",
-      "  appendFileSync(process.env.TEST_STRIPE_MARKER, 'sibling-started\\n');",
-      "  process.on('SIGTERM', () => {",
-      "    appendFileSync(process.env.TEST_STRIPE_MARKER, 'sibling-terminated\\n');",
-      "    setTimeout(() => { appendFileSync(process.env.TEST_STRIPE_MARKER, 'sibling-failed\\n'); process.exit(7); }, 100);",
-      "  });",
-      "  setTimeout(() => { appendFileSync(process.env.TEST_STRIPE_MARKER, 'sibling-failed\\n'); process.exit(7); }, 10000);",
-      "}",
-      "",
-    ].join("\n"), { mode: 0o755 });
-    chmodSync(stripePath, 0o755);
-    const previousPath = process.env.PATH;
-    const previousMarker = process.env.TEST_STRIPE_MARKER;
-    process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
-    process.env.TEST_STRIPE_MARKER = markerPath;
-    const controller = new AbortController();
-    const laterAbort = setInterval(() => {
-      if (
-        !controller.signal.aborted
-        && existsSync(markerPath)
-        && readFileSync(markerPath, "utf8").includes("oversized-terminated\n")
-      ) {
-        controller.abort(new Error("later_parent_abort"));
-      }
-    }, 10);
-    const startedAt = Date.now();
-    try {
-      const end = new Date("2026-08-10T20:10:00.000Z");
-      await expect(collectStripeEvidence({
-        previousStart: new Date("2026-08-10T20:00:00.000Z"),
-        currentStart: new Date("2026-08-10T20:05:00.000Z"),
-        end,
-        signal: controller.signal,
-      })).rejects.toMatchObject({ code: "EFBIG" });
-    } finally {
-      clearInterval(laterAbort);
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-      if (previousMarker === undefined) delete process.env.TEST_STRIPE_MARKER;
-      else process.env.TEST_STRIPE_MARKER = previousMarker;
-    }
-    const elapsedMs = Date.now() - startedAt;
-    const events = readFileSync(markerPath, "utf8");
-    expect(events).toContain("sibling-started\n");
-    expect(events).toContain("oversized-terminated\n");
-    expect(events).toContain("sibling-terminated\n");
-    expect(events).toContain("sibling-failed\n");
-    expect(controller.signal.aborted).toBe(true);
-    expect(elapsedMs).toBeGreaterThanOrEqual(900);
-    expect(elapsedMs).toBeLessThan(8_000);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(readFileSync(markerPath, "utf8")).toBe(events);
-  });
-
-  it("rejects a Vercel page above the partition row ceiling before normalization", async () => {
-    let fetchCalls = 0;
-    await withMockedFetch(async () => {
-      fetchCalls += 1;
-      return vercelRowsResponse(2_001, false);
-    }, async () => {
-      await expect(fetchVercelRows(
-        testVercelAccess(),
-        testVercelWindow(),
-      )).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
-    });
-    expect(fetchCalls).toBe(1);
-  });
-
-  it("enforces the Vercel partition row ceiling cumulatively across pages", async () => {
-    let fetchCalls = 0;
-    await withMockedFetch(async () => {
-      fetchCalls += 1;
-      return fetchCalls === 1
-        ? vercelRowsResponse(1_500, true)
-        : vercelRowsResponse(501, false);
-    }, async () => {
-      await expect(fetchVercelRows(
-        testVercelAccess(),
-        testVercelWindow(),
-      )).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
-    });
-    expect(fetchCalls).toBe(2);
-  });
-
-  it("stops a Vercel detail query before fetching beyond its total row budget", async () => {
-    let fetchCalls = 0;
-    await withMockedFetch(async () => {
-      fetchCalls += 1;
-      return vercelRowsResponse(2_000, false);
-    }, async () => {
-      const start = new Date("2026-08-10T20:00:00.000Z");
-      await expect(fetchVercelRowsByChunks(testVercelAccess(), {
-        start,
-        end: new Date(start.getTime() + 55 * 60_000),
-      })).rejects.toMatchObject({ code: "EOVERFLOW_ROWS" });
-    });
-    expect(fetchCalls).toBe(10);
-  });
-
-  it("fails closed at minimum Vercel detail and sample windows on row overflow", async () => {
-    const observedSampleDurations: number[] = [];
-    let detailCalls = 0;
-    await withMockedFetch(async (input) => {
-      const url = new URL(String(input));
-      const start = Number(url.searchParams.get("startDate"));
-      const end = Number(url.searchParams.get("endDate"));
-      observedSampleDurations.push(end - start);
-      detailCalls += 1;
-      return vercelRowsResponse(2_001, false);
-    }, async () => {
-      const start = new Date("2026-08-10T20:00:00.000Z");
-      await expect(fetchVercelRowsByChunks(testVercelAccess(), {
-        start,
-        end: new Date(start.getTime() + 15_000),
-      })).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
-    });
-    expect(detailCalls).toBe(1);
-
-    observedSampleDurations.length = 0;
-    await withMockedFetch(async (input) => {
-      const url = new URL(String(input));
-      const start = Number(url.searchParams.get("startDate"));
-      const end = Number(url.searchParams.get("endDate"));
-      observedSampleDurations.push(end - start);
-      return vercelRowsResponse(2_001, false);
-    }, async () => {
-      await expect(fetchVercelRequestSample(
-        testVercelAccess(),
-        new Date("2026-08-10T20:00:10.000Z"),
-      )).rejects.toMatchObject({ code: "EOVERFLOW_SAMPLE" });
-    });
-    expect(observedSampleDurations).toEqual([10_000, 5_000, 2_500, 1_250, 625, 312, 156, 100]);
-  });
-
-  it("never bisects a production-shaped Vercel detail window below the 15-second floor", async () => {
-    const observedDurations: number[] = [];
-    await withMockedFetch(async (input) => {
-      const url = new URL(String(input));
-      const start = Number(url.searchParams.get("startDate"));
-      const end = Number(url.searchParams.get("endDate"));
-      observedDurations.push(end - start);
-      return vercelRowsResponse(2_001, false);
-    }, async () => {
-      const start = new Date("2026-08-10T20:00:00.000Z");
-      await expect(fetchVercelRowsByChunks(testVercelAccess(), {
-        start,
-        end: new Date(start.getTime() + 5 * 60_000),
-      })).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
-    });
-    expect(observedDurations).toEqual([300_000, 150_000, 75_000, 37_500, 18_750]);
-    expect(Math.min(...observedDurations)).toBeGreaterThanOrEqual(15_000);
-  });
-
-  it("aborts and settles every sibling Vercel branch before returning a failure", async () => {
-    let fetchCalls = 0;
-    let activeRequests = 0;
-    let abortedRequests = 0;
-    await withMockedFetch(async (_input, init) => {
-      fetchCalls += 1;
-      if (fetchCalls === 1) {
-        return vercelRowsResponse(2_001, false);
-      }
-      activeRequests += 1;
-      return await new Promise<Response>((resolve, reject) => {
-        let settled = false;
-        const finish = (callback: () => void) => {
-          if (settled) return;
-          settled = true;
-          activeRequests -= 1;
-          callback();
-        };
-        const timeout = setTimeout(() => {
-          finish(() => resolve(vercelRowsResponse(0, false)));
-        }, 1_000);
-        const onAbort = () => {
-          clearTimeout(timeout);
-          abortedRequests += 1;
-          finish(() => reject(Object.assign(new Error("mock_request_aborted"), { name: "AbortError" })));
-        };
-        if (init?.signal?.aborted) {
-          onAbort();
-        } else {
-          init?.signal?.addEventListener("abort", onAbort, { once: true });
-        }
-      });
-    }, async () => {
-      const previousStart = new Date("2026-08-10T20:00:00.000Z");
-      await expect(collectVercelRowsForEvidence(testVercelAccess(), {
-        previousStart,
-        currentStart: new Date(previousStart.getTime() + 10_000),
-        end: new Date(previousStart.getTime() + 15_000),
-      })).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
-      expect(fetchCalls).toBe(7);
-      expect(activeRequests).toBe(0);
-      expect(abortedRequests).toBe(6);
-      const callsAtReturn = fetchCalls;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      expect(fetchCalls).toBe(callsAtReturn);
-    });
-  });
-
   it("keeps a healthy fixture bounded, aggregate-only, and quiet", () => {
     const snapshot = buildFixtureSnapshot("healthy", new Date("2026-08-09T20:00:00.000Z"));
 
@@ -702,7 +304,7 @@ describe("production-watch snapshot contract", () => {
     expect(snapshot.anomalyCandidates).toEqual([]);
   });
 
-  it("requires authenticated aggregate collection proof before provider coverage is complete", () => {
+  it("requires authentication and complete rate triplets when provider metrics are present", () => {
     const raw = JSON.parse(
       readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
     ) as { sources: Array<{ auth: string; counters: Array<{ metric: string; current: number }> }> };
@@ -764,6 +366,31 @@ describe("production-watch snapshot contract", () => {
       numerator.current = 0;
     }
     expect(() => parseProviderEvidence(zeroAggregate)).not.toThrow();
+
+    const availabilityOnly = JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as {
+      sources: Array<{
+        releaseContext: unknown[];
+        counters: unknown[];
+        latency: unknown[];
+        fingerprints: unknown[];
+      }>;
+    };
+    availabilityOnly.sources[0]!.releaseContext = [];
+    availabilityOnly.sources[0]!.counters = [];
+    availabilityOnly.sources[0]!.latency = [];
+    availabilityOnly.sources[0]!.fingerprints = [];
+    expect(() => parseProviderEvidence(availabilityOnly)).not.toThrow();
+
+    const cloudflareWithoutAggregates = structuredClone(availabilityOnly) as typeof availabilityOnly;
+    const cloudflareIndex = 1;
+    cloudflareWithoutAggregates.sources[cloudflareIndex]!.releaseContext = [];
+    cloudflareWithoutAggregates.sources[cloudflareIndex]!.counters = [];
+    cloudflareWithoutAggregates.sources[cloudflareIndex]!.latency = [];
+    cloudflareWithoutAggregates.sources[cloudflareIndex]!.fingerprints = [];
+    expect(() => parseProviderEvidence(cloudflareWithoutAggregates))
+      .toThrow("provider_ok_rate_facts_incomplete");
   });
 
   it("keeps unproven direct provider evidence partial even outside envelope parsing", () => {
@@ -2358,7 +1985,7 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(snapshot.anomalyCandidates).toEqual([]);
   });
 
-  it("maps non-empty all-adapter payloads and bounds composed maximum fanout", () => {
+  it("keeps provider availability probes status-only and bounds composed fanout", () => {
     const runtimeRoot = makeTempRoot();
     const databaseInvocations = path.join(runtimeRoot, "database-invocations.log");
     const vercelInvocations = path.join(runtimeRoot, "vercel-invocations.log");
@@ -2367,8 +1994,6 @@ describe("production-watch locking and dry-run behavior", () => {
     const providerActiveRoot = path.join(runtimeRoot, "provider-active");
     const providerTimeline = path.join(runtimeRoot, "provider-timeline.log");
     const homeRoot = path.join(runtimeRoot, "home");
-    const referenceMs = Date.now();
-    const vercelToken = installVercelApiFixture(homeRoot);
     const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
     const codexEnv = installSchemaFaithfulFakeCodex(runtimeRoot);
     const result = runProdWatch([
@@ -2390,14 +2015,10 @@ describe("production-watch locking and dry-run behavior", () => {
       TEST_CODEX_PROMPT_CAPTURE: codexPrompt,
       TEST_DATABASE_INVOCATION_LOG: databaseInvocations,
       TEST_STRIPE_INVOCATION_LOG: stripeInvocations,
-      TEST_VERCEL_FETCH_LOG: vercelInvocations,
-      TEST_VERCEL_TOKEN: vercelToken,
+      TEST_VERCEL_INVOCATION_LOG: vercelInvocations,
       TEST_PROVIDER_ACTIVE_ROOT: providerActiveRoot,
       TEST_PROVIDER_TIMELINE: providerTimeline,
-      TEST_PROVIDER_GATE_COUNT: "10",
-      TEST_PROVIDER_REFERENCE_MS: String(referenceMs),
-      TEST_VERCEL_NONEMPTY: "1",
-      TEST_STRIPE_NONEMPTY: "1",
+      TEST_PROVIDER_GATE_COUNT: "3",
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -2419,47 +2040,24 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(readFileSync(codexPrompt, "utf8")).toContain(
       "Use only the Cloudflare Observability MCP and only the production Worker named murph-hosted.",
     );
-    const vercelCalls = readFileSync(vercelInvocations, "utf8").trim().split("\n");
-    expect(vercelCalls.filter((call) => call === "api.vercel.com/v2/teams")).toHaveLength(1);
-    expect(vercelCalls.filter((call) => call === "api.vercel.com/v9/projects/murph")).toHaveLength(1);
-    expect(vercelCalls.filter((call) => call === "vercel.com/api/logs/request-logs"))
-      .toHaveLength(32);
-    const stripeCalls = readFileSync(stripeInvocations, "utf8").trim().split("\n");
-    expect(stripeCalls).toHaveLength(2);
-    expect(stripeCalls.some((call) => call.includes("--delivery-success=false"))).toBe(true);
+    expect(readFileSync(vercelInvocations, "utf8")).toBe(
+      "project inspect murph --scope cobuildwithus --non-interactive --no-color\n",
+    );
+    expect(readFileSync(stripeInvocations, "utf8")).toBe("balance retrieve --live\n");
     const providerCounters = (source: "vercel" | "cloudflare" | "stripe") => Object.fromEntries(
       snapshot.counters
         .filter((counter) => counter.dimensions.source === source)
         .map((counter) => [counter.metric, { current: counter.current, previous: counter.previous }]),
     );
-    expect(providerCounters("vercel")).toEqual({
-      provider_request_count: { current: 180, previous: 180 },
-      provider_error_count: { current: 1, previous: 1 },
-      provider_timeout_count: { current: 1, previous: 0 },
-    });
+    expect(providerCounters("vercel")).toEqual({});
     expect(providerCounters("cloudflare")).toEqual({});
-    expect(providerCounters("stripe")).toEqual({
-      provider_request_count: { current: 3, previous: 3 },
-      provider_error_count: { current: 2, previous: 2 },
-      provider_timeout_count: { current: 1, previous: 1 },
-    });
+    expect(providerCounters("stripe")).toEqual({});
     expect(snapshot.latency.filter((latency) =>
       ["vercel", "cloudflare", "stripe"].includes(latency.dimensions.source ?? "")
     )).toEqual([]);
-    expect(snapshot.fingerprints
-      .filter((fingerprint) => fingerprint.source === "vercel")
-      .map(({ component, phase, count, previousCount }) => ({ component, phase, count, previousCount })))
-      .toEqual([
-        { component: "production", phase: "request", count: 1, previousCount: 1 },
-        { component: "production", phase: "runtime", count: 1, previousCount: 1 },
-      ]);
-    expect(snapshot.fingerprints
-      .filter((fingerprint) => fingerprint.source === "stripe")
-      .map(({ component, phase, count, previousCount }) => ({ component, phase, count, previousCount })))
-      .toEqual([
-        { component: "webhooks", phase: "delivery", count: 2, previousCount: 2 },
-        { component: "payments", phase: "event", count: 1, previousCount: 1 },
-      ]);
+    expect(snapshot.fingerprints.filter((fingerprint) =>
+      fingerprint.source === "vercel" || fingerprint.source === "stripe"
+    )).toEqual([]);
     expect(snapshot.collectorFailures.filter((failure) => failure.source !== "database"))
       .toEqual([]);
     const timeline = readFileSync(providerTimeline, "utf8").trim().split("\n");
@@ -2467,13 +2065,17 @@ describe("production-watch locking and dry-run behavior", () => {
     const ends = timeline.filter((entry) => entry.startsWith("end\t"));
     const startLabels = starts.map((entry) => entry.split("\t")[1]!);
     const endLabels = ends.map((entry) => entry.split("\t")[1]!);
-    expect(startLabels.filter((label) => label.startsWith("vercel:"))).toHaveLength(34);
-    expect(startLabels.filter((label) => label.startsWith("stripe:"))).toHaveLength(2);
+    expect(startLabels.filter((label) => label.startsWith("vercel:"))).toEqual([
+      "vercel:availability",
+    ]);
+    expect(startLabels.filter((label) => label.startsWith("stripe:"))).toEqual([
+      "stripe:availability",
+    ]);
     expect(startLabels.filter((label) => label.startsWith("codex:"))).toEqual([
       "codex:mcp",
       "codex:exec",
     ]);
-    expect(Math.max(...starts.map((entry) => Number(entry.split("\t")[2])))).toBe(10);
+    expect(Math.max(...starts.map((entry) => Number(entry.split("\t")[2])))).toBe(3);
     expect(timeline.indexOf("end\tdatabase")).toBeLessThan(
       timeline.findIndex((entry) => entry.startsWith("start\t") && !entry.startsWith("start\tdatabase\t")),
     );
@@ -2481,6 +2083,23 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(readdirSync(providerActiveRoot)).toEqual([]);
     expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json")))
       .toBe(true);
+    const persistedState = readFileSync(
+      path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json"),
+      "utf8",
+    );
+    for (const privateProviderText of [
+      "hostile free-form provider text",
+      "synthetic-request-identifier",
+      "https://private.invalid/member-path",
+      "synthetic-object-identifier",
+      "must-not-be-ingested",
+      "hostile provider diagnostic",
+    ]) {
+      expect(result.stdout).not.toContain(privateProviderText);
+      expect(result.stderr).not.toContain(privateProviderText);
+      expect(JSON.stringify(snapshot)).not.toContain(privateProviderText);
+      expect(persistedState).not.toContain(privateProviderText);
+    }
   });
 
   it("drains all started provider work after one adapter fails", () => {
@@ -2488,7 +2107,6 @@ describe("production-watch locking and dry-run behavior", () => {
     const providerActiveRoot = path.join(runtimeRoot, "provider-active");
     const providerTimeline = path.join(runtimeRoot, "provider-timeline.log");
     const homeRoot = path.join(runtimeRoot, "home");
-    const vercelToken = installVercelApiFixture(homeRoot);
     const result = runProdWatch([
       "run",
       "--provider-child",
@@ -2505,15 +2123,11 @@ describe("production-watch locking and dry-run behavior", () => {
         path.join(runtimeRoot, "schema-faithful-codex-bin"),
         process.env.PATH ?? "",
       ].join(":"),
-      TEST_VERCEL_FETCH_LOG: path.join(runtimeRoot, "vercel-invocations.log"),
-      TEST_VERCEL_TOKEN: vercelToken,
+      TEST_VERCEL_INVOCATION_LOG: path.join(runtimeRoot, "vercel-invocations.log"),
       TEST_PROVIDER_ACTIVE_ROOT: providerActiveRoot,
       TEST_PROVIDER_TIMELINE: providerTimeline,
-      TEST_PROVIDER_GATE_COUNT: "10",
-      TEST_PROVIDER_FAIL_LABEL: "vercel:request:1",
-      TEST_PROVIDER_REFERENCE_MS: String(Date.now()),
-      TEST_VERCEL_NONEMPTY: "1",
-      TEST_STRIPE_NONEMPTY: "1",
+      TEST_PROVIDER_GATE_COUNT: "3",
+      TEST_PROVIDER_FAIL_LABEL: "vercel:availability",
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -2529,9 +2143,9 @@ describe("production-watch locking and dry-run behavior", () => {
       .filter((entry) => entry.startsWith("end\t"))
       .map((entry) => entry.split("\t")[1]!);
     expect(startLabels.filter((label) =>
-      label.startsWith("vercel:request:") || label.startsWith("stripe:") || label === "codex:exec"
-    )).toHaveLength(10);
-    expect(Math.max(...starts.map((entry) => Number(entry.split("\t")[2])))).toBe(10);
+      label === "vercel:availability" || label === "stripe:availability" || label === "codex:exec"
+    )).toHaveLength(3);
+    expect(Math.max(...starts.map((entry) => Number(entry.split("\t")[2])))).toBe(3);
     expect([...startLabels].sort()).toEqual([...endLabels].sort());
     expect(readdirSync(providerActiveRoot)).toEqual([]);
   });
@@ -3720,13 +3334,29 @@ describe("production-watch static safety contracts", () => {
           "    printf 'absent\\n' > \"$LAUNCHCTL_STATE\"",
           "    ;;",
           "  bootstrap)",
+          "    if [ -n \"${LAUNCHCTL_FAIL_BOOTSTRAP_ONCE:-}\" ] && [ ! -e \"$LAUNCHCTL_FAIL_BOOTSTRAP_ONCE\" ]; then",
+          "      : > \"$LAUNCHCTL_FAIL_BOOTSTRAP_ONCE\"",
+          "      exit 1",
+          "    fi",
           "    printf 'loaded\\n' > \"$LAUNCHCTL_STATE\"",
           "    ;;",
           "  enable)",
           "    if [ \"${LAUNCHCTL_FAIL_ENABLE:-0}\" = \"1\" ]; then exit 1; fi",
+          "    if [ -n \"${LAUNCHCTL_FAIL_ENABLE_ONCE:-}\" ] && [ ! -e \"$LAUNCHCTL_FAIL_ENABLE_ONCE\" ]; then",
+          "      : > \"$LAUNCHCTL_FAIL_ENABLE_ONCE\"",
+          "      exit 1",
+          "    fi",
+          "    if [ -n \"${LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE:-}\" ] && [ ! -e \"$LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE\" ]; then",
+          "      printf 'armed\\n' > \"$LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE\"",
+          "    fi",
           "    ;;",
           "  print)",
           "    if [ \"${LAUNCHCTL_PRINT_UNKNOWN:-0}\" = \"1\" ]; then printf 'unknown failure\\n' >&2; exit 1; fi",
+          "    if [ -n \"${LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE:-}\" ] && [ \"$(cat \"$LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE\" 2>/dev/null)\" = \"armed\" ]; then",
+          "      printf 'used\\n' > \"$LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE\"",
+          "      printf 'unknown failure\\n' >&2",
+          "      exit 1",
+          "    fi",
           "    if [ \"$(cat \"$LAUNCHCTL_STATE\" 2>/dev/null)\" = \"loaded\" ]; then exit 0; fi",
           "    printf 'Could not find service\\n' >&2",
           "    exit 113",
@@ -3818,12 +3448,14 @@ describe("production-watch static safety contracts", () => {
       );
       expect(replacement.status, replacement.stderr).toBe(0);
       const replacementCalls = readFileSync(launchctlLog, "utf8").trim().split("\n");
-      expect(replacementCalls).toHaveLength(5);
-      expect(replacementCalls[0]).toContain("bootout");
-      expect(replacementCalls[1]).toContain("print");
-      expect(replacementCalls[2]).toContain("bootstrap");
-      expect(replacementCalls[3]).toContain("enable");
-      expect(replacementCalls[4]).toContain("print");
+      expect(replacementCalls.map((call) => call.split(" ")[0])).toEqual([
+        "print",
+        "bootout",
+        "print",
+        "bootstrap",
+        "enable",
+        "print",
+      ]);
       expect(readFileSync(plistPath, "utf8")).toContain("murph-prod-watch-managed:v1");
       const pinnedRuntimeRoot = path.join(
         runtimeRoot,
@@ -3853,25 +3485,51 @@ describe("production-watch static safety contracts", () => {
         "alternates",
       ))).toBe(false);
 
-      writeFileSync(launchctlLog, "");
-      const enableFailure = runProdWatchFromCheckout(
-        ["scheduler", "install"],
-        runtimeRoot,
-        checkoutRoot,
-        { ...sharedEnv, LAUNCHCTL_FAIL_ENABLE: "1" },
-      );
-      expect(enableFailure.status).toBe(1);
-      expect(enableFailure.stderr).toContain("launchd_enable_failed");
-      expect(existsSync(plistPath)).toBe(true);
-      const failureCalls = readFileSync(launchctlLog, "utf8").trim().split("\n");
-      expect(failureCalls.map((call) => call.split(" ")[0])).toEqual([
-        "bootout",
-        "print",
+      const installedPlist = readFileSync(plistPath, "utf8");
+      const expectExactLoadedRollback = (
+        caseName: string,
+        failureEnv: Record<string, string>,
+        expectedCode: string,
+      ) => {
+        const previousPlist = installedPlist.replace(
+          "<!-- murph-prod-watch-managed:v1 -->",
+          `<!-- murph-prod-watch-managed:v1 -->\n<!-- previous-${caseName} -->`,
+        );
+        writeFileSync(plistPath, previousPlist, { mode: 0o600 });
+        writeFileSync(launchctlState, "loaded\n");
+        writeFileSync(launchctlLog, "");
+        const failedReplacement = runProdWatchFromCheckout(
+          ["scheduler", "install"],
+          runtimeRoot,
+          checkoutRoot,
+          { ...sharedEnv, ...failureEnv },
+        );
+        expect(failedReplacement.status).toBe(1);
+        expect(failedReplacement.stderr).toContain(expectedCode);
+        expect(readFileSync(plistPath, "utf8")).toBe(previousPlist);
+        expect(readFileSync(launchctlState, "utf8")).toBe("loaded\n");
+        const calls = readFileSync(launchctlLog, "utf8").trim().split("\n")
+          .map((call) => call.split(" ")[0]);
+        expect(calls.slice(0, 3)).toEqual(["print", "bootout", "print"]);
+        expect(calls.slice(-3)).toEqual(["bootstrap", "enable", "print"]);
+        expect(calls.filter((call) => call === "bootout")).toHaveLength(2);
+      };
+
+      expectExactLoadedRollback(
         "bootstrap",
+        { LAUNCHCTL_FAIL_BOOTSTRAP_ONCE: path.join(testRoot, "bootstrap-failed-once") },
+        "launchd_bootstrap_failed_previous_restored",
+      );
+      expectExactLoadedRollback(
         "enable",
-        "bootout",
-        "print",
-      ]);
+        { LAUNCHCTL_FAIL_ENABLE_ONCE: path.join(testRoot, "enable-failed-once") },
+        "launchd_enable_failed_previous_restored",
+      );
+      expectExactLoadedRollback(
+        "confirmation",
+        { LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE: path.join(testRoot, "confirmation-failed-once") },
+        "launchd_install_state_unconfirmed_previous_restored",
+      );
 
       writeFileSync(launchctlLog, "");
       writeFileSync(launchctlState, "loaded\n");
@@ -3917,7 +3575,7 @@ describe("production-watch static safety contracts", () => {
         },
       );
       expect(failedEnableCleanup.status).toBe(1);
-      expect(failedEnableCleanup.stderr).toContain("launchd_enable_cleanup_failed");
+      expect(failedEnableCleanup.stderr).toContain("launchd_enable_failed_cleanup_failed");
       expect(existsSync(plistPath)).toBe(true);
       expect(readFileSync(launchctlState, "utf8").trim()).toBe("loaded");
 
@@ -4017,34 +3675,6 @@ describe("production-watch static safety contracts", () => {
 
 function buildFixtureSnapshot(name: "healthy" | "suspicious", now: Date): ProductionWatchSnapshot {
   return buildFromEvidence(readFixture(name), now);
-}
-
-async function withMockedFetch<T>(mockFetch: typeof fetch, run: () => Promise<T>): Promise<T> {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = mockFetch;
-  try {
-    return await run();
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-}
-
-function vercelRowsResponse(rowCount: number, hasMoreRows: boolean): Response {
-  return new Response(JSON.stringify({
-    rows: Array.from({ length: rowCount }, () => ({})),
-    hasMoreRows,
-  }), { status: 200, headers: { "content-type": "application/json" } });
-}
-
-function testVercelAccess(): { token: string; teamId: string; projectId: string } {
-  return { token: "test-token", teamId: "test-team", projectId: "test-project" };
-}
-
-function testVercelWindow(): { start: Date; end: Date } {
-  return {
-    start: new Date("2026-08-10T20:00:00.000Z"),
-    end: new Date("2026-08-10T20:05:00.000Z"),
-  };
 }
 
 function buildCompleteSnapshot(now: Date): ProductionWatchSnapshot {
@@ -4183,16 +3813,6 @@ function installDatabaseFixtureHelper(
     TEST_NODE_EXECUTABLE: process.execPath,
     TEST_PROVIDER_TRACKER_PATH: providerTrackerPath,
   };
-}
-
-function installVercelApiFixture(homeRoot: string): string {
-  const authRoot = path.join(homeRoot, ".local", "share", "com.vercel.cli");
-  mkdirSync(authRoot, { recursive: true, mode: 0o700 });
-  const token = "test-vercel-token-1234567890";
-  const authPath = path.join(authRoot, "auth.json");
-  writeFileSync(authPath, JSON.stringify({ token }), { mode: 0o600 });
-  chmodSync(authPath, 0o600);
-  return token;
 }
 
 function installSchemaFaithfulFakeCodex(runtimeRoot: string): Record<string, string> {
@@ -4363,55 +3983,44 @@ function writeFakeSchedulerPreflightTools(binRoot: string): void {
 }
 
 function writeFakeProviderCliExecutables(binRoot: string): void {
-  const vercelPath = path.join(binRoot, "vercel");
-  writeFileSync(vercelPath, [
-    "#!/usr/bin/env node",
-    "const args = process.argv.slice(2);",
-    "if (args[0] !== 'logs') process.exit(1);",
-    "const sinceIndex = args.indexOf('--since');",
-    "const untilIndex = args.indexOf('--until');",
-    "const start = Date.parse(args[sinceIndex + 1]);",
-    "const end = Date.parse(args[untilIndex + 1]);",
-    "if (!Number.isFinite(start) || !Number.isFinite(end)) process.exit(1);",
-    "process.stdout.write(`${JSON.stringify({ id: `fake-${start}`, timestamp: Math.floor((start + end) / 2), responseStatusCode: 200, level: 'info', source: 'serverless', logs: [] })}\\n`);",
-    "",
-  ].join("\n"), { mode: 0o755 });
-  chmodSync(vercelPath, 0o755);
-  const stripePath = path.join(binRoot, "stripe");
-  writeFileSync(stripePath, [
-    "#!/usr/bin/env node",
-    "const { appendFileSync } = require('node:fs');",
-    "const tracker = process.env.TEST_PROVIDER_TRACKER_PATH === undefined ? { withTrackedProviderWork: async (_label, _gated, operation) => await operation() } : require(process.env.TEST_PROVIDER_TRACKER_PATH);",
-    "const args = process.argv.slice(2);",
-    "const failedDeliveries = args.includes('--delivery-success=false');",
-    "const label = failedDeliveries ? 'stripe:failed-deliveries' : 'stripe:events';",
-    "const event = (id, minutesAgo, type, referenceMs) => ({ id, created: Math.floor((referenceMs - minutesAgo * 60_000) / 1_000), type });",
-    "void tracker.withTrackedProviderWork(label, true, async () => {",
-    "  if (process.env.TEST_STRIPE_INVOCATION_LOG) appendFileSync(process.env.TEST_STRIPE_INVOCATION_LOG, `${args.join(' ')}\\n`);",
-    "  if (process.env.TEST_PROVIDER_FAIL_LABEL === label) throw new Error('synthetic_provider_failure');",
-    "  const referenceMs = Number(process.env.TEST_PROVIDER_REFERENCE_MS ?? Date.now());",
-    "  const data = process.env.TEST_STRIPE_NONEMPTY !== '1' ? [] : failedDeliveries ? [",
-    "    event('current-failure-overlap', 2, 'invoice.payment_failed', referenceMs),",
-    "    event('current-delivery-only', 4, 'charge.succeeded', referenceMs),",
-    "    event('previous-failure-overlap', 17, 'payment_intent.payment_failed', referenceMs),",
-    "    event('previous-delivery-only', 19, 'charge.succeeded', referenceMs),",
-    "    event('outside-delivery', 31, 'invoice.payment_failed', referenceMs),",
-    "    event('future-delivery', -1, 'invoice.payment_failed', referenceMs),",
-    "  ] : [",
-    "    event('current-success', 1, 'charge.succeeded', referenceMs),",
-    "    event('current-failure-overlap', 2, 'invoice.payment_failed', referenceMs),",
-    "    event('current-timeout', 3, 'event.timeout', referenceMs),",
-    "    event('previous-success', 16, 'charge.succeeded', referenceMs),",
-    "    event('previous-failure-overlap', 17, 'payment_intent.payment_failed', referenceMs),",
-    "    event('previous-timeout', 18, 'event.timeout', referenceMs),",
-    "    event('outside-event', 31, 'invoice.payment_failed', referenceMs),",
-    "    event('future-event', -1, 'invoice.payment_failed', referenceMs),",
-    "  ];",
-    "  process.stdout.write(`${JSON.stringify({ object: 'list', data, has_more: false })}\\n`);",
-    "}).catch((error) => { console.error(error instanceof Error ? error.message : 'stripe_fixture_failed'); process.exitCode = 1; });",
-    "",
-  ].join("\n"), { mode: 0o755 });
-  chmodSync(stripePath, 0o755);
+  for (const source of ["vercel", "stripe"] as const) {
+    const executablePath = path.join(binRoot, source);
+    const expectedArgs = source === "vercel"
+      ? ["project", "inspect", "murph", "--scope", "cobuildwithus", "--non-interactive", "--no-color"]
+      : ["balance", "retrieve", "--live"];
+    const invocationLogEnv = source === "vercel"
+      ? "TEST_VERCEL_INVOCATION_LOG"
+      : "TEST_STRIPE_INVOCATION_LOG";
+    writeFileSync(executablePath, [
+      "#!/usr/bin/env node",
+      "const { appendFileSync } = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      `const expectedArgs = ${JSON.stringify(expectedArgs)};`,
+      "if (JSON.stringify(args) !== JSON.stringify(expectedArgs)) process.exit(2);",
+      `const source = ${JSON.stringify(source)};`,
+      `const invocationLog = process.env[${JSON.stringify(invocationLogEnv)}];`,
+      "if (invocationLog !== undefined) appendFileSync(invocationLog, `${args.join(' ')}\\n`);",
+      "const tracker = process.env.TEST_PROVIDER_TRACKER_PATH === undefined",
+      "  ? { withTrackedProviderWork: async (_label, _gated, operation) => await operation() }",
+      "  : require(process.env.TEST_PROVIDER_TRACKER_PATH);",
+      "const label = `${source}:availability`;",
+      "void tracker.withTrackedProviderWork(label, true, async () => {",
+      "  if (process.env.TEST_PROVIDER_FAIL_LABEL === label) throw new Error('synthetic_provider_failure');",
+      "  process.stdout.write(JSON.stringify({",
+      "    message: 'hostile free-form provider text',",
+      "    requestId: 'synthetic-request-identifier',",
+      "    url: 'https://private.invalid/member-path',",
+      "    data: { object: { id: 'synthetic-object-identifier', payload: 'must-not-be-ingested' } },",
+      "  }));",
+      "  process.stderr.write('hostile provider diagnostic\\n');",
+      "}).catch((error) => {",
+      "  process.stderr.write(`${error instanceof Error ? error.message : 'provider_fixture_failed'}\\n`);",
+      "  process.exitCode = 1;",
+      "});",
+      "",
+    ].join("\n"), { mode: 0o755 });
+    chmodSync(executablePath, 0o755);
+  }
 }
 
 function writeProviderConcurrencyTracker(runtimeRoot: string): string {

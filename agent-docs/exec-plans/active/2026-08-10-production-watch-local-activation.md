@@ -4,7 +4,7 @@ Status: active
 
 ## Goal
 
-Activate a machine-local, five-minute monitor-only production watcher that collects bounded aggregate evidence from PostgreSQL, Vercel, Cloudflare, and Stripe and maintains a private incident ledger. Automatic diagnosis dispatch and draft-PR remediation are not implemented; any future automation requires a separate design and review.
+Activate a machine-local, five-minute monitor-only production watcher that collects bounded PostgreSQL aggregates, advisory Cloudflare aggregates, status-only Vercel/Stripe availability evidence, and maintains a private incident ledger. Automatic diagnosis dispatch and draft-PR remediation are not implemented; any future automation requires a separate design and review.
 
 ## Scope
 
@@ -15,6 +15,7 @@ Activate a machine-local, five-minute monitor-only production watcher that colle
 - Derive the scheduler's immutable revision only from the exact clean checkout executing installation; reject conflicting caller assertions.
 - Ignore mutable Codex user config and refuse to start the provider child unless the reviewed model/effort/disabled-feature contract and effective MCP set of exactly Cloudflare Observability are re-established.
 - Pin the installer-approved Codex standalone executable and SHA-256 into the scheduler and revalidate both before child launch.
+- Run the final install preflight from the pinned runtime before cutover and restore the exact prior managed plist/job state if candidate activation cannot be confirmed.
 - Reject test-only environment controls in the production entrypoint; keep dependency injection in a separate test-only entrypoint.
 - Disable user shell startup files before the launchd hardening command executes.
 - Never merge, enable auto-merge, deploy, or mutate production/provider state.
@@ -24,7 +25,7 @@ Activate a machine-local, five-minute monitor-only production watcher that colle
 - Production-watch focused tests and tools TypeScript typecheck.
 - Full repository-tools test suite.
 - Strict JSON-schema tests, docs drift/gardening, skill validation, diff hygiene, and privacy/secret scans.
-- Aggregate-only live preflight for all four production sources.
+- Aggregate-only PostgreSQL/Cloudflare preflight plus status-only Vercel/Stripe availability/authentication checks.
 - ReviewGPT launch gate using the latest published package version.
 - Scheduler install followed by a successful launchd collection and status/projection inspection.
 
@@ -38,7 +39,7 @@ Run the watcher scheduler uninstall command. This unloads only its managed launc
 - The correction pass removed the out-of-scope diagnosis, remediation, review, branch, and draft-PR lifecycle rather than leaving dormant code behind.
 - Provider-child execution now ignores mutable user configuration, pins its model and effort, disables unrelated capabilities, and exposes only the pinned Cloudflare Observability MCP executable.
 - Database collection has a deterministic one-session aggregate query with explicit cardinality tests. Subprocess cancellation now remains connected while waiting for the durable state lock.
-- ReviewGPT is pinned to published version `0.5.126`; a fresh review of the corrected pushed head remains an activation gate.
+- ReviewGPT `0.5.127` matches the latest published package. Its latest exact-head audit found two launch blockers: Vercel/Stripe raw provider-record ingestion and non-transactional launchd replacement. The correction removes row/event ingestion in favor of ignored-stdio status probes and restores the prior plist/job state after candidate activation failure; a fresh review of the final pushed head remains an activation gate.
 
 ## Decisions
 
@@ -48,4 +49,4 @@ Run the watcher scheduler uninstall command. This unloads only its managed launc
 
 ## Retrospective
 
-The first-reviewed revision contained 10,747 lines of watcher source and 5,079 lines of tests and fixtures. Under the same classification, the corrected implementation contains 8,432 source lines and 4,814 test and fixture lines; 6,904 of the source lines are executable TypeScript and SQL, with the remainder in strict runtime schemas. The reduction came from deleting the unlaunchable fixer lifecycle and its classification state rather than abstracting it behind another layer. Remaining size is concentrated in explicit provider normalization, strict schemas, durable state transitions, process ownership, launchd lifecycle safety, and their failure-path tests.
+The first-reviewed revision contained 10,747 lines of watcher source and 5,079 lines of tests and fixtures. Under the same classification, the current corrected implementation contains 7,847 source lines and 4,845 test and fixture lines; 6,319 of the source lines are executable TypeScript and SQL, with the remainder in strict runtime schemas. The reduction came from deleting the unlaunchable fixer lifecycle and its classification state, then deleting Vercel request-row and Stripe event-object ingestion instead of trying to redact provider records after retrieval. Remaining size is concentrated in strict schemas, durable state transitions, process ownership, launchd lifecycle safety, and their failure-path tests.

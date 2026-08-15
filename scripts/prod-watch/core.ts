@@ -556,7 +556,11 @@ export function parseProviderEvidence(value: unknown): ProviderEvidenceEnvelope 
     if (evidence.status === "ok" && evidence.auth !== "ok") {
       throw new Error("provider_ok_auth_unproven");
     }
-    if (evidence.status === "ok" && !providerRateEvidenceComplete(evidence)) {
+    if (
+      evidence.status === "ok"
+      && !providerRateEvidenceComplete(evidence)
+      && !providerAvailabilityEvidenceOnly(evidence)
+    ) {
       throw new Error("provider_ok_rate_facts_incomplete");
     }
   }
@@ -2333,6 +2337,14 @@ function providerRateEvidenceComplete(evidence: AdapterEvidence): boolean {
       || request.previous === undefined
       || counter.previous <= request.previous;
   });
+}
+
+function providerAvailabilityEvidenceOnly(evidence: AdapterEvidence): boolean {
+  return (evidence.source === "vercel" || evidence.source === "stripe")
+    && evidence.releaseContext.length === 0
+    && evidence.counters.length === 0
+    && evidence.latency.length === 0
+    && evidence.fingerprints.length === 0;
 }
 
 function withProviderRateDenominator(
