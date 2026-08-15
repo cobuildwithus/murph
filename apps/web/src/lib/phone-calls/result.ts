@@ -802,10 +802,10 @@ export function buildPhoneCallResultNotificationInstructions(input: {
       ]
     : [
         input.requireSend
-          ? "The Murph phone call has finished. Report the final result to this group chat."
+          ? "The Murph phone call has finished. Report the final result in this conversation."
           : "The Murph phone call has finished. Notify the user of the final result if it is worth sharing.",
         input.requireSend
-          ? "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. The group asked for this call, so never stay silent about it."
+          ? "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. The requester asked for this call, so never stay silent about it."
           : "If there is nothing meaningful to report, you may skip sending a message.",
       ];
   lines.push(

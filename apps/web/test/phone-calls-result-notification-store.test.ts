@@ -349,6 +349,33 @@ describe("default phone-call result notification store", () => {
     expect(mocks.requireHostedAssistantNotificationDestination).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it("suppresses duplicate analysis after a tracked generation is terminal", async () => {
+    const prisma = buildPrisma({
+      call: buildStoredAnalyzedCall({
+        resultDeliveryGeneration: 1,
+        resultDeliveryStatus: "delivered",
+        resultDeliveryTerminalAt: new Date("2026-08-09T00:05:00.000Z"),
+        resultNotificationChannel: "telegram",
+      }),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(handleRetellCallAnalyzed({
+      call: buildAnalyzedRetellCallPayload(),
+    })).resolves.toEqual({
+      notificationMailboxItemId: null,
+      notificationUserId: null,
+    });
+
+    expect(TRACKED_NOTIFICATION_DEDUPE_KEY).not.toBe(
+      LEGACY_NOTIFICATION_DEDUPE_KEY,
+    );
+    expect(mocks.readHostedMailboxItemByDedupeKey).not.toHaveBeenCalled();
+    expect(mocks.requireHostedAssistantNotificationDestination).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
 });
 
 function buildPrisma(input: {

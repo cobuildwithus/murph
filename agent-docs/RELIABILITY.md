@@ -1830,7 +1830,15 @@ Last verified: 2026-08-15
   schema and Web callback before the runner producer, then roll the runner out
   immediately. A rollback must first stop new tracked scheduled-call admission
   and keep a callback-capable runner until every nonterminal tracked call
-  drains; only then may the runner roll below callback support, with Web last.
+  drains; only then may the runner roll below callback support. Generation-aware
+  Web is a hard rollback floor after the first non-null result channel is
+  stored. Terminal tracked rows remain replay-suppression authority because old
+  Web uses the legacy result key and channel-agnostic routing; the floor cannot
+  be crossed until an operator query proves zero non-null result-channel rows.
+  A nonzero result requires continued compatible Web or a separately reviewed
+  forward migration. Emergency older-Web rollback additionally requires
+  disabling tracked phone calls and analyzed-webhook ingress before proving no
+  replay-capable tracked row remains.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution

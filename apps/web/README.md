@@ -450,10 +450,26 @@ The direct result-channel rollout is consumer-first: apply the additive
 `result_notification_channel` migration, deploy Web, then deploy the hosted
 assistant runner with immediate container rollout. An old runner omits the
 optional field and remains compatible with new Web. A new runner against old
-strict Web is rejected before Retell dispatch. Roll the runner back first; keep
-the new Web consumer until every call with a non-null result channel has
-completed, because an older Web result path does not preserve that exact
-surface at completion. Post-deploy proof should cover one direct Telegram
+strict Web is rejected before Retell dispatch. Pause tracked admission and drain
+every nonterminal tracked call before rolling the runner below callback support.
+Generation-aware Web is a hard rollback floor after the first call stores a
+non-null result channel: terminal rows still suppress duplicate analyzed
+webhooks under generation-scoped keys, while older Web uses a different key and
+channel-agnostic routing. Before any attempted rollback below that Web floor,
+the following operator query must return zero:
+
+```sql
+SELECT count(*) AS tracked_phone_call_rows
+FROM hosted_phone_call
+WHERE result_notification_channel IS NOT NULL;
+```
+
+A nonzero result requires continued compatible Web or a separately reviewed
+forward migration. Terminal delivery is not authority to delete the row or to
+declare older Web safe. For an emergency older-Web rollback, first disable
+tracked phone-call operation and analyzed-webhook ingress, then prove through a
+reviewed migration that no tracked row capable of replay remains. Post-deploy
+proof should cover one direct Telegram
 scheduled call, same-channel result delivery, a route-loss retry, and unchanged
 group behavior.
 

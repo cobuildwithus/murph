@@ -888,6 +888,14 @@ describe("Retell phone-call result handling", () => {
       "phone-call-result:hpc_telegram_direct:generation:1",
     );
     expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
+    expect(wake.notification.instructions).toContain(
+      "Report the final result in this conversation.",
+    );
+    expect(wake.notification.instructions).toContain(
+      "The requester asked for this call",
+    );
+    expect(wake.notification.instructions).not.toContain("group chat");
+    expect(wake.notification.instructions).not.toContain("The group asked");
   });
 
   it("signals the runtime only after a prepared result appends its mailbox item", async () => {
@@ -980,7 +988,14 @@ describe("Retell phone-call result handling", () => {
     // allow_send_or_skip here would let a completed, paid, externally visible
     // call produce no group message at all.
     expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
-    expect(wake.notification.instructions).toContain("this group chat");
+    expect(wake.notification.instructions).toContain(
+      "Report the final result in this conversation.",
+    );
+    expect(wake.notification.instructions).toContain(
+      "The requester asked for this call",
+    );
+    expect(wake.notification.instructions).not.toContain("group chat");
+    expect(wake.notification.instructions).not.toContain("The group asked");
     expect(wake.notification.instructions).not.toContain(
       "you may skip sending a message",
     );
