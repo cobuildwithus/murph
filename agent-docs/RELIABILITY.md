@@ -481,23 +481,45 @@ Last verified: 2026-08-15
   region so their counters cannot collide. Missing either expected port leaves
   the family unknown. An observed port can still produce a positive
   non-replayable condition; when every available signal is safe and only this
-  family is incomplete, the monitor uses that same bounded retry as a
-  confirmation scrape. Every available confirmation signal is evaluated;
+  family is incomplete, the monitor waits one second before one confirmation
+  scrape. PlanetScale's documented example 30-second Prometheus scrape
+  configuration is not a freshness guarantee, so it does not justify a longer
+  delay or another provider call. Every available confirmation signal is
+  evaluated;
   complementary observed ports can be composed with the original complete
-  gauge evidence, while a failed or still-incomplete confirmation retains the
-  original partial observation. Each observed port replaces and advances only
-  its own usable series baseline, an omitted port retains its prior baseline,
+  gauge evidence, while a failed confirmation retains the original partial
+  observation. A safe still-incomplete confirmation contributes its observed
+  counters to the original complete gauge evidence so a port first observed by
+  confirmation advances its baseline. Each observed port replaces and advances
+  only its own usable series baseline, an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed. This makes
   transient counter-family omission less noisy without converting unknown to
   zero, replaying an old delta, or weakening the two-check telemetry fallback.
+  The confirmation retains the existing two-observation/four-request ceiling.
+  Including two sequential ten-second fetch timeouts per observation, its
+  41-second worst-case wall time remains below the persisted two-minute run
+  lease and the platform's 15-minute scheduled runtime. Structured failure
+  warnings include the actual parsed-observation count and per-port omission
+  counts, without raw provider payloads or signed scrape values.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
-  consecutive runs before paging the monitoring condition. Crossing that
-  threshold persists one bounded telemetry-page obligation in the existing
-  incident row. The represented first two-check window counts incomplete versus
-  unavailable observations, unions only canonical missing families observed on
-  partial checks, and uses the threshold time as its window end. One bounded
-  evidence value on each existing sample preserves that aggregate provenance
-  across restart. The obligation survives an occupied pending-message slot,
+  consecutive runs before paging the monitoring condition. A failed check never
+  erases a successfully parsed observation: even an all-family-
+  missing parse remains an incomplete observation if its retry later fails,
+  while `unavailable` means that the check produced no parsed observation.
+  Crossing the threshold persists one bounded telemetry-page obligation in the
+  existing incident row. The represented first two-check window counts
+  incomplete versus unavailable observations, unions only canonical missing
+  families, and sums parsed observations plus exact 5432/6432 omission counts
+  from partial checks.
+  It uses the threshold time as its window end. One bounded evidence value on
+  each existing sample
+  preserves that aggregate provenance across restart. Legacy evidence without
+  port detail remains readable; any window containing it reports unavailable
+  port detail rather than presenting the detailed portion as an exact ratio.
+  Each failed check also retains the connection-error family whenever any of its
+  parsed observations omitted an expected port, keeping strict persistence
+  validation aligned with the operator diagnosis. The obligation survives an
+  occupied pending-message slot,
   restart, recovery, and connection-error-only prioritization; only
   acknowledgment of a pending body that includes the monitoring condition
   clears it. Recovery and another threshold before acknowledgment deliberately
