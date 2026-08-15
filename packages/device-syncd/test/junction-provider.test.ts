@@ -15395,6 +15395,9 @@ test("Junction sparse fetch dedupe preserves stable importer identities and reje
     { timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 20 },
     { id: "fat-row-conflict", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 21 },
     { id: "fat-row-conflict", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 22 },
+    { id: "fat-row-date-only", timestamp: "2026-06-15", unit: "%", value: 23 },
+    { id: "fat-row-alias-only", observedAt: "2026-06-15T10:00:00.000Z", unit: "%", value: 24 },
+    { id: "fat-row-invalid-calendar", timestamp: "2026-06-31T10:00:00.000Z", unit: "%", value: 25 },
   ];
   const forward = await run(records);
   const reversed = await run([...records].reverse());
@@ -15409,13 +15412,17 @@ test("Junction sparse fetch dedupe preserves stable importer identities and reje
   const forwardSummary = summarize(forward.normalized);
 
   assert.deepEqual(forwardSummary, summarize(reversed.normalized));
-  assert.equal(forwardSummary.length, 4);
-  assert.equal(new Set(forwardSummary.map((event) => event.identity)).size, 4);
+  assert.equal(forwardSummary.length, 2);
+  assert.equal(new Set(forwardSummary.map((event) => event.identity)).size, 2);
   assert.deepEqual(forwardSummary.map((event) => event.value).sort((left, right) =>
     Number(left) - Number(right)
-  ), [18, 18, 19, 20]);
+  ), [18, 18]);
   assert.doesNotMatch(JSON.stringify(forward.snapshot), /fat-row-conflict/u);
   assert.doesNotMatch(JSON.stringify(reversed.snapshot), /fat-row-conflict/u);
+  assert.doesNotMatch(
+    JSON.stringify(forward.snapshot),
+    /fat-row-date-only|fat-row-alias-only|fat-row-invalid-calendar/u,
+  );
 });
 
 test("Junction full backfills keep configured sparse and dense resources in bounded daily units", async () => {
@@ -15505,7 +15512,7 @@ test("Junction full backfills keep configured sparse and dense resources in boun
   }));
 });
 
-test("Junction direct-Link bounded sparse data stays with the full backfill owner", async () => {
+test("Junction direct-Link body data activates the existing extended-history owner", async () => {
   const connectedAt = "2026-04-03T00:00:00.000Z";
   const now = "2026-07-01T12:00:00.000Z";
   const vaultRoot = await makeTempDirectory("murph-junction-fat-activation");
@@ -15679,7 +15686,7 @@ test("Junction direct-Link bounded sparse data stays with the full backfill owne
     ).jobs ?? [];
     assert.equal(nonTerminalJobs.some((job) =>
       job.kind === "resource" && job.payload?.resource === "fat"
-    ), false);
+    ), true);
 
     const scheduled = requireValue(executor.createScheduledJobs?.(
       createStoredAccount({
@@ -15694,7 +15701,11 @@ test("Junction direct-Link bounded sparse data stays with the full backfill owne
       && job.payload?.resource === "fat"
       && job.payload?.sourceProviderSlug === "garmin"
     );
-    assert.deepEqual(activationJobs, []);
+    assert.equal(activationJobs.length, 1);
+    assert.equal(activationJobs[0]?.payload?.historicalBackfill, true);
+    assert.equal(activationJobs[0]?.payload?.historicalWindowStart, "2026-01-02T00:00:00.000Z");
+    assert.equal(activationJobs[0]?.payload?.windowStart, "2026-01-02T00:00:00.000Z");
+    assert.equal(activationJobs[0]?.payload?.windowEnd, "2026-07-01T00:00:00.000Z");
     assert.equal(requests.length, 0);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });

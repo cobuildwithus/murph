@@ -4570,7 +4570,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 22);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 23);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4589,34 +4589,35 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
   }
 });
 
-test("ordinary wearable reads rebuild carried v20 body projections before serving them", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-body-v20-reset-"));
+test("ordinary wearable reads rebuild carried v22 sparse-body projections before serving them", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-body-v22-reset-"));
   const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
   const bodyMetrics = [
-    ["weight", 72.4, "kg"],
-    ["body-fat-percentage", 18.4, "%"],
-    ["bmi", 23.7, "kg/m^2"],
-    ["lean-body-mass", 59.1, "kg"],
-    ["waist-circumference", 83.9, "cm"],
-    ["body-water-percentage", 51.8, "%"],
-    ["bone-mass-percentage", 4.2, "%"],
-    ["muscle-mass-percentage", 63.4, "%"],
-    ["visceral-fat-index", 7, "index"],
+    ["weight", 72.4, "kg", "sample"],
+    ["body-fat-percentage", 18.4, "%", "sample"],
+    ["bmi", 23.7, "kg/m^2", "sample"],
+    ["lean-body-mass", 59.1, "kg", "sample"],
+    ["waist-circumference", 83.9, "cm", "sample"],
+    ["body-water-percentage", 51.8, "%", "summary"],
+    ["bone-mass-percentage", 4.2, "%", "summary"],
+    ["muscle-mass-percentage", 63.4, "%", "summary"],
+    ["visceral-fat-index", 7, "index", "summary"],
   ] as const;
-  const newSummaryMetricKeys = [
-    "body-water-percentage",
-    "bone-mass-percentage",
-    "muscle-mass-percentage",
-    "visceral-fat-index",
+  const sparseBodyMetricKeys = [
+    "body-weight",
+    "body-fat-percentage",
+    "bmi",
+    "lean-body-mass",
+    "waist-circumference",
   ] as const;
 
   try {
     await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
     await writeFile(
       path.join(vaultRoot, "ledger/events/2026/2026-05.jsonl"),
-      bodyMetrics.map(([metric, value, unit], index) => JSON.stringify({
+      [...bodyMetrics.map(([metric, value, unit, observationGrain], index) => ({
         schemaVersion: "murph.event.v1",
-        id: `evt_body_v20_upgrade_${index}`,
+        id: `evt_body_v22_upgrade_${index}`,
         kind: "observation",
         occurredAt: `2026-05-20T08:${String(index).padStart(2, "0")}:00.000Z`,
         recordedAt: `2026-05-20T08:${String(index + 10).padStart(2, "0")}:00.000Z`,
@@ -4624,15 +4625,33 @@ test("ordinary wearable reads rebuild carried v20 body projections before servin
         source: "device",
         title: `Withings ${metric}`,
         metric,
-        observationGrain: "summary",
+        observationGrain,
         value,
         unit,
         externalRef: {
           system: "withings",
-          resourceType: "body-summary",
-          resourceId: `withings-body-v20-upgrade-${index}`,
+          resourceType: observationGrain === "sample" ? "body-reading" : "body-summary",
+          resourceId: `withings-body-v22-upgrade-${index}`,
         },
-      })).join("\n").concat("\n"),
+      })), {
+        schemaVersion: "murph.event.v1",
+        id: "evt_activity_v22_preserved",
+        kind: "observation",
+        occurredAt: "2026-05-20T07:00:00.000Z",
+        recordedAt: "2026-05-20T07:01:00.000Z",
+        dayKey: "2026-05-20",
+        source: "device",
+        title: "Withings daily steps",
+        metric: "daily-steps",
+        observationGrain: "summary",
+        value: 8432,
+        unit: "count",
+        externalRef: {
+          system: "withings",
+          resourceType: "daily-activity",
+          resourceId: "withings-activity-v22-preserved",
+        },
+      }].map((event) => JSON.stringify(event)).join("\n").concat("\n"),
       "utf8",
     );
 
@@ -4654,13 +4673,22 @@ test("ordinary wearable reads rebuild carried v20 body projections before servin
       assert.ok(bodyRow);
       const legacyBodySummary = JSON.parse(bodyRow.summaryJson) as Record<string, unknown>;
       for (const field of [
+        "weightKg",
+        "bodyFatPercentage",
+        "bmi",
+        "leanBodyMassKg",
+        "waistCircumference",
+      ]) {
+        assert.equal(Object.hasOwn(legacyBodySummary, field), true);
+        delete legacyBodySummary[field];
+      }
+      for (const field of [
         "bodyWaterPercentage",
         "boneMassPercentage",
         "muscleMassPercentage",
         "visceralFatIndex",
       ]) {
         assert.equal(Object.hasOwn(legacyBodySummary, field), true);
-        delete legacyBodySummary[field];
       }
       staleDatabase.prepare(`
         UPDATE query_wearable_summaries
@@ -4670,12 +4698,18 @@ test("ordinary wearable reads rebuild carried v20 body projections before servin
       staleDatabase.prepare(`
         DELETE FROM query_metric_points
         WHERE source_kind = 'wearable-summary'
-          AND metric_key IN (?, ?, ?, ?)
-      `).run(...newSummaryMetricKeys);
+          AND metric_key IN (?, ?, ?, ?, ?)
+      `).run(...sparseBodyMetricKeys);
       staleDatabase.prepare(`
         UPDATE query_meta SET value = ? WHERE key = 'built_at'
       `).run(staleBuiltAt);
-      staleDatabase.exec("PRAGMA user_version = 20;");
+      const preservedActivity = staleDatabase.prepare(`
+        SELECT summary_json AS summaryJson
+        FROM query_wearable_summaries
+        WHERE summary_kind = 'activity' AND summary_date = '2026-05-20'
+      `).get() as { summaryJson: string } | undefined;
+      assert.match(preservedActivity?.summaryJson ?? "", /8432/u);
+      staleDatabase.exec("PRAGMA user_version = 22;");
       unchangedSourceManifest = staleDatabase.prepare(`
         SELECT
           relative_path AS relativePath,
@@ -4718,11 +4752,11 @@ test("ordinary wearable reads rebuild carried v20 body projections before servin
       summaryPoints
         .filter((point) => point.source.kind === "wearable-summary")
         .map((point) => point.metricKey)
-        .filter((metricKey) => newSummaryMetricKeys.includes(
-          metricKey as typeof newSummaryMetricKeys[number],
+        .filter((metricKey) => sparseBodyMetricKeys.includes(
+          metricKey as typeof sparseBodyMetricKeys[number],
         ))
         .sort(),
-      [...newSummaryMetricKeys].sort(),
+      [...sparseBodyMetricKeys].sort(),
     );
 
     const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, {
@@ -4753,16 +4787,23 @@ test("ordinary wearable reads rebuild carried v20 body projections before servin
       );
       assert.ok(rebuiltBodySummary);
       for (const field of [
-        "bodyWaterPercentage",
-        "boneMassPercentage",
-        "muscleMassPercentage",
-        "visceralFatIndex",
+        "weightKg",
+        "bodyFatPercentage",
+        "bmi",
+        "leanBodyMassKg",
+        "waistCircumference",
       ]) {
         const envelope = rebuiltBodySummary[field] as {
           selection?: { value?: unknown };
         } | undefined;
         assert.equal(typeof envelope?.selection?.value, "number");
       }
+      const rebuiltActivity = reopened.prepare(`
+        SELECT summary_json AS summaryJson
+        FROM query_wearable_summaries
+        WHERE summary_kind = 'activity' AND summary_date = '2026-05-20'
+      `).get() as { summaryJson: string } | undefined;
+      assert.match(rebuiltActivity?.summaryJson ?? "", /8432/u);
     } finally {
       reopened.close();
     }

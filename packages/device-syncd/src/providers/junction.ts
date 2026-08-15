@@ -25,6 +25,7 @@ import {
   classifyJunctionSummaryNormalizationEvidence,
   countAcceptedJunctionDailyTimeseriesProviderRecords,
   identifyJunctionBloodPressureProviderRecords,
+  normalizeJunctionCanonicalBodyTimestamp,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
   resolveJunctionBoundedFeatureRecords,
@@ -395,6 +396,12 @@ const JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY = Object.freeze({
   history: "extended",
   version: 1,
 } as const);
+const JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY = Object.freeze({
+  anchor: "current_day",
+  completion: "exact_records",
+  history: "extended",
+  version: 1,
+} as const);
 
 // This is the history-depth decision for every admitted resource. Only the
 // sparse resources represented by the package-owned source/resource matrix
@@ -431,24 +438,19 @@ const JUNCTION_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   stress_level: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   vo2_max: JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY,
   water: JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY,
-  weight: {
-    anchor: "current_day",
-    completion: "exact_records",
-    history: "extended",
-    version: 1,
-  },
-  body_mass_index: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
+  weight: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
+  body_mass_index: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
   carbohydrates: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
-  fat: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
+  fat: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
   forced_expiratory_volume_1: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   forced_vital_capacity: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   heart_rate_alert: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   inhaler_usage: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   insulin_injection: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
-  lean_body_mass: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
+  lean_body_mass: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
   peak_expiratory_flow_rate: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   sleep_apnea_alert: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
-  waist_circumference: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
+  waist_circumference: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
   calories_basal: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   daylight_exposure: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   fall: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
@@ -6242,29 +6244,33 @@ function dedupeJunctionTimeseriesRecords(resource: string, records: unknown[]): 
     providerRowKey: buildJunctionTimeseriesProviderRowKey(resource, record),
     record,
   }));
-  const contentKeysByProviderRow = new Map<string, Set<string>>();
+  const contentKeysByStableIdentity = new Map<string, Set<string>>();
   for (const candidate of candidates) {
-    if (!candidate.providerRowKey || !candidate.contentKey) {
+    const stableIdentity = candidate.providerRowKey
+      ?? (isJunctionBodyTimeseriesResource(resource) ? candidate.key : null);
+    if (!stableIdentity || !candidate.contentKey) {
       continue;
     }
 
-    const contentKeys = contentKeysByProviderRow.get(candidate.providerRowKey)
+    const contentKeys = contentKeysByStableIdentity.get(stableIdentity)
       ?? new Set<string>();
     contentKeys.add(candidate.contentKey);
-    contentKeysByProviderRow.set(candidate.providerRowKey, contentKeys);
+    contentKeysByStableIdentity.set(stableIdentity, contentKeys);
   }
-  const conflictingProviderRows = new Set(
-    [...contentKeysByProviderRow.entries()]
+  const conflictingStableIdentities = new Set(
+    [...contentKeysByStableIdentity.entries()]
       .filter(([, contentKeys]) => contentKeys.size > 1)
-      .map(([providerRowKey]) => providerRowKey),
+      .map(([stableIdentity]) => stableIdentity),
   );
   const seen = new Set<string>();
   const deduped: unknown[] = [];
 
   for (const candidate of candidates) {
+    const stableIdentity = candidate.providerRowKey
+      ?? (isJunctionBodyTimeseriesResource(resource) ? candidate.key : null);
     if (
-      candidate.providerRowKey
-      && conflictingProviderRows.has(candidate.providerRowKey)
+      stableIdentity
+      && conflictingStableIdentities.has(stableIdentity)
     ) {
       continue;
     }
@@ -6315,7 +6321,7 @@ function filterJunctionTimeseriesRecordsToWindow(
       ? resolveJunctionTimeseriesRecordTimestampForResource(resource, entry)
       : resolveJunctionTimeseriesRecordRawTimestamp(entry, preferIntervalStart);
     if (!rawTimestamp) {
-      return true;
+      return !isJunctionBodyTimeseriesResource(resource);
     }
 
     if (
@@ -6490,6 +6496,9 @@ function junctionTimeseriesRecordValueIdentity(
   }
 
   const providerRowId = readJunctionTimeseriesProviderRowId(resource, entry) ?? "";
+  if (isJunctionBodyTimeseriesResource(resource) && includeProviderRowId) {
+    return providerRowId ? [providerRowId] : [];
+  }
   if (resource === "weight") {
     if (includeProviderRowId && providerRowId) {
       return [providerRowId];
@@ -6553,7 +6562,6 @@ const JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES = new Set([
   "lean_body_mass",
   "waist_circumference",
 ]);
-
 function isJunctionBodyTimeseriesResource(resource: string | null | undefined): boolean {
   return resource !== null
     && resource !== undefined
@@ -6568,12 +6576,12 @@ function resolveJunctionTimeseriesRecordTimestampForResource(
   record: Record<string, unknown>,
 ): string | null {
   if (JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES.has(resource)) {
-    return toIsoTimestampIfValid(record.timestamp);
+    return normalizeJunctionCanonicalBodyTimestamp(record.timestamp) ?? null;
   }
 
   if (JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES.has(resource)) {
-    const start = toIsoTimestampIfValid(record.start);
-    const end = toIsoTimestampIfValid(record.end);
+    const start = normalizeJunctionCanonicalBodyTimestamp(record.start);
+    const end = normalizeJunctionCanonicalBodyTimestamp(record.end);
     if (!start || !end || Date.parse(end) <= Date.parse(start)) {
       return null;
     }
@@ -7855,7 +7863,7 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     return null;
   }
 
-  if (!["blood_pressure", "weight"].includes(resource)) {
+  if (policy.completion !== "exact_records") {
     const coverageVersion = resource === "note"
       ? readJunctionNoteHistoryBackfillVersion(payload)
       : policy.version;

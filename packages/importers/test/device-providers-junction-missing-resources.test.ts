@@ -285,7 +285,46 @@ test("Junction missing-resource slice rejects malformed values, units, intervals
   assert.deepEqual(payload.evidenceParts, []);
 });
 
-test("Junction sparse identity collapses exact provider-row replay while preserving distinct ids and id-less semantics", () => {
+test("Junction body resources require canonical zoned timestamps and positive intervals", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-02-02T00:00:00.000Z",
+    timeseries: {
+      fat: grouped("withings", "scale", "scale-1", [
+        { timestamp: "2026-02-01T07:02:00-05:00", unit: "%", value: 18.1 },
+        { timestamp: "2026-02-01", unit: "%", value: 18.2 },
+        { timestamp: "2026-02-01T12:02:00", unit: "%", value: 18.3 },
+        { observedAt: TIMESTAMP, unit: "%", value: 18.4 },
+        { timestamp: "2026-02-30T12:02:00Z", unit: "%", value: 18.5 },
+      ]),
+      waist_circumference: grouped("withings", "scale", "scale-1", [
+        {
+          end: "2026-02-01T07:05:00-05:00",
+          start: "2026-02-01T07:00:00-05:00",
+          unit: "cm",
+          value: 82,
+        },
+        { end: END, start: END, unit: "cm", value: 83 },
+        {
+          end: "2026-02-01T12:05:00",
+          start: "2026-02-01T12:00:00",
+          unit: "cm",
+          value: 84,
+        },
+        { timestamp: TIMESTAMP, unit: "cm", value: 85 },
+      ]),
+    },
+  });
+
+  assert.deepEqual(
+    (payload.events ?? []).map((event) => [event.fields?.metric, event.fields?.value]),
+    [
+      ["body-fat-percentage", 18.1],
+      ["waist-circumference", 82],
+    ],
+  );
+});
+
+test("Junction sparse identity collapses provider replay and rejects ambiguous id-less body rows", () => {
   const records = [
     { id: "fat-row-1", timestamp: TIMESTAMP, unit: "%", value: 18 },
     { id: "fat-row-1", timestamp: TIMESTAMP, unit: "%", value: 18 },
@@ -306,11 +345,11 @@ test("Junction sparse identity collapses exact provider-row replay while preserv
     .map((event) => `${event.externalRef?.resourceId}:${event.externalRef?.facet}`)
     .sort();
 
-  assert.equal(first.events?.length, 4);
+  assert.equal(first.events?.length, 2);
   assert.deepEqual(identities(first), identities(replay));
-  assert.equal(new Set(identities(first)).size, 4);
-  assert.equal(first.evidenceParts?.length, 4);
-  assert.equal(replay.evidenceParts?.length, 4);
+  assert.equal(new Set(identities(first)).size, 2);
+  assert.equal(first.evidenceParts?.length, 2);
+  assert.equal(replay.evidenceParts?.length, 2);
   assert.equal(
     new Set(
       (first.events ?? [])
@@ -319,6 +358,26 @@ test("Junction sparse identity collapses exact provider-row replay while preserv
     ).size,
     2,
   );
+});
+
+test("Junction id-less body corrections retain one stable external identity", () => {
+  const normalizeValue = (value: number) => normalizeJunctionSnapshot({
+    importedAt: "2026-02-02T00:00:00.000Z",
+    timeseries: {
+      fat: grouped("withings", "scale", "scale-1", [{
+        timestamp: TIMESTAMP,
+        unit: "%",
+        value,
+      }]),
+    },
+  });
+  const original = normalizeValue(19).events?.[0];
+  const corrected = normalizeValue(20).events?.[0];
+
+  assert.ok(original);
+  assert.ok(corrected);
+  assert.equal(corrected.externalRef?.resourceId, original.externalRef?.resourceId);
+  assert.equal(corrected.fields?.value, 20);
 });
 
 test("Junction sparse provider-row identity excludes alert and intervention corrections", () => {
@@ -440,7 +499,7 @@ test("Junction sparse provider-row corrections revise one canonical event and ex
         }]),
       },
     });
-    const importSnapshot = (snapshot: ReturnType<typeof buildSnapshot>) =>
+    const importSnapshot = (snapshot: Record<string, unknown>) =>
       importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
         {
           provider: "junction",
@@ -483,6 +542,41 @@ test("Junction sparse provider-row corrections revise one canonical event and ex
     assert.equal(replay.applied, false);
     assert.equal(replay.ingestId, null);
     assert.equal(replay.persistedEvidencePartCount, 0);
+
+    const buildIdlessSnapshot = (input: { importedAt: string; value: number }) => ({
+      accountId: "junction-account-sparse-idless-revision",
+      importedAt: input.importedAt,
+      timeseries: {
+        fat: grouped("withings", "scale", "scale-1", [{
+          timestamp: "2026-02-01T14:02:00.000Z",
+          unit: "%",
+          value: input.value,
+        }]),
+      },
+    });
+    const idlessFirst = await importSnapshot(buildIdlessSnapshot({
+      importedAt: "2026-02-04T00:00:00.000Z",
+      value: 20,
+    }));
+    const idlessCorrected = await importSnapshot(buildIdlessSnapshot({
+      importedAt: "2026-02-05T00:00:00.000Z",
+      value: 21,
+    }));
+    const idlessFirstEvent = idlessFirst.events.find((event) =>
+      event.kind === "observation" && event.metric === "body-fat-percentage"
+    );
+    const idlessCorrectedEvent = idlessCorrected.events.find((event) =>
+      event.kind === "observation" && event.metric === "body-fat-percentage"
+    );
+
+    assert.ok(idlessFirstEvent);
+    assert.ok(idlessCorrectedEvent);
+    if (idlessCorrectedEvent.kind !== "observation") {
+      assert.fail("expected corrected id-less Junction body event to remain an observation");
+    }
+    assert.equal(idlessCorrectedEvent.id, idlessFirstEvent.id);
+    assert.equal(idlessCorrectedEvent.lifecycle?.revision, 2);
+    assert.equal(idlessCorrectedEvent.value, 21);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

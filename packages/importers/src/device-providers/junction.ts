@@ -1927,11 +1927,16 @@ const JUNCTION_FEATURE_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionFeatu
 const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 const JUNCTION_NOTE_RESOURCE = "note";
 const JUNCTION_WEIGHT_RESOURCE = "weight";
+const JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES = new Set([
+  "fat",
+]);
 const JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES = new Set([
   "body_mass_index",
   "lean_body_mass",
   "waist_circumference",
 ]);
+const JUNCTION_CANONICAL_BODY_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):?(\d{2}))$/iu;
 
 type JunctionSparseTimeseriesKind = "alert" | "insulin" | "observation";
 
@@ -2227,6 +2232,7 @@ function pushJunctionSparseTimeseriesRecords(
       entry,
       identityHash: buildJunctionSparseTimeseriesIdentityHash({
         record,
+        resource,
         resourceContext,
         resourceSlug,
       }),
@@ -2238,6 +2244,7 @@ function pushJunctionSparseTimeseriesRecords(
         entry,
         occurredAt,
         record,
+        resource,
         resourceContext,
         resourceSlug,
         timestamp,
@@ -2248,7 +2255,10 @@ function pushJunctionSparseTimeseriesRecords(
 
   const semanticContentKeysByProviderIdentity = new Map<string, Set<string>>();
   for (const candidate of candidates) {
-    if (!candidate.record.providerRowId) {
+    if (
+      !candidate.record.providerRowId
+      && !isJunctionBodyTimeseriesResource(resource)
+    ) {
       continue;
     }
 
@@ -2419,7 +2429,43 @@ function parseJunctionSparseTimeseriesRecord(
   const timestampRaw = stringId(entry.timestamp);
   const startRaw = stringId(entry.start);
   const endRaw = stringId(entry.end);
+  const instantBodyResource = JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES.has(resource);
   const intervalBodyResource = JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES.has(resource);
+  if (instantBodyResource) {
+    const timestamp = normalizeJunctionCanonicalBodyTimestamp(timestampRaw);
+    if (!timestampRaw || !timestamp) {
+      return null;
+    }
+    return buildJunctionSparseTimeseriesRecord({
+      descriptor,
+      entry,
+      observedAtRaw: timestampRaw,
+      resource,
+      value,
+    });
+  }
+  if (intervalBodyResource) {
+    const startAt = normalizeJunctionCanonicalBodyTimestamp(startRaw);
+    const endAt = normalizeJunctionCanonicalBodyTimestamp(endRaw);
+    if (
+      !startRaw
+      || !endRaw
+      || !startAt
+      || !endAt
+      || Date.parse(endAt) <= Date.parse(startAt)
+    ) {
+      return null;
+    }
+    return buildJunctionSparseTimeseriesRecord({
+      descriptor,
+      endAt,
+      entry,
+      observedAtRaw: startRaw,
+      resource,
+      startAt,
+      value,
+    });
+  }
   const requiresTimestamp = !intervalBodyResource
     && resource !== "carbohydrates"
     && resource !== "heart_rate_alert"
@@ -2442,10 +2488,70 @@ function parseJunctionSparseTimeseriesRecord(
     return null;
   }
 
-  const observedAtRaw = intervalBodyResource ? startRaw : timestampRaw ?? startRaw;
+  const observedAtRaw = timestampRaw ?? startRaw;
   if (!observedAtRaw) {
     return null;
   }
+
+  return buildJunctionSparseTimeseriesRecord({
+    descriptor,
+    endAt,
+    entry,
+    observedAtRaw,
+    resource,
+    startAt,
+    value,
+  });
+}
+
+export function normalizeJunctionCanonicalBodyTimestamp(value: unknown): string | undefined {
+  const normalized = stringId(value);
+  const match = normalized
+    ? JUNCTION_CANONICAL_BODY_TIMESTAMP_PATTERN.exec(normalized)
+    : null;
+  if (!match) {
+    return undefined;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = Number(match[7] ?? 0);
+  const offsetMinute = Number(match[8] ?? 0);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    [month - 1] ?? 0;
+  if (
+    day < 1
+    || day > daysInMonth
+    || hour > 23
+    || minute > 59
+    || second > 59
+    || offsetHour > 23
+    || offsetMinute > 59
+  ) {
+    return undefined;
+  }
+  return normalizeTimestamp(normalized);
+}
+
+function isJunctionBodyTimeseriesResource(resource: string): boolean {
+  return JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES.has(resource)
+    || JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES.has(resource);
+}
+
+function buildJunctionSparseTimeseriesRecord(input: {
+  descriptor: JunctionSparseTimeseriesDescriptor;
+  endAt?: string;
+  entry: PlainObject;
+  observedAtRaw: string;
+  resource: string;
+  startAt?: string;
+  value: number;
+}): JunctionSparseTimeseriesRecord | null {
+  const { descriptor, endAt, entry, observedAtRaw, resource, startAt, value } = input;
 
   const alertType = descriptor.kind === "alert" && resource === "heart_rate_alert"
     ? normalizeJunctionSemanticToken(entry.type)
@@ -2494,6 +2600,7 @@ function normalizeJunctionSemanticToken(value: unknown): string | undefined {
 
 function buildJunctionSparseTimeseriesIdentityHash(input: {
   record: JunctionSparseTimeseriesRecord;
+  resource: string;
   resourceContext: ResourceContext;
   resourceSlug: string;
 }): string {
@@ -2512,6 +2619,7 @@ function buildJunctionSparseTimeseriesIdentityHash(input: {
 
 function buildJunctionSparseTimeseriesSemanticIdentityHash(input: {
   record: JunctionSparseTimeseriesRecord;
+  resource: string;
   resourceContext: ResourceContext;
   resourceSlug: string;
 }): string {
@@ -2520,27 +2628,35 @@ function buildJunctionSparseTimeseriesSemanticIdentityHash(input: {
 
 function junctionSparseTimeseriesSemanticIdentityParts(input: {
   record: JunctionSparseTimeseriesRecord;
+  resource: string;
   resourceContext: ResourceContext;
   resourceSlug: string;
 }): readonly unknown[] {
-  return [
+  const stableIdentity = [
     input.resourceSlug,
     input.resourceContext.sourceProviderSlug,
     input.resourceContext.origin.sourceType ?? "",
     input.resourceContext.origin.sourceInstanceId ?? "",
     input.record.providerRowId ?? "",
-    input.record.observedAtRaw,
-    input.record.startAt ?? "",
-    input.record.endAt ?? "",
-    input.record.value,
-    input.record.unit,
-    input.record.upstreamUnit,
-    input.record.alertType ?? "",
-    input.record.bolusPurpose ?? "",
-    input.record.deliveryForm ?? "",
-    input.record.deliveryMode ?? "",
-    input.record.insulinType ?? "",
+    isJunctionBodyTimeseriesResource(input.resource)
+      ? normalizeTimestamp(input.record.observedAtRaw) ?? input.record.observedAtRaw
+      : input.record.observedAtRaw,
   ];
+  return isJunctionBodyTimeseriesResource(input.resource)
+    ? stableIdentity
+    : [
+        ...stableIdentity,
+        input.record.startAt ?? "",
+        input.record.endAt ?? "",
+        input.record.value,
+        input.record.unit,
+        input.record.upstreamUnit,
+        input.record.alertType ?? "",
+        input.record.bolusPurpose ?? "",
+        input.record.deliveryForm ?? "",
+        input.record.deliveryMode ?? "",
+        input.record.insulinType ?? "",
+      ];
 }
 
 function buildJunctionSparseTimeseriesSemanticContentKey(input: {
@@ -2548,12 +2664,22 @@ function buildJunctionSparseTimeseriesSemanticContentKey(input: {
   entry: PlainObject;
   occurredAt: string;
   record: JunctionSparseTimeseriesRecord;
+  resource: string;
   resourceContext: ResourceContext;
   resourceSlug: string;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
 }): string {
   return JSON.stringify([
     ...junctionSparseTimeseriesSemanticIdentityParts(input),
+    ...(isJunctionBodyTimeseriesResource(input.resource)
+      ? [
+          input.record.startAt ?? "",
+          input.record.endAt ?? "",
+          input.record.value,
+          input.record.unit,
+          input.record.upstreamUnit,
+        ]
+      : []),
     input.occurredAt,
     input.timestamp.recordedAt ?? "",
     input.dayKey,
@@ -3617,8 +3743,7 @@ function pushJunctionWeightReadings(
           resourceContext.sourceProviderSlug,
           resourceContext.origin.sourceType ?? "",
           resourceContext.origin.sourceInstanceId ?? "",
-          timestamp.observedAtRaw ?? occurredAt,
-          weightKilograms,
+          occurredAt,
         ]);
     if (seenReadingIdentityHashes.has(readingIdentityHash)) {
       continue;
@@ -8066,29 +8191,6 @@ function normalizeBodyCompositionPercent(value: unknown): number | undefined {
 function normalizeNonNegativeBodyIndex(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
   return numeric !== undefined && numeric >= 0
-    ? roundJunctionDailyAggregateValue(numeric)
-    : undefined;
-}
-
-function normalizeBodyWeightKilograms(value: unknown): number | undefined {
-  return normalizePositiveBodyMeasurement(value, 1_000);
-}
-
-function normalizeBodyMassIndex(value: unknown): number | undefined {
-  return normalizePositiveBodyMeasurement(value, 150);
-}
-
-function normalizeLeanBodyMassKilograms(value: unknown): number | undefined {
-  return normalizePositiveBodyMeasurement(value, 1_000);
-}
-
-function normalizeWaistCircumferenceCentimeters(value: unknown): number | undefined {
-  return normalizePositiveBodyMeasurement(value, 500);
-}
-
-function normalizePositiveBodyMeasurement(value: unknown, maximum: number): number | undefined {
-  const numeric = finiteNumber(value);
-  return numeric !== undefined && numeric > 0 && numeric <= maximum
     ? roundJunctionDailyAggregateValue(numeric)
     : undefined;
 }

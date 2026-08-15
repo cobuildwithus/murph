@@ -3075,12 +3075,16 @@ test("Junction weight readings are compact, replay-stable, distinct, and canonic
   const garminReadings = [
     { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
   ];
-  const snapshot = (input: { reverse: boolean; withingsReadingAWeight: number }) => {
+  const snapshot = (input: {
+    reverse: boolean;
+    withingsIdlessWeight: number;
+    withingsReadingAWeight: number;
+  }) => {
     const withingsReadings = [
       { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: input.withingsReadingAWeight, rawSecret: "RAW_WEIGHT_SENTINEL" },
       { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: input.withingsReadingAWeight, rawSecret: "RAW_WEIGHT_SENTINEL" },
       { id: "reading-b", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
-      { timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 82, rawSecret: "RAW_WEIGHT_SENTINEL" },
+      { timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: input.withingsIdlessWeight, rawSecret: "RAW_WEIGHT_SENTINEL" },
     ];
     return {
       accountId: "junction-account-hash-1",
@@ -3101,9 +3105,21 @@ test("Junction weight readings are compact, replay-stable, distinct, and canonic
       },
     };
   };
-  const orderedSnapshot = snapshot({ reverse: false, withingsReadingAWeight: 80 });
-  const reversedSnapshot = snapshot({ reverse: true, withingsReadingAWeight: 80 });
-  const correctedSnapshot = snapshot({ reverse: true, withingsReadingAWeight: 81 });
+  const orderedSnapshot = snapshot({
+    reverse: false,
+    withingsIdlessWeight: 82,
+    withingsReadingAWeight: 80,
+  });
+  const reversedSnapshot = snapshot({
+    reverse: true,
+    withingsIdlessWeight: 82,
+    withingsReadingAWeight: 80,
+  });
+  const correctedSnapshot = snapshot({
+    reverse: true,
+    withingsIdlessWeight: 83,
+    withingsReadingAWeight: 81,
+  });
   const ordered = normalizeJunctionSnapshot(orderedSnapshot);
   const reversed = normalizeJunctionSnapshot(reversedSnapshot);
   const corrected = normalizeJunctionSnapshot(correctedSnapshot);
@@ -3172,6 +3188,11 @@ test("Junction weight readings are compact, replay-stable, distinct, and canonic
       event.kind === "measurement"
       && event.dataOrigin?.sourceProviderSlug === "withings"
       && event.measurements[0]?.value === 81
+    ));
+    assert.ok(correctedImport.events.some((event) =>
+      event.kind === "measurement"
+      && event.dataOrigin?.sourceProviderSlug === "withings"
+      && event.measurements[0]?.value === 83
     ));
     assert.equal(availability.interrupted, false);
     assert.equal(availability.latestBodyMeasurementOccurredAt, "2026-04-22T08:05:00.000Z");

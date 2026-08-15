@@ -57,6 +57,13 @@ const SPARSE_DAILY_HISTORY_RESOURCES = [
   "vo2_max",
   "water",
 ] as const;
+const SPARSE_BODY_HISTORY_RESOURCES = [
+  "weight",
+  "fat",
+  "body_mass_index",
+  "lean_body_mass",
+  "waist_circumference",
+] as const;
 const SOURCE_DISCONNECT_FENCE_CODES = [
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -1179,8 +1186,12 @@ test("terminal matrix coverage suppresses every extended-history pair", () => {
   );
 });
 
-test("one reconnect clears exactly 12 schedule-time coordinates at maximum source cardinality", () => {
-  const scheduleTimeResources = ["note", ...SPARSE_DAILY_HISTORY_RESOURCES, "weight"] as const;
+test("one reconnect clears exactly 16 schedule-time coordinates at maximum source cardinality", () => {
+  const scheduleTimeResources = [
+    "note",
+    ...SPARSE_DAILY_HISTORY_RESOURCES,
+    ...SPARSE_BODY_HISTORY_RESOURCES,
+  ] as const;
   const allResources = ["blood_pressure", ...scheduleTimeResources] as const;
   const coveredMetadata = JUNCTION_CONNECT_SOURCE_TARGETS.reduce(
     (metadata, target) => allResources.reduce(
@@ -1384,7 +1395,7 @@ test("a stale job leaves newer extended-history coverage untouched without egres
     createJobContext({
       account: createAccount({
         metadata: {
-          junctionBloodPressureHistoryBackfillCoverage: `m2|${"0".repeat(192)}`,
+          junctionBloodPressureHistoryBackfillCoverage: `m3|${"0".repeat(192)}`,
         },
         sources,
       }),
@@ -1631,8 +1642,8 @@ test("stable dead coordinates cannot starve any ordinary history coordinate", as
   }
 });
 
-test("mixed history priority reaches every stable pool size through the 396-coordinate bound", () => {
-  for (let poolSize = 1; poolSize <= 396; poolSize += 1) {
+test("mixed history priority reaches every stable pool size through the 528-coordinate bound", () => {
+  for (let poolSize = 1; poolSize <= 528; poolSize += 1) {
     const candidates = Array.from({ length: poolSize }, (_, index) => index);
     const ordinaryOnlySelections = new Set(
       Array.from({ length: poolSize }, (_, scheduleSlot) =>
@@ -1656,7 +1667,7 @@ test("mixed history priority reaches every stable pool size through the 396-coor
     assert.equal(reopenedOnlySelections.size, poolSize);
   }
 
-  for (let mixedPoolSize = 1; mixedPoolSize < 396; mixedPoolSize += 1) {
+  for (let mixedPoolSize = 1; mixedPoolSize < 528; mixedPoolSize += 1) {
     const candidates = Array.from({ length: mixedPoolSize }, (_, index) => index);
     const ordinarySelections = Array.from(
       { length: mixedPoolSize * 4 },
@@ -1680,7 +1691,11 @@ test("mixed history priority reaches every stable pool size through the 396-coor
 });
 
 test("maximum history matrix applies active and completed coordinate suppression", () => {
-  const resources = [...SPARSE_DAILY_HISTORY_RESOURCES, "note", "weight"] as const;
+  const resources = [
+    ...SPARSE_DAILY_HISTORY_RESOURCES,
+    "note",
+    ...SPARSE_BODY_HISTORY_RESOURCES,
+  ] as const;
   const sourceProviderSlugs = [
     ...new Set(JUNCTION_CONNECT_SOURCE_TARGETS.map(({ providerSlug }) => providerSlug)),
   ];
@@ -1717,7 +1732,7 @@ test("maximum history matrix applies active and completed coordinate suppression
     createScheduledJobs(account, now, context).jobs.find((job) => job.kind === "resource"),
   );
 
-  assert.equal(coordinateCount, 396);
+  assert.equal(coordinateCount, 528);
   const activeRoot = selectRoot(NOW);
   assert.equal(observedCandidateCount, coordinateCount);
   activeDedupeKeys.add(requireValue(activeRoot.dedupeKey));
@@ -1876,8 +1891,12 @@ test.each([
   }
 });
 
-test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", () => {
-  const resources = ["note", ...SPARSE_DAILY_HISTORY_RESOURCES, "weight"] as const;
+test("maximum-cardinality schedule-time history queries 528 keys once and offers one inactive root", () => {
+  const resources = [
+    "note",
+    ...SPARSE_DAILY_HISTORY_RESOURCES,
+    ...SPARSE_BODY_HISTORY_RESOURCES,
+  ] as const;
   const availability = Object.fromEntries(
     ["blood_pressure", ...resources].map((resource) => [resource, true]),
   );
@@ -1912,12 +1931,12 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
   const context = {
     findActiveDedupeKeys(dedupeKeys: readonly string[]) {
       membershipQueries += 1;
-      assert.equal(dedupeKeys.length, 33 * 12);
+      assert.equal(dedupeKeys.length, 33 * 16);
       return new Set(dedupeKeys.filter((dedupeKey) => activeDedupeKeys.has(dedupeKey)));
     },
   };
 
-  for (let slot = 0; slot < 33 * 12; slot += 1) {
+  for (let slot = 0; slot < 33 * 16; slot += 1) {
     const resourceJobs = createScheduledJobs(
       account,
       new Date(slotStart).toISOString(),
@@ -1936,11 +1955,11 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
 
   assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
   assert.equal(sources.length, 35);
-  assert.equal(seenCoordinates.size, 33 * 12);
+  assert.equal(seenCoordinates.size, 33 * 16);
   assert.equal([...seenCoordinates].some((coordinate) =>
     coordinate.startsWith("apple_health:") || coordinate.startsWith("apple_healthkit:")
   ), false);
-  assert.equal(membershipQueries, 33 * 12);
+  assert.equal(membershipQueries, 33 * 16);
   assert.deepEqual(
     createScheduledJobs(
       createStoredAccount({ sources: [...sources].reverse() }),

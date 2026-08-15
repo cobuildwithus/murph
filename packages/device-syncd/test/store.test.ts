@@ -3434,10 +3434,10 @@ test("active dedupe membership matches enqueue ownership for queued and exhauste
     assert.throws(
       () => store.findActiveJobDedupeKeys({
         accountId: account.id,
-        dedupeKeys: Array.from({ length: 397 }, (_, index) => `candidate-${index}`),
+        dedupeKeys: Array.from({ length: 529 }, (_, index) => `candidate-${index}`),
         provider: "junction",
       }),
-      /exceeds 396 keys/u,
+      /exceeds 528 keys/u,
     );
 
     assert.equal(

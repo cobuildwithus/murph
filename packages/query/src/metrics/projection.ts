@@ -181,6 +181,9 @@ const ACTIVITY_METRIC_EVIDENCE = [
 const BODY_STATE_METRIC_EVIDENCE = [
   { metricKey: "body-weight", summaryField: "weightKg", sourceKind: "wearable-summary" },
   { metricKey: "body-fat-percentage", summaryField: "bodyFatPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "bmi", summaryField: "bmi", sourceKind: "wearable-summary" },
+  { metricKey: "lean-body-mass", summaryField: "leanBodyMassKg", sourceKind: "wearable-summary" },
+  { metricKey: "waist-circumference", summaryField: "waistCircumference", sourceKind: "wearable-summary" },
   { metricKey: "body-water-percentage", summaryField: "bodyWaterPercentage", sourceKind: "wearable-summary" },
   { metricKey: "bone-mass-percentage", summaryField: "boneMassPercentage", sourceKind: "wearable-summary" },
   { metricKey: "muscle-mass-percentage", summaryField: "muscleMassPercentage", sourceKind: "wearable-summary" },
@@ -315,20 +318,25 @@ interface JunctionBodyObservationIdentity {
 function applyJunctionPreciseBodyObservationPrecedence(
   points: readonly MetricPoint[],
 ): MetricPoint[] {
-  const preciseIdentities = new Set(
+  const preciseEventIdentities = new Set(
     points.flatMap((point) => {
       const identity = resolveJunctionBodyObservationIdentity(point);
-      return identity?.kind === "precise" ? [identity.key] : [];
+      return identity?.kind === "precise" && point.source.family === "event"
+        ? [identity.key]
+        : [];
     }),
   );
 
-  if (preciseIdentities.size === 0) {
+  if (preciseEventIdentities.size === 0) {
     return [...points];
   }
 
   return points.filter((point) => {
     const identity = resolveJunctionBodyObservationIdentity(point);
-    return identity?.kind !== "summary" || !preciseIdentities.has(identity.key);
+    if (!identity || !preciseEventIdentities.has(identity.key)) {
+      return true;
+    }
+    return identity.kind === "precise" && point.source.family === "event";
   });
 }
 
