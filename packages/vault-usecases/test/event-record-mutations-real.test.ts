@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { EventRecord } from "@murphai/contracts";
+import { isDeletedEventLifecycle, type EventRecord } from "@murphai/contracts";
 import {
   findEventByExternalRef,
   importDeviceBatch,
   initializeVault,
   readJsonlRecords,
-  VaultError,
 } from "@murphai/core";
 import { summarizeWearableSourceHealthRuntime } from "@murphai/query";
 import { test } from "vitest";
@@ -78,17 +77,6 @@ async function readEventShards(vaultRoot: string, relativePaths: readonly string
       bytes: await readFile(path.join(vaultRoot, relativePath)),
     })),
   );
-}
-
-async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, Buffer>> {
-  const snapshot = new Map<string, Buffer>();
-  for (const relativePath of await readdir(vaultRoot, { recursive: true })) {
-    const absolutePath = path.join(vaultRoot, relativePath);
-    if ((await stat(absolutePath)).isFile()) {
-      snapshot.set(relativePath, await readFile(absolutePath));
-    }
-  }
-  return snapshot;
 }
 
 test("WHOOP sleep-type enrichment preserves a newer edit from the real event mutation path", async () => {
@@ -385,7 +373,7 @@ test("WHOOP typed-sleep replay preserves a source-retaining edit", async () => {
   }
 });
 
-test("a real profile edit conflicts atomically with a retained authoritative provider update", async () => {
+test("a real profile edit remains live above an authoritative provider update", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-event-edit-junction-profile-"));
   const identity = {
     system: "junction",
@@ -464,44 +452,61 @@ test("a real profile edit conflicts atomically with a retained authoritative pro
     assert.deepEqual(corrected?.externalRef, { ...identity, facet, version: initialVersion });
     assert.deepEqual(corrected?.dataOrigin, dataOrigin);
 
-    const beforeConflict = await snapshotVaultFiles(vaultRoot);
     const updatedVersion = "2026-06-04T15:00:00.000Z";
-    await assert.rejects(
-      importDeviceBatch({
-        vaultRoot,
-        provider: "junction",
-        accountId: "junction-account",
-        importedAt: "2026-06-04T16:00:00.000Z",
-        events: [{
-          ...initialInput.events[0],
-          occurredAt: updatedVersion,
-          recordedAt: updatedVersion,
-          note: "Reported gender: female.",
-          externalRef: { ...identity, facet, version: updatedVersion },
-          dataOrigin: { ...dataOrigin, observedAtRaw: updatedVersion },
-          fields: { reportedGender: "female" },
-        }],
-        authoritativeEventSets: [{
-          ...identity,
-          version: updatedVersion,
-          facetPrefixes: [facet],
-          currentFacets: [facet],
-        }],
-      }),
-      (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-    );
+    const updatedInput = {
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account",
+      importedAt: "2026-06-04T16:00:00.000Z",
+      events: [{
+        ...initialInput.events[0],
+        occurredAt: updatedVersion,
+        recordedAt: updatedVersion,
+        note: "Reported gender: female.",
+        externalRef: { ...identity, facet, version: updatedVersion },
+        dataOrigin: { ...dataOrigin, observedAtRaw: updatedVersion },
+        fields: { reportedGender: "female" },
+      }],
+      authoritativeEventSets: [{
+        ...identity,
+        version: updatedVersion,
+        facetPrefixes: [facet],
+        currentFacets: [facet],
+      }],
+    };
+    const updated = await importDeviceBatch(updatedInput);
+    assert.equal(updated.applied, true);
 
-    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
-    assert.deepEqual(
-      await findEventByExternalRef({ vaultRoot, ...identity, facet }),
-      corrected,
+    const retained = await findEventByExternalRef({ vaultRoot, ...identity, facet });
+    assert.equal(retained?.id, eventId);
+    assert.equal(retained?.source, "manual");
+    assert.equal(retained?.title, "Corrected profile context");
+    assert.equal(retained?.note, "Member-confirmed profile context.");
+    assert.deepEqual(retained?.externalRef, { ...identity, facet, version: initialVersion });
+    assert.deepEqual(retained?.dataOrigin, dataOrigin);
+    const rows = (
+      await Promise.all(
+        [...new Set([...initial.eventShardPaths, ...updated.eventShardPaths])]
+          .map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat() as EventRecord[];
+    assert.ok(rows.some((event) =>
+      event.id === eventId
+      && event.source === "device"
+      && event.externalRef?.version === updatedVersion
+      && event.kind === "note"
+      && event.note === "Reported gender: female."
+    ));
+    assert.equal(
+      (await importDeviceBatch(updatedInput)).applied,
+      false,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 
-test("a real cycle edit rejects an omitted authoritative facet and keeps provider attribution", async () => {
+test("a real cycle edit remains live above an authoritative provider tombstone", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-event-edit-junction-cycle-"));
   const identity = {
     system: "junction",
@@ -589,34 +594,51 @@ test("a real cycle edit rejects an omitted authoritative facet and keeps provide
     assert.deepEqual(corrected?.externalRef, { ...identity, facet, version: initialVersion });
     assert.deepEqual(corrected?.dataOrigin, dataOrigin);
 
-    const beforeConflict = await snapshotVaultFiles(vaultRoot);
     const updatedVersion = "2026-06-04T15:00:00.000Z";
-    await assert.rejects(
-      importDeviceBatch({
-        vaultRoot,
-        provider: "junction",
-        accountId: "junction-account",
-        importedAt: "2026-06-04T16:00:00.000Z",
-        events: [],
-        evidenceParts: [{
-          role: "junction-summary-menstrual-cycle",
-          fileName: "menstrual-cycle.json",
-          content: { cycleCount: 1, factCount: 0 },
-        }],
-        authoritativeEventSets: [{
-          ...identity,
-          version: updatedVersion,
-          facetPrefixes: ["menstrual-flow"],
-          currentFacets: [],
-        }],
-      }),
-      (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-    );
+    const omissionInput = {
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-account",
+      importedAt: "2026-06-04T16:00:00.000Z",
+      events: [],
+      evidenceParts: [{
+        role: "junction-summary-menstrual-cycle",
+        fileName: "menstrual-cycle.json",
+        content: { cycleCount: 1, factCount: 0 },
+      }],
+      authoritativeEventSets: [{
+        ...identity,
+        version: updatedVersion,
+        facetPrefixes: ["menstrual-flow"],
+        currentFacets: [],
+      }],
+    };
+    const omitted = await importDeviceBatch(omissionInput);
+    assert.equal(omitted.applied, true);
 
-    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
-    assert.deepEqual(
-      await findEventByExternalRef({ vaultRoot, ...identity, facet }),
-      corrected,
+    const retained = await findEventByExternalRef({ vaultRoot, ...identity, facet });
+    assert.equal(retained?.id, eventId);
+    assert.equal(retained?.source, "manual");
+    assert.equal(retained?.title, "Corrected period length day");
+    assert.equal(retained?.dayKey, "2026-04-30");
+    assert.equal(retained?.timeZone, "America/Chicago");
+    assert.deepEqual(retained?.externalRef, { ...identity, facet, version: initialVersion });
+    assert.deepEqual(retained?.dataOrigin, dataOrigin);
+    const rows = (
+      await Promise.all(
+        [...new Set([...initial.eventShardPaths, ...omitted.eventShardPaths])]
+          .map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat() as EventRecord[];
+    assert.ok(rows.some((event) =>
+      event.id === eventId
+      && event.source === "device"
+      && event.externalRef?.version === updatedVersion
+      && isDeletedEventLifecycle(event.lifecycle)
+    ));
+    assert.equal(
+      (await importDeviceBatch(omissionInput)).applied,
+      false,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
