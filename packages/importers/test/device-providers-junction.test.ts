@@ -6065,12 +6065,13 @@ test("Junction no-id profile migration claims updated-at identities and retains 
       );
       assert.ok(updatedAtIdentity?.externalRef);
       const { evidenceRoles: _evidenceRoles, ...eventWithoutEvidence } = event;
+      const { version: _legacyVersion, ...legacyExternalRef } = updatedAtIdentity.externalRef;
       return {
         ...eventWithoutEvidence,
         occurredAt: updatedAtIdentity.occurredAt,
         recordedAt: updatedAtIdentity.recordedAt,
         dayKey: updatedAtIdentity.dayKey,
-        externalRef: updatedAtIdentity.externalRef,
+        externalRef: legacyExternalRef,
         dataOrigin: {
           ...event.dataOrigin,
           observedAtRaw: firstUpdatedAt,
@@ -6088,6 +6089,7 @@ test("Junction no-id profile migration claims updated-at identities and retains 
       event.kind === "observation" && event.metric === "height"
     );
     assert.ok(legacyHeight);
+    assert.equal(legacyHeight.externalRef?.version, undefined);
     await coreRuntime.upsertEvent({
       vaultRoot,
       payload: {

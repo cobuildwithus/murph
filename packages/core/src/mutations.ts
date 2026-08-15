@@ -2265,22 +2265,25 @@ function junctionNoIdProfileScopeKey(
   });
 }
 
-function isJunctionNoIdProfilePredecessor(
+function junctionNoIdProfilePredecessorRevision(
   match: IndexedEventExternalRefMatch,
-): boolean {
+): string | null {
   const externalRef = match.indexedExternalRef;
   const providerRecord = match.indexedRecord;
   const origin = providerRecord.dataOrigin;
-  const version = externalRef.version;
+  const persistedRevision = externalRef.version ?? providerRecord.occurredAt;
   if (
     !junctionNoIdProfileScopeKey(externalRef, origin)
-    || !version
-    || !isWritableIsoDateTime(version)
-    || providerRecord.occurredAt !== version
-    || origin?.observedAtRaw !== version
+    || !isWritableIsoDateTime(persistedRevision)
+    || providerRecord.occurredAt !== persistedRevision
+    || origin?.observedAtRaw !== persistedRevision
+    || (
+      externalRef.version === undefined
+      && origin.normalizerVersion !== "junction-normalizer.v1"
+    )
     || isDeletedEventSpineRecord(match.record)
   ) {
-    return false;
+    return null;
   }
 
   const expectedResourceId = `profile-${createHash("sha256")
@@ -2293,7 +2296,13 @@ function isJunctionNoIdProfilePredecessor(
     ]))
     .digest("hex")
     .slice(0, 16)}`;
-  return externalRef.resourceId === expectedResourceId;
+  return externalRef.resourceId === expectedResourceId ? persistedRevision : null;
+}
+
+function isJunctionNoIdProfilePredecessor(
+  match: IndexedEventExternalRefMatch,
+): boolean {
+  return junctionNoIdProfilePredecessorRevision(match) !== null;
 }
 
 function indexJunctionNoIdProfilePredecessors(
@@ -2661,13 +2670,13 @@ function buildLegacyExternalRefReservations(
     const predecessorMatches = scopeKey
       ? (index.junctionNoIdProfilePredecessorsByScope.get(scopeKey) ?? []).filter((match) => {
           const predecessorRefKey = eventExternalRefKey(match.indexedExternalRef);
-          const versionComparison = compareIncomingExternalRefVersion(
-            match.indexedExternalRef,
-            externalRef,
-          );
+          const predecessorRevision = junctionNoIdProfilePredecessorRevision(match);
+          const incomingRevision = externalRef.version;
           return predecessorRefKey !== primaryRefKey
-            && versionComparison !== null
-            && versionComparison > 0;
+            && predecessorRevision !== null
+            && incomingRevision !== undefined
+            && isWritableIsoDateTime(incomingRevision)
+            && compareIsoTimestampsAscending(incomingRevision, predecessorRevision) > 0;
         })
       : [];
     if (predecessorMatches.length > 1) {

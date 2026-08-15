@@ -8339,7 +8339,7 @@ test("importDeviceBatch scopes no-id Junction profile predecessor claims to one 
     occurredAt: string;
     sourceInstanceId: string;
     value: number;
-    version: string;
+    version?: string;
   }) => ({
     kind: "observation" as const,
     occurredAt: input.occurredAt,
@@ -8350,7 +8350,7 @@ test("importDeviceBatch scopes no-id Junction profile predecessor claims to one 
       system: "junction",
       resourceType,
       resourceId: profileResourceId(input.sourceInstanceId, input.occurredAt),
-      version: input.version,
+      ...(input.version ? { version: input.version } : {}),
       facet: "height",
     },
     dataOrigin: {
@@ -8380,7 +8380,6 @@ test("importDeviceBatch scopes no-id Junction profile predecessor claims to one 
       occurredAt: firstUpdatedAt,
       sourceInstanceId: "profile-source-a",
       value: 180,
-      version: firstUpdatedAt,
     })],
   });
   const createdAt = "2026-05-01T09:00:00.000Z";
@@ -8422,7 +8421,7 @@ test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors at
     normalizerVersion: string;
     occurredAt: string;
     value: number;
-    version: string;
+    version?: string;
   }) => ({
     kind: "observation" as const,
     occurredAt: input.occurredAt,
@@ -8433,7 +8432,7 @@ test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors at
       system: "junction",
       resourceType,
       resourceId: profileResourceId(input.occurredAt),
-      version: input.version,
+      ...(input.version ? { version: input.version } : {}),
       facet: "height",
     },
     dataOrigin: {
@@ -8464,13 +8463,11 @@ test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors at
         normalizerVersion: "junction-normalizer.v1",
         occurredAt: firstUpdatedAt,
         value: 179,
-        version: firstUpdatedAt,
       }),
       profileEvent({
         normalizerVersion: "junction-normalizer.v1",
         occurredAt: secondUpdatedAt,
         value: 180,
-        version: secondUpdatedAt,
       }),
     ],
   });
