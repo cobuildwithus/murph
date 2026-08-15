@@ -19,6 +19,7 @@ const TOOL_DIAGNOSTIC_LIMIT = 16
 const COMMAND_RUNTIME_ISSUE_TRACK_LIMIT = 256
 const COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT = 8
 const COMMAND_CLASSIFICATION_SCAN_LIMIT = 4096
+const COMMAND_ORDINAL_MAX = 10_000
 const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
 const DIRECT_SEARCH_COMMAND_PATTERN = /^(?:grep|rg)(?:\s|$)/u
 const UNQUOTED_SHELL_CONTROL_PATTERN = /[\r\n;&|<>`$(){}]/u
@@ -47,13 +48,6 @@ type BytesBucket =
   | 'gt_100kb'
 
 type CommandDiagnosticFamily = 'search' | 'unknown'
-
-type CommandFailureClass =
-  | 'nonzero_exit'
-  | 'not_executable'
-  | 'not_found'
-  | 'search_error'
-  | 'timeout'
 
 type TrackedCommandDiagnostic = {
   commandOrdinal: number
@@ -129,10 +123,18 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
   const completedCommandIds = new Set<string>()
   const pendingSearchFailureDetails: Record<string, unknown>[] = []
 
+  const nextCommandOrdinal = (): number => {
+    commandActionOrdinal = Math.min(
+      commandActionOrdinal + 1,
+      COMMAND_ORDINAL_MAX,
+    )
+    return commandActionOrdinal
+  }
+
   const nextCommandDiagnostic = (
     normalizedEvent: CodexNormalizedEvent,
   ): TrackedCommandDiagnostic => ({
-    commandOrdinal: ++commandActionOrdinal,
+    commandOrdinal: nextCommandOrdinal(),
     commandFamily: resolveDirectSearchCommandFamily(normalizedEvent),
   })
 
@@ -189,7 +191,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
       const commandDiagnostic = completionCommandPresent
         ? {
             commandOrdinal:
-              startedDiagnostic?.commandOrdinal ?? ++commandActionOrdinal,
+              startedDiagnostic?.commandOrdinal ?? nextCommandOrdinal(),
             commandFamily: resolveDirectSearchCommandFamily(
               input.normalizedEvent,
             ),
@@ -553,10 +555,10 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
           ? {
               commandFamily: input.commandDiagnostic.commandFamily,
               commandOrdinal: input.commandDiagnostic.commandOrdinal,
-              failureClass: classifyCommandFailure({
-                commandFamily: input.commandDiagnostic.commandFamily,
-                exitCode,
-              }),
+              failureClass:
+                input.commandDiagnostic.commandFamily === 'search'
+                  ? 'search_error'
+                  : 'nonzero_exit',
               ...(input.commandDiagnostic.commandFamily === 'search'
                 ? { recoveredAfterFailure: false }
                 : {}),
@@ -668,25 +670,6 @@ function hasExecutableShellControl(command: string): boolean {
   }
 
   return escaped || quote !== null
-}
-
-function classifyCommandFailure(input: {
-  commandFamily: CommandDiagnosticFamily
-  exitCode: number
-}): CommandFailureClass {
-  if (input.exitCode === 127) {
-    return 'not_found'
-  }
-  if (input.exitCode === 126) {
-    return 'not_executable'
-  }
-  if (input.exitCode === 124) {
-    return 'timeout'
-  }
-  if (input.commandFamily === 'search') {
-    return 'search_error'
-  }
-  return 'nonzero_exit'
 }
 
 function readCommandExitCode(input: {

@@ -17,10 +17,12 @@ Updated: 2026-08-14
 - Only direct bare `rg` and `grep` executions with exit code 1 are exempted;
   wrappers, compound commands, unknown commands, and all other nonzero exits
   retain the current runtime issue.
-- Persisted command issues add only `search` or `unknown` family, a bounded
-  failure class, and a turn-local command ordinal. A later successful direct
-  search marks an earlier direct-search failure recovered on the same in-memory
-  issue object before the turn returns.
+- Persisted command issues add only `search` or `unknown` family, a provable
+  `search_error` or generic `nonzero_exit` failure class, and a turn-local
+  command ordinal saturated at 10,000. Exact numeric exit codes remain
+  available without being relabeled as causal shell conditions. A later
+  successful direct search marks an earlier direct-search failure recovered on
+  the same in-memory issue object before the turn returns.
 - Returned and durable issue metadata continues to exclude command text,
   arguments, paths, output, payloads, and provider identifiers.
 - Focused assistant-engine and hosted persistence tests plus the relevant
@@ -66,9 +68,10 @@ Updated: 2026-08-14
 - Baseline focused assistant-engine coverage passed. The focused Web test used
   the repository's ordinary Prisma generation step for this fresh worktree.
 - The tracker retains only a bounded `search` or `unknown` enum and a command
-  ordinal beside an in-memory provider item key. Numeric shell-convention
-  classes cover timeout, not-executable, and not-found exits; other direct
-  search errors and generic nonzero exits stay distinct.
+  ordinal beside an in-memory provider item key. Only direct-search errors
+  receive the provable `search_error` class; every other retained failure uses
+  `nonzero_exit` and keeps its exact numeric exit code. The ordinal saturates at
+  a named cap instead of growing without bound.
 - A successful later direct search mutates only the still-local safe details
   object already held in `runtimeIssueInputs`. Provider-turn coverage proves
   that `recoveredAfterFailure` is finalized before the result reaches the
@@ -83,5 +86,11 @@ Updated: 2026-08-14
   bounded, accepts quoted or escaped argument data, and still rejects
   executable shell control, command substitution, malformed quoting, newlines,
   and oversized labels conservatively.
-- Both full assistant-engine files pass after that correction (284 tests), as
-  does the assistant-engine typecheck.
+- The exact-head preliminary re-check passed with no findings. Final ReviewGPT
+  round 1 then identified convention-dependent exit-code labels and the missing
+  ordinal value cap. The remediation retains the exact numeric exit code,
+  narrows the normalized class to provable search behavior versus generic
+  nonzero exit, and saturates the ordinal at 10,000.
+- Both full assistant-engine files pass after the final-review remediation (285
+  tests), as does the assistant-engine typecheck. Exact-head CI was green before
+  the remediation and must rerun on the corrected head.

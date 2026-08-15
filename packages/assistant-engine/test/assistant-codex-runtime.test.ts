@@ -11085,17 +11085,17 @@ describe('assistant codex runtime', () => {
       {
         command: 'cat /tmp/private-record',
         exitCode: 126,
-        failureClass: 'not_executable',
+        failureClass: 'nonzero_exit',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 127,
-        failureClass: 'not_found',
+        failureClass: 'nonzero_exit',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 124,
-        failureClass: 'timeout',
+        failureClass: 'nonzero_exit',
       },
       {
         command: 'bash -lc "rg private-query /tmp/private-record"',
@@ -11262,6 +11262,63 @@ describe('assistant codex runtime', () => {
     expect(encodedIssues).not.toContain('private regex error')
     expect(encodedIssues).not.toContain('item-sensitive')
     expect(encodedIssues).not.toContain('turn-current')
+  })
+
+  it('saturates command ordinals without retaining boundary command data', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
+    const recordCompletedCommand = (input: {
+      command: string
+      exitCode: number
+      id: string
+      output?: string
+    }) => {
+      const event = {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: input.output ?? '',
+            command: input.command,
+            exitCode: input.exitCode,
+            id: input.id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      return issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(event),
+        rawEvent: event,
+      })
+    }
+
+    for (let index = 0; index < 10_005; index += 1) {
+      expect(recordCompletedCommand({
+        command: 'true',
+        exitCode: 0,
+        id: `successful-command-${index}`,
+      })).toBeNull()
+    }
+
+    const boundaryIssue = recordCompletedCommand({
+      command: 'cat /tmp/private-ordinal-record',
+      exitCode: 127,
+      id: 'private-boundary-item',
+      output: 'private boundary output',
+    })
+    expect(boundaryIssue).toMatchObject({
+      details: {
+        commandFamily: 'unknown',
+        commandOrdinal: 10_000,
+        exitCode: 127,
+        failureClass: 'nonzero_exit',
+      },
+    })
+
+    const encodedIssue = JSON.stringify(boundaryIssue)
+    expect(encodedIssue).not.toContain('/tmp/private-ordinal-record')
+    expect(encodedIssue).not.toContain('private boundary output')
+    expect(encodedIssue).not.toContain('private-boundary-item')
+    expect(encodedIssue).not.toContain('turn-current')
   })
 
   it('propagates a recovered command failure through a successful provider turn', async () => {

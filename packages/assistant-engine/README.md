@@ -120,8 +120,10 @@ withdraws the tools without replacing the App Server.
 
 Codex command failures reuse the existing assistant runtime-issue path. The
 turn-scoped classifier persists only a `search` or `unknown` family, a bounded
-failure class, a command ordinal, the numeric exit code, and existing duration
-and output-size buckets. It never persists command text, arguments, paths,
+`search_error` or `nonzero_exit` failure class, a turn-local command ordinal
+saturated at 10,000, the exact numeric exit code, and existing duration and
+output-size buckets. Numeric exit codes are not relabeled as causal shell
+conditions. It never persists command text, arguments, paths,
 output, payloads, or provider action identifiers. A direct bare `rg` or `grep`
 exit code 1 is treated as an expected no-match result. When a later direct
 search succeeds, `recoveredAfterFailure` records only family-level recovery; it
