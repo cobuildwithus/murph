@@ -119,6 +119,11 @@ Updated: 2026-08-15
 - Publish a required stop-settlement notification under a stable call-id key
   after provider termination is confirmed or provider absence is durable.
   Mailbox/wake failures keep recovery pending, and replay reuses the same item.
+- Make reconciliation the sole terminal owner for a safety-cleanup row whose
+  foreground request returned `starting`. Provider `call_ended` callbacks and
+  service replay only preserve or wake that owner. Cleanup runs before a stop
+  fence, publishes the ordinary result before `endedAt`, then rereads the row
+  so a concurrent fence also receives its required stop-settlement result.
 - Treat every accepted `call_analyzed` event as terminal even when Retell omits
   `end_timestamp`: preserve an existing provider end or persist the analysis
   time as the fallback. Publish a required deduped not-completed result when
@@ -172,16 +177,15 @@ Updated: 2026-08-15
   creating a new origin-less direct row while preserving groups and legacy
   replay. Parent review additionally closed the provider-less asynchronous
   start-failure delivery gap with a required deduped result notification.
-- Current focused remediation proof passes 130 tests across the exact service,
+- Current focused remediation proof passes 133 tests across the exact service,
   Retell webhook, and result-notification-store files. The Web suite includes a
   fake-timer production Retell adapter proof with four serial 14-second
   requests, durable terminal state, required settlement finalization, and
   terminal usage recording before the 90-second step deadline. Earlier focused
   assistant-engine, hosted-execution, Cloudflare bridge, and cross-owner proofs
-  remain green. All 14 phone-call Web test files pass 229 tests after the
-  round-4 delta; Web typecheck, targeted lint, docs drift, doc gardening, and
-  `git diff --check` pass. Final exact-head gates will be rerun after review
-  remediation is committed.
+  remain green. All 14 phone-call Web test files pass 232 tests after the
+  round-5 delta, and Web typecheck passes. Final exact-head gates will be rerun
+  after review remediation is committed.
 - Final ReviewGPT round 4 found two actionable issues. The parent accepted both:
   an unsafe-storage provider cleanup could complete silently after foreground
   returned `starting`, and the origin-routing rollback drain allowed an ended
@@ -190,8 +194,15 @@ Updated: 2026-08-15
   failure result before terminalizing. Rollback now requires the ordinary
   result mailbox item for every non-null origin call, regardless of active,
   ended, or analyzed state, with an executable read-only zero-count query.
-- Remaining gates: lint/privacy inspection, commit and push the remediation
-  head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head
+- Final ReviewGPT round 5 found that the round-4 cleanup correction still had
+  competing terminal writers: a provider `call_ended` callback, service replay,
+  or generic stop handling could set `endedAt` after a notification failure and
+  erase the required result obligation. The parent accepted the finding.
+  Reconciliation now owns durable cleanup terminalization, cleanup precedes
+  explicit-stop handling, ordinary result delivery precedes `endedAt`, and a
+  post-terminal reread observes a stop fence that races with finalization.
+- Remaining gates: final lint/docs/privacy inspection, commit and push the
+  remediation head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head
   product-experience revalidation, clean merge-tree proof, and plan closure.
 - Direct proof: a synthetic call result arrives while one hosted invocation is
   active and newer conversation input is waiting; Murph receives the result in

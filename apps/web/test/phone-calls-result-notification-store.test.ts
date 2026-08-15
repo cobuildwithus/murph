@@ -341,15 +341,24 @@ describe("default phone-call result notification store", () => {
       label: "provider-less start failure",
       providerCallId: null,
       summary: "Murph could not start the phone call.",
+      stopRequestedAt: null,
     },
     {
       label: "unsafe provider cleanup",
       providerCallId: PROVIDER_CALL_ID,
       summary: "Murph stopped the phone call before it could be completed safely.",
+      stopRequestedAt: null,
+    },
+    {
+      label: "unsafe provider cleanup with a stop fence",
+      providerCallId: PROVIDER_CALL_ID,
+      summary: "Murph stopped the phone call before it could be completed safely.",
+      stopRequestedAt: new Date("2026-08-09T00:01:00.000Z"),
     },
   ])("dedupes $label and requires Murph to send it", async ({
     providerCallId,
     summary,
+    stopRequestedAt,
   }) => {
     const call: HostedPhoneCall = {
       ...buildStoredAnalyzedCall("linq"),
@@ -358,6 +367,7 @@ describe("default phone-call result notification store", () => {
       providerCallId,
       resultEncrypted: null,
       status: "failed",
+      stopRequestedAt,
     };
     const prisma = buildPrisma({ originDirectChannel: "linq" });
     const signalRuntime = vi.fn(async () => ({

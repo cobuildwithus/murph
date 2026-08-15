@@ -414,7 +414,7 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
   });
 
-  it("retries stored unsafe cleanup authority without another provider create", async () => {
+  it("rearms stored unsafe cleanup authority without another provider create", async () => {
     const existing = buildHostedPhoneCall({
       briefJson: null,
       endedAt: null,
@@ -447,8 +447,8 @@ describe("createHostedPhoneCall", () => {
       phoneCallId: existing.id,
     }, { signal: expect.any(AbortSignal) });
     expect(runtime.startCalls).toEqual([]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
-    expect(store.currentCall().endedAt).toEqual(expect.any(Date));
+    expect(runtime.stopCalls).toEqual([]);
+    expect(store.currentCall().endedAt).toBeNull();
   });
 
   it("keeps exact unsafe-cleanup replay typed when rearm and stop both fail", async () => {
@@ -484,7 +484,7 @@ describe("createHostedPhoneCall", () => {
     });
 
     expect(runtime.startCalls).toEqual([]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(runtime.stopCalls).toEqual([]);
     expect(store.currentCall().endedAt).toBeNull();
   });
 
@@ -560,13 +560,96 @@ describe("createHostedPhoneCall", () => {
     ]);
     expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
     expect(recordTerminalUsage).toHaveBeenCalledWith({
-      call: existing,
+      call: expect.objectContaining({
+        endedAt: expect.any(Date),
+        id: existing.id,
+      }),
       usage: terminalUsage,
     });
     expect(store.currentCall()).toMatchObject({
       endedAt: expect.any(Date),
       providerCallId: "retell_unsafe",
       status: "failed",
+    });
+  });
+
+  it("observes a stop fence racing with cleanup finalization", async () => {
+    const existing = buildHostedPhoneCall({
+      endedAt: null,
+      id: "hpc_cleanup_stop_race",
+      providerCallId: "retell_unsafe",
+      status: "failed",
+      stopRequestedAt: null,
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const stopRequestedAt = new Date("2026-06-25T00:01:00.000Z");
+    const finalizeStartFailure = vi.fn(async () => {
+      store.advanceCurrentCall({ stopRequestedAt });
+    });
+    const finalizeStopSettlement = vi.fn(async () => undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(finalizeStartFailure).toHaveBeenCalledOnce();
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+    expect(finalizeStopSettlement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endedAt: expect.any(Date),
+        id: existing.id,
+        stopRequestedAt,
+      }),
+      { abortSignal: expect.any(AbortSignal) },
+    );
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      status: "failed",
+      stopRequestedAt,
+    });
+  });
+
+  it("publishes cleanup failure before settling an existing stop fence", async () => {
+    const stopRequestedAt = new Date("2026-06-25T00:01:00.000Z");
+    const existing = buildHostedPhoneCall({
+      endedAt: null,
+      id: "hpc_cleanup_stopped",
+      providerCallId: "retell_unsafe",
+      status: "failed",
+      stopRequestedAt,
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const phases: string[] = [];
+    const finalizeStartFailure = vi.fn(async () => {
+      phases.push("ordinary-result");
+    });
+    const finalizeStopSettlement = vi.fn(async () => {
+      phases.push("stop-settlement");
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(phases).toEqual(["ordinary-result", "stop-settlement"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      status: "failed",
+      stopRequestedAt,
     });
   });
 
@@ -1428,7 +1511,7 @@ describe("createHostedPhoneCall", () => {
     }, { signal: expect.any(AbortSignal) });
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(runtime.stopCalls).toEqual([]);
   });
 
   it("allows a different request after unsafe provider cleanup records terminal proof", async () => {
@@ -1440,7 +1523,20 @@ describe("createHostedPhoneCall", () => {
     });
     const store = createPhoneCallStore({ pending });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_new" });
-    const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({ runId: "run_123" });
+    const finalizeStartFailure = vi.fn(async () => undefined);
+    const reconciliationWorkflowStarter = vi.fn(async (
+      workflowInput: { phoneCallId: string },
+      options: { signal: AbortSignal },
+    ) => {
+      await processHostedPhoneCallRecoveryById({
+        finalizeStartFailure,
+        phoneCallId: workflowInput.phoneCallId,
+        prisma: store.prisma,
+        runtime: runtime.runtime,
+        signal: options.signal,
+      });
+      return { runId: "run_123" };
+    });
 
     await expect(createHostedPhoneCall({
       brief: VALID_BRIEF,
@@ -1452,6 +1548,7 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toMatchObject({ status: "calling" });
 
     expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(finalizeStartFailure).toHaveBeenCalledOnce();
     expect(runtime.startCalls).toHaveLength(1);
     expect(store.createCalls).toHaveLength(1);
     expect(reconciliationWorkflowStarter).toHaveBeenCalledTimes(2);
@@ -1489,7 +1586,7 @@ describe("createHostedPhoneCall", () => {
     });
 
     expect(runtime.resolveCalls).toEqual([pending.id]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(runtime.stopCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
     expect(store.currentCall()).toMatchObject({
       endedAt: null,

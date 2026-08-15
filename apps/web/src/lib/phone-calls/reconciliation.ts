@@ -84,25 +84,6 @@ export async function processHostedPhoneCallRecoveryById(input: {
   if (!call) {
     return "missing";
   }
-  if (call.stopRequestedAt && call.providerCallId && !call.endedAt) {
-    const disposition = await stopHostedPhoneCallRequestedAuthority({
-      call,
-      runtime,
-      signal: input.signal,
-      store,
-    });
-    if (!disposition) {
-      return "pending";
-    }
-    const current = await waitForAbortableOperation(input.signal, () =>
-      store.hostedPhoneCall.findUnique({
-        where: { id: input.phoneCallId },
-      }));
-    if (!current) {
-      return "missing";
-    }
-    call = current;
-  }
   if (isHostedPhoneCallProviderCleanupPending(call) && call.providerCallId) {
     const cleanupCall = call;
     const providerCallId = call.providerCallId;
@@ -121,6 +102,32 @@ export async function processHostedPhoneCallRecoveryById(input: {
     if (!stopped) {
       return "pending";
     }
+    const current = await waitForAbortableOperation(input.signal, () =>
+      store.hostedPhoneCall.findUnique({
+        where: { id: input.phoneCallId },
+      }));
+    if (!current) {
+      return "missing";
+    }
+    call = current;
+  } else if (call.stopRequestedAt && call.providerCallId && !call.endedAt) {
+    const disposition = await stopHostedPhoneCallRequestedAuthority({
+      call,
+      runtime,
+      signal: input.signal,
+      store,
+    });
+    if (!disposition) {
+      return "pending";
+    }
+    const current = await waitForAbortableOperation(input.signal, () =>
+      store.hostedPhoneCall.findUnique({
+        where: { id: input.phoneCallId },
+      }));
+    if (!current) {
+      return "missing";
+    }
+    call = current;
   }
 
   if (isHostedPhoneCallReadyForProviderReconciliation(call)) {
@@ -142,25 +149,6 @@ export async function processHostedPhoneCallRecoveryById(input: {
       return "missing";
     }
     call = current;
-    if (call.stopRequestedAt && call.providerCallId && !call.endedAt) {
-      const disposition = await stopHostedPhoneCallRequestedAuthority({
-        call,
-        runtime,
-        signal: input.signal,
-        store,
-      });
-      if (!disposition) {
-        return "pending";
-      }
-      const stopped = await waitForAbortableOperation(input.signal, () =>
-        store.hostedPhoneCall.findUnique({
-          where: { id: input.phoneCallId },
-        }));
-      if (!stopped) {
-        return "missing";
-      }
-      call = stopped;
-    }
     if (
       result.status === "failed"
       && isHostedPhoneCallProviderCleanupPending(call)
@@ -183,6 +171,32 @@ export async function processHostedPhoneCallRecoveryById(input: {
       if (!stopped) {
         return "pending";
       }
+      const current = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.findUnique({
+          where: { id: input.phoneCallId },
+        }));
+      if (!current) {
+        return "missing";
+      }
+      call = current;
+    } else if (call.stopRequestedAt && call.providerCallId && !call.endedAt) {
+      const disposition = await stopHostedPhoneCallRequestedAuthority({
+        call,
+        runtime,
+        signal: input.signal,
+        store,
+      });
+      if (!disposition) {
+        return "pending";
+      }
+      const stopped = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.findUnique({
+          where: { id: input.phoneCallId },
+        }));
+      if (!stopped) {
+        return "missing";
+      }
+      call = stopped;
     }
   }
 

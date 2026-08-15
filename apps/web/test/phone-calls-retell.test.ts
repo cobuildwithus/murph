@@ -1110,7 +1110,7 @@ describe("Retell phone-call result handling", () => {
     }]);
   });
 
-  it("closes unsafe-storage cleanup authority without converting it to success", async () => {
+  it("leaves unsafe-storage cleanup terminalization to reconciliation", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({
         analyzedAt: null,
@@ -1130,21 +1130,13 @@ describe("Retell phone-call result handling", () => {
       prisma: store.prisma,
     });
 
-    expect(store.updateManyCalls).toEqual([{
-      data: {
-        endedAt: new Date("2026-06-25T12:34:56.000Z"),
-        status: "failed",
-      },
-      where: {
-        endedAt: null,
-        id: "hpc_123",
-        provider: "retell",
-        providerCallId: "retell_call_unsafe",
-        status: {
-          in: ["starting", "calling", "ended", "failed"],
-        },
-      },
-    }]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      endedAt: null,
+      providerCallId: "retell_call_unsafe",
+      status: "failed",
+    });
   });
 
   it("persists a terminal end for an analyzed fenced call and replays its notification idempotently", async () => {

@@ -131,8 +131,14 @@ export async function handleRetellCallEnded(input: {
     if (!target) {
       return;
     }
-    const preserveFailedStatus = isHostedPhoneCallProviderCleanupPending(target.call)
-      || !hasRetellBasicAttributesOnlyStorage(input.call);
+    // A safety-cleanup row owns a required ordinary result notification. The
+    // reconciliation workflow is its sole terminal owner, so a provider
+    // call_ended callback cannot erase that retryable obligation by advancing
+    // endedAt first.
+    if (isHostedPhoneCallProviderCleanupPending(target.call)) {
+      return;
+    }
+    const preserveFailedStatus = !hasRetellBasicAttributesOnlyStorage(input.call);
 
     await tx.hostedPhoneCall.updateMany({
       data: {
@@ -330,9 +336,8 @@ export async function finalizeHostedPhoneCallStartFailure(
   if (
     call.status !== "failed"
     || call.analyzedAt !== null
-    || call.stopRequestedAt !== null
     || (
-      call.providerCallId !== null
+      (call.stopRequestedAt !== null || call.providerCallId !== null)
       && !providerCleanupPending
     )
   ) {

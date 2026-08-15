@@ -571,12 +571,9 @@ async function resolveHostedPhoneCallBlockerForNewRequest(input: {
     await ensureHostedPhoneCallCleanup({
       call: {
         id: input.call.id,
-        providerCallId: input.call.providerCallId,
       },
-      runtime: input.runtime,
       signal: input.signal,
       startReconciliationWorkflow: input.startReconciliationWorkflow,
-      store: input.store,
     });
     continuationArmed = true;
   } else if (isHostedPhoneCallReadyForProviderReconciliation(input.call)) {
@@ -667,12 +664,9 @@ async function resolveExistingHostedPhoneCall(input: {
     await ensureHostedPhoneCallCleanup({
       call: {
         id: input.call.id,
-        providerCallId: input.call.providerCallId,
       },
-      runtime: input.runtime,
       signal: input.signal,
       startReconciliationWorkflow: input.startReconciliationWorkflow,
-      store: input.store,
     });
     return toHostedPhoneCallStartResponse(input.call);
   }
@@ -732,12 +726,9 @@ async function reconcileHostedPhoneCallForService(input: {
     await ensureHostedPhoneCallCleanup({
       call: {
         id: current.id,
-        providerCallId: current.providerCallId,
       },
-      runtime: input.runtime,
       signal: input.signal,
       startReconciliationWorkflow: input.startReconciliationWorkflow,
-      store: input.store,
     });
   }
   return result;
@@ -746,12 +737,9 @@ async function reconcileHostedPhoneCallForService(input: {
 async function ensureHostedPhoneCallCleanup(input: {
   call: {
     id: string;
-    providerCallId: string;
   };
-  runtime: PhoneCallRuntime;
   signal: AbortSignal;
   startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
-  store: HostedPhoneCallStore;
 }): Promise<void> {
   try {
     await input.startReconciliationWorkflow(
@@ -760,11 +748,6 @@ async function ensureHostedPhoneCallCleanup(input: {
     );
   } catch {
     // The durable cleanup row remains available to Workflow or replay recovery.
-  }
-  try {
-    await stopHostedPhoneCallCleanupAuthority(input);
-  } catch {
-    // Exact replays keep returning the durable failed authority for later cleanup.
   }
 }
 
