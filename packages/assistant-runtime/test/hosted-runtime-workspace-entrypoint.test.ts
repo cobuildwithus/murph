@@ -392,6 +392,7 @@ import {
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
   HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   readHostedMailboxImportState,
+  writeHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import type {
@@ -31848,6 +31849,77 @@ describe("hosted workspace runtime entrypoint", () => {
         "idle_shutdown",
       ]);
       expect(createCheckpointSnapshot).toHaveBeenCalledOnce();
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("idle checkpoint derives both imported cursors from local mailbox state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput(),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/mailbox-cursor-derivation.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            const mailboxState = await readHostedMailboxImportState({ vaultRoot });
+            await writeHostedMailboxImportState({
+              state: {
+                ...mailboxState,
+                watermarks: {
+                  ...mailboxState.watermarks,
+                  conversation: "1",
+                },
+              },
+              vaultRoot,
+            });
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+              redactedStatus: {
+                hostedMailboxConversationImportedSeq: "0",
+                hostedMailboxSystemImportedSeq: "999",
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus
+          ?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "0",
+      );
     } finally {
       await removeTempRoot(vaultRoot);
     }

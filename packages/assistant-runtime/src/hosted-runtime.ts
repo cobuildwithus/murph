@@ -1641,7 +1641,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const checkpointWorkspacePort = canonicalRuntimeCommit
           ? workspacePort
           : foregroundWorkspacePort;
-        const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+        const redactedStatus = await withHostedMailboxProgressStatus({
           redactedStatus: checkpointInput.redactedStatus,
           vaultRoot: restored.vaultRoot,
         });
@@ -1976,7 +1976,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   : null,
               },
             ]);
-            const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+            const redactedStatus = await withHostedMailboxProgressStatus({
               redactedStatus: activeWorkspace?.redactedStatus ?? null,
               vaultRoot: restored.vaultRoot,
             });
@@ -6974,7 +6974,8 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
       vaultRoot: input.vaultRoot,
     });
   input.assertRuntimeNotAborted();
-  const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+  const redactedStatus = await withHostedMailboxProgressStatus({
+    includeConversationImportedSeq: true,
     redactedStatus: input.retainCanonicalWriteReceiptLogStatus
       ? input.redactedStatus
       : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
@@ -7035,7 +7036,8 @@ function readHostedConversationConsumedSeqFromStatus(
     : null;
 }
 
-async function withHostedSystemMailboxHandledThroughStatus(input: {
+async function withHostedMailboxProgressStatus(input: {
+  includeConversationImportedSeq?: boolean;
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
   vaultRoot: string;
 }): Promise<HostedRuntimeRedactedJson> {
@@ -7044,6 +7046,12 @@ async function withHostedSystemMailboxHandledThroughStatus(input: {
   });
   return {
     ...(input.redactedStatus ?? {}),
+    ...(input.includeConversationImportedSeq === true
+      ? {
+          hostedMailboxConversationImportedSeq:
+            mailboxState.watermarks.conversation,
+        }
+      : {}),
     hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
     hostedMailboxSystemHandledThroughSeq:
       await readHostedSystemMailboxHandledThroughSeq({
