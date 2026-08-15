@@ -22,6 +22,7 @@ import {
   formatHostedConnectedAppToolkitLabel,
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
+import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
 import {
   formatHostedDeviceSyncProviderLabel,
   resolveHostedDeviceSyncBrowserProviderLabel,
@@ -114,6 +115,8 @@ import {
 } from "../phone-calls/account-deletion";
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
+  HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
+  HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
   HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH,
   type HostedAccountExitReasonCode,
@@ -142,6 +145,7 @@ export type HostedAccountStoreDeletionMode =
   | "local-reference-delete"
   | "documented-retention";
 
+const HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT = 20;
 const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
   ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   // Group-aware provider fences expire after fifteen seconds. Deletion gets a
@@ -1038,6 +1042,7 @@ async function deleteHostedAccountDataInternal(input: {
   const connectedAppProviderCleanupStartedAt = new Date();
   const connectedAppRevocations = await revokeConnectedAppsBestEffort({
     memberId: input.memberId,
+    now: deletionStartedAt,
     prisma: input.prisma,
   });
   const providerRevocations = [
@@ -2430,11 +2435,12 @@ async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
   prisma: Prisma.TransactionClient;
   providerCleanupStartedAt: Date;
 }): Promise<void> {
+  // Retention owns when a started intent stops being provider-cleanup work.
+  // Public bearer expiry must not make account deletion discard that owner.
   const writes = await input.prisma.hostedConnectedAppConnectIntent.findMany({
     select: { claimHash: true },
     take: 1,
     where: {
-      expiresAt: { gt: new Date() },
       memberId: input.memberId,
       startedAt: { gte: input.providerCleanupStartedAt },
     },
@@ -3822,13 +3828,19 @@ async function revokeDeviceProvidersBestEffort(input: {
 
 async function revokeConnectedAppsBestEffort(input: {
   memberId: string;
+  now: Date;
   prisma: HostedAccountDataPrisma;
 }): Promise<HostedAccountProviderRevocationResult[]> {
   const inFlightIntents = await listInFlightConnectedAppIntentsForDeletion(input);
-  if (inFlightIntents.some((intent) => !intent.connectedAccountId)) {
+  const incompleteIntentCount = inFlightIntents.filter(
+    (intent) => !intent.connectedAccountId,
+  ).length;
+  if (incompleteIntentCount > 0) {
     return [{
       connectionId: "composio_connected_app_connection_in_progress",
-      errorCode: "CONNECTED_APP_CONNECTION_IN_PROGRESS",
+      errorCode: incompleteIntentCount === 1
+        ? "CONNECTED_APP_CONNECTION_IN_PROGRESS"
+        : "CONNECTED_APP_CONNECTIONS_IN_PROGRESS",
       providerLabel: "Connected apps",
       status: "failed",
       warningCode: null,
@@ -3941,26 +3953,44 @@ async function revokeConnectedAppsBestEffort(input: {
 
 async function listInFlightConnectedAppIntentsForDeletion(input: {
   memberId: string;
+  now: Date;
   prisma: HostedAccountDataPrisma;
 }): Promise<Array<{
   alias: string | null;
   connectedAccountId: string | null;
   toolkit: string;
 }>> {
-  const now = new Date();
-  return await input.prisma.hostedConnectedAppConnectIntent.findMany({
+  const ownerCutoff = hostedConnectedAppStartedIntentOwnerCutoff(input.now);
+  const intents = await input.prisma.hostedConnectedAppConnectIntent.findMany({
+    orderBy: [
+      { expiresAt: "asc" },
+      { claimHash: "asc" },
+    ],
     select: {
       alias: true,
       connectedAccountId: true,
       toolkit: true,
     },
+    take: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT + 1,
     where: {
       completedAt: null,
-      expiresAt: { gt: now },
+      expiresAt: { gt: ownerCutoff },
       memberId: input.memberId,
       startedAt: { not: null },
     },
   });
+  if (intents.length > HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
+      details: {
+        limit: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT,
+      },
+      httpStatus: 503,
+      message: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
+      retryable: true,
+    });
+  }
+  return intents;
 }
 
 function isComposioAccountDeletable(account: ComposioConnectedAccount): boolean {
@@ -3998,6 +4028,28 @@ function assertProviderRevocationsAllowDeletion(
 
   if (failures.length === 0) {
     return;
+  }
+
+  if (failures.some((failure) =>
+    failure.errorCode === "CONNECTED_APP_CONNECTIONS_IN_PROGRESS"
+  )) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
+      httpStatus: 503,
+      message: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
+      retryable: true,
+    });
+  }
+
+  if (failures.some((failure) =>
+    failure.errorCode === "CONNECTED_APP_CONNECTION_IN_PROGRESS"
+  )) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
+      httpStatus: 503,
+      message: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE,
+      retryable: true,
+    });
   }
 
   throw hostedOnboardingError({

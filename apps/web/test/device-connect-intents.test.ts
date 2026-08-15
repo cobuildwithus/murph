@@ -61,6 +61,7 @@ describe("hosted device connect intents", () => {
         sourceProviderSlug: null,
       }),
     });
+    expect(mocks.tx.deviceConnectIntent.deleteMany).not.toHaveBeenCalled();
   });
 
   it("preserves the frozen provider in a long-lived reconnect URL", async () => {
