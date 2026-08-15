@@ -148,6 +148,30 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
       'json',
     ])
 
+    const nonCompactRaw = await runCli([
+      'batch',
+      '--vault',
+      vault,
+      '--command',
+      '["memory","show"]',
+      '--format',
+      'json',
+    ])
+    const nonCompactResult = JSON.parse(nonCompactRaw) as {
+      commands: Array<{
+        outputBytes: number
+        outputChars: number
+        stdout: string
+      }>
+    }
+    const nonCompactMemory = nonCompactResult.commands[0]
+    assert.ok(nonCompactMemory)
+    assert.equal(
+      nonCompactMemory.outputBytes,
+      Buffer.byteLength(nonCompactMemory.stdout, 'utf8'),
+    )
+    assert.equal(nonCompactMemory.outputChars, nonCompactMemory.stdout.length)
+
     const raw = await runCli([
       'batch',
       '--compact',
@@ -188,6 +212,8 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
     )
     assert.equal(typeof result.commands[0]?.data, 'object')
     assert.equal(typeof result.commands[1]?.data, 'object')
+    assert.equal(result.commands[0]?.outputBytes, nonCompactMemory.outputBytes)
+    assert.equal(result.commands[0]?.outputChars, nonCompactMemory.outputChars)
 
     const duplicatedRaw = JSON.stringify({
       ...result,
