@@ -157,6 +157,7 @@ Updated: 2026-08-15
 - Local proof: frozen install, dependency-policy tests, the package-backed runner contract, ReviewGPT preflight/concurrency tests, CLI typecheck, and `pnpm deps:guard` pass; the installed binary reports 0.5.131. The lockfile changes only the direct ReviewGPT package from 0.5.127 to 0.5.131 and leaves its transitive graph unchanged.
 - Audit boundary: `pnpm deps:audit` still reports the repository's existing advisory set, including transitive paths through the unchanged `repomix@1.16.0` graph. This direct-version update introduces no new transitive versions; resolving that broader pre-existing advisory inventory is outside this PR.
 - Base reconciliation: current `main` independently landed the same ReviewGPT 0.5.131 package, lockfile, and runner-contract update. Delete the now-redundant dependency/test delta from this PR, retain the installed-version and focused proof, and review the workout-import patch with the latest runner.
+- Latest-base supersession: before the remediation rerun, `main` advanced again with ReviewGPT 0.5.132 and its conversation-stabilization coverage. Resolve the four tooling conflicts exactly to `main`, retain no PR-local ReviewGPT delta, reinstall from the merged frozen lockfile, and run round 15 with 0.5.132 on the exact pushed merge candidate.
 
 ## Round 14 hosted-scratch ownership correction
 
