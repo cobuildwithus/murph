@@ -125,12 +125,12 @@ Updated: 2026-08-15
   contributing check predates detailed evidence, the entire two-check window
   reports unavailable port detail instead of presenting a partial ratio as
   exact.
-- Upgrade `@cobuild/review-gpt` from `0.5.127` to `0.5.131`, including the
+- Upgrade `@cobuild/review-gpt` from `0.5.127` to `0.5.132`, including the
   lockfile, release-age exception, and repository version assertion. Releases
-  `0.5.128` through `0.5.131` harden canonical thread/turn capture, submitted
-  attachment verification, and marked-response handling, which are directly
-  relevant to the rate-limited round-two capture encountered on the remediated
-  head.
+  `0.5.128` through `0.5.132` harden canonical thread/turn capture, submitted
+  attachment verification, and marked-response handling. In particular,
+  `0.5.132` accepts timestamped submitted attachment names, directly addressing
+  the attachment-proof failure encountered on the remediated head.
 - A parsed all-required-families-missing observation remains authoritative when
   its retry fails before parsing. Return that first observation through the
   canonical collection builder; do not let the zero-evidence unavailable catch
@@ -156,7 +156,7 @@ Updated: 2026-08-15
   candidate head.
 - Commands still to run: final ReviewGPT remediation review and exact-head
   GitHub Actions for the dependency-updated remediated head.
-- ReviewGPT `0.5.131` is installed and reports the expected version;
+- ReviewGPT `0.5.132` is installed and reports the expected version;
   `pnpm deps:guard`, `pnpm deps:ignored-builds`, and `pnpm install
   --frozen-lockfile` pass. `pnpm deps:audit` remains non-green on the repository's
   existing advisory backlog; the reported ReviewGPT path resolves the same
