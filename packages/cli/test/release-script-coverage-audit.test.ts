@@ -511,6 +511,7 @@ function loadReviewGptOpenTargetHarness(
     value: {
       ...process.env,
       ORACLE_DRAFT_FILES: '',
+      ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '300000',
       ORACLE_DRAFT_MODEL: 'gpt-5.6-sol',
       ORACLE_DRAFT_PROMPT: options.prompt ?? 'Review the requested changes.',
       ORACLE_DRAFT_REMOTE_PORT: options.remotePort ?? '9999',
@@ -1048,6 +1049,10 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'review-gpt-context-policy.sh'),
       'utf8',
     )
+    const reviewGptPrHeadPreflight = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'),
+      'utf8',
+    )
     const reviewGptDriver = readFileSync(
       path.join(
         repoRoot,
@@ -1083,6 +1088,9 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
       'bash scripts/review-gpt-pr-head-preflight.sh --run',
+    )
+    expect(reviewGptPrHeadPreflight).toContain(
+      'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=300000',
     )
     for (const scriptName of removedScripts) {
       expect(rootPackageJson.scripts?.[scriptName]).toBeUndefined()
@@ -2521,6 +2529,41 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     expect(mixedPresetResult.stderr).toContain(
       'completion-specialists must run as the only preset',
     )
+  })
+
+  it('pins the package ReviewGPT marked-response floor at the repository boundary', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'review-gpt-floor-'))
+    const binRoot = path.join(harnessRoot, 'bin')
+    const fakePnpmPath = path.join(binRoot, 'pnpm')
+    try {
+      mkdirSync(binRoot, { recursive: true })
+      writeFileSync(
+        fakePnpmPath,
+        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS"\n',
+        { mode: 0o755 },
+      )
+      const result = spawnSync(
+        'bash',
+        [
+          '-c',
+          'source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"; review_gpt_run --version',
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...withoutNodeV8Coverage(),
+            ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
+            PATH: `${binRoot}:${process.env.PATH ?? ''}`,
+            REPO_ROOT: repoRoot,
+          },
+        },
+      )
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim()).toBe('300000')
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
   })
 
   it('keeps product-experience decisions distinct inside the unified specialist review', () => {

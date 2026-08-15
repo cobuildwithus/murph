@@ -301,6 +301,9 @@ review_gpt_run() {
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
   fi
 
+  # Murph's review workflow owns a five-minute package trust floor even though
+  # the package also supports direct callers with a configurable threshold.
+  export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=300000
   exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "$@"
 }
 

@@ -98,6 +98,10 @@ Updated: 2026-08-15
   addition rather than adding new health-record or transport machinery.
 - Upgrade the repository-backed ReviewGPT runner from 0.5.127 to the registry's
   current 0.5.131 release and update its release-contract assertions.
+- Pin `ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=300000` at Murph's package-runner
+  boundary. ReviewGPT 0.5.131 intentionally makes that value configurable for
+  direct callers, but Murph's completion gate must not inherit an ambient value
+  that can weaken the repository's five-minute marked-response trust floor.
 
 ## Verification
 
@@ -111,7 +115,11 @@ Updated: 2026-08-15
   `pnpm --dir packages/assistant-engine typecheck`, and
   `pnpm --dir packages/cli typecheck` passed.
 - `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/release-script-coverage-audit.test.ts`
-  passed earlier in the candidate cycle: 45 tests, 1 skipped.
+  passed after the trust-floor remediation: 46 tests, 1 skipped. The new child
+  process regression starts with an ambient value of `1` and observes `300000`
+  at the package boundary; the in-memory package harness uses that same
+  repository-owned value, while the existing boundary cases prove `299999`
+  is rejected and `300000` is admitted.
 - An isolated pinned Codex 0.147.0 config parse accepted
   `features.multi_agent_v2.hide_spawn_agent_metadata = true` and reported
   multi-agent V2 enabled.
@@ -124,6 +132,9 @@ Updated: 2026-08-15
   skips, assistant-engine typecheck passed, and `git diff --check` stayed clean.
 - Exact-head CI passed on the first-reviewed commit. The preliminary specialist
   pass returned substantive findings after 34 minutes; its accepted prompt
-  findings are being removed on a remediation head. The required final pass
-  remains pending after two pre-send browser failures and one rejected
-  nine-second response; no Eragon lane was used.
+  findings were removed on a remediation head. A 41-minute final pass confirmed
+  those findings resolved and found the ambient trust-floor override introduced
+  by ReviewGPT 0.5.131; the repository-boundary pin and regression above resolve
+  it. A fresh final pass and exact-head CI remain pending. Two pre-send browser
+  failures and one rejected nine-second response were not treated as reviews;
+  no Eragon lane was used.
