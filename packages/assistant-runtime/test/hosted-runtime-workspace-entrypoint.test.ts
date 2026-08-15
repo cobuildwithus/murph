@@ -407,6 +407,7 @@ import {
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
   HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   readHostedMailboxImportState,
+  writeHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import type {
@@ -7583,7 +7584,22 @@ describe("hosted workspace runtime entrypoint", () => {
       kind: "member.activated",
       label: "member activation",
       preCheckpointSafe: true,
-      withConversationPrefix: true,
+      conversationPrefixCount: 1,
+    },
+    {
+      dedupeKey: "member.activated:full-prefetch-synthetic",
+      kind: "member.activated",
+      label: "member activation with a full conversation prefetch",
+      preCheckpointSafe: true,
+      conversationPrefixCount: 52,
+    },
+    {
+      dedupeKey: "member.activated:prefetch-retry-synthetic",
+      kind: "member.activated",
+      label: "member activation after an initial prefetch retry",
+      preCheckpointSafe: true,
+      conversationPrefixCount: 1,
+      initialPrefetchFails: true,
     },
     {
       conversationHighWaterAhead: true,
@@ -7639,20 +7655,30 @@ describe("hosted workspace runtime entrypoint", () => {
       let assistantPhaseCalls = 0;
 
       try {
-        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-        const withConversationPrefix = "withConversationPrefix" in completion
-          && completion.withConversationPrefix;
+        const initialPrefetchFails = "initialPrefetchFails" in completion
+          && completion.initialPrefetchFails === true;
+        if (!initialPrefetchFails) {
+          await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+          await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+        }
+        const conversationPrefixCount = "conversationPrefixCount" in completion
+          ? completion.conversationPrefixCount ?? 0
+          : 0;
+        const withConversationPrefix = conversationPrefixCount > 0;
         const conversationHighWaterAhead =
           "conversationHighWaterAhead" in completion
           && completion.conversationHighWaterAhead;
         if (withConversationPrefix) {
           mailboxItems.push(
-            createMailboxItem({
-              id: "mailbox_item_entrypoint_external_completion_conversation",
-              kind: "conversation.message",
-              lane: "conversation",
-              laneSeq: "1",
-            }),
+            ...Array.from({ length: conversationPrefixCount }, (_, index) =>
+              createMailboxItem({
+                id:
+                  `mailbox_item_entrypoint_external_completion_conversation_${index + 1}`,
+                kind: "conversation.message",
+                lane: "conversation",
+                laneSeq: String(index + 1),
+              })
+            ),
             createMailboxItem({
               dedupeKey: completion.dedupeKey,
               id: "mailbox_item_entrypoint_external_completion",
@@ -7666,25 +7692,32 @@ describe("hosted workspace runtime entrypoint", () => {
           events,
           items: mailboxItems,
         });
-        const mailboxPort: HostedRuntimeMailboxPort = conversationHighWaterAhead
-          ? {
-              ...baseMailboxPort,
-              async fetch(request) {
-                const response = await baseMailboxPort.fetch(request);
-                if (!mailboxItems.some((item) => item.lane === "system")) {
-                  return response;
-                }
-                return {
-                  ...response,
-                  maxSeqByLane: response.maxSeqByLane.map((entry) =>
-                    entry.lane === "conversation"
-                      ? { ...entry, maxSeq: "1" }
-                      : entry
-                  ),
-                };
-              },
+        let initialPrefetchFailureCount = 0;
+        const mailboxPort: HostedRuntimeMailboxPort = {
+          ...baseMailboxPort,
+          async fetch(request) {
+            if (initialPrefetchFails && initialPrefetchFailureCount === 0) {
+              initialPrefetchFailureCount += 1;
+              events.push("mailbox.fetch:initial-prefetch-failed");
+              throw new Error("Synthetic initial mailbox prefetch failure.");
             }
-          : baseMailboxPort;
+            const response = await baseMailboxPort.fetch(request);
+            if (
+              !conversationHighWaterAhead
+              || !mailboxItems.some((item) => item.lane === "system")
+            ) {
+              return response;
+            }
+            return {
+              ...response,
+              maxSeqByLane: response.maxSeqByLane.map((entry) =>
+                entry.lane === "conversation"
+                  ? { ...entry, maxSeq: "1" }
+                  : entry
+              ),
+            };
+          },
+        };
         const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -7719,8 +7752,44 @@ describe("hosted workspace runtime entrypoint", () => {
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
-                workspace: createWorkspaceState({ version: "0" }),
+                workspace: createWorkspaceState({
+                  ...(initialPrefetchFails
+                    ? {
+                        snapshotRef: createWorkspaceSnapshotV2Ref(
+                          "external-completion-prefetch-retry",
+                        ),
+                      }
+                    : {}),
+                  version: "0",
+                }),
               }),
+              ...(initialPrefetchFails
+                ? {
+                    workspaceSnapshotPort: {
+                      async abortSnapshotSession() {
+                        throw new Error("Prefetch retry should not abort snapshots.");
+                      },
+                      async completeSnapshotSession() {
+                        throw new Error("Prefetch retry should not complete snapshots.");
+                      },
+                      async putSnapshotObjectDirect() {
+                        throw new Error("Prefetch retry should not upload snapshots.");
+                      },
+                      async restoreWorkspaceSnapshot(input) {
+                        await initializeVault({
+                          createdAt: TEST_NOW,
+                          vaultRoot: input.durableRoot,
+                        });
+                        await ensureHostedBootstrapMetadataForSystemMailboxTest(
+                          input.durableRoot,
+                        );
+                      },
+                      async startSnapshotSession() {
+                        throw new Error("Prefetch retry should not start snapshots.");
+                      },
+                    },
+                  }
+                : {}),
             }),
             runtimeWakeSignal,
             async runAssistantPhase() {
@@ -7768,9 +7837,14 @@ describe("hosted workspace runtime entrypoint", () => {
         }
         assert.equal(
           result.status,
-          withConversationPrefix || conversationHighWaterAhead
+          conversationHighWaterAhead
+            || (withConversationPrefix && !initialPrefetchFails)
             ? "scheduled"
             : "idle",
+        );
+        assert.equal(
+          initialPrefetchFailureCount,
+          initialPrefetchFails ? 1 : 0,
         );
       } finally {
         await removeTempRoot(vaultRoot);
@@ -17681,21 +17755,179 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("foreground conversation import survives failing same-wake system item", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-system-failure-"));
+  test.each([
+    { label: "successful", systemImportFails: false },
+    { label: "failing", systemImportFails: true },
+  ])("first-owner conversation survives $label activation decode", async ({
+    systemImportFails,
+  }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-first-owner-activation-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const phaseInputIds: string[][] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_first_owner_activation_system_001",
+        kind: "member.activated",
+        lane: "system",
+        laneSeq: "1",
+        occurredAt: "2026-04-27T00:00:01.000Z",
+      }),
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_first_owner_activation_conversation_001",
+        laneSeq: "1",
+        occurredAt: "2026-04-27T00:00:01.500Z",
+      }),
+    ];
+    let conversationInputId: string | null = null;
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_first_owner_activation",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/first-owner-activation.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
+            if (item.item.lane === "system") {
+              if (systemImportFails) {
+                throw new Error("Synthetic first-owner activation decode failure.");
+              }
+              return { status: "imported" };
+            }
+            conversationInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            return {
+              assistantInputId: conversationInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: createWorkspaceSnapshotV2Ref(
+                  "first-owner-activation",
+                ),
+                version: "0",
+              }),
+            }),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error("First-owner activation test should not abort snapshots.");
+              },
+              async completeSnapshotSession() {
+                throw new Error("First-owner activation test should not complete snapshots.");
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error("First-owner activation test should not upload snapshots.");
+              },
+              async restoreWorkspaceSnapshot(input) {
+                await initializeVault({
+                  createdAt: TEST_NOW,
+                  vaultRoot: input.durableRoot,
+                });
+                await ensureHostedBootstrapMetadataForSystemMailboxTest(
+                  input.durableRoot,
+                );
+              },
+              async startSnapshotSession() {
+                throw new Error("First-owner activation test should not start snapshots.");
+              },
+            },
+          }),
+          async runAssistantPhase(input) {
+            phaseInputIds.push([
+              ...(input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
+            ]);
+            events.push("assistant");
+            if (conversationInputId) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: conversationInputId,
+                vaultRoot,
+              });
+            }
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.ok(conversationInputId, events.join(","));
+      assert.deepEqual(phaseInputIds, [[conversationInputId]]);
+      assert.ok(
+        requireEventIndex(events, "import:conversation:1")
+        < requireEventIndex(events, "import:system:1"),
+      );
+      assert.ok(
+        requireEventIndex(events, "import:system:1")
+        < requireEventIndex(events, "assistant"),
+      );
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.system,
+        systemImportFails ? "0" : "1",
+      );
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
+      assert.equal(
+        result.redactedStatus?.hostedMailboxSystemImportedSeq,
+        systemImportFails ? "0" : "1",
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    { label: "successful", systemImportFails: false },
+    { label: "failing", systemImportFails: true },
+  ])("foreground conversation stays fresh across $label same-wake activation import", async ({
+    systemImportFails,
+  }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-activation-"));
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const imported: string[] = [];
+    const phaseInputIds: string[][] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPhaseCalls = 0;
+    let conversationInputId: string | null = null;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_runtime_foreground_system_failure",
+            attemptId: "attempt_synthetic_runtime_foreground_activation",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
@@ -17708,23 +17940,26 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/foreground-system-failure.bundle.json",
+                key: "users/bundles/member-synthetic/foreground-activation.bundle.json",
                 size: 640,
               }),
             };
           },
           async importItem(item) {
-            if (item.item.lane === "system") {
-              events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
-              throw new Error("Synthetic system import failure.");
-            }
-            imported.push(`${item.item.lane}:${item.item.laneSeq}`);
             events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
+            if (item.item.lane === "system") {
+              if (systemImportFails) {
+                throw new Error("Synthetic activation import failure.");
+              }
+              return { status: "imported" };
+            }
+            conversationInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            imported.push(`${item.item.lane}:${item.item.laneSeq}`);
             return {
-              assistantInputId: await stageAssistantInputEventForMailboxItem({
-                item: item.item,
-                vaultRoot,
-              }),
+              assistantInputId: conversationInputId,
               status: "imported",
             };
           },
@@ -17741,23 +17976,41 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
-            mailboxItems.push(createMailboxItem({
-              id: "mailbox_item_entrypoint_foreground_system_failure_system_001",
-              kind: "runtime.manual-requested",
-              lane: "system",
-              laneSeq: "1",
-              occurredAt: "2026-04-27T00:00:01.000Z",
-            }));
-            mailboxItems.push(createMailboxItem({
-              id: "mailbox_item_entrypoint_foreground_system_failure_conversation_001",
-              laneSeq: "1",
-              occurredAt: "2026-04-27T00:00:01.500Z",
-            }));
-            runtimeWakeSignal.notify();
-            await waitUntil(() => {
-              assert.ok(imported.includes("conversation:1"));
-            });
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            phaseInputIds.push([
+              ...(input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
+            ]);
+            events.push(`assistant:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              return {
+                afterCheckpoint: async () => {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_activation_system_001",
+                    kind: "member.activated",
+                    lane: "system",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_activation_conversation_001",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.500Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                  return null;
+                },
+                checkpointReason: "canonical_runtime_commit",
+                progressed: true,
+              };
+            } else if (conversationInputId) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: conversationInputId,
+                vaultRoot,
+              });
+            }
 
             return {
               checkpointReason: "canonical_runtime_commit",
@@ -17769,6 +18022,9 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(imported, ["conversation:1"]);
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(conversationInputId);
+      assert.deepEqual(phaseInputIds[1], [conversationInputId]);
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
@@ -17777,6 +18033,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(
         requireEventIndex(events, "import:conversation:1")
         < requireEventIndex(events, "import:system:1"),
+      );
+      assert.ok(
+        requireEventIndex(events, "import:system:1")
+        < requireEventIndex(events, "assistant:2"),
       );
     } finally {
       await removeTempRoot(vaultRoot);
@@ -31824,6 +32084,89 @@ describe("hosted workspace runtime entrypoint", () => {
         "idle_shutdown",
       ]);
       expect(createCheckpointSnapshot).toHaveBeenCalledOnce();
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("mailbox progress checkpoints derive imported cursors from local state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput(),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/mailbox-cursor-derivation.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            const mailboxState = await readHostedMailboxImportState({ vaultRoot });
+            await writeHostedMailboxImportState({
+              state: {
+                ...mailboxState,
+                watermarks: {
+                  ...mailboxState.watermarks,
+                  conversation: "1",
+                },
+              },
+              vaultRoot,
+            });
+            await runCanonicalWrite({
+              vaultRoot,
+              operationType: "hosted_mailbox_cursor_projection_test",
+              summary: "Persist the mailbox cursor projection test receipt.",
+              occurredAt: TEST_NOW,
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "journal/mailbox-cursor-projection.md",
+                  "mailbox cursor projection\n",
+                );
+              },
+            });
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+              redactedStatus: {
+                hostedMailboxConversationImportedSeq: "0",
+                hostedMailboxSystemImportedSeq: "999",
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus
+          ?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "0",
+      );
     } finally {
       await removeTempRoot(vaultRoot);
     }
