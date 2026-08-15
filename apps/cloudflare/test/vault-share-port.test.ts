@@ -11,11 +11,13 @@ vi.mock("../src/runtime-platform/web-control-transport.ts", () => ({
 import { createHostedWebVaultSharePort } from "../src/runtime-platform/vault-share-port.ts";
 
 const DELIVER_REQUEST = {
+  expectedGenerationToken: "a".repeat(43),
   projectionKind: "sleep-times.v0" as const,
   projectionScope: {
     projectionKind: "sleep-times.v0" as const,
   },
   records: [],
+  sourceWorkspaceVersion: "7",
 };
 
 function createPort() {
