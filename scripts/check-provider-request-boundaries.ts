@@ -432,6 +432,18 @@ interface ProviderCallParameterValue {
   readonly node: Node;
 }
 
+interface ProviderCallPropertyStep {
+  readonly defaultExpression: Expression | null;
+  readonly propertyName: string;
+}
+
+interface ParameterBindingEntry {
+  readonly defaultExpression: Expression | null;
+  readonly name: string;
+  readonly propertyPath: readonly string[] | null;
+  readonly propertySteps: readonly ProviderCallPropertyStep[];
+}
+
 interface TransportBinding {
   readonly initializer: Expression | null;
   readonly kind: "call" | "expression" | "namespace" | "shadow";
@@ -1281,31 +1293,79 @@ function readBindingPatternNames(node: Node): string[] {
 
 function readParameterBindingEntries(
   node: Node,
-  propertyPath: readonly string[] = [],
-): Array<{
-  readonly defaultExpression: Expression | null;
-  readonly name: string;
-  readonly propertyPath: readonly string[] | null;
-}> {
+  propertySteps: readonly ProviderCallPropertyStep[] = [],
+  rootDefaultExpression: Expression | null = null,
+): ParameterBindingEntry[] {
   if (node.type === "TSParameterProperty") {
-    return readParameterBindingEntries(node.parameter, propertyPath);
+    return readParameterBindingEntries(
+      node.parameter,
+      propertySteps,
+      rootDefaultExpression,
+    );
+  }
+  if (isIdentifier(node)) {
+    const propertyDefaultExpression = propertySteps.at(-1)
+      ?.defaultExpression ?? null;
+    return [{
+      defaultExpression: propertySteps.length === 0
+        ? rootDefaultExpression
+        : propertyDefaultExpression,
+      name: node.name,
+      propertyPath: propertySteps.length > 0
+        ? propertySteps.map((step) => step.propertyName)
+        : null,
+      propertySteps,
+    }];
   }
   if (node.type === "AssignmentPattern") {
-    const entries = readParameterBindingEntries(node.left, propertyPath);
-    if (!isIdentifier(node.left) || !isExpression(node.right)) {
-      return entries;
+    if (!isExpression(node.right)) {
+      return readParameterBindingEntries(
+        node.left,
+        propertySteps,
+        rootDefaultExpression,
+      );
     }
-    return entries.map((entry) => ({
-      ...entry,
-      defaultExpression: node.right,
-    }));
+    if (propertySteps.length === 0) {
+      return readParameterBindingEntries(
+        node.left,
+        propertySteps,
+        node.right,
+      );
+    }
+    const nestedSteps = propertySteps.map((step, index) =>
+      index === propertySteps.length - 1
+        ? { ...step, defaultExpression: node.right }
+        : step
+    );
+    return readParameterBindingEntries(
+      node.left,
+      nestedSteps,
+      rootDefaultExpression,
+    );
+  }
+  if (node.type === "RestElement") {
+    return readParameterBindingEntries(
+      node.argument,
+      propertySteps,
+      rootDefaultExpression,
+    );
+  }
+  if (node.type === "ArrayPattern") {
+    return node.elements.flatMap((element, index) =>
+      element
+        ? readParameterBindingEntries(
+            element,
+            [...propertySteps, {
+              defaultExpression: null,
+              propertyName: String(index),
+            }],
+            rootDefaultExpression,
+          )
+        : []
+    );
   }
   if (node.type !== "ObjectPattern") {
-    return readBindingPatternNames(node).map((name) => ({
-      defaultExpression: null,
-      name,
-      propertyPath: propertyPath.length > 0 ? propertyPath : null,
-    }));
+    return [];
   }
   return node.properties.flatMap((property) => {
     if (!isObjectProperty(property) || property.computed) {
@@ -1317,7 +1377,8 @@ function readParameterBindingEntries(
     }
     return readParameterBindingEntries(
       property.value,
-      [...propertyPath, propertyName],
+      [...propertySteps, { defaultExpression: null, propertyName }],
+      rootDefaultExpression,
     );
   });
 }
@@ -1578,6 +1639,57 @@ function readDirectFunctionReturnExpressions(node: Node): Expression[] {
     }
   });
   return returned;
+}
+
+function resolveProviderCallables(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly name: string;
+}): readonly Node[] {
+  if (
+    resolveParameterBinding(
+      input.analysis.parameterBindings,
+      input.name,
+      input.before,
+    )
+  ) {
+    return [];
+  }
+  const possibleVariableBindings = resolvePossibleBindings(
+    input.bindings,
+    input.name,
+    input.before,
+  );
+  if (possibleVariableBindings.length > 0) {
+    const callables = possibleVariableBindings.flatMap((binding) =>
+      readVariableBindingPossibleValues(
+        binding,
+        input.bindings,
+        input.analysis.sourceFile,
+      ).filter((value) => isFunction(value))
+    );
+    return callables.filter((callable, index) =>
+      callables.findIndex((candidate) =>
+        candidate.type === callable.type &&
+        candidate.start === callable.start &&
+        candidate.end === callable.end
+      ) === index
+    );
+  }
+  const callable = resolveFunctionBinding(
+    input.analysis.functionBindings,
+    input.name,
+    input.before,
+  );
+  const sameScopeBindings = callable
+    ? input.analysis.functionBindings.get(input.name)?.filter(
+      (binding) =>
+        binding.scopeStart === callable.scopeStart &&
+        binding.scopeEnd === callable.scopeEnd,
+    ) ?? []
+    : [];
+  return callable && sameScopeBindings.length === 1 ? [callable.node] : [];
 }
 
 function collectFileProviderIds(
@@ -2573,32 +2685,14 @@ function readProviderCallParameterValues(input: {
 
     for (const entry of readParameterBindingEntries(parameter)) {
       const values = valuesByName.get(entry.name) ?? [];
-      const propertyPath = entry.propertyPath ?? [];
       for (const root of roots) {
-        const projection = readProviderCallPropertyPathValues({
+        values.push(...readProviderCallPropertyPathValues({
           bindings: input.bindings,
-          propertyPath,
+          defaultCallParameterValues: valuesByName,
+          propertySteps: entry.propertySteps,
           sourceFile: input.sourceFile,
           value: root,
-        });
-        for (const projected of projection.values) {
-          values.push(...readProviderCallPossibleValues({
-            before: projected.before,
-            bindings: input.bindings,
-            callParameterValues: projected.callParameterValues,
-            defaultExpression: entry.defaultExpression,
-            defaultCallParameterValues: valuesByName,
-            node: projected.node,
-            resolving: new Set(),
-          }));
-        }
-        if (projection.missing && entry.defaultExpression) {
-          values.push({
-            before: entry.defaultExpression.start ?? input.callable.start ?? 0,
-            callParameterValues: valuesByName,
-            node: entry.defaultExpression,
-          });
-        }
+        }));
       }
       valuesByName.set(entry.name, dedupeProviderCallValues(values));
     }
@@ -2658,7 +2752,28 @@ function readProviderCallPossibleValues(input: {
             before: binding.start - 1,
             node: value,
             resolving,
-          }));
+        }));
+      }));
+    }
+    const callParameterValues = input.callParameterValues?.get(
+      expression.name,
+    ) ?? [];
+    if (callParameterValues.length > 0) {
+      return dedupeProviderCallValues(callParameterValues.flatMap((value) => {
+        const key =
+          `provider-call-parameter:${expression.name}:${value.node.start}:${value.before}`;
+        if (input.resolving.has(key)) {
+          return [];
+        }
+        const resolving = new Set(input.resolving);
+        resolving.add(key);
+        return readProviderCallPossibleValues({
+          ...input,
+          before: value.before,
+          callParameterValues: value.callParameterValues,
+          node: value.node,
+          resolving,
+        });
       }));
     }
   }
@@ -2685,27 +2800,27 @@ function readProviderCallPossibleValues(input: {
   if (expression.type === "AwaitExpression") {
     return readProviderCallPossibleValues({ ...input, node: expression.argument });
   }
-  return [{
+  const direct = [{
     before: input.before,
     callParameterValues: input.callParameterValues,
     node: expression,
   }];
+  return providerCallValueIsDefinitelyDefined(expression)
+    ? direct
+    : dedupeProviderCallValues([...direct, ...useDefault()]);
 }
 
 function readProviderCallPropertyPathValues(input: {
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly propertyPath: readonly string[];
+  readonly defaultCallParameterValues: ProviderCallParameterValues;
+  readonly propertySteps: readonly ProviderCallPropertyStep[];
   readonly sourceFile: Node;
   readonly value: ProviderCallParameterValue;
-}): {
-  readonly missing: boolean;
-  readonly values: readonly ProviderCallParameterValue[];
-} {
-  const [propertyName, ...remaining] = input.propertyPath;
-  if (!propertyName) {
-    return { missing: false, values: [input.value] };
+}): ProviderCallParameterValue[] {
+  const [step, ...remaining] = input.propertySteps;
+  if (!step) {
+    return [input.value];
   }
-  let missing = false;
   const values: ProviderCallParameterValue[] = [];
   const alternatives = readProviderCallPossibleValues({
     before: input.value.before,
@@ -2719,60 +2834,146 @@ function readProviderCallPropertyPathValues(input: {
   for (const alternative of alternatives) {
     const projected = readEffectiveStaticPropertyPathValues(
       alternative.node,
-      [propertyName],
+      [step.propertyName],
       input.bindings,
       alternative.before,
       input.sourceFile,
     );
-    if (projected.length === 0) {
-      missing = missing || isStaticallyMissingProviderCallProperty(
-        alternative.node,
-        propertyName,
-      );
-      continue;
-    }
-    for (const node of projected) {
-      const nested = readProviderCallPropertyPathValues({
-        ...input,
-        propertyPath: remaining,
-        value: { ...alternative, node },
+    const possibleProjected = projected.flatMap((node) =>
+      readProviderCallPossibleValues({
+        before: alternative.before,
+        bindings: input.bindings,
+        callParameterValues: alternative.callParameterValues,
+        defaultExpression: step.defaultExpression,
+        defaultCallParameterValues: input.defaultCallParameterValues,
+        node,
+        resolving: new Set(),
+      })
+    );
+    if (
+      step.defaultExpression &&
+      (
+        projected.length === 0 ||
+        !isProviderCallStaticPropertyDefinitelyDefined({
+          before: alternative.before,
+          bindings: input.bindings,
+          callParameterValues: alternative.callParameterValues,
+          node: alternative.node,
+          propertyName: step.propertyName,
+        })
+      )
+    ) {
+      possibleProjected.push({
+        before: step.defaultExpression.start ?? alternative.before,
+        callParameterValues: input.defaultCallParameterValues,
+        node: step.defaultExpression,
       });
-      missing = missing || nested.missing;
-      values.push(...nested.values);
+    }
+    for (const value of dedupeProviderCallValues(possibleProjected)) {
+      values.push(...readProviderCallPropertyPathValues({
+        ...input,
+        propertySteps: remaining,
+        value,
+      }));
     }
   }
-  return { missing, values: dedupeProviderCallValues(values) };
+  return dedupeProviderCallValues(values);
 }
 
-function isStaticallyMissingProviderCallProperty(
-  node: Node,
-  propertyName: string,
-): boolean {
-  const expression = unwrapExpression(node);
+function isProviderCallStaticPropertyDefinitelyDefined(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly callParameterValues?: ProviderCallParameterValues;
+  readonly node: Node;
+  readonly propertyName: string;
+}): boolean {
+  const expression = unwrapExpression(input.node);
+  let propertyValue: Node | "defined" | "unknown" | null = null;
   if (isObjectExpression(expression)) {
     for (const property of expression.properties) {
-      if (isSpreadElement(property) || property.computed) {
-        return false;
+      if (isSpreadElement(property)) {
+        propertyValue = "unknown";
+        continue;
       }
       if (
-        (isObjectProperty(property) || property.type === "ObjectMethod") &&
-        readPropertyName(property.key) === propertyName
+        property.computed &&
+        !isStringLiteral(property.key)
       ) {
-        return false;
+        propertyValue = "unknown";
+        continue;
       }
+      const propertyName = readPropertyName(property.key);
+      if (propertyName !== input.propertyName) {
+        continue;
+      }
+      propertyValue = isObjectProperty(property)
+        ? property.value
+        : "defined";
     }
-    return true;
-  }
-  if (
+  } else if (
     expression.type === "ArrayExpression" &&
-    /^(?:0|[1-9][0-9]*)$/u.test(propertyName)
+    /^(?:0|[1-9][0-9]*)$/u.test(input.propertyName)
   ) {
-    if (expression.elements.some((element) => element && isSpreadElement(element))) {
+    const propertyIndex = Number(input.propertyName);
+    if (
+      expression.elements.slice(0, propertyIndex + 1).some(
+        (element) => element && isSpreadElement(element),
+      )
+    ) {
       return false;
     }
-    return expression.elements[Number(propertyName)] == null;
+    propertyValue = expression.elements[propertyIndex] ?? null;
+  } else {
+    return false;
   }
-  return false;
+  if (propertyValue === "defined") {
+    return true;
+  }
+  if (!propertyValue || propertyValue === "unknown") {
+    return false;
+  }
+  const possibleValues = readProviderCallPossibleValues({
+    before: input.before,
+    bindings: input.bindings,
+    callParameterValues: input.callParameterValues,
+    defaultExpression: null,
+    defaultCallParameterValues: undefined,
+    node: propertyValue,
+    resolving: new Set(),
+  });
+  return possibleValues.length > 0 && possibleValues.every((value) =>
+    providerCallValueIsDefinitelyDefined(value.node)
+  );
+}
+
+function providerCallValueIsDefinitelyDefined(
+  node: Node,
+): boolean {
+  const expression = unwrapExpression(node);
+  switch (expression.type) {
+    case "ArrayExpression":
+    case "ArrowFunctionExpression":
+    case "BigIntLiteral":
+    case "BinaryExpression":
+    case "BooleanLiteral":
+    case "ClassExpression":
+    case "DecimalLiteral":
+    case "FunctionExpression":
+    case "NewExpression":
+    case "NullLiteral":
+    case "NumericLiteral":
+    case "ObjectExpression":
+    case "RegExpLiteral":
+    case "StringLiteral":
+    case "TemplateLiteral":
+    case "ThisExpression":
+    case "UpdateExpression":
+      return true;
+    case "UnaryExpression":
+      return expression.operator !== "void";
+    default:
+      return false;
+  }
 }
 
 function dedupeProviderCallValues(
@@ -3039,52 +3240,36 @@ function inferProviderExpressionFacts(input: {
       );
     }
     const callee = unwrapExpression(node.callee);
-    if (
-      isIdentifier(callee) &&
-      !resolveParameterBinding(
-        input.analysis.parameterBindings,
-        callee.name,
-        input.before,
-      ) &&
-      !resolveBinding(input.bindings, callee.name, input.before)
-    ) {
-      const callable = resolveFunctionBinding(
-        input.analysis.functionBindings,
-        callee.name,
-        input.before,
-      );
-      const sameScopeBindings = callable
-        ? input.analysis.functionBindings.get(callee.name)?.filter(
-          (binding) =>
-            binding.scopeStart === callable.scopeStart &&
-            binding.scopeEnd === callable.scopeEnd,
-        ) ?? []
-        : [];
-      const bindingKey = callable
-        ? `provider-function:${callee.name}:${callable.start}`
-        : "";
-      if (
-        callable &&
-        sameScopeBindings.length === 1 &&
-        !input.resolving.has(bindingKey)
-      ) {
+    if (isIdentifier(callee)) {
+      for (const callable of resolveProviderCallables({
+        analysis: input.analysis,
+        before: input.before,
+        bindings: input.bindings,
+        name: callee.name,
+      })) {
+        const callableStart = callable.start ?? 0;
+        const bindingKey =
+          `provider-function:${callee.name}:${callableStart}`;
+        if (input.resolving.has(bindingKey)) {
+          continue;
+        }
         const resolving = new Set(input.resolving);
         resolving.add(bindingKey);
         const callParameterValues = readProviderCallParameterValues({
           bindings: input.bindings,
           call: node,
           callerParameterValues: input.callParameterValues,
-          callable: callable.node,
+          callable,
           sourceFile: input.analysis.sourceFile,
         });
         for (const returned of readDirectFunctionReturnExpressions(
-          callable.node,
+          callable,
         )) {
           mergeProviderExpressionFacts(
             facts,
             inferProviderExpressionFacts({
               ...input,
-              before: returned.start ?? callable.start,
+              before: returned.start ?? callableStart,
               callParameterValues,
               node: returned,
               resolving,

@@ -598,14 +598,19 @@ Last verified: 2026-08-15
   or namespace is unpacked or copied. The guard also follows strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data. Provider URL facts follow direct
-  returns from one uniquely resolved, unshadowed same-file function declaration;
-  nested functions and recursive cycles are excluded, and file-level fallback
-  hints are disabled inside the callee so a generic returned `Request` cannot
-  inherit an unrelated provider marker elsewhere in the module. Call-local
-  helper facts map supplied arguments to those direct returns, use a parameter
-  or destructured-property default only for a missing or statically undefined
-  value, and retain every bounded conditional/logical alternative; an explicit
-  internal override remains authoritative. Untyped fetch parameters retain
+  returns from statically resolved, unshadowed same-file function declarations,
+  arrow functions, and function expressions through the existing set-valued
+  lexical chronology. Duplicate declarations, nested functions, and recursive
+  cycles are excluded, and file-level fallback hints are disabled inside the
+  callee so a generic returned `Request` cannot inherit an unrelated provider
+  marker elsewhere in the module. Call-local helper facts map supplied
+  arguments to those direct returns. One object/array parameter-path projection
+  owns destructuring defaults at every nested step; any opaque, spread-produced,
+  or otherwise unproven value retains the applicable default unless that step
+  is proven present and non-`undefined`. Bounded conditional/logical
+  alternatives remain possible, while an exact internal property written after
+  an opaque spread and a later definitive internal callable reassignment remain
+  authoritative. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest
   chronological declaration or simple assignment in the variable's lexical
   owner. Assignments reached only through conditional branches, short-circuit

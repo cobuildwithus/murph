@@ -2272,12 +2272,18 @@ describe("check-provider-request-boundaries", () => {
     }
   });
 
-  it("applies local URL helper parameter defaults only when reachable", () => {
-    const source = [
+  it("applies local URL helper defaults whenever an input may be absent", () => {
+    const sourceLines = [
       "function makeTarget(endpoint = 'https://api.openai.com/v1/responses') {",
       "  return endpoint;",
       "}",
       "function readTarget({ endpoint = 'https://api.openai.com/v1/images' } = {}) {",
+      "  return endpoint;",
+      "}",
+      "function nestedTarget({ route: { endpoint } = { endpoint: 'https://api.openai.com/v1/batches' } }) {",
+      "  return endpoint;",
+      "}",
+      "function arrayTarget([endpoint = 'https://api.openai.com/v1/vector_stores'] = []) {",
       "  return endpoint;",
       "}",
       "function forwardTarget(endpoint = '/internal') {",
@@ -2288,40 +2294,86 @@ describe("check-provider-request-boundaries", () => {
       "}",
       "const opaque = loadOptions();",
       "const spread = { ...opaque };",
-      "await fetch(makeTarget(), { method: 'POST' });",
-      "await fetch(makeTarget(undefined), { method: 'POST' });",
-      "await fetch(makeTarget('https://api.openai.com/v1/models'), { method: 'POST' });",
+      "const spreadWithInternal = { ...opaque, endpoint: '/internal' };",
+      "const opaqueArray = loadEndpoints();",
+      "const spreadArray = [...opaqueArray];",
+      "await fetch(makeTarget(), { method: 'POST' }); // violation",
+      "await fetch(makeTarget(undefined), { method: 'POST' }); // violation",
+      "await fetch(makeTarget('https://api.openai.com/v1/models'), { method: 'POST' }); // violation",
       "await fetch(makeTarget('/internal'), { method: 'POST' });",
-      "await fetch(makeTarget(Date.now() > 0 ? undefined : '/internal'), { method: 'POST' });",
-      "await fetch(readTarget(), { method: 'POST' });",
-      "await fetch(readTarget({}), { method: 'POST' });",
+      "await fetch(makeTarget(Date.now() > 0 ? undefined : '/internal'), { method: 'POST' }); // violation",
+      "await fetch(readTarget(), { method: 'POST' }); // violation",
+      "await fetch(readTarget({}), { method: 'POST' }); // violation",
       "await fetch(readTarget({ endpoint: '/internal' }), { method: 'POST' });",
-      "await fetch(readTarget({ endpoint: undefined }), { method: 'POST' });",
-      "await fetch(readTarget(opaque), { method: 'POST' });",
-      "await fetch(readTarget(spread), { method: 'POST' });",
-      "await fetch(readTarget(Date.now() > 0 ? {} : opaque), { method: 'POST' });",
+      "await fetch(readTarget({ endpoint: undefined }), { method: 'POST' }); // violation",
+      "await fetch(readTarget(opaque), { method: 'POST' }); // violation",
+      "await fetch(readTarget(spread), { method: 'POST' }); // violation",
+      "await fetch(readTarget(Date.now() > 0 ? {} : opaque), { method: 'POST' }); // violation",
+      "await fetch(readTarget(spreadWithInternal), { method: 'POST' });",
+      "await fetch(nestedTarget({}), { method: 'POST' }); // violation",
+      "await fetch(nestedTarget({ route: undefined }), { method: 'POST' }); // violation",
+      "await fetch(nestedTarget(opaque), { method: 'POST' }); // violation",
+      "await fetch(nestedTarget({ route: { endpoint: '/internal' } }), { method: 'POST' });",
+      "await fetch(nestedTarget({ ...opaque, route: { endpoint: '/internal' } }), { method: 'POST' });",
+      "await fetch(arrayTarget(), { method: 'POST' }); // violation",
+      "await fetch(arrayTarget([]), { method: 'POST' }); // violation",
+      "await fetch(arrayTarget([undefined]), { method: 'POST' }); // violation",
+      "await fetch(arrayTarget(opaqueArray), { method: 'POST' }); // violation",
+      "await fetch(arrayTarget(spreadArray), { method: 'POST' }); // violation",
+      "await fetch(arrayTarget(['/internal']), { method: 'POST' });",
+      "await fetch(arrayTarget(['/internal', ...opaqueArray]), { method: 'POST' });",
       "await fetch(forwardTarget(), { method: 'POST' });",
-      "await fetch(forwardTarget('https://api.openai.com/v1/files'), { method: 'POST' });",
-      "await fetch(defaultForward(), { method: 'POST' });",
-    ].join("\n");
+      "await fetch(forwardTarget('https://api.openai.com/v1/files'), { method: 'POST' }); // violation",
+      "await fetch(defaultForward(), { method: 'POST' }); // violation",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
 
     for (const relativePath of [
       "scripts/defaulted-local-provider-url-helper.mjs",
       "scripts/defaulted-local-provider-url-helper.mts",
     ]) {
       const matches = violationsOfKind("raw-provider-http", source, relativePath);
-      expect(matches.map((match) => match.line)).toEqual([
-        15,
-        16,
-        17,
-        19,
-        20,
-        21,
-        23,
-        26,
-        28,
-        29,
-      ]);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
+  it("resolves chronologically possible local helper callables", () => {
+    const sourceLines = [
+      "const arrowTarget = () => 'https://api.openai.com/v1/responses';",
+      "const expressionTarget = function () { return 'https://api.openai.com/v1/images'; };",
+      "let reassignedTarget = () => 'https://api.openai.com/v1/audio';",
+      "reassignedTarget = () => '/internal';",
+      "let conditionalTarget = () => 'https://api.openai.com/v1/files';",
+      "if (Date.now() > 0) conditionalTarget = () => '/internal';",
+      "await fetch(arrowTarget(), { method: 'POST' }); // violation",
+      "await fetch(expressionTarget(), { method: 'POST' }); // violation",
+      "await fetch(reassignedTarget(), { method: 'POST' });",
+      "await fetch(conditionalTarget(), { method: 'POST' }); // violation",
+      "{",
+      "  const arrowTarget = () => '/internal';",
+      "  const expressionTarget = function () { return '/internal'; };",
+      "  await fetch(arrowTarget(), { method: 'POST' });",
+      "  await fetch(expressionTarget(), { method: 'POST' });",
+      "}",
+      "async function invoke(arrowTarget) {",
+      "  await fetch(arrowTarget(), { method: 'POST' });",
+      "}",
+      "await invoke(() => '/internal');",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/local-provider-url-callables.mjs",
+      "scripts/local-provider-url-callables.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
     }
   });
 

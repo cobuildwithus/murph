@@ -518,6 +518,47 @@ Updated: 2026-08-15
   threshold contract. Eragon is excluded from subsequent review routing
   because its rate limit is silent.
 
+### ReviewGPT round 20 requirement-level retrospective
+
+- A trusted non-Eragon full-snapshot review of exact head
+  `a0eddd83a93af27edbdf52ec4f9a1b3667a80b03` returned
+  `RETROSPECTIVE_REQUIRED`. The same-file helper mechanism added after round 19
+  had three facets of the same ownership gap: container defaults on nested
+  object or array patterns were discarded, opaque or spread-produced inputs
+  did not retain reachable defaults, and callable resolution excluded local
+  arrow functions and function expressions.
+- Requirement decision: retain bounded same-file helper inference. Deleting it
+  would reopen the exact helper-return bypass that round 19 required the guard
+  to close. Every call value not proven present and non-`undefined` must retain
+  the applicable parameter or destructuring default as a possible value.
+  Statically resolvable local callable declarations, arrow functions, and
+  function expressions are the same supported contract; lexical shadows and
+  definitive later assignments remain authoritative negative controls.
+- Redesign decision: parameter-path projection owns default activation at each
+  object or array step, while the existing set-valued variable chronology owns
+  local callable selection. Direct-return provider inference consumes both;
+  there will be no second syntax scanner, helper registry, provenance table,
+  exception, or compatibility path. Unknown calls, computed properties, and
+  spreads remain conservative rather than proving a default unreachable.
+- The executable proof matrix must cover a nested object container default,
+  array-element default, opaque inputs that may produce `{}` or an explicitly
+  `undefined` property, object and array spread equivalents, direct-return
+  arrows and function expressions, lexical shadows, explicit internal
+  overrides after opaque spreads, and definitive internal reassignment.
+- Implemented the redesign without a new registry or scanner. Parameter
+  binding entries now retain an ordered object/array path whose individual
+  steps own their defaults. Projection preserves a default whenever a step is
+  absent, opaque, spread-produced, or not proven non-`undefined`; a later exact
+  internal property remains definitive. The callable resolver reads function
+  declarations and every chronologically possible function-valued variable
+  binding through the existing lexical binding authority.
+- The expanded `.mjs`/`.mts` regression matrix passes 132 focused guard tests.
+  Repo-tools TypeScript compilation, the production provider scan, doc
+  gardening, and the full 39-file/763-test repo-tools aggregate pass. A repeated
+  diff-aware aggregate encountered two untouched native worktree-hook timeouts
+  under shared-host contention after all earlier gates passed; both exact cases
+  passed together in the immediate isolated retry.
+
 ## Verification
 
 - `pnpm provider-requests:guard`
