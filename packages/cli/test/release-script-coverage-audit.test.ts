@@ -81,6 +81,7 @@ type ReviewGptHarnessOptions = {
   hangVersionAtCall?: number
   idleDraftStateRoot?: string
   idleDraftTimeoutMs?: number
+  minimumMarkedResponseMs?: number
   prompt?: string
   remotePort?: string
   responseFile?: string
@@ -165,7 +166,9 @@ function loadReviewGptOpenTargetHarness(
     'module.exports.__isRetryableSocketErrorTest = isRetryableSocketError;',
     'module.exports.__mainTest = main;',
     'module.exports.__mainWithRetryTest = mainWithRetry;',
+    'module.exports.__assertMarkedResponseDurationTrustedTest = assertMarkedResponseDurationTrusted;',
     'module.exports.__markedResponseDurationFailureTest = markedResponseDurationFailure;',
+    'module.exports.__minimumMarkedResponseMsTest = minimumMarkedResponseMs;',
     'module.exports.__modelAttestationTurnNonceTest = modelAttestationTurnNonce;',
     'module.exports.__modelAttestationForSnapshotTest = modelAttestationForSnapshot;',
     'module.exports.__prepareRuntimeConfigTest = prepareRuntimeConfig;',
@@ -511,6 +514,13 @@ function loadReviewGptOpenTargetHarness(
     value: {
       ...process.env,
       ORACLE_DRAFT_FILES: '',
+      ...(options.minimumMarkedResponseMs === undefined
+        ? {}
+        : {
+            ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: String(
+              options.minimumMarkedResponseMs,
+            ),
+          }),
       ORACLE_DRAFT_MODEL: 'gpt-5.6-sol',
       ORACLE_DRAFT_PROMPT: options.prompt ?? 'Review the requested changes.',
       ORACLE_DRAFT_REMOTE_PORT: options.remotePort ?? '9999',
@@ -573,7 +583,10 @@ function loadReviewGptOpenTargetHarness(
   const isRetryableSocketError = moduleRecord.exports.__isRetryableSocketErrorTest
   const main = moduleRecord.exports.__mainTest
   const mainWithRetry = moduleRecord.exports.__mainWithRetryTest
+  const assertMarkedResponseDurationTrusted =
+    moduleRecord.exports.__assertMarkedResponseDurationTrustedTest
   const markedResponseDurationFailure = moduleRecord.exports.__markedResponseDurationFailureTest
+  const minimumMarkedResponseMs = moduleRecord.exports.__minimumMarkedResponseMsTest
   const modelAttestationTurnNonce = moduleRecord.exports.__modelAttestationTurnNonceTest
   const modelAttestationForSnapshot = moduleRecord.exports.__modelAttestationForSnapshotTest
   const modelConfirmationFailure = moduleRecord.exports.modelConfirmationFailure
@@ -592,7 +605,9 @@ function loadReviewGptOpenTargetHarness(
     typeof isRetryableSocketError !== 'function' ||
     typeof main !== 'function' ||
     typeof mainWithRetry !== 'function' ||
+    typeof assertMarkedResponseDurationTrusted !== 'function' ||
     typeof markedResponseDurationFailure !== 'function' ||
+    typeof minimumMarkedResponseMs !== 'number' ||
     typeof modelAttestationTurnNonce !== 'string' ||
     typeof modelAttestationForSnapshot !== 'function' ||
     typeof modelConfirmationFailure !== 'function' ||
@@ -607,6 +622,19 @@ function loadReviewGptOpenTargetHarness(
   const socketOwner = Reflect.apply(createWebSocketOwner, undefined, [])
 
   return {
+    assertMarkedResponseDurationTrusted: (
+      responseResult: {
+        responseDurationFailure?: string
+        responseText?: string
+        status?: string
+      },
+      responseFilePath = '',
+    ) => {
+      Reflect.apply(assertMarkedResponseDurationTrusted, undefined, [
+        responseResult,
+        responseFilePath,
+      ])
+    },
     commands,
     connectTarget: async (desiredUrl: string) => {
       return Reflect.apply(connectTarget, undefined, [desiredUrl, socketOwner])
@@ -636,6 +664,7 @@ function loadReviewGptOpenTargetHarness(
       responseMarker: string,
       responseElapsedMs: number,
     ) => String(Reflect.apply(markedResponseDurationFailure, undefined, [{
+      minimumResponseMs: minimumMarkedResponseMs,
       responseElapsedMs,
       responseMarker,
       targetModel,
@@ -2081,6 +2110,7 @@ describe('monorepo release flow coverage audit', () => {
       'installed',
       'Brave Browser',
     )
+    const harnessBin = path.join(harnessRoot, 'bin')
     const copiedBrowserPath = path.join(
       controlledRepoRoot,
       'output-packages',
@@ -2112,6 +2142,7 @@ describe('monorepo release flow coverage audit', () => {
       '#!/usr/bin/env bash\nexit 0\n',
       true,
     )
+    writeHarnessFile(harnessRoot, 'bin/mdfind', '#!/usr/bin/env bash\nexit 47\n', true)
     const configHarness = `
 set -euo pipefail
 review_gpt_register_dir_preset() { :; }
@@ -2134,6 +2165,7 @@ printf '%s|%s|%s|%s|%s|%s|%s\n' \
           ...withoutNodeV8Coverage(),
           CONFIG_PATH: controlledConfigPath,
           HOME: harnessRoot,
+          PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
           REVIEW_GPT_BROWSER_LANE: 'eragon',
           XDG_CONFIG_HOME: path.join(harnessRoot, 'config'),
           browser_binary_path: '',
@@ -2164,6 +2196,16 @@ printf '%s|%s|%s|%s|%s|%s|%s\n' \
         ].join('|'),
       )
 
+      rmSync(
+        path.join(
+          controlledRepoRoot,
+          'output-packages',
+          'review-gpt-profiles',
+          'eragon',
+          'Eragon.app',
+        ),
+        { force: true, recursive: true },
+      )
       writeHarnessFile(
         harnessRoot,
         'installed/Brave Browser',
@@ -3260,6 +3302,50 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     expect(
       harness.markedResponseDurationFailure('current', 'ROUND_OUTCOME:', 37_000),
     ).toBe('')
+
+    const configuredHarness = loadReviewGptOpenTargetHarness(1, undefined, {
+      minimumMarkedResponseMs: 30_000,
+    })
+    expect(
+      configuredHarness.markedResponseDurationFailure(
+        'gpt-5.6-sol',
+        'ROUND_OUTCOME:',
+        29_999,
+      ),
+    ).toContain('below the 30s minimum')
+    expect(
+      configuredHarness.markedResponseDurationFailure(
+        'gpt-5.6-sol',
+        'ROUND_OUTCOME:',
+        30_000,
+      ),
+    ).toBe('')
+    expect(() =>
+      loadReviewGptOpenTargetHarness(1, undefined, {
+        minimumMarkedResponseMs: 0,
+      }).prepareRuntimeConfig(),
+    ).toThrow('Invalid ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS')
+
+    const outputDirectory = mkdtempSync(
+      path.join(os.tmpdir(), 'review-gpt-response-too-fast-'),
+    )
+    try {
+      const responseFile = path.join(outputDirectory, 'response.md')
+      expect(() =>
+        configuredHarness.assertMarkedResponseDurationTrusted(
+          {
+            responseDurationFailure: 'Injected response duration failure.',
+            responseText: 'Rejected response\r\n',
+            status: 'response-too-fast',
+          },
+          responseFile,
+        ),
+      ).toThrow('Injected response duration failure.')
+      expect(readFileSync(responseFile, 'utf8')).toBe('Rejected response\n')
+      expect(existsSync(`${responseFile}.model-verification.json`)).toBe(false)
+    } finally {
+      rmSync(outputDirectory, { force: true, recursive: true })
+    }
   })
 
   it('writes private model evidence atomically and invalidates it before validation', () => {

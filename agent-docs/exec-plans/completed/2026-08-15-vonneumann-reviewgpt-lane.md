@@ -1,6 +1,6 @@
 # Vonneumann ReviewGPT Lane
 
-Status: active
+Status: completed
 Created: 2026-08-15
 Updated: 2026-08-15
 
@@ -80,6 +80,12 @@ Updated: 2026-08-15
 - Reuse the retained Vonneumann profile instead of creating or copying browser
   state.
 - Do not add a new abstraction; extend the existing closed lane maps and pool.
+- Use the public `@cobuild/review-gpt` 0.5.131 release, which was the registry
+  `latest` at final local verification.
+- Skip copied-app Spotlight discovery whenever the authoritative installed
+  Brave binary is executable; retain discovery only as the existing fallback.
+- Accept both preliminary coverage findings and resolve them with direct
+  installed-browser and configurable trust-threshold harness scenarios.
 
 ## Verification
 
@@ -91,3 +97,15 @@ Updated: 2026-08-15
   installed Brave report the same version, the app signature is valid, the
   retained profile starts on its own CDP endpoint, existing lanes remain
   unchanged, and all focused checks pass.
+
+## Results
+
+- The local Vonneumann app, dispatcher mapping, codesign, exact Brave version
+  match, and CDP endpoint passed direct proof.
+- ReviewGPT 0.5.131 passed the explicit Vonneumann dry run, dependency policy
+  guard, ignored-build check, focused config/package tests, and CLI typecheck.
+- The preliminary coverage pass returned two findings and no patch artifact.
+  Both findings were accepted and resolved with focused passing tests.
+- The final cross-cutting ReviewGPT gate did not apply because the change is
+  isolated developer tooling without a cross-cutting production trigger.
+Completed: 2026-08-15
