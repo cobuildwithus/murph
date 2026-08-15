@@ -47,8 +47,22 @@ correlation fields retain their current contract and limits.
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
 hosted OpenAI Responses traffic and Venice Responses calls explicitly tagged by
-Codex as `request_kind: memory`. Version 2 records request and input byte counts,
+Codex as `request_kind: memory`. Version 3 records request and input byte counts,
 allowlisted shape/model kinds, cache-key presence, and keyed prefix fingerprints.
+For parsed Responses input, it also extends the existing aligned
+`inputNestedMetricKinds`, `inputNestedMetricCounts`, and
+`inputNestedMetricBytes` arrays with fixed function-output metrics. Nonzero
+action metrics use `function_output.action.command.execution`,
+`function_output.action.dynamic.tool.call`,
+`function_output.action.mcp.tool.call`, or `function_output.action.other`.
+`function_output.repeated` means the output has a `call_id` already seen in the
+request. `function_output.equivalent` means a different `call_id` carried the
+exact same deterministic JSON serialization earlier. Repeated and equivalent
+properties are counted independently when both apply, and zero-valued metrics
+are omitted. They do not claim semantic equivalence, and no call id, serialized
+output, or comparison key is persisted.
+Request bodies above 6 MiB retain the request byte count and `too_large` status
+but skip JSON and function-output classification.
 Venice memory rows additionally record the canonical Murph model, the allowlisted
 upstream Venice model id, response-header latency, HTTP outcome, validated
 `CF-RAY`, bounded provider retry count, and whether the provider's reported model
@@ -74,6 +88,12 @@ while accepted and request-only diagnostics use debug retention. Venice response
 status and response-header latency are recorded only after upstream dispatch;
 Murph-local platform-usage denials do not produce Venice response rows, and
 transport failures omit response-header latency.
+
+The separate assistant `provider.prompt_size` trace may record
+`conversationHistoryPresent`, `conversationHistoryCount`, and
+`conversationHistoryBytes`. Those fields describe only the bounded conversation
+history flattened into the initial provider prompt; they do not measure
+function outputs carried into later mid-turn Responses requests.
 
 ## Append and deletion serialization
 
