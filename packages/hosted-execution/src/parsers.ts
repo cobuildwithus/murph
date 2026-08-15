@@ -14,6 +14,8 @@ import {
   isAssistantVoiceOptionId,
   normalizeStoredAssistantPersonaId,
   normalizeIanaTimeZone,
+  parseMemberActionRequestV1,
+  parseMemberActionOutcomeV1,
 } from "@murphai/contracts";
 
 import {
@@ -57,6 +59,8 @@ import type {
   HostedExecutionMemberPreferencesUpdatedEvent,
   HostedExecutionEnvironmentVoiceCapturedPayload,
   HostedExecutionMealPhotoCapturedPayload,
+  HostedExecutionMemberActionRequestedEvent,
+  HostedExecutionMemberActionCompletedEvent,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDirectRoute,
   HostedExecutionWake,
@@ -98,6 +102,8 @@ import {
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionMealPhotoCapturedWake,
+  buildHostedExecutionMemberActionRequestedWake,
+  buildHostedExecutionMemberActionCompletedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
@@ -373,6 +379,34 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         runId: parseHostedClinicalRecordsIdentifier(record.runId),
         userId: wireUserId,
       };
+    case "member.action.requested":
+      assertExactHostedExecutionKeys(record, [
+        "eventId",
+        "kind",
+        "occurredAt",
+        "request",
+        "userId",
+      ], "Hosted execution member.action.requested wake");
+      return buildHostedExecutionMemberActionRequestedWake({
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        request: parseMemberActionRequestV1(record.request),
+      });
+    case "member.action.completed":
+      assertExactHostedExecutionKeys(record, [
+        "eventId",
+        "kind",
+        "occurredAt",
+        "outcome",
+        "userId",
+      ], "Hosted execution member.action.completed wake");
+      return buildHostedExecutionMemberActionCompletedWake({
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        outcome: parseMemberActionOutcomeV1(record.outcome),
+      });
     case "device-sync.wake":
       return buildHostedExecutionDeviceSyncWake({
         ...(record.connectionId === undefined
@@ -1415,6 +1449,28 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         runId: parseHostedClinicalRecordsIdentifier(record.runId),
         userId,
       } satisfies HostedExecutionClinicalRecordsSyncRequestedEvent;
+    case "member.action.requested":
+      assertExactHostedExecutionKeys(record, [
+        "kind",
+        "request",
+        "userId",
+      ], "Hosted execution member.action.requested event");
+      return {
+        kind,
+        request: parseMemberActionRequestV1(record.request),
+        userId,
+      } satisfies HostedExecutionMemberActionRequestedEvent;
+    case "member.action.completed":
+      assertExactHostedExecutionKeys(record, [
+        "kind",
+        "outcome",
+        "userId",
+      ], "Hosted execution member.action.completed event");
+      return {
+        kind,
+        outcome: parseMemberActionOutcomeV1(record.outcome),
+        userId,
+      } satisfies HostedExecutionMemberActionCompletedEvent;
     case "device-sync.wake":
       return {
         ...(record.connectionId === undefined

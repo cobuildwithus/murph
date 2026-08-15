@@ -1435,6 +1435,10 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         if (!share) {
           throw new Error("Hosted-local group email share was not created.");
         }
+        // Snapshot encryption reads the Web-owned crypto configuration from
+        // process.env, so restore this scenario's resolved environment after
+        // the asynchronous store imports above.
+        applyHostedWebTestkitEnvironment(deps.environment);
         const replaced = await projectionStore.replaceHostedVaultShareProjectionSnapshot({
           prisma: deps.prisma,
           records: [],

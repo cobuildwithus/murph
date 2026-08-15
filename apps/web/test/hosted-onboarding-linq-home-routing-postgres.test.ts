@@ -467,7 +467,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }),
         ]);
 
-        for (const [index, client] of editClients.entries()) {
+        for (const [index, client] of editClients.slice(0, 2).entries()) {
           const event = events[index];
           const pid = editPids[index];
           if (!event || pid === undefined) {
@@ -501,9 +501,24 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }),
         ]);
 
-        await Promise.all(editPids.slice(1).map((pid) =>
-          waitForBlockedBackend({ observer, pid })
-        ));
+        const secondEditPid = editPids[1];
+        const thirdEditClient = editClients[2];
+        const thirdEditEvent = events[2];
+        const thirdEditPid = editPids[2];
+        if (
+          secondEditPid === undefined
+          || !thirdEditClient
+          || !thirdEditEvent
+          || thirdEditPid === undefined
+        ) {
+          throw new Error("Expected the second and third edit contenders.");
+        }
+        await waitForBlockedBackend({ observer, pid: secondEditPid });
+        editRequests.push(runHostedLinqMessageEditPreparedTransaction({
+          event: thirdEditEvent,
+          prisma: thirdEditClient,
+        }));
+        await waitForBlockedBackend({ observer, pid: thirdEditPid });
         releaseRetryBlocker.resolve();
         const plans = await Promise.all(editRequests);
 

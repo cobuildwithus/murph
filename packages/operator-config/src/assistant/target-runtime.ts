@@ -63,6 +63,14 @@ export const HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID =
   'venice-local-test'
 export const VENICE_CODEX_MODEL_PROVIDER_ID = 'venice'
 
+export function resolveAssistantCodexUsageProviderName(
+  modelProviderId: string | null,
+): string | null {
+  return modelProviderId === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+    ? HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
+    : modelProviderId
+}
+
 export const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
   OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
