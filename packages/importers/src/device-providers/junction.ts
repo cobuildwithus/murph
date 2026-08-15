@@ -916,6 +916,7 @@ const SLEEP_ASLEEP_STAGE_METRIC_NAMES = new Set([
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
 const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
 const JUNCTION_SLEEP_UNSPECIFIED_TOTAL_NORMALIZER_VERSION = "junction-sleep-unspecified-total.v1";
+const JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION = "junction-no-id-profile.v1";
 
 type JunctionSleepStage = Exclude<JunctionSleepStageValue, "asleep_unspecified">;
 
@@ -5583,13 +5584,10 @@ function pushProfileSummary(
     dayKey: extractIsoDatePrefix(pinnedOccurredAt) ?? baseTimestamp.dayKey,
     observedAtRaw: pinnedOccurredAt,
   });
-  const legacyExternalRefs = (facet: string) => buildJunctionProfileLegacyExternalRefs(
-    resourceContext,
-    entry,
-    timestamp,
-    providerTimestampRaw,
-    facet,
-  );
+  const profileNormalizerVersion = firstStringFromPaths(entry, ["stableResourceId"])
+      || firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
+    ? undefined
+    : JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION;
 
   pushObservationMetrics(
     entry,
@@ -5597,7 +5595,7 @@ function pushProfileSummary(
     context,
     JUNCTION_PROFILE_METRICS,
     timestamp,
-    legacyExternalRefs,
+    { normalizerVersion: profileNormalizerVersion },
   );
 
   if (!timestamp.occurredAt) {
@@ -5615,8 +5613,9 @@ function pushProfileSummary(
       title: "Junction gender",
       evidenceRoles: resourceContext.evidenceRoles,
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "gender"),
-      legacyExternalRefs: legacyExternalRefs("gender"),
-      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, {
+        normalizerVersion: profileNormalizerVersion,
+      }),
       fields: {
         measurements: [{
           metric: "gender",
@@ -5652,8 +5651,9 @@ function pushProfileSummary(
     note: trimToLength(segments.join(" "), 4000),
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "profile-demographics"),
-    legacyExternalRefs: legacyExternalRefs("profile-demographics"),
-    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, {
+      normalizerVersion: profileNormalizerVersion,
+    }),
     fields: reportedGender ? { reportedGender } : undefined,
   }));
 }
@@ -6948,7 +6948,7 @@ function pushObservationMetrics(
   context: NormalizationContext,
   metrics: readonly MetricDescriptor[],
   timestampOverride?: ReturnType<typeof resolveRecordTimestamp>,
-  legacyExternalRefs?: (facet: string) => DeviceExternalRefPayload[] | undefined,
+  options: { normalizerVersion?: string } = {},
 ): void {
   const timestamp = timestampOverride ?? resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const occurredAt = timestamp.occurredAt;
@@ -6980,8 +6980,7 @@ function pushObservationMetrics(
       // supersedes an existing generic Apple HRV event instead of duplicating
       // it under the corrected SDNN metric.
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
-      legacyExternalRefs: legacyExternalRefs?.(metric.metric),
-      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, options),
       fields: {
         metric: metricKey,
         observationGrain: "summary",
@@ -7366,44 +7365,6 @@ function buildStableProfileResourceId(
         sourceInstanceId,
         updatedAt,
       ])}`
-    : undefined;
-}
-
-function buildJunctionProfileLegacyExternalRefs(
-  resourceContext: ResourceContext,
-  entry: PlainObject,
-  timestamp: ReturnType<typeof resolveRecordTimestamp>,
-  providerTimestampRaw: unknown,
-  facet: string,
-): DeviceExternalRefPayload[] | undefined {
-  if (
-    firstStringFromPaths(entry, ["stableResourceId"])
-    || firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
-  ) {
-    return undefined;
-  }
-
-  const primary = makeJunctionExternalRef(resourceContext, entry, timestamp, facet);
-  const updatedAtRaw = firstValueFromPaths(entry, ["updatedAt", "updated_at"]);
-  const legacyTimestamps = new Set([
-    stringId(providerTimestampRaw),
-    resolveSafeTimestamp(providerTimestampRaw, resourceContext.sourceProviderSlug),
-    stringId(updatedAtRaw),
-    resolveSafeTimestamp(updatedAtRaw, resourceContext.sourceProviderSlug),
-  ].filter((value): value is string => value !== undefined));
-  const legacyResourceIds = [...legacyTimestamps].map((legacyTimestamp) =>
-    `profile-${shortHash([
-      "profile",
-      resourceContext.sourceProviderSlug,
-      resourceContext.origin.sourceType,
-      resourceContext.origin.sourceInstanceId,
-      legacyTimestamp,
-    ])}`
-  ).filter((resourceId) => resourceId !== primary.resourceId);
-
-  const uniqueLegacyResourceIds = [...new Set(legacyResourceIds)];
-  return uniqueLegacyResourceIds.length > 0
-    ? uniqueLegacyResourceIds.map((resourceId) => ({ ...primary, resourceId }))
     : undefined;
 }
 

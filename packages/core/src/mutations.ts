@@ -2032,6 +2032,10 @@ interface EventExternalRefIndex {
     string,
     Map<string, Map<string, Set<number>>>
   >;
+  junctionNoIdProfilePredecessorsByScope: Map<
+    string,
+    IndexedEventExternalRefMatch[]
+  >;
   latestByRefKey: Map<string, IndexedEventExternalRefMatch>;
   latestById: Map<string, EventRecord>;
   maxRevisionById: Map<string, number>;
@@ -2173,8 +2177,12 @@ async function indexLatestEventsByExternalRef(
     }
   }
 
+  const junctionNoIdProfilePredecessorsByScope =
+    indexJunctionNoIdProfilePredecessors(latestByRefKey.values());
+
   return {
     deviceOwnerRevisionsByRefKeyAndFingerprint,
+    junctionNoIdProfilePredecessorsByScope,
     latestByRefKey,
     latestById,
     maxRevisionById,
@@ -2205,6 +2213,7 @@ const JUNCTION_SLEEP_STAGE_METRIC_FACETS = new Set([
 ]);
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
 const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
+const JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION = "junction-no-id-profile.v1";
 
 function deviceDataOriginSourceMatches(
   existing: DeviceDataOrigin | undefined,
@@ -2230,6 +2239,90 @@ function deviceDataOriginSourceMatches(
   }
 
   return compared;
+}
+
+function junctionNoIdProfileScopeKey(
+  externalRef: ExternalRef | undefined,
+  origin: DeviceDataOrigin | undefined,
+): string | null {
+  if (
+    externalRef?.system !== "junction"
+    || !externalRef.resourceType.endsWith("-profile")
+    || typeof externalRef.facet !== "string"
+    || !/^profile-[a-f0-9]{16}$/u.test(externalRef.resourceId)
+    || origin?.sourceProviderSlug === undefined
+  ) {
+    return null;
+  }
+
+  return stableStringify({
+    resourceType: externalRef.resourceType,
+    facet: externalRef.facet,
+    aggregatorProvider: origin.aggregatorProvider,
+    sourceProviderSlug: origin.sourceProviderSlug,
+    sourceType: origin.sourceType,
+    sourceInstanceId: origin.sourceInstanceId,
+  });
+}
+
+function isJunctionNoIdProfilePredecessor(
+  match: IndexedEventExternalRefMatch,
+): boolean {
+  const externalRef = match.indexedExternalRef;
+  const providerRecord = match.indexedRecord;
+  const origin = providerRecord.dataOrigin;
+  const version = externalRef.version;
+  if (
+    !junctionNoIdProfileScopeKey(externalRef, origin)
+    || !version
+    || !isWritableIsoDateTime(version)
+    || providerRecord.occurredAt !== version
+    || origin?.observedAtRaw !== version
+    || isDeletedEventSpineRecord(match.record)
+  ) {
+    return false;
+  }
+
+  const expectedResourceId = `profile-${createHash("sha256")
+    .update(JSON.stringify([
+      "profile",
+      origin.sourceProviderSlug,
+      origin.sourceType,
+      origin.sourceInstanceId,
+      providerRecord.occurredAt,
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
+  return externalRef.resourceId === expectedResourceId;
+}
+
+function indexJunctionNoIdProfilePredecessors(
+  matches: Iterable<IndexedEventExternalRefMatch>,
+): Map<string, IndexedEventExternalRefMatch[]> {
+  const byScope = new Map<string, IndexedEventExternalRefMatch[]>();
+  for (const match of matches) {
+    if (!isJunctionNoIdProfilePredecessor(match)) {
+      continue;
+    }
+
+    const scopeKey = junctionNoIdProfileScopeKey(
+      match.indexedExternalRef,
+      match.indexedRecord.dataOrigin,
+    );
+    if (!scopeKey) {
+      continue;
+    }
+
+    const scopedMatches = byScope.get(scopeKey) ?? [];
+    scopedMatches.push(match);
+    byScope.set(scopeKey, scopedMatches);
+  }
+  return byScope;
+}
+
+function isIncomingJunctionNoIdProfile(record: EventRecord): boolean {
+  return record.dataOrigin?.normalizerVersion === JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION
+    && junctionNoIdProfileScopeKey(record.externalRef, record.dataOrigin) !== null;
 }
 
 function isDateLikeWhoopBodyMeasurementResourceId(resourceId: string): boolean {
@@ -2406,33 +2499,9 @@ function isCompatibleLegacyExternalRefMatch(
     return hasStableJunctionSleepStageSummaryLegacyProof(existing, incoming);
   }
 
-  if (isJunctionNoIdProfileLegacyRef(existing, incoming, legacyExternalRef)) {
-    return true;
-  }
-
   return existing.record.dayKey === incoming.dayKey ||
     (isSameObservationFacet(existing.record, incoming) &&
       hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef));
-}
-
-function isJunctionNoIdProfileLegacyRef(
-  existing: IndexedEventExternalRefMatch,
-  incoming: EventRecord,
-  legacyExternalRef: ExternalRef,
-): boolean {
-  const primaryRef = incoming.externalRef;
-  const existingOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
-  return legacyExternalRef.system === "junction"
-    && legacyExternalRef.resourceType.endsWith("-profile")
-    && /^profile-[a-f0-9]{16}$/u.test(legacyExternalRef.resourceId)
-    && /^profile-[a-f0-9]{16}$/u.test(primaryRef?.resourceId ?? "")
-    && legacyExternalRef.resourceId !== primaryRef?.resourceId
-    && primaryRef?.version !== undefined
-    && existing.indexedRecord.occurredAt === primaryRef.version
-    && existingOrigin?.sourceProviderSlug !== undefined
-    && existingOrigin.sourceProviderSlug === incoming.dataOrigin?.sourceProviderSlug
-    && existingOrigin.sourceInstanceId === incoming.dataOrigin?.sourceInstanceId
-    && deviceDataOriginSourceMatches(existingOrigin, incoming.dataOrigin);
 }
 
 function selectLatestIndexedEventExternalRefMatch(
@@ -2544,6 +2613,25 @@ function buildLegacyExternalRefReservations(
 ): Map<string, LegacyExternalRefReservation> {
   const reservations = new Map<string, LegacyExternalRefReservation>();
 
+  const reserve = (
+    entry: PreparedDeviceEventEntry,
+    refKey: string,
+    indexedMatch: IndexedEventExternalRefMatch,
+  ): void => {
+    const existing = reservations.get(refKey);
+    if (existing && existing.entry !== entry) {
+      const externalRef = indexedMatch.indexedExternalRef;
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Event legacy externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+          `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+          "matched multiple incoming device events; ambiguous legacy cleanup must be repaired explicitly.",
+      );
+    }
+
+    reservations.set(refKey, { entry, indexedMatch });
+  };
+
   for (const entry of entries) {
     const externalRef = entry.record.externalRef;
     if (!externalRef) {
@@ -2562,17 +2650,37 @@ function buildLegacyExternalRefReservations(
         continue;
       }
 
-      const existing = reservations.get(legacyRefKey);
-      if (existing && existing.entry !== entry) {
-        throw new VaultError(
-          "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-          `Event legacy externalRef "${legacyExternalRef.system}/${legacyExternalRef.resourceType}/` +
-            `${legacyExternalRef.resourceId}${legacyExternalRef.facet ? `#${legacyExternalRef.facet}` : ""}" ` +
-            "matched multiple incoming device events; ambiguous legacy cleanup must be repaired explicitly.",
-        );
-      }
+      reserve(entry, legacyRefKey, indexedMatch);
+    }
 
-      reservations.set(legacyRefKey, { entry, indexedMatch });
+    if (!isIncomingJunctionNoIdProfile(entry.record)) {
+      continue;
+    }
+
+    const scopeKey = junctionNoIdProfileScopeKey(externalRef, entry.record.dataOrigin);
+    const predecessorMatches = scopeKey
+      ? (index.junctionNoIdProfilePredecessorsByScope.get(scopeKey) ?? []).filter((match) => {
+          const predecessorRefKey = eventExternalRefKey(match.indexedExternalRef);
+          const versionComparison = compareIncomingExternalRefVersion(
+            match.indexedExternalRef,
+            externalRef,
+          );
+          return predecessorRefKey !== primaryRefKey
+            && versionComparison !== null
+            && versionComparison > 0;
+        })
+      : [];
+    if (predecessorMatches.length > 1) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Junction profile externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+          `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+          "matched multiple persisted predecessor identities; nothing was imported.",
+      );
+    }
+    const predecessor = predecessorMatches[0];
+    if (predecessor) {
+      reserve(entry, eventExternalRefKey(predecessor.indexedExternalRef), predecessor);
     }
   }
 
@@ -2588,6 +2696,7 @@ async function buildDeviceEventIdentityContext(
     return {
       index: {
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+        junctionNoIdProfilePredecessorsByScope: new Map(),
         latestByRefKey: new Map(),
         latestById: new Map(),
         maxRevisionById: new Map(),
@@ -2613,6 +2722,8 @@ function cloneDeviceEventIdentityContext(
     index: {
       deviceOwnerRevisionsByRefKeyAndFingerprint:
         context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
+      junctionNoIdProfilePredecessorsByScope:
+        context.index.junctionNoIdProfilePredecessorsByScope,
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
       maxRevisionById: new Map(context.index.maxRevisionById),
@@ -2627,6 +2738,7 @@ function buildEmptyDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
     deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+    junctionNoIdProfilePredecessorsByScope: new Map(),
     latestByRefKey: new Map(),
     latestById: new Map(),
     maxRevisionById: new Map(),
@@ -2708,6 +2820,9 @@ function resolveDeviceEventIdentity(
   const primaryMatch = reservedForLegacyClaim && reservedForLegacyClaim.entry !== entry
     ? undefined
     : index.latestByRefKey.get(refKey);
+  const explicitLegacyRefKeys = new Set(
+    entry.legacyExternalRefs.map((legacyExternalRef) => eventExternalRefKey(legacyExternalRef)),
+  );
   const legacyMatchedEntries = entry.legacyExternalRefs
     .map((legacyExternalRef) => ({
       legacyExternalRef,
@@ -2736,9 +2851,20 @@ function resolveDeviceEventIdentity(
       return (!reservation || reservation.entry === entry)
         && isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
     });
+  const implicitReservedEntries = [...legacyReservations.entries()]
+    .filter(([reservedRefKey, reservation]) =>
+      reservation.entry === entry
+      && reservedRefKey !== refKey
+      && !explicitLegacyRefKeys.has(reservedRefKey)
+    )
+    .map(([reservedRefKey, reservation]) => ({
+      refKey: reservedRefKey,
+      indexedMatch: reservation.indexedMatch,
+    }));
   const matchedEntries = [
     ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
     ...legacyMatchedEntries,
+    ...implicitReservedEntries,
   ];
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
@@ -2963,6 +3089,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
     const { matchedEntries, refKey } = resolved;
     let latest = resolved.latest;
+    const migratesJunctionNoIdProfileIdentity = isIncomingJunctionNoIdProfile(entry.record)
+      && matchedEntries.some((match) => match.refKey !== refKey);
 
     if (!latest) {
       const canonicalRecordId = preferredCanonicalIdByPreparedId.get(entry.record.id)
@@ -3069,6 +3197,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
         };
         const retainedMemberRevision: EventRecord = {
           ...latest,
+          ...(migratesJunctionNoIdProfileIdentity
+            ? { externalRef, dataOrigin: entry.record.dataOrigin }
+            : {}),
           lifecycle: buildEventSpineLifecycle(providerRevision + 1),
         };
         const retainedMemberPath = historicalUserEditMatch.indexedMatch.relativePath
@@ -3215,6 +3346,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const retainedMemberRevision = historicalUserEditMatch
       ? {
           ...latest,
+          ...(migratesJunctionNoIdProfileIdentity
+            ? { externalRef, dataOrigin: entry.record.dataOrigin }
+            : {}),
           lifecycle: buildEventSpineLifecycle(revision + 1),
         }
       : null;

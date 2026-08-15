@@ -5997,7 +5997,7 @@ test("Junction profile identity canonicalizes timestamp spellings without changi
   );
 });
 
-test("Junction no-id profile facets claim the pre-normalized timestamp identity", () => {
+test("Junction no-id profile facets declare their persisted-predecessor migration shape", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
@@ -6018,25 +6018,24 @@ test("Junction no-id profile facets claim the pre-normalized timestamp identity"
     events.map((event) => event.externalRef?.facet).sort(),
     ["gender", "height", "profile-demographics"],
   );
-  assert.equal(events.every((event) => event.legacyExternalRefs?.length === 1), true);
-  assert.equal(
-    new Set(events.map((event) => event.legacyExternalRefs?.[0]?.resourceId)).size,
-    1,
-  );
+  assert.equal(events.every((event) => event.legacyExternalRefs === undefined), true);
   assert.equal(events.every((event) =>
-    event.legacyExternalRefs?.[0]?.resourceId !== event.externalRef?.resourceId
-    && event.legacyExternalRefs?.[0]?.facet === event.externalRef?.facet
+    event.dataOrigin?.normalizerVersion === "junction-no-id-profile.v1"
   ), true);
 });
 
 test("Junction no-id profile migration claims updated-at identities and retains member edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-profile-no-id-migration");
-  const profile = (input: { height: number; includeCreatedAt: boolean }) => ({
-    importedAt: "2026-05-21T12:00:00.000Z",
+  const createdAt = "2026-05-01T09:00:00.000Z";
+  const firstUpdatedAt = "2026-05-20T09:00:00.000Z";
+  const secondUpdatedAt = "2026-05-22T09:00:00.000Z";
+  const thirdUpdatedAt = "2026-05-23T09:00:00.000Z";
+  const profile = (input: { createdAt?: string; height: number; updatedAt: string }) => ({
+    importedAt: input.updatedAt,
     summaries: {
       profile: {
-        ...(input.includeCreatedAt ? { created_at: "2026-05-01T09:00:00Z" } : {}),
-        updated_at: "2026-05-20T09:00:00Z",
+        ...(input.createdAt ? { created_at: input.createdAt } : {}),
+        updated_at: input.updatedAt,
         height: input.height,
         gender: "other",
         source_device_id: "stable-profile-source",
@@ -6051,20 +6050,40 @@ test("Junction no-id profile migration claims updated-at identities and retains 
       createdAt: "2026-05-01T00:00:00.000Z",
       timezone: "UTC",
     });
-    const legacyPayload = normalizeJunctionSnapshot(profile({
+    const canonicalFirstPayload = normalizeJunctionSnapshot(profile({
+      createdAt,
       height: 180,
-      includeCreatedAt: false,
+      updatedAt: firstUpdatedAt,
     }));
-    const first = await importDeviceProviderSnapshot<
-      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
-    >(
-      {
-        provider: "junction",
-        vaultRoot,
-        snapshot: profile({ height: 180, includeCreatedAt: false }),
-      },
-      { corePort: coreRuntime },
-    );
+    const updatedAtIdentityPayload = normalizeJunctionSnapshot(profile({
+      height: 180,
+      updatedAt: firstUpdatedAt,
+    }));
+    const legacyEvents = (canonicalFirstPayload.events ?? []).map((event) => {
+      const updatedAtIdentity = updatedAtIdentityPayload.events?.find((candidate) =>
+        candidate.externalRef?.facet === event.externalRef?.facet
+      );
+      assert.ok(updatedAtIdentity?.externalRef);
+      const { evidenceRoles: _evidenceRoles, ...eventWithoutEvidence } = event;
+      return {
+        ...eventWithoutEvidence,
+        occurredAt: updatedAtIdentity.occurredAt,
+        recordedAt: updatedAtIdentity.recordedAt,
+        dayKey: updatedAtIdentity.dayKey,
+        externalRef: updatedAtIdentity.externalRef,
+        dataOrigin: {
+          ...event.dataOrigin,
+          observedAtRaw: firstUpdatedAt,
+          normalizerVersion: "junction-normalizer.v1",
+        },
+      };
+    });
+    const first = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-05-20T10:00:00.000Z",
+      events: legacyEvents,
+    });
     const legacyHeight = first.events.find((event) =>
       event.kind === "observation" && event.metric === "height"
     );
@@ -6079,14 +6098,15 @@ test("Junction no-id profile migration claims updated-at identities and retains 
       },
     });
 
-    const currentSnapshot = profile({ height: 181, includeCreatedAt: true });
+    const currentSnapshot = profile({
+      createdAt,
+      height: 181,
+      updatedAt: secondUpdatedAt,
+    });
     const currentPayload = normalizeJunctionSnapshot(currentSnapshot);
     assert.ok(currentPayload.events?.every((event) =>
-      event.legacyExternalRefs?.some((legacyRef) =>
-        legacyRef.resourceId === legacyPayload.events?.find((legacyEvent) =>
-          legacyEvent.externalRef?.facet === event.externalRef?.facet
-        )?.externalRef?.resourceId
-      )
+      event.legacyExternalRefs === undefined
+      && event.dataOrigin?.normalizerVersion === "junction-no-id-profile.v1"
     ));
     const update = await importDeviceProviderSnapshot<
       Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
@@ -6094,41 +6114,69 @@ test("Junction no-id profile migration claims updated-at identities and retains 
       { provider: "junction", vaultRoot, snapshot: currentSnapshot },
       { corePort: coreRuntime },
     );
-    const replay = await importDeviceProviderSnapshot<
+    const secondReplay = await importDeviceProviderSnapshot<
       Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
     >(
       { provider: "junction", vaultRoot, snapshot: currentSnapshot },
       { corePort: coreRuntime },
     );
-    const convergedReplay = await importDeviceProviderSnapshot<
+    const thirdSnapshot = profile({
+      createdAt,
+      height: 182,
+      updatedAt: thirdUpdatedAt,
+    });
+    const nextUpdate = await importDeviceProviderSnapshot<
       Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
     >(
-      { provider: "junction", vaultRoot, snapshot: currentSnapshot },
+      { provider: "junction", vaultRoot, snapshot: thirdSnapshot },
+      { corePort: coreRuntime },
+    );
+    const thirdReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: thirdSnapshot },
       { corePort: coreRuntime },
     );
     const records = (
       await Promise.all(
-        [...new Set([...first.eventShardPaths, ...update.eventShardPaths])].map((relativePath) =>
-          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
-        ),
+        [...new Set([
+          ...first.eventShardPaths,
+          ...update.eventShardPaths,
+          ...nextUpdate.eventShardPaths,
+        ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
       )
     ).flat();
     const live = latestLiveRecords(records);
     const liveHeight = live.find((event) => event.id === legacyHeight.id);
+    const currentHeight = currentPayload.events?.find((event) =>
+      event.kind === "observation" && event.fields?.metric === "height"
+    );
 
     assert.equal(live.length, 3);
     assert.equal(liveHeight?.source, "manual");
     assert.equal(storedObservationValue(liveHeight), 179);
+    assert.equal(
+      storedExternalRefResourceId(liveHeight),
+      currentHeight?.externalRef?.resourceId,
+    );
+    assert.equal(storedExternalRefField(liveHeight, "version"), secondUpdatedAt);
+    assert.equal(storedDataOriginObservedAtRaw(liveHeight), createdAt);
     assert.ok(records.some((event) =>
       event.id === legacyHeight.id
       && event.source === "device"
       && storedObservationValue(event) === 181
-      && storedExternalRefResourceId(event) !== storedExternalRefResourceId(legacyHeight)
+      && storedExternalRefResourceId(event) === currentHeight?.externalRef?.resourceId
+      && storedExternalRefField(event, "version") === secondUpdatedAt
     ));
-    assert.ok(replay.events.every((event) =>
-      storedExternalRefResourceId(event) !== storedExternalRefResourceId(legacyHeight)
+    assert.ok(records.some((event) =>
+      event.id === legacyHeight.id
+      && event.source === "device"
+      && storedObservationValue(event) === 182
+      && storedExternalRefField(event, "version") === thirdUpdatedAt
     ));
-    assert.equal(convergedReplay.applied, false);
+    assert.equal(secondReplay.applied, false);
+    assert.equal(nextUpdate.applied, true);
+    assert.equal(thirdReplay.applied, false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
