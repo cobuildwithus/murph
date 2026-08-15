@@ -438,7 +438,7 @@ member, mailbox, trace, or attempt identifiers.
 
 The native Cloudflare container is a warm per-user shell. Startup readiness is
 allowed up to 15 wall-clock seconds, including lifecycle-lock queue time. Once
-lifecycle work starts, one absolute five-second cleanup deadline covers both
+readiness-triggered cleanup starts, one absolute five-second cleanup deadline covers both
 the pre-destroy state read and destroy settlement, with a distinct one-second
 caller guard margin. The command budget begins at runtime-control authorization,
 before route parsing, Durable Object dispatch, consent serialization, and

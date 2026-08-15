@@ -2435,19 +2435,21 @@ export class RunnerContainer extends Container {
   }
 
   private async destroyIfRunning(input: {
+    cleanupDeadlineAtMs?: number;
     expectedInteractionGeneration?: number;
     failClosed?: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<boolean> {
     const failClosed = Boolean(input.failClosed);
     const context = this.currentLogContext;
-    const cleanupDeadlineAtMs = Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
+    const statusDeadlineAtMs = input.cleanupDeadlineAtMs
+      ?? Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
     let statusBeforeDestroy: string | null = null;
 
     try {
       statusBeforeDestroy = await readRunnerContainerStatusWithTimeout(
         this,
-        Math.max(1, cleanupDeadlineAtMs - Date.now()),
+        Math.max(1, statusDeadlineAtMs - Date.now()),
       );
       if (
         isRunnerContainerStopped(statusBeforeDestroy)
@@ -2512,7 +2514,9 @@ export class RunnerContainer extends Container {
         (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
       );
       const destroySettle = this.waitForDestroyedContainerStopped({
-        cleanupDeadlineAtMs,
+        ...(input.cleanupDeadlineAtMs === undefined
+          ? {}
+          : { cleanupDeadlineAtMs: input.cleanupDeadlineAtMs }),
         destroyStartedAt,
         failClosed,
         statusBeforeDestroy,
@@ -2585,7 +2589,7 @@ export class RunnerContainer extends Container {
   }
 
   private async waitForDestroyedContainerStopped(input: {
-    cleanupDeadlineAtMs: number;
+    cleanupDeadlineAtMs?: number;
     destroyStartedAt: number;
     failClosed: boolean;
     statusBeforeDestroy: string | null;
@@ -2604,6 +2608,8 @@ export class RunnerContainer extends Container {
       }
   > {
     const context = this.currentLogContext;
+    const cleanupDeadlineAtMs = input.cleanupDeadlineAtMs
+      ?? Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
     const observedStatuses: string[] = [];
     let lastError: unknown = null;
     let statusAfterDestroy: string | null = null;
@@ -2620,7 +2626,7 @@ export class RunnerContainer extends Container {
         };
       }
 
-      let remainingMs = input.cleanupDeadlineAtMs - Date.now();
+      let remainingMs = cleanupDeadlineAtMs - Date.now();
       if (remainingMs <= 0) {
         const error = lastError
           ? new Error("Hosted runner container did not report stopped after destroy.", {
@@ -2674,7 +2680,7 @@ export class RunnerContainer extends Container {
         appendObservedRunnerContainerStatus(observedStatuses, "status_error");
       }
 
-      remainingMs = input.cleanupDeadlineAtMs - Date.now();
+      remainingMs = cleanupDeadlineAtMs - Date.now();
       if (remainingMs <= 0) {
         continue;
       }
@@ -2686,6 +2692,7 @@ export class RunnerContainer extends Container {
   }
 
   private async stopWarmContainer(input?: {
+    cleanupDeadlineAtMs?: number;
     expectedInteractionGeneration?: number;
     failClosed?: boolean;
     reason?: RunnerContainerDestroyReason;
@@ -2696,6 +2703,9 @@ export class RunnerContainer extends Container {
     let destroyed: boolean;
     try {
       destroyed = await this.destroyIfRunning({
+        ...(input?.cleanupDeadlineAtMs === undefined
+          ? {}
+          : { cleanupDeadlineAtMs: input.cleanupDeadlineAtMs }),
         ...(input?.expectedInteractionGeneration === undefined
           ? {}
           : { expectedInteractionGeneration: input.expectedInteractionGeneration }),
@@ -2719,8 +2729,10 @@ export class RunnerContainer extends Container {
     failClosed: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<void> {
+    const cleanupDeadlineAtMs = Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
     try {
       const settled = await this.stopWarmContainer({
+        cleanupDeadlineAtMs,
         failClosed: input.failClosed,
         reason: input.reason,
       });

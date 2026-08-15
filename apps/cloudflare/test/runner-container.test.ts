@@ -7714,6 +7714,59 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("gives an ordinary destroy a fresh settlement window after a slow status read", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+
+    try {
+      let status: "running" | "destroying" | "stopped" = "running";
+      let stateReads = 0;
+      const getState = vi.fn(async () => {
+        stateReads += 1;
+        if (stateReads === 1) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 4_000));
+        }
+        return {
+          lastChange: Date.now(),
+          status,
+        };
+      });
+      const destroy = vi.fn(async () => {
+        status = "destroying";
+        await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+        status = "stopped";
+      });
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const destroyPromise = container.destroyInstance();
+      let settled = false;
+      void destroyPromise.finally(() => {
+        settled = true;
+      }).catch(() => undefined);
+
+      await vi.advanceTimersByTimeAsync(3_999);
+      expect(destroy).not.toHaveBeenCalled();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(destroyPromise).resolves.toBeUndefined();
+      expect(Date.now()).toBe(Date.parse("2026-04-27T00:00:06.000Z"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails closed when destroy resolves but the container never reports stopped", async () => {
     vi.useFakeTimers();
 

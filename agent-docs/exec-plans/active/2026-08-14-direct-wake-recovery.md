@@ -101,6 +101,11 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   total Linq sends to one. Barrier stop is idempotent; file teardown closes it
   before the Web scenario and still attempts every remaining cleanup if one
   step rejects.
+- [x] Resolve the final parent review's purpose-drift finding by scoping the
+  shared five-second status-plus-destroy deadline to readiness cleanup only.
+  Ordinary container stops again receive a separately bounded status read and
+  fresh destroy-settlement window; a four-second read plus two-second settle
+  regression covers the restored contract.
 - [ ] Complete the hosted-local journey in a capable environment, resolve the
   exact-head final Review GPT gate and CI, archive this plan, and push the final
   reviewed head.
@@ -117,9 +122,10 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   container cleanup. The controller must use the actual settled RPC outcome
   when cleanup finishes inside that allowance and preserve only when it does
   not settle.
-- A pre-destroy state read and destroy settlement previously each received a
-  fresh five-second timeout. One absolute cleanup deadline now covers both;
-  an explicit unsettled result preserves the fresh fence if cleanup still runs.
+- During readiness cleanup, a pre-destroy state read and destroy settlement
+  previously each received a fresh five-second timeout. One absolute cleanup
+  deadline now covers both; an explicit unsettled result preserves the fresh
+  fence if cleanup still runs.
 - Initial local review found that both lifecycle-lock queue time and
   consent/admission time were outside their apparent bounds. The final design
   starts each absolute deadline before those waits.
@@ -141,6 +147,11 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   test process, ages that same attempt beyond startup grace, and explicitly
   releases the fetch. The preload is injected only by the hosted-local test
   process and fails closed outside the E2E test-control profile.
+- The first absolute cleanup-deadline implementation placed its clock inside
+  the shared destroy primitive, unintentionally shortening consent withdrawal,
+  deletion, idle cleanup, and every other ordinary stop. The final design
+  passes that deadline only from the readiness wrapper; the shared primitive's
+  default keeps its prior two bounded phases.
 - Local execution of that hosted-local proof reached the external Temporal
   configuration but timed out during the harness's MinIO image fallback before
   any test ran. Unit/typecheck proof is green; the capable hosted-local CI lane

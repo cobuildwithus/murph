@@ -2309,7 +2309,7 @@ or destroy-settlement checks. Accepted background invocations begin their
 pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
 Container readiness receives at most 15 wall-clock seconds, including time
-queued for the container lifecycle lock. Once lifecycle work starts, the RPC
+queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
 allows one absolute five-second fail-closed cleanup deadline shared by the
 pre-destroy state read and destroy settlement, and its caller-side guard keeps
 a separate one-second margin. If the container RPC settles

@@ -511,8 +511,8 @@ a shared 29-second outer deadline. Cloudflare starts its server-side clock at
 runtime-control authorization, before route parsing, Durable Object dispatch,
 consent serialization, and health-data admission. Container readiness is capped at 20
 wall-clock seconds end to end: at most 15 seconds for readiness, including
-lifecycle-lock queue time, plus one absolute five-second deadline shared by the
-in-lock cleanup state read and destroy settlement. Its caller guard adds a
+lifecycle-lock queue time, plus one absolute five-second deadline shared by a
+readiness-triggered cleanup state read and destroy settlement. Its caller guard adds a
 separate one-second margin, so the RPC can
 settle before the request deadline. Shorter command budgets keep the smaller of
 15 seconds and the remaining time minus that one-second guard for readiness;
