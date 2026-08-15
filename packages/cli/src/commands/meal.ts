@@ -1,5 +1,6 @@
 import { Cli, z } from 'incur'
 import {
+  MEAL_MICRONUTRIENT_KEYS,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
   type EventSource,
@@ -97,7 +98,7 @@ const mealInputPayloadShapeDescription = [
   '`audio` or `audioPath` for an optional audio note path;',
   '`note`, `occurredAt`, and `source` for the saved event fields;',
   '`ingredients` as a string array;',
-  '`nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams? }, provenance?: { source, confidence?, sourceDetail? } }`.',
+  '`nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams?, waterGrams? }, micros?: { <supported bounded nutrient keys> }, provenance?: { source, confidence?, sourceDetail? } }`.',
 ].join(' ')
 
 function formatSchemaIssues(
@@ -118,6 +119,7 @@ function hasMeaningfulMealNutrition(nutrition: MealNutrition | undefined): boole
 
   return Boolean(
     Object.keys(nutrition.totals ?? {}).length > 0 ||
+      Object.keys(nutrition.micros ?? {}).length > 0 ||
       Object.keys(nutrition.provenance ?? {}).length > 0,
   )
 }
@@ -208,7 +210,11 @@ function buildMealNutritionFromOptions(
     return payloadNutrition
   }
 
-  const nutrition: MealNutrition = {}
+  const nutrition: MealNutrition = {
+    ...(payloadNutrition?.micros
+      ? { micros: payloadNutrition.micros }
+      : {}),
+  }
   if (hasTotals) {
     nutrition.totals = totals
   }
@@ -300,6 +306,32 @@ const mealNutritionTotalsResultSchema = z.object({
   mealCount: z.number().int().nonnegative(),
   totals: mealNutritionTotalsSchema,
   days: z.array(mealNutritionDaySchema),
+})
+
+const mealNutrientSchema = z.object({
+  key: z.enum(['waterGrams', ...MEAL_MICRONUTRIENT_KEYS]),
+  label: z.string().min(1),
+  category: z.enum(['water', 'mineral', 'trace_element', 'vitamin']),
+  unit: z.enum(['g', 'mg', 'mcg']),
+  total: z.number().nonnegative().nullable(),
+  contributingMealCount: z.number().int().nonnegative(),
+})
+
+const mealNutrientDaySchema = z.object({
+  date: localDateSchema,
+  mealCount: z.number().int().nonnegative(),
+  nutrients: z.array(mealNutrientSchema),
+})
+
+const mealNutrientTotalsResultSchema = z.object({
+  vault: pathSchema,
+  filters: z.object({
+    from: localDateSchema.nullable(),
+    to: localDateSchema.nullable(),
+  }),
+  mealCount: z.number().int().nonnegative(),
+  nutrients: z.array(mealNutrientSchema),
+  days: z.array(mealNutrientDaySchema),
 })
 
 const mealAddTypedOptionShape = {
@@ -595,6 +627,31 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         output: mealNutritionTotalsResultSchema,
         async run({ options, requestId }) {
           return services.query.showMealNutritionTotals({
+            vault: String(options.vault ?? ''),
+            requestId: typeof requestId === 'string' ? requestId : null,
+            from: typeof options.from === 'string' ? options.from : undefined,
+            to: typeof options.to === 'string' ? options.to : undefined,
+          })
+        },
+      },
+      {
+        name: 'nutrients',
+        args: z.object({}),
+        description:
+          'Show water, vitamin, and mineral totals from meal nutrition over an optional date range.',
+        hint:
+          'Use `meal nutrients --from YYYY-MM-DD --to YYYY-MM-DD` for connected or saved meal nutrients. A null total means unavailable, and contributingMealCount smaller than mealCount means the nutrient is present on only part of the meal set. This read does not include source-app daily targets, percentages, or deficiency conclusions.',
+        options: {
+          from: localDateSchema
+            .optional()
+            .describe('Optional inclusive lower date bound in YYYY-MM-DD form.'),
+          to: localDateSchema
+            .optional()
+            .describe('Optional inclusive upper date bound in YYYY-MM-DD form.'),
+        },
+        output: mealNutrientTotalsResultSchema,
+        async run({ options, requestId }) {
+          return services.query.showMealNutrientTotals({
             vault: String(options.vault ?? ''),
             requestId: typeof requestId === 'string' ? requestId : null,
             from: typeof options.from === 'string' ? options.from : undefined,

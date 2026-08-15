@@ -38,6 +38,7 @@ import { hostedBrowserVaultReplicaObjectKey } from "../src/storage-paths.js";
 import {
   buildAssistantProviderMurphToolCall,
   buildAssistantProviderShellCommandCall,
+  readHostedLocalAssistantProviderToolOutputs,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -144,18 +145,35 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const outboundBaseline = requireLinqStub().countObservedSends(replyPath);
     const providerBaseline = countResponsesApiRequests();
-    const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString();
+    const dueAtDate = new Date(Date.now() + 24 * 60 * 60 * 1_000);
+    dueAtDate.setUTCSeconds(0, 0);
+    const dueAt = dueAtDate.toISOString();
+    const automationStateMarker = buildCanonicalAutomationStateMarker({
+      dueAt,
+    });
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("automation", {
         action: "save",
         continuityPolicy: "fresh",
         instructions: "Record the hosted canonical checkpoint recovery probe.",
-        schedule: { at: dueAt, kind: "at" },
+        schedule: {
+          kind: "at",
+          localAt: {
+            date: dueAt.slice(0, 10),
+            time: dueAt.slice(11, 16),
+            timeZone: "UTC",
+          },
+        },
         slug: automationSlug,
         summary: "Hosted canonical checkpoint recovery probe.",
         tags: ["assistant"],
         title: "Canonical receipt recovery probe",
       }),
+      buildAssistantProviderShellCommandCall(
+        buildCanonicalAutomationStateProbeCommand({
+          dueAt,
+        }),
+      ),
       replyText,
     ], {
       matchInputContains: inboundText,
@@ -193,13 +211,13 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     expect(BigInt(finalStatus.workspace!.version)).toBeGreaterThan(activationWorkspaceVersion);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundBaseline + 1);
 
-    const providerRequestText = requireScenario().assistantProviderRequests
+    const providerRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
-      .slice(providerBaseline)
-      .map(readAssistantProviderRequestText)
+      .slice(providerBaseline);
+    const providerToolOutputText = providerRequests
+      .flatMap(readHostedLocalAssistantProviderToolOutputs)
       .join("\n\n");
-    expect(providerRequestText).toContain(automationSlug);
-    expect(providerRequestText).toMatch(/"created"\s*:\s*true/u);
+    expect(providerToolOutputText).toContain(automationStateMarker);
 
     const faultLogs = [
       requireScenario().harness.stdoutTail(2_000_000),
@@ -269,24 +287,24 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     expect(BigInt(finalStatus.workspace!.version)).toBeGreaterThan(fixture.seededVersion);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundBaseline + 1);
 
-    const providerRequestText = requireScenario().assistantProviderRequests
+    const providerToolOutputText = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(providerBaseline)
-      .map(readAssistantProviderRequestText)
+      .flatMap(readHostedLocalAssistantProviderToolOutputs)
       .join("\n\n");
-    expect(providerRequestText).toContain(
+    expect(providerToolOutputText).toContain(
       `PREFERENCE_RECOVERY_PREFERENCES_SHA256=${fixture.expectedPreferencesSha256}`,
     );
-    expect(providerRequestText).toContain(
+    expect(providerToolOutputText).toContain(
       `PREFERENCE_RECOVERY_MUTATIONS_SHA256=${fixture.expectedMutationsSha256}`,
     );
     for (const auditId of fixture.auditIds) {
-      expect(providerRequestText).toContain(
+      expect(providerToolOutputText).toContain(
         `PREFERENCE_RECOVERY_AUDIT_${auditId}=1`,
       );
     }
-    expect(providerRequestText).toContain("PREFERENCE_RECOVERY_PREFERENCE_AUDIT_COUNT=2");
-    expect(providerRequestText).toContain("PREFERENCE_RECOVERY_UNIQUE_PREFERENCE_AUDIT_COUNT=2");
+    expect(providerToolOutputText).toContain("PREFERENCE_RECOVERY_PREFERENCE_AUDIT_COUNT=2");
+    expect(providerToolOutputText).toContain("PREFERENCE_RECOVERY_UNIQUE_PREFERENCE_AUDIT_COUNT=2");
 
     const finalRedactedStatus = finalStatus.workspace?.redactedStatus ?? {};
     for (const key of HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS) {
@@ -674,6 +692,40 @@ function buildPreferenceRecoveryStateProbeCommand(
   return `node -e ${quoteShellArgument(script)}`;
 }
 
+function buildCanonicalAutomationStateMarker(input: { dueAt: string }): string {
+  return [
+    "CANONICAL_AUTOMATION_STATE",
+    automationSlug,
+    input.dueAt,
+    chatId,
+    "audit=1",
+  ].join("|");
+}
+
+function buildCanonicalAutomationStateProbeCommand(input: {
+  dueAt: string;
+}): string {
+  const script = [
+    'const fs = require("node:fs");',
+    'const { execFileSync } = require("node:child_process");',
+    `const slug = ${JSON.stringify(automationSlug)};`,
+    `const dueAt = ${JSON.stringify(input.dueAt)};`,
+    `const chatId = ${JSON.stringify(chatId)};`,
+    'const shown = JSON.parse(execFileSync("vault-cli", ["automation", "show", slug, "--format", "json"], { encoding: "utf8" }));',
+    'const automation = shown && (shown.data || shown).automation;',
+    'if (!automation || automation.slug !== slug || automation.status !== "active" || automation.continuityPolicy !== "fresh") throw new Error("Canonical automation readback mismatch.");',
+    'if (automation.instructions !== "Record the hosted canonical checkpoint recovery probe." || automation.title !== "Canonical receipt recovery probe" || automation.summary !== "Hosted canonical checkpoint recovery probe.") throw new Error("Canonical automation content mismatch.");',
+    'if (!automation.schedule || automation.schedule.kind !== "at" || automation.schedule.at !== dueAt) throw new Error("Canonical automation schedule mismatch.");',
+    'if (!automation.route || automation.route.channel !== "linq" || automation.route.deliveryTarget !== chatId || automation.route.threadIsDirect !== true) throw new Error("Canonical automation route mismatch.");',
+    'if (!Array.isArray(automation.tags) || !automation.tags.includes("assistant")) throw new Error("Canonical automation tags mismatch.");',
+    'const auditRecords = fs.readdirSync("audit", { recursive: true }).filter((entry) => typeof entry === "string" && entry.endsWith(".jsonl")).flatMap((entry) => fs.readFileSync("audit/" + entry, "utf8").split(/\\r?\\n/u).filter(Boolean).map((line) => JSON.parse(line)));',
+    'const matchingAudits = auditRecords.filter((record) => record.commandName === "core.upsertAutomation" && Array.isArray(record.targetIds) && record.targetIds.includes(automation.automationId));',
+    'if (matchingAudits.length !== 1) throw new Error("Canonical automation audit count mismatch.");',
+    'console.log(["CANONICAL_AUTOMATION_STATE", automation.slug, automation.schedule.at, automation.route.deliveryTarget, "audit=" + matchingAudits.length].join("|"));',
+  ].join("");
+  return `node -e ${quoteShellArgument(script)}`;
+}
+
 function quoteShellArgument(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -717,23 +769,6 @@ async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Re
     },
     method: "POST",
   });
-}
-
-function readAssistantProviderRequestText(request: { body: string }): string {
-  return collectJsonStrings(JSON.parse(request.body)).join("\n\n");
-}
-
-function collectJsonStrings(value: unknown): string[] {
-  if (typeof value === "string") {
-    return [value];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectJsonStrings(entry));
-  }
-  if (value && typeof value === "object") {
-    return Object.values(value).flatMap((entry) => collectJsonStrings(entry));
-  }
-  return [];
 }
 
 function countResponsesApiRequests(): number {

@@ -531,6 +531,7 @@ export function SectionsContent() {
           <SiteFooter
             id="design-site-footer-preview"
             referralsAvailable
+            vitalsMode="synthetic"
           />
         </div>
       </StudySection>
@@ -573,7 +574,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source availability, actions, and disconnect lifecycle">
+      <StudySection title="Connect source capabilities, availability, actions, and disconnect lifecycle">
         <ConnectSourceCardStudy
           androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
         />
@@ -635,7 +636,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Browser Vault progressive loading transitions">
+      <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
         <BrowserVaultLoadingTransitionsStudy />
       </StudySection>
 

@@ -68,7 +68,10 @@ test("RootLayout renders global providers without route-owned footer chrome", as
 test("footer ownership stays on explicit public surfaces", () => {
   const readAppFile = (path: string) =>
     readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
-  const assertOwnsFooter = (path: string) => {
+  const assertOwnsFooter = (
+    path: string,
+    renderPattern = /<SiteFooter \/>/u,
+  ) => {
     const source = readAppFile(path);
 
     assert.match(
@@ -78,20 +81,24 @@ test("footer ownership stays on explicit public surfaces", () => {
     );
     assert.match(
       source,
-      /<SiteFooter \/>/u,
+      renderPattern,
       `${path} should render SiteFooter directly`,
     );
   };
 
   assertOwnsFooter("app/page.tsx");
   assertOwnsFooter("app/security/page.tsx");
-  assertOwnsFooter("app/design/page.tsx");
+  assertOwnsFooter(
+    "app/design/page.tsx",
+    /<SiteFooter vitalsMode="synthetic" \/>/u,
+  );
   assertOwnsFooter("app/not-found.tsx");
   assertOwnsFooter("src/components/legal/legal-policy-page.tsx");
 
   const rootLayoutSource = readAppFile("app/layout.tsx");
   const designPageSource = readAppFile("app/design/page.tsx");
   const designComponentsSource = readAppFile("app/design/components-content.tsx");
+  const inputOtpSource = readAppFile("src/components/ui/input-otp.tsx");
   const subprocessorsPageSource = readAppFile("app/subprocessors/page.tsx");
   assert.doesNotMatch(rootLayoutSource, /SiteFooter/u);
   assert.doesNotMatch(designPageSource, /HostedPrivyBoundary/u);
@@ -107,6 +114,24 @@ test("footer ownership stays on explicit public surfaces", () => {
     designComponentsSource,
     /requestHostedOnboardingJson|\/api\/legal\/consent\/accept/u,
   );
+  const designOtpStart = designComponentsSource.indexOf('id="otp-ds"');
+  const designOtpSource = designComponentsSource.slice(
+    designOtpStart,
+    designComponentsSource.indexOf("</InputOTP>", designOtpStart),
+  );
+  for (const vendorIgnoreAttribute of [
+    "data-1p-ignore",
+    'data-bwignore="true"',
+    'data-form-type="other"',
+    'data-lpignore="true"',
+  ]) {
+    assert.match(designOtpSource, new RegExp(vendorIgnoreAttribute));
+  }
+  assert.match(
+    designOtpSource,
+    /pushPasswordManagerStrategy="none"/u,
+  );
+  assert.doesNotMatch(inputOtpSource, /pushPasswordManagerStrategy/u);
   assert.doesNotMatch(
     designComponentsSource,
     /Standard, Tiny, And Fallback Bedtime Transition/u,

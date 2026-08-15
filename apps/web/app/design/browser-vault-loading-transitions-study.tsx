@@ -2,9 +2,17 @@
 
 import type {
   BrowserVaultDeviceMetricSummary,
+  BrowserVaultLabBiomarkerDetail,
   BrowserVaultMeasuredBiomarker,
+  BrowserVaultPresentedLabResultRow,
 } from "@murphai/query/browser-biomarkers";
 
+import {
+  BiomarkerDetailContent,
+  BiomarkerDetailShell,
+  BiomarkerStaleRefreshAlert,
+  EmptyBiomarkerDetailCard,
+} from "@/src/components/biomarkers/lab-biomarker-detail-view";
 import {
   BiomarkerListSkeleton,
   DeviceMetricsSection,
@@ -20,6 +28,7 @@ import {
   BiomarkerPrivateTrendCardView,
   type BiomarkerPrivateTrendState,
 } from "@/src/components/biomarkers/biomarker-detail/biomarker-private-trend-card";
+import { BiomarkerDetailSkeleton } from "@/src/components/biomarkers/lab-biomarker-detail-skeleton";
 import {
   ResultsSummary,
   ResultsSummarySkeleton,
@@ -152,6 +161,43 @@ const DESIGN_LAB_GROUP: MeasuredBiomarkerGroup = {
   id: "nutrients",
   items: [DESIGN_LAB_BIOMARKER],
   label: "Nutrients & fatty acids",
+};
+
+const DESIGN_LAB_ROWS: readonly BrowserVaultPresentedLabResultRow[] = [
+  {
+    ...DESIGN_LAB_BIOMARKER.latest,
+    date: "2025-11-01",
+    id: "design-ferritin-result-2025",
+    normalizedValue: 58,
+    observedAt: "2025-11-01T08:00:00.000Z",
+    value: 58,
+  },
+  {
+    ...DESIGN_LAB_BIOMARKER.latest,
+    date: "2026-05-01",
+    id: "design-ferritin-result-2026-05",
+    normalizedValue: 68,
+    observedAt: "2026-05-01T08:00:00.000Z",
+    value: 68,
+  },
+  DESIGN_LAB_BIOMARKER.latest,
+];
+
+const DESIGN_LAB_DETAIL: BrowserVaultLabBiomarkerDetail = {
+  biomarkerKey: "design-ferritin",
+  chartSeries: DESIGN_LAB_ROWS.map((row) => ({
+    date: row.date,
+    observedAt: row.observedAt,
+    rowId: row.id,
+    unit: "ng/mL",
+    value: row.normalizedValue ?? row.value ?? 0,
+  })),
+  comparableUnit: "ng/mL",
+  displayName: "Ferritin",
+  hasIncompatibleHistory: false,
+  latest: DESIGN_LAB_BIOMARKER.latest,
+  metricKey: "design-ferritin",
+  rows: [...DESIGN_LAB_ROWS],
 };
 
 const noopRetry = async () => undefined;
@@ -299,6 +345,45 @@ export function BrowserVaultLoadingTransitionsStudy() {
             </StudyState>
           </div>
         </div>
+      </TransitionStudy>
+
+      <TransitionStudy
+        description="The private result route reserves the latest reading, chart, and year-grouped ledger while loading, then keeps usable saved results or the empty state quiet during automatic refresh."
+        title="Biomarker result detail"
+        transition="biomarker-result-detail"
+      >
+        <StudyState label="Loading" state="loading">
+          <BiomarkerDetailSkeleton />
+        </StudyState>
+        <StudyState label="Stale saved result" state="stale-populated">
+          <BiomarkerDetailShell
+            chatAction={null}
+            detail={DESIGN_LAB_DETAIL}
+            summary="Synthetic iron-storage marker history for layout review."
+          >
+            <BiomarkerStaleRefreshAlert hasResults onRefresh={() => undefined} />
+            <BiomarkerDetailContent detail={DESIGN_LAB_DETAIL} fallbackRanges={[]} />
+          </BiomarkerDetailShell>
+        </StudyState>
+        <StudyState label="Refreshing saved result" state="refresh-pending-populated">
+          <BiomarkerDetailShell
+            chatAction={null}
+            detail={DESIGN_LAB_DETAIL}
+            summary="Synthetic iron-storage marker history for layout review."
+          >
+            <BiomarkerDetailContent detail={DESIGN_LAB_DETAIL} fallbackRanges={[]} />
+          </BiomarkerDetailShell>
+        </StudyState>
+        <StudyState label="Stale empty result" state="stale-empty">
+          <BiomarkerDetailShell chatAction={null} detail={null} summary={null}>
+            <BiomarkerStaleRefreshAlert hasResults={false} onRefresh={() => undefined} />
+            <EmptyBiomarkerDetailCard
+              authRequired={false}
+              preparing={false}
+              uploadLabsAction={null}
+            />
+          </BiomarkerDetailShell>
+        </StudyState>
       </TransitionStudy>
     </div>
   );

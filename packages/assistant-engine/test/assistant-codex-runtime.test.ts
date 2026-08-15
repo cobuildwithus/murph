@@ -27,7 +27,10 @@ import {
   type HostedCanonicalWritePort,
 } from '@murphai/core'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import type {
+  AssistantResponseCard,
+  CompactTableWorkoutResponseCardV1,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -173,6 +176,31 @@ const TRACKED_COMPACT_TABLE_RESPONSE_CARD: AssistantResponseCard = {
     snapshotAt: '2026-08-04T21:30:00.000Z',
   },
 }
+const OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD:
+  CompactTableWorkoutResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Full workout recovery',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        actual: null,
+      })),
+    })),
+  },
+}
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 
@@ -232,6 +260,7 @@ function createHostedToolContext(input: {
   beforeToolExecution?: AssistantHostedToolContext['beforeToolExecution']
   computerToolsAvailable?: boolean
   groupTool?: AssistantHostedToolContext['groupTool']
+  imageGenerationLauncher?: AssistantHostedToolContext['imageGenerationLauncher']
   sendVaultFile?: AssistantHostedToolContext['sendVaultFile']
   vaultFileSendAvailable?: boolean
 } = {}): AssistantHostedToolContext {
@@ -243,6 +272,7 @@ function createHostedToolContext(input: {
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     groupTool: input.groupTool ?? null,
+    imageGenerationLauncher: input.imageGenerationLauncher ?? null,
     persistGeneratedImageCapture: async (write) => await write(),
     sendVaultFile: input.sendVaultFile ?? vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
@@ -20480,6 +20510,20 @@ describe('steered final segments', () => {
         expectedSuccess?: boolean
         expectedText: string
         id: number
+        kind: 'generate-image'
+        prompt: string
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
+        kind: 'generate-voice-memo'
+        text: string
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
         kind: 'send-vault-file'
         ref: string
       }
@@ -20545,6 +20589,18 @@ describe('steered final segments', () => {
     return 'kind' in step && step.kind === 'send-vault-file'
   }
 
+  function isGenerateVoiceMemoStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'generate-voice-memo' }> {
+    return 'kind' in step && step.kind === 'generate-voice-memo'
+  }
+
+  function isGenerateImageStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'generate-image' }> {
+    return 'kind' in step && step.kind === 'generate-image'
+  }
+
   function isReactToMessageStep(
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'react-to-message' }> {
@@ -20587,6 +20643,7 @@ describe('steered final segments', () => {
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
       responseCardsAvailable?: boolean
       turnStatus?: 'completed' | 'failed'
+      voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
     } = {},
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
@@ -20720,6 +20777,54 @@ describe('steered final segments', () => {
                   callId: `call-steered-vault-${step.id}`,
                   namespace: 'murph',
                   tool: 'send_vault_file',
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  contentItems: [{
+                    text: step.expectedText,
+                    type: 'inputText',
+                  }],
+                  success: step.expectedSuccess ?? true,
+                },
+              })
+              continue
+            }
+
+            if (isGenerateVoiceMemoStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  arguments: { text: step.text },
+                  namespace: 'murph',
+                  tool: 'generate_voice_memo',
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  contentItems: [{
+                    text: step.expectedText,
+                    type: 'inputText',
+                  }],
+                  success: step.expectedSuccess ?? true,
+                },
+              })
+              continue
+            }
+
+            if (isGenerateImageStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  arguments: { prompt: step.prompt },
+                  namespace: 'murph',
+                  tool: 'generate_image',
                   turnId: 'turn-steered-finals',
                 },
               }))
@@ -20870,12 +20975,18 @@ describe('steered final segments', () => {
         input.authorizeAcceptedMessageTarget ?? null,
       codexCommand: 'codex',
       codexHome,
-      ...(input.responseCardsAvailable === true
+      ...(input.responseCardsAvailable === true || input.voiceMemoRuntime != null ||
+          input.hostedToolContext?.vaultFileSendAvailable === true
         ? {
             dynamicTools: resolveMurphDynamicTools({
-              responseCardsAvailable: true,
+              responseCardsAvailable: input.responseCardsAvailable === true,
+              vaultFileSendAvailable:
+                input.hostedToolContext?.vaultFileSendAvailable === true,
+              voiceMemoGenerationAvailable: input.voiceMemoRuntime != null,
             }),
-            groupConversation: false,
+            ...(input.responseCardsAvailable === true
+              ? { groupConversation: false }
+              : {}),
           }
         : {}),
       hostedToolContext: input.hostedToolContext,
@@ -20884,6 +20995,7 @@ describe('steered final segments', () => {
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
+      voiceMemoRuntime: input.voiceMemoRuntime,
       prompt: 'First question',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -21190,6 +21302,110 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe(
       'Strength session\n\nBench press: Set 1: 185 lb × 8',
     )
+    expect(result.finalMessage).not.toContain('evt_')
+    expect(result.transcriptMessage).toContain(
+      '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
+    )
+  })
+
+  it('renders every semantic workout set from trusted state when the card envelope is too large', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+        expectedText:
+          'workout card envelope too large; full text recovery selected',
+        id: 871,
+        kind: 'attach-response-card',
+      },
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.finalMessage).not.toMatch(/delete|merge|shorten|simplify/iu)
+    for (let exerciseIndex = 0; exerciseIndex < 16; exerciseIndex += 1) {
+      expect(result.finalMessage).toContain(
+        `Capacity exercise ${exerciseIndex + 1}:`,
+      )
+      for (let setIndex = 0; setIndex < 16; setIndex += 1) {
+        expect(result.finalMessage).toContain(
+          `set ${setIndex + 1}: pending; target Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        )
+      }
+    }
+    expect(result.finalMessage).not.toContain('evt_')
+    expect(result.transcriptMessage).toContain(
+      '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
+    )
+  })
+
+  it('blocks response effects before work after workout card overflow owns presentation', async () => {
+    const generateAndUpload = vi.fn(async () => ({
+      attachmentId: 'attachment_should_not_exist',
+      filename: 'voice-should-not-exist.mp3',
+    }))
+    const sendVaultFile = vi.fn(async () => ({
+      filename: 'report.pdf',
+      status: 'approved' as const,
+    }))
+    const launchImageGeneration = vi.fn(() => 'started' as const)
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+        expectedText:
+          'workout card envelope too large; full text recovery selected',
+        id: 872,
+        kind: 'attach-response-card',
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'voice memo generation cannot be combined with a response card',
+        id: 873,
+        kind: 'generate-voice-memo',
+        text: 'Read the workout aloud.',
+      },
+      {
+        expectedSuccess: false,
+        expectedText: 'image generation cannot be combined with a response card',
+        id: 874,
+        kind: 'generate-image',
+        prompt: 'Render the workout.',
+      },
+      {
+        expectedSuccess: false,
+        expectedText: 'vault-file sending cannot be combined with a response card',
+        id: 875,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+      },
+    ], {
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+        imageGenerationLauncher: { launch: launchImageGeneration },
+        sendVaultFile,
+        vaultFileSendAvailable: true,
+      }),
+      responseCardsAvailable: true,
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        generateAndUpload,
+        kind: 'linq',
+      },
+    })
+
+    expect(generateAndUpload).not.toHaveBeenCalled()
+    expect(launchImageGeneration).not.toHaveBeenCalled()
+    expect(sendVaultFile).not.toHaveBeenCalled()
+    expect(result.finalAction).toBeNull()
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.finalMessage).toContain('Capacity exercise 1:')
+    expect(result.finalMessage).toContain('Capacity exercise 16:')
     expect(result.finalMessage).not.toContain('evt_')
     expect(result.transcriptMessage).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
