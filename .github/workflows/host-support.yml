@@ -308,7 +308,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run fixture coverage
-        run: pnpm exec tsx e2e/smoke/verify-scenario-integrity.ts --coverage
+        run: pnpm test:scenario-integrity
 
   release-checks-linux:
     name: Release checks (ubuntu)

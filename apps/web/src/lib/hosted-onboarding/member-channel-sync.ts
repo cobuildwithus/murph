@@ -5,7 +5,12 @@ import {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import {
+  appendHostedMailboxEnvelopeTx,
+  appendPreparedHostedMailboxEnvelopeTx,
+  prepareHostedMailboxEnvelopeAppend,
+  type PreparedHostedMailboxEnvelopeAppend,
+} from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "./errors";
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
@@ -24,6 +29,39 @@ type HostedMemberEmailLinkedClient = PrismaClient | Prisma.TransactionClient;
 
 export interface HostedMailboxAppendDispatch {
   mailboxItemId: string;
+}
+
+export async function prepareHostedMemberChannelsUpdatedForSnapshot(input: {
+  emailLinked: boolean;
+  member: HostedMemberSnapshot;
+  memberId: string;
+  occurredAt: string;
+  prisma: PrismaClient;
+  sourceType: string;
+}): Promise<PreparedHostedMailboxEnvelopeAppend> {
+  const memberChannels = resolveHostedMemberChannelsForSnapshot({
+    emailLinked: input.emailLinked,
+    member: input.member,
+  });
+  return prepareHostedMailboxEnvelopeAppend({
+    envelope: buildHostedExecutionMemberChannelsUpdatedWake({
+      eventId: buildHostedMemberChannelsUpdatedEventId(input),
+      memberChannels,
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    prisma: input.prisma,
+  });
+}
+
+export async function commitPreparedHostedMemberChannelsUpdatedTx(input: {
+  prepared: PreparedHostedMailboxEnvelopeAppend;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedMailboxAppendDispatch> {
+  return appendPreparedHostedMailboxEnvelopeTx({
+    prepared: input.prepared,
+    tx: input.prisma,
+  });
 }
 
 export function resolveHostedMemberChannelsForSnapshot(input: {

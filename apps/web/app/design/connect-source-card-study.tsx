@@ -294,15 +294,22 @@ export function ConnectSourceCardStudy({
   const disconnectDialogSource = studyState === "source"
     ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) => source.id === "zepp")
       ?.source ?? null
-    : studyState === "dexcom-disconnect"
-      ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) =>
-          source.id === "dexcom-recovery"
+    : studyState === "disconnect-retry"
+      ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
+          source.id === "garmin-disconnect-journey"
         )?.source ?? null
-      : studyState === "shared-dexcom-disconnect"
-        ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
-            source.id === "garmin-disconnect-journey"
+      : studyState === "dexcom-disconnect"
+        ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) =>
+            source.id === "dexcom-recovery"
           )?.source ?? null
-      : null;
+        : studyState === "shared-dexcom-disconnect"
+          ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
+              source.id === "garmin-disconnect-journey"
+            )?.source ?? null
+          : null;
+  const disconnectErrorMessage = studyState === "disconnect-retry"
+    ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
+    : null;
   const disconnectUnavailableSourceNames = disconnectDialogSource
     ? [
         ...DESIGN_CONNECT_SOURCE_CASES,
@@ -355,7 +362,7 @@ export function ConnectSourceCardStudy({
 
       <ConnectDisconnectDialog
         affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
-        errorMessage={null}
+        errorMessage={disconnectErrorMessage}
         inert
         pending={false}
         source={disconnectDialogSource}

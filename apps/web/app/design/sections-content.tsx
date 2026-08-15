@@ -531,6 +531,7 @@ export function SectionsContent() {
           <SiteFooter
             id="design-site-footer-preview"
             referralsAvailable
+            vitalsMode="synthetic"
           />
         </div>
       </StudySection>
@@ -623,7 +624,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Account deletion during migration maintenance">
+      <StudySection title="Account deletion maintenance and provider-access recovery">
         <AccountDeletionMaintenanceStudy />
       </StudySection>
 

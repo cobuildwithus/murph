@@ -67,11 +67,14 @@ import type {
   CodexAppServerLiveTurn,
   CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
+import type {
+  AssistantRuntimeIssueInput,
+} from '../src/assistant/issue-reporting.ts'
 import {
-  buildRuntimeIssueInputForFailedCodexAction,
   CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
   CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
   createCodexActionDiagnosticsReducer,
+  createCodexActionRuntimeIssueTracker,
 } from '../src/assistant-codex/action-diagnostics.ts'
 import {
   buildCodexThreadResumeParams,
@@ -10867,6 +10870,7 @@ describe('assistant codex runtime', () => {
   })
 
   it('builds privacy-safe runtime issues for failed Codex action events', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
     const failedCommandEvent = {
       method: 'item/completed',
       params: {
@@ -10875,7 +10879,7 @@ describe('assistant codex runtime', () => {
           type: 'commandExecution',
           exitCode: 2,
           durationMs: 6_000,
-          commandLabel: 'cat /tmp/private-file',
+          command: 'cat /tmp/private-file',
           filePaths: ['/tmp/private-file'],
           stdout: 'private stdout',
           stderr: 'private stderr',
@@ -10885,12 +10889,12 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-current',
       },
     }
-    expect(
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(failedCommandEvent),
-        rawEvent: failedCommandEvent,
-      }),
-    ).toEqual({
+    const failedCommandIssue = issueTracker.recordEvent({
+      activeTurnId: 'turn-current',
+      normalizedEvent: normalizeCodexEvent(failedCommandEvent),
+      rawEvent: failedCommandEvent,
+    })
+    expect(failedCommandIssue).toEqual({
       component: 'assistant.codex-action',
       operation: 'command.execution',
       phase: 'provider_turn',
@@ -10900,6 +10904,8 @@ describe('assistant codex runtime', () => {
       summary: 'Codex command execution failed during provider turn.',
       details: {
         actionKind: 'command.execution',
+        commandFamily: 'unknown',
+        commandOrdinal: 1,
         durationMsBucket: '5_30s',
         exitCode: 2,
         outputBytesBucket: 'lt_1kb',
@@ -10919,12 +10925,11 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-current',
       },
     }
-    expect(
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(successfulCommandEvent),
-        rawEvent: successfulCommandEvent,
-      }),
-    ).toBeNull()
+    expect(issueTracker.recordEvent({
+      activeTurnId: 'turn-current',
+      normalizedEvent: normalizeCodexEvent(successfulCommandEvent),
+      rawEvent: successfulCommandEvent,
+    })).toBeNull()
 
     const failedMcpEvent = {
       method: 'item/completed',
@@ -10948,12 +10953,11 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-current',
       },
     }
-    expect(
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(failedMcpEvent),
-        rawEvent: failedMcpEvent,
-      }),
-    ).toEqual({
+    expect(issueTracker.recordEvent({
+      activeTurnId: 'turn-current',
+      normalizedEvent: normalizeCodexEvent(failedMcpEvent),
+      rawEvent: failedMcpEvent,
+    })).toEqual({
       component: 'assistant.codex-action',
       operation: 'mcp.tool.call',
       phase: 'tool_call',
@@ -10987,7 +10991,8 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-current',
       },
     }
-    const dynamicIssue = buildRuntimeIssueInputForFailedCodexAction({
+    const dynamicIssue = issueTracker.recordEvent({
+      activeTurnId: 'turn-current',
       normalizedEvent: normalizeCodexEvent(failedDynamicEvent),
       rawEvent: failedDynamicEvent,
     })
@@ -11010,10 +11015,7 @@ describe('assistant codex runtime', () => {
 
     const encodedIssues = JSON.stringify([
       dynamicIssue,
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(failedCommandEvent),
-        rawEvent: failedCommandEvent,
-      }),
+      failedCommandIssue,
     ])
     expect(encodedIssues).not.toContain('private stdout')
     expect(encodedIssues).not.toContain('private stderr')
@@ -11021,6 +11023,462 @@ describe('assistant codex runtime', () => {
     expect(encodedIssues).not.toContain('/tmp/private-file')
     expect(encodedIssues).not.toContain('private prompt')
     expect(encodedIssues).not.toContain('dynamic private output')
+  })
+
+  it('attributes command failures without retaining private command data', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
+    const commandEvent = (input: {
+      command?: string
+      event: 'completed' | 'started'
+      exitCode?: number
+      id: string
+      output?: string
+    }) => ({
+      method: `item/${input.event}`,
+      params: {
+        item: {
+          id: input.id,
+          type: 'commandExecution',
+          ...(input.command === undefined
+            ? {}
+            : { command: input.command }),
+          ...(input.exitCode === undefined
+            ? {}
+            : { exitCode: input.exitCode }),
+          ...(input.output === undefined
+            ? {}
+            : { aggregatedOutput: input.output }),
+        },
+      },
+    })
+    const record = (event: ReturnType<typeof commandEvent>) =>
+      issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(event),
+        rawEvent: event,
+      })
+
+    record(commandEvent({
+      command: 'rg private-query /tmp/private-record',
+      event: 'started',
+      id: 'search-no-match',
+    }))
+    expect(record(commandEvent({
+      event: 'completed',
+      exitCode: 1,
+      id: 'search-no-match',
+      output: 'private search output',
+    }))).toBeNull()
+    expect(record(commandEvent({
+      command: 'grep private-query /tmp/private-record',
+      event: 'completed',
+      exitCode: 1,
+      id: 'grep-no-match',
+    }))).toBeNull()
+
+    record(commandEvent({
+      command: 'rg private-query /tmp/private-record',
+      event: 'started',
+      id: 'search-error',
+    }))
+    const searchIssue = record(commandEvent({
+      event: 'completed',
+      exitCode: 2,
+      id: 'search-error',
+      output: 'private regex error',
+    }))
+    expect(searchIssue).toMatchObject({
+      details: {
+        actionKind: 'command.execution',
+        commandFamily: 'search',
+        commandOrdinal: 3,
+        exitCode: 2,
+        recoveredAfterFailure: false,
+      },
+    })
+    expect(searchIssue).not.toHaveProperty('details.failureClass')
+
+    expect(record(commandEvent({
+      command: 'rg narrower-query /tmp/private-record',
+      event: 'completed',
+      exitCode: 0,
+      id: 'search-recovery',
+    }))).toBeNull()
+    expect(searchIssue).toMatchObject({
+      details: {
+        recoveredAfterFailure: true,
+      },
+    })
+
+    const operationalFailures = [
+      {
+        command: 'cat /tmp/private-record',
+        exitCode: 126,
+      },
+      {
+        command: 'cat /tmp/private-record',
+        exitCode: 127,
+      },
+      {
+        command: 'cat /tmp/private-record',
+        exitCode: 124,
+      },
+      {
+        command: 'bash -lc "rg private-query /tmp/private-record"',
+        exitCode: 1,
+      },
+      {
+        command: 'rg private-query /tmp/private-record | head',
+        exitCode: 1,
+      },
+    ] as const
+    const operationalIssues: AssistantRuntimeIssueInput[] = []
+
+    for (const [index, example] of operationalFailures.entries()) {
+      const event = commandEvent({
+        command: example.command,
+        event: 'completed',
+        exitCode: example.exitCode,
+        id: `classified-${index}`,
+        output: 'private command output',
+      })
+      const issue = record(event)
+      expect(issue).toMatchObject({
+        details: {
+          commandFamily: 'unknown',
+          commandOrdinal: index + 5,
+          exitCode: example.exitCode,
+        },
+      })
+      expect(issue).not.toHaveProperty('details.failureClass')
+      if (issue) {
+        operationalIssues.push(issue)
+      }
+      expect(record(event)).toBeNull()
+    }
+
+    const encodedIssues = JSON.stringify([
+      searchIssue,
+      ...operationalIssues,
+    ])
+    expect(encodedIssues).not.toContain('private-query')
+    expect(encodedIssues).not.toContain('/tmp/private-record')
+    expect(encodedIssues).not.toContain('private search output')
+    expect(encodedIssues).not.toContain('private regex error')
+    expect(encodedIssues).not.toContain('private command output')
+    expect(encodedIssues).not.toContain('search-error')
+  })
+
+  it('recognizes quoted and escaped direct search arguments conservatively', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
+    let commandSequence = 0
+    const recordCommand = (input: {
+      command: string
+      exitCode: number
+      output?: string
+    }) => {
+      const id = `item-sensitive-${++commandSequence}`
+      const startedEvent = {
+        method: 'item/started',
+        params: {
+          item: {
+            command: input.command,
+            id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      const completedEvent = {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: input.output ?? 'private search output',
+            exitCode: input.exitCode,
+            id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      expect(issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(startedEvent),
+        rawEvent: startedEvent,
+      })).toBeNull()
+      return issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(completedEvent),
+        rawEvent: completedEvent,
+      })
+    }
+
+    const expectedNoMatches = [
+      "rg -n 'private(foo|bar)$' /tmp/private-record",
+      'grep -E "private(foo|bar){2}$" /tmp/private-record',
+      'rg private\\(foo\\|bar\\)\\{2\\}\\$ /tmp/private-record',
+      "rg 'private$(literal)`text`' /tmp/private-record",
+    ]
+    for (const command of expectedNoMatches) {
+      expect(recordCommand({ command, exitCode: 1 })).toBeNull()
+    }
+
+    const searchIssue = recordCommand({
+      command: "rg 'private(foo|bar){2}$' /tmp/private-record",
+      exitCode: 2,
+      output: 'private regex error',
+    })
+    expect(searchIssue).toMatchObject({
+      details: {
+        commandFamily: 'search',
+        commandOrdinal: 5,
+        exitCode: 2,
+        recoveredAfterFailure: false,
+      },
+    })
+    expect(recordCommand({
+      command: 'grep -E "private(foo|bar){2}$" /tmp/private-record',
+      exitCode: 0,
+    })).toBeNull()
+    expect(searchIssue).toMatchObject({
+      details: {
+        recoveredAfterFailure: true,
+      },
+    })
+
+    const commandsWithExecutableShellSyntax = [
+      'rg private-query /tmp/private-record | head',
+      'rg private-query /tmp/private-record; head /tmp/private-record',
+      'rg private-query /tmp/private-record && head /tmp/private-record',
+      'rg private-query /tmp/private-record || head /tmp/private-record',
+      'rg private-query > /tmp/private-record',
+      'rg (private-query) /tmp/private-record',
+      'rg "$(private-command)" /tmp/private-record',
+      'rg "`private-command`" /tmp/private-record',
+      "rg 'private-query /tmp/private-record",
+      'rg "private-query /tmp/private-record',
+      'rg private-query\n/tmp/private-record',
+      `rg ${'x'.repeat(4096)}`,
+    ]
+    const executableShellIssues = commandsWithExecutableShellSyntax.map(
+      (command, index) => {
+        const issue = recordCommand({ command, exitCode: 1 })
+        expect(issue).toMatchObject({
+          details: {
+            commandFamily: 'unknown',
+            commandOrdinal: index + 7,
+            exitCode: 1,
+          },
+        })
+        return issue
+      },
+    )
+
+    const encodedIssues = JSON.stringify([
+      searchIssue,
+      ...executableShellIssues,
+    ])
+    expect(encodedIssues).not.toContain('private(foo|bar)')
+    expect(encodedIssues).not.toContain('private-query')
+    expect(encodedIssues).not.toContain('private-command')
+    expect(encodedIssues).not.toContain('/tmp/private-record')
+    expect(encodedIssues).not.toContain('private search output')
+    expect(encodedIssues).not.toContain('private regex error')
+    expect(encodedIssues).not.toContain('item-sensitive')
+    expect(encodedIssues).not.toContain('turn-current')
+  })
+
+  it('saturates command ordinals without retaining boundary command data', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
+    const recordCompletedCommand = (input: {
+      command: string
+      exitCode: number
+      id: string
+      output?: string
+    }) => {
+      const event = {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: input.output ?? '',
+            command: input.command,
+            exitCode: input.exitCode,
+            id: input.id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      return issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(event),
+        rawEvent: event,
+      })
+    }
+
+    for (let index = 0; index < 10_005; index += 1) {
+      expect(recordCompletedCommand({
+        command: 'true',
+        exitCode: 0,
+        id: `successful-command-${index}`,
+      })).toBeNull()
+    }
+
+    const boundaryIssue = recordCompletedCommand({
+      command: 'cat /tmp/private-ordinal-record',
+      exitCode: 127,
+      id: 'private-boundary-item',
+      output: 'private boundary output',
+    })
+    expect(boundaryIssue).toMatchObject({
+      details: {
+        commandFamily: 'unknown',
+        commandOrdinal: 10_000,
+        exitCode: 127,
+      },
+    })
+
+    const encodedIssue = JSON.stringify(boundaryIssue)
+    expect(encodedIssue).not.toContain('/tmp/private-ordinal-record')
+    expect(encodedIssue).not.toContain('private boundary output')
+    expect(encodedIssue).not.toContain('private-boundary-item')
+    expect(encodedIssue).not.toContain('turn-current')
+  })
+
+  it('propagates a recovered command failure through a successful provider turn', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-command-failure-recovery-',
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: { id: 'thread-command-failure-recovery' },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: { id: 'turn-command-failure-recovery' },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            method: 'item/started',
+            params: {
+              item: {
+                command: 'rg private-query /tmp/private-record',
+                id: 'command-private-failure',
+                type: 'commandExecution',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                aggregatedOutput: 'private command failure output',
+                exitCode: 2,
+                id: 'command-private-failure',
+                status: 'failed',
+                type: 'commandExecution',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/started',
+            params: {
+              item: {
+                command: 'rg narrower-query /tmp/private-record',
+                id: 'command-private-recovery',
+                type: 'commandExecution',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                aggregatedOutput: 'private command recovery output',
+                exitCode: 0,
+                id: 'command-private-recovery',
+                status: 'completed',
+                type: 'commandExecution',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-command-failure-recovery',
+                phase: 'final_answer',
+                text: 'Recovered safely.',
+                type: 'agentMessage',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-command-failure-recovery',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      prompt: 'recover from a failed search',
+      workingDirectory,
+    })
+    expect(result.finalMessage).toBe('Recovered safely.')
+    expect(result.runtimeIssueInputs).toEqual([
+      {
+        component: 'assistant.codex-action',
+        operation: 'command.execution',
+        phase: 'provider_turn',
+        issueKind: 'tool_error',
+        severity: 'warning',
+        errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+        summary: 'Codex command execution failed during provider turn.',
+        details: {
+          actionKind: 'command.execution',
+          commandFamily: 'search',
+          commandOrdinal: 1,
+          durationMsBucket: 'unknown',
+          exitCode: 2,
+          outputBytesBucket: 'lt_1kb',
+          recoveredAfterFailure: true,
+        },
+      },
+    ])
+    const encodedIssues = JSON.stringify(result.runtimeIssueInputs)
+    expect(encodedIssues).not.toContain('private-query')
+    expect(encodedIssues).not.toContain('narrower-query')
+    expect(encodedIssues).not.toContain('/tmp/private-record')
+    expect(encodedIssues).not.toContain('private command failure output')
+    expect(encodedIssues).not.toContain('private command recovery output')
+    expect(encodedIssues).not.toContain('command-private-failure')
+    expect(encodedIssues).not.toContain('command-private-recovery')
+    expect(encodedIssues).not.toContain('thread-command-failure-recovery')
+    expect(encodedIssues).not.toContain('turn-command-failure-recovery')
   })
 
   it('emits Codex action diagnostics when a turn fails', async () => {
