@@ -51,6 +51,7 @@ interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubL
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
+    sameWorkerVersion?: boolean;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult>;
@@ -834,6 +835,9 @@ export async function handleTestStartStuckInvocationRoute(
     return json({ error: "Unsupported test stuck invocation age." }, 400);
   }
   return json(await stub.startStuckInvocationForTest({
+    ...(context.url.searchParams.get("sameWorkerVersion") === "1"
+      ? { sameWorkerVersion: true }
+      : {}),
     ...(startedAgoMs === null ? {} : { startedAgoMs }),
     userId,
   }));

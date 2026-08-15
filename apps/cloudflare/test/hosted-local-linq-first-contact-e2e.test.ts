@@ -4,6 +4,7 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -96,14 +97,18 @@ const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
-const directWakeRetryBarrierPreloadUrl = new URL(
+const directWakeRetryBarrierPreloadPath = fileURLToPath(new URL(
   "../../web/test/support/hosted-local-direct-wake-retry-barrier-preload.ts",
   import.meta.url,
-).href;
+));
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
 const testControlsEnabled = process.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS === "1";
+const directWakeRetrySetupTimeoutMs =
+  process.env.MURPH_HOSTED_LOCAL_E2E_EXTENDED_SETUP_TIMEOUT === "1"
+    ? 900_000
+    : 300_000;
 const productionDescribe = testControlsEnabled ? describe.skip : describe;
 const testControlsDescribe = testControlsEnabled ? describe : describe.skip;
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -200,6 +205,15 @@ it("extracts only the first retry_later direct-wake correlation", () => {
     `  orchestrationAttemptId: '${orchestrationAttemptId}',`,
     "}",
   ].join("\n"))).toBeNull();
+});
+
+it("summarizes direct-wake diagnostics without correlation identifiers", () => {
+  expect(summarizeDirectWakeCompletions([
+    "Hosted direct ensure wake completed.",
+    "{ attemptNumber: 1, kind: 'retry_later' }",
+    "Hosted direct ensure wake completed.",
+    "{ attemptNumber: 2, kind: 'runtime_processing_accepted' }",
+  ].join("\n"))).toBe("1:retry_later,2:runtime_processing_accepted");
 });
 
 it("releases a blocked direct-wake retry during barrier teardown", async () => {
@@ -1328,13 +1342,13 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
           directWakeRetryBarrier.url,
         MURPH_HOSTED_LOCAL_DIRECT_WAKE_RETRY_BARRIER_USER_ID:
           directRetryRecoveryUserId,
-        NODE_OPTIONS: appendNodeImportOption(
+        NODE_OPTIONS: appendNodeRequireOption(
           process.env.NODE_OPTIONS,
-          directWakeRetryBarrierPreloadUrl,
+          directWakeRetryBarrierPreloadPath,
         ),
       },
     });
-  }, 300_000);
+  }, directWakeRetrySetupTimeoutMs);
 
   itOutsideFastDeployGate(
     "recovers one inbound through a direct retry without duplicate provider or Linq work",
@@ -1370,6 +1384,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
       // fetch. Release only after the same fence crosses startup grace.
       const stuckFence = await activeScenario.harness.startStuckInvocationForTest(
         directRetryRecoveryUserId,
+        { sameWorkerVersion: true },
       );
       const providerBaseline = countAssistantProviderResponsesApiRequests();
       const acceptedReplyBaseline = activeLinqStub.countAcceptedSends(
@@ -1825,14 +1840,15 @@ async function waitForPromiseWithTimeout(
   }
 }
 
-function appendNodeImportOption(
+function appendNodeRequireOption(
   existingNodeOptions: string | undefined,
-  importUrl: string,
+  requirePath: string,
 ): string {
   const existing = existingNodeOptions?.trim();
+  const requireOption = `--require=${JSON.stringify(requirePath)}`;
   return existing
-    ? `${existing} --import=${importUrl}`
-    : `--import=${importUrl}`;
+    ? `${existing} ${requireOption}`
+    : requireOption;
 }
 
 function readObservedLinqIdempotencyKey(request: ObservedLinqRequest): string | null {
@@ -2026,6 +2042,7 @@ async function waitForDirectRetryLatencyTrace(input: {
 }) {
   const startedAt = Date.now();
   let lastError: unknown = null;
+  let lastObservation = "none";
   while (Date.now() - startedAt < 30_000) {
     try {
       const mailboxItem = await readHostedMailboxItemForTest({
@@ -2039,6 +2056,14 @@ async function waitForDirectRetryLatencyTrace(input: {
         userId: input.userId,
       });
       const orchestration = trace.phaseBreakdown?.orchestration;
+      lastObservation = [
+        `directRequest=${orchestration?.directEnsureRequestStartedAtEpochMs
+          ? "present"
+          : "missing"}`,
+        `directResult=${orchestration?.directEnsureResultKind ?? "missing"}`,
+        `runtimeAttempt=${trace.runtimeAttemptId ? "present" : "missing"}`,
+        `temporalSignal=${trace.temporalSignalAcceptedAt ? "present" : "missing"}`,
+      ].join(",");
       if (
         trace.temporalSignalAcceptedAt
         && trace.runtimeAttemptId
@@ -2054,24 +2079,57 @@ async function waitForDirectRetryLatencyTrace(input: {
     await sleep(100);
   }
 
+  const latestOutput = requireScenario().harness.stdoutTail(2_000_000);
+  const lastErrorKind = lastError instanceof Error
+    ? lastError.name
+    : typeof lastError;
   throw new Error(
-    `Timed out waiting for the direct-retry latency trace: ${String(lastError)}`,
+    "Timed out waiting for the direct-retry latency trace. "
+      + `Observation: ${lastObservation}. `
+      + `Direct wake completions: ${summarizeDirectWakeCompletions(latestOutput)}. `
+      + `Last read error kind: ${lastErrorKind}.`,
   );
 }
 
 async function waitForFirstDirectRetryLog(): Promise<string> {
   const startedAt = Date.now();
+  let latestOutput = "";
   while (Date.now() - startedAt < 30_000) {
-    const orchestrationAttemptId = readFirstDirectRetryOrchestrationAttemptId(
-      requireScenario().harness.stdoutTail(2_000_000),
-    );
+    latestOutput = requireScenario().harness.stdoutTail(2_000_000);
+    const orchestrationAttemptId =
+      readFirstDirectRetryOrchestrationAttemptId(latestOutput);
     if (orchestrationAttemptId) {
       return orchestrationAttemptId;
     }
     await sleep(25);
   }
 
-  throw new Error("Timed out waiting for the first direct retry_later log.");
+  throw new Error(
+    "Timed out waiting for the first direct retry_later log. "
+      + `Observed direct wake completions: ${summarizeDirectWakeCompletions(latestOutput)}.`,
+  );
+}
+
+function summarizeDirectWakeCompletions(output: string): string {
+  const message = "Hosted direct ensure wake completed.";
+  const completions: string[] = [];
+  let cursor = 0;
+  while (cursor < output.length) {
+    const messageIndex = output.indexOf(message, cursor);
+    if (messageIndex < 0) {
+      break;
+    }
+    const block = output.slice(messageIndex, messageIndex + 2_000);
+    const attemptNumber = block.match(
+      /attemptNumber[^0-9]{0,24}([0-9]+)/u,
+    )?.[1] ?? "unknown";
+    const kind = block.match(
+      /kind[^A-Za-z_]{0,24}([a-z_]+)/u,
+    )?.[1] ?? "unknown";
+    completions.push(`${attemptNumber}:${kind}`);
+    cursor = messageIndex + message.length;
+  }
+  return completions.slice(-10).join(",") || "none";
 }
 
 function readFirstDirectRetryOrchestrationAttemptId(

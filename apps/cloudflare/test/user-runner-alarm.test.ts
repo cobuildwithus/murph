@@ -5825,6 +5825,33 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).toEqual([]);
   });
 
+  it("can seed a same-version stuck invocation for hosted-local tests", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerHarness({
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const stuck = await runner.startStuckInvocationForTest({
+      sameWorkerVersion: true,
+      userId: TEST_USER_ID,
+    });
+
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      `${TEST_USER_ID}--v-current`,
+    );
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: stuck.attemptId,
+      active_expires_at: null,
+    });
+    expect(alarms).toEqual([]);
+  });
+
   it("can age an existing active fence without replacing its attempt", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

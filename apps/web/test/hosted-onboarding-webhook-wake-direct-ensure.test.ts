@@ -11,7 +11,11 @@ const mocks = vi.hoisted(() => ({
   prewarmRuntimeShell: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   recordHostedIngressAcceptedFromMailboxItem: vi.fn(async () => undefined),
-  recordHostedIngressDirectEnsureTiming: vi.fn(async () => undefined),
+  recordHostedIngressDirectEnsureTiming: vi.fn(async () => ({
+    matchedCount: 1,
+    recorded: true,
+    unmatchedCount: 0,
+  })),
   recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
@@ -88,6 +92,11 @@ function buildWakeHandoff(
 describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValue({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -275,6 +284,59 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       source: "linq",
     });
     consoleInfo.mockRestore();
+  });
+
+  it("logs only aggregate metadata when direct timing no longer matches", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    mocks.recordHostedIngressDirectEnsureTiming.mockResolvedValueOnce({
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
+    });
+    mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
+      input.onTiming({
+        directEnsureAction: "woken",
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        directEnsureResultKind: "runtime_processing_accepted",
+        directEnsureRuntimeAttemptId: "runtime-attempt-test",
+        orchestrationAttemptId: input.orchestrationAttemptId,
+        tokenAcquiredAtEpochMs: 1_777_000_000_010,
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+      });
+      return {
+        action: "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
+        runtimeAttemptId: "runtime-attempt-test",
+      };
+    });
+
+    try {
+      await expect(maybeHandoffHostedExecutionWebhookWake({
+        response,
+        scheduleAfterResponse: (task) => {
+          afterResponseTasks.push(task);
+        },
+        wakeHandoff: buildWakeHandoff(),
+      })).resolves.toMatchObject({
+        reason: "temporal-signaled",
+        signalAccepted: true,
+      });
+      await Promise.all(afterResponseTasks.map((task) => task()));
+
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Hosted direct ensure wake timing record did not match.",
+        {
+          matchedCount: 0,
+          source: "linq",
+          unmatchedCount: 1,
+        },
+      );
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 
   it("uses one bounded retry after retry_later without another Temporal signal", async () => {

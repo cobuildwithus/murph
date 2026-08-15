@@ -2258,6 +2258,15 @@ describe("hosted runtime latency dashboard store", () => {
       authenticatedUserId: "member_latency_1",
       mailboxItemId: "mailbox_latency_1",
       phaseBreakdown: {
+        orchestration: {
+          directEnsureAction: "replaced",
+          directEnsureOrchestrationAttemptId:
+            "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          directEnsureRequestStartedAtEpochMs: 1_777_000_001_001,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_001_010,
+          directEnsureResultKind: "runtime_processing_accepted",
+          directEnsureRuntimeAttemptId: "runtime-attempt-direct",
+        },
         restore: { decryptMs: 5 },
         schemaVersion: 1,
         wake: { foregroundImportStartedAtEpochMs: 1_777_000_001_011 },
@@ -2294,11 +2303,24 @@ describe("hosted runtime latency dashboard store", () => {
       assistant: {
         firstCodexOutputObservedAtEpochMs: Date.parse("2026-06-09T10:05:03.000Z"),
       },
+      orchestration: {
+        directEnsureAction: "replaced",
+        directEnsureOrchestrationAttemptId:
+          "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        directEnsureRequestStartedAtEpochMs: 1_777_000_001_001,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_001_010,
+        directEnsureResultKind: "runtime_processing_accepted",
+        directEnsureRuntimeAttemptId: "runtime-attempt-direct",
+      },
       provider: { promptBuildMs: 22 },
       restore: { decryptMs: 5 },
       schemaVersion: 1,
       wake: { foregroundImportStartedAtEpochMs: 1_777_000_001_011 },
     });
+    const setBasedSql = prisma.readSetBasedMutationSql().join("\n");
+    expect(setBasedSql).toContain("WHEN 'opaque_identifier'");
+    expect(setBasedSql).toContain("length(leaf.value #>> '{}') <= 192");
+    expect(setBasedSql).toContain("~ '^[A-Za-z0-9][A-Za-z0-9._:-]*$'");
   });
 
   it("persists sanitized stored phaseBreakdown when incoming diagnostics are idempotent", async () => {

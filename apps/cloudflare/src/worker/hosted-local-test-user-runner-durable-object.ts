@@ -50,6 +50,7 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
   }
 
   async startStuckInvocationForTest(input: {
+    sameWorkerVersion?: boolean;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {

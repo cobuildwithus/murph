@@ -2182,6 +2182,31 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("starts a same-version hosted-local stuck invocation for correctly bound callers", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/stuck-invocation?sameWorkerVersion=1",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({
+      sameWorkerVersion: true,
+      userId: "member_123",
+    });
+  });
+
   it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {
     const stub = createUserRunnerStub();
     const wake = createWake("evt_123");
@@ -4769,6 +4794,7 @@ type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
   runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
+    sameWorkerVersion?: boolean;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult>;

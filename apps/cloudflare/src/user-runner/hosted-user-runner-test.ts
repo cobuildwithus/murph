@@ -3,6 +3,9 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  resolveHostedExecutionRunnerContainerName,
+} from "../hosted-runner-container-identity.js";
+import {
   HostedUserRunner,
 } from "./hosted-user-runner.js";
 import {
@@ -32,10 +35,12 @@ export interface HostedRunnerAgedActiveFenceTestResult {
 
 export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   private readonly testState: DurableObjectStateLike;
+  private readonly testRunnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
 
   constructor(...args: ConstructorParameters<typeof HostedUserRunner>) {
     super(...args);
     this.testState = args[0];
+    this.testRunnerRuntimeEnvSource = args[3] ?? {};
   }
 
   installRuntimeProcessingStateTimingHooksForTest(input: {
@@ -115,12 +120,18 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   }
 
   async startStuckInvocationForTest(input: {
+    sameWorkerVersion?: boolean;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.stateStore.bindUser(input.userId);
     const token = await this.stateStore.beginWriteFence({
-      runnerContainerName: input.userId,
+      runnerContainerName: input.sameWorkerVersion
+        ? resolveHostedExecutionRunnerContainerName({
+            source: this.testRunnerRuntimeEnvSource,
+            userId: input.userId,
+          })
+        : input.userId,
       userId: input.userId,
     });
     if (typeof input.startedAgoMs === "number") {

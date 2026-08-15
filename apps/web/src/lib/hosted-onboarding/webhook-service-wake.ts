@@ -197,12 +197,19 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   };
 
   try {
-    await recordHostedIngressDirectEnsureTiming({
+    const result = await recordHostedIngressDirectEnsureTiming({
       expectedUserId: timingRecord.userId,
       mailboxItemId: timingRecord.mailboxItemId,
       phaseBreakdown,
       source: timingRecord.source,
     });
+    if (!result.recorded) {
+      console.warn("Hosted direct ensure wake timing record did not match.", {
+        matchedCount: result.matchedCount,
+        source: timingRecord.source,
+        unmatchedCount: result.unmatchedCount,
+      });
+    }
   } catch (error) {
     console.warn("Hosted direct ensure wake timing record failed.", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
