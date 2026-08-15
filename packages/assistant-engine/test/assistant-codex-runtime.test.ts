@@ -21790,6 +21790,71 @@ describe('steered final segments', () => {
     )
   })
 
+  it('emits generated-audio timing from the Codex voice-memo tool boundary', async () => {
+    const onTraceEvent = vi.fn()
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: 'generated voice memo attached to the final response',
+        id: 872,
+        kind: 'generate-voice-memo',
+        text: 'Read this aloud.',
+      },
+    ], {
+      onTraceEvent,
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        async generateAndUpload(request) {
+          request.recordPhaseTiming?.({
+            deliveryMode: 'synchronous',
+            generationDurationMs: 21,
+            mediaKind: 'voice_memo',
+            outcome: 'succeeded',
+            terminalPhase: 'upload',
+            uploadDurationMs: 13,
+          })
+          return {
+            attachmentId: 'attachment_timing_trace',
+            filename: 'timing-trace.mp3',
+            ok: true,
+          }
+        },
+        kind: 'linq',
+      },
+    })
+
+    const timingEvents = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => asRecord(event.rawEvent).schema ===
+        'murph.assistant-codex-generated-audio-phase-timing.v1')
+
+    expect(timingEvents).toEqual([
+      {
+        codexThreadId: 'thread-steered-finals',
+        rawEvent: {
+          schema: 'murph.assistant-codex-generated-audio-phase-timing.v1',
+          type: 'assistant.codex.generated_audio_phase_timing',
+          generatedAudioDeliveryMode: 'synchronous',
+          generatedAudioGenerationDurationMs: 21,
+          generatedAudioKind: 'voice_memo',
+          generatedAudioOutcome: 'succeeded',
+          generatedAudioTerminalPhase: 'upload',
+          generatedAudioUploadDurationMs: 13,
+        },
+        updates: [],
+      },
+    ])
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        filename: 'timing-trace.mp3',
+        kind: 'voice_memo',
+      }),
+    ])
+  })
+
   it('blocks response effects before work after workout card overflow owns presentation', async () => {
     const generateAndUpload = vi.fn(async () => ({
       attachmentId: 'attachment_should_not_exist',
