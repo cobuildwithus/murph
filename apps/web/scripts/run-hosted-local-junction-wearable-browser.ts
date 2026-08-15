@@ -17,6 +17,7 @@ import {
 import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-challenge.ts";
 
 interface BrowserConfig {
+  browserChannel: "chrome" | undefined;
   disclosureSourceName: "Oura" | "Whoop";
   email: string;
   headless: boolean;
@@ -97,7 +98,10 @@ async function main(): Promise<void> {
   clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
 
   stage = "browser_launch";
-  const browser = await chromium.launch({ headless: config.headless });
+  const browser = await chromium.launch({
+    channel: config.browserChannel,
+    headless: config.headless,
+  });
   try {
     const context = await browser.newContext({
       locale: "en-US",
@@ -449,6 +453,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   }
 
   return {
+    browserChannel: !headless && !manualAuthorizationAllowed ? "chrome" : undefined,
     disclosureSourceName: source === "oura" ? "Oura" : "Whoop",
     email: readHostedLocalBrowserEnvironmentValue(
       environment,

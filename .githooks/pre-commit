@@ -2,9 +2,10 @@
 # Keep generated CLI artifacts in sync with the CLI config surface.
 #
 # CI ("Release package coverage (cli)") fails when
-# packages/cli/config.schema.json or packages/cli/src/incur.generated.ts drift
-# from the generator output. When a commit touches packages/cli/, regenerate
-# those artifacts and re-stage them so a stale copy can never be committed.
+# packages/cli/config.schema.json, packages/cli/src/incur.generated.ts, or
+# packages/cli/src/vault-cli-skill-hash.generated.ts drift from the generator
+# output. When a commit touches packages/cli/, regenerate those artifacts and
+# re-stage them so a stale copy can never be committed.
 #
 # Installed by the root `prepare` script from the branch-independent primary checkout.
 set -euo pipefail
@@ -22,19 +23,80 @@ guard_root="$(
 MURPH_WORKTREE_GUARD_CURRENT_WORKTREE="$repo_root" \
   "$guard_root/scripts/worktree-storage-guard"
 
-# Fast no-op unless the staged change touches the CLI package.
-if ! git diff --cached --name-only | grep -q '^packages/cli/'; then
+# Fast no-op unless the staged change touches the CLI package. A path-scoped
+# tree comparison remains correct for rename-outs, quoted paths, and large
+# diffs under pipefail.
+if git diff --cached --quiet -- packages/cli/; then
   exit 0
 fi
+
+merge_head="$(git rev-parse --verify --quiet MERGE_HEAD 2>/dev/null || true)"
+if [[ -n "$merge_head" ]] \
+  && git diff --cached --quiet "$merge_head" -- packages/cli/; then
+  echo "pre-commit: skipped CLI config-schema generation for base-only merge changes." >&2
+  exit 0
+fi
+
+generated_cli_outputs=(
+  packages/cli/config.schema.json
+  packages/cli/src/incur.generated.ts
+  packages/cli/src/vault-cli-skill-hash.generated.ts
+)
+
+assert_clean_cli_inputs() {
+  local has_untracked_cli_input=false
+  local untracked_cli_scan_complete=false
+  local untracked_path
+
+  while IFS= read -r -d '' untracked_path; do
+    if [[ "$untracked_path" == '__MURPH_CLI_INPUT_SCAN_COMPLETE__' ]]; then
+      untracked_cli_scan_complete=true
+      continue
+    fi
+    case "$untracked_path" in
+      packages/cli/config.schema.json|packages/cli/src/incur.generated.ts|packages/cli/src/vault-cli-skill-hash.generated.ts)
+        ;;
+      *)
+        has_untracked_cli_input=true
+        ;;
+    esac
+  done < <(
+    git -C "$repo_root" ls-files --others --exclude-standard -z -- packages/cli/ \
+      && printf '%s\0' '__MURPH_CLI_INPUT_SCAN_COMPLETE__'
+  )
+
+  if [[ "$untracked_cli_scan_complete" != true ]]; then
+    echo "pre-commit: could not inspect untracked CLI generator inputs." >&2
+    return 1
+  fi
+
+  if ! git -C "$repo_root" diff --quiet -- \
+    packages/cli/ \
+    ':(exclude)packages/cli/config.schema.json' \
+    ':(exclude)packages/cli/src/incur.generated.ts' \
+    ':(exclude)packages/cli/src/vault-cli-skill-hash.generated.ts' \
+    || [[ "$has_untracked_cli_input" == true ]]; then
+    echo "pre-commit: unstaged CLI generator inputs would make generated artifacts differ from the commit tree; stage or restore them first." >&2
+    return 1
+  fi
+}
+
+assert_clean_cli_inputs
 
 if ! pnpm --dir "$repo_root/packages/cli" gen:config-schema >/dev/null 2>&1; then
   echo "pre-commit: CLI config-schema generation failed; commit continues, CI will verify." >&2
   exit 0
 fi
 
-if ! git -C "$repo_root" diff --quiet -- \
-  packages/cli/config.schema.json packages/cli/src/incur.generated.ts; then
-  git -C "$repo_root" add \
-    packages/cli/config.schema.json packages/cli/src/incur.generated.ts
+assert_clean_cli_inputs
+
+generated_cli_outputs_changed=false
+if ! git -C "$repo_root" diff --quiet -- "${generated_cli_outputs[@]}" \
+  || ! git -C "$repo_root" diff --cached --quiet -- "${generated_cli_outputs[@]}"; then
+  generated_cli_outputs_changed=true
+fi
+
+git -C "$repo_root" add "${generated_cli_outputs[@]}"
+if [[ "$generated_cli_outputs_changed" == true ]]; then
   echo "pre-commit: regenerated CLI config schema and re-staged it." >&2
 fi

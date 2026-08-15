@@ -1756,7 +1756,10 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       importItemContext: input.importItemContext,
       input: input.input,
       lanes: ["system"],
-      prefetch: importPage === 1 ? input.input.initialMailboxPrefetch ?? null : null,
+      // The shared foreground prefetch can predate a system wake that arrived
+      // while its conversation item was being imported. Establish a fresh
+      // system-lane boundary before starting the assistant.
+      prefetch: null,
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,
       suppressNoopRuntimeLog: true,
