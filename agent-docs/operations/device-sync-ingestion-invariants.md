@@ -163,6 +163,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    keep the slowest upstream bucket, longest signed delivery, and earliest
    receipt without pairing timestamps from different events. Source attribution
    coalesces only when every timing hint agrees; conflicting sources are omitted.
+   Junction execution authority separately classifies the complete inline
+   payload, including direct, nested, and grouped records. One unambiguous inline
+   source overrides an envelope routing hint; mixed sources are retryable, and a
+   source-unknown data event is retryable while source-specific migration
+   admission is active. Lifecycle and data-less historical-complete events do
+   not manufacture data-source authority.
    The runtime log contains only the coarse upstream bucket, connector provider,
    normalized source provider when known, job kind, provider-send-to-receipt,
    receipt-to-import, queue, and execution durations. `provider` names the

@@ -4932,6 +4932,67 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   );
 });
 
+test("Junction webhook jobs use complete inline provenance and reject mixed sources", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const parseWebhook = async (input: {
+    data: Record<string, unknown>;
+    messageId: string;
+  }) => {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.activity.created",
+        user_id: "junction-user-inline-source",
+        data: input.data,
+      },
+      messageId: input.messageId,
+      timestamp: "1775174400",
+    });
+    return requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    });
+  };
+
+  const nested = await parseWebhook({
+    data: {
+      id: "activity-nested-fitbit",
+      provider: "junction",
+      results: [{
+        date: "2026-04-02",
+        sourceProviderSlug: "fitbit",
+        steps: 4321,
+      }],
+    },
+    messageId: "msg_activity_nested_fitbit",
+  });
+
+  assert.equal(nested.sourceProviderSlug, "fitbit");
+  assert.equal(nested.dataSourceProviderSlug, "fitbit");
+  assert.equal(nested.jobs[0]?.payload?.sourceProviderSlug, "fitbit");
+
+  await assert.rejects(
+    parseWebhook({
+      data: {
+        groups: {
+          fitbit: [{ data: [{ date: "2026-04-02", steps: 4321 }] }],
+          garmin: [{ data: [{ date: "2026-04-02", steps: 1234 }] }],
+        },
+        id: "activity-mixed-sources",
+      },
+      messageId: "msg_activity_mixed_sources",
+    }),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_SOURCE_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+});
+
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);

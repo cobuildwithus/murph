@@ -58,6 +58,19 @@ export function isJunctionCredentialIndependentInlineImportJob(input: {
 export function resolveDeviceSyncJunctionInlineSourceProviderSlug(
   record: Record<string, unknown>,
 ): string | null {
+  const classification = classifyDeviceSyncJunctionInlineSourceProviderSlug(record);
+  return classification.status === "resolved"
+    ? classification.sourceProviderSlug
+    : null;
+}
+
+export type DeviceSyncJunctionInlineSourceProviderClassification =
+  | { status: "ambiguous" | "missing" }
+  | { sourceProviderSlug: string; status: "resolved" };
+
+export function classifyDeviceSyncJunctionInlineSourceProviderSlug(
+  record: Record<string, unknown>,
+): DeviceSyncJunctionInlineSourceProviderClassification {
   const slugs = new Set<string>();
   const addRecordSlug = (entry: Record<string, unknown>): void => {
     const slug = normalizeHostedJunctionProviderSlug(
@@ -93,7 +106,16 @@ export function resolveDeviceSyncJunctionInlineSourceProviderSlug(
     }
   }
 
-  return slugs.size === 1 ? [...slugs][0] ?? null : null;
+  if (slugs.size === 0) {
+    return { status: "missing" };
+  }
+  if (slugs.size > 1) {
+    return { status: "ambiguous" };
+  }
+  const sourceProviderSlug = [...slugs][0];
+  return sourceProviderSlug
+    ? { sourceProviderSlug, status: "resolved" }
+    : { status: "missing" };
 }
 
 function readJunctionInlineNestedRecords(

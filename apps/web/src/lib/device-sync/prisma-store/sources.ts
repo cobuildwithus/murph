@@ -211,8 +211,8 @@ export class PrismaHostedConnectionSourceStore {
 
   /**
    * Records that an inbound payload carried this source's data. Matching is by
-   * provider slug because that is what the webhook envelope names, and the
-   * update is forward-only so an out-of-order redelivery cannot rewind the
+   * provider slug after ingress has resolved complete webhook provenance, and
+   * the update is forward-only so an out-of-order redelivery cannot rewind the
    * signal a stall is measured against.
    *
    * This never creates a source row: a payload that arrives before the connect

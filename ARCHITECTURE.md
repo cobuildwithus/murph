@@ -1171,9 +1171,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   existing cutover claim and provider-terminal source projection pending until
   canonical import, checkpoint-safe acknowledgement, and boundary publication
   finish; a cutover claim that wins the lock makes later Fitbit-attributed
-  webhook admission retryable. Google Health-attributed webhook admission
-  likewise stays retryable while non-terminal Fitbit owns the canonical window,
-  matching the importer fence instead of acknowledging a no-op. Device sync
+  webhook admission retryable. Junction classifies the complete inline payload,
+  including nested and grouped records, before Web admission; mixed sources and
+  source-unknown data during a migration are retried instead of entering dirty
+  or encrypted-payload state. Google Health data likewise stays provider-
+  retryable while non-terminal Fitbit owns the canonical window, matching the
+  importer fence instead of acknowledging a no-op. The locked admission attempt
+  still stamps successor freshness and appends the existing deterministic
+  reconcile wake, while provider trace completion and dirty/payload acceptance
+  wait for terminal Fitbit. Lifecycle and data-less historical-complete events
+  remain admissible. Device sync
   advances a per-resource legacy coverage boundary only
   after the corresponding canonical import is durably accepted. Every accepted
   daily fact immediately advances its overlap fence, but an active-provider

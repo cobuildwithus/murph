@@ -2,7 +2,7 @@
 
 Status: in progress; final ReviewGPT and current-base gates remain
 Created: 2026-08-11
-Updated: 2026-08-13
+Updated: 2026-08-15
 
 ## Goal
 
@@ -165,6 +165,13 @@ Updated: 2026-08-13
     and boundary publication; a claim-first webhook remains retryable through
     the existing source fence. Add no new state or process, prove the composed
     owner boundary, push, and continue to a valid pass.
+21. Completed: final round 14 found that envelope-only source admission created
+    a circular successor-freshness gate and could misclassify nested or grouped
+    Junction payloads. Classify complete inline provenance, reject mixed or
+    migration-source-unknown data before acceptance, and let a Google Health
+    data attempt stamp freshness plus the existing deterministic reconcile wake
+    while leaving provider trace and payload work retryable until Fitbit is
+    terminal. Preserve lifecycle and data-less historical completion admission.
 
 ## Decisions
 
@@ -314,6 +321,13 @@ Updated: 2026-08-13
   provider-terminal source projection, an incomplete post-revoke claim remains
   fenced without a duplicate revoke, and the existing provider-absence recovery
   plus terminal projection resume only after dirty work clears.
+- Final round-fourteen remediation proof: all 236 focused Junction provider tests
+  and all 145 hosted Web wake tests pass. Device-sync and Web typechecks pass.
+  Regressions prove nested provenance overrides an aggregator envelope, mixed
+  grouped sources retry, Google data stamps successor freshness without dirty or
+  trace acceptance while Fitbit is active, source lifecycle and data-less
+  historical completion remain admissible, and provider redelivery enters the
+  ordinary data path after Fitbit becomes terminal.
 - Final round-twelve finding was reproduced at both lossy authority boundaries
   and in hosted ordering. The correction carries canonical post-close
   provider-pull finalization through importer receipt, local source summary, and
@@ -324,8 +338,9 @@ Updated: 2026-08-13
 
 ## Remaining handoff
 
-- Keep the pull request draft.
-- Commit and push the round-twelve remediation, then continue the user-authorized
+- Keep the pull request draft until the corrected candidate is pushed and the
+  ReviewGPT/required-CI gates are started together.
+- Commit and push the round-fourteen remediation, then continue the user-authorized
   ReviewGPT loop against that exact head until it reaches a valid pass.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict

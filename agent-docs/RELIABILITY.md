@@ -644,9 +644,17 @@ Last verified: 2026-08-11
   detected dirty work keeps recovery pending; the shared admission lock prevents
   new Fitbit work from entering behind that claim, and provider-absence recovery
   can finalize after the dirty predicate clears without another revoke.
-  Google Health-attributed webhook work remains retryable while non-terminal
+  Junction webhook admission derives source authority from the complete inline
+  payload, including nested and grouped records, instead of trusting only the
+  envelope hint. Mixed inline sources and source-unknown data events during an
+  active Fitbit migration are retryable before dirty or payload acceptance.
+  Google Health-attributed data remains provider-retryable while non-terminal
   Fitbit owns canonical admission, so the importer fence cannot turn a durable
-  acceptance into an acknowledged no-op. The
+  acceptance into an acknowledged no-op. That retry still stamps successor
+  freshness and appends the existing deterministic reconcile wake under the
+  connection lock; provider trace completion and dirty/payload acceptance wait
+  until Fitbit is terminal. Source lifecycle and data-less historical-complete
+  events remain admissible because they do not create fenced canonical data. The
   check adds one bounded indexed `exists` query to cutover/recovery and only to
   a terminal Fitbit source projection during migration; ordinary provider
   scheduling and ingestion fanout are unchanged. Boundary

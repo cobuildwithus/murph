@@ -1985,19 +1985,29 @@ function isHostedGoogleHealthFitbitMigrationCutoverReady(
   );
 }
 
-function isHostedGoogleHealthFitbitWebhookSourceAdmitted(
+function hasHostedGoogleHealthFitbitMigrationSource(
   sources: readonly HostedDeviceConnectionSource[],
-  sourceProviderSlug: string,
 ): boolean {
-  if (sourceProviderSlug !== JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG) {
-    return true;
-  }
-  const legacySources = sources.filter((source) =>
+  return sources.some((source) => {
+    const sourceProviderSlug = normalizeJunctionProviderSlug(source.sourceProviderSlug);
+    return sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      || sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
+  });
+}
+
+function hasNonTerminalHostedGoogleHealthFitbitLegacySource(
+  sources: readonly HostedDeviceConnectionSource[],
+): boolean {
+  return sources.some((source) =>
     normalizeJunctionProviderSlug(source.sourceProviderSlug)
       === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    && !isGoogleHealthFitbitMigrationLegacyTerminal(source)
   );
-  return legacySources.length === 0
-    || legacySources.every(isGoogleHealthFitbitMigrationLegacyTerminal);
+}
+
+function isHostedJunctionDataWebhookEvent(eventType: string): boolean {
+  return eventType.startsWith("daily.data.")
+    || eventType.startsWith("historical.data.");
 }
 
 async function readCurrentSourceDisconnectTarget(input: {
@@ -2797,6 +2807,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
+          retrySourceAfterCommit: false,
           wakeMailboxItemId: null,
         };
       }
@@ -2812,6 +2823,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
+          retrySourceAfterCommit: false,
           wakeMailboxItemId: null,
         };
       }
@@ -2825,19 +2837,35 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
           httpStatus: 503,
         });
       }
-      const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
-      if (sourceProviderSlug) {
+      const dataSourceProviderSlug = normalizeJunctionProviderSlug(
+        input.dataSourceProviderSlug,
+      );
+      const eventSourceProviderSlug = normalizeJunctionProviderSlug(
+        input.sourceProviderSlug,
+      );
+      const sourceProviderSlug = dataSourceProviderSlug ?? eventSourceProviderSlug;
+      const unknownJunctionDataSource = input.provider === "junction"
+        && dataSourceProviderSlug === null
+        && eventSourceProviderSlug === null
+        && isHostedJunctionDataWebhookEvent(input.eventType);
+      if (sourceProviderSlug || unknownJunctionDataSource) {
+        const needsMigrationSourceSet = dataSourceProviderSlug
+          === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+          || unknownJunctionDataSource;
         const matchingSources = await input.store.listConnectionSources({
           connectionId: input.connectionId,
-          ...(sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+          ...(needsMigrationSourceSet
             ? {}
             : { sourceProviderSlug }),
         }, tx);
         if (
-          !isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)
-          || !isHostedGoogleHealthFitbitWebhookSourceAdmitted(
-            matchingSources,
-            sourceProviderSlug,
+          (
+            sourceProviderSlug !== null
+            && !isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)
+          )
+          || (
+            unknownJunctionDataSource
+            && hasHostedGoogleHealthFitbitMigrationSource(matchingSources)
           )
         ) {
           throw deviceSyncError({
@@ -2846,6 +2874,48 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
             retryable: true,
             httpStatus: 503,
           });
+        }
+        if (
+          dataSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+          && hasNonTerminalHostedGoogleHealthFitbitLegacySource(matchingSources)
+        ) {
+          await input.store.markConnectionSourceDataReceived({
+            connectionId: input.connectionId,
+            now: input.acceptedAt,
+            sourceProviderSlug: dataSourceProviderSlug,
+            tx,
+          });
+          const wake = buildHostedDeviceSyncWake({
+            connectionId: input.connectionId,
+            expectedConnectedAt: input.expectedConnectedAt,
+            hint: {
+              eventType: input.eventType,
+              occurredAt: input.occurredAt,
+              reason: "fitbit_migration_successor_arrival",
+              resourceCategory: input.resourceCategory ?? null,
+            },
+            occurredAt: input.occurredAt,
+            provider: input.provider,
+            source: "webhook-hint",
+            traceId: input.traceId,
+            userId: input.userId,
+          });
+          const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+            envelope: wake,
+            tx,
+          });
+          if (mailboxAppend.dedupeConflict) {
+            throw deviceSyncError({
+              code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+              httpStatus: 503,
+              message: "Hosted device-sync migration wake conflicted with an existing wake identity.",
+              retryable: true,
+            });
+          }
+          return {
+            retrySourceAfterCommit: true,
+            wakeMailboxItemId: mailboxAppend.item.id,
+          };
         }
       }
 
@@ -2926,6 +2996,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       }
 
       return {
+        retrySourceAfterCommit: false,
         wakeMailboxItemId,
       };
       },
@@ -2937,6 +3008,14 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   if (result.wakeMailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
       failureMode: "best_effort",
+    });
+  }
+  if (result.retrySourceAfterCommit) {
+    throw deviceSyncError({
+      code: "WEBHOOK_SOURCE_NOT_READY",
+      message: "Google Health delivery is waiting for Fitbit migration cutover.",
+      retryable: true,
+      httpStatus: 503,
     });
   }
 }

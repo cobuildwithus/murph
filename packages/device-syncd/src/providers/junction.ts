@@ -37,6 +37,7 @@ import {
   sanitizeHostedRuntimeDiagnosticText,
 } from "../hosted-runtime.ts";
 import {
+  classifyDeviceSyncJunctionInlineSourceProviderSlug,
   isJunctionCredentialIndependentInlineImportJob,
   resolveDeviceSyncJunctionInlineSourceProviderSlug,
 } from "../junction-inline-authority.ts";
@@ -2588,7 +2589,7 @@ export function createJunctionDeviceSyncProvider(
     const data = readPlainObject(verified.payload[JUNCTION_WEBHOOK_ROOT_FIELDS.data]);
     const externalAccountSelection = requireJunctionWebhookUserIdSelection(verified.payload, data);
     const resource = inferJunctionWebhookResource(eventType, data);
-    const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
+    const envelopeSourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
     const eventOccurredAt = extractJunctionWebhookOccurredAt(data);
     const occurredAt = eventOccurredAt ?? context.now;
@@ -2599,8 +2600,18 @@ export function createJunctionDeviceSyncProvider(
       externalAccountId: externalAccountSelection.userId,
       resource,
       summaryResources,
-      sourceProviderSlug,
+      sourceProviderSlug: envelopeSourceProviderSlug,
     });
+    const historicalPullCompleted = isJunctionHistoricalDataEvent(eventType)
+      && data !== null
+      && isJunctionHistoricalPullCompletedWebhookData(data, externalAccountSelection.userId);
+    const inlineSourceProviderSlug = resolveJunctionWebhookDataJobSourceProviderSlug(
+      webhookDataJsons,
+    );
+    const dataSourceProviderSlug = isJunctionDataEvent(eventType) && !historicalPullCompleted
+      ? inlineSourceProviderSlug ?? envelopeSourceProviderSlug
+      : null;
+    const sourceProviderSlug = dataSourceProviderSlug ?? envelopeSourceProviderSlug;
     const jobs = buildJunctionWebhookJobs({
       eventType,
       objectId,
@@ -2625,14 +2636,7 @@ export function createJunctionDeviceSyncProvider(
       // A historical-pull completion is a data-less notification, so accepting
       // its fetch job proves nothing arrived. Treating it as delivery would
       // refresh the arrival signal and hide the very stall this detects.
-      dataSourceProviderSlug: isJunctionDataEvent(eventType)
-          && !(
-            isJunctionHistoricalDataEvent(eventType)
-            && data !== null
-            && isJunctionHistoricalPullCompletedWebhookData(data, externalAccountSelection.userId)
-          )
-        ? sourceProviderSlug
-        : null,
+      dataSourceProviderSlug,
       jobs,
       unknownAccountAction: "accept",
     };
@@ -6700,13 +6704,50 @@ function buildJunctionWebhookDataJobJsons(input: {
   if (!record) {
     return [];
   }
+  const inlineSourceProviderSlug = resolveDeviceSyncJunctionInlineSourceProviderSlug(record);
 
   const withSource = stripUndefined({
     ...record,
     sourceProviderSlug:
-      normalizeProviderSlug(record.sourceProviderSlug) ?? input.sourceProviderSlug ?? undefined,
+      normalizeProviderSlug(record.sourceProviderSlug)
+      ?? inlineSourceProviderSlug
+      ?? input.sourceProviderSlug
+      ?? undefined,
   });
   return [serializeJunctionWebhookDataJobRecord(withSource)];
+}
+
+function resolveJunctionWebhookDataJobSourceProviderSlug(
+  webhookDataJsons: readonly string[],
+): string | null {
+  const sourceProviderSlugs = new Set<string>();
+  for (const webhookDataJson of webhookDataJsons) {
+    const record = parseJunctionWebhookDataJobRecord(webhookDataJson);
+    if (!record) {
+      throw junctionWebhookSourceNotReadyError();
+    }
+    const classification = classifyDeviceSyncJunctionInlineSourceProviderSlug(record);
+    if (classification.status === "ambiguous") {
+      throw junctionWebhookSourceNotReadyError();
+    }
+    if (classification.status === "resolved") {
+      sourceProviderSlugs.add(classification.sourceProviderSlug);
+    }
+  }
+
+  if (sourceProviderSlugs.size > 1) {
+    throw junctionWebhookSourceNotReadyError();
+  }
+  return [...sourceProviderSlugs][0] ?? null;
+}
+
+function junctionWebhookSourceNotReadyError(): DeviceSyncError {
+  return deviceSyncError({
+    code: "WEBHOOK_SOURCE_NOT_READY",
+    message: "Junction webhook data source provenance was ambiguous. Retry later.",
+    retryable: true,
+    httpStatus: 503,
+  });
 }
 
 function serializeJunctionWebhookDataJobRecord(record: Record<string, unknown>): string {
