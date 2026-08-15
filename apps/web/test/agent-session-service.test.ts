@@ -1297,8 +1297,9 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       const harness = createRetrySafeStoreHarness(bearerToken);
       const refreshTokens = vi.fn(async () => {
         throw deviceSyncError({
-          code: "OURA_REFRESH_TOKEN_ROTATION_MISSING",
-          message: "Oura refresh response did not include a replacement refresh token.",
+          accountStatus: "reauthorization_required",
+          code: "TOKEN_REFRESH_STATE_UNKNOWN",
+          message: "Device sync token refresh state is unknown. Reconnect this source before syncing again.",
           retryable: false,
         });
       });

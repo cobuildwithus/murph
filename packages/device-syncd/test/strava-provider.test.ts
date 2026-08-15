@@ -424,8 +424,8 @@ describe("Strava device-sync provider", () => {
         refreshToken: "stored-refresh-token",
       })),
     ).rejects.toMatchObject({
-      accountStatus: null,
-      code: "STRAVA_REFRESH_TOKEN_MISSING",
+      accountStatus: "reauthorization_required",
+      code: "TOKEN_REFRESH_STATE_UNKNOWN",
     });
   });
 

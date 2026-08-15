@@ -1168,6 +1168,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
               code: "OURA_REFRESH_TOKEN_ROTATION_MISSING",
               message: "Oura refresh response did not include a replacement refresh token.",
               retryable: false,
+              accountStatus: "reauthorization_required",
             }),
           ),
       });

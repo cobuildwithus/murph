@@ -218,6 +218,8 @@ export async function persistProviderTokenRefreshErrorStatus(input: {
     sanitizeHostedRuntimeErrorText(
       persistedError instanceof Error ? persistedError.message : null,
     ) ?? "Token refresh state is unknown. Reconnect this source.";
+  const tokenRefreshStateIsUnknown = isDeviceSyncError(persistedError)
+    && persistedError.code === "TOKEN_REFRESH_STATE_UNKNOWN";
   const seedAccount: PublicDeviceSyncAccount = {
     ...input.account,
     lastErrorCode: sanitizedErrorCode,
@@ -233,7 +235,7 @@ export async function persistProviderTokenRefreshErrorStatus(input: {
     provider: input.account.provider,
     kind: accountStatus === "disconnected" ? "disconnected" : "reauthorization_required",
     occurredAt: input.now,
-    reason: persistedError === input.error ? "token_refresh_failed" : "token_refresh_state_unknown",
+    reason: tokenRefreshStateIsUnknown ? "token_refresh_state_unknown" : "token_refresh_failed",
     revokeWarning: {
       code: sanitizedErrorCode,
       message: sanitizedErrorMessage,
@@ -242,7 +244,8 @@ export async function persistProviderTokenRefreshErrorStatus(input: {
     tx: input.tx,
   });
   await input.store.syncDurableConnectionState(seedAccount, input.tx);
-  const providerClassifiedFailure = persistedError === input.error;
+  const providerClassifiedFailure = persistedError === input.error
+    && !tokenRefreshStateIsUnknown;
   const shouldClearTokenBundle = accountStatus === "disconnected"
     || !providerClassifiedFailure;
 
