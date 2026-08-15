@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-14
+Last verified: 2026-08-15
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -493,6 +493,32 @@ Stop and reconsider the architecture if the spike shows: backfill too
 shallow for credible baselines; background latency incompatible with daily
 challenge mechanics; overlapping-writer dedupe intractable server-side; or
 licensing unresolved.
+
+## Automated hosted/native E2E acceptance
+
+The required automated acceptance lane for companion auth/control/device-sync
+changes is `agent-docs/references/native-ios-hosted-e2e.md`. It supersedes any
+plan language that treats a mocked or hermetic native/client flow as acceptance
+proof. Lower-level route, SDK-wrapper, hosted-local, and fixture tests remain
+useful, but they cannot satisfy this gate.
+
+For a selected PR, the main repository must deploy the exact PR SHA as a normal
+minified build into the dedicated hosted E2E Vercel project and dispatch the
+exact approved private iOS workflow revision. The private lane must run the
+normally compiled app on a real physical iPhone through real Privy OTP, the real
+companion admission/legal-consent/sign-in-token and persisted-member contract,
+the real Junction/Vital SDK, and the real iOS HealthKit permission UI. There is
+no synthetic token, fake provider, fixture transport, local hosted substitute,
+or product test bypass. Repeatable PR signup uses the existing Web Settings
+user-owned account-deletion boundary; it does not add or restore an
+internal/admin reset route. Production canary mode keeps a dedicated persistent
+identity and is explicitly non-destructive.
+
+The main repo consumes only the exact private workflow run's status/conclusion.
+Auth, OTP, legal/HealthKit consent, and provider-token stages must not export
+screenshots, video, raw xcresult bundles, traces, response bodies, or log tails.
+Any private diagnostic artifact is limited to privacy-safe structured stage
+name/status data as defined by the durable cross-repository contract.
 
 ## TestFlight MVP Acceptance
 

@@ -1,6 +1,6 @@
 # Native Companion Apps (Health Sync)
 
-Last verified: 2026-08-12
+Last verified: 2026-08-15
 
 Current iOS distribution status: approved for the App Store. The canonical
 public listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
@@ -346,6 +346,18 @@ Out of scope for the public v1: chat surfaces, vault UI, direct WHOOP BLE,
 widgets, Live Activities, watchOS, Android. The overnight PRV capability is an
 internal beta and does not expand the App Store surface until its authorization,
 privacy, signed-device, and paired-ECG gates pass.
+
+### Automated native acceptance
+
+Auth/control/device-sync changes use the protected cross-repository acceptance
+contract in `agent-docs/references/native-ios-hosted-e2e.md`. The required PR
+proof is the normally compiled iOS app on a physical iPhone against the exact
+PR SHA deployed as a real hosted/minified Web build, with real Privy OTP, real
+companion admission/legal-consent/sign-in-token persistence, real Junction/Vital
+SDK calls, and the real HealthKit permission UI. Mocked, fixture, hosted-local,
+or hermetic client coverage cannot replace that gate. Repeatability uses only
+the existing user-owned account deletion boundary; production canary mode is
+fail-closed and non-destructive.
 
 ### App Store review requirements (verified June 2026)
 
