@@ -49,7 +49,6 @@ export type HostedConnectionSourceRecord =
 export type HostedConnectionSourceAdmissionCandidate = Omit<
   Pick<
     HostedConnectionSourceRecord,
-    | "id"
     | "lastErrorCode"
     | "lastErrorMessage"
     | "lifecycleEpoch"
@@ -802,7 +801,6 @@ function mapHostedConnectionSourceAdmissionCandidate(
   record: HostedConnectionSourceRecord,
 ): HostedConnectionSourceAdmissionCandidate {
   return {
-    id: record.id,
     lastErrorCode: record.lastErrorCode,
     lastErrorMessage: record.lastErrorMessage,
     lifecycleEpoch: readSourceLifecycleEpoch(record.lifecycleEpoch),

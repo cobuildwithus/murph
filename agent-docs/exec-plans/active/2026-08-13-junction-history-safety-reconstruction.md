@@ -438,6 +438,30 @@ Updated: 2026-08-14
   tactical branch. Owner-local Web and real-SQLite/service proofs remain the
   test boundary; the previously rejected cross-owner mega-test is still
   unnecessary.
+- Valid final ReviewGPT round 11 reviewed exact head
+  `b2c71effbe36ac36f5797566ac4f6dbb968de785` in the existing thread and
+  returned `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE` after a substantive
+  full-snapshot audit. The response hash matches the package-owned
+  `gpt-5-6-pro` sidecar. One earlier attempt failed before send when the known
+  shared transient PR-context directory lost `pr-body.md`; the pinned Phlebas
+  retry sent once and completed after about 77 minutes.
+- Accepted the remaining alias-identity seam. The bounded webhook admission
+  reader correctly projects an alias-only Apple Health row onto canonical
+  semantic authority without rewriting it, but its cross-provider-I/O proof
+  also captured the physical Prisma row ID. An ordinary owning source read can
+  replace that alias row with a canonical row while preserving every semantic
+  lifecycle field; the later ID comparison then terminally consumes the valid
+  registration without lifecycle or work effects. A migrated-Postgres race
+  reproduced the exact epoch-1 disconnected result after physical rekey.
+- The round-11 retrospective keeps the original round-2 decision: canonical
+  source identity, lifecycle epoch, status/fence, error state, timestamp, and
+  parent credential epoch are authority; a physical storage ID is not. Delete
+  `id` only from this bounded cross-provider-I/O candidate, mapper, and
+  comparator. Retain unrelated row-ID proofs whose transactional owner first
+  physically canonicalizes its rows. This shrinks the proof instead of adding
+  a schema field, alias compatibility owner, retry, queue, manager, repair, or
+  reconciliation path. One real-Postgres owner-race test is the complete proof
+  boundary; no cross-owner mega-test is needed.
 
 ## Verification
 
@@ -611,3 +635,17 @@ Updated: 2026-08-14
     prepared Web typechecks pass; the touched Web file passes its owning ESLint
     configuration. The hosted stale-residue guard, stale-helper scan, privacy
     scan, and `git diff --check` pass.
+  - Round-11 physical-rekey proof first reproduced the bug on the unmodified
+    comparator in a migrated Postgres database: the provider check was active
+    and an owning source-list transaction replaced the alias row with a
+    canonical row at unchanged lifecycle authority, but final admission left
+    the source disconnected at epoch 1 and created none of the accepted work
+    effects. After deleting the physical row ID from this proof, the same race
+    advances epoch 1 to 2, clears all twelve target schedule-time coordinates,
+    preserves target blood pressure and sibling Garmin weight coverage, settles
+    the trace, and creates one dirty owner, signal, mailbox item, and wake.
+  - The complete hosted webhook, source-store, and migrated-Postgres authority
+    lane passes 175 tests, including the existing credential, epoch, fence,
+    status, error, and timestamp supersession cases. Prepared Web typecheck and
+    touched-file lint pass. The hosted stale-residue guard, targeted proof-owner
+    inspection, privacy scan, and `git diff --check` pass.

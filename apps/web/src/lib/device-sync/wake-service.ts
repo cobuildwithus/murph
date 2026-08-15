@@ -2757,8 +2757,7 @@ function hostedConnectionSourceAdmissionMatchesProof(
   expected: HostedConnectionSourceAdmissionCandidate,
   current: HostedConnectionSourceAdmissionCandidate,
 ): boolean {
-  return expected.id === current.id
-    && expected.lastErrorCode === current.lastErrorCode
+  return expected.lastErrorCode === current.lastErrorCode
     && expected.lastErrorMessage === current.lastErrorMessage
     && expected.lifecycleEpoch === current.lifecycleEpoch
     && expected.lastSeenAt.getTime() === current.lastSeenAt.getTime()

@@ -6,17 +6,79 @@ import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/co
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 import type { DeviceSyncRegistry } from "@murphai/device-syncd/types";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedDeviceSyncControlPlaneContext } from "@/src/lib/device-sync/control-plane-context";
-import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import {
+  mapHostedConnectionRecord,
+  PrismaDeviceSyncControlPlaneStore,
+} from "@/src/lib/device-sync/prisma-store";
 import { HostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { HostedDeviceSyncWebhookAdminService } from "@/src/lib/device-sync/webhook-admin-service";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { revokeHostedConsentScope } from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
+
+const orchestrationMocks = vi.hoisted(() => ({
+  signalHostedDeviceSyncMailboxRuntime: vi.fn(async () => ({
+    signalAccepted: true as const,
+    workflowId: "hosted-device-sync-webhook-authority-test",
+  })),
+}));
+const mailboxCryptoMocks = vi.hoisted(() => ({
+  encryptHostedMailboxPayloadStringFromPreparedRoot: vi.fn(async (input: {
+    value: string | null | undefined;
+  }) => input.value === null || input.value === undefined
+    ? null
+    : `test-ciphertext:${input.value}`),
+  prepareHostedDomainRootForWeb: vi.fn(async (input: {
+    domain: string;
+    userId: string;
+  }) => Object.freeze({
+    domain: input.domain,
+    rootKeyId: "test-ingress-root",
+    userId: input.userId,
+  })),
+  revalidatePreparedHostedDomainRootForWebTx: vi.fn(async (input: {
+    prepared: { rootKeyId: string };
+  }) => ({
+    root: Promise.resolve({}),
+    rootKeyId: input.prepared.rootKeyId,
+  })),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedDeviceSyncMailboxRuntime:
+    orchestrationMocks.signalHostedDeviceSyncMailboxRuntime,
+}));
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >("@/src/lib/hosted-crypto/domain-root-store");
+  return {
+    ...actual,
+    prepareHostedDomainRootForWeb: mailboxCryptoMocks.prepareHostedDomainRootForWeb,
+    revalidatePreparedHostedDomainRootForWebTx:
+      mailboxCryptoMocks.revalidatePreparedHostedDomainRootForWebTx,
+  };
+});
+vi.mock("@/src/lib/hosted-mailbox/encryption", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-mailbox/encryption")
+  >("@/src/lib/hosted-mailbox/encryption");
+  return {
+    ...actual,
+    encryptHostedMailboxPayloadStringFromPreparedRoot:
+      mailboxCryptoMocks.encryptHostedMailboxPayloadStringFromPreparedRoot,
+  };
+});
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -322,9 +384,34 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
   setHostedSecureBoxStringTestCodecForTests(null);
 }
 
+function addHistoryCoverage(
+  metadata: Record<string, unknown>,
+  providerSlug: string,
+  resource: string,
+  version: number,
+): Record<string, unknown> {
+  const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata,
+    providerSlug,
+    resource,
+    version,
+  });
+  if (!update) {
+    throw new TypeError("Expected representable Junction history coverage.");
+  }
+  return { ...metadata, [update.metadataKey]: update.value };
+}
+
 describe.skipIf(!runPostgresProof)(
   "prepared device-webhook authority revalidation (real PostgreSQL)",
   () => {
+    beforeEach(() => {
+      orchestrationMocks.signalHostedDeviceSyncMailboxRuntime.mockClear();
+      mailboxCryptoMocks.encryptHostedMailboxPayloadStringFromPreparedRoot.mockClear();
+      mailboxCryptoMocks.prepareHostedDomainRootForWeb.mockClear();
+      mailboxCryptoMocks.revalidatePreparedHostedDomainRootForWebTx.mockClear();
+    });
+
     it("terminally settles a delayed signed Junction registration after consent is revoked during source cleanup", async () => {
       const fixture = await createFixture({
         sourceLastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -441,6 +528,164 @@ describe.skipIf(!runPostgresProof)(
           expectedSource: supersededSource,
           traceId: prepared.traceId,
         });
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("admits a registration when the source owner physically canonicalizes the same Apple lifecycle during provider I/O", async () => {
+      const fixture = await createFixture({ sourceLastErrorCode: null });
+      const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "apple_health_kit",
+      });
+      const siblingSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "garmin",
+      });
+      if (!canonicalSourceInstanceKey || !siblingSourceInstanceKey) {
+        throw new TypeError("Expected canonical Junction source identities.");
+      }
+
+      let metadata: Record<string, unknown> = {};
+      for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+        metadata = addHistoryCoverage(metadata, "apple_health_kit", resource, version);
+      }
+      metadata = addHistoryCoverage(metadata, "apple_health_kit", "blood_pressure", 1);
+      metadata = addHistoryCoverage(metadata, "garmin", "weight", 1);
+
+      await fixture.store.syncDurableConnectionMetadata(fixture.connectionId, metadata);
+      await fixture.prisma.deviceConnectionSource.update({
+        data: {
+          sourceInstanceKey: "jxn_src_legacy_apple_health",
+          sourceProviderSlug: "apple_health",
+        },
+        where: { id: fixture.sourceId },
+      });
+      await fixture.store.upsertConnectionSource({
+        connectionId: fixture.connectionId,
+        firstSeenAt: fixture.receivedAt.toISOString(),
+        lastSeenAt: fixture.receivedAt.toISOString(),
+        sourceInstanceKey: siblingSourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      });
+
+      const providerFetch = vi.fn(async () => {
+        await fixture.store.withHealthDataAdmissionLock(
+          fixture.memberId,
+          fixture.connectionId,
+          async (tx) => {
+            const sources = await fixture.store.listConnectionSources(
+              fixture.connectionId,
+              tx,
+            );
+            expect(sources).toEqual(expect.arrayContaining([
+              expect.objectContaining({
+                lifecycleEpoch: 1,
+                sourceInstanceKey: canonicalSourceInstanceKey,
+                sourceProviderSlug: "apple_health_kit",
+                status: "disconnected",
+              }),
+            ]));
+          },
+        );
+        await expect(fixture.prisma.deviceConnectionSource.findUnique({
+          where: { id: fixture.sourceId },
+        })).resolves.toBeNull();
+        return new Response(JSON.stringify({
+          data: [{ slug: "apple_health_kit", status: "connected" }],
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      });
+      const registry = createJunctionRegistry(providerFetch);
+
+      try {
+        const prepared = await prepareRegistration({ fixture, registry });
+        const consumeService = createIngressService({
+          fixture,
+          headers: new Headers(),
+          registry,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        expect(providerFetch).toHaveBeenCalledOnce();
+        const sources = await fixture.prisma.deviceConnectionSource.findMany({
+          orderBy: { sourceProviderSlug: "asc" },
+          where: { connectionId: fixture.connectionId },
+        });
+        expect(sources).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            lifecycleEpoch: 2,
+            sourceInstanceKey: canonicalSourceInstanceKey,
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+          }),
+          expect.objectContaining({
+            sourceInstanceKey: siblingSourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          }),
+        ]));
+        expect(sources).toHaveLength(2);
+
+        const connectionRecord = await fixture.store.getConnectionRecordForUser(
+          fixture.memberId,
+          fixture.connectionId,
+        );
+        if (!connectionRecord) {
+          throw new TypeError("Expected the Junction account after webhook admission.");
+        }
+        const durableMetadata = mapHostedConnectionRecord(connectionRecord).metadata;
+        for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+          expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            durableMetadata,
+            "apple_health_kit",
+            resource,
+            version,
+          )).toBe(false);
+        }
+        expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          durableMetadata,
+          "apple_health_kit",
+          "blood_pressure",
+          1,
+        )).toBe(true);
+        expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          durableMetadata,
+          "garmin",
+          "weight",
+          1,
+        )).toBe(true);
+        await expect(fixture.prisma.deviceWebhookTrace.findUniqueOrThrow({
+          select: { claimToken: true, processingExpiresAt: true, status: true },
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: prepared.traceId,
+            },
+          },
+        })).resolves.toEqual({
+          claimToken: null,
+          processingExpiresAt: null,
+          status: "processed",
+        });
+        await expect(fixture.prisma.deviceSyncDirtyConnection.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.deviceSyncSignal.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+        expect(orchestrationMocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledOnce();
       } finally {
         await cleanupFixture(fixture);
       }

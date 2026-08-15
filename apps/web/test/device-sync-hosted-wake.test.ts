@@ -464,7 +464,6 @@ function buildHostedConnectionSourceAdmissionCandidate(
   source: ReturnType<typeof buildHostedConnectionSource>,
 ) {
   return {
-    id: source.id,
     lastErrorCode: source.lastErrorCode,
     lastErrorMessage: source.lastErrorMessage,
     lifecycleEpoch: source.lifecycleEpoch,
