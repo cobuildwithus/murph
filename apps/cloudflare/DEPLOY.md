@@ -321,8 +321,16 @@ Observability.
 Deploy the first native response-card release as one Cloudflare Worker and
 runner bundle update with `container_rollout=immediate`. Before allowing card
 traffic, require managed-container smoke to report the exact new runner-bundle
-fingerprint and prove the updated assistant CLI surface. There is no Web
-deployment dependency.
+fingerprint and prove the updated assistant CLI surface.
+
+An expansion of an existing strict card version has a reader floor even when
+its discriminator is unchanged. For the V4 workout expansion above eight
+exercises or eight sets per exercise, release the native reader first, deploy
+the shared Web parser/static image route second, then deploy the Worker and
+runner together with `container_rollout=immediate`. Before expanded authoring,
+require the exact runner fingerprint and a successful fetch of an expanded V4
+static image from the deployed Web artifact. Keep that Web version available
+while any expanded immutable image URL can still be fetched.
 
 Ordinary outbox records and hosted delivery side effects omit the optional
 `card` field. A new Worker with an old runner is therefore safe for ordinary
@@ -334,6 +342,14 @@ The prior bundle remains a safe rollback only before the first card-bearing
 value exists. After that point, the new bundle is the hard rollback floor for
 workspaces, checkpoints, retained outbox intents, and side effects. Forward-fix
 on that bundle or newer rather than restoring an older reader.
+
+For the within-V4 bound expansion, the prior Web and runner bundles remain safe
+only before the first expanded V4 card is sent or persisted. After that point,
+do not roll either reader below the expanded bound. Forward-fix, and if an old
+local runner already quarantined an expanded intent, explicitly restore that
+intent only after the compatible bundle is live. Monitor for
+`outbox.intent.quarantined`, strict response-card parse failures, stale runner
+fingerprints, and failed expanded static-image fetches.
 
 ## Exercise Routine Response-Card Rollout
 
