@@ -107,6 +107,80 @@ describe("hosted phone-call status", () => {
     });
   });
 
+  it("exposes a durable cleanup fallback before notification retry succeeds", async () => {
+    const timestamp = new Date("2026-09-01T15:00:00.000Z");
+    secureBoxMocks.openHostedUserSecureBoxStrings.mockResolvedValueOnce([
+      JSON.stringify({
+        followUp:
+          "Confirm the outcome with the call recipient before repeating the request.",
+        outcome: "needs_user",
+        summary:
+          "The call is no longer active, but Murph could not safely verify whether the request was completed.",
+      }),
+    ]);
+
+    const result = await readHostedPhoneCallStatus({
+      memberId: "member_status_owner",
+      prisma: {
+        hostedPhoneCall: {
+          findMany: vi.fn(async () => [{
+            analyzedAt: null,
+            createdAt: timestamp,
+            endedAt: null,
+            id: "hpc_status_cleanup_fallback",
+            memberId: "member_status_owner",
+            resultEncrypted: "encrypted-cleanup-fallback",
+            resultJson: null,
+            status: "failed" as const,
+            stopRequestedAt: null,
+            updatedAt: timestamp,
+          }]),
+        },
+      },
+    });
+
+    expect(result.calls[0]).toMatchObject({
+      analyzedAt: null,
+      phoneCallId: "hpc_status_cleanup_fallback",
+      result: {
+        outcome: "needs_user",
+      },
+      status: "failed",
+    });
+  });
+
+  it("keeps a safely ended call result empty while provider analysis is pending", async () => {
+    const timestamp = new Date("2026-09-01T15:00:00.000Z");
+
+    const result = await readHostedPhoneCallStatus({
+      memberId: "member_status_owner",
+      prisma: {
+        hostedPhoneCall: {
+          findMany: vi.fn(async () => [{
+            analyzedAt: null,
+            createdAt: timestamp,
+            endedAt: timestamp,
+            id: "hpc_status_awaiting_analysis",
+            memberId: "member_status_owner",
+            resultEncrypted: null,
+            resultJson: null,
+            status: "ended" as const,
+            stopRequestedAt: null,
+            updatedAt: timestamp,
+          }]),
+        },
+      },
+    });
+
+    expect(result.calls[0]).toMatchObject({
+      analyzedAt: null,
+      phoneCallId: "hpc_status_awaiting_analysis",
+      result: null,
+      status: "ended",
+    });
+    expect(secureBoxMocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
+  });
+
   it("opens the three-result status window through one bounded secure-box batch", async () => {
     const createdAt = new Date("2026-09-01T15:00:00.000Z");
     const calls = [0, 1, 2].map((index) => ({

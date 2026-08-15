@@ -730,8 +730,10 @@ describe("createHostedPhoneCall", () => {
     const finalizeStopSettlement = vi.fn()
       .mockRejectedValueOnce(new Error("mailbox append unavailable"))
       .mockResolvedValueOnce(undefined);
+    const finalizeStartFailure = vi.fn(async () => undefined);
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
       finalizeStopSettlement,
       phoneCallId: existing.id,
       prisma: store.prisma,
@@ -746,6 +748,7 @@ describe("createHostedPhoneCall", () => {
     });
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
       finalizeStopSettlement,
       phoneCallId: existing.id,
       prisma: store.prisma,
@@ -755,6 +758,18 @@ describe("createHostedPhoneCall", () => {
 
     expect(runtime.resolveCalls).toEqual([existing.id]);
     expect(runtime.stopCalls).toEqual([]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
+    expect(finalizeStartFailure).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: existing.id,
+        providerCallId: null,
+        status: "failed",
+      }),
+      {
+        abortSignal: expect.any(AbortSignal),
+        notifyResult: false,
+      },
+    );
     expect(finalizeStopSettlement).toHaveBeenCalledTimes(2);
     expect(finalizeStopSettlement).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -813,7 +828,10 @@ describe("createHostedPhoneCall", () => {
         providerCallId: null,
         status: "failed",
       }),
-      { abortSignal: expect.any(AbortSignal) },
+      {
+        abortSignal: expect.any(AbortSignal),
+        notifyResult: true,
+      },
     );
   });
 

@@ -204,12 +204,12 @@ export async function processHostedPhoneCallRecoveryById(input: {
     call.status === "failed"
     && call.providerCallId === null
     && call.analyzedAt === null
-    && call.stopRequestedAt === null
   ) {
     try {
       await waitForAbortableOperation(input.signal, () =>
         finalizeStartFailure(call, {
           abortSignal: input.signal,
+          notifyResult: call.stopRequestedAt === null,
         }));
     } catch {
       input.signal.throwIfAborted();

@@ -128,6 +128,10 @@ Updated: 2026-08-15
   termination proves that the call is no longer active but cannot prove whether
   its real-world goal already completed. Tell the member to verify before
   repeating the request. Provider-less start failure remains `not_completed`.
+- Persist Murph-derived `needs_user` and `not_completed` fallback results in the
+  existing encrypted call-result field before delivery. A conditional write
+  leaves `analyzedAt` null, preserves provider analysis that wins the race, and
+  makes proactive delivery and later status reads consume one canonical truth.
 - Treat every accepted `call_analyzed` event as terminal even when Retell omits
   `end_timestamp`: preserve an existing provider end or persist the analysis
   time as the fallback. Publish a required deduped not-completed result when
@@ -182,14 +186,14 @@ Updated: 2026-08-15
   creating a new origin-less direct row while preserving groups and legacy
   replay. Parent review additionally closed the provider-less asynchronous
   start-failure delivery gap with a required deduped result notification.
-- Current focused remediation proof passes 136 tests across the exact service,
-  Retell webhook, and result-notification-store files. The Web suite includes a
+- Current focused remediation proof passes 93 tests across service,
+  reconciliation, status, and result-notification-store files. The Web suite includes a
   fake-timer production Retell adapter proof with four serial 14-second
   requests, durable terminal state, required settlement finalization, and
   terminal usage recording before the 90-second step deadline. Earlier focused
   assistant-engine, hosted-execution, Cloudflare bridge, and cross-owner proofs
-  remain green. All 14 phone-call Web test files pass 235 tests after the
-  round-7 delta, and Web typecheck plus targeted lint pass. Final exact-head
+  remain green. All 14 phone-call Web test files pass 240 tests after the
+  round-8 delta, and Web typecheck passes. Final exact-head
   gates will be rerun after review remediation is committed.
 - Final ReviewGPT round 4 found two actionable issues. The parent accepted both:
   an unsafe-storage provider cleanup could complete silently after foreground
@@ -224,6 +228,13 @@ Updated: 2026-08-15
   now distinguishes explicit-stop workflow ownership from bounded foreground
   safety cleanup and recognizes stop settlement as the sole notification when
   a stop fence precedes durable provider absence.
+- Final ReviewGPT round 8 found that synthetic cleanup and provider-absence
+  outcomes existed only in the mailbox path, so a later status request could
+  lose an outcome Murph had already established. The parent accepted the
+  finding. Fallback results are now encrypted onto the existing call row before
+  notification; mailbox failure leaves that result inspectable, stop-fenced
+  provider absence stores it without a competing ordinary notification, and a
+  provider analysis that wins the conditional write remains authoritative.
 - Remaining gates: final lint/docs/privacy inspection, commit and push the
   remediation head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head
   product-experience revalidation, clean merge-tree proof, and plan closure.

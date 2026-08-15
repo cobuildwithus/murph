@@ -328,6 +328,7 @@ export async function finalizeHostedPhoneCallStartFailure(
   call: HostedPhoneCall,
   options: {
     abortSignal?: AbortSignal;
+    notifyResult?: boolean;
     prisma?: PrismaClient;
     signalRuntime?: typeof signalHostedMailboxAppendRuntime;
   } = {},
@@ -336,10 +337,7 @@ export async function finalizeHostedPhoneCallStartFailure(
   if (
     call.status !== "failed"
     || call.analyzedAt !== null
-    || (
-      (call.stopRequestedAt !== null || call.providerCallId !== null)
-      && !providerCleanupPending
-    )
+    || (call.providerCallId !== null && !providerCleanupPending)
   ) {
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_START_FAILURE_REQUIRED",
@@ -347,26 +345,145 @@ export async function finalizeHostedPhoneCallStartFailure(
     );
   }
   const prisma = options.prisma ?? getPrisma();
-  const result = await appendPhoneCallResultNotification({
+  const fallbackResult: HostedPhoneCallResult = providerCleanupPending
+    ? {
+        followUp:
+          "Confirm the outcome with the call recipient before repeating the request.",
+        outcome: "needs_user",
+        summary:
+          "The call is no longer active, but Murph could not safely verify whether the request was completed.",
+      }
+    : {
+        outcome: "not_completed",
+        summary: "Murph could not start the phone call.",
+      };
+  const persisted = await persistHostedPhoneCallFallbackResult({
+    abortSignal: options.abortSignal,
     call,
     prisma,
-    result: providerCleanupPending
-      ? {
-          followUp:
-            "Confirm the outcome with the call recipient before repeating the request.",
-          outcome: "needs_user",
-          summary:
-            "The call is no longer active, but Murph could not safely verify whether the request was completed.",
-        }
-      : {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
+    result: fallbackResult,
+  });
+  if (!persisted || options.notifyResult === false) {
+    return;
+  }
+  const result = await appendPhoneCallResultNotification({
+    call: persisted.call,
+    prisma,
+    result: persisted.result,
   });
   await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
     abortSignal: options.abortSignal,
     expectedUserId: result.notificationUserId,
     mailboxItemId: result.notificationMailboxItemId,
+  });
+}
+
+async function persistHostedPhoneCallFallbackResult(input: {
+  abortSignal?: AbortSignal;
+  call: HostedPhoneCall;
+  prisma: PrismaClient;
+  result: HostedPhoneCallResult;
+}): Promise<{
+  call: HostedPhoneCall;
+  result: HostedPhoneCallResult;
+} | null> {
+  if (hasStoredHostedPhoneCallResult(input.call)) {
+    return {
+      call: input.call,
+      result: await requireStoredHostedPhoneCallResult(input),
+    };
+  }
+
+  // Seal the fallback outside the CAS. The update only owns a still-unresolved
+  // row, so provider analysis that wins first remains the canonical result.
+  let resultEncrypted: string;
+  try {
+    resultEncrypted = await hostedPhoneCallCrypto.encryptResult({
+      callId: input.call.id,
+      memberId: input.call.memberId,
+      prisma: input.prisma,
+      signal: input.abortSignal,
+      value: input.result,
+    });
+  } catch (error) {
+    const stored = await input.prisma.hostedPhoneCall.findUnique({
+      where: { id: input.call.id },
+    });
+    if (!stored) {
+      return null;
+    }
+    throw error;
+  }
+  const updated = await input.prisma.hostedPhoneCall.updateMany({
+    data: {
+      resultEncrypted,
+      resultJson: Prisma.DbNull,
+    },
+    where: {
+      analyzedAt: null,
+      endedAt: null,
+      id: input.call.id,
+      provider: "retell",
+      providerCallId: input.call.providerCallId,
+      resultEncrypted: null,
+      resultJson: {
+        equals: Prisma.DbNull,
+      },
+      status: "failed",
+    },
+  });
+  if (updated.count === 1) {
+    return {
+      call: {
+        ...input.call,
+        resultEncrypted,
+        resultJson: null,
+      },
+      result: input.result,
+    };
+  }
+
+  const stored = await input.prisma.hostedPhoneCall.findUnique({
+    where: { id: input.call.id },
+  });
+  if (!stored) {
+    return null;
+  }
+  if (hasStoredHostedPhoneCallResult(stored)) {
+    return {
+      call: stored,
+      result: await requireStoredHostedPhoneCallResult({
+        ...input,
+        call: stored,
+      }),
+    };
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_PHONE_CALL_FALLBACK_RESULT_RETRY_REQUIRED",
+    httpStatus: 503,
+    message: "Hosted phone-call fallback result lost authority and must be retried.",
+    retryable: true,
+  });
+}
+
+async function requireStoredHostedPhoneCallResult(input: {
+  abortSignal?: AbortSignal;
+  call: HostedPhoneCall;
+  prisma: PrismaClient;
+}): Promise<HostedPhoneCallResult> {
+  const result = await readHostedPhoneCallResult({
+    call: input.call,
+    prisma: input.prisma,
+    signal: input.abortSignal,
+  });
+  if (result) {
+    return result;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_PHONE_CALL_FALLBACK_RESULT_INVALID",
+    httpStatus: 409,
+    message: "Hosted phone-call fallback result is invalid.",
+    retryable: true,
   });
 }
 
