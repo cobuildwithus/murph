@@ -616,42 +616,48 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
-  it("publishes cleanup failure before settling an existing stop fence", async () => {
-    const stopRequestedAt = new Date("2026-06-25T00:01:00.000Z");
-    const existing = buildHostedPhoneCall({
-      endedAt: null,
-      id: "hpc_cleanup_stopped",
-      providerCallId: "retell_unsafe",
-      status: "failed",
-      stopRequestedAt,
-    });
-    const store = createPhoneCallStore({ existing });
-    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
-    const phases: string[] = [];
-    const finalizeStartFailure = vi.fn(async () => {
-      phases.push("ordinary-result");
-    });
-    const finalizeStopSettlement = vi.fn(async () => {
-      phases.push("stop-settlement");
-    });
+  it.each(["stopped", "already_terminal"] as const)(
+    "publishes cleanup uncertainty before settling an existing stop fence when provider is %s",
+    async (stopDisposition) => {
+      const stopRequestedAt = new Date("2026-06-25T00:01:00.000Z");
+      const existing = buildHostedPhoneCall({
+        endedAt: null,
+        id: "hpc_cleanup_stopped",
+        providerCallId: "retell_unsafe",
+        status: "failed",
+        stopRequestedAt,
+      });
+      const store = createPhoneCallStore({ existing });
+      const runtime = createPhoneCallRuntime({
+        providerCallId: "retell_unused",
+        stopDisposition,
+      });
+      const phases: string[] = [];
+      const finalizeStartFailure = vi.fn(async () => {
+        phases.push("ordinary-result");
+      });
+      const finalizeStopSettlement = vi.fn(async () => {
+        phases.push("stop-settlement");
+      });
 
-    await expect(processHostedPhoneCallRecoveryById({
-      finalizeStartFailure,
-      finalizeStopSettlement,
-      phoneCallId: existing.id,
-      prisma: store.prisma,
-      runtime: runtime.runtime,
-      signal: new AbortController().signal,
-    })).resolves.toBe("complete");
+      await expect(processHostedPhoneCallRecoveryById({
+        finalizeStartFailure,
+        finalizeStopSettlement,
+        phoneCallId: existing.id,
+        prisma: store.prisma,
+        runtime: runtime.runtime,
+        signal: new AbortController().signal,
+      })).resolves.toBe("complete");
 
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
-    expect(phases).toEqual(["ordinary-result", "stop-settlement"]);
-    expect(store.currentCall()).toMatchObject({
-      endedAt: expect.any(Date),
-      status: "failed",
-      stopRequestedAt,
-    });
-  });
+      expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+      expect(phases).toEqual(["ordinary-result", "stop-settlement"]);
+      expect(store.currentCall()).toMatchObject({
+        endedAt: expect.any(Date),
+        status: "failed",
+        stopRequestedAt,
+      });
+    },
+  );
 
   it("consumes a stop intent after reconciliation discovers an uncertain provider call", async () => {
     const existing = buildHostedPhoneCall({
@@ -2993,6 +2999,7 @@ function createPhoneCallRuntime(input: {
   providerCallId: string;
   reconciliationError?: Error;
   reconciliationResult?: Awaited<ReturnType<PhoneCallRuntime["resolveProviderCall"]>>;
+  stopDisposition?: Awaited<ReturnType<PhoneCallRuntime["stopIfActive"]>>;
   stopError?: Error;
 }) {
   const resolveCalls: string[] = [];
@@ -3027,7 +3034,7 @@ function createPhoneCallRuntime(input: {
       if (input.stopError) {
         throw input.stopError;
       }
-      return "stopped";
+      return input.stopDisposition ?? "stopped";
     },
   };
 

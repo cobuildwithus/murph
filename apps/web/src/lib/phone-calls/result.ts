@@ -350,12 +350,18 @@ export async function finalizeHostedPhoneCallStartFailure(
   const result = await appendPhoneCallResultNotification({
     call,
     prisma,
-    result: {
-      outcome: "not_completed",
-      summary: providerCleanupPending
-        ? "Murph stopped the phone call before it could be completed safely."
-        : "Murph could not start the phone call.",
-    },
+    result: providerCleanupPending
+      ? {
+          followUp:
+            "Confirm the outcome with the call recipient before repeating the request.",
+          outcome: "needs_user",
+          summary:
+            "The call is no longer active, but Murph could not safely verify whether the request was completed.",
+        }
+      : {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
   });
   await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
     abortSignal: options.abortSignal,

@@ -124,6 +124,10 @@ Updated: 2026-08-15
   service replay only preserve or wake that owner. Cleanup runs before a stop
   fence, publishes the ordinary result before `endedAt`, then rereads the row
   so a concurrent fence also receives its required stop-settlement result.
+- Classify safety cleanup as `needs_user`, not `not_completed`: provider
+  termination proves that the call is no longer active but cannot prove whether
+  its real-world goal already completed. Tell the member to verify before
+  repeating the request. Provider-less start failure remains `not_completed`.
 - Treat every accepted `call_analyzed` event as terminal even when Retell omits
   `end_timestamp`: preserve an existing provider end or persist the analysis
   time as the fallback. Publish a required deduped not-completed result when
@@ -177,15 +181,15 @@ Updated: 2026-08-15
   creating a new origin-less direct row while preserving groups and legacy
   replay. Parent review additionally closed the provider-less asynchronous
   start-failure delivery gap with a required deduped result notification.
-- Current focused remediation proof passes 133 tests across the exact service,
+- Current focused remediation proof passes 134 tests across the exact service,
   Retell webhook, and result-notification-store files. The Web suite includes a
   fake-timer production Retell adapter proof with four serial 14-second
   requests, durable terminal state, required settlement finalization, and
   terminal usage recording before the 90-second step deadline. Earlier focused
   assistant-engine, hosted-execution, Cloudflare bridge, and cross-owner proofs
-  remain green. All 14 phone-call Web test files pass 232 tests after the
-  round-5 delta, and Web typecheck passes. Final exact-head gates will be rerun
-  after review remediation is committed.
+  remain green. All 14 phone-call Web test files pass 233 tests after the
+  round-6 delta, and Web typecheck plus targeted lint pass. Final exact-head
+  gates will be rerun after review remediation is committed.
 - Final ReviewGPT round 4 found two actionable issues. The parent accepted both:
   an unsafe-storage provider cleanup could complete silently after foreground
   returned `starting`, and the origin-routing rollback drain allowed an ended
@@ -201,6 +205,14 @@ Updated: 2026-08-15
   Reconciliation now owns durable cleanup terminalization, cleanup precedes
   explicit-stop handling, ordinary result delivery precedes `endedAt`, and a
   post-terminal reread observes a stop fence that races with finalization.
+- Final ReviewGPT round 6 found that safety cleanup still reported the
+  unverified real-world outcome as `not_completed` and claimed Murph stopped
+  the call even when the typed provider disposition could be
+  `already_terminal`. The parent accepted the finding. Both provider
+  dispositions now produce a neutral `needs_user` result that confirms only
+  that the call is no longer active, says goal completion could not be safely
+  verified, and tells the member to confirm before repeating the request.
+  Provider-less failure retains its proven `not_completed` result.
 - Remaining gates: final lint/docs/privacy inspection, commit and push the
   remediation head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head
   product-experience revalidation, clean merge-tree proof, and plan closure.

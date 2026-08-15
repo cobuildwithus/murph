@@ -339,23 +339,27 @@ describe("default phone-call result notification store", () => {
   it.each([
     {
       label: "provider-less start failure",
+      outcome: "not_completed",
       providerCallId: null,
       summary: "Murph could not start the phone call.",
       stopRequestedAt: null,
     },
     {
       label: "unsafe provider cleanup",
+      outcome: "needs_user",
       providerCallId: PROVIDER_CALL_ID,
-      summary: "Murph stopped the phone call before it could be completed safely.",
+      summary: "Murph could not safely verify whether the request was completed.",
       stopRequestedAt: null,
     },
     {
       label: "unsafe provider cleanup with a stop fence",
+      outcome: "needs_user",
       providerCallId: PROVIDER_CALL_ID,
-      summary: "Murph stopped the phone call before it could be completed safely.",
+      summary: "Murph could not safely verify whether the request was completed.",
       stopRequestedAt: new Date("2026-08-09T00:01:00.000Z"),
     },
   ])("dedupes $label and requires Murph to send it", async ({
+    outcome,
     providerCallId,
     summary,
     stopRequestedAt,
@@ -403,9 +407,16 @@ describe("default phone-call result notification store", () => {
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
     expect(mocks.readHostedPhoneCallResult).not.toHaveBeenCalled();
-    expect(JSON.stringify(
-      mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0],
-    )).toContain(summary);
+    const instructions = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
+      .envelope.notification.instructions;
+    expect(instructions).toContain(summary);
+    expect(instructions).toContain(`"outcome":"${outcome}"`);
+    if (providerCallId) {
+      expect(instructions).toContain(
+        "Confirm the outcome with the call recipient before repeating the request.",
+      );
+      expect(instructions).not.toContain("Murph stopped the phone call");
+    }
     expect(JSON.stringify(
       mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0],
     )).toContain('"kind":"require_send"');
