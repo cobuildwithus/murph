@@ -12,8 +12,11 @@ import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "@murphai/device-syncd/junction-resources";
-import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "@murphai/device-syncd/junction-source-reconnect";
+import {
+  clearJunctionAllExtendedHistoryCoverageForProvider,
+} from "@murphai/device-syncd/junction-source-reconnect";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
+import { isDeviceSyncSourceDisconnectFenced } from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
@@ -228,7 +231,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     const localSourcesBeforeHydration = existing
       ? store.listConnectionSources({ connectionId: existing.id })
       : [];
-    const hydrationExisting = clearNewerHostedJunctionSourceCoverageFromLocalMerge(
+    const hydrationExisting = clearNonDurableHostedJunctionSourceCoverageFromLocalMerge(
       entry,
       existing,
       localSourcesBeforeHydration,
@@ -419,7 +422,7 @@ function resolveHostedHydrationSourceInstanceKey(input: {
     ?? input.sourceInstanceKey;
 }
 
-function clearNewerHostedJunctionSourceCoverageFromLocalMerge(
+function clearNonDurableHostedJunctionSourceCoverageFromLocalMerge(
   entry: HostedDeviceSyncRuntimeConnectionSnapshot,
   existing: StoredDeviceSyncAccount | null,
   localSources: readonly StoredDeviceConnectionSource[],
@@ -438,15 +441,19 @@ function clearNewerHostedJunctionSourceCoverageFromLocalMerge(
 
   let metadata = existing.metadata;
   for (const source of entry.sources ?? []) {
-    if (!source.sourceInstanceKey) {
-      continue;
-    }
     const localSource = findSemanticJunctionSource(
       localSources,
       source.sourceProviderSlug,
     );
-    if (localSource && (source.lifecycleEpoch ?? 1) > localSource.lifecycleEpoch) {
-      metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+    if (
+      source.status === "disconnected"
+      || isDeviceSyncSourceDisconnectFenced(source)
+      || Boolean(
+        localSource
+        && (source.lifecycleEpoch ?? 1) > localSource.lifecycleEpoch,
+      )
+    ) {
+      metadata = clearJunctionAllExtendedHistoryCoverageForProvider({
         metadata,
         providerSlug: source.sourceProviderSlug,
       });

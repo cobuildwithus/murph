@@ -223,6 +223,23 @@ Updated: 2026-08-14
   lifecycle, reread the provider, or add queue/process state. New sources and
   repeated starts against an already-disconnected source do not advance the
   revision; callback admission remains the sole lifecycle-epoch increment.
+- A hosted Junction source-start is likewise the earliest durable boundary that
+  can reject an older metadata-only runner apply. Advance the existing parent
+  connection `updatedAt` in the same advisory transaction as the source claim,
+  choosing a timestamp strictly after both the source and parent versions. This
+  reuses the apply protocol's existing `observedUpdatedAt` CAS and adds no field,
+  schema, lifecycle owner, provider read, or queue.
+- Hosted hydration must also prevent a rejected stale apply from surviving in
+  runner-local SQLite and being republished on a later current-epoch apply.
+  Before merging durable hosted metadata, clear all thirteen target-source
+  completion coordinates when the hosted source is disconnected, carries the
+  existing disconnect fence, or has a newer lifecycle epoch. The ordinary merge
+  then overlays any durable hosted completion truth, while sibling-source
+  coverage remains untouched.
+- Round 7 is the configured final-review hard cap. Its accepted hosted-runtime
+  finding is remediated and verified below, but no round 8 is started without an
+  explicit continuation decision. The review gate therefore remains open even
+  after this remediation is pushed.
 
 ## ReviewGPT evidence and finding ledger
 
@@ -316,6 +333,22 @@ Updated: 2026-08-14
   bounded update in the existing transaction; the larger change is regression
   proof for the real SQLite interleaving, callback epoch, replacement schedule,
   and preservation of already-complete blood-pressure coverage.
+- Valid final ReviewGPT round 7 reviewed exact head
+  `0857bcf9445fa26b34e4f3cbbef3ee359e00bbc2` with `gpt-5-6-pro` in the same
+  corrected review thread for about 54 minutes. It returned
+  `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE`. A preceding preflight failed
+  before send because its full-snapshot anchor named the prior head; it had no
+  code verdict and did not consume a review send.
+- Accepted: the local SQLite revision fence from round 6 did not cover the
+  hosted browser/companion source-start owners. Those owners changed a child
+  source without advancing the parent connection version, so a metadata-only
+  old blood-pressure completion could still satisfy the Web apply CAS. Even a
+  rejected source-bearing apply could leave the stale completion in runner
+  SQLite, where later hydration retained and republished it. The correction
+  advances the parent version atomically at hosted source-start and clears all
+  target-source coverage on fenced/newer hosted hydration before durable hosted
+  metadata is overlaid. The fix adds one exact parent timestamp write and one
+  shared bounded cleanup helper; it adds no new state or asynchronous machinery.
 
 ## Verification
 
@@ -434,3 +467,16 @@ Updated: 2026-08-14
     adjacent revision/source-start tests pass (3 tests), the complete service
     file passes 116 tests, the full device-sync package passes 1,101 tests, the
     device-sync typecheck passes, and `git diff --check` passes.
+  - Round-7 remediation first reproduced both hosted variants: the Web
+    source-start boundary left the parent connection timestamp unchanged, and
+    hosted hydration retained target-source blood-pressure coverage after the
+    reconnect fence. After correction, the full device-sync package passes 47
+    files and 1,101 tests; the full assistant-runtime package passes 86 files
+    and 2,290 tests with 4 skipped; the Web runtime-authority file passes 84
+    tests; and the Web wake/store files pass 152 tests. Device-sync,
+    assistant-runtime, and prepared Web typechecks pass, as does
+    `git diff --check`. Workspace package-cycle and hosted stale-residue guards
+    pass. The supported runner assembly passes all six parity probes without a
+    budget ratchet: vault total 9,042,569/9,100,000 bytes and entry 791/20,000
+    bytes; runner entry 1,701,375 bytes, static closure
+    8,059,499/8,088,470 bytes, and total 10,222,270/10,251,013 bytes.

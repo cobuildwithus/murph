@@ -20,3 +20,20 @@ export function clearJunctionScheduleTimeExtendedHistoryCoverageForProvider(inpu
 
   return metadata;
 }
+
+export function clearJunctionAllExtendedHistoryCoverageForProvider(input: {
+  metadata: Record<string, unknown>;
+  providerSlug: string;
+}): Record<string, unknown> {
+  const metadata = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata: input.metadata,
+    providerSlug: input.providerSlug,
+    resource: "blood_pressure",
+    version: 1,
+  }) ?? input.metadata;
+
+  return clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+    metadata,
+    providerSlug: input.providerSlug,
+  });
+}

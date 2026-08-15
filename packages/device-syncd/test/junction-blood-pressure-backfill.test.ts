@@ -10,7 +10,10 @@ import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
 } from "../src/junction-historical-backfill-progress.ts";
-import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "../src/junction-source-reconnect.ts";
+import {
+  clearJunctionAllExtendedHistoryCoverageForProvider,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
+} from "../src/junction-source-reconnect.ts";
 import {
   createJunctionDeviceSyncProvider,
   selectJunctionScheduledHistoryCandidate,
@@ -1193,6 +1196,10 @@ test("one reconnect clears exactly 12 schedule-time coordinates at maximum sourc
     metadata: coveredMetadata,
     providerSlug: reconnectingTarget.providerSlug,
   });
+  const sourceStartClearedMetadata = clearJunctionAllExtendedHistoryCoverageForProvider({
+    metadata: coveredMetadata,
+    providerSlug: reconnectingTarget.providerSlug,
+  });
 
   for (const target of JUNCTION_CONNECT_SOURCE_TARGETS) {
     for (const resource of scheduleTimeResources) {
@@ -1209,6 +1216,14 @@ test("one reconnect clears exactly 12 schedule-time coordinates at maximum sourc
       "blood_pressure",
       true,
     );
+    for (const resource of allResources) {
+      assertHistoryCoverage(
+        sourceStartClearedMetadata,
+        target.providerSlug,
+        resource,
+        target.providerSlug !== reconnectingTarget.providerSlug,
+      );
+    }
   }
 });
 

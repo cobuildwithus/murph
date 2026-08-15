@@ -1481,7 +1481,7 @@ describe("hosted device-sync runtime", () => {
         connectionId: localAccountId,
         firstSeenAt: "2026-04-02T09:00:00.000Z",
         lastSeenAt: "2026-04-06T09:20:00.000Z",
-        resourceAvailabilitySummary: { caffeine: true },
+        resourceAvailabilitySummary: { blood_pressure: true, caffeine: true },
         sourceInstanceKey: withingsSourceInstanceKey,
         sourceProviderSlug: "withings",
         status: "connected",
@@ -1490,6 +1490,7 @@ describe("hosted device-sync runtime", () => {
       for (const [providerSlug, resource] of [
         ["garmin", "blood_pressure"],
         ["garmin", "caffeine"],
+        ["withings", "blood_pressure"],
         ["withings", "caffeine"],
       ] as const) {
         const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
@@ -1510,14 +1511,15 @@ describe("hosted device-sync runtime", () => {
           providerConfigKey: "junction",
         },
         externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:25:00.000Z",
         metadata: retryingMetadata,
         provider: "junction",
         sources: [
           {
             displayName: "Garmin",
             firstSeenAt: "2026-04-01T09:00:00.000Z",
-            lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
-            lastErrorMessage: "Historical data remained incomplete.",
+            lastErrorCode: "SOURCE_START_CLEANUP_IN_PROGRESS",
+            lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:25:00.000Z",
             lastDataAt: null,
             resourceCount: 2,
@@ -1529,7 +1531,7 @@ describe("hosted device-sync runtime", () => {
             },
             sourceInstanceKey: hostedSourceInstanceKey,
             sourceProviderSlug: "garmin",
-            status: "error",
+            status: "connected",
           },
         ],
       });
@@ -1547,10 +1549,10 @@ describe("hosted device-sync runtime", () => {
       assert.equal(sources.length, 2);
       const garminSource = sources.find((source) => source.sourceProviderSlug === "garmin");
       assert.equal(garminSource?.sourceInstanceKey, localSourceInstanceKey);
-      assert.equal(garminSource?.status, "error");
+      assert.equal(garminSource?.status, "connected");
       assert.equal(
         garminSource?.lastErrorCode,
-        "HISTORICAL_DATA_RECONNECT_REQUIRED",
+        "SOURCE_START_CLEANUP_IN_PROGRESS",
       );
       assert.equal(garminSource?.lastSeenAt, "2026-04-06T09:25:00.000Z");
       assert.deepEqual(garminSource?.resourceAvailabilitySummary, {
@@ -1559,6 +1561,35 @@ describe("hosted device-sync runtime", () => {
         caffeine: true,
         sleep: true,
       });
+      const sourceStartMetadata =
+        getStore(service).getAccountById(localAccountId)?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          sourceStartMetadata,
+          "garmin",
+          "blood_pressure",
+          1,
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          sourceStartMetadata,
+          "garmin",
+          "caffeine",
+          1,
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          sourceStartMetadata,
+          "withings",
+          "blood_pressure",
+          1,
+        ),
+        true,
+      );
 
       hostedSnapshot = buildRuntimeSnapshot({
         connectionId: hostedConnectionId,
@@ -1639,11 +1670,20 @@ describe("hosted device-sync runtime", () => {
       assert.equal(
         hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
           reconnectedMetadata,
-          "garmin",
+          "withings",
           "blood_pressure",
           1,
         ),
         true,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reconnectedMetadata,
+          "garmin",
+          "blood_pressure",
+          1,
+        ),
+        false,
       );
 
       getStore(service).patchAccount(localAccountId, {
@@ -1651,8 +1691,13 @@ describe("hosted device-sync runtime", () => {
       });
       const scheduled = await service.runSchedulerOnce(localAccountId);
       const caffeineJob = scheduled.find((job) => job.payload.resource === "caffeine");
+      const bloodPressureJob = scheduled.find(
+        (job) => job.payload.resource === "blood_pressure",
+      );
       assert.equal(caffeineJob?.payload.sourceProviderSlug, "garmin");
       assert.equal(caffeineJob?.payload.sourceLifecycleEpoch, 2);
+      assert.equal(bloodPressureJob?.payload.sourceProviderSlug, "garmin");
+      assert.equal(bloodPressureJob?.payload.sourceLifecycleEpoch, 2);
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -2024,7 +2069,7 @@ describe("hosted device-sync runtime", () => {
           "blood_pressure",
           1,
         ),
-        true,
+        false,
       );
       assert.equal(
         hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -2101,8 +2146,13 @@ describe("hosted device-sync runtime", () => {
       });
       const scheduled = await service.runSchedulerOnce(localAccountId);
       const caffeineJob = scheduled.find((job) => job.payload.resource === "caffeine");
+      const bloodPressureJob = scheduled.find(
+        (job) => job.payload.resource === "blood_pressure",
+      );
       assert.equal(caffeineJob?.payload.sourceProviderSlug, "apple_health_kit");
       assert.equal(caffeineJob?.payload.sourceLifecycleEpoch, 2);
+      assert.equal(bloodPressureJob?.payload.sourceProviderSlug, "apple_health_kit");
+      assert.equal(bloodPressureJob?.payload.sourceLifecycleEpoch, 2);
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,

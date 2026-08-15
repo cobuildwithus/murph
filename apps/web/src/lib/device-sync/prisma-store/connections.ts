@@ -620,6 +620,18 @@ export class PrismaHostedConnectionStore {
     });
   }
 
+  async advanceConnectionSourceStartBoundary(input: {
+    connectionId: string;
+    updatedAt: string;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<void> {
+    await input.tx.deviceConnection.update({
+      where: { id: input.connectionId },
+      data: { updatedAt: new Date(input.updatedAt) },
+      select: { id: true },
+    });
+  }
+
   async syncDurableConnectionLocalHeartbeatState(
     account: Pick<PublicDeviceSyncAccount, "externalAccountId" | "id">,
     localState: HostedLocalHeartbeatStateUpdate,

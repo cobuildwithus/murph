@@ -416,7 +416,10 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
     if (!sourceInstanceKey) {
       throw connectionSourceNotFoundError();
     }
-    const sourceStartedAt = nextHostedSourceLifecycleAt(source?.lastSeenAt ?? null);
+    const sourceStartedAt = nextHostedSourceLifecycleAt(
+      source?.lastSeenAt ?? null,
+      connection.updatedAt,
+    );
     await input.store.upsertConnectionSource({
       connectionId: expectedConnection.id,
       sourceInstanceKey,
@@ -428,6 +431,13 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    if (source) {
+      await input.store.advanceConnectionSourceStartBoundary({
+        connectionId: expectedConnection.id,
+        updatedAt: sourceStartedAt,
+        tx,
+      });
+    }
   });
 }
 
@@ -628,7 +638,10 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       };
     }
 
-    const claimAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+    const claimAt = nextHostedSourceLifecycleAt(
+      source.lastSeenAt,
+      connection.updatedAt,
+    );
     await writeHostedConnectionSourceLifecycle({
       errorCode: HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
       errorMessage: null,
@@ -636,6 +649,11 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       source,
       status: source.status,
       store: input.store,
+      tx,
+    });
+    await input.store.advanceConnectionSourceStartBoundary({
+      connectionId: input.connectionId,
+      updatedAt: claimAt,
       tx,
     });
     return { claimAt, connection, revokeSourceAccess, source, storedAccount };
@@ -1634,11 +1652,13 @@ function sourceStartCleanupUnavailableError(): never {
   });
 }
 
-function nextHostedSourceLifecycleAt(previous: string | null): string {
-  const previousMs = previous === null ? Number.NaN : Date.parse(previous);
+function nextHostedSourceLifecycleAt(...previous: Array<string | null>): string {
   return toIsoTimestamp(new Date(Math.max(
     Date.now(),
-    Number.isFinite(previousMs) ? previousMs + 1 : 0,
+    ...previous.map((value) => {
+      const previousMs = value === null ? Number.NaN : Date.parse(value);
+      return Number.isFinite(previousMs) ? previousMs + 1 : 0;
+    }),
   )));
 }
 

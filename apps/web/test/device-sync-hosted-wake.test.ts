@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     ensureSdkConnection: vi.fn(),
     ensureWebhookSubscriptions: vi.fn(),
     appendHostedMailboxEnvelope: vi.fn(),
+    advanceConnectionSourceStartBoundary: vi.fn(),
     getConnectionForUser: vi.fn(),
     getConnectionRecordForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
@@ -536,6 +537,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     metadata: record.metadataJson ?? {},
   }),
   PrismaDeviceSyncControlPlaneStore: class PrismaDeviceSyncControlPlaneStore {
+    advanceConnectionSourceStartBoundary = mocks.advanceConnectionSourceStartBoundary;
     completeWebhookTrace = mocks.completeWebhookTrace;
     createSignal = mocks.createSignal;
     markWebhookReceived = mocks.markWebhookReceived;
@@ -838,6 +840,7 @@ describe("hosted device-sync wakes", () => {
     });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("user-123");
     mocks.appendHostedMailboxEnvelope.mockResolvedValue(undefined);
+    mocks.advanceConnectionSourceStartBoundary.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
     mocks.ensureSdkConnection.mockResolvedValue(buildHostedConnection({
       id: "dsc_junction_123",
@@ -1092,6 +1095,11 @@ describe("hosted device-sync wakes", () => {
       status: "disconnected",
       tx: mocks.prismaTx,
     }));
+    expect(mocks.advanceConnectionSourceStartBoundary).toHaveBeenCalledWith({
+      connectionId: currentConnection.id,
+      tx: mocks.prismaTx,
+      updatedAt: "2026-03-26T12:00:00.000Z",
+    });
     expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(currentSource).toMatchObject({
       firstSeenAt: "2026-03-26T12:00:00.000Z",
@@ -3948,6 +3956,12 @@ describe("hosted device-sync wakes", () => {
         updatedAt: "2026-03-26T12:00:01.000Z",
       };
     });
+    mocks.advanceConnectionSourceStartBoundary.mockImplementation(async (input) => {
+      currentConnection = {
+        ...currentConnection,
+        updatedAt: input.updatedAt,
+      };
+    });
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/connect-sources/withings/start", {
         method: "POST",
@@ -3973,7 +3987,14 @@ describe("hosted device-sync wakes", () => {
       "withings",
       "weight",
     )).toBe(true);
-    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.advanceConnectionSourceStartBoundary).toHaveBeenCalledWith({
+      connectionId: currentConnection.id,
+      tx: mocks.prismaTx,
+      updatedAt: expect.any(String),
+    });
+    const sourceStartUpdatedAt = mocks.advanceConnectionSourceStartBoundary
+      .mock.calls[0]?.[0].updatedAt;
+    expect(currentConnection.updatedAt).toBe(sourceStartUpdatedAt);
   });
 
   it("does not issue a new Link while exact-source provider cleanup is in progress", async () => {

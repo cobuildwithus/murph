@@ -365,6 +365,14 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.syncDurableConnectionMetadata(connectionId, metadata, tx);
   }
 
+  async advanceConnectionSourceStartBoundary(input: {
+    connectionId: string;
+    updatedAt: string;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<void> {
+    await this.connections.advanceConnectionSourceStartBoundary(input);
+  }
+
   async prepareRuntimeApplyTokenWrites(
     entries: readonly HostedRuntimeApplyTokenWritePreparation[],
   ): Promise<Map<string, HostedRuntimeApplyPreparedTokenWrite>> {
