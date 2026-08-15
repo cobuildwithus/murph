@@ -71,6 +71,12 @@ Updated: 2026-08-16
    lock and provider preparation read.
    Mitigation: Shared ingress carries its transient defer decision to Web. Only
    deferred source admission enters the recovery preparation path.
+7. Risk: Every post-commit Temporal signal could fail after webhook acceptance,
+   leaving committed initial and dirty work asleep without another member action.
+   Mitigation: The existing scheduled mailbox-handoff sweep now selects one
+   exact unconsumed `device-sync.wake` per user. It retries from mailbox and
+   lane-watermark truth without a new queue, ledger, scheduler, or dirty-row
+   scan.
 
 ## Tasks
 
@@ -132,3 +138,17 @@ Updated: 2026-08-16
     entered an extra recovery preparation lock. Shared ingress now passes its
     transient defer decision, and established sources keep the normal two-pass
     durable admission path without a provider read.
+  - Final ReviewGPT round 2 required a retrospective because post-commit
+    best-effort signaling still repeated the accepted runtime-handoff failure.
+    The recorded decision keeps the user outcome and reuses the existing shared
+    scheduled mailbox-handoff owner. It adds `device-sync.wake` to that bounded
+    unconsumed-mailbox selection instead of adding new state or a process.
+  - Real PostgreSQL prepared-webhook proof now forces the first Temporal signal
+    to fail, replays the same provider event through a fresh service instance,
+    proves one retained mailbox row, and accepts its later scheduled handoff.
+  - Real PostgreSQL shared-handoff selection proof: 3 passed, including exact
+    selection of an unconsumed `device-sync.wake` row.
+  - Shared handoff and hosted wake unit proof: 172 passed.
+  - Assistant-runtime cold-restart proof: 1 passed, with 315 unrelated tests
+    skipped by the focused name filter; the same durable `device-sync.wake`
+    survives clean-state restore, bounded provider replay, and quiescence.

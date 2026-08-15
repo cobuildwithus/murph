@@ -1218,8 +1218,11 @@ Last verified: 2026-08-15
   fences before it commits `source_confirmed`, source admission,
   callback-equivalent source-scoped initial work, its mandatory mailbox
   handoff, dirty state, and trace completion in one locked transaction. The
-  initial handoff is required even when dirty state already exists. A pending webhook without
-  that exact provider proof releases its trace claim and returns a retryable
+  initial handoff is required even when dirty state already exists. If its
+  post-commit Temporal signal fails, the existing scheduled mailbox-handoff
+  sweep selects one exact unconsumed `device-sync.wake` pointer per user and
+  retries from mailbox truth without scanning dirty rows. A pending webhook
+  without that exact provider proof releases its trace claim and returns a retryable
   not-ready response. Manual reconcile, due scheduling, ordinary queued jobs,
   and sync-success promotion apply the same account phase gate. After a shared
   account is `source_confirmed`, a new target source does

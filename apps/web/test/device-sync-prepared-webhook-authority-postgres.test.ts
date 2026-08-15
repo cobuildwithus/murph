@@ -20,6 +20,7 @@ import { HostedDeviceSyncWebhookAdminService } from "@/src/lib/device-sync/webho
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { readHostedMailboxWakeByItemId } from "@/src/lib/hosted-mailbox/store";
+import { runHostedPreferenceHandoffSweeper } from "@/src/lib/hosted-orchestration/preference-handoff-sweeper";
 import { revokeHostedConsentScope } from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -402,7 +403,7 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
 describe.skipIf(!runPostgresProof)(
   "prepared device-webhook authority revalidation (real PostgreSQL)",
   () => {
-    it("confirms pending setup from a signed daily event only after live source proof", async () => {
+    it("confirms pending setup and recovers a missed runtime handoff from durable mailbox state", async () => {
       const sourceProviderSlug = "garmin";
       const fixture = await createFixture({
         setupPhase: "pending_link",
@@ -416,6 +417,7 @@ describe.skipIf(!runPostgresProof)(
         status: 200,
       }));
       const registry = createJunctionRegistry(providerFetch);
+      const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       try {
         const prepared = await prepareDailyData({
@@ -445,10 +447,22 @@ describe.skipIf(!runPostgresProof)(
           headers: new Headers(),
           registry,
         });
+        runtimeMocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValueOnce(
+          new Error("Synthetic Temporal signal outage."),
+        );
 
         await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
           accepted: true,
           duplicate: false,
+        });
+        const replayService = createIngressService({
+          fixture,
+          headers: new Headers(),
+          registry,
+        });
+        await expect(replayService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: true,
         });
 
         expect(providerFetch).toHaveBeenCalledOnce();
@@ -534,7 +548,39 @@ describe.skipIf(!runPostgresProof)(
         expect(runtimeMocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
           mailboxItemId: mailboxItem.id,
         });
+        expect(runtimeMocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(1);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+
+        const requestHandoff = vi.fn(async () => ({
+          signalAccepted: true as const,
+          workflowId: "hosted-user-runtime:test",
+        }));
+        await expect(runHostedPreferenceHandoffSweeper({
+          hasActiveAccess: vi.fn(async () => true),
+          logger: {
+            info: vi.fn(),
+            warn: vi.fn(),
+          },
+          requestHandoff,
+          store: {
+            listCandidates: vi.fn(async () => [{
+              mailboxItemId: mailboxItem.id,
+              userId: fixture.memberId,
+            }]),
+          },
+        })).resolves.toMatchObject({
+          handoffAccepted: 1,
+          handoffFailed: 0,
+        });
+        expect(requestHandoff).toHaveBeenCalledWith({
+          abortSignal: expect.any(AbortSignal),
+          expectedUserId: fixture.memberId,
+          mailboxItemId: mailboxItem.id,
+        });
       } finally {
+        warningSpy.mockRestore();
         await cleanupFixture(fixture);
       }
     });
