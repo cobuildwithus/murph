@@ -270,6 +270,26 @@ describe("hosted-local worktree config", () => {
     expect(config.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("0");
   });
 
+  it("preserves an explicit Temporal disable for worktree startup", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_TEMPORAL: "disabled",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env.MURPH_DEV_TEMPORAL).toBe("disabled");
+    expect(
+      resolveHostedLocalWorktreeDevConfig({
+        env: {
+          MURPH_DEV_TEMPORAL: "disabled",
+        },
+        slug: "feature-a",
+      }).temporal.mode,
+    ).toBe("disabled");
+  });
+
   it("drops inherited temp dir overrides from worktree startup env", () => {
     for (const tempDir of [
       ".tmp/hosted-local-worktrees",

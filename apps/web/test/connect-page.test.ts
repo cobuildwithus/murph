@@ -392,7 +392,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     {
       assetPath: "/brand-logos/connect/cronometer.png",
       description:
-        "Nutrition logs, calories, macros, micronutrients, and meal timing from Cronometer.",
+        "Cronometer meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
       name: "Cronometer",
     },
     {

@@ -1398,7 +1398,9 @@ function buildLinqProviderMessageEffects(input: {
   const textParts = (input.body.message.parts ?? []).filter(
     (part): part is TextPart => part.type === 'text',
   )
-  const text = textParts.length === 1 ? textParts[0]!.value : null
+  const text = textParts.length > 0
+    ? textParts.map((part) => part.value).join('')
+    : null
   return [{
     ...(input.body.message.parts?.some((part) => part.type === 'media') === true
       ? { carriesIntentMedia: true as const }
@@ -2842,9 +2844,9 @@ function buildLinqMessageBody(input: {
     : null
   const media = normalizeLinqMediaList(input.media ?? [])
   const normalizedMessage = normalizeNullableString(input.message)
-  const textPart = normalizedMessage === null
-    ? null
-    : buildLinqTextPartWithinLimit({
+  const textParts = normalizedMessage === null
+    ? []
+    : buildLinqTextPartsWithinLimits({
         message: normalizedMessage,
         operation: input.operation,
         requestAttachmentMediaPartCount:
@@ -2853,7 +2855,7 @@ function buildLinqMessageBody(input: {
         requestPublicUrlMediaPartCount:
           media.filter((part) => 'url' in part).length,
       })
-  const parts: MessageContent['parts'] = textPart ? [textPart, ...media] : media
+  const parts: MessageContent['parts'] = [...textParts, ...media]
   if (parts.length === 0) {
     throw new VaultCliError(
       'LINQ_INVALID_INPUT',
@@ -2876,7 +2878,7 @@ function buildLinqMessageBody(input: {
   return { message }
 }
 
-export function assertLinqMessageTextPartWithinLimit(input: {
+export function assertLinqMessagePartsWithinLimits(input: {
   message: string
   operation: 'create_chat' | 'send_message'
   requestAttachmentMediaPartCount: number
@@ -2887,24 +2889,26 @@ export function assertLinqMessageTextPartWithinLimit(input: {
   if (normalizedMessage === null) {
     return
   }
-  buildLinqTextPartWithinLimit({
+  buildLinqTextPartsWithinLimits({
     ...input,
     message: normalizedMessage,
   })
 }
 
-function buildLinqTextPartWithinLimit(input: {
+function buildLinqTextPartsWithinLimits(input: {
   message: string
   operation: 'create_chat' | 'send_message'
   requestAttachmentMediaPartCount: number
   requestMediaPartCount: number
   requestPublicUrlMediaPartCount: number
-}): TextPart {
+}): TextPart[] {
   const renderedText = renderMarkdownMessageText(input.message)
-  if (renderedText.text.length > LINQ_MAX_TEXT_PART_LENGTH) {
+  const textParts = splitLinqTextParts(renderedText)
+  const requestMessagePartCount = input.requestMediaPartCount + textParts.length
+  if (requestMessagePartCount > LINQ_MAX_MESSAGE_PARTS) {
     throw Object.assign(new VaultCliError(
       'LINQ_INVALID_INPUT',
-      `Linq text parts may contain at most ${LINQ_MAX_TEXT_PART_LENGTH} characters.`,
+      `Linq message must contain at most ${LINQ_MAX_MESSAGE_PARTS} parts.`,
       {
         failureStage: 'configuration',
         operation: input.operation,
@@ -2912,9 +2916,9 @@ function buildLinqTextPartWithinLimit(input: {
         requestAttachmentMediaPartCount: input.requestAttachmentMediaPartCount,
         requestMediaPartCount: input.requestMediaPartCount,
         requestMessageLength: renderedText.text.length,
-        requestMessagePartCount: input.requestMediaPartCount + 1,
+        requestMessagePartCount,
         requestPublicUrlMediaPartCount: input.requestPublicUrlMediaPartCount,
-        requestTextPartCount: 1,
+        requestTextPartCount: textParts.length,
         retryable: false,
       },
     ), {
@@ -2923,14 +2927,68 @@ function buildLinqTextPartWithinLimit(input: {
     })
   }
 
-  const textPart: TextPart = {
-    type: 'text',
-    value: renderedText.text,
+  return textParts
+}
+
+type LinqTextDecoration = NonNullable<TextPart['text_decorations']>[number]
+
+function splitLinqTextParts(
+  renderedText: ReturnType<typeof renderMarkdownMessageText>,
+): TextPart[] {
+  const parts: TextPart[] = []
+  let rangeStart = 0
+
+  while (rangeStart < renderedText.text.length) {
+    let rangeEnd = Math.min(
+      rangeStart + LINQ_MAX_TEXT_PART_LENGTH,
+      renderedText.text.length,
+    )
+    if (
+      rangeEnd < renderedText.text.length &&
+      isHighSurrogate(renderedText.text.charCodeAt(rangeEnd - 1)) &&
+      isLowSurrogate(renderedText.text.charCodeAt(rangeEnd))
+    ) {
+      rangeEnd -= 1
+    }
+
+    const decorations = renderedText.decorations
+      .map((decoration): LinqTextDecoration | null => {
+        const decorationStart = Math.max(decoration.range[0], rangeStart)
+        const decorationEnd = Math.min(decoration.range[1], rangeEnd)
+        return decorationEnd <= decorationStart
+          ? null
+          : {
+              range: [
+                decorationStart - rangeStart,
+                decorationEnd - rangeStart,
+              ],
+              style: decoration.style,
+            }
+      })
+      .filter((decoration): decoration is LinqTextDecoration =>
+        decoration !== null
+      )
+
+    const part: TextPart = {
+      type: 'text',
+      value: renderedText.text.slice(rangeStart, rangeEnd),
+    }
+    if (decorations.length > 0) {
+      part.text_decorations = decorations
+    }
+    parts.push(part)
+    rangeStart = rangeEnd
   }
-  if (renderedText.decorations.length > 0) {
-    textPart.text_decorations = renderedText.decorations
-  }
-  return textPart
+
+  return parts
+}
+
+function isHighSurrogate(value: number): boolean {
+  return value >= 0xd800 && value <= 0xdbff
+}
+
+function isLowSurrogate(value: number): boolean {
+  return value >= 0xdc00 && value <= 0xdfff
 }
 
 function normalizeLinqMediaList(

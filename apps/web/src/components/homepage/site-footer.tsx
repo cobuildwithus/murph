@@ -5,7 +5,10 @@ import {
   getAvailableHostedPublicReferralRewards,
 } from "@/src/lib/hosted-growth/referral-program";
 
-import { SiteFooterVitals } from "./site-footer-vitals";
+import {
+  SiteFooterVitals,
+  type SiteFooterVitalsMode,
+} from "./site-footer-vitals";
 
 function GitHubIcon() {
   return (
@@ -74,9 +77,11 @@ const footerLinks = {
 export function SiteFooter({
   id = "site-footer",
   referralsAvailable = getAvailableHostedPublicReferralRewards().length > 0,
+  vitalsMode = "live",
 }: {
   id?: string;
   referralsAvailable?: boolean;
+  vitalsMode?: SiteFooterVitalsMode;
 }) {
   const productLinks = referralsAvailable
     ? footerLinks.murph
@@ -92,7 +97,7 @@ export function SiteFooter({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/logo.svg" alt="Murph" width={125} height={28} className="h-7 w-auto" />
             </Link>
-            <SiteFooterVitals />
+            <SiteFooterVitals mode={vitalsMode} />
           </div>
 
           <div className="grid grid-cols-2 gap-x-20 gap-y-8 sm:gap-x-28">

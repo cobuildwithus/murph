@@ -223,14 +223,14 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
   );
 });
 
-test("next.config externalizes the Temporal client only for hosted-local smoke artifacts", () => {
+test("next.config externalizes one Temporal client instance in every server artifact", () => {
   const smokeNextConfig = buildHostedWebNextConfig(
     PHASE_PRODUCTION_BUILD,
     createHostedWebSmokeEnvironment(createProcessEnv({})),
   );
 
   assert.deepEqual(smokeNextConfig.serverExternalPackages, ["@temporalio/client"]);
-  assert.equal(productionNextConfig.serverExternalPackages, undefined);
+  assert.deepEqual(productionNextConfig.serverExternalPackages, ["@temporalio/client"]);
 });
 
 test("hosted web smoke can isolate concurrent dev and production runs with a dist-dir suffix", () => {

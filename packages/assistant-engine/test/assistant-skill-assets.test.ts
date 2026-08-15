@@ -263,6 +263,102 @@ describe('assistant skill assets', () => {
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
 
+  it('keeps longitudinal routing compact while the skill owns trial selection and onboarding owns activation', async () => {
+    const experimentSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'self-management-experiments',
+    )
+    expect(experimentSkill).toBeTruthy()
+    if (!experimentSkill) return
+
+    expect(experimentSkill.triggerHint).toContain(
+      'Use to design, run, and interpret low-burden personalized experiments',
+    )
+    expect(experimentSkill.triggerHint).not.toContain('private direct')
+    expect(experimentSkill.triggerHint).not.toContain('proactively use it')
+
+    const raw = await readSkillFile(experimentSkill)
+    const compact = raw.replace(/\s+/gu, ' ')
+    expect(raw).toContain('## Personalized trial selection')
+    expect(raw).not.toContain('## Private longitudinal default')
+    expect(compact).toContain(
+      'Use longitudinal context as a decision input, not decoration',
+    )
+    expect(compact).toContain(
+      'let prior partial benefit refine technique, timing, dose, or comparison',
+    )
+    expect(compact).toContain(
+      'Lead the first useful response with a calibrated working assessment, the one or two longitudinal facts that changed the choice, and one selected trial.',
+    )
+    expect(compact).toContain(
+      'Do not answer an eligible request with a list of hydration, sleep, stress, diet, trigger avoidance, or other general wellness ideas.',
+    )
+    expect(compact).toContain(
+      'Do not withhold it because run creation, reminders, check-ins, or tracking still need authorization.',
+    )
+    expect(compact).toContain(
+      'mentions history without letting it change the lever, technique, timing, dose, comparison, or outcome',
+    )
+    expect(compact).toContain(
+      'ends with generic wellness advice when a safe bounded trial is the selected answer',
+    )
+
+    const onboarding = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'experiment-onboarding',
+    )
+    expect(onboarding).toBeTruthy()
+    if (!onboarding) return
+    const onboardingRaw = await readSkillFile(onboarding)
+    expect(onboardingRaw).toContain(
+      'This restriction is about persistence and activation, not about withholding a useful proposal.',
+    )
+    expect(onboardingRaw).toContain(
+      'create the run and support only after authorization.',
+    )
+
+    const repositoryRoot = path.resolve(resolveAssistantSkillsRoot(), '../../..')
+    const [productContract, changelog] = await Promise.all([
+      readFile(
+        path.join(repositoryRoot, 'agent-docs/product-specs/health-commons.md'),
+        'utf8',
+      ),
+      readFile(
+        path.join(
+          repositoryRoot,
+          'apps/web/changelog/entries/2026-08-14/personalized-next-trials.json',
+        ),
+        'utf8',
+      ),
+    ])
+    const compactProductContract = productContract.replace(/\s+/gu, ' ')
+    expect(compactProductContract).toContain(
+      'it may suggest one context-grounded bounded trial without experiment vocabulary',
+    )
+    expect(compactProductContract).toContain(
+      'factual questions, logging or record updates, requests to be heard',
+    )
+    expect(compactProductContract).toContain(
+      'acute or unstable situations, cases primarily owned by urgent or clinician-led evaluation',
+    )
+    expect(compactProductContract).toContain(
+      'the existing record already resolves',
+    )
+    expect(compactProductContract).toContain(
+      'one clearly indicated direct action makes comparison unnecessary',
+    )
+    expect(compactProductContract).toContain(
+      'A proposal never authorizes a run, reminder, check-in, or tracking plan',
+    )
+    expect(compactProductContract).not.toContain(
+      'does not create or suggest an experiment unless the member asks',
+    )
+    expect(changelog).toContain(
+      'When a private health problem keeps returning',
+    )
+    expect(changelog).toContain(
+      'starting a tracked experiment, reminder, or check-in still requires the member\'s authorization',
+    )
+  })
+
   it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
     const sleepSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'sleep-improvement',
@@ -1526,6 +1622,18 @@ describe('assistant skill assets', () => {
 
     const raw = await readSkillFile(supplementSkill)
 
+    expect(raw).toContain(
+      'For connected or saved-meal nutrient questions, also read `food-journal`',
+    )
+    expect(raw).toContain(
+      'missing or partial meal coverage is not zero intake',
+    )
+    expect(raw).toContain(
+      'source-app targets and percentages are not imported',
+    )
+    expect(raw).toContain(
+      'one day of food records cannot diagnose a deficiency',
+    )
     expect(raw).toContain('vault-cli supplement search-labels`')
     expect(raw).toContain('vault-cli\nsupplement search-labels-batch`')
     expect(raw).toContain('preserve the full active ingredient panel')

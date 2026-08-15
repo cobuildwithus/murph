@@ -308,6 +308,63 @@ describe('workout session response cards', () => {
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
   })
 
+  it('encodes a complete 11×3 late-active card when its measured URL fits', () => {
+    const exerciseNames = [
+      'Back squat',
+      'Romanian deadlift',
+      'Leg press',
+      'Leg extension',
+      'Hamstring curl',
+      'Walking lunge',
+      'Calf raise',
+      'Hip thrust',
+      'Cable row',
+      'Push-up',
+      'Farmer carry',
+    ]
+    const card: CompactTableResponseCardV1 = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Full strength session',
+      subtitle: null,
+      footer: 'Reply with the exercise, set, and result.',
+      tracking: ACTIVE_WORKOUT_CARD.tracking,
+      workout: {
+        version: 1,
+        state: 'active',
+        exercises: exerciseNames.map((name, exerciseIndex) => ({
+          name,
+          sets: Array.from({ length: 3 }, (_, setIndex) => {
+            const isCompleted = exerciseIndex * 3 + setIndex < 30
+            return isCompleted
+              ? {
+                  status: 'completed' as const,
+                  target: '8 reps',
+                  actual: '8 reps',
+                }
+              : {
+                  status: 'pending' as const,
+                  target: '8 reps',
+                  actual: null,
+                }
+          }),
+        })),
+      },
+    }
+
+    expect(assistantResponseCardSchema.parse(card)).toEqual(card)
+    const url = encodeWorkoutSessionAppCardUrl(card)
+    expect(url.length).toBeLessThan(2_048)
+    expect(decodeAppCardUrl(url)).toMatchObject({
+      schemaVersion: 4,
+      card: {
+        e: expect.arrayContaining([
+          ['Farmer carry', expect.any(Array)],
+        ]),
+      },
+    })
+  })
+
   it('renders a useful fallback and keeps tracking private to transcript context', () => {
     const visible = renderAssistantResponseCardText(ACTIVE_WORKOUT_CARD)
     expect(visible).toContain('Active workout · 3/6 sets complete')
