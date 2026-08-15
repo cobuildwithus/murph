@@ -118,7 +118,9 @@ export type DatabaseHealthCondition =
       failures: number;
       incompleteChecks?: number;
       kind: "monitoring_unavailable";
-      connectionErrorEvidence?: DatabaseConnectionErrorCollectionEvidence;
+      connectionErrorEvidence?:
+        | DatabaseConnectionErrorCollectionEvidence
+        | null;
       missingMetrics: readonly DatabaseHealthRequiredMetricName[];
       unavailableChecks?: number;
     };

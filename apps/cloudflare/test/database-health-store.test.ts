@@ -184,10 +184,7 @@ describe("database health store", () => {
 
     expect(store.readLatestMonitoringEvidence()).toEqual({
       availability: "incomplete",
-      connectionErrorEvidence: {
-        missingPortAttempts: { "5432": 0, "6432": 0 },
-        parsedAttempts: 0,
-      },
+      connectionErrorEvidence: null,
       missingMetrics: [],
     });
     expect(sql.exec<{ name: string }>(
@@ -260,10 +257,7 @@ describe("database health store", () => {
 
     expect(store.readAlertState().monitoringAlertObligation).toEqual({
       checkedAtMs: 600_000,
-      connectionErrorEvidence: {
-        missingPortAttempts: { "5432": 0, "6432": 0 },
-        parsedAttempts: 0,
-      },
+      connectionErrorEvidence: null,
       failures: 2,
       incompleteChecks: 2,
       missingMetrics: [
@@ -271,6 +265,31 @@ describe("database health store", () => {
       ],
       unavailableChecks: 0,
     });
+  });
+
+  it("rejects parsed evidence on an all-unavailable monitoring obligation", () => {
+    const sql = createTestSqlStorage();
+    const store = new DatabaseHealthStore(sql);
+    sql.exec(
+      `UPDATE database_health_meta
+       SET monitoring_alert_owed_json = ?
+       WHERE singleton = 1`,
+      JSON.stringify({
+        checkedAtMs: 600_000,
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 0 },
+          parsedAttempts: 1,
+        },
+        failures: 2,
+        incompleteChecks: 0,
+        missingMetrics: [],
+        unavailableChecks: 2,
+      }),
+    );
+
+    expect(() => store.readAlertState()).toThrow(
+      /database monitoring alert obligation/u,
+    );
   });
 
   it.each([

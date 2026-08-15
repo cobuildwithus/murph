@@ -1608,8 +1608,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   counts for ports 5432/6432 from partial checks. It uses the threshold time as
   the window end; one bounded
   evidence value on each existing sample preserves that provenance across
-  restart. Structured collection warnings include the bounded parsed-observation
-  count and per-port omission counts without raw provider payloads. One bounded
+  restart. A failed check retains every family omitted by any of its parsed
+  observations, so its exact port evidence and canonical missing-family list
+  cannot diverge. If any sample in the two-check window predates detailed port
+  evidence, the aggregate keeps port detail unknown instead of presenting a
+  partial ratio as exact. Structured collection warnings include the bounded
+  parsed-observation count and per-port omission counts without raw provider
+  payloads. One bounded
   obligation in the
   existing incident row survives a busy pending slot, restart, and recovery
   until a telemetry-bearing page is acknowledged. Recovery and another metric

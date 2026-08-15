@@ -260,8 +260,11 @@ existing incident row. The first two-check window counts incomplete versus
 unavailable observations, unions only canonical missing families, and sums
 parsed observations plus exact 5432/6432 omission counts from partial checks.
 It identifies the threshold time as the window end. A bounded per-sample evidence value preserves
-that provenance across restart, while legacy evidence remains readable without
-inventing port detail. An older
+that provenance across restart. A failed check retains the connection-error
+family if any parsed observation omitted an expected port, even when its final
+selected observation is missing another family. Legacy evidence remains
+readable, and any window containing it reports unavailable port detail rather
+than presenting a partial ratio as exact. An older
 pending page or connection-error priority cannot lose the obligation; recovery
 and another gap before acknowledgment coalesce into that same notification
 while the first threshold window remains authoritative. The obligation does

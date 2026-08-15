@@ -630,7 +630,8 @@ supported provider credential.
   retention, one bounded confirmation for a safe connection-error-family
   omission, confirmation-only port baseline advancement, exact single-port
   warning and persisted alert evidence, alternating-port window aggregation,
-  legacy evidence parsing,
+  mixed-confirmation family/evidence alignment, legacy evidence parsing, and
+  conservative legacy-plus-detailed window formatting,
   multi-family confirmation rejection, cross-scrape port composition,
   immediate unsafe-signal paging before that confirmation, unsafe confirmation
   paging without losing the complementary baseline, failed-confirmation

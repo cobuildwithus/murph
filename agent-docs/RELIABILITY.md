@@ -510,8 +510,12 @@ Last verified: 2026-08-14
   It uses the threshold time as its window end. One bounded evidence value on
   each existing sample
   preserves that aggregate provenance across restart. Legacy evidence without
-  port detail remains readable and is reported as unavailable detail rather than
-  inventing a port. The obligation survives an occupied pending-message slot,
+  port detail remains readable; any window containing it reports unavailable
+  port detail rather than presenting the detailed portion as an exact ratio.
+  Each failed check also retains the connection-error family whenever any of its
+  parsed observations omitted an expected port, keeping strict persistence
+  validation aligned with the operator diagnosis. The obligation survives an
+  occupied pending-message slot,
   restart, recovery, and connection-error-only prioritization; only
   acknowledgment of a pending body that includes the monitoring condition
   clears it. Recovery and another threshold before acknowledgment deliberately

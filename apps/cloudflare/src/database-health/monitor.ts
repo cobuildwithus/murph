@@ -355,6 +355,10 @@ export class DatabaseHealthMonitor {
         )
         : (previousConnectionErrorCounterBaseline ?? {});
       if (observation.missingMetrics.length > 0) {
+        const monitoringMissingMetrics = readMonitoringMissingMetrics({
+          connectionErrorEvidence,
+          missingMetrics: observation.missingMetrics,
+        });
         const connectionErrorDeltas =
           observedConnectionErrorCounters === null
             ? null
@@ -374,7 +378,7 @@ export class DatabaseHealthMonitor {
             connectionErrorEvidence,
             failures,
             kind: "monitoring_unavailable",
-            missingMetrics: observation.missingMetrics,
+            missingMetrics: monitoringMissingMetrics,
           });
         }
         console.warn("Database health metrics collection failed.", {
@@ -382,7 +386,7 @@ export class DatabaseHealthMonitor {
           connectionErrorEvidence,
           failureCode: "required_metrics_missing",
           failures,
-          missingMetrics: observation.missingMetrics,
+          missingMetrics: monitoringMissingMetrics,
         });
         return {
           connectionErrorCounterBaseline,
@@ -394,7 +398,7 @@ export class DatabaseHealthMonitor {
           monitoringEvidence: {
             availability: "incomplete",
             connectionErrorEvidence,
-            missingMetrics: observation.missingMetrics,
+            missingMetrics: monitoringMissingMetrics,
           },
           snapshot: observation.snapshot,
           status: "failed",
@@ -1334,7 +1338,7 @@ function formatMonitoringUnavailableCondition(
 function formatMissingMetricLabel(
   name: DatabaseHealthRequiredMetricName,
   connectionErrorEvidence:
-    DatabaseConnectionErrorCollectionEvidence | undefined,
+    DatabaseConnectionErrorCollectionEvidence | null | undefined,
 ): string {
   const label = DATABASE_METRIC_ALERT_LABELS[name];
   if (name !== DATABASE_CONNECTION_ERROR_METRIC_NAME) {
@@ -1375,20 +1379,28 @@ function buildMonitoringAlertObligation(input: {
   const observedMissingMetrics = new Set(
     input.observations.flatMap((observation) => observation.missingMetrics),
   );
-  const connectionErrorEvidence = input.observations.reduce(
-    (combined, observation) => ({
-      missingPortAttempts: {
-        "5432": combined.missingPortAttempts["5432"]
-          + observation.connectionErrorEvidence.missingPortAttempts["5432"],
-        "6432": combined.missingPortAttempts["6432"]
-          + observation.connectionErrorEvidence.missingPortAttempts["6432"],
+  const connectionErrorEvidence = input.observations.some(
+    (observation) => observation.connectionErrorEvidence === null,
+  )
+    ? null
+    : input.observations.reduce(
+      (combined, observation) => {
+        const evidence = observation.connectionErrorEvidence;
+        if (evidence === null) {
+          return combined;
+        }
+        return {
+          missingPortAttempts: {
+            "5432": combined.missingPortAttempts["5432"]
+              + evidence.missingPortAttempts["5432"],
+            "6432": combined.missingPortAttempts["6432"]
+              + evidence.missingPortAttempts["6432"],
+          },
+          parsedAttempts: combined.parsedAttempts + evidence.parsedAttempts,
+        };
       },
-      parsedAttempts:
-        combined.parsedAttempts
-        + observation.connectionErrorEvidence.parsedAttempts,
-    }),
-    emptyConnectionErrorCollectionEvidence(),
-  );
+      emptyConnectionErrorCollectionEvidence(),
+    );
   return {
     checkedAtMs: input.checkedAtMs,
     connectionErrorEvidence,
@@ -1532,6 +1544,23 @@ function buildDatabaseMetricCollection(input: {
     },
     observation: input.observation,
   };
+}
+
+function readMonitoringMissingMetrics(input: {
+  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence;
+  missingMetrics: readonly DatabaseHealthRequiredMetricName[];
+}): DatabaseHealthRequiredMetricName[] {
+  const missingMetricSet = new Set(input.missingMetrics);
+  if (
+    DATABASE_CONNECTION_ERROR_PORTS.some(
+      (port) => input.connectionErrorEvidence.missingPortAttempts[port] > 0,
+    )
+  ) {
+    missingMetricSet.add(DATABASE_CONNECTION_ERROR_METRIC_NAME);
+  }
+  return DATABASE_HEALTH_REQUIRED_METRIC_NAMES.filter(
+    (name) => missingMetricSet.has(name),
+  );
 }
 
 function emptyConnectionErrorCollectionEvidence():

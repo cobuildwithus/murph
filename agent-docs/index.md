@@ -265,7 +265,8 @@ evidence when either expected connection-error port is missing, continued
 evaluation of available database signals, per-port baseline advancement with
 new/reset suppression, bounded safe connection-error confirmation with exact
 missing-port attempt and alert evidence, confirmation-only port baseline
-advancement, cross-scrape
+advancement, failed-check family/evidence alignment, conservative legacy-window
+provenance, cross-scrape
 port composition and without suppressing unsafe observations, and
 one-shot telemetry-only operator paging with unresolved-window coalescing,
 current-pressure priority including direct and pooled connection errors in one

@@ -20,14 +20,14 @@ export interface DatabaseHealthMonitoringAlertObligation {
   checkedAtMs: number;
   failures: number;
   incompleteChecks: number;
-  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence;
+  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence | null;
   missingMetrics: readonly DatabaseHealthRequiredMetricName[];
   unavailableChecks: number;
 }
 
 export interface DatabaseHealthMonitoringEvidence {
   availability: "incomplete" | "unavailable";
-  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence;
+  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence | null;
   missingMetrics: readonly DatabaseHealthRequiredMetricName[];
 }
 
@@ -438,7 +438,7 @@ export class DatabaseHealthStore {
       availability: row.failure_code === "required_metrics_missing"
         ? "incomplete"
         : "unavailable",
-      connectionErrorEvidence: emptyConnectionErrorCollectionEvidence(),
+      connectionErrorEvidence: null,
       missingMetrics: [],
     };
   }
@@ -706,6 +706,7 @@ function parseMonitoringAlertObligation(
   const normalizedConnectionErrorEvidence = parseConnectionErrorEvidence(
     connectionErrorEvidence,
     failures * 2,
+    true,
   );
   if (
     typeof normalizedIncompleteChecks !== "number"
@@ -716,22 +717,26 @@ function parseMonitoringAlertObligation(
     || normalizedUnavailableChecks < 0
     || normalizedIncompleteChecks + normalizedUnavailableChecks !== failures
     || (
-      connectionErrorEvidence !== undefined
-      && normalizedIncompleteChecks > 0
+      normalizedConnectionErrorEvidence !== null
       && (
-        normalizedConnectionErrorEvidence.parsedAttempts === 0
-        || normalizedConnectionErrorEvidence.parsedAttempts
-          > normalizedIncompleteChecks * 2
+        normalizedIncompleteChecks === 0
+          ? normalizedConnectionErrorEvidence.parsedAttempts !== 0
+          : (
+            normalizedConnectionErrorEvidence.parsedAttempts === 0
+            || normalizedConnectionErrorEvidence.parsedAttempts
+              > normalizedIncompleteChecks * 2
+          )
       )
     )
     || (
-      hasMissingConnectionErrorPortAttempts(
+      normalizedConnectionErrorEvidence !== null
+      && hasMissingConnectionErrorPortAttempts(
         normalizedConnectionErrorEvidence,
       )
       && !missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
     )
     || (
-      connectionErrorEvidence !== undefined
+      normalizedConnectionErrorEvidence !== null
       && missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
       && !hasMissingConnectionErrorPortAttempts(
         normalizedConnectionErrorEvidence,
@@ -782,25 +787,31 @@ function parseMonitoringEvidence(
   const normalizedConnectionErrorEvidence = parseConnectionErrorEvidence(
     connectionErrorEvidence,
     2,
+    false,
   );
   if (
     (
       availability === "unavailable"
+      && normalizedConnectionErrorEvidence !== null
       && normalizedConnectionErrorEvidence.parsedAttempts > 0
     )
     || (
       availability === "incomplete"
       && connectionErrorEvidence !== undefined
-      && normalizedConnectionErrorEvidence.parsedAttempts === 0
+      && (
+        normalizedConnectionErrorEvidence === null
+        || normalizedConnectionErrorEvidence.parsedAttempts === 0
+      )
     )
     || (
-      hasMissingConnectionErrorPortAttempts(
+      normalizedConnectionErrorEvidence !== null
+      && hasMissingConnectionErrorPortAttempts(
         normalizedConnectionErrorEvidence,
       )
       && !missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
     )
     || (
-      connectionErrorEvidence !== undefined
+      normalizedConnectionErrorEvidence !== null
       && missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
       && !hasMissingConnectionErrorPortAttempts(
         normalizedConnectionErrorEvidence,
@@ -819,9 +830,13 @@ function parseMonitoringEvidence(
 function parseConnectionErrorEvidence(
   value: unknown,
   maximumParsedAttempts: number,
-): DatabaseConnectionErrorCollectionEvidence {
+  allowUnknownMarker: boolean,
+): DatabaseConnectionErrorCollectionEvidence | null {
   if (value === undefined) {
-    return emptyConnectionErrorCollectionEvidence();
+    return null;
+  }
+  if (value === null && allowUnknownMarker) {
+    return null;
   }
   if (!isObjectRecord(value)) {
     throw new Error("Stored database monitoring port evidence is invalid.");
@@ -858,14 +873,6 @@ function parseConnectionErrorEvidence(
   return {
     missingPortAttempts: normalizedMissingPortAttempts,
     parsedAttempts,
-  };
-}
-
-function emptyConnectionErrorCollectionEvidence():
-  DatabaseConnectionErrorCollectionEvidence {
-  return {
-    missingPortAttempts: { "5432": 0, "6432": 0 },
-    parsedAttempts: 0,
   };
 }
 

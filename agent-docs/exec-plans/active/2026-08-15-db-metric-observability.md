@@ -87,10 +87,18 @@ Updated: 2026-08-15
   alert-obligation JSON as bounded parsed-observation and per-port omission
   counts. Legacy JSON without that field normalizes to no port detail; warnings
   record the same exact counts without provider payloads.
+- Preliminary ReviewGPT found that a mixed confirmation could select another
+  missing family while retaining a prior port omission, causing strict
+  persistence validation to reject the alert. Canonically union any port
+  omission evidenced during the failed check into its missing-family list.
+- Preserve absent legacy port evidence as unknown rather than zero. If any
+  contributing check predates detailed evidence, the entire two-check window
+  reports unavailable port detail instead of presenting a partial ratio as
+  exact.
 
 ## Verification
 
-- Commands run: `pnpm exec vitest run --config
+- Commands run before review: `pnpm exec vitest run --config
   apps/cloudflare/vitest.config.ts` for the four database-health node files (109
   tests),
   `pnpm exec vitest run --config
@@ -101,8 +109,13 @@ Updated: 2026-08-15
   Workers files (15 tests). Its earlier global workspace-boundary guard reports
   four base-identical violations in untouched CLI/Web tests; each reported path
   is byte-identical to `origin/main`, so the current diff did not cause them.
-- Commands still to run: exact-head GitHub Actions and the routed ReviewGPT
-  gates.
+- After preliminary and final-round ReviewGPT remediation, the focused node
+  suite passes 112
+  tests, the real Workers/SQLite file passes 5 tests, and the Cloudflare
+  typecheck passes. Exact-head GitHub Actions were fully green on the first
+  candidate head.
+- Commands still to run: final ReviewGPT remediation review and exact-head
+  GitHub Actions for the remediated head.
 - Expected outcomes: omitted ports are explicit across restart and alerts,
   complementary port observations compose safely, unsafe evidence is not
   delayed, retry/request bounds are fixed, legacy persisted rows remain
