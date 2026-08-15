@@ -263,6 +263,10 @@ import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
   createHostedExecutionGroupReactionEventId,
 } from "@murphai/hosted-execution";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+} from "@murphai/hosted-execution/vault-share";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
@@ -287,6 +291,12 @@ import {
   handleHostedOnboardingLinqWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-service";
 import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
+import {
+  setHostedSecureBoxStringTestCodecForTests,
+} from "@/src/lib/hosted-crypto/secure-box";
+import {
+  replaceHostedVaultShareProjectionSnapshot,
+} from "@/src/lib/hosted-vault-share/projection-store";
 import { createPrismaClient } from "@/src/lib/prisma";
 import { sha256Hex } from "@/src/lib/primitives";
 
@@ -3535,6 +3545,166 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("composes D-to-R vault replacement with the actual O-to-R account deletion path", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const suffix = randomUUID().replaceAll("-", "");
+      const deletionApplicationName = `delete_vault_${suffix.slice(0, 8)}`;
+      const projectionApplicationName = `project_vault_${suffix.slice(0, 8)}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        deletionApplicationName,
+        externalParticipantSortsBeforeOwner: true,
+      });
+      const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const projectionPrisma = createPrismaClient({
+        databaseUrl: withPostgresApplicationName(
+          databaseUrl,
+          projectionApplicationName,
+        ),
+        poolMax: 1,
+      });
+      const projectionScope = hostedVaultShareProjectionKindToScope(
+        "sleep-times.v0",
+      );
+      const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+        projectionScope,
+      );
+      const shareId = `share_delete_projection_${suffix}`;
+      let releaseDeletionPreparation = (): void => undefined;
+      const deletionPreparationMayContinue = new Promise<void>((resolve) => {
+        releaseDeletionPreparation = resolve;
+      });
+      let reportDeletionPrepared = (): void => undefined;
+      const deletionPrepared = new Promise<void>((resolve) => {
+        reportDeletionPrepared = resolve;
+      });
+      let releaseOutreachTable = (): void => undefined;
+      const outreachTableMayRelease = new Promise<void>((resolve) => {
+        releaseOutreachTable = resolve;
+      });
+      let reportOutreachTableLocked = (): void => undefined;
+      const outreachTableLocked = new Promise<void>((resolve) => {
+        reportOutreachTableLocked = resolve;
+      });
+      const inFlight: Promise<unknown>[] = [];
+
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: () => `ciphertext_${shareId}`,
+      });
+      accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+        .mockReset()
+        .mockImplementation(async () => {
+          reportDeletionPrepared();
+          await deletionPreparationMayContinue;
+        });
+      providerMocks.sendHostedLinqChatMessage
+        .mockReset()
+        .mockResolvedValue({
+          chatId: fixture.chatId,
+          messageId: `message-delete-projection-${suffix}`,
+        });
+
+      try {
+        expect(fixture.participantMemberId < fixture.ownerMemberId).toBe(true);
+        await drainDeletionReplyEffect({
+          effect: fixture.effect,
+          prisma: fixture.replyPrisma,
+        });
+        await fixture.deletionPrisma.hostedWorkspace.create({
+          data: { userId: fixture.participantMemberId, version: 1n },
+        });
+        await fixture.deletionPrisma.hostedVaultShare.create({
+          data: {
+            destinationMemberId: fixture.runtimeMemberId,
+            grantedAt: new Date("2026-07-27T16:00:00.000Z"),
+            grantorMemberId: fixture.participantMemberId,
+            id: shareId,
+            projectionKind: projectionScope.projectionKind,
+            projectionScopeJson: JSON.parse(
+              JSON.stringify(projectionScope),
+            ) as Prisma.InputJsonValue,
+            projectionScopeKey,
+            status: "granted",
+          },
+        });
+
+        const deletion = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        inFlight.push(deletion);
+        await deletionPrepared;
+
+        const outreachTableHolder = blocker.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(
+            'LOCK TABLE "hosted_group_join_outreach" IN ACCESS EXCLUSIVE MODE',
+          );
+          reportOutreachTableLocked();
+          await outreachTableMayRelease;
+        });
+        inFlight.push(outreachTableHolder);
+        await outreachTableLocked;
+        releaseDeletionPreparation();
+        await waitForPostgresApplicationLock({
+          applicationName: deletionApplicationName,
+          observer,
+        });
+
+        const projection = replaceHostedVaultShareProjectionSnapshot({
+          prisma: projectionPrisma,
+          records: [],
+          share: {
+            destinationMemberId: fixture.runtimeMemberId,
+            grantorMemberId: fixture.participantMemberId,
+            id: shareId,
+            projectionKind: projectionScope.projectionKind,
+            projectionScope,
+            projectionScopeKey,
+          },
+          sourceWorkspaceVersion: "1",
+        });
+        inFlight.push(projection);
+        await waitForPostgresApplicationLock({
+          applicationName: projectionApplicationName,
+          observer,
+        });
+
+        releaseOutreachTable();
+        await outreachTableHolder;
+        const [, projectionResult] = await withTimeout(
+          Promise.all([deletion, projection]),
+          15_000,
+        );
+        expect(projectionResult).toBe("no-active-share");
+        await expect(fixture.deletionPrisma.hostedVaultShare.findUnique({
+          select: { id: true },
+          where: { id: shareId },
+        })).resolves.toBeNull();
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        releaseDeletionPreparation();
+        releaseOutreachTable();
+        await Promise.allSettled(inFlight);
+        setHostedSecureBoxStringTestCodecForTests(null);
+        accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+          .mockReset()
+          .mockResolvedValue(undefined);
+        providerMocks.sendHostedLinqChatMessage.mockReset();
+        vi.unstubAllEnvs();
+        await cleanupDeletionReplyRaceFixture(fixture);
+        await Promise.all([
+          blocker.$disconnect(),
+          observer.$disconnect(),
+          projectionPrisma.$disconnect(),
+        ]);
+      }
+    });
+
     it("rejects a reply after the deletion suspension fence and completes that request", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -4234,13 +4404,25 @@ function makePendingDeletionCleanupResult() {
   };
 }
 
-async function createDeletionReplyRaceFixture():
+async function createDeletionReplyRaceFixture(input: {
+  deletionApplicationName?: string;
+  externalParticipantSortsBeforeOwner?: boolean;
+} = {}):
   Promise<DeletionReplyRaceFixture> {
-  const deletionPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const deletionPrisma = createPrismaClient({
+    databaseUrl: input.deletionApplicationName
+      ? withPostgresApplicationName(databaseUrl, input.deletionApplicationName)
+      : databaseUrl,
+    poolMax: 2,
+  });
   const replyPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
-  const ownerMemberId = `hbm_delete_owner_${randomUUID()}`;
+  const ownerMemberId = input.externalParticipantSortsBeforeOwner
+    ? `hbm_delete_z_owner_${randomUUID()}`
+    : `hbm_delete_owner_${randomUUID()}`;
   const runtimeMemberId = `hbm_delete_runtime_${randomUUID()}`;
-  const participantMemberId = `hbm_delete_participant_${randomUUID()}`;
+  const participantMemberId = input.externalParticipantSortsBeforeOwner
+    ? `hbm_delete_a_participant_${randomUUID()}`
+    : `hbm_delete_participant_${randomUUID()}`;
   const groupId = `hgrp_delete_fence_${randomUUID()}`;
   const offerId = `hgrpjo_delete_fence_${randomUUID()}`;
   const outreachId = `hgrpjoa_delete_fence_${randomUUID()}`;
@@ -4272,9 +4454,9 @@ async function createDeletionReplyRaceFixture():
 
   await deletionPrisma.hostedMember.createMany({
     data: [
-      { id: ownerMemberId },
-      { id: runtimeMemberId },
-      { id: participantMemberId },
+      { billingStatus: HostedBillingStatus.active, id: ownerMemberId },
+      { billingStatus: HostedBillingStatus.not_started, id: runtimeMemberId },
+      { billingStatus: HostedBillingStatus.active, id: participantMemberId },
     ],
   });
   await deletionPrisma.hostedThreadContainer.create({
@@ -4698,6 +4880,39 @@ async function closeTestServer(server: Server): Promise<void> {
       resolve();
     });
   });
+}
+
+async function waitForPostgresApplicationLock(input: {
+  applicationName: string;
+  observer: PrismaClient;
+}): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const [activity] = await input.observer.$queryRaw<
+      Array<{ waitEventType: string | null }>
+    >`
+      SELECT wait_event_type AS "waitEventType"
+      FROM pg_stat_activity
+      WHERE application_name = ${input.applicationName}
+        AND state = 'active'
+    `;
+    if (activity?.waitEventType === "Lock") {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(
+    `Expected ${input.applicationName} to wait on a PostgreSQL lock.`,
+  );
+}
+
+function withPostgresApplicationName(
+  value: string,
+  applicationName: string,
+): string {
+  const url = new URL(value);
+  url.searchParams.set("application_name", applicationName);
+  return url.toString();
 }
 
 function clearHostedOnboardingEnvCache(): void {
