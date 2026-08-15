@@ -580,26 +580,33 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
   );
 });
 
-test("SettingsDataPrivacyPage redirects signed-in users to the settings privacy section", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    },
-    session: {
-      privyUserId: "did:privy:user_123",
-    },
-  });
+test.each(["active", "checkout"])(
+  "SettingsDataPrivacyPage exposes the existing deletion owner for a %s member",
+  async (stage) => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: {
+        billingStatus: stage === "active" ? "active" : "not_started",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      session: {
+        privyUserId: "did:privy:user_123",
+      },
+    });
 
-  const { default: SettingsDataPrivacyPage } =
-    await import("../app/(dashboard)/settings/data-privacy/page");
+    const { default: SettingsDataPrivacyPage } =
+      await import("../app/settings/data-privacy/page");
 
-  await expect(SettingsDataPrivacyPage()).rejects.toThrow(
-    "NEXT_REDIRECT:/settings#data-privacy",
-  );
-});
+    const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+
+    assert.match(markup, /Data &amp; privacy/);
+    assert.match(markup, /Hosted data privacy settings true/);
+    assert.match(markup, /without an active subscription or health-data consent/);
+    expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
+    expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+  },
+);
 
 test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for signed-out users", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -609,13 +616,20 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   });
 
   const { default: SettingsDataPrivacyPage } =
-    await import("../app/(dashboard)/settings/data-privacy/page");
+    await import("../app/settings/data-privacy/page");
 
   const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
 
   assert.match(markup, /Sign in to manage your data/);
-  assert.match(markup, /Data &amp; privacy section/);
-  assert.match(markup, /After sign-in, this link opens the deletion controls directly in settings\./);
+  assert.match(markup, /Choose Delete account, review the details, and confirm\./);
+  assert.match(markup, /Health content, memories, and assistant history/);
+  assert.match(markup, /active hosted/);
+  assert.match(markup, /systems within 30 days; backups within 90 days/);
+  assert.match(markup, /Account\/profile, wearable sync, webhook, and routing records/);
+  assert.match(markup, /Support: up to 3 years/);
+  assert.match(markup, /external carrier, Telegram, Linq, or email systems cannot be recalled/);
+  assert.match(markup, /mailto:legal@justco\.build/);
+  assert.match(markup, /href="\/legal\/privacy"/);
 });
 
 test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
