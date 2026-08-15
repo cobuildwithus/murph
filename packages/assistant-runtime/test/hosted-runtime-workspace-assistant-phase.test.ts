@@ -13,6 +13,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
@@ -266,6 +267,7 @@ import type {
 } from "../src/hosted-runtime/mailbox-import.ts";
 import {
   readHostedSystemMailboxState,
+  updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
@@ -15956,8 +15958,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
       async (preparationInput) => {
         if (
-          preparationInput.allowedRouteActions?.length === 1
-          && preparationInput.allowedRouteActions[0] === "apply-member-action"
+          preparationInput.allowedRouteActions?.includes("apply-member-action")
+          && preparationInput.allowedWakeKinds?.includes("member.action.requested")
         ) {
           sequence.push("member-action");
           return {
@@ -16017,8 +16019,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(
       mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.at(-1)?.[0],
     ).toEqual(expect.objectContaining({
-      allowedRouteActions: ["apply-member-action"],
-      allowedWakeKinds: ["member.action.requested"],
+      allowedRouteActions: [
+        "apply-member-activation",
+        "apply-member-action",
+      ],
+      allowedWakeKinds: [
+        "member.activated",
+        "member.action.requested",
+      ],
       shouldYieldBackgroundMaintenance: null,
     }));
     expect(postCheckpoint).toEqual(expect.objectContaining({
@@ -16037,6 +16045,180 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
+  });
+
+  it("finishes member activation after the first foreground reply", async () => {
+    const sequence: string[] = [];
+    const activationItem = createMemberActivationSignupWelcomeSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+      async (preparationInput) => {
+        if (
+          preparationInput.allowedRouteActions?.includes("apply-member-activation")
+          && preparationInput.allowedWakeKinds?.includes("member.activated")
+        ) {
+          sequence.push("member-activation");
+          return {
+            item: activationItem,
+            itemId: activationItem.itemId,
+            metrics: {
+              bootstrapResult: null,
+              conversationMetrics: null,
+              mailboxLane: "member-activated" as const,
+              nextWakeAt: null,
+              postCheckpointRecord: null,
+              redactedLogEntries: [],
+            },
+            status: "processed" as const,
+          };
+        }
+        return null;
+      },
+    );
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      sequence.push("provider");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        progressed: true,
+        redactedLogEntries: [],
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+    }));
+
+    expect(sequence).toEqual(["provider"]);
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(sequence).toEqual(["provider", "member-activation"]);
+    expect(
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.at(-1)?.[0],
+    ).toEqual(expect.objectContaining({
+      allowedRouteActions: [
+        "apply-member-activation",
+        "apply-member-action",
+      ],
+      allowedWakeKinds: [
+        "member.activated",
+        "member.action.requested",
+      ],
+      shouldYieldBackgroundMaintenance: null,
+    }));
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+    }));
+  });
+
+  it("removes a real queued member activation after the first foreground reply", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-member-activation-"));
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    const sequence: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: now, vaultRoot });
+      const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+      const activationWake = buildHostedExecutionMemberActivatedWake({
+        eventId: "member.activated:synthetic:first-conversation",
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
+        memberId: "member_synthetic_phase",
+        occurredAt: now,
+      });
+      const activationItem = createResolvedMemberActivationMailboxItem({
+        occurredAt: now,
+      });
+      // Preserve recovery coverage for snapshots created before bootstrap-only
+      // activations stopped creating a second queue item.
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [{
+          attemptCount: 0,
+          itemId: activationItem.item.id,
+          lastAttemptAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          mailboxDedupeKey: activationItem.item.dedupeKey,
+          mailboxLaneSeq: activationItem.item.laneSeq,
+          nextAttemptAt: null,
+          occurredAt: activationItem.item.occurredAt,
+          postCheckpointRecord: null,
+          preferenceCausalSeq: null,
+          requestId: null,
+          routeAction: "apply-member-activation",
+          status: "pending",
+          wake: activationWake,
+        }],
+      }));
+      expect(await readHostedSystemMailboxState(vaultRoot)).toMatchObject({
+        pending: [
+          {
+            routeAction: "apply-member-activation",
+            wake: { kind: "member.activated" },
+          },
+        ],
+      });
+
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+        systemMailbox.prepareHostedSystemMailboxItemForCheckpoint,
+      );
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementation(
+        systemMailbox.recordHostedSystemMailboxItemAfterCheckpoint,
+      );
+      mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
+        systemMailbox.resolveHostedSystemMailboxNextWakeCandidate,
+      );
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+        sequence.push("provider");
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: true,
+          deviceSyncProcessed: 0,
+          deviceSyncSkipped: true,
+          nextWakeAt: null,
+          parserProcessed: 0,
+          postCheckpointRecord: null,
+          progressed: true,
+          redactedLogEntries: [],
+        };
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        now: () => now,
+        operatorHomeRoot,
+        vaultRoot,
+      }));
+
+      expect(sequence).toEqual(["provider"]);
+      expect(await readHostedSystemMailboxState(vaultRoot)).toMatchObject({
+        pending: [
+          {
+            routeAction: "apply-member-activation",
+            wake: { kind: "member.activated" },
+          },
+        ],
+      });
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({ pending: [] });
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "activation_bootstrap",
+      }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
   });
 
   it("does not scan terminal Linq cleanup during fresh conversation input", async () => {
@@ -18507,6 +18689,49 @@ function createResolvedForegroundAdmissionMailboxItem(input: {
     },
     route: {
       action: "apply-runtime-control-request",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
+function createResolvedMemberActivationMailboxItem(input: {
+  occurredAt: string;
+}): HostedMailboxResolvedImportItem {
+  const item: HostedMailboxItem = {
+    createdAt: input.occurredAt,
+    dedupeKey: "member.activated:synthetic:first-conversation",
+    expiresAt: null,
+    id: "mailbox_item_member_activated_first_conversation",
+    kind: "member.activated",
+    lane: "system",
+    laneSeq: "1",
+    occurredAt: input.occurredAt,
+    payloadBytes: 64,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: input.occurredAt,
+    userId: "member_synthetic_phase",
+  };
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      requestId: null,
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "apply-member-activation",
       advanceProgress: true,
       itemRef: {
         id: item.id,

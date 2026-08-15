@@ -254,7 +254,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("bootstraps member activation before queued system maintenance", async () => {
+  it("finishes a bootstrap-only member activation during import", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "member.activated:bootstrap-before-maintenance",
@@ -276,30 +276,66 @@ describe("hosted system mailbox notification execution context", () => {
           wake,
         }),
         {
-          reasonCode: "system_mailbox.queued",
+          reasonCode: "system_mailbox.activation_bootstrapped",
           status: "imported",
         },
       );
       await access(path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata));
       expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({
+        pending: [],
+      });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
 
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
-        executionContext: null,
-        now: () => FIXED_NOW,
-        runtime: createRuntime({}),
-        runtimeEnv: {},
+  it("queues member activation when a welcome still needs delivery", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:signup-welcome",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+      signupWelcome: {
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "explicit",
+            target: "12345",
+          },
+          identityId: "hbidx:telegram:v1:test",
+          threadId: null,
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedActivationItem(),
         vaultRoot: workspace.vaultRoot,
+        wake,
       });
 
-      assert.equal(prepared?.status, "processed");
-      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sourceMailboxItemId: "mailbox_item_system_activation",
-          wake: expect.objectContaining({
-            kind: "member.activated",
-          }),
-        }),
-      );
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot))
+        .toMatchObject({
+          pending: [
+            {
+              routeAction: "apply-member-activation",
+              wake: {
+                kind: "member.activated",
+                signupWelcome: expect.any(Object),
+              },
+            },
+          ],
+        });
     } finally {
       await workspace.cleanup();
     }

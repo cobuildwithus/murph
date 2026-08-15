@@ -28,13 +28,13 @@ describe("Hosted Linq provider-event diagnostics retention index migration", () 
       '    OR "payload_shape_json" IS NOT NULL;',
     ].join("\n"));
     expect(cleanupSource).toContain([
-      '      WHERE "received_at" < ${cutoff}',
+      '      WHERE provider_event."received_at" < ${cutoff}',
       "        AND (",
-      '          "extraction_json" IS NOT NULL',
-      '          OR "payload_sanitized_json" IS NOT NULL',
-      '          OR "payload_shape_json" IS NOT NULL',
+      '          provider_event."extraction_json" IS NOT NULL',
+      '          OR provider_event."payload_sanitized_json" IS NOT NULL',
+      '          OR provider_event."payload_shape_json" IS NOT NULL',
       "        )",
-      '      ORDER BY "received_at" ASC, "event_id" ASC',
+      '      ORDER BY provider_event."received_at" ASC, provider_event."event_id" ASC',
     ].join("\n"));
     expect(prismaSchema).toContain("@@index([receivedAt, eventId])");
   });
