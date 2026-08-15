@@ -811,7 +811,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['document', 'workout-import-status'],
         description:
-          'Check whether workout history has ever been imported from one preserved raw source.',
+          'Resolve whole-source workout import completion for one preserved raw source.',
       },
       {
         path: ['document', 'edit'],
@@ -828,7 +828,7 @@ export const vaultCliCommandDescriptors = [
         'showDocument',
         'listDocuments',
         'showDocumentManifest',
-        'hasWorkoutHistoryForRawSource',
+        'resolveWorkoutImportStatusForRawSource',
       ],
     },
     register({ cli, services }) {

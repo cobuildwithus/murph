@@ -1021,15 +1021,14 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       return listDocumentsUseCase(input)
     },
-    async hasWorkoutHistoryForRawSource(input: CommandContext & { rawRef: string }) {
+    async resolveWorkoutImportStatusForRawSource(input: CommandContext & { rawRef: string }) {
       const core = await loadCoreRuntime()
       return {
         vault: input.vault,
         rawRef: input.rawRef,
-        imported: await core.hasEventKindReferencedRawRef({
+        status: await core.resolveWorkoutSourceImportStatus({
           vaultRoot: input.vault,
           rawRef: input.rawRef,
-          kind: 'activity_session',
         }),
       }
     },

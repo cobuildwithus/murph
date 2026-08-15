@@ -99,7 +99,7 @@ test('independent exact-source attempts stop from durable workout-source history
   assert.equal(firstDocument.ok, true, firstDocument.ok ? undefined : JSON.stringify(firstDocument.error))
   assert.equal(requireData(firstDocument).created, true)
   const first = requireData(firstDocument)
-  const initialStatus = await runCli<{ imported: boolean }>([
+  const initialStatus = await runCli<{ status: string }>([
     'document',
     'workout-import-status',
     first.rawFile,
@@ -107,7 +107,7 @@ test('independent exact-source attempts stop from durable workout-source history
     vaultRoot,
   ])
   assert.equal(initialStatus.ok, true, initialStatus.ok ? undefined : JSON.stringify(initialStatus.error))
-  assert.equal(requireData(initialStatus).imported, false)
+  assert.equal(requireData(initialStatus).status, 'not_imported')
 
   const firstJsonl = path.join(workDir, 'first.jsonl')
   await writeFile(firstJsonl, toJsonl([withRawRef(first.rawFile)]), 'utf8')
@@ -141,7 +141,7 @@ test('independent exact-source attempts stop from durable workout-source history
   assert.equal(second.rawFile, first.rawFile)
   assert.equal(second.manifestFile, first.manifestFile)
 
-  const importedStatus = await runCli<{ imported: boolean }>([
+  const importedStatus = await runCli<{ status: string }>([
     'document',
     'workout-import-status',
     second.rawFile,
@@ -149,7 +149,7 @@ test('independent exact-source attempts stop from durable workout-source history
     vaultRoot,
   ])
   assert.equal(importedStatus.ok, true)
-  assert.equal(requireData(importedStatus).imported, true)
+  assert.equal(requireData(importedStatus).status, 'completed')
 
   const listed = await runCli<EventListResult>([
     'event',
@@ -175,7 +175,7 @@ test('independent exact-source attempts stop from durable workout-source history
   ])
   assert.equal(memberEdit.ok, true)
 
-  const statusAfterEdit = await runCli<{ imported: boolean }>([
+  const statusAfterEdit = await runCli<{ status: string }>([
     'document',
     'workout-import-status',
     second.rawFile,
@@ -183,7 +183,7 @@ test('independent exact-source attempts stop from durable workout-source history
     vaultRoot,
   ])
   assert.equal(statusAfterEdit.ok, true)
-  assert.equal(requireData(statusAfterEdit).imported, true)
+  assert.equal(requireData(statusAfterEdit).status, 'completed')
 
   const memberDelete = await runCli([
     'event',
@@ -194,7 +194,7 @@ test('independent exact-source attempts stop from durable workout-source history
   ])
   assert.equal(memberDelete.ok, true)
 
-  const statusAfterDelete = await runCli<{ imported: boolean }>([
+  const statusAfterDelete = await runCli<{ status: string }>([
     'document',
     'workout-import-status',
     second.rawFile,
@@ -202,7 +202,7 @@ test('independent exact-source attempts stop from durable workout-source history
     vaultRoot,
   ])
   assert.equal(statusAfterDelete.ok, true)
-  assert.equal(requireData(statusAfterDelete).imported, true)
+  assert.equal(requireData(statusAfterDelete).status, 'completed')
 
   const retryJsonl = path.join(workDir, 'retry.jsonl')
   await writeFile(retryJsonl, toJsonl([withRawRef(second.rawFile, 60)]), 'utf8')
@@ -225,6 +225,45 @@ test('independent exact-source attempts stop from durable workout-source history
   const manifestFiles = await readdir(path.dirname(path.join(vaultRoot, first.manifestFile)))
   assert.equal(documentDirectories.length, 1)
   assert.equal(manifestFiles.filter((name) => name.startsWith('manifest.')).length, 1)
+}, 180_000)
+
+test('workout import status exposes partial history without a completion receipt', async () => {
+  const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-partial-source-'))
+  const vaultRoot = path.join(workDir, 'vault')
+  const sourcePath = path.join(workDir, 'workout-history.csv')
+  await writeFile(sourcePath, 'session,exercise,reps\nsession-a,Squat,5\n', 'utf8')
+  await runCli(['init', '--vault', vaultRoot])
+
+  const sourceImport = await runCli<DocumentImportResult>([
+    'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+  ])
+  assert.equal(sourceImport.ok, true)
+  const source = requireData(sourceImport)
+  const inputPath = path.join(workDir, 'events.jsonl')
+  await writeFile(inputPath, toJsonl([withRawRef(source.rawFile)]), 'utf8')
+
+  const unguarded = await runCli<EventImportJsonlResult>([
+    'event', 'import-jsonl', '--input', `@${inputPath}`, '--apply', '--vault', vaultRoot,
+  ])
+  assert.equal(unguarded.ok, true)
+
+  const status = await runCli<{ status: string }>([
+    'document', 'workout-import-status', source.rawFile, '--vault', vaultRoot,
+  ])
+  assert.equal(status.ok, true)
+  assert.equal(requireData(status).status, 'partial_conflict')
+
+  const guardedRetry = await runCli<EventImportJsonlResult>([
+    'event', 'import-jsonl',
+    '--input', `@${inputPath}`,
+    '--source-raw-ref-once', source.rawFile,
+    '--apply',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(guardedRetry.ok, false)
+  if (guardedRetry.ok) throw new Error('expected partial source retry to be rejected')
+  assert.equal(guardedRetry.error.code, 'conflict')
+  assert.match(guardedRetry.error.message ?? '', /without a whole-source completion receipt/iu)
 }, 180_000)
 
 test('deleted exact source fails closed without duplicating workout history', async () => {

@@ -146,6 +146,7 @@ export {
   repairJunctionWorkoutHeartRateZones,
   repairExperimentMedia,
   repairVault,
+  resolveWorkoutSourceImportStatus,
   saveEncounterBundle,
   stopExperiment,
   stopRegimen,
@@ -327,13 +328,18 @@ export {
   findCaptureByLookup,
   findEventByExternalRef,
   findEventsByRawRefs,
-  hasEventKindReferencedRawRef,
   readStoredCaptureLookupIndex,
   runGeneratedImageCaptureRetention,
   buildSleepSessionEventDraft,
   buildSupplementIntakeEventDraft,
   buildSymptomEventDraft,
 } from "./domains/events.ts";
+export {
+  WORKOUT_SOURCE_IMPORT_STATUS_VALUES,
+} from "./mutations.ts";
+export type {
+  WorkoutSourceImportStatus,
+} from "./mutations.ts";
 export type {
   AddActivitySessionInput,
   AddActivitySessionResult,

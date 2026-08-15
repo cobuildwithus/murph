@@ -625,6 +625,9 @@ export async function importEventRecordsFromJsonl(input: {
       EVENT_BATCH_SOURCE_ALREADY_IMPORTED: {
         code: 'conflict',
       },
+      EVENT_BATCH_SOURCE_PARTIAL_CONFLICT: {
+        code: 'conflict',
+      },
       EVENT_BATCH_SOURCE_ROW_INVALID: {
         code: 'contract_invalid',
       },

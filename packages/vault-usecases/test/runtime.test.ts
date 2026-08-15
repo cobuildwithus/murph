@@ -19,7 +19,7 @@ function createCoreRuntimeStub() {
   return {
     REQUIRED_DIRECTORIES: ["journal"],
     applyCanonicalWriteBatch: vi.fn(async () => undefined),
-    hasEventKindReferencedRawRef: vi.fn(async () => false),
+    resolveWorkoutSourceImportStatus: vi.fn(async () => 'not_imported' as const),
     initializeVault: vi.fn(async () => undefined),
     validateVault: vi.fn(async () => ({ valid: true, issues: [] })),
     repairVault: vi.fn(async () => ({ updated: false, createdDirectories: [] })),

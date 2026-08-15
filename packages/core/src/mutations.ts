@@ -24,6 +24,7 @@ import type {
   IntegrationIngestRecord,
 } from "@murphai/contracts";
 import {
+  auditRecordSchema,
   assertContractId,
   collectEventRawReferencePaths,
   compareIsoTimestampsAscending,
@@ -86,8 +87,6 @@ import {
 import {
   buildEventImportDecisionRecord,
   buildPublicEventImportRecord,
-  findEventsByRawRefs,
-  hasEventKindReferencedRawRef,
   loadEventLedgerShardsById,
   selectLatestMatchedEvent,
   toEventLedgerFile,
@@ -3805,10 +3804,20 @@ async function hashSourceFile(sourcePath: string): Promise<CommittedPayloadRecei
   return { byteLength, sha256: hash.digest("hex") };
 }
 
-async function findExactDocumentImport(input: {
+interface ExactDocumentSource {
+  result: ImportDocumentResult & { created: false };
+  rawRef: string;
+}
+
+interface ExactDocumentSourceSet {
+  deletedExactSourceExists: boolean;
+  liveSources: ExactDocumentSource[];
+}
+
+async function inspectExactDocumentSourceSet(input: {
   vaultRoot: string;
   sourceReceipt: CommittedPayloadReceipt;
-}): Promise<(ImportDocumentResult & { created: false }) | null> {
+}): Promise<ExactDocumentSourceSet> {
   const manifestPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.rawDocumentsDirectory, {
     extension: ".json",
   });
@@ -3863,7 +3872,7 @@ async function findExactDocumentImport(input: {
     }
   }
   if (matchingManifests.size === 0) {
-    return null;
+    return { deletedExactSourceExists: false, liveSources: [] };
   }
 
   const shardPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
@@ -3900,14 +3909,12 @@ async function findExactDocumentImport(input: {
     isDeletedEventSpineRecord(entry.record)
     && matchingManifests.has(entry.record.documentId)
   );
-  if (deletedExactSourceExists) {
-    throw new VaultError(
-      "DOCUMENT_EXACT_SOURCE_DELETED",
-      "An exact source document existed but was deleted. Exact reuse will not create a replacement identity.",
-    );
-  }
 
+  const liveSources: ExactDocumentSource[] = [];
   for (const entry of documents) {
+    if (isDeletedEventSpineRecord(entry.record)) {
+      continue;
+    }
     const stored = matchingManifests.get(entry.record.documentId);
     if (!stored) {
       continue;
@@ -3923,22 +3930,159 @@ async function findExactDocumentImport(input: {
     if (!raw) {
       continue;
     }
-    return {
-      created: false,
-      documentId: entry.record.documentId,
-      raw: {
-        relativePath: stored.rawRef,
-        originalFileName: stored.originalFileName,
-        mediaType: stored.mediaType,
+    liveSources.push({
+      rawRef: stored.rawRef,
+      result: {
+        created: false,
+        documentId: entry.record.documentId,
+        raw: {
+          relativePath: stored.rawRef,
+          originalFileName: stored.originalFileName,
+          mediaType: stored.mediaType,
+        },
+        event: entry.record,
+        eventPath: entry.relativePath,
+        auditPath: null,
+        manifestPath: stored.manifestPath,
       },
-      event: entry.record,
-      eventPath: entry.relativePath,
-      auditPath: null,
-      manifestPath: stored.manifestPath,
-    };
+    });
   }
 
-  return null;
+  return { deletedExactSourceExists, liveSources };
+}
+
+async function findExactDocumentImport(input: {
+  vaultRoot: string;
+  sourceReceipt: CommittedPayloadReceipt;
+}): Promise<(ImportDocumentResult & { created: false }) | null> {
+  const exactSources = await inspectExactDocumentSourceSet(input);
+  if (exactSources.deletedExactSourceExists) {
+    throw new VaultError(
+      "DOCUMENT_EXACT_SOURCE_DELETED",
+      "An exact source document existed but was deleted. Exact reuse will not create a replacement identity.",
+    );
+  }
+  return exactSources.liveSources[0]?.result ?? null;
+}
+
+export const WORKOUT_SOURCE_IMPORT_STATUS_VALUES = [
+  "not_imported",
+  "completed",
+  "partial_conflict",
+] as const;
+
+export type WorkoutSourceImportStatus =
+  (typeof WORKOUT_SOURCE_IMPORT_STATUS_VALUES)[number];
+
+const WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND = "core.importEventBatch.sourceRawRefOnce";
+
+function buildWorkoutSourceCompletionTarget(
+  sourceReceipt: CommittedPayloadReceipt,
+): string {
+  return `workout-source-v1:sha256:${sourceReceipt.sha256}:bytes:${sourceReceipt.byteLength}`;
+}
+
+async function hasWorkoutSourceCompletionAudit(input: {
+  vaultRoot: string;
+  targetId: string;
+}): Promise<boolean> {
+  const auditPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.auditDirectory, {
+    extension: ".jsonl",
+  });
+  for (const relativePath of auditPaths) {
+    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      const parsed = safeParseContract(auditRecordSchema, rawRecord);
+      if (
+        parsed.success
+        && parsed.data.commandName === WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND
+        && parsed.data.targetIds?.includes(input.targetId) === true
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function hasActivitySessionForAnyRawRef(input: {
+  vaultRoot: string;
+  rawRefs: ReadonlySet<string>;
+}): Promise<boolean> {
+  const eventPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  for (const relativePath of eventPaths) {
+    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      const parsed = safeParseContract(eventRecordSchema, rawRecord);
+      if (
+        parsed.success
+        && parsed.data.kind === "activity_session"
+        && collectEventRawReferencePaths(parsed.data).some((rawRef) => input.rawRefs.has(rawRef))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function inspectWorkoutSourceImportStatus(input: {
+  vaultRoot: string;
+  rawRef: string;
+}): Promise<{ status: WorkoutSourceImportStatus; completionTargetId: string }> {
+  const sourceIntegrity = await statAndHashVaultFile(input.vaultRoot, input.rawRef);
+  if (sourceIntegrity === null) {
+    throw new VaultError(
+      "EVENT_BATCH_SOURCE_RAW_REF_MISSING",
+      "The workout source does not exist as a vault file.",
+    );
+  }
+
+  const sourceReceipt = {
+    byteLength: sourceIntegrity.byteSize,
+    sha256: sourceIntegrity.sha256,
+  };
+  const exactSources = await inspectExactDocumentSourceSet({
+    vaultRoot: input.vaultRoot,
+    sourceReceipt,
+  });
+  if (!exactSources.liveSources.some((source) => source.rawRef === input.rawRef)) {
+    throw new VaultError(
+      "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE",
+      "The workout source is no longer owned by a live source document.",
+    );
+  }
+  if (exactSources.deletedExactSourceExists) {
+    throw new VaultError(
+      "DOCUMENT_EXACT_SOURCE_DELETED",
+      "An exact source document existed but was deleted. Workout import will not reuse a replacement identity.",
+    );
+  }
+
+  const completionTargetId = buildWorkoutSourceCompletionTarget(sourceReceipt);
+  if (await hasWorkoutSourceCompletionAudit({
+    vaultRoot: input.vaultRoot,
+    targetId: completionTargetId,
+  })) {
+    return { status: "completed", completionTargetId };
+  }
+
+  const exactRawRefs = new Set(exactSources.liveSources.map((source) => source.rawRef));
+  const hasPartialHistory = await hasActivitySessionForAnyRawRef({
+    vaultRoot: input.vaultRoot,
+    rawRefs: exactRawRefs,
+  });
+  return {
+    status: hasPartialHistory ? "partial_conflict" : "not_imported",
+    completionTargetId,
+  };
+}
+
+export async function resolveWorkoutSourceImportStatus(input: {
+  vaultRoot: string;
+  rawRef: string;
+}): Promise<WorkoutSourceImportStatus> {
+  return (await inspectWorkoutSourceImportStatus(input)).status;
 }
 
 export async function importDocument({
@@ -6008,6 +6152,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     );
   }
 
+  let sourceCompletionTargetId: string | null = null;
   if (sourceRawRef) {
     const invalidSourceIndexes = decisions.flatMap((decision, index) =>
       decision.action === "upsert"
@@ -6025,45 +6170,23 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
       );
     }
 
-    const sourceIntegrity = await statAndHashVaultFile(vaultRoot, sourceRawRef);
-    if (sourceIntegrity === null) {
-      throw new VaultError(
-        "EVENT_BATCH_SOURCE_RAW_REF_MISSING",
-        "The guarded raw source does not exist as a vault file; nothing was imported.",
-      );
-    }
-
-    const [sourceDocumentMatches] = await findEventsByRawRefs({
-      vaultRoot,
-      rawRefs: [sourceRawRef],
-    });
-    const liveSourceDocumentOwnsRawRef = sourceDocumentMatches?.some(({ latest }) =>
-      latest.kind === "document"
-      && !isDeletedEventSpineRecord(latest)
-      && latest.attachments?.some((attachment) =>
-        attachment.role === "source_document"
-        && attachment.relativePath === sourceRawRef
-        && attachment.sha256 === sourceIntegrity.sha256
-      )
-    ) === true;
-    if (!liveSourceDocumentOwnsRawRef) {
-      throw new VaultError(
-        "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE",
-        "The guarded raw source is no longer owned by a live source document; nothing was imported.",
-      );
-    }
-
-    const sourceAlreadyImported = await hasEventKindReferencedRawRef({
+    const sourceState = await inspectWorkoutSourceImportStatus({
       vaultRoot,
       rawRef: sourceRawRef,
-      kind: "activity_session",
     });
-    if (sourceAlreadyImported) {
+    if (sourceState.status === "completed") {
       throw new VaultError(
         "EVENT_BATCH_SOURCE_ALREADY_IMPORTED",
-        "This raw source already has workout history in the event ledger; nothing was imported.",
+        "The atomic workout import for this exact source already completed; nothing was imported.",
       );
     }
+    if (sourceState.status === "partial_conflict") {
+      throw new VaultError(
+        "EVENT_BATCH_SOURCE_PARTIAL_CONFLICT",
+        "This exact source has workout history without a whole-source completion receipt; nothing was imported. Resolve the partial import before retrying.",
+      );
+    }
+    sourceCompletionTargetId = sourceState.completionTargetId;
   }
 
   signal?.throwIfAborted();
@@ -6117,14 +6240,19 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         vaultRoot,
         batch,
         action: "event_upsert",
-        commandName: "core.importEventBatch",
+        commandName: sourceCompletionTargetId
+          ? WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND
+          : "core.importEventBatch",
         summary: `Imported event batch: ${counts.createdCount} created, ` +
           `${counts.supersededCount} superseded, ` +
           `${counts.retractedCount} retracted, ` +
           `${counts.skippedExistingCount} skipped existing of ${counts.receivedCount} received.`,
         occurredAt,
         files: appendPlan.appendedShardPaths,
-        targetIds: [...new Set(appendPlan.appendedRecordIds)].slice(0, AUDIT_TARGET_ID_LIMIT),
+        targetIds: [
+          ...(sourceCompletionTargetId ? [sourceCompletionTargetId] : []),
+          ...new Set(appendPlan.appendedRecordIds),
+        ].slice(0, AUDIT_TARGET_ID_LIMIT),
       });
 
       return {

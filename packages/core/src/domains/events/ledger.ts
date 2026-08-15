@@ -100,31 +100,6 @@ export interface EventRawRefMatch {
   latest: EventRecord;
 }
 
-export async function hasEventKindReferencedRawRef(input: {
-  vaultRoot: string;
-  rawRef: string;
-  kind: EventRecord["kind"];
-}): Promise<boolean> {
-  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
-
-  for (const relativePath of relativePaths) {
-    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
-    for (const rawRecord of records) {
-      const record = validateStoredEventRecord(rawRecord as JsonObject);
-      if (
-        record.kind === input.kind
-        && collectEventRawReferencePaths(record).includes(input.rawRef)
-      ) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
 export interface UpsertEventResult {
   eventId: string;
   ledgerFile: string;

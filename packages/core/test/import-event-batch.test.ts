@@ -10,12 +10,12 @@ import {
   deleteEvent,
   findEventByExternalRef,
   findEventsByRawRefs,
-  hasEventKindReferencedRawRef,
   importDocument,
   importEventBatch,
   initializeVault,
   listHistoryEvents,
   readJsonlRecords,
+  resolveWorkoutSourceImportStatus,
   updateVaultSummary,
   upsertEvent,
   VaultError,
@@ -39,7 +39,10 @@ async function importWorkoutSourceDocument(vaultRoot: string, name: string) {
   const sourceRoot = await makeTempDirectory(`${name}-source`);
   const sourcePath = path.join(sourceRoot, "workout-source.csv");
   await fs.writeFile(sourcePath, "session,exercise\na,Squat\n", "utf8");
-  return importDocument({ vaultRoot, sourcePath, reuseExact: true });
+  return {
+    ...await importDocument({ vaultRoot, sourcePath, reuseExact: true }),
+    sourcePath,
+  };
 }
 
 async function readAllAuditRecords(vaultRoot: string): Promise<AuditRecord[]> {
@@ -246,11 +249,7 @@ test("source-guarded workout batches land once and retain completion through edi
   });
   assert.equal(dryRun.applied, false);
   assert.equal(dryRun.createdCount, 1);
-  assert.equal(await hasEventKindReferencedRawRef({
-    vaultRoot,
-    rawRef,
-    kind: "activity_session",
-  }), false);
+  assert.equal(await resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }), "not_imported");
 
   const applied = await importEventBatch({
     vaultRoot,
@@ -260,11 +259,20 @@ test("source-guarded workout batches land once and retain completion through edi
   });
   assert.equal(applied.applied, true);
   assert.equal(applied.createdCount, 1);
-  assert.equal(await hasEventKindReferencedRawRef({
+  assert.equal(await resolveWorkoutSourceImportStatus({
     vaultRoot,
     rawRef,
-    kind: "activity_session",
-  }), true);
+  }), "completed");
+  const completionAudit = (await readAllAuditRecords(vaultRoot)).find(
+    (record) => record.commandName === "core.importEventBatch.sourceRawRefOnce",
+  );
+  assert.ok(completionAudit);
+  assert.equal(
+    completionAudit.targetIds?.some((targetId) =>
+      /^workout-source-v1:sha256:[a-f0-9]{64}:bytes:\d+$/u.test(targetId)
+    ),
+    true,
+  );
 
   const eventId = applied.eventIds[0];
   assert.ok(eventId);
@@ -278,17 +286,80 @@ test("source-guarded workout batches land once and retain completion through edi
     },
   });
   await deleteEvent({ vaultRoot, eventId });
-  assert.equal(await hasEventKindReferencedRawRef({
+  assert.equal(await resolveWorkoutSourceImportStatus({
     vaultRoot,
     rawRef,
-    kind: "activity_session",
-  }), true);
+  }), "completed");
 
   await assert.rejects(
     importEventBatch({
       vaultRoot,
       payloads: [buildActivitySessionPayload(rawRef, 60)],
       rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ALREADY_IMPORTED");
+      return true;
+    },
+  );
+});
+
+test("source-guarded workout batches reject partial history without a completion receipt", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-partial");
+  const source = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-partial");
+  const rawRef = source.raw.relativePath;
+
+  const unguarded = await importEventBatch({
+    vaultRoot,
+    payloads: [buildActivitySessionPayload(rawRef)],
+    apply: true,
+  });
+  assert.equal(unguarded.applied, true);
+  assert.equal(await resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }), "partial_conflict");
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [buildActivitySessionPayload(rawRef, 60)],
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_PARTIAL_CONFLICT");
+      return true;
+    },
+  );
+});
+
+test("whole-source completion is shared by every live exact-byte document alias", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-alias");
+  const first = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-alias");
+  const alias = await importDocument({
+    vaultRoot,
+    sourcePath: first.sourcePath,
+  });
+  assert.notEqual(alias.raw.relativePath, first.raw.relativePath);
+
+  const applied = await importEventBatch({
+    vaultRoot,
+    payloads: [buildActivitySessionPayload(first.raw.relativePath)],
+    rejectIfSourceRawRefAlreadyImported: first.raw.relativePath,
+    apply: true,
+  });
+  assert.equal(applied.applied, true);
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef: alias.raw.relativePath,
+  }), "completed");
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [buildActivitySessionPayload(alias.raw.relativePath)],
+      rejectIfSourceRawRefAlreadyImported: alias.raw.relativePath,
       apply: true,
     }),
     (error) => {
@@ -334,11 +405,14 @@ test("source-guarded apply rejects a source document deleted after dry-run", asy
     },
   );
 
-  assert.equal(await hasEventKindReferencedRawRef({
-    vaultRoot,
-    rawRef,
-    kind: "activity_session",
-  }), false);
+  await assert.rejects(
+    resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE");
+      return true;
+    },
+  );
   assert.equal(
     (await readAllAuditRecords(vaultRoot))
       .filter((record) => record.commandName === "core.importEventBatch").length,
@@ -370,11 +444,10 @@ test("source-guarded workout batches reject any non-workout or unreferenced row 
     },
   );
 
-  assert.equal(await hasEventKindReferencedRawRef({
+  assert.equal(await resolveWorkoutSourceImportStatus({
     vaultRoot,
     rawRef,
-    kind: "activity_session",
-  }), false);
+  }), "not_imported");
   assert.equal(await findEventByExternalRef({
     vaultRoot,
     system: invalidRow.externalRef.system,

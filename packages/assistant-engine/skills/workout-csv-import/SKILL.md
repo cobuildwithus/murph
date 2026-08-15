@@ -33,11 +33,13 @@ batch write. Keep raw rows out of model context and user-facing replies.
    replacement source identity; do not bypass the conflict with ordinary
    document import in this workout workflow.
 2. Immediately run `vault-cli document workout-import-status <raw-file-ref>
-   --format json`. If `imported` is true, the atomic workout import for this
-   exact source completed in an earlier attempt. Stop before Python or JSONL
-   generation and tell the member the source was already imported. This check
-   uses immutable event-ledger history, so it remains true after a workout is
-   edited or deleted.
+   --format json`. If `status` is `completed`, the atomic workout import for
+   this exact source completed in an earlier attempt. Stop before Python or
+   JSONL generation and tell the member the source was already imported. If
+   `status` is `partial_conflict`, stop and explain that workout history exists
+   without a whole-source completion receipt and must be resolved before a safe
+   retry. Proceed only when `status` is `not_imported`. The completion receipt
+   remains valid after an imported workout is edited or deleted.
 3. Use a small local Python 3 script with the standard library only. Typical
    modules include `csv`, `datetime`, `hashlib`, and `json`; when an offsetless
    wall-clock timestamp has a known IANA timezone, use `zoneinfo.ZoneInfo` so
@@ -71,8 +73,9 @@ batch write. Keep raw rows out of model context and user-facing replies.
   disclose that limitation. Strong and Hevy retain those richer semantics.
 - Apply at most once for the current request and never blindly retry an
   ambiguous failure. A later attempt repeats the exact-source status check
-  before transforming: a completed atomic batch stops there; an absent batch
-  may proceed.
+  before transforming: `completed` stops as already imported,
+  `partial_conflict` stops for explicit recovery, and only `not_imported` may
+  proceed.
 
 ## Validate, apply, and verify
 

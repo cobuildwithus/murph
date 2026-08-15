@@ -104,7 +104,7 @@ const queryServiceMethodNames = [
   "showDocument",
   "listDocuments",
   "showDocumentManifest",
-  "hasWorkoutHistoryForRawSource",
+  "resolveWorkoutImportStatusForRawSource",
   "showProvider",
   "listProviders",
   "showRecipe",

@@ -28,13 +28,13 @@ import { normalizeOccurredAtOption } from './occurred-at-option.js'
 const workoutImportStatusResultSchema = z.object({
   vault: pathSchema,
   rawRef: pathSchema,
-  imported: z.boolean(),
+  status: z.enum(['not_imported', 'completed', 'partial_conflict']),
 })
 
 function createWorkoutImportStatusCommand(services: VaultServices): AnyFactoryCommandConfig {
   return {
     name: 'workout-import-status',
-    description: 'Check whether workout history has ever been imported from one preserved raw source.',
+    description: 'Resolve whole-source workout import completion for one preserved raw source.',
     args: z.object({
       rawRef: z
         .string()
@@ -42,7 +42,7 @@ function createWorkoutImportStatusCommand(services: VaultServices): AnyFactoryCo
     }),
     output: workoutImportStatusResultSchema,
     async run({ args, options, requestId }) {
-      return services.query.hasWorkoutHistoryForRawSource({
+      return services.query.resolveWorkoutImportStatusForRawSource({
         vault: String(options.vault ?? ''),
         requestId,
         rawRef: String(args.rawRef ?? ''),

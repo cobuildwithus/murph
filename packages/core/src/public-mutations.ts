@@ -12,6 +12,7 @@ import {
   importEventBatch as importEventBatchInternal,
   importDocument as importDocumentInternal,
   importSamples as importSamplesInternal,
+  resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal,
 } from "./mutations.ts";
 import {
   promoteInboxExperimentNote as promoteInboxExperimentNoteInternal,
@@ -506,9 +507,13 @@ export async function stopExperiment(
 export async function importDocument(
   input: Parameters<typeof importDocumentInternal>[0],
 ): ReturnType<typeof importDocumentInternal> {
-  return input.reuseExact === true
-    ? withCanonicalInputWriteLock(input, importDocumentInternal)
-    : importDocumentInternal(input);
+  return withCanonicalInputWriteLock(input, importDocumentInternal);
+}
+
+export async function resolveWorkoutSourceImportStatus(
+  input: Parameters<typeof resolveWorkoutSourceImportStatusInternal>[0],
+): ReturnType<typeof resolveWorkoutSourceImportStatusInternal> {
+  return withCanonicalInputWriteLock(input, resolveWorkoutSourceImportStatusInternal);
 }
 
 export async function addMeal(

@@ -1309,14 +1309,14 @@ export interface QueryServices extends HealthQueryServiceMethods {
       to?: string
     },
   ): Promise<ListResult>
-  hasWorkoutHistoryForRawSource(
+  resolveWorkoutImportStatusForRawSource(
     input: CommandContext & {
       rawRef: string
     },
   ): Promise<{
     vault: string
     rawRef: string
-    imported: boolean
+    status: 'not_imported' | 'completed' | 'partial_conflict'
   }>
   showDocumentManifest(
     input: CommandContext & {
@@ -1569,11 +1569,10 @@ export interface VaultServices {
 
 export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   REQUIRED_DIRECTORIES: readonly string[]
-  hasEventKindReferencedRawRef(input: {
+  resolveWorkoutSourceImportStatus(input: {
     vaultRoot: string
     rawRef: string
-    kind: 'activity_session'
-  }): Promise<boolean>
+  }): Promise<'not_imported' | 'completed' | 'partial_conflict'>
   applyCanonicalWriteBatch(input: {
     vaultRoot: string
     operationType: string

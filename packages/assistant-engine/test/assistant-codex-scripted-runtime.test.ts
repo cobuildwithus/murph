@@ -605,9 +605,9 @@ if [ "$1 $2" = "document import" ]; then
 fi
 if [ "$1 $2" = "document workout-import-status" ]; then
   if [ -f "$DURABLE_WORKOUT_IMPORT_STATE/import-state" ]; then
-    printf '%s\\n' '{"imported":true}'
+    printf '%s\\n' '{"status":"completed"}'
   else
-    printf '%s\\n' '{"imported":false}'
+    printf '%s\\n' '{"status":"not_imported"}'
   fi
   exit 0
 fi
@@ -651,7 +651,7 @@ set -eu
 ./vault-cli workout import inspect workout-history.csv --format json > inspect.json
 ./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > document.json
 ./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > status.json
-test "$(python3 -c 'import json; print(str(json.load(open("status.json"))["imported"]).lower())')" = 'false'
+test "$(python3 -c 'import json; print(json.load(open("status.json"))["status"])')" = 'not_imported'
 ./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > schema.json
 python3 workout-csv-helper.py transform workout-history.csv document.json events.jsonl events.sha256 stable
 ./vault-cli event import-jsonl --input @events.jsonl --source-raw-ref-once raw/documents/workout-source.csv --format json > dry-run.json
@@ -660,7 +660,7 @@ python3 workout-csv-helper.py verify events.jsonl events.sha256
 python3 workout-csv-helper.py verify events.jsonl events.sha256
 ./vault-cli event list --kind activity_session --from 2026-01-15 --to 2026-07-15 --limit 10 --format json > readback.json
 ./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > replay-status.json
-test "$(python3 -c 'import json; print(str(json.load(open("replay-status.json"))["imported"]).lower())')" = 'true'
+test "$(python3 -c 'import json; print(json.load(open("replay-status.json"))["status"])')" = 'completed'
 python3 workout-csv-helper.py summarize transform-summary.json dry-run.json apply.json readback.json
 `,
       { encoding: 'utf8', mode: 0o755 },
@@ -809,7 +809,7 @@ if [ "$1 $2" = "document import" ]; then
 fi
 if [ "$1 $2" = "document workout-import-status" ]; then
   test "$(cat "$DURABLE_WORKOUT_IMPORT_STATE/import-state")" = '2'
-  printf '%s\\n' '{"imported":true}'
+  printf '%s\\n' '{"status":"completed"}'
   exit 0
 fi
 printf '%s\\n' '{"error":"retry must stop before transformation or event import"}' >&2
@@ -824,7 +824,7 @@ set -eu
 ./vault-cli workout import inspect workout-history.csv --format json > inspect.json
 ./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > document.json
 ./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > status.json
-test "$(python3 -c 'import json; print(str(json.load(open("status.json"))["imported"]).lower())')" = 'true'
+test "$(python3 -c 'import json; print(json.load(open("status.json"))["status"])')" = 'completed'
 printf '%s\\n' '{"status":"already_imported","transformed":false,"writeAttempted":false}'
 `,
       { encoding: 'utf8', mode: 0o755 },
@@ -926,7 +926,7 @@ if [ "$1 $2" = "document import" ]; then
   exit 0
 fi
 if [ "$1 $2" = "document workout-import-status" ]; then
-  printf '%s\\n' '{"imported":false}'
+  printf '%s\\n' '{"status":"not_imported"}'
   exit 0
 fi
 if [ "$1 $2" = "event payload-schema" ]; then
@@ -1108,7 +1108,7 @@ if [ "$1 $2" = "document import" ]; then
   exit 0
 fi
 if [ "$1 $2" = "document workout-import-status" ]; then
-  printf '%s\\n' '{"imported":false}'
+  printf '%s\\n' '{"status":"not_imported"}'
   exit 0
 fi
 if [ "$1 $2" = "event payload-schema" ]; then

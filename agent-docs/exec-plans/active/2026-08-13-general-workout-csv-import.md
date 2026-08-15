@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-15
 
 ## Goal
 
@@ -13,7 +13,7 @@ Updated: 2026-08-13
 - Strong and Hevy exports continue to use the dedicated workout CSV importer.
 - An unfamiliar workout CSV is handled locally without placing raw rows in the reusable prompt or making one model/tool call per set.
 - Murph reads the exact activity-session JSONL schema, requires explicit consequential mappings and units instead of guessing, dry-runs the complete batch, and applies only after validation succeeds.
-- Exact-source retries stop from durable raw-reference history without regenerating or comparing a model-authored transform.
+- Exact-source retries stop from a durable whole-source completion receipt without regenerating or comparing a model-authored transform.
 - Focused prompt tests, typecheck, preliminary ReviewGPT specialist review, final ReviewGPT gate, and exact-head CI pass.
 
 ## Scope
@@ -104,4 +104,11 @@ Updated: 2026-08-13
 - Original requirement: preserve a large unfamiliar workout CSV, transform it locally without raw-row prompt expansion, apply one validated canonical batch, and make exact-source recovery safe across independent turns.
 - First-reviewed versus current shape: the first head relied on model-authored workout identity and kept detailed mechanics resident. Review moved the mechanics on demand, made source evidence and immutable workout-to-raw history authoritative, and exposed deletion/alias/apply-boundary cases in that composed ownership model. Review growth is concentrated in production-boundary and real App Server regressions; production state remains the existing document event, raw manifest, event ledger, and canonical write lock.
 - Concepts retained: explicit exact document reuse, derived source-completion status, and one source-guarded append precondition. Concepts removed or rejected: model-authored external references, generic event conflict policy, equality exceptions, registries, replay state machines, leases, and compatibility machinery.
-- Cap decision pending: land and verify the two accepted round-seven corrections, then pause before any round eight. The recommended continuation is one fresh full audit of the corrected head because both corrections stay inside the retrospective's existing-owner direction and add no durable owner; merge still requires an explicit continuation decision and a later `PASS`.
+- Cap decision: the user's explicit request to repair and merge the PR authorized one fresh full audit of the corrected head. Round eight ran against the integrated current-base head.
+
+## Round 8 whole-source receipt correction
+
+- Review finding: any historical activity session mentioning the selected raw path was treated as proof that the whole atomic import completed. An ordinary event import or an observable prefix of the multi-file commit could therefore report `imported: true`; exact-byte document aliases could also split status and apply authority across different raw paths.
+- Decision: the source-guarded batch now appends a distinct content-derived completion target in its existing audit row, after the event shards in the same canonical batch. Status and apply use one resolver under the canonical write lock and return `completed`, `partial_conflict`, or `not_imported` across every live exact-byte document alias. Ordinary document imports use that same lock, closing the alias-selection race. No registry, lease, or new persisted owner was added.
+- Recovery behavior: only the guarded batch audit proves `completed`. Historical workout references without that receipt are `partial_conflict` and fail closed with an explicit recovery error; edits and deletions after a completed batch do not erase its receipt.
+- Proof: focused core regressions cover the completion audit marker, durable completion after workout edits/deletion, an unguarded partial import, exact-byte aliases, deleted-source authority, and shared document/status locking. Real CLI tests exercise all three statuses, while the App Server journeys retain completed and not-imported stop/proceed behavior.
