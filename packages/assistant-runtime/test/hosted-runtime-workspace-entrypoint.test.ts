@@ -14424,7 +14424,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 if (scenario.systemItemId) {
                   mailboxItems.push(createMailboxItem({
                     id: scenario.systemItemId,
-                    kind: "member.activated",
+                    kind: "member.channels.updated",
                     lane: "system",
                     laneSeq: "1",
                     occurredAt: "2026-04-27T00:00:01.000Z",
