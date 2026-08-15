@@ -168,10 +168,29 @@ the member's current authorized Telegram route.
   owner.
 - The round 9 remediation passes 97 focused Web phone-call service, delivery,
   notification-store, and reconciliation tests. Web typecheck also passes.
-- ReviewGPT tooling is updated from `0.5.127` to the registry-latest `0.5.132`
-  with the matching narrow minimum-release-age exception and lockfile integrity.
-  A frozen-lockfile install and the installed CLI version check pass.
-- Exact-head CI exposed stale release-audit assertions for the prior ReviewGPT
-  version and its fixed five-minute implementation shape. The audit now pins
-  `0.5.132` and verifies the equivalent configurable threshold plus extracted
-  fail-closed helper. Its exact package-backed ReviewGPT test passes.
+- The substantive round 10 audit runs with registry-latest ReviewGPT `0.5.132`;
+  its registry integrity, frozen install, and installed CLI version were proved.
+  While that audit ran, `main` independently landed the same package upgrade in
+  #1900, so this candidate drops its duplicate dependency and audit-test edits
+  and inherits `0.5.132` from the merge base instead of retaining a conflict.
+- Intermediate exact-head CI exposed stale release-audit assertions for the
+  prior ReviewGPT version and its fixed five-minute implementation shape. That
+  candidate proved the `0.5.132` configurable threshold and extracted
+  fail-closed helper directly; current `main` now owns the stronger equivalent
+  audit through #1900.
+- ReviewGPT round 10 at
+  `388db5f9c744bddbbc068ccb0e26d707f6367047` found a provider-success recovery
+  gap: the delivered in-memory owner did not retain the Telegram receipt, so a
+  failed first checkpoint could persist a callback-pending intent without the
+  evidence needed to replay the signed Web confirmation. It also found that a
+  repeated callback failure kept the prior due timestamp and could spin.
+- The remediation carries the exact provider receipt into the delivered owner,
+  preserves it and the terminal-confirmation obligation through checkpoint
+  fallback, and advances the existing bounded retry timestamp after every
+  failed callback. Focused fault-injection proof fails the first post-send
+  atomic rename and the first callback, restarts the dispatcher, confirms Web,
+  and observes exactly one Telegram provider call. A second regression proves
+  that repeated callback failures each back off before succeeding without a
+  provider resend. The two new regressions plus the existing stale receipt and
+  ambiguity recovery cases pass together, the complete three-file outbox slice
+  passes 162 tests, and Assistant Engine typecheck passes.

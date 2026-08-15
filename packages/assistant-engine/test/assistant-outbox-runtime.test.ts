@@ -6153,7 +6153,7 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
-  it('replays a tracked terminal success callback after restart without resending the provider effect', async () => {
+  it('backs off repeated tracked terminal callback failures without resending the provider effect', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-15T13:00:00.000Z'))
     const { vaultRoot } = await createAssistantVault(
@@ -6189,6 +6189,7 @@ describe('assistant outbox runtime', () => {
     )
     const confirmTerminalIntent = vi.fn()
       .mockRejectedValueOnce(new Error('terminal callback response lost'))
+      .mockRejectedValueOnce(new Error('terminal callback remains unavailable'))
       .mockResolvedValueOnce(undefined)
     const dispatchHooks = {
       confirmTerminalIntent,
@@ -6212,6 +6213,9 @@ describe('assistant outbox runtime', () => {
     expect(first.deliveryError).toMatchObject({
       code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
     })
+    expect(Date.parse(first.intent.nextAttemptAt ?? '')).toBeGreaterThan(
+      Date.parse('2026-08-15T13:00:00.000Z'),
+    )
     expect(confirmTerminalIntent).toHaveBeenNthCalledWith(1, {
       intent: expect.objectContaining({
         deliveryConfirmationPending: true,
@@ -6230,18 +6234,37 @@ describe('assistant outbox runtime', () => {
       status: 'retryable',
     })
 
-    const restarted = await dispatchAssistantOutboxIntent({
+    vi.setSystemTime(new Date(first.intent.nextAttemptAt!))
+    const firstRestart = await dispatchAssistantOutboxIntent({
       dispatchHooks,
       intentId: seeded.intentId,
-      now: new Date('2026-08-15T13:01:00.000Z'),
+      now: new Date(first.intent.nextAttemptAt!),
       vault: vaultRoot,
     })
 
-    expect(restarted.intent.status).toBe('sent')
-    expect(restarted.intent.deliveryConfirmationPending).toBe(false)
-    expect(restarted.deliveryError).toBeNull()
+    expect(firstRestart.intent).toMatchObject({
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+    })
+    expect(Date.parse(firstRestart.intent.nextAttemptAt ?? '')).toBeGreaterThan(
+      Date.parse(first.intent.nextAttemptAt!),
+    )
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
     expect(confirmTerminalIntent).toHaveBeenCalledTimes(2)
+
+    vi.setSystemTime(new Date(firstRestart.intent.nextAttemptAt!))
+    const secondRestart = await dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      intentId: seeded.intentId,
+      now: new Date(firstRestart.intent.nextAttemptAt!),
+      vault: vaultRoot,
+    })
+
+    expect(secondRestart.intent.status).toBe('sent')
+    expect(secondRestart.intent.deliveryConfirmationPending).toBe(false)
+    expect(secondRestart.deliveryError).toBeNull()
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect(confirmTerminalIntent).toHaveBeenCalledTimes(3)
   })
 
   it.each([

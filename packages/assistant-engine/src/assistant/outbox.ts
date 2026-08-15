@@ -851,6 +851,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
 
   if (prepared.action === 'confirm-terminal') {
     const confirmedIntent = await confirmAssistantOutboxTerminalIntent({
+      attemptedAt: now,
       dispatchHooks: input.dispatchHooks,
       intent: prepared.intent,
       intentPath: prepared.intentPath,
@@ -980,6 +981,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       const sentIntent = terminalConfirmationRequired
         ? await finalizeAssistantOutboxTerminalDelivery({
             completedAt,
+            confirmationAttemptedAt: now,
             delivery: recoveredDelivery,
             dispatchHooks: input.dispatchHooks,
             intent: prepared.intent,
@@ -1244,6 +1246,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       })
     const sentIntent = pendingTerminalConfirmation
       ? await confirmAssistantOutboxTerminalIntent({
+          attemptedAt: now,
           dispatchHooks: input.dispatchHooks,
           intent: durableDeliveredIntent,
           intentPath: dispatchIntentPath,
@@ -1318,6 +1321,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       })
     const confirmedIntent = pendingTerminalConfirmation
       ? await confirmAssistantOutboxTerminalIntent({
+          attemptedAt: now,
           dispatchHooks: input.dispatchHooks,
           intent: failedIntent,
           intentPath: dispatchIntentPath,
@@ -1382,6 +1386,7 @@ function readAssistantOutboxPendingTerminalConfirmation(input: {
 }
 
 async function confirmAssistantOutboxTerminalIntent(input: {
+  attemptedAt: Date
   dispatchHooks: AssistantOutboxDispatchHooks | undefined
   intent: AssistantOutboxIntent
   intentPath: string
@@ -1400,7 +1405,15 @@ async function confirmAssistantOutboxTerminalIntent(input: {
       vault: input.vault,
     })
   } catch {
-    return input.intent
+    return rescheduleAssistantOutboxConfirmationRetry({
+      error:
+        input.intent.lastError ??
+        createAssistantDeliveryConfirmationPendingError(),
+      intentPath: input.intentPath,
+      scheduledAt: input.attemptedAt,
+      sending: input.intent,
+      vault: input.vault,
+    })
   }
 
   if (input.outcome.status === 'sent') {
@@ -1415,7 +1428,7 @@ async function confirmAssistantOutboxTerminalIntent(input: {
 
   return markAssistantOutboxIntentMirrorTerminal({
     error: input.outcome.deliveryError,
-    failedAt: new Date(),
+    failedAt: input.attemptedAt,
     intent: input.intent,
     intentPath: input.intentPath,
     onlyCurrentStatuses: ['retryable', 'sending'],
@@ -1453,6 +1466,7 @@ async function finalizeAssistantOutboxTerminalFailure(input: {
   })
   return outcome
     ? confirmAssistantOutboxTerminalIntent({
+        attemptedAt: input.failedAt,
         dispatchHooks: input.dispatchHooks,
         intent: pendingIntent,
         intentPath: input.intentPath,
@@ -1464,6 +1478,7 @@ async function finalizeAssistantOutboxTerminalFailure(input: {
 
 async function finalizeAssistantOutboxTerminalDelivery(input: {
   completedAt: string
+  confirmationAttemptedAt: Date
   delivery: AssistantChannelDelivery
   dispatchHooks: AssistantOutboxDispatchHooks | undefined
   intent: AssistantOutboxIntent
@@ -1487,6 +1502,7 @@ async function finalizeAssistantOutboxTerminalDelivery(input: {
   })
   return outcome
     ? confirmAssistantOutboxTerminalIntent({
+        attemptedAt: input.confirmationAttemptedAt,
         dispatchHooks: input.dispatchHooks,
         intent: pendingIntent,
         intentPath: input.intentPath,
@@ -2553,6 +2569,7 @@ function buildAssistantOutboxDeliveredIntent(input: {
       actorId: sessionBinding?.actorId ?? input.intent.actorId,
       bindingDelivery: sessionBinding?.delivery ?? input.intent.bindingDelivery,
       channel: sessionBinding?.channel ?? input.intent.channel,
+      delivery: input.delivery,
       deliveryTransportIdempotent: input.deliveryTransportIdempotent,
       identityId: sessionBinding?.identityId ?? input.intent.identityId,
       threadId: sessionBinding?.threadId ?? input.intent.threadId,

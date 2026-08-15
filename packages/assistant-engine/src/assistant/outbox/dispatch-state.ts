@@ -448,7 +448,12 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       isAssistantOutboxRetryBudgetExhausted(baseIntent)
     const terminalConfirmationPending =
       input.terminalConfirmationRequired === true &&
-      (abandonedDelivery || retryExhausted || !retryRequested)
+      (
+        abandonedDelivery ||
+        retryExhausted ||
+        !retryRequested ||
+        (input.deliveryMayHaveSucceeded && input.sending.delivery !== null)
+      )
     const retryable = (retryRequested && !retryExhausted) ||
       terminalConfirmationPending
     const deliveryError = retryExhausted
@@ -930,7 +935,14 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.sending,
+        ['sending', 'retryable'],
+      )
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -943,7 +955,9 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const retryIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
-        deliveryConfirmationPending: baseIntent.deliveryTransportIdempotent,
+        deliveryConfirmationPending:
+          baseIntent.deliveryConfirmationPending ||
+          baseIntent.deliveryTransportIdempotent,
         updatedAt: scheduledAt,
         nextAttemptAt: buildAssistantOutboxRetryTimestamp(
           input.scheduledAt,

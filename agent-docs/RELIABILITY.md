@@ -1811,10 +1811,14 @@ Last verified: 2026-08-15
   evidence and stays retryable until Web acknowledges the matching terminal
   callback. A later runtime pass replays only that idempotent callback from the
   persisted evidence; it never re-enters the Telegram provider. The outbox marks
-  the intent ordinarily terminal and nonselectable only after Web acknowledges
-  the call-row transition and its next-obligation re-arm. If the process is lost
-  while the non-idempotent Telegram intent is still `sending`, stale recovery
-  makes the same no-resend decision, persists an ambiguous callback outcome on
+  a provider receipt on the in-memory dispatch owner before its first
+  post-provider checkpoint, so a failed checkpoint fallback cannot discard the
+  receipt or callback obligation. Each failed callback advances the existing
+  bounded outbox retry timestamp; it does not immediately spin or resend.
+  The intent becomes ordinarily terminal and nonselectable only after Web
+  acknowledges the call-row transition and its next-obligation re-arm. If the
+  process is lost while the non-idempotent Telegram intent is still `sending`,
+  stale recovery makes the same no-resend decision, persists an ambiguous callback outcome on
   the existing intent, and waits for Web acknowledgement before terminalizing
   the outbox. The call row supplies the stronger provider-entry fact: a queued
   generation returns to `pending` and re-arms recovery, while a generation
