@@ -6,6 +6,8 @@ Last verified: 2026-08-15
 
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
+Current verification routing includes the WHOOP canary's bounded direct-locator
+authorization diagnostics and dynamic-DOM headed-browser proof.
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary

@@ -70,14 +70,21 @@ Updated: 2026-08-15
   first probe could count a denial as positive and miss hidden, computed-name,
   or framed actions. The corrected probe reuses Playwright accessible-name
   matching plus the driver's negative veto and has real headed-browser proof.
+- Accepted final round 2's boundedness finding: pattern-by-pattern element
+  reacquisition could outlive the browser-parent timeout on a changing page.
+  The probe now uses one safe positive locator per role/frame plus one negative
+  count, with short-timeout dynamic-DOM headed-browser proof.
 
 ## Verification
 
 - Commands: focused browser-driver and workflow-contract Vitest files; relevant
   Web, hosted-local harness, and Cloudflare typechecks; docs/privacy/diff guards;
   exact-head required GitHub Actions; merge-triggered protected-main canary.
-- Passed locally on the corrected diagnostic head: 13 focused browser-driver
+- Passed locally on the first corrected diagnostic head: 13 focused browser-driver
   tests, two real headed-browser smoke scenarios, Web typecheck, targeted ESLint,
   docs drift, diff check, and the privacy scan.
+- Passed locally after the bounded-locator remediation: the same 13 focused
+  tests, all three real headed-browser scenarios, Web typecheck, and targeted
+  ESLint. Docs and diff/privacy guards are rerun before the next commit.
 - Expected outcome: diagnostics first prove the current consent structure, then
   the corrected driver completes the full provider and persisted-state journey.

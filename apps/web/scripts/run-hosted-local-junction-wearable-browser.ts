@@ -65,24 +65,16 @@ interface AuthorizationSurfaceSummary {
 type AuthorizationRoot = Frame | Page;
 
 const RUNNER_NAME = "Hosted-local Junction wearable browser runner";
-const AUTH_ACTIONS = [
-  /\baccept\b/i,
-  /\bagree\b/i,
-  /\bcontinue\b/i,
-  /\bnext\b/i,
-  /\blog ?in\b/i,
-  /\bsign in\b/i,
-  /\bsubmit\b/i,
-  /\bverify\b/i,
-  /\bauthorize\b/i,
-  /\ballow\b/i,
-  /\bapprove\b/i,
-  /\bgrant\b/i,
-  /\bconfirm\b/i,
-  /\bconnect\b/i,
-] as const;
+const POSITIVE_AUTH_ACTION_PATTERN =
+  /\b(?:accept|agree|continue|next|log ?in|sign in|submit|verify|authorize|allow|approve|grant|confirm|connect)\b/iu;
 const NEGATIVE_AUTH_ACTION_PATTERN =
-  /\b(?:cancel|decline|deny|disallow|do not|don't|not now|reject|skip)\b/iu;
+  /\b(?:cancel|decline|deny|disallow|do not|don(?:\u0027|\u2019)t|not now|reject|skip)\b/iu;
+const SAFE_AUTH_ACTION_PATTERN = new RegExp(
+  `^(?![\\s\\S]*${NEGATIVE_AUTH_ACTION_PATTERN.source})[\\s\\S]*${
+    POSITIVE_AUTH_ACTION_PATTERN.source
+  }`,
+  "iu",
+);
 const TRUSTED_AUTHORIZATION_DOMAINS = [
   "junction.com",
   "tryvital.io",
@@ -265,7 +257,7 @@ async function completeExternalAuthorization(
       }
 
       await checkRequiredConsentCheckboxes(page);
-      const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
+      const clicked = await clickFirstVisibleAction(page);
       if (clicked) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
@@ -384,28 +376,19 @@ async function checkRequiredConsentCheckboxes(page: Page): Promise<void> {
 
 async function clickFirstVisibleAction(
   page: Page,
-  names: readonly RegExp[],
 ): Promise<boolean> {
-  for (const name of names) {
-    for (const role of ["button", "link"] as const) {
-      const controls = page.getByRole(role, { name });
-      for (let index = 0; index < await controls.count(); index += 1) {
-        const control = controls.nth(index);
-        if (
-          await locatorMatchesAccessibleName(
-            page,
-            role,
-            control,
-            NEGATIVE_AUTH_ACTION_PATTERN,
-          )
-          || !await control.isVisible().catch(() => false)
-          || !await control.isEnabled().catch(() => false)
-        ) {
-          continue;
-        }
-        await control.click();
-        return true;
+  for (const role of ["button", "link"] as const) {
+    const controls = page.getByRole(role, { name: SAFE_AUTH_ACTION_PATTERN });
+    for (let index = 0; index < await controls.count(); index += 1) {
+      const control = controls.nth(index);
+      if (
+        !await control.isVisible().catch(() => false)
+        || !await control.isEnabled().catch(() => false)
+      ) {
+        continue;
       }
+      await control.click();
+      return true;
     }
   }
   return false;
@@ -461,87 +444,46 @@ async function summarizeAuthorizationActions(
     }
     const inChildFrame = rootIndex > 0;
     for (const role of ["button", "link"] as const) {
-      const controls = root.getByRole(role, { includeHidden: true });
-      const count = await controls.count().catch(() => 0);
-      for (let index = 0; index < count; index += 1) {
-        const control = controls.nth(index);
-        const [positive, negative, visible, enabled] = await Promise.all([
-          locatorMatchesAnyAccessibleName(root, role, control, AUTH_ACTIONS),
-          locatorMatchesAccessibleName(
-            root,
-            role,
-            control,
-            NEGATIVE_AUTH_ACTION_PATTERN,
-          ),
-          control.isVisible().catch(() => false),
-          control.isEnabled().catch(() => false),
-        ]);
-        if (negative) {
-          summary.negative += 1;
+      summary.negative += await root
+        .getByRole(role, {
+          includeHidden: true,
+          name: NEGATIVE_AUTH_ACTION_PATTERN,
+        })
+        .count()
+        .catch(() => 0);
+      const allPositiveControls = root.getByRole(role, {
+        includeHidden: true,
+        name: SAFE_AUTH_ACTION_PATTERN,
+      });
+      const visiblePositiveControls = root.getByRole(role, {
+        name: SAFE_AUTH_ACTION_PATTERN,
+      });
+      const [positiveCount, visibleCount] = await Promise.all([
+        allPositiveControls.count().catch(() => 0),
+        visiblePositiveControls.count().catch(() => 0),
+      ]);
+      let visibleEnabledCount = 0;
+      for (let index = 0; index < visibleCount; index += 1) {
+        if (
+          await visiblePositiveControls.nth(index).isEnabled().catch(() => false)
+        ) {
+          visibleEnabledCount += 1;
         }
-        if (!positive || negative) {
-          continue;
-        }
+      }
 
-        summary.positive += 1;
-        if (inChildFrame) {
-          summary.positiveInChildFrames += 1;
-        }
-        if (!visible) {
-          summary.positiveHidden += 1;
-          continue;
-        }
-        summary.positiveVisible += 1;
-        if (!enabled) {
-          summary.positiveVisibleDisabled += 1;
-          continue;
-        }
-        summary.positiveVisibleEnabled += 1;
-        if (inChildFrame) {
-          summary.positiveVisibleEnabledInChildFrames += 1;
-        }
+      summary.positive += positiveCount;
+      summary.positiveHidden += Math.max(0, positiveCount - visibleCount);
+      summary.positiveVisible += visibleCount;
+      summary.positiveVisibleDisabled += visibleCount - visibleEnabledCount;
+      summary.positiveVisibleEnabled += visibleEnabledCount;
+      if (inChildFrame) {
+        summary.positiveInChildFrames += positiveCount;
+        summary.positiveVisibleEnabledInChildFrames += visibleEnabledCount;
       }
     }
   }
 
   return summary;
-}
-
-async function locatorMatchesAnyAccessibleName(
-  root: AuthorizationRoot,
-  role: "button" | "link",
-  control: Locator,
-  patterns: readonly RegExp[],
-): Promise<boolean> {
-  for (const pattern of patterns) {
-    if (await locatorMatchesAccessibleName(root, role, control, pattern)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-async function locatorMatchesAccessibleName(
-  root: AuthorizationRoot,
-  role: "button" | "link",
-  control: Locator,
-  pattern: RegExp,
-): Promise<boolean> {
-  const controlHandle = await control.elementHandle().catch(() => null);
-  if (!controlHandle) {
-    return false;
-  }
-  try {
-    return await root
-      .getByRole(role, { includeHidden: true, name: pattern })
-      .evaluateAll(
-        (elements, target) => elements.includes(target),
-        controlHandle,
-      )
-      .catch(() => false);
-  } finally {
-    await controlHandle.dispose();
-  }
 }
 
 async function summarizeAuthorizationCheckboxes(
@@ -696,7 +638,6 @@ export {
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
-  summarizeAuthorizationSurface as summarizeHostedLocalJunctionAuthorizationSurfaceForTest,
 };
 
 function assertTrustedAuthorizationUrl(

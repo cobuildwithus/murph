@@ -26,7 +26,6 @@ function createConfig(environment: Record<string, string | undefined> = {}) {
 function emptyLocator() {
   return {
     count: vi.fn(async () => 0),
-    evaluateAll: vi.fn(async () => false),
     nth: vi.fn(),
   };
 }
@@ -36,7 +35,6 @@ function actionLocator(click: () => void) {
     click: vi.fn(async () => {
       click();
     }),
-    elementHandle: vi.fn(async () => ({ dispose: vi.fn(async () => undefined) })),
     getAttribute: vi.fn(async () => null),
     innerText: vi.fn(async () => "Continue"),
     isEnabled: vi.fn(async () => true),
