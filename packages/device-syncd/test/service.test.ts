@@ -1908,7 +1908,8 @@ test("Junction lifecycle supersession retries one webhook resource job with norm
   let now = new Date("2030-04-03T12:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-lifecycle-retry");
   let requestCount = 0;
-  let importedSnapshotCount = 0;
+  const importedRecordCounts: number[] = [];
+  const requestedWindows: Array<{ windowEnd: string | null; windowStart: string | null }> = [];
   let advanceLifecycle: (() => void) | null = null;
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
@@ -1919,8 +1920,11 @@ test("Junction lifecycle supersession retries one webhook resource job with norm
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     importer: {
-      async importDeviceProviderSnapshot() {
-        importedSnapshotCount += 1;
+      async importDeviceProviderSnapshot(input) {
+        const snapshot = input.snapshot as {
+          timeseries?: { heart_rate_alert?: unknown[] };
+        };
+        importedRecordCounts.push(snapshot.timeseries?.heart_rate_alert?.length ?? 0);
         return { events: [{ kind: "measurement" }] };
       },
     },
@@ -1951,19 +1955,25 @@ test("Junction lifecycle supersession retries one webhook resource job with norm
           throw new Error(`Unexpected Junction lifecycle retry request: ${url.toString()}`);
         }
         requestCount += 1;
+        const windowStart = url.searchParams.get("start_date");
+        requestedWindows.push({
+          windowEnd: url.searchParams.get("end_date"),
+          windowStart,
+        });
         advanceLifecycle?.();
         advanceLifecycle = null;
+        const day = windowStart?.slice(0, 10) ?? "2026-04-01";
         return createJsonResponse({
           groups: {
             garmin: [{
-              data: [{
-                end: "2026-04-02T10:01:00.000Z",
-                id: "heart-alert-lifecycle-retry",
-                start: "2026-04-02T10:00:00.000Z",
+              data: Array.from({ length: 80 }, (_value, index) => ({
+                end: `${day}T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:30.000Z`,
+                id: `heart-alert-lifecycle-retry-${day}-${index}`,
+                start: `${day}T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00.000Z`,
                 type: "irregular_rhythm",
                 unit: "count",
                 value: 1,
-              }],
+              })),
               source: { provider: "garmin", type: "watch" },
             }],
           },
@@ -2008,14 +2018,14 @@ test("Junction lifecycle supersession retries one webhook resource job with norm
       provider: "junction",
       kind: "resource",
       payload: {
-        eventType: "daily.data.heart_rate_alert.created",
+        eventType: "historical.data.heart_rate_alert.created",
         objectId: "heart-alert-lifecycle-retry",
         occurredAt: "2026-04-02T10:01:00.000Z",
         resource: "heart_rate_alert",
         resourceCategory: "timeseries",
         sourceProviderSlug: "garmin",
         windowEnd: "2026-04-03T00:00:00.000Z",
-        windowStart: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
       },
       availableAt: now.toISOString(),
       maxAttempts: 5,
@@ -2032,7 +2042,7 @@ test("Junction lifecycle supersession retries one webhook resource job with norm
       new Date(now.getTime() + computeRetryDelayMs(1)).toISOString(),
     );
     assert.equal(requestCount, 1);
-    assert.equal(importedSnapshotCount, 0);
+    assert.deepEqual(importedRecordCounts, []);
     assert.deepEqual(
       readJobsForAccountForTesting(store, account.id).map((candidate) => candidate.id),
       [job.id],
@@ -2046,11 +2056,35 @@ test("Junction lifecycle supersession retries one webhook resource job with norm
     assert.equal(completed.status, "succeeded");
     assert.equal(completed.attempts, 2);
     assert.equal(requestCount, 2);
-    assert.equal(importedSnapshotCount, 1);
-    assert.deepEqual(
-      readJobsForAccountForTesting(store, account.id).map((candidate) => candidate.id),
-      [job.id],
-    );
+    assert.deepEqual(importedRecordCounts, [80]);
+    const persistedJobs = readJobsForAccountForTesting(store, account.id);
+    assert.equal(persistedJobs.length, 2);
+    const followUpRow = persistedJobs.find((candidate) => candidate.id !== job.id);
+    assert.ok(followUpRow);
+    const followUp = store.getJobById(followUpRow.id);
+    assert.ok(followUp);
+    assert.equal(followUp.status, "queued");
+    assert.equal(followUp.payload.windowStart, "2026-04-02T00:00:00.000Z");
+    assert.equal(followUp.payload.windowEnd, "2026-04-03T00:00:00.000Z");
+
+    assert.equal((await service.runWorkerOnce())?.id, followUp.id);
+    assert.equal(store.getJobById(followUp.id)?.status, "succeeded");
+    assert.equal(requestCount, 3);
+    assert.deepEqual(importedRecordCounts, [80, 80]);
+    assert.deepEqual(requestedWindows, [
+      {
+        windowEnd: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+      {
+        windowEnd: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+      {
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+    ]);
   } finally {
     close();
   }

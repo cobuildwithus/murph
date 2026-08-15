@@ -2412,6 +2412,17 @@ export function createJunctionDeviceSyncProvider(
           !extendedHistoricalBackfill
           && timeseriesPolicy?.maxCanonicalRecordsPerWindow !== undefined
         ) {
+          const [boundedWindow] = buildPreciseTimeseriesWindows(
+            window.windowStart,
+            window.windowEnd,
+          );
+          if (!boundedWindow) {
+            return withJunctionSkippedResourceMetadata(
+              context,
+              { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+              skippedOptionalResources,
+            );
+          }
           await importJunctionTimeseriesResourceSnapshot({
             context,
             dateQueryFormat: "datetime",
@@ -2419,12 +2430,19 @@ export function createJunctionDeviceSyncProvider(
             skippedOptionalResources,
             sourceProviderSlug,
             sourceProviders,
-            windowEnd: window.windowEnd,
-            windowStart: window.windowStart,
+            windowEnd: boundedWindow.windowEnd,
+            windowStart: boundedWindow.windowStart,
           });
           return withJunctionSkippedResourceMetadata(
             context,
-            { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+            Date.parse(boundedWindow.windowEnd) < Date.parse(window.windowEnd)
+              ? buildYieldedJunctionJobResult({
+                  context,
+                  job,
+                  windowEnd: window.windowEnd,
+                  windowStart: boundedWindow.windowEnd,
+                })
+              : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
             skippedOptionalResources,
           );
         }
