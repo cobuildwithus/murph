@@ -39,6 +39,7 @@ import {
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
+import { computeAssistantAutomationSemanticRevision } from '../automation/semantic-revision.js'
 import {
   computeAssistantAutomationRetryAt,
   type AssistantRunEvent,
@@ -1721,6 +1722,8 @@ function resolveAssistantCronOutboxAutomationAuthority(
   return {
     automationId: job.source.automationId,
     automationRelativePath: job.source.relativePath,
+    expectedSemanticRevision:
+      computeAssistantAutomationSemanticRevision(job.source),
     expectedUpdatedAt: job.source.updatedAt,
   }
 }

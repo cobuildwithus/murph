@@ -945,6 +945,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<{
+  assistantCronWakeAt: string | null;
   assistantCronDueNow: boolean;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
@@ -1006,6 +1007,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
         },
       ]);
   return {
+    assistantCronWakeAt: assistantCronWake.at,
     assistantCronDueNow: assistantCronWake.dueNow,
     ...selectedWake,
   };
@@ -2333,6 +2335,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         || hostedVaultStartupPreparation.mutated;
       let checkpointed = false;
       let foregroundWakeObserved = false;
+      let assistantCronDeadlineMs: number | null = null;
       const consumeForegroundWake = (): boolean => {
         if (foregroundWakeObserved) {
           return true;
@@ -2347,7 +2350,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         foregroundWakeObserved = true;
         return true;
       };
-      const shouldYieldSystemMailboxWork = (): boolean => consumeForegroundWake();
+      const shouldYieldSystemMailboxWork = (): boolean =>
+        consumeForegroundWake()
+        || (
+          assistantCronDeadlineMs !== null
+          && Date.now() >= assistantCronDeadlineMs
+        );
       const resolveSystemMailboxModeWake = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ) => await resolveHostedSystemMailboxProcessingModeWake({
@@ -2831,6 +2839,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
 
       const initialProjectedWake = await resolveCurrentSystemMailboxModeWake();
+      const projectedAssistantCronDeadlineMs = Date.parse(
+        initialProjectedWake.assistantCronWakeAt ?? "",
+      );
+      assistantCronDeadlineMs = Number.isFinite(projectedAssistantCronDeadlineMs)
+        ? projectedAssistantCronDeadlineMs
+        : null;
       if (initialProjectedWake.assistantCronDueNow) {
         if (
           importOrStartupCheckpointPending

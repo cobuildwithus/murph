@@ -27,6 +27,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ScheduledLogQueryRecord } from '@murphai/query'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { computeAssistantAutomationSemanticRevision } from '../src/assistant/automation/semantic-revision.js'
 import {
   createAssistantGroupEmailOutboxTool,
 } from '../src/assistant/group-email-outbox.js'
@@ -11320,9 +11321,11 @@ describe('assistant cron runtime orchestration', () => {
 
     const paths = resolveAssistantStatePaths(vaultRoot)
     const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
-    if (!source) {
-      throw new Error('Expected canonical source to exist.')
+    if (!source || source.kind !== 'automation') {
+      throw new Error('Expected canonical automation source to exist.')
     }
+    const expectedSemanticRevision =
+      computeAssistantAutomationSemanticRevision(source)
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const baseRuntimeState = resolveCanonicalRuntimeState(source, runtimeStore)
     const runtimeState = {
@@ -11358,6 +11361,19 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(result.run.status).toBe('succeeded')
+    const persistedSource = (await listCanonicalAssistantCronRecords(vaultRoot))
+      .find(
+        (record) =>
+          record.kind === 'automation' &&
+          record.automationId === source.automationId,
+      )
+    expect(persistedSource?.kind).toBe('automation')
+    if (!persistedSource || persistedSource.kind !== 'automation') {
+      throw new Error('Expected persisted canonical automation source to exist.')
+    }
+    expect(
+      computeAssistantAutomationSemanticRevision(persistedSource),
+    ).toBe(expectedSemanticRevision)
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: 'participant-1',
@@ -11369,6 +11385,7 @@ describe('assistant cron runtime orchestration', () => {
         outboxAutomationAuthority: {
           automationId: 'automation-linq-pinned-mixed-route',
           automationRelativePath: 'bank/automations/stand-up-reminder.md',
+          expectedSemanticRevision,
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
         },
         participantId: 'participant-1',
@@ -11476,6 +11493,7 @@ describe('assistant cron runtime orchestration', () => {
         outboxAutomationAuthority: {
           automationId: 'automation-kl-pending-sent',
           automationRelativePath: 'bank/automations/midnight-sleep-reminder.md',
+          expectedSemanticRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
         },
       }),

@@ -350,6 +350,7 @@ export const assistantOutboxAutomationAuthoritySchema = z
   .object({
     automationId: z.string().trim().min(1),
     automationRelativePath: z.string().trim().min(1).optional(),
+    expectedSemanticRevision: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
     expectedUpdatedAt: isoTimestampSchema,
   })
   .strict()

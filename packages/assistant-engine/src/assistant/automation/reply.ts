@@ -141,6 +141,7 @@ import {
   type AssistantRunEvent,
 } from './shared.js'
 import { buildAssistantAutomationTurnEnvelope } from './turn-envelope.js'
+import { computeAssistantAutomationSemanticRevision } from './semantic-revision.js'
 
 const ASSISTANT_AUTO_REPLY_OUTBOX_CLOCK_SKEW_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH = 4_000
@@ -4874,6 +4875,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 interface AssistantAutoReplyMatchingOutboxDelivery {
   automationId: string | null
   automationRelativePath: string | null
+  automationExpectedSemanticRevision: string | null
   automationExpectedUpdatedAt: string | null
   scheduledOccurrenceAt: string | null
   intentId: string
@@ -4959,6 +4961,10 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       automationRelativePath:
         normalizeNullableString(
           intent.automationAuthority?.automationRelativePath,
+        ) ?? null,
+      automationExpectedSemanticRevision:
+        normalizeNullableString(
+          intent.automationAuthority?.expectedSemanticRevision,
         ) ?? null,
       automationExpectedUpdatedAt:
         normalizeNullableString(
@@ -5173,16 +5179,24 @@ async function buildAssistantAutoReplyExperimentSupportContext(input: {
   } catch {
     return null
   }
+  const expectedSemanticRevision = normalizeNullableString(
+    input.delivery?.automationExpectedSemanticRevision,
+  )
   const expectedUpdatedAt = normalizeNullableString(
     input.delivery?.automationExpectedUpdatedAt,
   )
   if (
     !automation ||
     automation.automationId !== automationId ||
-    expectedUpdatedAt === null ||
-    automation.updatedAt !== expectedUpdatedAt ||
     automation.supportKind === null
   ) {
+    return null
+  }
+  const revisionMatches = expectedSemanticRevision !== null
+    ? computeAssistantAutomationSemanticRevision(automation) ===
+      expectedSemanticRevision
+    : expectedUpdatedAt !== null && automation.updatedAt === expectedUpdatedAt
+  if (!revisionMatches) {
     return null
   }
   const experimentOwners = automation.tags
@@ -5207,7 +5221,9 @@ async function buildAssistantAutoReplyExperimentSupportContext(input: {
       ? [`- This reminder's exact scheduled occurrence is ${scheduledOccurrenceAt}.`]
       : ['- The exact scheduled occurrence is unavailable; do not infer it from send or delivery timing.']),
     `- The prior message reached provider acceptance at ${providerAcceptedAt}. This is not a delivered-receipt timestamp.`,
-    '- Treat a generic affirmative or completion reply as evidence for exactly one occurrence of this experiment-owned reminder, never the whole day or several sets.',
+    '- Occurrence-write authority is conditional: the current user must explicitly state that they completed this exact occurrence, or their input must be an unambiguous affirmative/reaction to an exact prior message that specifically asked them to confirm completion of this occurrence.',
+    '- A generic affirmative or reaction to a status check, review, digest, cadence question, or continue/pause/modify question answers only that question and grants zero adherence-write authority. The support kind alone never proves completion. If the exact prior message is ambiguous, do not write adherence.',
+    '- When completion is authorized, record exactly one occurrence of this experiment-owned reminder, never the whole day or several sets.',
     '- Before writing, read the exact experiment and its canonical progress to resolve the declared adherence event lane and the intended occurrence.',
     '- Use that declared lane. Do not create or switch to a generic activity_session when the experiment requires intervention_session evidence.',
     '- After the canonical write, re-read progress. Say the occurrence was recorded only when that readback proves the new event; otherwise state the failure without a success acknowledgment.',

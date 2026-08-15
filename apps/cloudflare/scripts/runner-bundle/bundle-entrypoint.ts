@@ -272,12 +272,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Generation-10 Browser Vault projection adds the replica builder to lazy
 // runner output. A dedicated Query server facade keeps that graph off startup;
 // exact macOS assembly measured an 8,065,357B static closure and 10,325,065B
-// total after the merged AgentMail removal on 2026-08-14. Keep the entry and
-// static-closure ratchets below, while giving the previous 10,357,833B total
-// cap 10% headroom and retaining the forbidden-startup-input guards.
+// total after the merged AgentMail removal on 2026-08-14. Reminder wake
+// preemption then measured an 8,165,926B static closure without adding a
+// forbidden boot input. Ratchet that baseline while keeping the previous
+// 10,357,833B total cap's 10% headroom and the existing variance allowances.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_393_617;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_065_357;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_165_926;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

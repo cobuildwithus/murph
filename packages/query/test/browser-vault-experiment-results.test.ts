@@ -19,6 +19,7 @@ import {
 } from "../src/browser.ts";
 import {
   buildExperimentAdherenceCalendar,
+  synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceObservation,
 } from "../src/experiment-adherence.ts";
 
@@ -2774,6 +2775,54 @@ test("browser progress uses the protocol snapshot's accepted activity kinds", ()
     minimumDurationMinutes: 35,
     missing: "missed_after_grace",
   });
+});
+
+test("browser progress repairs a persisted legacy target from protocol sessions per day", () => {
+  const slug = "repeated-strength-browser-repair";
+  const runPlan = {
+    interventionStart: "2026-08-01",
+    interventionEnd: "2026-08-01",
+    modality: "Strength practice",
+    schedule: {
+      kind: "dailyLocal" as const,
+      localTime: "09:00",
+      timeZone: "UTC",
+    },
+    targetSessions: 8,
+    minimumUsefulSessions: 6,
+  };
+  const client = createBrowserVaultQueryClient(createReplica({
+    generatedAt: "2026-08-02T12:00:00.000Z",
+    entities: [experimentEntity({
+      id: "exp_repeated_strength_browser_repair",
+      slug,
+      effectiveProtocolSnapshot: {
+        effectiveSpecHash: `sha256:${"5".repeat(64)}`,
+        doseSignature: "Eight small strength sets daily",
+        frequency: { sessionsPerDay: 8 },
+      },
+      runPlan: {
+        ...runPlan,
+        adherenceTargets:
+          synthesizeLegacySessionAdherenceTargets({ runPlan }),
+      },
+    })],
+  }));
+
+  const result = selectBrowserVaultExperimentResults(client, slug, {
+    asOf: "2026-08-02T12:00:00.000Z",
+  });
+
+  assert.equal(
+    result?.experiment.runPlan.adherenceTargets[0]?.calendar?.kind,
+    "daily",
+  );
+  assert.equal(
+    result?.experiment.runPlan.adherenceTargets[0]?.calendar?.targetCountPerDay,
+    8,
+  );
+  assert.equal(result?.progress?.adherence.expectedSessionsByNow, 8);
+  assert.equal(result?.progress?.adherence.assumedSessions ?? 0, 0);
 });
 
 test("counts browser generic workout modality from any activity sessions", () => {

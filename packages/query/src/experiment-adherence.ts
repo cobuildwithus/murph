@@ -762,7 +762,7 @@ export function countCalendarAdherenceSessions(input: {
       continue;
     }
 
-    const missingPolicy = resolveEffectiveLinkedEventMissingPolicy({
+    const missingPolicy = resolveEffectiveExperimentLinkedEventMissingPolicy({
       evidence: target.evidence,
       expectedCount,
     });
@@ -777,7 +777,7 @@ export function countCalendarAdherenceSessions(input: {
   return counts;
 }
 
-function resolveEffectiveLinkedEventMissingPolicy(input: {
+export function resolveEffectiveExperimentLinkedEventMissingPolicy(input: {
   evidence: Extract<ExperimentAdherenceEvidenceRule, { kind: "linkedEventCount" }>;
   expectedCount: number;
 }): Extract<
@@ -1028,7 +1028,7 @@ function missingCell(input: {
   }
 
   const missingPolicy = expectation.target.evidence.kind === "linkedEventCount"
-    ? resolveEffectiveLinkedEventMissingPolicy({
+    ? resolveEffectiveExperimentLinkedEventMissingPolicy({
         evidence: expectation.target.evidence,
         expectedCount: expectation.expectedCount,
       })

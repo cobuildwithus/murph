@@ -13518,6 +13518,134 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("system mailbox yields device sync when its projected assistant cron becomes due", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchStarted = createDeferred<void>();
+    const now = "2026-04-27T14:00:00.000Z";
+    const reminderAt = "2026-04-27T14:00:01.000Z";
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:assistant-deadline",
+      id: "mailbox_item_system_mailbox_device_assistant_deadline",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceSyncPort = createSnapshotDeviceSyncPort({
+      connectionId: "device_sync_connection_assistant_deadline",
+      nextReconcileAt: "2026-04-27T14:05:00.000Z",
+      onFetchSnapshot: async (signal) => {
+        fetchStarted.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          const abort = () => reject(signal?.reason);
+          if (signal?.aborted) {
+            abort();
+            return;
+          }
+          signal?.addEventListener("abort", abort, { once: true });
+        });
+      },
+    });
+
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    try {
+      vi.setSystemTime(new Date(now));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41WZ",
+        continuityPolicy: "fresh",
+        instructions: "Send one deadline-sensitive reminder.",
+        now: new Date("2026-04-27T13:58:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: { at: reminderAt, kind: "at" },
+        status: "active",
+        title: "Synthetic deadline reminder",
+        vaultRoot,
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-device-assistant-deadline-before.bundle.json",
+        vaultRoot,
+      });
+
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_device_assistant_deadline",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-device-assistant-deadline.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: now,
+                nextWakeReason: "device-sync.reconcile",
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox mode must hand off rather than execute assistant work.");
+          },
+          vaultRoot,
+        },
+      );
+
+      await fetchStarted.promise;
+      vi.setSystemTime(new Date(Date.parse(reminderAt) - 25));
+      await vi.advanceTimersByTimeAsync(25);
+      const result = await resultPromise;
+
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, reminderAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(deviceSyncPort.applyUpdatesCalls, 0);
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(state.pending.length, 1);
+      assert.equal(state.pending[0]?.itemId, deviceItem.id);
+      assert.equal(state.pending[0]?.status, "pending");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -37670,7 +37798,7 @@ function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
   nextReconcileAt: string;
   onApplyUpdates?: (() => Promise<void> | void) | null;
-  onFetchSnapshot?: (() => Promise<void> | void) | null;
+  onFetchSnapshot?: ((signal: AbortSignal | null) => Promise<void> | void) | null;
 }): HostedRuntimeDeviceSyncPort & {
   readonly applyUpdatesCalls: number;
   readonly fetchSnapshotCalls: number;
@@ -37704,9 +37832,9 @@ function createSnapshotDeviceSyncPort(input: {
         userId: TEST_USER_ID,
       };
     },
-    async fetchSnapshot() {
+    async fetchSnapshot(request) {
       fetchSnapshotCalls += 1;
-      await input.onFetchSnapshot?.();
+      await input.onFetchSnapshot?.(request?.signal ?? null);
       return {
         connections: [
           {

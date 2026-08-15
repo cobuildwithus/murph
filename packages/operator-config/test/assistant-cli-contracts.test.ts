@@ -162,11 +162,13 @@ describe('assistant CLI delivery contracts', () => {
       ...intent,
       automationAuthority: {
         automationId: ' automation_sleep_reminder ',
+        expectedSemanticRevision: 'a'.repeat(64),
         expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
       },
     })
     expect(authorizedIntent.automationAuthority).toEqual({
       automationId: 'automation_sleep_reminder',
+      expectedSemanticRevision: 'a'.repeat(64),
       expectedUpdatedAt: '2026-04-12T00:00:00.000Z',
     })
     expect(() => assistantOutboxIntentSchema.parse({

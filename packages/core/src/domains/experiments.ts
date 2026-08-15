@@ -602,6 +602,19 @@ export async function updateExperiment(
     input.relativePath,
   );
   if (
+    !isDeepStrictEqual(
+      nextAttributes.runPlan?.adherenceTargets,
+      document.attributes.runPlan?.adherenceTargets,
+    )
+  ) {
+    validateContract(
+      experimentAdherenceTargetsAuthoringSchema,
+      nextAttributes.runPlan?.adherenceTargets ?? [],
+      "FRONTMATTER_INVALID",
+      "Experiment adherence targets failed authoring validation before write.",
+    );
+  }
+  if (
     document.attributes.status !== "planned" &&
     (
       !isDeepStrictEqual(

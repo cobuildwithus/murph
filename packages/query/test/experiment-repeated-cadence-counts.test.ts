@@ -7,6 +7,7 @@ import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import {
   buildExperimentAdherenceCalendar,
   countCalendarAdherenceSessions,
+  synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceObservation,
 } from "../src/experiment-adherence.ts";
 import { summarizeExperimentProgress } from "../src/experiments.ts";
@@ -334,6 +335,61 @@ test("legacy assumed repeated targets never infer the unobserved remainder", () 
   assert.equal(counts.assumedSessions, 0);
   assert.equal(counts.expectedSessionsByNow, 8);
   assert.equal(counts.missedSessions, 5);
+});
+
+test("server progress repairs a persisted legacy target from protocol sessions per day", () => {
+  const runPlan = {
+    interventionStart: "2026-08-01",
+    interventionEnd: "2026-08-01",
+    modality: "Strength practice",
+    schedule: {
+      kind: "dailyLocal" as const,
+      localTime: "09:00",
+      timeZone: "UTC",
+    },
+    targetSessions: 8,
+    minimumUsefulSessions: 6,
+  };
+  const legacyTargets = synthesizeLegacySessionAdherenceTargets({ runPlan });
+  const experiment = makeEntity({
+    entityId: EXPERIMENT_ID,
+    family: "experiment",
+    kind: "experiment_entry",
+    recordClass: "bank",
+    occurredAt: "2026-08-01T08:00:00.000Z",
+    date: "2026-08-01",
+    experimentSlug: EXPERIMENT_SLUG,
+    status: "active",
+    title: "Repeated strength",
+    attributes: {
+      schemaVersion: "murph.frontmatter.experiment.v1",
+      docType: "experiment",
+      experimentId: EXPERIMENT_ID,
+      slug: EXPERIMENT_SLUG,
+      title: "Repeated strength",
+      status: "active",
+      startedOn: "2026-08-01",
+      effectiveProtocolSnapshot: {
+        effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+        doseSignature: "Eight small strength sets daily",
+        frequency: { sessionsPerDay: 8 },
+      },
+      runPlan: { ...runPlan, adherenceTargets: legacyTargets },
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/repeated-strength-protocol-repair",
+    metadata: { timezone: "UTC" },
+    entities: [experiment],
+  });
+
+  const progress = summarizeExperimentProgress(vault, EXPERIMENT_SLUG, {
+    asOf: "2026-08-03",
+  });
+
+  assert.equal(progress.adherence.expectedSessionsByNow, 8);
+  assert.equal(progress.adherence.assumedSessions ?? 0, 0);
+  assert.equal(progress.adherence.completedSessions, 0);
 });
 
 test("explicit skipped occurrences preserve adherence v1 missed semantics", () => {

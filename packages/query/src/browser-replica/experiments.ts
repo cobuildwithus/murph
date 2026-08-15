@@ -561,6 +561,9 @@ function buildRunContext(
       sourceEffectiveProtocolSnapshot,
     ),
     protocolKey: readString(readRecord(sourceCommonsProtocolRef)?.key),
+    protocolSessionsPerDay: readProtocolSessionsPerDay(
+      sourceEffectiveProtocolSnapshot,
+    ),
     runPlan: {
       minimumUsefulSessions: readNumber(runPlanRecord, "minimumUsefulSessions") ?? undefined,
       modality: readString(runPlanRecord?.modality) ?? undefined,
@@ -2737,6 +2740,12 @@ function readProtocolActivitySessionEvidence(
       ? {}
       : { minimumDurationMinutes }),
   };
+}
+
+function readProtocolSessionsPerDay(snapshotLike: unknown): number | null {
+  return readFiniteNumber(
+    readRecord(readRecord(snapshotLike)?.frequency)?.sessionsPerDay,
+  );
 }
 
 function readFiniteNumber(value: unknown): number | null {
