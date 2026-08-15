@@ -104,7 +104,9 @@ review_gpt_option_requires_value() {
       | --token-limit \
       | --tokenLimit \
       | --token-offset \
-      | --tokenOffset)
+      | --tokenOffset \
+      | --minimum-marked-response-time \
+      | --minimumMarkedResponseTime)
       return 0
       ;;
   esac
