@@ -1049,7 +1049,7 @@ function normalizeP256PublicJwk(jwk: JsonWebKey, label: string): JsonWebKey {
     || typeof jwk.y !== "string"
     || jwk.x.length === 0
     || jwk.y.length === 0
-    || "d" in jwk
+    || jwk.d !== undefined
   ) {
     throw new TypeError(`${label} must be a public P-256 EC JWK.`);
   }

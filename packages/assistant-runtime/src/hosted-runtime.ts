@@ -632,11 +632,12 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
 ): Promise<{
   containsOnlyBrowserVaultRefreshWakes: boolean;
   containsOnlyDeviceSyncWakes: boolean;
+  containsOnlyInitialMemberActivation: boolean;
   containsOnlySafeSystemWakes: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
-  const reachesEveryLaneHighWater = prefetch.lanes.every((lane) => {
+  const reachesLaneHighWater = (lane: HostedMailboxLane): boolean => {
     const laneHighWaters = response.maxSeqByLane.filter((entry) => entry.lane === lane);
     if (laneHighWaters.length !== 1) {
       return false;
@@ -665,7 +666,23 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
     return visibleMaxSeq === null
       ? maxSeq <= importedSeq
       : visibleMaxSeq === maxSeq;
-  });
+  };
+  const reachesEveryLaneHighWater = prefetch.lanes.every(reachesLaneHighWater);
+  const reachesSystemLaneHighWater = prefetch.lanes.includes("system")
+    && reachesLaneHighWater("system");
+  const initialSystemSeq = parseHostedMailboxSeqOrNull(
+    prefetch.importedSeqByLane.system,
+  );
+  const systemItems = response.items.filter((item) => item.lane === "system");
+  // Enrollment can start the first owner from conversation before the
+  // activation continuation signals it. The shared prefetch can still hold
+  // that conversation prefix after it has been imported, so classify only
+  // the complete system lane here.
+  const containsOnlyInitialMemberActivation = reachesSystemLaneHighWater
+    && initialSystemSeq === 0n
+    && systemItems.length === 1
+    && systemItems[0]?.kind === "member.activated"
+    && parseHostedMailboxSeqOrNull(systemItems[0].laneSeq) === 1n;
   return {
     containsOnlyBrowserVaultRefreshWakes: response.items.length > 0
       && response.items.every((item) =>
@@ -678,17 +695,21 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
         item.lane === "system"
         && item.kind === "device-sync.wake"
       ),
-    containsOnlySafeSystemWakes: response.items.length > 0
-      && response.items.every((item) =>
-        item.lane === "system"
-        && (
-          item.kind === "runtime.pending-effects-reconcile-requested"
-          || item.kind === "assistant.ask.requested"
-          || item.kind === "assistant.ask.completed"
-          || (
-            item.kind === "assistant.notification.requested"
-            && isHostedPreCheckpointExternalCompletionDedupeKey(
-              item.dedupeKey,
+    containsOnlyInitialMemberActivation,
+    containsOnlySafeSystemWakes: containsOnlyInitialMemberActivation
+      || (
+        response.items.length > 0
+        && response.items.every((item) =>
+          item.lane === "system"
+          && (
+            item.kind === "runtime.pending-effects-reconcile-requested"
+            || item.kind === "assistant.ask.requested"
+            || item.kind === "assistant.ask.completed"
+            || (
+              item.kind === "assistant.notification.requested"
+              && isHostedPreCheckpointExternalCompletionDedupeKey(
+                item.dedupeKey,
+              )
             )
           )
         )
@@ -1611,7 +1632,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const checkpointWorkspacePort = canonicalRuntimeCommit
           ? workspacePort
           : foregroundWorkspacePort;
-        const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+        const redactedStatus = await withHostedMailboxProgressStatus({
           redactedStatus: checkpointInput.redactedStatus,
           vaultRoot: restored.vaultRoot,
         });
@@ -1946,7 +1967,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   : null,
               },
             ]);
-            const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+            const redactedStatus = await withHostedMailboxProgressStatus({
               redactedStatus: activeWorkspace?.redactedStatus ?? null,
               vaultRoot: restored.vaultRoot,
             });
@@ -6974,7 +6995,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
       vaultRoot: input.vaultRoot,
     });
   input.assertRuntimeNotAborted();
-  const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+  const redactedStatus = await withHostedMailboxProgressStatus({
     redactedStatus: input.retainCanonicalWriteReceiptLogStatus
       ? input.redactedStatus
       : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
@@ -7035,7 +7056,7 @@ function readHostedConversationConsumedSeqFromStatus(
     : null;
 }
 
-async function withHostedSystemMailboxHandledThroughStatus(input: {
+async function withHostedMailboxProgressStatus(input: {
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
   vaultRoot: string;
 }): Promise<HostedRuntimeRedactedJson> {
@@ -7044,6 +7065,17 @@ async function withHostedSystemMailboxHandledThroughStatus(input: {
   });
   return {
     ...(input.redactedStatus ?? {}),
+    ...(mailboxState.watermarks.conversation !== "0"
+      || Object.hasOwn(
+        input.redactedStatus ?? {},
+        "hostedMailboxConversationImportedSeq",
+      )
+      ? {
+          hostedMailboxConversationImportedSeq:
+            mailboxState.watermarks.conversation,
+        }
+      : {}),
+    hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
     hostedMailboxSystemHandledThroughSeq:
       await readHostedSystemMailboxHandledThroughSeq({
         importedSeq: mailboxState.watermarks.system,

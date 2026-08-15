@@ -485,6 +485,29 @@ export interface HostedLocalAssistantProviderStubRequest {
   url: string;
 }
 
+/**
+ * Reads only protocol-owned tool results from a recorded Responses request.
+ * Function arguments, prompts, and prior assistant text are intentionally not
+ * evidence that a scripted tool completed successfully.
+ */
+export function readHostedLocalAssistantProviderToolOutputs(
+  request: HostedLocalAssistantProviderStubRequest,
+): string[] {
+  const body = parseJsonObject(request.body);
+  if (!Array.isArray(body?.input)) {
+    return [];
+  }
+
+  return body.input
+    .map((item) => isRecord(item) ? item : null)
+    .filter((item) =>
+      item?.type === "custom_tool_call_output"
+      || item?.type === "function_call_output"
+    )
+    .map((item) => readAssistantProviderToolOutputText(item?.output))
+    .filter((output): output is string => output !== null);
+}
+
 export type HostedLocalAssistantProviderStubUsageMode =
   | "fixed"
   | "request-body-estimate";
@@ -1575,6 +1598,20 @@ function parseJsonObject(body: string): Record<string, unknown> | null {
   }
 
   return null;
+}
+
+function readAssistantProviderToolOutputText(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const textItems = value
+    .map((item) => isRecord(item) ? item.text : null)
+    .filter((text): text is string => typeof text === "string");
+  return textItems.length > 0 ? textItems.join("\n") : null;
 }
 
 function isContextCompactionResponsesRequest(value: Record<string, unknown>): boolean {

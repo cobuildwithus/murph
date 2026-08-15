@@ -1,7 +1,10 @@
 import path from "node:path";
 
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
+  buildJunctionProviderSourceInstanceKey,
+} from "@murphai/device-syncd/connect-config";
 
 import {
   createDefaultImporterPort,
@@ -9,6 +12,10 @@ import {
   SqliteDeviceSyncStore,
 } from "@murphai/device-syncd/service";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  compareDeviceSyncSourceIdentity,
+  dedupeDeviceSyncSourcesByIdentity,
+} from "@murphai/device-syncd/public-account";
 
 import type {
   CreateDeviceSyncServiceInput,
@@ -22,6 +29,7 @@ import {
   HostedRuntimeArtifactWriteError,
   type HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
+import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
 
 const storeByService = new WeakMap<DeviceSyncService, SqliteDeviceSyncStore>();
 
@@ -123,15 +131,26 @@ async function listHostedJobConnectionSources(input: {
   const localSources = input.store.listConnectionSources({
     connectionId: input.accountId,
   });
-  return connection.sources
+  const projectedSources = connection.sources
     .filter((source) =>
-      (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
-      && (!input.status || source.status === input.status)
+      !input.sourceProviderSlug || areHostedJunctionSourcesEquivalent(
+        input.provider,
+        source.sourceProviderSlug,
+        input.sourceProviderSlug,
+      )
     )
     .map((source) => {
-      const localSource = localSources.find(
-        (candidate) => candidate.sourceProviderSlug === source.sourceProviderSlug,
+      const exactLocalSource = localSources.find(
+        (candidate) => candidate.sourceInstanceKey === source.sourceInstanceKey,
       );
+      const routeEquivalentLocalSource = selectHostedJunctionSource(
+        input.provider,
+        localSources,
+        source.sourceProviderSlug,
+      );
+      const localSource = input.provider === "junction"
+        ? routeEquivalentLocalSource ?? exactLocalSource
+        : exactLocalSource ?? routeEquivalentLocalSource;
       const sourceInstanceKey = localSource?.sourceInstanceKey
         ?? source.sourceInstanceKey
         ?? (
@@ -145,19 +164,66 @@ async function listHostedJobConnectionSources(input: {
 
       return {
         ...source,
+        firstSeenAt: localSource?.firstSeenAt ?? source.firstSeenAt,
         ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
+        sourceProviderSlug: localSource?.sourceProviderSlug ?? source.sourceProviderSlug,
       };
     });
+  const dedupedSources = dedupeHostedJobConnectionSources(
+    input.provider,
+    projectedSources,
+  );
+  return input.status
+    ? dedupedSources.filter((source) => source.status === input.status)
+    : dedupedSources;
 }
 
-function hostedSourceStateUnavailable(cause?: unknown) {
-  return deviceSyncError({
-    code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
-    message: "Current hosted device source state is unavailable. Retry shortly.",
-    retryable: true,
-    httpStatus: 503,
-    ...(cause === undefined ? {} : { cause }),
-  });
+function areHostedJunctionSourcesEquivalent(
+  provider: string,
+  left: string,
+  right: string,
+): boolean {
+  if (provider !== "junction") {
+    return left === right;
+  }
+  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
+}
+
+function selectHostedJunctionSource(
+  provider: string,
+  sources: readonly ProviderJobConnectionSource[],
+  sourceProviderSlug: string,
+): ProviderJobConnectionSource | undefined {
+  return sources
+    .filter((source) => areHostedJunctionSourcesEquivalent(
+      provider,
+      source.sourceProviderSlug,
+      sourceProviderSlug,
+    ))
+    .sort(compareDeviceSyncSourceIdentity)[0];
+}
+
+interface HostedJobConnectionSource extends ProviderJobConnectionSource {
+  lastDataAt: string | null;
+  lastSeenAt: string;
+}
+
+function dedupeHostedJobConnectionSources(
+  provider: string,
+  sources: readonly HostedJobConnectionSource[],
+): HostedJobConnectionSource[] {
+  if (provider !== "junction") {
+    return [...sources];
+  }
+  return dedupeDeviceSyncSourcesByIdentity(
+    sources,
+    (left, right) => areHostedJunctionSourcesEquivalent(
+      provider,
+      left.sourceProviderSlug,
+      right.sourceProviderSlug,
+    ),
+    hostedSourceStateUnavailable,
+  );
 }
 
 export function requireHostedRuntimeDeviceSyncStore(service: DeviceSyncService): SqliteDeviceSyncStore {

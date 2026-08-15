@@ -13,7 +13,6 @@ import {
 } from "./kernel-live-view-origin";
 import {
   isHostedWebDevFileSystemCacheEnabled,
-  isHostedWebSmokeArtifactMode,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
 
@@ -73,7 +72,7 @@ const OG_SHARE_ASSET_TRACE_INCLUDES = [
 // The footer availability indicator reads the incident.io status-page summary
 // from the browser, so the status-page origin must be reachable client-side.
 const STATUS_PAGE_CONNECT_SOURCES = ["https://status.withmurph.ai"] as const;
-const HOSTED_WEB_SMOKE_SERVER_EXTERNAL_PACKAGES = ["@temporalio/client"];
+const HOSTED_WEB_SERVER_EXTERNAL_PACKAGES = ["@temporalio/client"];
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -358,12 +357,9 @@ export function buildHostedWebNextConfig(
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
-    // Hosted-local smoke processes preload a fault injector that patches the
-    // installed Temporal client. Keep that package external in smoke artifacts
-    // so the application and preload share one constructor and prototype.
-    ...(isHostedWebSmokeArtifactMode(environment)
-      ? { serverExternalPackages: HOSTED_WEB_SMOKE_SERVER_EXTERNAL_PACKAGES }
-      : {}),
+    // Temporal clients use process-bound transport state. Keep one physical
+    // package instance across request handlers in every server artifact.
+    serverExternalPackages: HOSTED_WEB_SERVER_EXTERNAL_PACKAGES,
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
     typescript: {

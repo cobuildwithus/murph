@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import { act, startTransition, type ReactElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import {
+  act,
+  startTransition,
+  type ErrorInfo,
+  type ReactElement,
+} from "react";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { vi } from "vitest";
 
 const requireFromRenderClientComponentTest = createRequire(import.meta.url);
@@ -23,7 +28,13 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
 };
 
 type RenderClientComponentOptions = {
+  hydrateFrom?: {
+    markup: string;
+    onRecoverableError?: (error: unknown, errorInfo: ErrorInfo) => void;
+    prepareDom?: (container: HTMLElement) => void;
+  };
   historyState?: unknown;
+  innerWidth?: number;
   location?: Record<string, string>;
   matchMedia?: typeof window.matchMedia;
   sessionStorage?: Storage;
@@ -46,9 +57,15 @@ export async function renderClientComponent(
   options: RenderClientComponentOptions & { requireButton?: boolean } = {},
 ): Promise<RenderClientComponentResult<HTMLButtonElement | null>> {
   const { document, window } = loadLinkedom().parseHTML(
-    "<html><body><div id='root'></div></body></html>",
+    `<html><body><div id='root'>${options.hydrateFrom?.markup ?? ""}</div></body></html>`,
   );
   installGlobals(window, document);
+  if (options.innerWidth !== undefined) {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: options.innerWidth,
+    });
+  }
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
     value: options.visibilityState ?? "visible",
@@ -116,11 +133,21 @@ export async function renderClientComponent(
 
   const container = document.getElementById("root");
   assert.ok(container);
-  const root: Root = createRoot(container);
+  options.hydrateFrom?.prepareDom?.(container);
+  let root: Root | undefined;
 
   await act(async () => {
-    root.render(element);
+    if (options.hydrateFrom) {
+      root = hydrateRoot(container, element, {
+        onRecoverableError: options.hydrateFrom.onRecoverableError,
+      });
+    } else {
+      root = createRoot(container);
+      root.render(element);
+    }
   });
+  assert.ok(root);
+  const renderedRoot = root;
 
   const button = container.querySelector("button");
   if (options.requireButton !== false) {
@@ -132,7 +159,7 @@ export async function renderClientComponent(
     button: button instanceof window.HTMLButtonElement ? button : null,
     cleanup: async () => {
       await act(async () => {
-        root.unmount();
+        renderedRoot.unmount();
       });
     },
     container,
@@ -142,7 +169,7 @@ export async function renderClientComponent(
     replaceState,
     rerender: async (nextElement: ReactElement) => {
       await act(async () => {
-        root.render(nextElement);
+        renderedRoot.render(nextElement);
       });
     },
     rerenderInTransition: async (nextElement: ReactElement) => {
@@ -153,7 +180,7 @@ export async function renderClientComponent(
       Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false);
       try {
         startTransition(() => {
-          root.render(nextElement);
+          renderedRoot.render(nextElement);
         });
         await new Promise((resolve) => setTimeout(resolve, 25));
       } finally {

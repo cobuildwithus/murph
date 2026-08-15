@@ -76,6 +76,7 @@ const runLoopMocks = vi.hoisted(() => ({
   errorMessage: vi.fn(),
   formatStructuredErrorMessage: vi.fn(),
   getAssistantCronStatus: vi.fn(),
+  maintainAssistantAutoReplyRouteState: vi.fn(),
   maybeRunAssistantRuntimeMaintenance: vi.fn(),
   maybeThrowInjectedAssistantFault: vi.fn(),
   processDueAssistantCronJobs: vi.fn(),
@@ -209,6 +210,11 @@ vi.mock('../src/assistant/outbox/summary.ts', () => ({
 
 vi.mock('../src/assistant/runtime-budgets.ts', () => ({
   maybeRunAssistantRuntimeMaintenance: runLoopMocks.maybeRunAssistantRuntimeMaintenance,
+}))
+
+vi.mock('../src/assistant/runtime-residue.ts', () => ({
+  maintainAssistantAutoReplyRouteState:
+    runLoopMocks.maintainAssistantAutoReplyRouteState,
 }))
 
 vi.mock('../src/assistant/status.ts', () => ({
@@ -1118,6 +1124,9 @@ beforeEach(() => {
   runLoopMocks.buildAssistantOutboxSummary.mockReset().mockResolvedValue({
     nextAttemptAt: null,
   })
+  runLoopMocks.maintainAssistantAutoReplyRouteState
+    .mockReset()
+    .mockResolvedValue({ changed: false, trusted: true })
   runLoopMocks.maybeRunAssistantRuntimeMaintenance.mockReset().mockResolvedValue(undefined)
   runLoopMocks.maybeThrowInjectedAssistantFault.mockReset().mockImplementation(() => {})
   runLoopMocks.processDueAssistantCronJobs.mockReset().mockResolvedValue({
@@ -3491,7 +3500,9 @@ describe('assistant auto-reply runtime', () => {
     expect(readAutoReplyCursor(state, 'linq')).toEqual(successor.event.cursor)
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     expect(replyMocks.sendAssistantMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ beforeProviderAcceptedInputs }),
+      expect.objectContaining({
+        beforeProviderAcceptedInputs: expect.any(Function),
+      }),
     )
 
     await expect(scan(1)).resolves.toMatchObject({
@@ -3504,7 +3515,9 @@ describe('assistant auto-reply runtime', () => {
     expect(readAutoReplyCursor(state, 'linq')).toEqual(unrelated.event.cursor)
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(2)
     expect(replyMocks.sendAssistantMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ beforeProviderAcceptedInputs }),
+      expect.objectContaining({
+        beforeProviderAcceptedInputs: expect.any(Function),
+      }),
     )
 
     await expect(scan(1)).resolves.toMatchObject({
@@ -13449,6 +13462,7 @@ describe('assistant automation run loop', () => {
     )
 
     const result = await runLoop.runAssistantAutomation({
+      deliveryDispatchMode: 'queue-only',
       drainOutbox: true,
       inboxServices,
       once: true,
@@ -13469,7 +13483,21 @@ describe('assistant automation run loop', () => {
       limit: undefined,
       signal: expect.any(AbortSignal),
     })
+    expect(runLoopMocks.drainAssistantOutbox).toHaveBeenCalledTimes(2)
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
+    expect(
+      runLoopMocks.maintainAssistantAutoReplyRouteState,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      shouldYield: expect.any(Function),
+      signal: expect.any(AbortSignal),
+      vault: '/tmp/assistant-automation-vault',
+    }))
+    expect(
+      runLoopMocks.drainAssistantOutbox.mock.invocationCallOrder.at(-1),
+    ).toBeLessThan(
+      runLoopMocks.maintainAssistantAutoReplyRouteState
+        .mock.invocationCallOrder[0] ?? 0,
+    )
     expect(runLoopMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
     expect(release).toHaveBeenCalledOnce()
@@ -13511,6 +13539,9 @@ describe('assistant automation run loop', () => {
     })
 
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(
+      runLoopMocks.maintainAssistantAutoReplyRouteState,
+    ).toHaveBeenCalledOnce()
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledOnce()
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
     expect(
@@ -13561,6 +13592,9 @@ describe('assistant automation run loop', () => {
     })
 
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
+    expect(
+      runLoopMocks.maintainAssistantAutoReplyRouteState,
+    ).not.toHaveBeenCalled()
   })
 
   it('threads the foreground yield check into an in-flight maintenance pass', async () => {
@@ -13845,6 +13879,76 @@ describe('assistant automation run loop', () => {
     expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
   })
 
+  it('wakes at the outbox sending-recovery deadline without an inbox event', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const externalAbort = new AbortController()
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: { signal: AbortSignal },
+        ) => await new Promise<void>((resolve) => {
+          options.signal.addEventListener('abort', () => resolve(), {
+            once: true,
+          })
+        }),
+      ),
+    })
+    runLoopMocks.buildAssistantOutboxSummary.mockResolvedValue({
+      nextAttemptAt: '2026-04-09T00:10:00.000Z',
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        externalAbort.abort()
+      }
+      return {
+        currentTurnDeliveryIntentIds: [],
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scanStartedAt).toEqual([Date.parse('2026-04-09T00:00:00.000Z')])
+
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1_000)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toEqual([
+      Date.parse('2026-04-09T00:00:00.000Z'),
+      Date.parse('2026-04-09T00:10:00.000Z'),
+    ])
+  })
+
   it('stages local imported captures as assistant input before the wake-driven scan', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
@@ -13918,13 +14022,15 @@ describe('assistant automation run loop', () => {
     })
     runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async (input) => {
       scanStartedAt.push(Date.now())
-      if (scanStartedAt.length === 2) {
+      if (scanStartedAt.length >= 2) {
         const batch = await input.inputSource.listInputCandidates({
           afterCursor: null,
           limit: 10,
         })
-        stagedInputs.push(...batch.inputs)
-        externalAbort.abort()
+        if (batch.inputs.length > 0) {
+          stagedInputs.push(...batch.inputs)
+          externalAbort.abort()
+        }
       }
       return {
         routing: {
@@ -13960,7 +14066,7 @@ describe('assistant automation run loop', () => {
     const result = await resultPromise
 
     expect(result.reason).toBe('signal')
-    expect(scanStartedAt).toHaveLength(2)
+    expect(scanStartedAt.length).toBeGreaterThanOrEqual(2)
     expect(stagedInputs.map((candidate) => candidate.event.text)).toEqual([
       'local input staged from inbox import',
     ])
@@ -14006,6 +14112,136 @@ describe('assistant automation run loop', () => {
       'group-local-1',
     )
   })
+
+  it('yields lock-bound route maintenance before staging fresh local input', async () => {
+    vi.useRealTimers()
+    const context = await createTempVaultContext('assistant-local-route-yield-')
+    tempRoots.push(context.parentRoot)
+    const { withAssistantRuntimeWriteLock } = await vi.importActual<
+      typeof import('../src/assistant/runtime-write-lock.ts')
+    >('../src/assistant/runtime-write-lock.ts')
+    const externalAbort = new AbortController()
+    const stagedInputs: AssistantInputCandidate[] = []
+    let abortScheduled = false
+    let maintenanceStarted = (): void => {}
+    const maintenanceStartedPromise = new Promise<void>((resolve) => {
+      maintenanceStarted = resolve
+    })
+    let observedPreStagingYield = false
+
+    runLoopMocks.maintainAssistantAutoReplyRouteState.mockImplementationOnce(
+      async (input: {
+        shouldYield: () => boolean
+        vault: string
+      }) => await withAssistantRuntimeWriteLock(input.vault, async () => {
+        maintenanceStarted()
+        const deadline = Date.now() + 2_000
+        while (!input.shouldYield()) {
+          if (Date.now() >= deadline) {
+            throw new Error('Fresh input did not preempt lock-bound route maintenance.')
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        observedPreStagingYield = true
+        return { changed: false, trusted: false }
+      }),
+    )
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: {
+            onEvent?: (event: Record<string, unknown>) => void
+            signal: AbortSignal
+          },
+        ) => {
+          await maintenanceStartedPromise
+          options.onEvent?.({
+            capture: {
+              accountId: 'acct-route-yield',
+              actor: {
+                id: 'actor-route-yield',
+                isSelf: false,
+              },
+              attachments: [],
+              externalId: 'msg-route-yield',
+              occurredAt: '2026-04-09T00:00:10.000Z',
+              raw: {
+                message_id: 102,
+                schema: 'murph.telegram-capture.v1',
+              },
+              source: 'telegram',
+              text: 'fresh input preempts route maintenance',
+              thread: {
+                id: 'thread-route-yield',
+                isDirect: true,
+              },
+            },
+            connectorId: 'telegram',
+            persisted: {
+              captureId: 'capture-route-yield',
+              createdAt: '2026-04-09T00:00:11.000Z',
+              deduped: false,
+              sourceDirectory: 'raw/inbox/telegram/capture-route-yield',
+              eventId: 'event-route-yield',
+            },
+            source: 'telegram',
+            type: 'capture.imported',
+          })
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          })
+        },
+      ),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async (input) => {
+      const batch = await input.inputSource.listInputCandidates({
+        afterCursor: null,
+        limit: 10,
+      })
+      if (batch.inputs.length > 0 && !abortScheduled) {
+        abortScheduled = true
+        stagedInputs.push(...batch.inputs)
+        setTimeout(() => externalAbort.abort(), 25)
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    const result = await runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: context.vaultRoot,
+    })
+
+    expect(result.reason).toBe('signal')
+    expect(observedPreStagingYield).toBe(true)
+    expect(stagedInputs.map((candidate) => candidate.event.text)).toEqual([
+      'fresh input preempts route maintenance',
+    ])
+  }, 10_000)
 
   it('stages local Linq imported captures with reaction eligibility metadata', async () => {
     vi.useFakeTimers()
@@ -14078,13 +14314,15 @@ describe('assistant automation run loop', () => {
     })
     runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async (input) => {
       scanStartedAt.push(Date.now())
-      if (scanStartedAt.length === 2) {
+      if (scanStartedAt.length >= 2) {
         const batch = await input.inputSource.listInputCandidates({
           afterCursor: null,
           limit: 10,
         })
-        stagedInputs.push(...batch.inputs)
-        externalAbort.abort()
+        if (batch.inputs.length > 0) {
+          stagedInputs.push(...batch.inputs)
+          externalAbort.abort()
+        }
       }
       return {
         routing: {
@@ -14120,7 +14358,7 @@ describe('assistant automation run loop', () => {
     const result = await resultPromise
 
     expect(result.reason).toBe('signal')
-    expect(scanStartedAt).toHaveLength(2)
+    expect(scanStartedAt.length).toBeGreaterThanOrEqual(2)
     expect(stagedInputs).toHaveLength(1)
     expect(stagedInputs[0]?.event.replyTarget).toEqual({
       channel: 'linq',

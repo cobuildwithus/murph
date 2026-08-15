@@ -17,9 +17,13 @@ import {
   type AssistantAcceptedTurnInputJournal,
 } from './active-turn-input-journal.js'
 import {
-  AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
   readAssistantAutoReplyReceiptMetadata,
 } from './automation/auto-reply-retry.js'
+import {
+  maintainAssistantAutoReplyRouteStateAtPaths,
+  readAssistantAutoReplyRouteMigrationStatusAtPaths,
+  type AssistantAutoReplyRouteMaintenanceResult,
+} from './automation/cross-session-route-state.js'
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
@@ -156,6 +160,60 @@ export async function pruneAssistantRuntimeResidue(input: {
   return result
 }
 
+export async function maintainAssistantAutoReplyRouteState(
+  input: {
+    shouldYield?: (() => boolean) | null
+    signal?: AbortSignal | null
+    vault: string
+  },
+): Promise<AssistantAutoReplyRouteMaintenanceResult> {
+  input.signal?.throwIfAborted()
+  const shouldYield = () => {
+    input.signal?.throwIfAborted()
+    return input.shouldYield?.() === true
+  }
+  if (shouldYield()) {
+    return { changed: false, trusted: false }
+  }
+  return await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      input.signal?.throwIfAborted()
+      const migrationStatus =
+        await readAssistantAutoReplyRouteMigrationStatusAtPaths(paths)
+      const outbox = await readOutboxInventory(
+        paths.outboxDirectory,
+        input.vault,
+        input.signal,
+        shouldYield,
+      )
+      input.signal?.throwIfAborted()
+      if (!outbox.trusted || shouldYield()) {
+        return { changed: false, trusted: false }
+      }
+      const receipts = migrationStatus === 'missing'
+        ? await readJsonInventory(
+            paths.turnsDirectory,
+            (value) => assistantTurnReceiptSchema.parse(value),
+            input.signal,
+            shouldYield,
+          )
+        : { records: [], trusted: true }
+      input.signal?.throwIfAborted()
+      return await maintainAssistantAutoReplyRouteStateAtPaths({
+        outboxIntents: outbox.records.map(({ record }) => record),
+        outboxTrusted: outbox.trusted,
+        paths,
+        receipts: receipts.records.map(({ record }) => record),
+        receiptsTrusted: receipts.trusted,
+        shouldYield,
+      })
+    },
+    input.signal,
+  )
+}
+
 async function pruneAssistantRuntimeResidueAtPaths(input: {
   generatedDeliveryFilesQuiescent: boolean
   now: Date
@@ -174,7 +232,16 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     vault: input.vault,
   })
   input.signal?.throwIfAborted()
+  const autoReplyRouteState = await maintainAssistantAutoReplyRouteStateAtPaths({
+    outboxIntents: inventory.outbox.records.map(({ record }) => record),
+    outboxTrusted: inventory.outbox.trusted,
+    paths: input.paths,
+    receipts: inventory.receipts.records.map(({ record }) => record),
+    receiptsTrusted: inventory.receipts.trusted,
+  })
+  input.signal?.throwIfAborted()
   const plan = planAssistantRuntimeResiduePrune({
+    autoReplyRouteState,
     inventory,
     now: input.now,
     pendingInputIds: input.pendingInputIds,
@@ -594,6 +661,7 @@ function assistantFileStatsMatch(left: Stats, right: Stats): boolean {
 }
 
 function planAssistantRuntimeResiduePrune(input: {
+  autoReplyRouteState: AssistantAutoReplyRouteMaintenanceResult
   inventory: AssistantRuntimeResidueInventory
   now: Date
   pendingInputIds: readonly string[]
@@ -751,8 +819,12 @@ function planAssistantRuntimeResiduePrune(input: {
       : []
 
   const receiptPaths: string[] = []
-  if (input.inventory.outbox.trusted && input.inventory.receipts.trusted) {
-    const unprotectedReceipts = input.inventory.receipts.records
+  if (
+    input.autoReplyRouteState.trusted &&
+    input.inventory.outbox.trusted &&
+    input.inventory.receipts.trusted
+  ) {
+    const eligibleReceipts = input.inventory.receipts.records
       .filter(({ record }) =>
         !activeTurnIds.has(record.turnId) &&
         !retainedJournalTurnIds.has(record.turnId) &&
@@ -760,14 +832,10 @@ function planAssistantRuntimeResiduePrune(input: {
           pendingInputIds,
           receipt: record,
         }) &&
-        !receiptReferencesLiveCrossSessionContextIntent({
-          liveOutboxIntentIds: allOutboxIntentIds,
-          receipt: record,
-        }) &&
         Number.isFinite(resolveReceiptTimestampMs(record)),
       )
 
-    const terminalReceipts = unprotectedReceipts
+    const terminalReceipts = eligibleReceipts
       .filter(({ record }) => isPrunableTerminalAssistantTurnReceipt(record))
       .sort((left, right) =>
         resolveReceiptTimestampMs(right.record) -
@@ -783,7 +851,7 @@ function planAssistantRuntimeResiduePrune(input: {
       }
     }
 
-    for (const receipt of unprotectedReceipts) {
+    for (const receipt of eligibleReceipts) {
       if (
         receipt.record.status === 'running' &&
         resolveReceiptTimestampMs(receipt.record) < cutoffMs
@@ -819,30 +887,6 @@ function receiptHasNoPendingAutoReplyInputs(input: {
     return true
   }
   return metadata.inputIds.every((inputId) => !input.pendingInputIds.has(inputId))
-}
-
-// Cross-session context consumption is tracked by recording the source outbox
-// intent's id in this receipt's timeline metadata. The selector treats the
-// receipt as the sole source of truth, so we must keep the receipt at least as
-// long as the referenced outbox intent itself — otherwise pruning could delete
-// the consumption record while the source intent is still selectable, and the
-// same prior message would resurface as turn context.
-function receiptReferencesLiveCrossSessionContextIntent(input: {
-  liveOutboxIntentIds: ReadonlySet<string>
-  receipt: AssistantTurnReceipt
-}): boolean {
-  for (const event of input.receipt.timeline) {
-    const intentId =
-      event.metadata[AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]
-    if (
-      typeof intentId === 'string' &&
-      intentId.length > 0 &&
-      input.liveOutboxIntentIds.has(intentId)
-    ) {
-      return true
-    }
-  }
-  return false
 }
 
 function isPrunableTerminalAssistantTurnReceipt(
@@ -1139,12 +1183,16 @@ async function readOutboxInventory(
   directory: string,
   vault: string,
   signal?: AbortSignal | null,
+  shouldYield?: (() => boolean) | null,
 ): Promise<Inventory<PersistedRecord<AssistantOutboxIntent>>> {
   const records: Array<PersistedRecord<AssistantOutboxIntent>> = []
   let trusted = true
 
   for (const entry of await readDirectoryEntries(directory, signal)) {
     signal?.throwIfAborted()
+    if (shouldYield?.() === true) {
+      return { records, trusted: false }
+    }
     if (!entry.name.endsWith('.json')) {
       if (entry.name === '.quarantine') {
         const quarantineStats = await lstat(path.join(directory, entry.name))
@@ -1239,12 +1287,16 @@ async function readJsonInventory<T>(
   directory: string,
   parse: (value: unknown) => T,
   signal?: AbortSignal | null,
+  shouldYield?: (() => boolean) | null,
 ): Promise<Inventory<PersistedRecord<T>>> {
   const records: Array<PersistedRecord<T>> = []
   let trusted = true
 
   for (const entry of await readDirectoryEntries(directory, signal)) {
     signal?.throwIfAborted()
+    if (shouldYield?.() === true) {
+      return { records, trusted: false }
+    }
     if (!entry.name.endsWith('.json')) {
       continue
     }

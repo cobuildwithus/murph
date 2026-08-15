@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 100,
+  "item": {
+    "id": "faster-replies-after-reminders",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Faster replies after reminders",
+    "summary": "Follow-ups to Murph's reminders and check-ins now start faster as your conversation history grows.",
+    "details": "Murph still carries the relevant prior message into the reply and avoids repeating older context.",
+    "relevanceTags": ["assistant", "messaging", "performance", "reliability"],
+    "sourcePullRequests": [1801]
+  }
+}

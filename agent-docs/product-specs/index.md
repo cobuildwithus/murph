@@ -1,11 +1,12 @@
 # Product Specs Index
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 | Path | Purpose | Status |
 | --- | --- | --- |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria for keeping the repo current-state only. | Active |
 | `agent-docs/product-specs/bring-your-own-inference.md` | One encrypted personal custom-inference connection with native Responses or adapted Chat Completions, Codex-only execution, fenced credential injection, and no silent managed fallback. | Specified |
+| `agent-docs/product-specs/member-owned-device-provider-applications.md` | One encrypted member-owned OAuth client application per supported device provider, provisioned through existing Kernel Managed Auth and bound by exact revision to existing device-sync OAuth, runtime, and webhook owners. | Proposed |
 | `agent-docs/product-specs/murph-personas.md` | Persona-first onboarding, canonical persona ids, and code-owned style defaults. | Implemented |
 | `agent-docs/product-specs/starter-usage.md` | One idempotent, non-expiring $4.50 starter-usage grant on the existing immutable usage-credit ledger, including migration and legacy Stripe-drain compatibility. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary with separate group funding. | Active |

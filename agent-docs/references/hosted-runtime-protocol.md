@@ -1580,8 +1580,10 @@ The same existing `provider_started` phase breakdown may subdivide
 readiness, input selection, pass setup, candidate scan, group/operation scope,
 terminal evidence, session preflight, cross-session context, prompt preparation,
 and service handoff. When present, those ten values sum exactly to their parent;
-outbox and receipt-scan timings remain nested within cross-session context, and
-the subdivision adds no I/O or awaited reporting work. The emitter omits a
+outbox timing remains nested within cross-session context. Route-scoped
+cross-session consumption reads one exact route record and at most one exact
+pending receipt; it never inventories receipts on this foreground path. The
+subdivision adds no reporting I/O or awaited reporting work. The emitter omits a
 partial or non-additive subdivision, and Web's best-effort parser drops the
 malformed phase breakdown without losing the core provider-start milestone.
 The complete subdivision is emitted only when the provider-producing group is
@@ -2293,8 +2295,12 @@ state or mutating restored assistant recovery while Web and Temporal remain the
 usage-policy and durable-reconciliation owners.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
-workspace read/readiness steps are capped by the remaining budget. Accepted
-background invocations begin their pending I/O before acceptance; Durable Object
+workspace read/readiness steps are capped by the remaining budget. Fresh starts
+give authoritative container readiness at most 20 seconds within that remaining
+command budget before the existing fence cleanup and `retry_later` path runs.
+This matches the runner readiness ceiling without weakening invalidated-shell
+or destroy-settlement checks. Accepted background invocations begin their
+pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
