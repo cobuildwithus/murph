@@ -112,8 +112,10 @@ The external-provider request guard, including its registered providers,
 structural presigned/internal/xAI exceptions, raw HTTP transport discovery,
 conditional-aware effective assignment and fetch invocation provenance, SDK
 fetch-adapter and handwritten wire-contract detection, literal dynamic-import
-transports, digest-pinned transfer/adapter authority closure, and exact current
-failure inventory, is
+transports and their exact namespace aliases, closed-member bound transport
+composition and mutation closure, owner-specific digest-pinned transfer URL
+normalizers, digest-pinned adapter authority closure, and exact current failure
+inventory, is
 specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.

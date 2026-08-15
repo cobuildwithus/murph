@@ -1650,6 +1650,34 @@ describe("check-provider-request-boundaries", () => {
       "}",
     ].join("\n");
     expect(rawHttpViolations(secondOwner, relativePath)).toHaveLength(1);
+
+    const normalizedSecondOwner = [
+      source,
+      "async function uploadLinqAttachmentBytesAgain(input: { bytes: Uint8Array; uploadUrl: string }) {",
+      "  const uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl);",
+      "  await fetch(uploadUrl, { body: input.bytes, method: 'PUT' });",
+      "}",
+    ].join("\n");
+    expect(rawHttpViolations(normalizedSecondOwner, relativePath)).toHaveLength(
+      1,
+    );
+
+    const duplicateEffect = replaceRequired(
+      source,
+      "  const timeout = createTimeoutAbortController(",
+      [
+        "  await fetchImplementation(uploadUrl, {",
+        "    body,",
+        "    headers: normalizeLinqRequiredHeaders(input.requiredHeaders),",
+        "    method: 'PUT',",
+        "    redirect: 'error',",
+        "  })",
+        "  const timeout = createTimeoutAbortController(",
+      ].join("\n"),
+    );
+    expect(rawHttpViolations(duplicateEffect, relativePath).length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("requires the Resend override to pass one direct closed request init", () => {
@@ -2340,6 +2368,100 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("preserves transport namespaces through local aliases and reassignment", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "import * as https from 'node:https';",
+        "import * as undici from 'undici';",
+        "const web = globalThis;",
+        "const { fetch: send } = web;",
+        "await send('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "const imported = await import('node-fetch');",
+        "const transport = imported;",
+        "await transport.default('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "const nodeTransport = https;",
+        "nodeTransport.request({ hostname: 'api.openai.com', path: '/v1/responses' });",
+        "let assigned;",
+        "assigned = undici;",
+        "await assigned.fetch('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "const workerGlobal = self;",
+        "await workerGlobal.fetch('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "const browserGlobal = window;",
+        "await browserGlobal.fetch('https://api.openai.com/v1/responses', { method: 'POST' });",
+      ].join("\n"),
+      "scripts/aliased-transport-namespaces.mts",
+    );
+    const shadowed = violationsOfKind(
+      "raw-provider-http",
+      [
+        "async function run(globalThis: { fetch(url: string): Promise<unknown> }) {",
+        "  const web = globalThis;",
+        "  const { fetch: send } = web;",
+        "  await send('https://api.openai.com/v1/responses');",
+        "}",
+        "const web = globalThis;",
+        "let selected = web;",
+        "selected = { fetch: async (_url: string) => ({ ok: true }) };",
+        "const { fetch: selectedSend } = selected;",
+        "await selectedSend('https://api.openai.com/v1/responses');",
+      ].join("\n"),
+      "scripts/shadowed-transport-namespaces.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([5, 8, 10, 13, 15, 17]);
+    expect(shadowed).toEqual([]);
+  });
+
+  it("composes pre-bound transports stored in closed local members", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const transports = {",
+        "  send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' }),",
+        "};",
+        "await transports.send();",
+        "const nested = { provider: { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') } };",
+        "await nested.provider.send.call(undefined, { method: 'POST' });",
+        "const tuple = [globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses')] as const;",
+        "await tuple[0].apply(undefined, []);",
+        "const base = { ignored: true };",
+        "const spread = { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses'), ...base };",
+        "await spread.send();",
+        "let conditional = { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') };",
+        "if (Date.now() > 0) conditional = { send: async (_url: string) => ({ ok: true }) };",
+        "await conditional.send();",
+        "const shared = { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') };",
+        "const spreadOnly = { ...shared };",
+        "await spreadOnly.send();",
+        "const selected = Date.now() > 0 ? shared : { send: async (_url: string) => ({ ok: true }) };",
+        "await selected.send();",
+        "const referenced = { provider: shared };",
+        "await referenced.provider.send();",
+        "const mutated = { send: async (_url: string) => ({ ok: true }) };",
+        "mutated.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await mutated.send();",
+        "const assigned = { send: async (_url: string) => ({ ok: true }) };",
+        "Object.assign(assigned, { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "await assigned.send();",
+      ].join("\n"),
+      "scripts/member-bound-provider-transports.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([
+      4,
+      6,
+      8,
+      11,
+      14,
+      17,
+      19,
+      21,
+      24,
+      27,
+    ]);
   });
 
 });

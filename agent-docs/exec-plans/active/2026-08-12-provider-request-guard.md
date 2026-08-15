@@ -292,6 +292,27 @@ Updated: 2026-08-14
   adopting upstream's valid recorded no-reply provider-turn shape. ReviewGPT
   `0.5.127` arrived from that base; the live registry, manifest, lockfile, and
   installed executable all identify `0.5.127` as latest.
+- Exact-head CI for merge head `c5c469be553cdebdb54bb579fd576eab935c6d7b`
+  passed the complete required matrix on retry after one upstream GitHub
+  Markdown request returned a transient `403`. The focused guard remained
+  green during that infrastructure failure.
+- A fresh exact-head ReviewGPT audit then found three concrete High bypasses
+  and one disclosure drift. Exact aliases of web globals or imported transport
+  namespaces could lose transport identity; pre-bound transports stored in
+  closed local object/array members could execute without composing their
+  provider request arguments; and the Linq URL normalizer could act as a
+  file-wide presigned-transfer capability outside its pinned owner. The PR body
+  also omitted the Node bootstrap and full-audit `.nvmrc` packaging surfaces.
+- The correction extends the existing lexical and closed-origin owners rather
+  than adding an exception. Namespace aliases retain exact web, fetch-package,
+  Node HTTP/HTTPS, and Undici identity until shadowed or reassigned. Closed
+  member calls compose bound and invocation arguments across direct, `.call`,
+  and closed `.apply` forms; spreads, conditional roots, direct member writes,
+  and `Object.assign` retain all possible provider transports. A URL normalizer
+  is now metadata on one exact digest-pinned transfer owner and cannot authorize
+  a second owner. Production-owner duplicate-effect and adjacent mutation
+  fixtures fail closed. The live PR disclosure is updated before the next
+  exact-head audit.
 
 ## Verification
 
@@ -304,9 +325,10 @@ Updated: 2026-08-14
 
 Current evidence:
 
-- Focused guard suite: 109 tests passed on the current merged base, including
+- Focused guard suite: 111 tests passed on the current merged base, including
   direct ReviewGPT reproductions and negative controls for unrelated objects,
-  imports, callables, ambiguous provider evidence, and domain models.
+  imports, namespace aliases, closed member origins and mutations, callables,
+  ambiguous provider evidence, and domain models.
 - Full repository-tool suite: 36 files and 650 tests passed.
 - Repo-tools TypeScript compilation passes with `tsconfig.tools.json`.
 - The combined guard and Node-bootstrap suite passes 110 tests after the final
@@ -314,6 +336,8 @@ Current evidence:
   103 tests with the CI-owned heap ceiling.
 - `pnpm provider-requests:guard`: passes on the current merged base containing
   the sibling SDK migrations and exact registered SDK hooks.
+- Repo-tools TypeScript compilation and the production provider scan pass after
+  the three latest ReviewGPT mechanisms and adjacent mutation closure.
 - `bash scripts/doc-gardening.sh --fail-on-issues`: passes with zero issues.
 - Exact-head CI on `41fc0d55d8d9a78d130cc4b35e34f847dcfe67d4`
   passed release build/typecheck, all assistant/CLI/platform package coverage,

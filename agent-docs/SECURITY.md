@@ -573,7 +573,13 @@ Last verified: 2026-08-14
   imported Node HTTP/HTTPS and Undici transports, explicit aliases, injected
   fetch-call signatures, CommonJS `require`, literal dynamic `import()`,
   TypeScript import-equals, direct invocation, and destructured transport
-  forms, and strict fetch-shaped
+  forms. Namespace identity follows exact aliases of web globals, dynamic
+  imports, Node HTTP/HTTPS, and Undici without crossing a lexical shadow or
+  later reassignment. Pre-bound transports stored in closed local object or
+  array members retain their bound request arguments through direct, `.call`,
+  and closed `.apply` invocation; spreads, conditional origins, member writes,
+  and `Object.assign` remain possible values and fail closed when any branch
+  carries provider transport provenance. The guard also follows strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest
@@ -614,8 +620,9 @@ Last verified: 2026-08-14
   unique top-level declaration with an exact implementation digest; the URL
   expression must also belong to one unique registered transfer owner whose
   complete callable is digest-pinned, and a provider-named URL must resolve
-  through its registered owner-path URL normalizer with its implementation
-  digest pinned; statically known internal or
+  through the URL normalizer registered on that exact owner, with both
+  implementations digest-pinned. The helper is not an independent transfer
+  capability; statically known internal or
   unambiguous single-slash application traffic, plus `new URL` composition only
   against the exact static `location.origin` owner;
   registered providers without a verified provider-owned TypeScript SDK, and

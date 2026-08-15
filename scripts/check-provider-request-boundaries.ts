@@ -17,6 +17,7 @@ import {
   isImportSpecifier,
   isMemberExpression,
   isNewExpression,
+  isNumericLiteral,
   isObjectExpression,
   isObjectProperty,
   isOptionalCallExpression,
@@ -306,13 +307,6 @@ const approvedPresignedTransferHeaderFactories = Object.freeze([
     relativePath: "packages/operator-config/src/linq-runtime.ts",
   },
 ] as const);
-const approvedPresignedTransferUrlFactories = Object.freeze([
-  {
-    implementationSha256: "622f955de784fa29b35a8c2b028b0205b8e7274dac4c1f827fb185cde3266d29",
-    name: "normalizeLinqAttachmentUploadUrl",
-    relativePath: "packages/operator-config/src/linq-runtime.ts",
-  },
-] as const);
 const approvedPresignedTransferUrlOwners = Object.freeze([
   {
     implementationSha256: "df89ecf4a04b585a6d17cafbac5445b5654d57a05c344591d27074a06a13145f",
@@ -337,6 +331,9 @@ const approvedPresignedTransferUrlOwners = Object.freeze([
     names: ["uploadUrl"],
     ownerName: "uploadLinqAttachmentBytes",
     relativePath: "packages/operator-config/src/linq-runtime.ts",
+    urlFactoryImplementationSha256:
+      "622f955de784fa29b35a8c2b028b0205b8e7274dac4c1f827fb185cde3266d29",
+    urlFactoryName: "normalizeLinqAttachmentUploadUrl",
   },
   {
     implementationSha256: "441cacf90f7446d1006cc6b17e9c0e5a1d59bda6cffe230f63af70b2c60bd1d0",
@@ -899,11 +896,16 @@ function collectHttpTransportBindings(
     let current = bindings.get(name) ?? [];
     const start = node.start ?? 0;
     if (kind !== "shadow") {
-      const withoutSameDeclarationShadow = current.filter(
-        (binding) => binding.kind !== "shadow" || binding.start !== start,
+      const withoutSameDeclarationFallback = current.filter(
+        (binding) =>
+          binding.start !== start ||
+          (
+            binding.kind !== "shadow" &&
+            (kind === "expression" || binding.kind !== "expression")
+          ),
       );
-      if (withoutSameDeclarationShadow.length !== current.length) {
-        current = withoutSameDeclarationShadow;
+      if (withoutSameDeclarationFallback.length !== current.length) {
+        current = withoutSameDeclarationFallback;
         bindings.set(name, current);
       }
     }
@@ -1064,92 +1066,121 @@ function collectHttpTransportBindings(
   while (changed) {
     changed = false;
     traverseFast(sourceFile, (node) => {
-      if (!isVariableDeclarator(node) || !node.init) {
+      if (
+        isVariableDeclarator(node) &&
+        node.init &&
+        node.id.type === "ObjectPattern"
+      ) {
+        const init = unwrapExpression(node.init);
+        const staticModule = readStaticTransportModule(init);
+        const directTransport = staticModule
+          ? classifyHttpTransportModule(staticModule.moduleName)
+          : null;
+        const namespaceTransport = directTransport ??
+          readTransportNamespaceKind(init, bindings, node.start ?? 0);
+        if (!namespaceTransport) {
+          return;
+        }
+        for (const property of node.id.properties) {
+          if (
+            property.type === "RestElement" &&
+            isIdentifier(property.argument)
+          ) {
+            changed = addBinding(
+              property.argument.name,
+              "namespace",
+              node,
+              namespaceTransport,
+            ) || changed;
+            continue;
+          }
+          if (
+            !isObjectProperty(property) ||
+            (property.computed && !isStringLiteral(property.key))
+          ) {
+            continue;
+          }
+          const localIdentifier = isIdentifier(property.value)
+            ? property.value
+            : property.value.type === "AssignmentPattern" &&
+                isIdentifier(property.value.left)
+              ? property.value.left
+              : null;
+          if (!localIdentifier) {
+            continue;
+          }
+          const importedName = readPropertyName(property.key);
+          if (
+            importedName &&
+            isHttpTransportMethod(namespaceTransport, importedName)
+          ) {
+            changed = addBinding(
+              localIdentifier.name,
+              "call",
+              node,
+              namespaceTransport,
+            ) || changed;
+          }
+        }
         return;
       }
-      const init = unwrapExpression(node.init);
+
+      const target = isVariableDeclarator(node) && node.init &&
+          isIdentifier(node.id)
+        ? { initializer: node.init, name: node.id.name }
+        : isAssignmentExpression(node) &&
+            node.operator === "=" &&
+            isIdentifier(node.left) &&
+            isExpression(node.right)
+          ? { initializer: node.right, name: node.left.name }
+          : null;
+      if (!target) {
+        return;
+      }
+      const init = unwrapExpression(target.initializer);
       const staticModule = readStaticTransportModule(init);
       const directTransport = staticModule
         ? classifyHttpTransportModule(staticModule.moduleName)
         : null;
 
-      if (isIdentifier(node.id)) {
-        if (directTransport) {
-          changed = addBinding(
-            node.id.name,
-            directTransport === "fetch-package" &&
-              staticModule?.source === "require"
-              ? "call"
-              : "namespace",
-            node,
-            directTransport,
-          ) || changed;
-          return;
-        }
-        const memberTransport = readTransportMemberBinding(
-          init,
-          bindings,
-          node.start ?? 0,
-        );
-        if (memberTransport) {
-          changed = addBinding(
-            node.id.name,
-            "call",
-            node,
-            memberTransport,
-          ) || changed;
-        }
+      if (directTransport) {
+        changed = addBinding(
+          target.name,
+          directTransport === "fetch-package" &&
+            staticModule?.source === "require"
+            ? "call"
+            : "namespace",
+          node,
+          directTransport,
+        ) || changed;
         return;
       }
-
-      if (node.id.type !== "ObjectPattern") {
+      const namespaceTransport = readTransportNamespaceKind(
+        init,
+        bindings,
+        node.start ?? 0,
+      );
+      if (namespaceTransport) {
+        changed = addBinding(
+          target.name,
+          "namespace",
+          node,
+          namespaceTransport,
+        ) || changed;
         return;
       }
-      const namespaceTransport = directTransport ??
-        readTransportNamespaceKind(init, bindings, node.start ?? 0);
-      if (!namespaceTransport) {
-        return;
-      }
-      for (const property of node.id.properties) {
-        if (
-          property.type === "RestElement" &&
-          isIdentifier(property.argument)
-        ) {
-          changed = addBinding(
-            property.argument.name,
-            "namespace",
-            node,
-            namespaceTransport,
-          ) || changed;
-          continue;
-        }
-        if (
-          !isObjectProperty(property) ||
-          (property.computed && !isStringLiteral(property.key))
-        ) {
-          continue;
-        }
-        const localIdentifier = isIdentifier(property.value)
-          ? property.value
-          : property.value.type === "AssignmentPattern" &&
-              isIdentifier(property.value.left)
-            ? property.value.left
-            : null;
-        if (!localIdentifier) {
-          continue;
-        }
-        const importedName = readPropertyName(property.key);
-        if (
-          importedName &&
-          isHttpTransportMethod(namespaceTransport, importedName)
-        ) {
-          changed = addBinding(
-            localIdentifier.name,
-            "call",
-            node,
-            namespaceTransport,
-          ) || changed;
-        }
+      const memberTransport = readTransportMemberBinding(
+        init,
+        bindings,
+        node.start ?? 0,
+      );
+      if (memberTransport) {
+        changed = addBinding(
+          target.name,
+          "call",
+          node,
+          memberTransport,
+        ) || changed;
       }
     });
   }
@@ -1828,7 +1859,47 @@ function readBoundTransportCall(input: {
   ) {
     const path = readMemberPath(expression);
     if (path?.[0] !== "this") {
-      return null;
+      const initializer = resolveStaticMemberInitializer(
+        expression,
+        input.bindings,
+        input.before,
+        input.analysis.sourceFile,
+      );
+      if (!initializer) {
+        for (const possible of readPossibleStaticMemberInitializers(
+          expression,
+          input.bindings,
+          input.before,
+          input.analysis.sourceFile,
+        )) {
+          const possibleBound = readBoundTransportCall({
+            ...input,
+            before: possible.start ?? input.before,
+            node: possible,
+          });
+          if (possibleBound) {
+            return {
+              arguments: [],
+              evidenceNode: expression,
+              transportTarget: possibleBound.transportTarget,
+              unresolved: true,
+            };
+          }
+        }
+        return null;
+      }
+      const key = `bound-static-member:${path?.join(".") ?? expression.start}`;
+      if (input.resolving.has(key)) {
+        return null;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      return readBoundTransportCall({
+        ...input,
+        before: initializer.start ?? input.before,
+        node: initializer,
+        resolving,
+      });
     }
     const binding = resolveMemberBinding(
       input.analysis.memberBindings,
@@ -2263,6 +2334,7 @@ function inferProviderExpressionFacts(input: {
           node,
           input.bindings,
           input.before,
+          input.analysis.sourceFile,
         );
         if (staticInitializer) {
           const resolving = new Set(input.resolving);
@@ -3619,14 +3691,11 @@ function isPresignedByteTransfer(input: {
   readonly urlFacts: ProviderExpressionFacts;
 }): boolean {
   const before = input.call.start ?? Number.MAX_SAFE_INTEGER;
-  const approvedProviderNamedUrl = isApprovedPresignedTransferUrlExpression({
-    analysis: input.analysis,
-    before,
-    bindings: input.bindings,
-    node: input.urlArgument,
-    relativePath: input.relativePath,
-    resolving: new Set(),
-  });
+  const approvedProviderNamedUrl = isApprovedPresignedTransferUrlOwner(
+    input.relativePath,
+    readMemberPath(input.urlArgument)?.at(-1) ?? "",
+    { analysis: input.analysis, before },
+  );
   if (
     (input.urlFacts.explicitProviderIds.size > 0 && !approvedProviderNamedUrl) ||
     !isOpaqueTransferUrlShape({
@@ -3927,77 +3996,6 @@ function isApprovedPresignedTransferHeaderFactoryCall(
   });
 }
 
-function isApprovedPresignedTransferUrlExpression(input: {
-  readonly analysis: ProviderHttpSourceAnalysis;
-  readonly before: number;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly node: Node;
-  readonly relativePath: string;
-  readonly resolving: ReadonlySet<string>;
-}): boolean {
-  const expression = unwrapExpression(input.node);
-  if (isIdentifier(expression)) {
-    const key = `presigned-url:${expression.name}`;
-    if (input.resolving.has(key)) {
-      return false;
-    }
-    const binding = resolveBinding(input.bindings, expression.name, input.before);
-    if (!binding?.definitive) {
-      return false;
-    }
-    const resolving = new Set(input.resolving);
-    resolving.add(key);
-    return isApprovedPresignedTransferUrlExpression({
-      ...input,
-      before: expression.start ?? input.before,
-      node: binding.initializer,
-      resolving,
-    });
-  }
-  if (!isCallExpression(expression) && !isOptionalCallExpression(expression)) {
-    return false;
-  }
-  const callee = unwrapExpression(expression.callee);
-  if (
-    !isIdentifier(callee) ||
-    resolveParameterBinding(input.analysis.parameterBindings, callee.name, input.before) ||
-    resolveBinding(input.bindings, callee.name, input.before)
-  ) {
-    return false;
-  }
-  const functionBinding = resolveFunctionBinding(
-    input.analysis.functionBindings,
-    callee.name,
-    input.before,
-  );
-  if (functionBinding?.scopeStart !== 0) {
-    return false;
-  }
-  return approvedPresignedTransferUrlFactories.some((factory) => {
-    if (
-      factory.relativePath !== normalizeRepoPath(input.relativePath) ||
-      factory.name !== callee.name ||
-      input.analysis.functionBindings.get(callee.name)?.filter(
-        (binding) => binding.scopeStart === 0,
-      ).length !== 1
-    ) {
-      return false;
-    }
-    const range = findExactApprovedFunctionRange({
-      functionName: factory.name,
-      sourceFile: input.analysis.sourceFile,
-    });
-    return Boolean(
-      range &&
-      hasExactSourceHash(
-        input.analysis.contents,
-        range,
-        factory.implementationSha256,
-      ),
-    );
-  });
-}
-
 function isOpaqueTransferUrlShape(input: {
   readonly analysis: ProviderHttpSourceAnalysis;
   readonly before: number;
@@ -4062,16 +4060,6 @@ function isOpaqueTransferUrlShape(input: {
       }),
     );
   }
-  if (isCallExpression(node) || isOptionalCallExpression(node)) {
-    return isApprovedPresignedTransferUrlExpression({
-      analysis: input.analysis,
-      before: input.before,
-      bindings: input.bindings,
-      node,
-      relativePath: input.relativePath,
-      resolving: input.resolving,
-    });
-  }
   return false;
 }
 
@@ -4090,19 +4078,41 @@ function isApprovedPresignedTransferUrlOwner(
   const matchingOwnerCount = collectLocalFunctionRanges(
     input.analysis.sourceFile,
   ).filter((candidate) => candidate.name === owner?.name).length;
-  return Boolean(
-    owner && matchingOwnerCount === 1 && approvedPresignedTransferUrlOwners.some(
-      (approved) =>
-        approved.relativePath === normalizeRepoPath(relativePath) &&
-        approved.ownerName === owner.name &&
-        approved.names.some((candidate) => candidate === name) &&
-        hasExactSourceHash(
-          input.analysis.contents,
-          owner,
-          approved.implementationSha256,
-        ),
-    ),
-  );
+  if (!owner || matchingOwnerCount !== 1) {
+    return false;
+  }
+  return approvedPresignedTransferUrlOwners.some((approved) => {
+    if (
+      approved.relativePath !== normalizeRepoPath(relativePath) ||
+      approved.ownerName !== owner.name ||
+      !approved.names.some((candidate) => candidate === name) ||
+      !hasExactSourceHash(
+        input.analysis.contents,
+        owner,
+        approved.implementationSha256,
+      )
+    ) {
+      return false;
+    }
+    if (!("urlFactoryName" in approved)) {
+      return true;
+    }
+    const factoryRange = findExactApprovedFunctionRange({
+      functionName: approved.urlFactoryName,
+      sourceFile: input.analysis.sourceFile,
+    });
+    return Boolean(
+      factoryRange &&
+      input.analysis.functionBindings.get(approved.urlFactoryName)?.filter(
+        (binding) => binding.scopeStart === 0,
+      ).length === 1 &&
+      hasExactSourceHash(
+        input.analysis.contents,
+        factoryRange,
+        approved.urlFactoryImplementationSha256,
+      ),
+    );
+  });
 }
 
 function readObjectProperty(
@@ -4132,6 +4142,7 @@ function resolveStaticMemberInitializer(
   node: Node,
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
   before: number,
+  sourceFile: Node,
 ): Node | null {
   const pathParts = readMemberPath(node);
   const root = pathParts?.[0];
@@ -4139,11 +4150,35 @@ function resolveStaticMemberInitializer(
     return null;
   }
   const binding = resolveBinding(bindings, root, before);
-  if (!binding) {
+  if (
+    !binding?.definitive ||
+    readStaticMemberMutationInitializers(
+      node,
+      bindings,
+      before,
+      sourceFile,
+    ).length > 0
+  ) {
     return null;
   }
   let current = unwrapExpression(binding.initializer);
+  const resolving = new Set([`${root}:${binding.start}`]);
   for (const propertyName of pathParts.slice(1)) {
+    while (isIdentifier(current)) {
+      const currentBinding = resolveBinding(
+        bindings,
+        current.name,
+        current.start ?? before,
+      );
+      const key = currentBinding
+        ? `${current.name}:${currentBinding.start}`
+        : "";
+      if (!currentBinding?.definitive || resolving.has(key)) {
+        return null;
+      }
+      resolving.add(key);
+      current = unwrapExpression(currentBinding.initializer);
+    }
     if (isObjectExpression(current)) {
       const property = readClosedObjectProperties(current)?.get(propertyName);
       if (!property) {
@@ -4167,6 +4202,314 @@ function resolveStaticMemberInitializer(
     return null;
   }
   return current;
+}
+
+function readPossibleStaticPropertyValues(
+  node: Node,
+  propertyName: string,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+  resolving: ReadonlySet<string>,
+): Node[] {
+  const current = unwrapExpression(node);
+  if (isIdentifier(current)) {
+    const values: Node[] = [];
+    for (const binding of resolvePossibleBindings(
+      bindings,
+      current.name,
+      current.start ?? before,
+    )) {
+      const key = `${current.name}:${binding.start}`;
+      if (resolving.has(key)) {
+        continue;
+      }
+      const nextResolving = new Set(resolving);
+      nextResolving.add(key);
+      values.push(
+        ...readPossibleStaticPropertyValues(
+          binding.initializer,
+          propertyName,
+          bindings,
+          binding.start,
+          nextResolving,
+        ),
+      );
+    }
+    return values;
+  }
+  if (current.type === "ConditionalExpression") {
+    return [current.consequent, current.alternate].flatMap((branch) =>
+      readPossibleStaticPropertyValues(
+        branch,
+        propertyName,
+        bindings,
+        before,
+        resolving,
+      )
+    );
+  }
+  if (current.type === "LogicalExpression") {
+    return [current.left, current.right].flatMap((branch) =>
+      readPossibleStaticPropertyValues(
+        branch,
+        propertyName,
+        bindings,
+        before,
+        resolving,
+      )
+    );
+  }
+  if (current.type === "SequenceExpression") {
+    return current.expressions.flatMap((branch) =>
+      readPossibleStaticPropertyValues(
+        branch,
+        propertyName,
+        bindings,
+        before,
+        resolving,
+      )
+    );
+  }
+  if (isObjectExpression(current)) {
+    const values: Node[] = [];
+    for (const property of current.properties) {
+      if (isSpreadElement(property)) {
+        values.push(
+          ...readPossibleStaticPropertyValues(
+            property.argument,
+            propertyName,
+            bindings,
+            property.start ?? before,
+            resolving,
+          ),
+        );
+        continue;
+      }
+      if (!isObjectProperty(property)) {
+        continue;
+      }
+      const key = !property.computed && isIdentifier(property.key)
+        ? property.key.name
+        : isStringLiteral(property.key)
+          ? property.key.value
+          : isNumericLiteral(property.key)
+            ? String(property.key.value)
+            : null;
+      if (key === propertyName) {
+        values.push(unwrapExpression(property.value));
+      }
+    }
+    return values;
+  }
+  if (
+    current.type === "ArrayExpression" &&
+    /^\d+$/u.test(propertyName)
+  ) {
+    const index = Number(propertyName);
+    const element = current.elements[index];
+    const values = element && !isSpreadElement(element)
+      ? [unwrapExpression(element)]
+      : [];
+    for (const candidate of current.elements) {
+      if (candidate && isSpreadElement(candidate)) {
+        values.push(
+          ...readPossibleStaticPropertyValues(
+            candidate.argument,
+            propertyName,
+            bindings,
+            candidate.start ?? before,
+            resolving,
+          ),
+        );
+      }
+    }
+    return values;
+  }
+  return [];
+}
+
+function readPossibleStaticMemberInitializers(
+  node: Node,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+  sourceFile: Node,
+): Node[] {
+  const pathParts = readMemberPath(node);
+  const root = pathParts?.[0];
+  if (!pathParts || pathParts.length < 2 || !root || root === "this") {
+    return [];
+  }
+
+  let current = resolvePossibleBindings(bindings, root, before).map(
+    (binding) => unwrapExpression(binding.initializer),
+  );
+  for (const propertyName of pathParts.slice(1)) {
+    current = current.flatMap((candidate) =>
+      readPossibleStaticPropertyValues(
+        candidate,
+        propertyName,
+        bindings,
+        before,
+        new Set(),
+      )
+    );
+  }
+  return [
+    ...current,
+    ...readStaticMemberMutationInitializers(
+      node,
+      bindings,
+      before,
+      sourceFile,
+    ),
+  ];
+}
+
+const staticMemberMutationCandidatesBySource = new WeakMap<
+  Node,
+  readonly Node[]
+>();
+
+function collectStaticMemberMutationCandidates(sourceFile: Node): readonly Node[] {
+  const cached = staticMemberMutationCandidatesBySource.get(sourceFile);
+  if (cached) {
+    return cached;
+  }
+  const candidates: Node[] = [];
+  traverseFast(sourceFile, (candidate) => {
+    if (
+      isAssignmentExpression(candidate) ||
+      (
+        (isCallExpression(candidate) || isOptionalCallExpression(candidate)) &&
+        readMemberPath(candidate.callee)?.join(".") === "Object.assign"
+      )
+    ) {
+      candidates.push(candidate);
+    }
+  });
+  staticMemberMutationCandidatesBySource.set(sourceFile, candidates);
+  return candidates;
+}
+
+function readStaticMemberMutationInitializers(
+  node: Node,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+  sourceFile: Node,
+): Node[] {
+  const targetPath = readMemberPath(node);
+  const root = targetPath?.[0];
+  if (!targetPath || targetPath.length < 2 || !root || root === "this") {
+    return [];
+  }
+  const targetBinding = resolveBinding(bindings, root, before);
+  if (!targetBinding) {
+    return [];
+  }
+
+  const hasTargetBindingAt = (position: number): boolean => {
+    const binding = resolveBinding(bindings, root, position);
+    return Boolean(
+      binding &&
+      binding.start === targetBinding.start &&
+      binding.scopeStart === targetBinding.scopeStart &&
+      binding.scopeEnd === targetBinding.scopeEnd,
+    );
+  };
+  const startsWithTargetPath = (candidate: readonly string[]): boolean =>
+    candidate.length >= 1 &&
+    candidate.length <= targetPath.length &&
+    candidate.every((part, index) => targetPath[index] === part);
+  const readNestedValues = (
+    value: Node,
+    remainingPath: readonly string[],
+    position: number,
+  ): Node[] => {
+    let values = [unwrapExpression(value)];
+    for (const propertyName of remainingPath) {
+      values = values.flatMap((candidate) =>
+        readPossibleStaticPropertyValues(
+          candidate,
+          propertyName,
+          bindings,
+          position,
+          new Set(),
+        )
+      );
+    }
+    return values;
+  };
+
+  const values: Node[] = [];
+  for (const candidate of collectStaticMemberMutationCandidates(sourceFile)) {
+    const position = candidate.start ?? Number.MAX_SAFE_INTEGER;
+    if (position >= before || !hasTargetBindingAt(position)) {
+      continue;
+    }
+    if (isAssignmentExpression(candidate)) {
+      const assignedPath = readMemberPath(candidate.left);
+      if (assignedPath && startsWithTargetPath(assignedPath)) {
+        values.push(
+          ...readNestedValues(
+            candidate.right,
+            targetPath.slice(assignedPath.length),
+            position,
+          ),
+        );
+        continue;
+      }
+      if (
+        (isMemberExpression(candidate.left) ||
+          isOptionalMemberExpression(candidate.left)) &&
+        candidate.left.computed
+      ) {
+        const objectPath = readMemberPath(candidate.left.object);
+        if (objectPath && startsWithTargetPath(objectPath)) {
+          values.push(
+            ...readNestedValues(
+              candidate.right,
+              targetPath.slice(objectPath.length + 1),
+              position,
+            ),
+          );
+        }
+      }
+      continue;
+    }
+    if (
+      (isCallExpression(candidate) || isOptionalCallExpression(candidate)) &&
+      readMemberPath(candidate.callee)?.join(".") === "Object.assign"
+    ) {
+      const [assigned, ...sources] = candidate.arguments;
+      if (
+        !assigned ||
+        assigned.type === "ArgumentPlaceholder" ||
+        assigned.type === "SpreadElement"
+      ) {
+        continue;
+      }
+      const assignedPath = readMemberPath(assigned);
+      if (!assignedPath || !startsWithTargetPath(assignedPath)) {
+        continue;
+      }
+      for (const source of sources) {
+        if (
+          source.type === "ArgumentPlaceholder" ||
+          source.type === "SpreadElement"
+        ) {
+          continue;
+        }
+        values.push(
+          ...readNestedValues(
+            source,
+            targetPath.slice(assignedPath.length),
+            position,
+          ),
+        );
+      }
+    }
+  }
+  return values;
 }
 
 function resolveStaticMemberContainer(
@@ -5116,6 +5459,49 @@ function isFetchLikeCallTarget(input: {
         resolving,
       });
     }
+    const staticInitializer = resolveStaticMemberInitializer(
+      expression,
+      input.bindings,
+      input.before,
+      input.analysis.sourceFile,
+    );
+    if (staticInitializer) {
+      const key = `${input.exact ? "exact-" : ""}fetch-static-member:${pathText}:${staticInitializer.start ?? 0}`;
+      if (input.resolving.has(key)) {
+        return false;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      return isFetchLikeCallTarget({
+        ...input,
+        before: staticInitializer.start ?? input.before,
+        node: staticInitializer,
+        resolving,
+      });
+    }
+    for (const possible of readPossibleStaticMemberInitializers(
+      expression,
+      input.bindings,
+      input.before,
+      input.analysis.sourceFile,
+    )) {
+      const key = `${input.exact ? "exact-" : ""}fetch-possible-static-member:${pathText}:${possible.start ?? 0}`;
+      if (input.resolving.has(key)) {
+        continue;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      if (
+        isFetchLikeCallTarget({
+          ...input,
+          before: possible.start ?? input.before,
+          node: possible,
+          resolving,
+        })
+      ) {
+        return true;
+      }
+    }
     const parameter = root
       ? resolveParameterBinding(
           input.analysis.parameterBindings,
@@ -5763,6 +6149,8 @@ function readMemberPath(node: Node): string[] | null {
       ? property.name
       : node.computed && isStringLiteral(property)
         ? property.value
+        : node.computed && isNumericLiteral(property)
+          ? String(property.value)
         : null;
     if (!propertyName) {
       return null;
