@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT help advertises a rejected no-artifacts flag'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1860'
 ---
 
 ## Expected Behavior

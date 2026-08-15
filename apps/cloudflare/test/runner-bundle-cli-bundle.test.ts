@@ -244,7 +244,11 @@ describe("runner bundle vault-cli esbuild step", () => {
     };
 
     expect(() =>
-      assertVaultCliBundleWithinBudgets(metafile, { entryBytes: 200, totalBytes: 800 }),
+      assertVaultCliBundleWithinBudgets(metafile, {
+        entryBytes: 200,
+        staticClosureBytes: 200,
+        totalBytes: 800,
+      }),
     ).toThrow(
       new RegExp(
         [
@@ -259,8 +263,53 @@ describe("runner bundle vault-cli esbuild step", () => {
     );
 
     expect(
-      assertVaultCliBundleWithinBudgets(metafile, { entryBytes: 300, totalBytes: 1100 }),
-    ).toEqual({ entryBytes: 300, totalBytes: 1100 });
+      assertVaultCliBundleWithinBudgets(metafile, {
+        entryBytes: 300,
+        staticClosureBytes: 300,
+        totalBytes: 1100,
+      }),
+    ).toEqual({ entryBytes: 300, staticClosureBytes: 300, totalBytes: 1100 });
+  });
+
+  it("rejects dynamic-to-static graph drift without relying on total size growth", () => {
+    const createMetafile = (kind: "dynamic-import" | "import-statement"): Metafile => ({
+      inputs: {},
+      outputs: {
+        ".bundle/bin.js": {
+          bytes: 100,
+          entryPoint: "packages/cli/src/bin.ts",
+          exports: [],
+          imports: [{ kind, path: "./chunk-heavy.js" }],
+          inputs: {},
+        },
+        ".bundle/chunk-heavy.js": {
+          bytes: 700,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+      },
+    });
+    const budgets = {
+      entryBytes: 100,
+      staticClosureBytes: 200,
+      totalBytes: 800,
+    };
+
+    expect(assertVaultCliBundleWithinBudgets(
+      createMetafile("dynamic-import"),
+      budgets,
+    )).toEqual({
+      entryBytes: 100,
+      staticClosureBytes: 100,
+      totalBytes: 800,
+    });
+    expect(() =>
+      assertVaultCliBundleWithinBudgets(
+        createMetafile("import-statement"),
+        budgets,
+      )
+    ).toThrow(/static startup closure 800B exceeds budget 200B/u);
   });
 
   // incur keys its command tree in module-level WeakMaps, so inlining two

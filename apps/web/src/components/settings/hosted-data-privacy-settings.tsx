@@ -220,12 +220,19 @@ function HostedDataPrivacySettingsAuthorized(props: {
       const stripeEffectPending =
         requestError instanceof HostedOnboardingApiError
         && requestError.code === HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE;
+      const connectedAppCompletionRecoveryRequired =
+        requestError instanceof HostedOnboardingApiError
+        && (
+          requestError.code === "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG"
+          || requestError.code === "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS"
+        );
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
         if (
           !providerRecoveryRequired
           && !deviceTokenRefreshRecoveryRequired
           && !stripeEffectPending
+          && !connectedAppCompletionRecoveryRequired
         ) {
           reloadCurrentHostedAuthDocument();
         }

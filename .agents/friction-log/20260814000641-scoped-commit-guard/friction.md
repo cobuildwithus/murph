@@ -1,6 +1,7 @@
 ---
 title: 'Scoped commit guard is blocked by unrelated temporary clones'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1816'
 ---
 
 ## Expected Behavior

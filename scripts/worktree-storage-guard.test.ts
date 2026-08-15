@@ -20,6 +20,8 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { worktreeCreationIntentPath } from './frog-autofix-recovery.ts'
+
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const roots: string[] = []
 
@@ -79,7 +81,12 @@ function createHarness(): Harness {
   )
   executable(
     path.join(fakeBin, 'cobuild-committer'),
-    '#!/usr/bin/env bash\nset -euo pipefail\nexec git commit "$@"\n',
+    `#!/usr/bin/env bash
+set -euo pipefail
+commit_message="\${1:?}"
+shift
+exec git commit -m "$commit_message" -- "$@"
+`,
   )
   writeFileSync(path.join(primary, 'tracked.txt'), 'baseline\n')
   executable(
@@ -312,6 +319,144 @@ describe('worktree storage guard', () => {
     expect(packageJson.scripts.prepare).toBe(
       'if [ -z "${CI:-}" ] && [ -z "${VERCEL:-}" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then scripts/install-git-hooks; fi',
     )
+  })
+
+  it('rejects an active non-fast-forward merge through the installed committer wrapper', () => {
+    const harness = createHarness()
+    const installedCommitter = path.join(
+      sourceRoot,
+      'node_modules',
+      '.bin',
+      'cobuild-committer',
+    )
+    expect(existsSync(installedCommitter)).toBe(true)
+    runGit(harness.primary, ['checkout', '-b', 'merge-side'])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'side\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    runGit(harness.primary, [
+      '-c',
+      'core.hooksPath=/dev/null',
+      'commit',
+      '-m',
+      'side change',
+    ])
+    runGit(harness.primary, ['checkout', 'main'])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'main\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    runGit(harness.primary, [
+      '-c',
+      'core.hooksPath=/dev/null',
+      'commit',
+      '-m',
+      'main change',
+    ])
+    const merge = spawnSync(
+      'git',
+      ['-c', 'core.hooksPath=/dev/null', 'merge', '--no-ff', '--no-commit', 'merge-side'],
+      { cwd: harness.primary, encoding: 'utf8' },
+    )
+    expect(merge.status).toBe(1)
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'resolved\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+    expect(runGit(harness.primary, ['diff', '--name-only', '--diff-filter=U']))
+      .toBe('')
+
+    const before = {
+      commitCount: runGit(harness.primary, ['rev-list', '--count', 'HEAD']),
+      head: runGit(harness.primary, ['rev-parse', 'HEAD']),
+      index: runGit(harness.primary, ['ls-files', '--stage']),
+      mergeHead: runGit(harness.primary, ['rev-parse', 'MERGE_HEAD']),
+      resolved: readFileSync(path.join(harness.primary, 'tracked.txt'), 'utf8'),
+      status: runGit(harness.primary, ['status', '--porcelain=v1']),
+    }
+
+    const result = runScript(
+      harness,
+      'committer',
+      ['test(repo): reject active merge', 'tracked.txt'],
+      {
+        MURPH_TEST_COMMITTER_BIN: installedCommitter,
+        MURPH_WORKTREE_GUARD_LOCK_HELD: '1',
+      },
+    )
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      'active Git operation is not supported (MERGE_HEAD)',
+    )
+    expect(runGit(harness.primary, ['rev-parse', 'HEAD'])).toBe(before.head)
+    expect(runGit(harness.primary, ['rev-list', '--count', 'HEAD']))
+      .toBe(before.commitCount)
+    expect(runGit(harness.primary, ['rev-parse', 'MERGE_HEAD']))
+      .toBe(before.mergeHead)
+    expect(runGit(harness.primary, ['ls-files', '--stage'])).toBe(before.index)
+    expect(runGit(harness.primary, ['status', '--porcelain=v1']))
+      .toBe(before.status)
+    expect(readFileSync(path.join(harness.primary, 'tracked.txt'), 'utf8'))
+      .toBe(before.resolved)
+  })
+
+  it('clears the creation intent only after sanctioned setup succeeds', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'intent-success')
+    const intent = worktreeCreationIntentPath(harness.state, target)
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'intent-success',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(existsSync(intent)).toBe(false)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('keeps both platform lock command bounds explicit', () => {
+    const installer = readFileSync(
+      path.join(sourceRoot, 'scripts', 'install-git-hooks'),
+      'utf8',
+    )
+    const guard = readFileSync(
+      path.join(sourceRoot, 'scripts', 'worktree-storage-guard'),
+      'utf8',
+    )
+    for (const [command, timeoutFlag] of [
+      ['flock', '-w'],
+      ['lockf', '-t'],
+    ]) {
+      expect(installer).toContain(`${command} ${timeoutFlag} "$lock_wait_seconds"`)
+      expect(guard).toContain(
+        `${command} ${timeoutFlag} "$compatibility_wait_seconds"`,
+      )
+    }
+  })
+
+  it('retains creation intent after checkout setup fails and rejects retry', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'intent-failure')
+    const intent = worktreeCreationIntentPath(harness.state, target)
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      '#!/bin/sh\nexit 29\n',
+    )
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'intent-failure',
+      target,
+    ])
+
+    expect(creation.status).toBe(29)
+    expect(existsSync(target)).toBe(false)
+    expect(existsSync(intent)).toBe(true)
+    const retry = runScript(harness, 'create-worktree', [
+      '-b',
+      'intent-failure',
+      target,
+    ])
+    expect(retry.status).toBe(1)
+    expect(retry.stderr).toContain('matching incomplete creation already exists')
   })
 
   it('runs prepare hook setup locally and skips it in hosted automation', () => {
@@ -1255,7 +1400,7 @@ mkdir "$admin/murph-storage-guard-authorized"
     ).toMatch(/^[0-9a-f]{40,64}$/)
   })
 
-  it('rolls back a marked worktree when checkout materialization fails', () => {
+  it('rolls back a marked worktree and retains its failed creation fence', () => {
     const harness = createHarness()
     const target = path.join(harness.root, 'partial-materialization')
     const markerObserved = path.join(harness.root, 'marker-observed-before-failure')
@@ -1324,13 +1469,13 @@ touch ${JSON.stringify(hookInvoked)}
       'partial-materialization-failure',
       target,
     ])
-    expect(retry.status, retry.stderr).toBe(0)
-    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
-    expect(existsSync(hookInvoked)).toBe(true)
-    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(retry.status).toBe(1)
+    expect(retry.stderr).toContain('matching incomplete creation already exists')
+    expect(existsSync(target)).toBe(false)
+    expect(existsSync(hookInvoked)).toBe(false)
   })
 
-  it('rolls back an interrupted materialization and preserves retry state', async () => {
+  it('rolls back an interrupted materialization and retains its retry fence', async () => {
     const harness = createHarness()
     const unrelatedTarget = path.join(harness.root, 'unrelated-existing')
     expect(
@@ -1408,13 +1553,13 @@ touch ${JSON.stringify(hookInvoked)}
       'interrupted-materialization',
       target,
     ])
-    expect(retry.status, retry.stderr).toBe(0)
-    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
-    expect(existsSync(hookInvoked)).toBe(true)
-    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(retry.status).toBe(1)
+    expect(retry.stderr).toContain('matching incomplete creation already exists')
+    expect(existsSync(target)).toBe(false)
+    expect(existsSync(hookInvoked)).toBe(false)
   }, 15_000)
 
-  it('rolls back an interrupted post-checkout hook and permits retry', async () => {
+  it('rolls back an interrupted post-checkout hook and retains its retry fence', async () => {
     const harness = createHarness()
     const target = path.join(harness.root, 'interrupted-post-checkout')
     const hookStarted = path.join(harness.root, 'post-checkout-started')
@@ -1456,9 +1601,9 @@ sleep 2
       'interrupted-post-checkout',
       target,
     ])
-    expect(retry.status, retry.stderr).toBe(0)
-    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
-    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(retry.status).toBe(1)
+    expect(retry.stderr).toContain('matching incomplete creation already exists')
+    expect(existsSync(target)).toBe(false)
   }, 15_000)
 
   it('leaves an uncatchably interrupted materialization unauthorized', async () => {
@@ -1727,7 +1872,11 @@ PATH=/usr/bin:/bin exec touch "$@"
     writeFileSync(path.join(existingWorktree, 'tracked.txt'), 'scoped commit\n')
     runGit(existingWorktree, ['add', 'tracked.txt'])
 
-    const commit = spawnSync('bash', ['scripts/committer', '-m', 'scoped commit'], {
+    const commit = spawnSync('bash', [
+      'scripts/committer',
+      'test(repo): scoped commit',
+      'tracked.txt',
+    ], {
       cwd: existingWorktree,
       encoding: 'utf8',
       env: guardEnvironment(harness, {
@@ -2197,7 +2346,11 @@ done
 
     writeFileSync(path.join(historical, 'tracked.txt'), 'historical commit\n')
     runGit(historical, ['add', 'tracked.txt'])
-    const historicalCommit = spawnSync('bash', ['scripts/committer', '-m', 'historical commit'], {
+    const historicalCommit = spawnSync('bash', [
+      'scripts/committer',
+      'test(repo): historical commit',
+      'tracked.txt',
+    ], {
       cwd: historical,
       encoding: 'utf8',
       env: historicalEnvironment,
@@ -2290,7 +2443,11 @@ done
 
     writeFileSync(path.join(headSibling, 'tracked.txt'), 'head committer\n')
     runGit(headSibling, ['add', 'tracked.txt'])
-    const headCommit = spawnSync('bash', ['scripts/committer', '-m', 'head committer'], {
+    const headCommit = spawnSync('bash', [
+      'scripts/committer',
+      'test(repo): head committer',
+      'tracked.txt',
+    ], {
       cwd: headSibling,
       encoding: 'utf8',
       env: headEnvironment,
@@ -2408,7 +2565,11 @@ done
     runGit(baseSibling, ['add', 'tracked.txt'])
     const baseCommitAfterPrimaryUpgrade = spawnSync(
       'bash',
-      ['scripts/committer', '-m', 'historical after primary upgrade'],
+      [
+        'scripts/committer',
+        'test(repo): historical after primary upgrade',
+        'tracked.txt',
+      ],
       { cwd: baseSibling, encoding: 'utf8', env: baseEnvironment },
     )
     expect(baseCommitAfterPrimaryUpgrade.status, baseCommitAfterPrimaryUpgrade.stderr).toBe(0)

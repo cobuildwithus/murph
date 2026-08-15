@@ -35,8 +35,8 @@ export class DeviceProviderApplicationIngressStore
     private readonly store: PrismaDeviceSyncControlPlaneStore,
   ) {}
 
-  deleteExpiredOAuthStates(now: string): Promise<number> {
-    return this.store.deleteExpiredOAuthStates(now);
+  deleteExpiredOAuthStates(): Promise<number> {
+    return this.store.deleteExpiredOAuthStates();
   }
 
   createOAuthState(input: OAuthStateRecord): Promise<OAuthStateRecord> {

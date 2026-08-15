@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
+state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
+primary_worktree="$(
+  git -C "$repo_root" worktree list --porcelain |
+    awk '$1 == "worktree" && !found { print substr($0, 10); found = 1 }'
+)"
+
+if [[ -z "$primary_worktree" || ! -x "$primary_worktree/.githooks/pre-commit" ]]; then
+  printf 'install-git-hooks: primary checkout hook is unavailable\n' >&2
+  exit 1
+fi
+
+desired_hooks_path="$primary_worktree/.githooks"
+guard_config="$state_dir/gitconfig"
+tmp_config="$guard_config.tmp.$$"
+mkdir -p "$state_dir"
+: >"$tmp_config"
+git config --file "$tmp_config" core.hooksPath "$desired_hooks_path"
+mv "$tmp_config" "$guard_config"
+
+# Keep a harmless legacy value in the main config, then append our included
+# value after it. Historical prepare scripts may rewrite the legacy value, but
+# Git continues to resolve the later branch-independent include.
+git -C "$repo_root" config --local core.hooksPath .githooks
+git -C "$repo_root" config --local --fixed-value --unset-all include.path "$guard_config" \
+  2>/dev/null || true
+git -C "$repo_root" config --local --add include.path "$guard_config"
+
+# Initialize the machine-local authorization baseline before a raw worktree can
+# reach the shared hook for the first time.
+MURPH_WORKTREE_GUARD_CURRENT_WORKTREE="$repo_root" \
+  "$primary_worktree/scripts/worktree-storage-guard"
