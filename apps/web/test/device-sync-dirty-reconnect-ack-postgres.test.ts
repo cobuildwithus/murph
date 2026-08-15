@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { createDeviceSyncRegistry } from "@murphai/device-syncd";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
-import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import type { DeviceSyncProvider } from "@murphai/device-syncd/types";
 import { describe, expect, it, vi } from "vitest";
 

@@ -1775,6 +1775,7 @@ describe("runHostedDeviceSyncPass", () => {
     const service = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -1850,6 +1851,7 @@ describe("runHostedDeviceSyncPass", () => {
     const service = {
       close: vi.fn(),
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -1945,6 +1947,7 @@ describe("runHostedDeviceSyncPass", () => {
     const service = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => account.nextReconcileAt,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2036,6 +2039,7 @@ describe("runHostedDeviceSyncPass", () => {
     const service = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () =>
         [...accounts.values()].find((account) => account.nextReconcileAt)
           ?.nextReconcileAt ?? null,
