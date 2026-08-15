@@ -3562,6 +3562,8 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
     expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
     expect(fullPackageScript).toContain('REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS')
+    expect(fullPackageScript).toContain('REVIEW_GPT_EXPECTED_PR_BODY_PATH')
+    expect(fullPackageScript).toContain('REVIEW_GPT_EXPECTED_PR_BODY_SHA256')
     expect(fullPackageScript).toContain('review-phase.json')
     expect(fullPackageScript).toContain('rendered-evidence.txt')
     expect(fullPackageScript).toContain('review-round.json')
@@ -3775,6 +3777,20 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         cwd: harnessRoot,
         encoding: 'utf8',
       }).trim()
+      const expectedParentBody = [
+        `ReviewGPT first-reviewed head: ${firstHead}`,
+        'ReviewGPT context sensitivity: routine',
+        'Frog autofix issue: #123',
+        '',
+      ].join('\n')
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/frog-autofix-pr-body.md',
+        expectedParentBody,
+      )
+      const expectedParentBodySha256 = createHash('sha256')
+        .update(expectedParentBody)
+        .digest('hex')
 
       writeHarnessFile(
         harnessRoot,
@@ -4213,6 +4229,46 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           { encoding: 'utf8' },
         ),
       ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/frog-autofix-pr-body.md',
+        expectedParentBody,
+      )
+      const roundOneParentBody = invokePackager('round-one-parent-body', firstHead, {
+        REVIEW_GPT_EXPECTED_PR_BODY_PATH:
+          'audit-packages/frog-autofix-pr-body.md',
+        REVIEW_GPT_EXPECTED_PR_BODY_SHA256: expectedParentBodySha256,
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+      })
+      expect(
+        roundOneParentBody.result.status,
+        roundOneParentBody.result.stderr,
+      ).toBe(0)
+      expect(execFileSync(
+        'unzip',
+        ['-p', roundOneParentBody.zipPath, 'review-gpt-pr-context/pr-body.md'],
+        { encoding: 'utf8' },
+      )).toBe(expectedParentBody)
+      expect(listZipEntries(roundOneParentBody.zipPath)).not.toContain(
+        'audit-packages/frog-autofix-pr-body.md',
+      )
+
+      const changedParentBody = invokePackager('changed-parent-body', firstHead, {
+        REVIEW_GPT_EXPECTED_PR_BODY_PATH:
+          'audit-packages/frog-autofix-pr-body.md',
+        REVIEW_GPT_EXPECTED_PR_BODY_SHA256: 'f'.repeat(64),
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+      })
+      expect(changedParentBody.result.status).not.toBe(0)
+      expect(changedParentBody.result.stderr).toContain(
+        'expected ReviewGPT PR body evidence changed before packaging',
+      )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const roundTwo = invokePackager('round-two', currentHead, {
