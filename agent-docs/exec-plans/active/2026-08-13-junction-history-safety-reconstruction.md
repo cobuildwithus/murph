@@ -471,6 +471,29 @@ Updated: 2026-08-14
   round-11 physical-rekey deletion and all prior correction mechanisms and
   reported no remaining qualifying finding. The final ReviewGPT gate is
   complete with zero unresolved accepted findings.
+- Final ReviewGPT round 13 reviewed exact current-main integration head
+  `f34b9ac3a237a07c9cb91449b801af60f3f124a0` in the existing thread and
+  returned `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE` after about 58
+  minutes. The prompt was accepted once, but ReviewGPT could not persist its
+  initial capture metadata; the same-thread wake path recovered the completed
+  response without resending the round.
+- Accepted the integration identity seam. Current main intentionally preserves
+  an established opaque Junction source key, but local reconnect start, hosted
+  source start/callback, and hosted runtime apply still used the catalog-derived
+  key as an existence key. Reconnect could therefore create a second physical
+  row without advancing the old worker revision or hosted parent boundary, and
+  a stale source-first blood-pressure completion could survive the callback as
+  current coverage. Focused SQLite, hosted-start, and runtime-apply regressions
+  reproduced all three missed-owner effects before remediation.
+- The accepted correction at `0186631c3d33` resolves route-equivalent source
+  authority before choosing the physical point-write identity. Existing opaque
+  identity is preserved; the deterministic key is used only for a genuinely
+  new source. One shared pure hosted resolver composes the existing identity
+  and lifecycle rules for source start, callback, and runtime apply. No finding
+  was rejected. The fix adds no persisted field, provider generation, queue,
+  retry owner, manager, repair loop, reconciliation process, or provider call;
+  its only structural cost is the small stateless resolver shared by the three
+  existing Web owners.
 
 ## Verification
 
@@ -662,3 +685,11 @@ Updated: 2026-08-14
     `1c01b72f56047aa692032d0a6bfce3c832750ccf`, the requested model, the
     package-owned response hash, `ROUND_OUTCOME: PASS`, and `REVIEW_COMPLETE`.
     Its full-patch audit found no remaining qualifying issue.
+  - Round-13 integration proof first reproduced the defect at all three owner
+    boundaries: local reconnect left `local_connection_revision` unchanged,
+    hosted start skipped the parent-version boundary, and hosted runtime apply
+    rejected or redirected an update away from the established opaque row.
+    After correction, device-sync store/service passes 176 tests,
+    assistant hosted runtime passes 107 tests, and hosted wake/runtime authority
+    passes 248 tests. Device-sync, assistant-runtime, and prepared Web typechecks
+    pass; `git diff --check` and the added-line privacy/identifier scan pass.
