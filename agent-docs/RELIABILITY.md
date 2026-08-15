@@ -743,11 +743,15 @@ Last verified: 2026-08-15
   beneficiary. Customer Portal admissions perform the same claim-aware owner
   check before and after session creation; the Family check reads only the
   owner group and its billing scalars while locked, then decrypts the one
-  required Customer id after the database transaction. Before any later owner
-  writes a claim, its claim-disabled phase must stop issuing mutation-capable Portal
-  sessions, preserve cancellation through the replacement owner, and drain or
-  provider-invalidate previously issued sessions. Once the first claim exists,
-  the cutover is the rollback floor. The exact release and removal sequence
+  required Customer id after the database transaction. Generic Stripe webhook
+  reconciliation distinguishes that transient claim from settled Family
+  authority and leaves its existing accepted receipt failed and non-poisoning
+  until the claim clears; the same receipt then replays normally. Before any
+  later owner writes a claim, its claim-disabled phase must stop issuing
+  mutation-capable Portal sessions, preserve cancellation through the
+  replacement owner, and drain or provider-invalidate previously issued
+  sessions. Once the first claim exists, the cutover is the rollback floor. The
+  exact release and removal sequence
   lives in
   `agent-docs/operations/stripe-effect-compatibility-cutover.md`.
 - A never-paid Family owner draft is recoverable without a repair queue or new

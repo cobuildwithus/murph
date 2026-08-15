@@ -989,6 +989,160 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("retries the same payment-failure receipt after a Family effect claim clears", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const reconciliationClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_claimed_invoice_failure_${fixtureId}`;
+      const groupId = `hbag_claimed_invoice_failure_${fixtureId}`;
+      const customerId = `cus_${fixtureId}`;
+      const subscriptionId = `sub_${fixtureId}`;
+      const event = makeStripeEvent({
+        createdAt: new Date("2026-08-15T08:00:00.000Z"),
+        eventId: `evt_invoice_failure_${fixtureId}`,
+        object: makeStripeInvoicePaymentFailed({
+          customerId,
+          invoiceId: `in_${fixtureId}`,
+          subscriptionId,
+        }),
+        type: "invoice.payment_failed",
+      });
+      const subscription = {
+        ...makeActiveStripeSubscription({
+          customerId,
+          memberId,
+          subscriptionId,
+        }),
+        status: "past_due",
+      } as Stripe.Subscription;
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+        },
+      });
+      await observer.hostedAccountGroup.create({
+        data: {
+          billingStatus: HostedBillingStatus.not_started,
+          id: groupId,
+          ownerMemberId: memberId,
+        },
+      });
+      await observer.hostedAccountGroupMembership.create({
+        data: {
+          groupId,
+          id: `hbagm_claimed_invoice_failure_${fixtureId}`,
+          memberId,
+          planCode: "pulse",
+          role: "owner",
+          status: "active",
+        },
+      });
+      await observer.hostedAccountGroupBillingRef.create({
+        data: {
+          groupId,
+          stripeEffectClaimId: `effect_${fixtureId}`,
+        },
+      });
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt(input) {
+          return input.value;
+        },
+      });
+      stripeProvider.eventsRetrieve.mockResolvedValue(event);
+      stripeProvider.subscriptionsRetrieve.mockResolvedValue(subscription);
+
+      try {
+        const initialMember = await requireBillingSnapshot(observer, memberId);
+        await observer.$transaction((tx) =>
+          writeHostedMemberStripeBillingTx({
+            billingStatus: HostedBillingStatus.active,
+            canonicalBillingStatus: HostedBillingStatus.active,
+            dispatchContext: {
+              eventCreatedAt: new Date("2026-08-15T07:59:00.000Z"),
+              occurredAt: "2026-08-15T07:59:00.000Z",
+              sourceEventId: `evt_binding_${fixtureId}`,
+              sourceType: "stripe.customer.subscription.updated",
+            },
+            member: initialMember,
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: subscriptionId,
+            tx,
+          }),
+          { timeout: transactionTimeoutMs },
+        );
+        await recordHostedStripeEvent({ event, prisma: observer });
+        await observer.hostedStripeEvent.update({
+          data: { attemptCount: 5 },
+          where: { eventId: event.id },
+        });
+
+        await expect(reconcileHostedStripeEventById({
+          eventId: event.id,
+          prisma: reconciliationClient,
+        })).resolves.toMatchObject({ status: "failed" });
+        await expect(observer.hostedStripeEvent.findUnique({
+          where: { eventId: event.id },
+        })).resolves.toMatchObject({
+          attemptCount: 6,
+          lastErrorCode: "HOSTED_STRIPE_EFFECT_PENDING",
+          processedAt: null,
+          status: HostedStripeEventStatus.failed,
+        });
+        await expect(observer.hostedMember.findUnique({
+          where: { id: memberId },
+        })).resolves.toMatchObject({
+          billingStatus: HostedBillingStatus.active,
+        });
+
+        await observer.hostedAccountGroupBillingRef.update({
+          data: { stripeEffectClaimId: null },
+          where: { groupId },
+        });
+        await observer.hostedStripeEvent.update({
+          data: { nextAttemptAt: new Date(0) },
+          where: { eventId: event.id },
+        });
+
+        await expect(reconcileHostedStripeEventById({
+          eventId: event.id,
+          prisma: reconciliationClient,
+        })).resolves.toMatchObject({ status: "completed" });
+        await expect(observer.hostedStripeEvent.findUnique({
+          where: { eventId: event.id },
+        })).resolves.toMatchObject({
+          attemptCount: 7,
+          processedAt: expect.any(Date),
+          status: HostedStripeEventStatus.completed,
+        });
+        await expect(observer.hostedMember.findUnique({
+          where: { id: memberId },
+        })).resolves.toMatchObject({
+          billingStatus: HostedBillingStatus.past_due,
+        });
+      } finally {
+        errorSpy.mockRestore();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        stripeProvider.eventsRetrieve.mockReset();
+        stripeProvider.subscriptionsRetrieve.mockReset();
+        await observer.hostedStripeEvent.deleteMany({
+          where: { eventId: event.id },
+        });
+        await observer.hostedAccountGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        await disconnectClients([observer, reconciliationClient]);
+      }
+    });
+
     it.each([
       {
         billingIdentity: "fully bound",
@@ -2703,6 +2857,21 @@ function makeActiveStripeSubscription(input: {
     object: "subscription",
     status: "active",
   } as Stripe.Subscription;
+}
+
+function makeStripeInvoicePaymentFailed(input: {
+  customerId: string;
+  invoiceId: string;
+  subscriptionId: string;
+}): Stripe.Invoice {
+  // @ts-expect-error - the reconciliation fixture uses only the Stripe fields
+  // read by production invoice lookup and billing policy.
+  return {
+    customer: input.customerId,
+    id: input.invoiceId,
+    object: "invoice",
+    subscription: input.subscriptionId,
+  } as Stripe.Invoice;
 }
 
 function makeStripeCharge(input: {

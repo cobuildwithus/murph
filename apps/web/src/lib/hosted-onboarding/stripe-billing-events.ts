@@ -33,7 +33,12 @@ import {
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
-import { HostedOnboardingError, hostedOnboardingError } from "./errors";
+import {
+  HostedOnboardingError,
+  hostedOnboardingError,
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+  HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+} from "./errors";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
@@ -231,6 +236,14 @@ async function classifyHostedFamilyBillingClaimTx(input: {
   });
   if (!familyClaim) {
     return "none";
+  }
+  if (familyClaim.kind === "stripe_effect") {
+    throw hostedOnboardingError({
+      code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+      httpStatus: 409,
+      message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+      retryable: true,
+    });
   }
   if (input.stripeSubscriptionId) {
     const familyGroupId =

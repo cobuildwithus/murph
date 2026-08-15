@@ -70,4 +70,7 @@ reads only the owner group and five billing authority scalars in each of its two
 short lock transactions; it performs no roster, invite, contact, capacity, or
 external-key work while locked, and decrypts only the Customer id between the
 first transaction and provider call. Terminal claim removal restores direct
-admission.
+admission. An accepted direct `invoice.payment_failed` receipt that overlaps a
+claim-only owner group remains failed/retryable beyond the ordinary poison cap;
+after claim removal, the same receipt applies the canonical `past_due`
+projection and completes.
