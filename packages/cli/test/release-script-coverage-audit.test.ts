@@ -2293,6 +2293,31 @@ printf '%s|%s|%s|%s|%s\n' \
         'vonneumann|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
+      )
+      const invalidLaneCountResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(invalidLaneCountResult.status).not.toBe(0)
+      expect(invalidLaneCountResult.stderr).toContain(
+        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 5',
+      )
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
+      )
+
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
@@ -2407,22 +2432,28 @@ for review_gpt_lane in main eragon phlebas hercules mountain vonneumann; do
 done
 printf '%s\n' "\${review_gpt_managed_ports[*]}"
 `
-      const correctionPresetResult = spawnSync('bash', ['-c', correctionPresetHarness], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        env: {
-          ...cleanBrowserPreferenceEnv(),
-          HOME: harnessRoot,
-          REPO_ROOT: repoRoot,
-          REVIEW_GPT_BROWSER_LANE: 'vonneumann',
-          REVIEW_GPT_REVIEW_PHASE: 'final',
-          REVIEW_GPT_ROUND_NUMBER: '2',
-          REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
-          XDG_CONFIG_HOME: localConfigRoot,
+      const correctionPresetResult = spawnSync(
+        'bash',
+        ['-c', correctionPresetHarness],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...cleanBrowserPreferenceEnv(),
+            HOME: harnessRoot,
+            REPO_ROOT: repoRoot,
+            REVIEW_GPT_BROWSER_LANE: 'vonneumann',
+            REVIEW_GPT_REVIEW_PHASE: 'final',
+            REVIEW_GPT_ROUND_NUMBER: '2',
+            REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
+            XDG_CONFIG_HOME: localConfigRoot,
+          },
         },
-      })
+      )
       expect(correctionPresetResult.status, correctionPresetResult.stderr).toBe(0)
-      const correctionPresetLines = correctionPresetResult.stdout.trim().split('\n')
+      const correctionPresetLines = correctionPresetResult.stdout
+        .trim()
+        .split('\n')
       expect(correctionPresetLines.at(-2)).toBe(
         [
           'vonneumann',
