@@ -7,6 +7,7 @@ import {
   DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
+  isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
   isEstablishedDeviceSyncConnection,
   isDeviceSyncDisconnectRecoveryRequired,
@@ -91,6 +92,29 @@ test("established connection status requires active source-confirmed setup", () 
   assert.equal(isDeviceSyncConnectionSetupPending({ setupPhase: "link_returned" }), true);
   assert.equal(isDeviceSyncConnectionSetupPending({ setupPhase: "source_confirmed" }), false);
   assert.equal(isDeviceSyncConnectionSetupPending({ setupPhase: null }), false);
+});
+
+test("pending setup expiry is inclusive and applies only to incomplete setup", () => {
+  assert.equal(isDeviceSyncConnectionSetupExpiredAt({
+    setupExpiresAt: "2026-04-07T00:15:00.000Z",
+    setupPhase: "pending_link",
+  }, "2026-04-07T00:15:00.000Z"), true);
+  assert.equal(isDeviceSyncConnectionSetupExpiredAt({
+    setupExpiresAt: "2026-04-07T00:15:00.000Z",
+    setupPhase: "link_returned",
+  }, "2026-04-07T00:16:00.000Z"), true);
+  assert.equal(isDeviceSyncConnectionSetupExpiredAt({
+    setupExpiresAt: "2026-04-07T00:15:00.000Z",
+    setupPhase: "pending_link",
+  }, "2026-04-07T00:14:59.999Z"), false);
+  assert.equal(isDeviceSyncConnectionSetupExpiredAt({
+    setupExpiresAt: "2026-04-07T00:15:00.000Z",
+    setupPhase: "source_confirmed",
+  }, "2026-04-07T00:16:00.000Z"), false);
+  assert.equal(isDeviceSyncConnectionSetupExpiredAt({
+    setupExpiresAt: null,
+    setupPhase: "pending_link",
+  }, "2026-04-07T00:16:00.000Z"), false);
 });
 
 test("historical connection reset recovery is limited to Garmin error sources", () => {

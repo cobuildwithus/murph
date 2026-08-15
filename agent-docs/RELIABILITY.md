@@ -1182,11 +1182,17 @@ Last verified: 2026-08-14
   both Queue observations are healthy. The monitor persists no
   webhook ciphertext, provider identity, member identity, or Queue message id.
 - Junction Link setup remains retryable but inert before proof-verified callback
-  completion. Webhooks for an active `pending_link` or `link_returned` account
-  release their trace claim and return a retryable not-ready response; they do
-  not persist dirty state or wake work. Manual reconcile, due scheduling,
-  ordinary queued jobs, and sync-success promotion apply the same account phase
-  gate. After a shared account is `source_confirmed`, a new target source does
+  completion. A webhook whose original prepared receipt instant is before the
+  active `pending_link` or `link_returned` account's `setupExpiresAt` releases
+  its trace claim and returns a retryable not-ready response; queue delay or
+  redrive does not change that event's lifecycle meaning. At or after
+  `setupExpiresAt`, the incomplete setup is terminal for that webhook: admission
+  completes only the existing webhook trace and acknowledges the event without
+  dirty state, source admission, last-webhook freshness, signal, mailbox, wake,
+  job, canonical-health, or setup-state mutation. The dequeue clock owns only
+  the trace-processing lease. Manual reconcile, due scheduling, ordinary queued
+  jobs, and sync-success promotion apply the same account phase gate. After a
+  shared account is `source_confirmed`, a new target source does
   not move the account back into a pending phase. Its `DeviceConnectionSource`
   remains `disconnected`, and source-attributed webhooks, dirty-state commit
   races, and provider pulls fail or exit without admitting target data until

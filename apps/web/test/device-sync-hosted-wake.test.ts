@@ -332,7 +332,9 @@ function buildWebhookAdmissionRecord(
     refreshLeaseTokenVersion: null,
     refreshTokenEncrypted: null,
     scopesJson: [],
-    setupExpiresAt: null,
+    setupExpiresAt: connection.setupExpiresAt
+      ? new Date(connection.setupExpiresAt)
+      : null,
     setupPhase: connection.setupPhase,
     status: connection.status,
     tokenVersion: null,
@@ -1834,6 +1836,52 @@ describe("hosted device-sync wakes", () => {
 
     expect(providerRead).not.toHaveBeenCalled();
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("junction", "1".repeat(64), "claim-token");
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.markWebhookReceived).not.toHaveBeenCalled();
+    expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("terminally settles an expired pending Junction source webhook before provider I/O", async () => {
+    const providerRead = vi.fn(async () => true);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: { isSourceAccessActive: providerRead },
+    });
+    mocks.getConnectionRecordForUser.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({
+        provider: "junction",
+        setupExpiresAt: "2026-03-26T12:00:00.000Z",
+        setupPhase: "pending_link",
+      }),
+    );
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", { method: "POST" }),
+    );
+    const prepared: PreparedDeviceSyncWebhookV1 = {
+      acceptanceMode: "level_dirty_hint",
+      eventType: "provider.connection.updated",
+      externalAccountId: "acct_sensitive",
+      jobs: [],
+      provider: "junction",
+      receivedAt: "2026-03-26T12:00:00.000Z",
+      schema: "murph.device-sync-prepared-webhook.v1",
+      sourceProviderSlug: "apple_health_kit",
+      traceId: "2".repeat(64),
+    };
+
+    await expect(controlPlane.handlePreparedWebhook(prepared)).resolves.toEqual({ accepted: true });
+
+    expect(providerRead).not.toHaveBeenCalled();
+    expect(mocks.listConnectionSourceAdmissionCandidates).not.toHaveBeenCalled();
+    expect(mocks.materializeStoredConnectionAccount).not.toHaveBeenCalled();
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "junction",
+      "2".repeat(64),
+      "claim-token",
+      mocks.prismaTx,
+    );
     expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
     expect(mocks.markWebhookReceived).not.toHaveBeenCalled();
     expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
@@ -5589,6 +5637,7 @@ describe("hosted device-sync wakes", () => {
         provider: true,
         providerApplicationId: true,
         providerApplicationRevision: true,
+        setupExpiresAt: true,
         setupPhase: true,
         status: true,
         userId: true,
@@ -5673,6 +5722,43 @@ describe("hosted device-sync wakes", () => {
 
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("terminally consumes webhook work when setup is expired before dirty-state commit", async () => {
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({
+        setupExpiresAt: "2026-03-26T12:00:00.000Z",
+        setupPhase: "pending_link",
+      }),
+    );
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
+    });
+
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "oura",
+      "trace_123",
+      "claim-token",
+      mocks.prismaTx,
+    );
+    expect(mocks.prepareDirtyConnectionUpsert).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.markWebhookReceived).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
