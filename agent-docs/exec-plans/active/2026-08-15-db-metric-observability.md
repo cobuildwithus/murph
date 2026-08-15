@@ -67,6 +67,9 @@ Updated: 2026-08-15
    PR.
 6. Run preliminary and final exact-head ReviewGPT concurrently with required CI,
    remediate accepted findings, and finish the PR lane.
+7. Update the repository ReviewGPT toolchain to the latest public release,
+   verify its dependency policy surface, and use that version for the remediated
+   exact-head review.
 
 ## Decisions
 
@@ -95,6 +98,12 @@ Updated: 2026-08-15
   contributing check predates detailed evidence, the entire two-check window
   reports unavailable port detail instead of presenting a partial ratio as
   exact.
+- Upgrade `@cobuild/review-gpt` from `0.5.127` to `0.5.131`, including the
+  lockfile, release-age exception, and repository version assertion. Releases
+  `0.5.128` through `0.5.131` harden canonical thread/turn capture, submitted
+  attachment verification, and marked-response handling, which are directly
+  relevant to the rate-limited round-two capture encountered on the remediated
+  head.
 
 ## Verification
 
@@ -115,7 +124,20 @@ Updated: 2026-08-15
   typecheck passes. Exact-head GitHub Actions were fully green on the first
   candidate head.
 - Commands still to run: final ReviewGPT remediation review and exact-head
-  GitHub Actions for the remediated head.
+  GitHub Actions for the dependency-updated remediated head.
+- ReviewGPT `0.5.131` is installed and reports the expected version;
+  `pnpm deps:guard`, `pnpm deps:ignored-builds`, and `pnpm install
+  --frozen-lockfile` pass. `pnpm deps:audit` remains non-green on the repository's
+  existing advisory backlog; the reported ReviewGPT path resolves the same
+  `repomix@1.16.0` and `tar@7.5.16` on the parent head, and this bump changes no
+  transitive lockfile resolution.
+- The focused repository contract for the installed ReviewGPT runner passes.
+  A whole-file CLI audit passes 42 tests with 1 skipped, while three unrelated
+  shell-harness cases exceed their existing 45/60-second limits under concurrent
+  ReviewGPT activity on the shared host. A direct dry run returns the expected
+  output successfully in 66 seconds, confirming host latency rather than an
+  assertion or exit-status regression; exact-head GitHub Actions own the clean
+  broad rerun.
 - Expected outcomes: omitted ports are explicit across restart and alerts,
   complementary port observations compose safely, unsafe evidence is not
   delayed, retry/request bounds are fixed, legacy persisted rows remain
