@@ -231,6 +231,9 @@ usable observation, including a scrape with every required family absent,
 receives one bounded retry after one second; only an exhausted two-attempt
 collection counts as a failed check. A usable partial observation ordinarily
 remains single-pass so available unsafe evidence pages without delay. The
+monitor retains every successfully parsed observation even when it contains no
+usable required family and its retry fails before parsing; `unavailable` is
+reserved for checks that produced no parsed observation. The
 connection-error family expects both ports, keyed by port and region so their
 series cannot collide. Missing either port keeps that family unknown. When a
 safe observation is otherwise complete, the monitor makes one confirmation

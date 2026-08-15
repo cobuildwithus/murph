@@ -1602,7 +1602,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   usable baseline; an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed so an old delta is
   never replayed. A telemetry-only notification opens after two consecutive
-  incomplete or failed collections. The first two-check threshold
+  incomplete or failed collections. Every successfully parsed observation is
+  retained, including an all-family-
+  missing first parse followed by retry transport failure; `unavailable` is
+  reserved for a check with no parsed observation. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families, and sums parsed observations plus exact omission
   counts for ports 5432/6432 from partial checks. It uses the threshold time as

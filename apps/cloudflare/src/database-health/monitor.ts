@@ -493,13 +493,21 @@ export class DatabaseHealthMonitor {
     if (!hasUsableDatabaseHealthMetric(observation)) {
       await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
       attempts += 1;
-      const retryObservation = await this.collectMetricObservationOnce();
-      parsedObservations.push(retryObservation);
-      return buildDatabaseMetricCollection({
-        attempts,
-        observation: retryObservation,
-        parsedObservations,
-      });
+      try {
+        const retryObservation = await this.collectMetricObservationOnce();
+        parsedObservations.push(retryObservation);
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation: retryObservation,
+          parsedObservations,
+        });
+      } catch {
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation,
+          parsedObservations,
+        });
+      }
     }
     const observationConnectionErrorDeltas =
       observation.snapshot.connectionErrorCounters === null

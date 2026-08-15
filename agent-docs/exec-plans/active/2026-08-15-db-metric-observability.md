@@ -55,6 +55,33 @@ Updated: 2026-08-15
    Mitigation: log only canonical metric names, expected port labels, bounded
    counts, failure codes, and attempt metadata.
 
+## Round-two requirement retrospective
+
+- Trigger: the round-two diagnostic reproduced the same split-provenance
+  mechanism as the accepted round-one persistence finding. An all-required-
+  metrics-missing first response is successfully parsed, but a transport or
+  provider failure on its retry escapes the canonical collection builder and
+  the outer catch replaces that parsed evidence with an unavailable sample
+  claiming zero parsed attempts.
+- Product invariant: every successfully parsed observation contributes its
+  bounded missing-family and per-port provenance. `unavailable` means that no
+  observation was successfully parsed; a later failed request cannot erase an
+  earlier parsed response from the same bounded check.
+- Ownership decision: `collectMetricObservation` remains the single owner of
+  parsed-attempt accumulation. Once it has one parsed observation, every exit
+  returns `DatabaseMetricCollection`; only a check with no parsed observation
+  reaches `collectSample`'s unavailable catch.
+- Smallest correction: when the retry after an unusable parsed observation
+  fails, return the canonical collection built from that first observation.
+  Do not add another state machine, queue, persisted field, or reconciliation
+  path.
+- Required proof: compose a prior current check with two 6432 omissions and a
+  second check whose all-missing parsed observation is followed by retry
+  transport failure. The admitted immutable alert must report 5432 in 1/3 and
+  6432 in 3/3, survive restart and ambiguous Linq retry unchanged, retain the
+  existing two-observation/four-request and wait ceilings, and preserve counter
+  baseline safety.
+
 ## Tasks
 
 1. Inspect the exact current owner and focused tests; research official
@@ -104,6 +131,10 @@ Updated: 2026-08-15
   attachment verification, and marked-response handling, which are directly
   relevant to the rate-limited round-two capture encountered on the remediated
   head.
+- A parsed all-required-families-missing observation remains authoritative when
+  its retry fails before parsing. Return that first observation through the
+  canonical collection builder; do not let the zero-evidence unavailable catch
+  erase it.
 
 ## Verification
 
@@ -138,6 +169,12 @@ Updated: 2026-08-15
   output successfully in 66 seconds, confirming host latency rather than an
   assertion or exit-status regression; exact-head GitHub Actions own the clean
   broad rerun.
+- After the round-two mechanism correction, all four focused database-health
+  node files pass 115 tests, the real Workers/SQLite file passes 5 tests, and
+  the Cloudflare typecheck, docs drift check, and diff check pass. The new
+  production-faithful regression proves exact 5432 1/3 and 6432 3/3 evidence,
+  restart-safe immutable Linq delivery, the seven-request composed two-check
+  bound, both one-second waits, and a safe next-sample counter baseline.
 - Expected outcomes: omitted ports are explicit across restart and alerts,
   complementary port observations compose safely, unsafe evidence is not
   delayed, retry/request bounds are fixed, legacy persisted rows remain

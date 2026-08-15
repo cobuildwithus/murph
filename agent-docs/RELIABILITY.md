@@ -502,11 +502,15 @@ Last verified: 2026-08-14
   warnings include the actual parsed-observation count and per-port omission
   counts, without raw provider payloads or signed scrape values.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
-  consecutive runs before paging the monitoring condition. Crossing that
-  threshold persists one bounded telemetry-page obligation in the existing
-  incident row. The represented first two-check window counts incomplete versus
-  unavailable observations, unions only canonical missing families, and sums
-  parsed observations plus exact 5432/6432 omission counts from partial checks.
+  consecutive runs before paging the monitoring condition. A failed check never
+  erases a successfully parsed observation: even an all-family-
+  missing parse remains an incomplete observation if its retry later fails,
+  while `unavailable` means that the check produced no parsed observation.
+  Crossing the threshold persists one bounded telemetry-page obligation in the
+  existing incident row. The represented first two-check window counts
+  incomplete versus unavailable observations, unions only canonical missing
+  families, and sums parsed observations plus exact 5432/6432 omission counts
+  from partial checks.
   It uses the threshold time as its window end. One bounded evidence value on
   each existing sample
   preserves that aggregate provenance across restart. Legacy evidence without

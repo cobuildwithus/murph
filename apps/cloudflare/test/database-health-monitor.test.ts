@@ -1540,6 +1540,99 @@ describe("database health monitor", () => {
     expect(harness.retryWaits).toEqual([1_000]);
   });
 
+  it("retains an unusable parsed observation when its retry transport fails", async () => {
+    const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
+    const missingPooledPortMetricsBody = completeMetricsBody.replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="6432".*$/mu,
+      "",
+    );
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      linqResponses: [
+        () => {
+          throw new Error("ambiguous send");
+        },
+      ],
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        if (scrapeAttempt <= 2) {
+          return missingPooledPortMetricsBody;
+        }
+        return scrapeAttempt === 3 ? "" : completeMetricsBody;
+      },
+      serviceDiscoveryResponses: [
+        createServiceDiscoveryResponse,
+        createServiceDiscoveryResponse,
+        createServiceDiscoveryResponse,
+        () => new Response(null, { status: 503 }),
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "alert_failed", sampleStatus: "failed" });
+
+    expect(harness.planetScaleRequests).toHaveLength(7);
+    expect(harness.retryWaits).toEqual([1_000, 1_000]);
+    const pendingState = harness.monitor.readAlertState();
+    const idempotencyKey = pendingState.pendingAlertIdempotencyKey;
+    const pendingMessage = pendingState.pendingAlertMessage;
+    if (!idempotencyKey || !pendingMessage) {
+      throw new Error("Expected the parsed-retry-failure alert to be pending.");
+    }
+    expect(pendingState.monitoringAlertObligation).toMatchObject({
+      connectionErrorEvidence: {
+        missingPortAttempts: { "5432": 1, "6432": 3 },
+        parsedAttempts: 3,
+      },
+      failures: 2,
+      incompleteChecks: 2,
+      unavailableChecks: 0,
+    });
+    expect(pendingMessage).toContain("5432 in 1/3; 6432 in 3/3");
+
+    const originalBodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    harness.restartMonitor();
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      monitoringAlertObligation: {
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 1, "6432": 3 },
+          parsedAttempts: 3,
+        },
+      },
+      pendingAlertIdempotencyKey: idempotencyKey,
+      pendingAlertMessage: pendingMessage,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2 + ONE_HOUR_MS),
+    ).resolves.toMatchObject({ outcome: "alert_sent", sampleStatus: "ok" });
+
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      connectionErrorDelta: 0,
+      scrapeStatus: "ok",
+    });
+    const retriedBodies = await Promise.all(
+      harness.allLinqRequests.map(readLinqRequestBody),
+    );
+    expect(retriedBodies.map((body) => body.message.parts[0]?.value))
+      .toEqual([
+        ...originalBodies.map((body) => body.message.parts[0]?.value),
+        pendingMessage,
+        pendingMessage,
+      ]);
+    expect(retriedBodies.map((body) => body.message.idempotency_key).sort())
+      .toEqual([
+        idempotencyKey,
+        idempotencyKey,
+        `${idempotencyKey}-recipient-2`,
+        `${idempotencyKey}-recipient-2`,
+      ].sort());
+  });
+
   it("retains the original incomplete observation when connection-error confirmation fails", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,

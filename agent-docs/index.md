@@ -266,8 +266,8 @@ evaluation of available database signals, per-port baseline advancement with
 new/reset suppression, bounded safe connection-error confirmation with exact
 missing-port attempt and alert evidence, confirmation-only port baseline
 advancement, failed-check family/evidence alignment, conservative legacy-window
-provenance, cross-scrape
-port composition and without suppressing unsafe observations, and
+provenance, parsed-observation retention across later retry failure,
+cross-scrape port composition without suppressing unsafe observations, and
 one-shot telemetry-only operator paging with unresolved-window coalescing,
 current-pressure priority including direct and pooled connection errors in one
 combined pre-first-page incident, post-ack recurrence suppression, durable
