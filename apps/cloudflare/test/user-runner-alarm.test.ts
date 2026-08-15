@@ -951,7 +951,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     }));
     expect(invoke).not.toHaveBeenCalled();
@@ -1816,7 +1816,7 @@ describe("HostedUserRunner execution coordination", () => {
       )
     );
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     }));
     expect(invoke).not.toHaveBeenCalled();
@@ -2034,7 +2034,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(workspaceReadTimeouts).toEqual([29_000]);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 20_000,
       userId: TEST_USER_ID,
     });
   });
@@ -2064,7 +2064,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2159,7 +2159,7 @@ describe("HostedUserRunner execution coordination", () => {
       kind: "runtime_processing_accepted",
     });
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).toHaveBeenCalledOnce();
@@ -2337,7 +2337,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2433,7 +2433,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(workspaceReadStarted).toBe(true);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     });
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -2535,7 +2535,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2561,7 +2561,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2692,7 +2692,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2728,17 +2728,17 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     }));
     if (readinessStartedAt === null) {
       throw new Error("Expected startup readiness to begin.");
     }
 
-    await vi.advanceTimersByTimeAsync(8_000);
+    await vi.advanceTimersByTimeAsync(9_000);
     await expect(response).resolves.toEqual({
       kind: "retry_later",
-      retryAt: new Date(readinessStartedAt + 18_000).toISOString(),
+      retryAt: new Date(readinessStartedAt + 19_000).toISOString(),
     });
 
     expect(invoke).not.toHaveBeenCalled();
@@ -2768,7 +2768,7 @@ describe("HostedUserRunner execution coordination", () => {
     ) {
       readinessReceiver = this;
       expect(input).toEqual({
-        timeoutMs: 8_000,
+        timeoutMs: 9_000,
         userId: TEST_USER_ID,
       });
       return { kind: "ready" };
@@ -2822,7 +2822,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 9_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();

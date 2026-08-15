@@ -15,6 +15,7 @@ import {
   HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
   isLocalTemporalTcpPortCandidateUsable,
   mergeRequiredEnvProfile,
+  readHostedLocalAssistantProviderToolOutputs,
   reserveLocalTemporalTcpPort,
   resolveHostedAssistantLocalDevEnv,
   scopeHostedLocalAssistantProviderResponse,
@@ -28,6 +29,36 @@ import {
 } from "@murphai/hosted-local-harness/e2e";
 
 const temporalDevUiPortOffset = 1_000;
+
+describe("readHostedLocalAssistantProviderToolOutputs", () => {
+  it("does not treat a marker in failed command arguments as successful output", () => {
+    const marker = "CANONICAL_AUTOMATION_STATE|expected";
+    const outputs = readHostedLocalAssistantProviderToolOutputs({
+      body: JSON.stringify({
+        input: [
+          {
+            arguments: JSON.stringify({ cmd: `echo ${marker}` }),
+            name: "exec_command",
+            type: "function_call",
+          },
+          {
+            output: "Process exited with code 1",
+            type: "function_call_output",
+          },
+          {
+            output: [{ text: "durable-success", type: "input_text" }],
+            type: "custom_tool_call_output",
+          },
+        ],
+      }),
+      method: "POST",
+      url: "/v1/responses",
+    });
+
+    expect(outputs).toEqual(["Process exited with code 1", "durable-success"]);
+    expect(outputs.join("\n")).not.toContain(marker);
+  });
+});
 
 describe("mergeRequiredEnvProfile", () => {
   it("preserves the default hosted runner profiles when adding a required channel profile", () => {
