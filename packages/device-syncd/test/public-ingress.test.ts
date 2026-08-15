@@ -1989,6 +1989,148 @@ test("public ingress keeps pending external-link accounts inert until callback c
   assert.equal(store.completedWebhookTraceCalls, 1);
 });
 
+test("public ingress terminally consumes webhooks received after incomplete setup expiry", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let acceptedCalls = 0;
+  let dirtySatisfiedCalls = 0;
+  let sourceObservedCalls = 0;
+  const provider = createFakeProvider({
+    async verifyAndParseWebhook() {
+      return {
+        acceptanceMode: "level_dirty_hint",
+        eventType: "provider.connection.updated",
+        externalAccountId: "demo-expired-setup",
+        jobs: [],
+        sourceProviderSlug: "fitbit",
+        traceId: "expired-setup-trace",
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+    hooks: {
+      onConnectionSourceObserved() {
+        sourceObservedCalls += 1;
+        return { sourceAdmissionCommitted: true };
+      },
+      onLevelDirtyWebhookAlreadySatisfied() {
+        dirtySatisfiedCalls += 1;
+        return null;
+      },
+      onWebhookAccepted({ account, claimToken, traceId }) {
+        acceptedCalls += 1;
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+      },
+    },
+  });
+  const account = store.upsertConnection({
+    connectedAt: "2026-03-26T12:00:00.000Z",
+    credential: { kind: "none" },
+    externalAccountId: "demo-expired-setup",
+    existingAccountPolicy: "replace",
+    metadata: {},
+    nextReconcileAt: null,
+    ownerId: "owner-123",
+    provider: "demo",
+    scopes: [],
+    setupExpiresAt: "2026-03-26T12:15:00.000Z",
+    setupPhase: "pending_link",
+    status: "active",
+  });
+  store.upsertConnectionSource({
+    connectionId: account.id,
+    firstSeenAt: "2026-03-26T12:00:00.000Z",
+    lastSeenAt: "2026-03-26T12:00:00.000Z",
+    sourceInstanceKey: "fitbit:test",
+    sourceProviderSlug: "fitbit",
+    status: "disconnected",
+  });
+  const prepared = await ingress.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers(),
+    Buffer.from("{}"),
+    new Date("2026-03-26T12:15:00.000Z"),
+  );
+
+  const first = await ingress.handlePreparedWebhook(prepared);
+  assert.equal(first.accepted, true);
+  assert.equal(first.duplicate, false);
+  assert.equal(acceptedCalls, 0);
+  assert.equal(dirtySatisfiedCalls, 0);
+  assert.equal(sourceObservedCalls, 0);
+  assert.equal(store.claimWebhookTraceCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 1);
+  assert.equal(store.recordedSourceDataArrivals.length, 0);
+  assert.equal(store.getConnectionById(account.id)?.lastWebhookAt, null);
+  assert.equal(store.getConnectionById(account.id)?.setupPhase, "pending_link");
+  assert.equal(
+    store.getConnectionById(account.id)?.setupExpiresAt,
+    "2026-03-26T12:15:00.000Z",
+  );
+
+  const duplicate = await ingress.handlePreparedWebhook(prepared);
+  assert.equal(duplicate.accepted, true);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(acceptedCalls, 0);
+  assert.equal(dirtySatisfiedCalls, 0);
+  assert.equal(sourceObservedCalls, 0);
+  assert.equal(store.completedWebhookTraceCalls, 1);
+});
+
+test("public ingress keeps a pre-expiry prepared webhook retryable after delayed delivery", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            eventType: "demo.updated",
+            externalAccountId: "demo-live-setup",
+            jobs: [],
+            traceId: "live-setup-delayed-trace",
+          };
+        },
+      }),
+    ]),
+    store,
+  });
+  store.upsertConnection({
+    connectedAt: "2026-03-26T12:00:00.000Z",
+    credential: { kind: "none" },
+    externalAccountId: "demo-live-setup",
+    existingAccountPolicy: "replace",
+    metadata: {},
+    nextReconcileAt: null,
+    ownerId: "owner-123",
+    provider: "demo",
+    scopes: [],
+    setupExpiresAt: "2026-03-26T12:15:00.000Z",
+    setupPhase: "pending_link",
+    status: "active",
+  });
+  const prepared = await ingress.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers(),
+    Buffer.from("{}"),
+    new Date("2026-03-26T12:14:59.999Z"),
+  );
+
+  await assert.rejects(
+    () => ingress.handlePreparedWebhook(prepared),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+  assert.equal(store.claimWebhookTraceCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(readRecordedWebhookTrace(store), null);
+});
+
 test("public ingress rejects external-link callbacks that do not match the seeded account", async () => {
   const store = new InMemoryPublicIngressStore();
   const provider = createFakeProvider({

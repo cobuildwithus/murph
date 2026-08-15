@@ -2497,9 +2497,16 @@ cookie or cross-host handoff.
 Junction's existing setup phase is the account data-admission boundary. A new
 account in `pending_link` or `link_returned` cannot accept webhook side effects,
 persist dirty work, wake or schedule the runtime, execute queued provider jobs,
-or promote itself through sync success. After an account reaches
-`source_confirmed`, adding or retrying another Junction-backed source preserves
-that account and its established siblings. The target `DeviceConnectionSource`
+or promote itself through sync success. Webhook retryability for that incomplete
+setup is bounded by the event's original prepared receipt instant: receipts
+before `setupExpiresAt` release the trace claim and remain retryable even when
+delivery occurs later, while receipts at or after `setupExpiresAt` complete only
+the existing trace and terminate transport handling without source admission,
+freshness, dirty, signal, mailbox, wake, job, canonical-health, or setup-state
+effects. Dequeue time owns the trace-processing lease, not lifecycle meaning.
+The proof-verified callback remains the only setup-completion owner. After an
+account reaches `source_confirmed`, adding or retrying another Junction-backed
+source preserves that account and its established siblings. The target `DeviceConnectionSource`
 stays `disconnected` and its webhook and pull work remain inert until callback
 completion reaches the runtime connection-established hook. Shared ingress
 chooses one closed account write policy for every persistence request:

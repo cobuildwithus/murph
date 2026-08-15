@@ -1,6 +1,7 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
+  isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
   isDeviceSyncSourceAdmitted,
   isEstablishedDeviceSyncConnection,
@@ -1641,6 +1642,42 @@ export class DeviceSyncPublicIngress {
       });
     }
 
+    if (
+      account.status === "active"
+      && isDeviceSyncConnectionSetupPending(account)
+    ) {
+      if (isDeviceSyncConnectionSetupExpiredAt(account, now)) {
+        this.logger.warn?.("Ignoring webhook side effects for expired incomplete device sync setup.", {
+          provider: provider.provider,
+          accountId: account.id,
+          eventType: webhook.eventType,
+          traceId,
+        });
+        await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+        return {
+          accepted: true,
+          duplicate: false,
+          provider: provider.provider,
+          eventType: webhook.eventType,
+          traceId,
+        };
+      }
+
+      this.logger.warn?.("Delaying webhook side effects until device sync setup is confirmed.", {
+        provider: provider.provider,
+        accountId: account.id,
+        eventType: webhook.eventType,
+        traceId,
+      });
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
+      throw deviceSyncError({
+        code: "WEBHOOK_ACCOUNT_NOT_READY",
+        message: "Device sync setup must finish before webhook side effects can be accepted.",
+        retryable: true,
+        httpStatus: 503,
+      });
+    }
+
     try {
       // A dirty row proves only that import invalidation is queued. Await exact-
       // source lifecycle work before dirty coalescing can complete this trace.
@@ -1676,7 +1713,6 @@ export class DeviceSyncPublicIngress {
           }
           if (
             account.status === "active"
-            && !isDeviceSyncConnectionSetupPending(account)
             && (
               !sourceObservation
               || !("sourceAdmissionCommitted" in sourceObservation)
@@ -1700,7 +1736,6 @@ export class DeviceSyncPublicIngress {
 
       if (
         account.status === "active"
-        && !isDeviceSyncConnectionSetupPending(account)
         && webhook.acceptanceMode === "level_dirty_hint"
       ) {
         const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
@@ -1724,25 +1759,6 @@ export class DeviceSyncPublicIngress {
     } catch (error) {
       await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
       throw error;
-    }
-
-    if (
-      account.status === "active"
-      && isDeviceSyncConnectionSetupPending(account)
-    ) {
-      this.logger.warn?.("Delaying webhook side effects until device sync setup is confirmed.", {
-        provider: provider.provider,
-        accountId: account.id,
-        eventType: webhook.eventType,
-        traceId,
-      });
-      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
-      throw deviceSyncError({
-        code: "WEBHOOK_ACCOUNT_NOT_READY",
-        message: "Device sync setup must finish before webhook side effects can be accepted.",
-        retryable: true,
-        httpStatus: 503,
-      });
     }
 
     switch (account.status) {

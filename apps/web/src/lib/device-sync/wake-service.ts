@@ -28,6 +28,7 @@ import {
   DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
   isDeviceSyncDisconnectInProgress,
   isHistoricalResetIncompleteDeviceSyncAccount,
@@ -1998,9 +1999,15 @@ async function prepareHostedWebhookSourceObservation(input: {
           await completeHostedWebhookTraceTx(input, tx);
           return { kind: "terminal" };
         }
-        if (isDeviceSyncConnectionSetupPending({
+        const setup = {
+          setupExpiresAt: current.setupExpiresAt?.toISOString() ?? null,
           setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
-        })) {
+        };
+        if (isDeviceSyncConnectionSetupPending(setup)) {
+          if (isDeviceSyncConnectionSetupExpiredAt(setup, input.now)) {
+            await completeHostedWebhookTraceTx(input, tx);
+            return { kind: "terminal" };
+          }
           throw deviceSyncError({
             code: "WEBHOOK_ACCOUNT_NOT_READY",
             message: "Device sync setup changed before webhook work could be admitted.",
@@ -2909,6 +2916,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       provider: true,
       providerApplicationId: true,
       providerApplicationRevision: true,
+      setupExpiresAt: true,
       setupPhase: true,
       status: true,
       userId: true,
@@ -2938,9 +2946,15 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     await completeHostedWebhookTraceTx(input, tx);
     return "completed";
   }
-  if (isDeviceSyncConnectionSetupPending({
+  const setup = {
+    setupExpiresAt: current.setupExpiresAt?.toISOString() ?? null,
     setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
-  })) {
+  };
+  if (isDeviceSyncConnectionSetupPending(setup)) {
+    if (isDeviceSyncConnectionSetupExpiredAt(setup, input.acceptedAt)) {
+      await completeHostedWebhookTraceTx(input, tx);
+      return "completed";
+    }
     throw deviceSyncError({
       code: "WEBHOOK_ACCOUNT_NOT_READY",
       message: "Device sync setup changed before webhook work could be committed.",
