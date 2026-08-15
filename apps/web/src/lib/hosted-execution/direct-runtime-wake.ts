@@ -124,6 +124,10 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
   };
   wakeSource: HostedDirectRuntimeWakeSource;
 }): Promise<void> {
+  const client = input.client;
+  const onTiming = input.input.onTiming;
+  const userId = input.input.userId;
+  const wakeSource = input.wakeSource;
   const orchestrationAttemptId = `web-ingress-${randomUUID()}`;
   const deadlineAtEpochMs = Date.now() + HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS;
   const signal = AbortSignal.timeout(HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS);
@@ -145,7 +149,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
           attemptNumber,
           orchestrationAttemptId,
           reason: "deadline_exhausted",
-          source: input.wakeSource,
+          source: wakeSource,
         });
         return;
       }
@@ -153,21 +157,21 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       // Do not persist the previous parsed result if a later attempted request
       // fails before returning a parseable control response.
       timing = null;
-      const ensureResult = await input.client.ensureRuntimeProcessing({
+      const ensureResult = await client.ensureRuntimeProcessing({
         commandTimeoutMs,
         onTiming: (value) => {
           timing = value;
         },
         orchestrationAttemptId,
         signal,
-        userId: input.input.userId,
+        userId,
       });
       if (!("kind" in ensureResult)) {
         console.info("Hosted direct ensure wake accepted.", {
           accepted: ensureResult.accepted,
           attemptNumber,
           orchestrationAttemptId,
-          source: input.wakeSource,
+          source: wakeSource,
         });
         return;
       }
@@ -179,7 +183,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
         ...(ensureResult.kind === "runtime_processing_accepted"
           ? { action: ensureResult.action }
           : {}),
-        source: input.wakeSource,
+        source: wakeSource,
       });
       if (
         ensureResult.kind !== "retry_later"
@@ -203,7 +207,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
           attemptNumber,
           orchestrationAttemptId,
           reason: "retry_outside_deadline",
-          source: input.wakeSource,
+          source: wakeSource,
         });
         return;
       }
@@ -212,7 +216,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
         attemptNumber,
         orchestrationAttemptId,
         retryDelayMs,
-        source: input.wakeSource,
+        source: wakeSource,
       });
       await waitForHostedDirectRuntimeWakeRetry(retryDelayMs, signal);
     }
@@ -220,17 +224,17 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
     console.warn("Hosted direct ensure wake failed.", {
       errorName: describeHostedExecutionSafeLogErrorCode(error),
       orchestrationAttemptId,
-      source: input.wakeSource,
+      source: wakeSource,
     });
   } finally {
-    if (timing && input.input.onTiming) {
+    if (timing && onTiming) {
       try {
-        await input.input.onTiming(timing);
+        await onTiming(timing);
       } catch (error) {
         console.warn("Hosted direct ensure wake timing callback failed.", {
           errorName: describeHostedExecutionSafeLogErrorCode(error),
           orchestrationAttemptId,
-          source: input.wakeSource,
+          source: wakeSource,
         });
       }
     }
