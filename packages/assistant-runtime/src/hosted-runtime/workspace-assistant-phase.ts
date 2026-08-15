@@ -2749,6 +2749,7 @@ export async function runHostedWorkspaceAssistantPhase(
       actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
       includeBackgroundDueIntents:
         input.shouldYieldBackgroundMaintenance?.() !== true,
+      messageVolumeReceiptPort: input.runtime.platform.effectsPort,
       preferredIntentIds: currentTurnDeliveryIntentIds,
       vaultRoot: input.restored.vaultRoot,
     });
@@ -5727,6 +5728,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       ? await collectHostedAssistantDeliverySideEffects({
         actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
         includeBackgroundDueIntents: phaseInput.foregroundCausalOnly !== true,
+        messageVolumeReceiptPort: phaseInput.runtime.platform.effectsPort,
         preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
           systemMailboxPreparation,
         ),

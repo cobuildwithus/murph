@@ -2560,6 +2560,56 @@ describe('assistant outbox runtime', () => {
     })).toBe(false)
   })
 
+  it('retains pending message-volume receipts until acknowledgement, then restores ordinary pruning', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-message-volume-retention-',
+    )
+    const pending = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:00:00.000Z',
+      message: 'pending message-volume receipt',
+      sessionId: 'session-message-volume-pending',
+      turnId: 'turn-message-volume-pending',
+    })
+    const recorded = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:10:00.000Z',
+      message: 'recorded message-volume receipt',
+      sessionId: 'session-message-volume-recorded',
+      turnId: 'turn-message-volume-recorded',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...pending,
+      delivery: createDelivery({
+        providerMessageId: 'message-volume-pending',
+        sentAt: '2026-03-01T00:01:00.000Z',
+      }),
+      messageVolumeReceiptRecordedAt: null,
+      sentAt: '2026-03-01T00:01:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:01:00.000Z',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...recorded,
+      delivery: createDelivery({
+        providerMessageId: 'message-volume-recorded',
+        sentAt: '2026-03-01T00:11:00.000Z',
+      }),
+      messageVolumeReceiptRecordedAt: '2026-03-01T00:12:00.000Z',
+      sentAt: '2026-03-01T00:11:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:12:00.000Z',
+    })
+
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2026-04-20T12:00:00.000Z'),
+      paths,
+      vault: vaultRoot,
+    })).resolves.toBe(1)
+
+    const retained = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retained.map((intent) => intent.intentId)).toEqual([pending.intentId])
+    expect(retained[0]?.messageVolumeReceiptRecordedAt).toBeNull()
+  })
+
   it('retains unresolved private continuity until application, then restores ordinary pruning', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-outbox-private-continuity-retention-',

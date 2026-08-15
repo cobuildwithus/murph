@@ -45,10 +45,12 @@ import {
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
+  hasPendingAssistantOutboxMessageVolumeReceipt,
   isAssistantOutboxReplyBubbleSuccessor,
   listAssistantCronPendingDeliveryIntentIds,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
+  markAssistantOutboxMessageVolumeReceiptRecorded,
   normalizeAssistantDeliveryError,
   persistAssistantPrivateCompletionContinuityAfterDelivery,
   readAssistantAutomationState,
@@ -141,10 +143,11 @@ const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // Bounds due approval reconciliation so a backlog cannot stall delivery with
 // an unbounded series of web-control round trips.
 const HOSTED_MAX_DUE_APPROVAL_RECONCILE = 4;
+const HOSTED_MAX_PENDING_MESSAGE_VOLUME_RECEIPTS = 8;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
-const HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS = 2_000;
+const HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS = 2_000;
 const HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS = 1_500;
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
@@ -167,6 +170,10 @@ interface HostedAssistantDeliveryBoundaryFields {
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   includeBackgroundDueIntents: boolean;
+  messageVolumeReceiptPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "recordOutboundMessageVolumeReceipt"
+  > | null;
   preferredEffectIds?: readonly string[];
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
@@ -183,6 +190,13 @@ export async function collectHostedAssistantDeliverySideEffects(
   };
   const now = new Date();
   const storedIntents = await listAssistantOutboxIntents(request.vaultRoot);
+  if (request.includeBackgroundDueIntents) {
+    queueHostedAssistantPendingMessageVolumeReceipts({
+      effectsPort: input.messageVolumeReceiptPort ?? null,
+      intents: storedIntents,
+      vaultRoot: request.vaultRoot,
+    });
+  }
   const reconcileTargets = selectHostedAssistantApprovalReconcileTargets({
     includeBackgroundDueIntents: request.includeBackgroundDueIntents,
     now,
@@ -3201,6 +3215,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             linqDeliveryContexts,
             timing: acceptedLinqReactionTiming,
           });
+          queueHostedAssistantMessageVolumeReceiptWrite({
+            effectsPort: input.effectsPort,
+            intent,
+            vaultRoot: input.vaultRoot,
+          });
         },
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) => {
           if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
@@ -3232,6 +3251,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           input.preparedDispatch !== null
           && isHostedBackgroundDeliveryDeferredError(error),
       },
+      trackMessageVolumeReceipt:
+        input.effectsPort.recordOutboundMessageVolumeReceipt !== undefined,
       dependencies: {
         sendEmail: async (request) => {
           if (request.targetKind === "participant") {
@@ -5255,7 +5276,8 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   };
 }
 
-const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
+const pendingHostedAssistantDeliveryControlPlaneWrites = new Set<Promise<void>>();
+const pendingHostedAssistantMessageVolumeReceiptKeys = new Set<string>();
 
 async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
@@ -5325,7 +5347,7 @@ async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
       timer = setTimeout(() => {
         abortController.abort();
         resolve("timed_out");
-      }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
+      }, HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS);
       timer.unref?.();
     });
     const result = await Promise.race([
@@ -5338,7 +5360,7 @@ async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
         "Accepted Linq delivery outcome recording timed out before consume state could be stored.",
         {
           retryable: true,
-          timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
+          timeoutMs: HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS,
         },
       );
     }
@@ -5383,7 +5405,7 @@ function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
         timer = setTimeout(() => {
           abortController.abort();
           resolve("timed_out");
-        }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
+        }, HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS);
         timer.unref?.();
       });
       const result = await Promise.race([
@@ -5392,7 +5414,7 @@ function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
       ]);
       if (result === "timed_out") {
         console.warn("Hosted Linq delivery outcome recording timed out.", {
-          timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
+          timeoutMs: HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS,
         });
       }
     } catch (error) {
@@ -5403,13 +5425,133 @@ function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
       if (timer !== null) {
         clearTimeout(timer);
       }
-      pendingHostedAssistantLinqDeliveryOutcomeWrites.delete(write);
+      pendingHostedAssistantDeliveryControlPlaneWrites.delete(write);
     }
   });
-  pendingHostedAssistantLinqDeliveryOutcomeWrites.add(write);
+  pendingHostedAssistantDeliveryControlPlaneWrites.add(write);
 }
 
-export async function drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(
+function queueHostedAssistantPendingMessageVolumeReceipts(input: {
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "recordOutboundMessageVolumeReceipt"
+  > | null;
+  intents: readonly AssistantOutboxIntent[];
+  vaultRoot: string;
+}): void {
+  let queued = 0;
+  for (const intent of input.intents) {
+    if (!hasPendingAssistantOutboxMessageVolumeReceipt(intent)) {
+      continue;
+    }
+    const queuedReceipt = queueHostedAssistantMessageVolumeReceiptWrite({
+      effectsPort: input.effectsPort,
+      intent,
+      vaultRoot: input.vaultRoot,
+    });
+    if (!queuedReceipt) {
+      continue;
+    }
+    queued += 1;
+    if (queued >= HOSTED_MAX_PENDING_MESSAGE_VOLUME_RECEIPTS) {
+      return;
+    }
+  }
+}
+
+function queueHostedAssistantMessageVolumeReceiptWrite(input: {
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "recordOutboundMessageVolumeReceipt"
+  > | null;
+  intent: AssistantOutboxIntent;
+  vaultRoot: string;
+}): boolean {
+  const recordReceipt = input.effectsPort?.recordOutboundMessageVolumeReceipt;
+  if (!recordReceipt || !hasPendingAssistantOutboxMessageVolumeReceipt(input.intent)) {
+    return false;
+  }
+  const delivery = input.intent.delivery;
+  if (!delivery) {
+    return false;
+  }
+  const channel = delivery.channel.trim().toLowerCase();
+  if (channel !== "email" && channel !== "telegram") {
+    return false;
+  }
+  const receiptKey = [
+    input.vaultRoot,
+    input.intent.intentId,
+    input.intent.dedupeKey,
+  ].join("\u0000");
+  if (
+    pendingHostedAssistantMessageVolumeReceiptKeys.has(receiptKey)
+    || pendingHostedAssistantMessageVolumeReceiptKeys.size
+      >= HOSTED_MAX_PENDING_MESSAGE_VOLUME_RECEIPTS
+  ) {
+    return false;
+  }
+  pendingHostedAssistantMessageVolumeReceiptKeys.add(receiptKey);
+
+  const write = Promise.resolve().then(async () => {
+    const abortController = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const record = recordReceipt(
+        {
+          channel,
+          dedupeKey: input.intent.dedupeKey,
+        },
+        { signal: abortController.signal },
+      );
+      void record.catch(() => undefined);
+      const timeout = new Promise<"timed_out">((resolve) => {
+        timer = setTimeout(() => {
+          abortController.abort();
+          resolve("timed_out");
+        }, HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS);
+        timer.unref?.();
+      });
+      const result = await Promise.race([
+        record.then((receipt) => ({ receipt } as const)),
+        timeout,
+      ]);
+      if (result === "timed_out") {
+        console.warn(
+          "Hosted outbound message-volume receipt recording timed out.",
+          { timeoutMs: HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS },
+        );
+        return;
+      }
+      if (!Number.isFinite(Date.parse(result.receipt.recordedAt))) {
+        throw new TypeError(
+          "Hosted outbound message-volume receipt response is invalid.",
+        );
+      }
+      await markAssistantOutboxMessageVolumeReceiptRecorded({
+        channel,
+        dedupeKey: input.intent.dedupeKey,
+        intentId: input.intent.intentId,
+        recordedAt: result.receipt.recordedAt,
+        vault: input.vaultRoot,
+      });
+    } catch (error) {
+      console.warn("Hosted outbound message-volume receipt recording failed.", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      pendingHostedAssistantMessageVolumeReceiptKeys.delete(receiptKey);
+      pendingHostedAssistantDeliveryControlPlaneWrites.delete(write);
+    }
+  });
+  pendingHostedAssistantDeliveryControlPlaneWrites.add(write);
+  return true;
+}
+
+export async function drainHostedAssistantDeliveryControlPlaneWritesBestEffort(
   options?: { timeoutMs?: number },
 ): Promise<void> {
   const timeoutMs = options?.timeoutMs;
@@ -5428,7 +5570,7 @@ export async function drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(
   try {
     let observed: Promise<void>[];
     do {
-      observed = Array.from(pendingHostedAssistantLinqDeliveryOutcomeWrites);
+      observed = Array.from(pendingHostedAssistantDeliveryControlPlaneWrites);
       if (observed.length === 0) {
         return;
       }
@@ -5436,18 +5578,21 @@ export async function drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(
       await (timeout ? Promise.race([observedSettled, timeout]) : observedSettled);
       if (timedOut) {
         console.warn(
-          "Hosted Linq delivery outcome drain timed out; queued writes continue in the background.",
+          "Hosted delivery control-plane drain timed out; queued writes continue in the background.",
           { timeoutMs },
         );
         return;
       }
-    } while (observed.some((write) => pendingHostedAssistantLinqDeliveryOutcomeWrites.has(write)));
+    } while (observed.some((write) => pendingHostedAssistantDeliveryControlPlaneWrites.has(write)));
   } finally {
     if (timer !== null) {
       clearTimeout(timer);
     }
   }
 }
+
+export const drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort =
+  drainHostedAssistantDeliveryControlPlaneWritesBestEffort;
 
 function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
   if (error && typeof error === "object" && "code" in error) {

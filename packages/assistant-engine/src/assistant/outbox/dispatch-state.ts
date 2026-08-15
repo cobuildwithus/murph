@@ -123,7 +123,15 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.intent)) {
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.intent,
+        ['sending'],
+        false,
+      )
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -135,6 +143,12 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
+        ...(input.intent.messageVolumeReceiptRecordedAt === undefined
+          ? {}
+          : {
+              messageVolumeReceiptRecordedAt:
+                input.intent.messageVolumeReceiptRecordedAt,
+            }),
         deliveryConfirmationPending: input.deliveryTransportIdempotent,
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
         preparedDispatchToken: baseIntent.preparedDispatchToken,
