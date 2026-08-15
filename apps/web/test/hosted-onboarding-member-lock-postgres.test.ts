@@ -24,6 +24,8 @@ import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 import { ensureHostedCompanionMemberId } from "@/src/lib/hosted-onboarding/companion-member-access";
 import {
+  createHostedFamilyBillingCheckout,
+  HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY,
   issueHostedFamilyInvite,
   updateHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -358,6 +360,38 @@ function createDeferred<T = void>(): Deferred<T> {
   return { promise, resolve };
 }
 
+function pauseAfterNextInteractiveTransaction(input: {
+  committed: Deferred<void>;
+  prisma: PrismaClient;
+  release: Deferred<void>;
+}): PrismaClient {
+  let paused = false;
+  return new Proxy(input.prisma, {
+    get(target, property) {
+      if (property !== "$transaction") {
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return async (
+        run: (tx: Prisma.TransactionClient) => Promise<unknown>,
+        options?: {
+          isolationLevel?: Prisma.TransactionIsolationLevel;
+          maxWait?: number;
+          timeout?: number;
+        },
+      ) => {
+        const result = await target.$transaction(run, options);
+        if (!paused) {
+          paused = true;
+          input.committed.resolve();
+          await input.release.promise;
+        }
+        return result;
+      };
+    },
+  });
+}
+
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted member Stripe mutation lock PostgreSQL concurrency",
   () => {
@@ -440,6 +474,309 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
         await disconnectClients([owner, contender]);
+      }
+    });
+
+    it("blocks direct Checkout when a compatibility claim commits after reservation", async () => {
+      const claimant = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_checkout_late_claim_${fixtureId}`;
+      const inviteCode = `invite-checkout-late-claim-${fixtureId}`;
+      const reservationCommitted = createDeferred();
+      const releaseCheckout = createDeferred();
+      const controlledWriter = pauseAfterNextInteractiveTransaction({
+        committed: reservationCommitted,
+        prisma: writer,
+        release: releaseCheckout,
+      });
+      const now = new Date("2026-08-12T12:00:00.000Z");
+      let checkoutPromise: Promise<unknown> | null = null;
+      installPassthroughHostedSecureBoxTestCodec();
+      stripeProvider.checkoutSessionsCreate.mockClear();
+      stripeProvider.checkoutSessionsCreate.mockImplementation(async (
+        params: Stripe.Checkout.SessionCreateParams,
+      ) => ({
+        client_reference_id: params.client_reference_id,
+        customer: params.customer ?? null,
+        id: "cs_test_directLateClaim123",
+        metadata: params.metadata ?? {},
+        mode: "subscription",
+        status: "open",
+        subscription: null,
+        url: "https://checkout.stripe.com/c/pay/cs_test_directLateClaim123",
+      }));
+
+      try {
+        await claimant.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.not_started,
+            id: memberId,
+          },
+        });
+        await claimant.hostedMemberIdentity.create({
+          data: {
+            memberId,
+            phoneLookupKey: `phone:${fixtureId}`,
+          },
+        });
+        await claimant.hostedInvite.create({
+          data: {
+            expiresAt: new Date("2026-08-13T12:00:00.000Z"),
+            id: `hi_checkout_late_claim_${fixtureId}`,
+            inviteCode,
+            memberId,
+          },
+        });
+
+        checkoutPromise = createHostedBillingCheckout({
+          inviteCode,
+          member: { id: memberId, suspendedAt: null },
+          now,
+          prisma: controlledWriter,
+        });
+        await reservationCommitted.promise;
+        await expect(claimant.hostedMemberBillingRef.findUnique({
+          select: { checkoutAttemptId: true },
+          where: { memberId },
+        })).resolves.toEqual({
+          checkoutAttemptId: expect.any(String),
+        });
+
+        await claimant.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT "id"
+            FROM "hosted_member"
+            WHERE "id" = ${memberId}
+            FOR UPDATE
+          `;
+          await tx.hostedMemberBillingRef.update({
+            data: {
+              stripeEffectClaimedAt: now,
+              stripeEffectClaimId: `member-checkout:${fixtureId}`,
+              stripeEffectKind: "member.subscription-create",
+            },
+            where: { memberId },
+          });
+        });
+        releaseCheckout.resolve();
+
+        await expect(checkoutPromise).rejects.toMatchObject({
+          code: "HOSTED_STRIPE_EFFECT_PENDING",
+          retryable: true,
+        });
+        expect(stripeProvider.checkoutSessionsCreate).not.toHaveBeenCalled();
+        await expect(claimant.hostedMemberBillingRef.findUnique({
+          select: { checkoutAttemptId: true },
+          where: { memberId },
+        })).resolves.toEqual({ checkoutAttemptId: null });
+
+        await claimant.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT "id"
+            FROM "hosted_member"
+            WHERE "id" = ${memberId}
+            FOR UPDATE
+          `;
+          await tx.hostedMemberBillingRef.update({
+            data: {
+              stripeEffectClaimedAt: null,
+              stripeEffectClaimId: null,
+              stripeEffectKind: null,
+            },
+            where: { memberId },
+          });
+        });
+        await expect(createHostedBillingCheckout({
+          inviteCode,
+          member: { id: memberId, suspendedAt: null },
+          now,
+          prisma: writer,
+        })).resolves.toEqual({
+          alreadyActive: false,
+          url: "https://checkout.stripe.com/c/pay/cs_test_directLateClaim123",
+        });
+        expect(stripeProvider.checkoutSessionsCreate).toHaveBeenCalledOnce();
+      } finally {
+        releaseCheckout.resolve();
+        await Promise.allSettled(checkoutPromise ? [checkoutPromise] : []);
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await claimant.hostedMember.deleteMany({ where: { id: memberId } });
+        await disconnectClients([claimant, writer]);
+      }
+    });
+
+    it.each([
+      { claimOwner: "Family group" as const },
+      { claimOwner: "owner member" as const },
+    ])("blocks Family Checkout when a $claimOwner claim commits after reservation", async ({
+      claimOwner,
+    }) => {
+      const claimant = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_family_checkout_late_claim_${fixtureId}`;
+      const groupId = `hbag_family_checkout_late_claim_${fixtureId}`;
+      const reservationCommitted = createDeferred();
+      const releaseCheckout = createDeferred();
+      const controlledWriter = pauseAfterNextInteractiveTransaction({
+        committed: reservationCommitted,
+        prisma: writer,
+        release: releaseCheckout,
+      });
+      const now = new Date("2026-08-12T12:00:00.000Z");
+      const previousFamilyPriceId =
+        process.env[HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY];
+      let checkoutPromise: Promise<unknown> | null = null;
+      process.env[HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY] =
+        "price_family_late_claim";
+      installPassthroughHostedSecureBoxTestCodec();
+      stripeProvider.checkoutSessionsCreate.mockClear();
+      stripeProvider.checkoutSessionsCreate.mockImplementation(async (
+        params: Stripe.Checkout.SessionCreateParams,
+      ) => ({
+        client_reference_id: params.client_reference_id,
+        customer: params.customer ?? null,
+        id: "cs_test_familyLateClaim123",
+        metadata: params.metadata ?? {},
+        mode: "subscription",
+        status: "open",
+        subscription: null,
+        url: "https://checkout.stripe.com/c/pay/cs_test_familyLateClaim123",
+      }));
+
+      try {
+        await claimant.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.not_started,
+            id: memberId,
+          },
+        });
+        await claimant.hostedAccountGroup.create({
+          data: {
+            billingStatus: HostedBillingStatus.not_started,
+            id: groupId,
+            ownerMemberId: memberId,
+          },
+        });
+        await claimant.hostedAccountGroupMembership.create({
+          data: {
+            groupId,
+            id: `hbagm_family_checkout_late_claim_${fixtureId}`,
+            memberId,
+            planCode: "pulse",
+            role: "owner",
+            status: "active",
+          },
+        });
+
+        checkoutPromise = createHostedFamilyBillingCheckout({
+          groupId,
+          now,
+          ownerMemberId: memberId,
+          prisma: controlledWriter,
+          seatCount: 2,
+        });
+        await reservationCommitted.promise;
+        await expect(claimant.hostedAccountGroupBillingRef.findUnique({
+          select: { checkoutAttemptId: true },
+          where: { groupId },
+        })).resolves.toEqual({
+          checkoutAttemptId: expect.any(String),
+        });
+
+        await claimant.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT "id"
+            FROM "hosted_member"
+            WHERE "id" = ${memberId}
+            FOR UPDATE
+          `;
+          if (claimOwner === "Family group") {
+            await tx.hostedAccountGroupBillingRef.update({
+              data: {
+                stripeEffectClaimedAt: now,
+                stripeEffectClaimId: `family-checkout:${fixtureId}`,
+                stripeEffectKind: "family.subscription-create",
+              },
+              where: { groupId },
+            });
+          } else {
+            await tx.hostedMemberBillingRef.upsert({
+              create: {
+                memberId,
+                stripeEffectClaimedAt: now,
+                stripeEffectClaimId: `member-family-checkout:${fixtureId}`,
+                stripeEffectKind: "member.subscription-create",
+              },
+              update: {
+                stripeEffectClaimedAt: now,
+                stripeEffectClaimId: `member-family-checkout:${fixtureId}`,
+                stripeEffectKind: "member.subscription-create",
+              },
+              where: { memberId },
+            });
+          }
+        });
+        releaseCheckout.resolve();
+
+        await expect(checkoutPromise).rejects.toMatchObject({
+          code: "HOSTED_STRIPE_EFFECT_PENDING",
+          retryable: true,
+        });
+        expect(stripeProvider.checkoutSessionsCreate).not.toHaveBeenCalled();
+
+        await claimant.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT "id"
+            FROM "hosted_member"
+            WHERE "id" = ${memberId}
+            FOR UPDATE
+          `;
+          if (claimOwner === "Family group") {
+            await tx.hostedAccountGroupBillingRef.update({
+              data: {
+                stripeEffectClaimedAt: null,
+                stripeEffectClaimId: null,
+                stripeEffectKind: null,
+              },
+              where: { groupId },
+            });
+          } else {
+            await tx.hostedMemberBillingRef.update({
+              data: {
+                stripeEffectClaimedAt: null,
+                stripeEffectClaimId: null,
+                stripeEffectKind: null,
+              },
+              where: { memberId },
+            });
+          }
+        });
+        await expect(createHostedFamilyBillingCheckout({
+          groupId,
+          now,
+          ownerMemberId: memberId,
+          prisma: writer,
+          seatCount: 2,
+        })).resolves.toMatchObject({
+          alreadyActive: false,
+          url: expect.any(String),
+        });
+        expect(stripeProvider.checkoutSessionsCreate).toHaveBeenCalledOnce();
+      } finally {
+        releaseCheckout.resolve();
+        await Promise.allSettled(checkoutPromise ? [checkoutPromise] : []);
+        if (previousFamilyPriceId === undefined) {
+          delete process.env[HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY];
+        } else {
+          process.env[HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY] =
+            previousFamilyPriceId;
+        }
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await claimant.hostedAccountGroup.deleteMany({ where: { id: groupId } });
+        await claimant.hostedMember.deleteMany({ where: { id: memberId } });
+        await disconnectClients([claimant, writer]);
       }
     });
 

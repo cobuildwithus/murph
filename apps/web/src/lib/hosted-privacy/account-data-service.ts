@@ -973,6 +973,17 @@ async function deleteHostedAccountDataInternal(input: {
     providerAccessRemovalConfirmationToken:
       input.providerAccessRemovalConfirmationToken ?? null,
   });
+  // Sponsorship owns a beneficiary-first, payer-second lock order. Run that
+  // existing owner immediately after the durable suspension fence so no new
+  // payer admission can race it and no external deletion work precedes it.
+  await input.prisma.$transaction(
+    (tx) => cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
+      now: deletionStartedAt,
+      payerMemberIds: deletionMemberIds,
+      tx,
+    }),
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
   // The suspension fence is committed before provider identifiers are
   // decrypted so relationship writers cannot add ownership outside this
   // durable cleanup snapshot.
@@ -1150,11 +1161,6 @@ async function deleteHostedAccountDataInternal(input: {
       requiredMemberIds: deletionMemberIds.filter(
         (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
       ),
-    });
-    await cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
-      now: deletionStartedAt,
-      payerMemberIds: deletionMemberIds,
-      tx,
     });
     const transactionDeletionMemberIds = uniqueStrings([
       input.memberId,

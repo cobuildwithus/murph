@@ -508,6 +508,120 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
+  it("stops before direct Checkout provider entry when a member claim wins after reservation", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+    prisma.afterNextTransactionCommitted(() => {
+      prisma.setBillingRefState({
+        stripeEffectClaimId: "future-member-effect",
+      });
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberBillingRef.updateMany).toHaveBeenCalledWith({
+      data: {
+        checkoutAttemptId: null,
+        checkoutCreatedAt: null,
+        checkoutIntentHash: null,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+      },
+      where: expect.objectContaining({
+        memberId: "member_123",
+      }),
+    });
+  });
+
+  it("expires the unbound direct Session when a member claim wins at bind", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+    const session = {
+      client_reference_id: "member_123",
+      id: "cs_test_directClaimAtBind123",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutAttemptId: "",
+        checkoutIntentHash: "",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      mode: "subscription",
+      status: "open",
+      url: "https://billing.example.test/direct-claim-at-bind",
+    };
+    mocks.stripe.checkout.sessions.create.mockImplementationOnce(
+      async (params) => {
+        session.metadata.checkoutAttemptId = params.metadata.checkoutAttemptId;
+        session.metadata.checkoutIntentHash = params.metadata.checkoutIntentHash;
+        prisma.setBillingRefState({
+          stripeEffectClaimId: "future-member-effect",
+        });
+        return session;
+      },
+    );
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValue(session);
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+      session.id,
+    );
+    expect(
+      prisma.hostedMemberSubscriptionCheckout.create,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("expires an existing open direct Session when a claim wins before URL return", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ alreadyActive: false });
+
+    prisma.afterNextTransactionCommitted(() => {
+      prisma.setBillingRefState({
+        stripeEffectClaimId: "future-member-effect",
+      });
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:05.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_123");
+  });
+
   it("does not create Checkout while a claim-only owner group owns Family billing", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue({
@@ -1385,6 +1499,7 @@ function makePrisma(input: {
     suspendedAt: Date | null;
   } | null>;
 } = {}) {
+  const afterTransactionCallbacks: Array<() => Promise<void> | void> = [];
   let state: BillingRefFixture | null = input.billingRef
     ? {
         checkoutAttemptId: null,
@@ -1451,7 +1566,20 @@ function makePrisma(input: {
       input.memberFindUniqueResults.at(-1) ?? null,
     );
   } else {
-    memberFindUnique.mockResolvedValue(defaultMember);
+    memberFindUnique.mockImplementation(async () => defaultMember
+      ? {
+          ...defaultMember,
+          billingRef: state
+            ? {
+                currentBillingPhase: state.currentBillingPhase ?? null,
+                currentCheckoutOffer: state.currentCheckoutOffer ?? null,
+                stripeEffectClaimId: state.stripeEffectClaimId ?? null,
+                stripeSubscriptionLookupKey:
+                  state.stripeSubscriptionLookupKey ?? null,
+              }
+            : null,
+        }
+      : null);
   }
   const lockQuery = vi.fn().mockResolvedValue([]);
   const prismaTx = {
@@ -1480,7 +1608,11 @@ function makePrisma(input: {
   let transactionTail = Promise.resolve();
   const transaction = vi.fn(
     (callback: (tx: typeof prismaTx) => Promise<unknown>) => {
-      const result = transactionTail.then(() => callback(prismaTx));
+      const result = transactionTail.then(async () => {
+        const value = await callback(prismaTx);
+        await afterTransactionCallbacks.shift()?.();
+        return value;
+      });
       transactionTail = result.then(
         () => undefined,
         () => undefined,
@@ -1500,6 +1632,11 @@ function makePrisma(input: {
     },
     hostedMemberSubscriptionCheckout:
       prismaTx.hostedMemberSubscriptionCheckout,
+    afterNextTransactionCommitted(
+      callback: () => Promise<void> | void,
+    ) {
+      afterTransactionCallbacks.push(callback);
+    },
     setBillingRefState(data: Partial<BillingRefFixture>) {
       if (!state) {
         throw new Error("Expected a hosted member billing ref fixture.");

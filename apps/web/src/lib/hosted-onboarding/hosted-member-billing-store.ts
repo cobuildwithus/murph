@@ -216,28 +216,62 @@ export async function assertNoHostedDirectSubscriptionStripeEffectTx(input: {
     createHostedStripeSubscriptionLookupKeyReadCandidates(
       input.stripeSubscriptionId,
     );
-  const [memberClaim, familyClaim] = await Promise.all([
-    input.tx.hostedMemberBillingRef.findFirst({
-      select: { stripeEffectClaimId: true },
-      where: {
-        memberId: input.memberId,
-        stripeEffectClaimId: { not: null },
-      },
-    }),
-    directSubscriptionLookupKeys.length === 0
-      ? null
-      : input.tx.hostedAccountGroupBillingRef.findFirst({
-          select: { stripeEffectClaimId: true },
-          where: {
-            group: { ownerMemberId: input.memberId },
-            stripeEffectClaimId: { not: null },
-            stripeEffectDirectSubscriptionLookupKey: {
-              in: directSubscriptionLookupKeys,
-            },
+  const memberClaim = await input.tx.hostedMemberBillingRef.findUnique({
+    select: { stripeEffectClaimId: true },
+    where: { memberId: input.memberId },
+  });
+  await assertNoHostedDirectSubscriptionStripeEffectByLookupKeysTx({
+    directSubscriptionLookupKeys,
+    memberId: input.memberId,
+    stripeEffectClaimId: memberClaim?.stripeEffectClaimId,
+    tx: input.tx,
+  });
+}
+
+/**
+ * Bounded variant for callers that already selected the direct billing row
+ * under the member lock. This avoids decrypting the Subscription merely to
+ * rebuild the lookup key used by the Family conversion claim.
+ */
+export async function assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx(
+  input: {
+    memberId: string;
+    stripeEffectClaimId: string | null | undefined;
+    stripeSubscriptionLookupKey: string | null | undefined;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  await assertNoHostedDirectSubscriptionStripeEffectByLookupKeysTx({
+    directSubscriptionLookupKeys: input.stripeSubscriptionLookupKey
+      ? [input.stripeSubscriptionLookupKey]
+      : [],
+    memberId: input.memberId,
+    stripeEffectClaimId: input.stripeEffectClaimId,
+    tx: input.tx,
+  });
+}
+
+async function assertNoHostedDirectSubscriptionStripeEffectByLookupKeysTx(
+  input: {
+    directSubscriptionLookupKeys: readonly string[];
+    memberId: string;
+    stripeEffectClaimId: string | null | undefined;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  assertHostedStripeEffectClaimAbsent(input.stripeEffectClaimId);
+  const familyClaim = input.directSubscriptionLookupKeys.length === 0
+    ? null
+    : await input.tx.hostedAccountGroupBillingRef.findFirst({
+        select: { stripeEffectClaimId: true },
+        where: {
+          group: { ownerMemberId: input.memberId },
+          stripeEffectClaimId: { not: null },
+          stripeEffectDirectSubscriptionLookupKey: {
+            in: [...input.directSubscriptionLookupKeys],
           },
-        }),
-  ]);
-  assertHostedStripeEffectClaimAbsent(memberClaim?.stripeEffectClaimId);
+        },
+      });
   assertHostedStripeEffectClaimAbsent(familyClaim?.stripeEffectClaimId);
 }
 

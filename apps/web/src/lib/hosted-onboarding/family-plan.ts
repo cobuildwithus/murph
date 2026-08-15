@@ -29,6 +29,7 @@ import {
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
   createHostedStripeCheckoutSessionLookupKey,
+  createHostedStripeCheckoutSessionLookupKeyReadCandidates,
   createHostedTelegramUsernameLookupKey,
   createHostedTelegramUsernameLookupKeyReadCandidates,
   createHostedStripeCustomerLookupKey,
@@ -2803,6 +2804,18 @@ async function createOrResumeHostedFamilyBillingCheckout(
       });
     }
 
+    await prisma.$transaction(
+      (tx) => revalidateHostedFamilyCheckoutClaimTx({
+        checkoutAttemptId: checkoutInput.checkoutAttemptId,
+        groupId: checkoutInput.group.id,
+        ownerMemberId: checkoutInput.group.ownerMemberId,
+        sessionId: null,
+        subscriptionId: null,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+
     const metadata = buildHostedFamilyStripeMetadata(checkoutInput.group);
     metadata.checkoutAttemptId = checkoutInput.checkoutAttemptId;
     const checkoutParams: Stripe.Checkout.SessionCreateParams = {
@@ -2847,7 +2860,10 @@ async function createOrResumeHostedFamilyBillingCheckout(
     } catch (error) {
       if (
         isHostedOnboardingError(error)
-        && error.code === "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE"
+        && (
+          error.code === "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE"
+          || error.code === "HOSTED_STRIPE_EFFECT_PENDING"
+        )
       ) {
         await reconcileOrCloseHostedFamilyCheckoutAfterLostBind({
           attemptId: checkoutInput.checkoutAttemptId,
@@ -2941,17 +2957,31 @@ async function resumeHostedFamilyBillingCheckout(input: {
         retryable: true,
       });
     }
-    await input.prisma.$transaction(
-      (tx) => revalidateHostedFamilyCheckoutClaimTx({
-        checkoutAttemptId: input.checkoutInput.checkoutAttemptId,
-        groupId: input.checkoutInput.group.id,
-        ownerMemberId: input.checkoutInput.group.ownerMemberId,
-        sessionId: session.id,
-        subscriptionId: null,
-        tx,
-      }),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-    );
+    try {
+      await input.prisma.$transaction(
+        (tx) => revalidateHostedFamilyCheckoutClaimTx({
+          checkoutAttemptId: input.checkoutInput.checkoutAttemptId,
+          groupId: input.checkoutInput.group.id,
+          ownerMemberId: input.checkoutInput.group.ownerMemberId,
+          sessionId: session.id,
+          subscriptionId: null,
+          tx,
+        }),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+    } catch (error) {
+      if (
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_STRIPE_EFFECT_PENDING"
+      ) {
+        await closeUnboundHostedSubscriptionCheckout({
+          deleteSessionCustomer: false,
+          sessionId: session.id,
+          stripe: input.stripe,
+        });
+      }
+      throw error;
+    }
     return {
       alreadyActive: false,
       url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: session.url }) ??
@@ -3037,20 +3067,39 @@ async function revalidateHostedFamilyCheckoutClaimTx(input: {
   checkoutAttemptId: string;
   groupId: string;
   ownerMemberId: string;
-  sessionId: string;
+  sessionId: string | null;
   subscriptionId: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<"current" | "subscription_bound"> {
   await lockHostedMemberRow(input.tx, input.ownerMemberId);
-  const group = await input.tx.hostedAccountGroup.findUnique({
-    select: {
-      id: true,
-      ownerMemberId: true,
-    },
-    where: {
-      id: input.groupId,
-    },
-  });
+  const [group, owner, billingRef, memberBillingRef] = await Promise.all([
+    input.tx.hostedAccountGroup.findUnique({
+      select: {
+        id: true,
+        ownerMemberId: true,
+      },
+      where: {
+        id: input.groupId,
+      },
+    }),
+    input.tx.hostedMember.findUnique({
+      select: { suspendedAt: true },
+      where: { id: input.ownerMemberId },
+    }),
+    input.tx.hostedAccountGroupBillingRef.findUnique({
+      select: {
+        checkoutAttemptId: true,
+        stripeCheckoutSessionLookupKey: true,
+        stripeEffectClaimId: true,
+        stripeSubscriptionLookupKey: true,
+      },
+      where: { groupId: input.groupId },
+    }),
+    input.tx.hostedMemberBillingRef.findUnique({
+      select: { stripeEffectClaimId: true },
+      where: { memberId: input.ownerMemberId },
+    }),
+  ]);
   if (!group || group.ownerMemberId !== input.ownerMemberId) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
@@ -3059,20 +3108,41 @@ async function revalidateHostedFamilyCheckoutClaimTx(input: {
       retryable: true,
     });
   }
+  if (!owner || isHostedMemberSuspended(owner.suspendedAt)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+      message:
+        "This hosted account is suspended. Contact support to restore access.",
+    });
+  }
 
-  const billingRef = await readHostedAccountGroupStripeBillingRef({
-    groupId: input.groupId,
-    prisma: input.tx,
-  });
+  assertHostedStripeEffectClaimAbsent(billingRef?.stripeEffectClaimId);
+  assertHostedStripeEffectClaimAbsent(
+    memberBillingRef?.stripeEffectClaimId,
+  );
+  const subscriptionLookupKeys =
+    createHostedStripeSubscriptionLookupKeyReadCandidates(
+      input.subscriptionId,
+    );
   if (
-    input.subscriptionId
-    && billingRef?.stripeSubscriptionId === input.subscriptionId
+    subscriptionLookupKeys.length > 0
+    && billingRef?.stripeSubscriptionLookupKey != null
+    && subscriptionLookupKeys.includes(
+      billingRef.stripeSubscriptionLookupKey,
+    )
   ) {
     return "subscription_bound";
   }
+  const sessionLookupKeys =
+    createHostedStripeCheckoutSessionLookupKeyReadCandidates(input.sessionId);
+  const sessionMatches = input.sessionId === null
+    ? billingRef?.stripeCheckoutSessionLookupKey == null
+    : billingRef?.stripeCheckoutSessionLookupKey != null
+      && sessionLookupKeys.includes(billingRef.stripeCheckoutSessionLookupKey);
   if (
     billingRef?.checkoutAttemptId !== input.checkoutAttemptId
-    || billingRef.stripeCheckoutSessionId !== input.sessionId
+    || !sessionMatches
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
@@ -3933,13 +4003,23 @@ async function bindHostedFamilyCheckoutSessionTx(input: {
   sessionId: string;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
-  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
-  const owner = await input.tx.hostedMember.findUnique({
-    select: { suspendedAt: true },
-    where: { id: input.group.ownerMemberId },
-  });
-  if (!owner || owner.suspendedAt) {
-    return false;
+  try {
+    await revalidateHostedFamilyCheckoutClaimTx({
+      checkoutAttemptId: input.attemptId,
+      groupId: input.group.id,
+      ownerMemberId: input.group.ownerMemberId,
+      sessionId: null,
+      subscriptionId: null,
+      tx: input.tx,
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_MEMBER_SUSPENDED"
+    ) {
+      return false;
+    }
+    throw error;
   }
 
   const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(

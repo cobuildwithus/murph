@@ -8,12 +8,13 @@ type BillingPortalSessionCreateArguments = Parameters<
 >;
 
 const mocks = vi.hoisted(() => ({
-  assertNoHostedDirectSubscriptionStripeEffectTx: vi.fn(),
+  assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   decryptHostedWebNullableString: vi.fn(),
   getPrisma: vi.fn(),
   hostedAccountGroupFindUnique: vi.fn(),
-  readHostedMemberStripeBillingRef: vi.fn(),
+  hostedMemberBillingRefFindUnique: vi.fn(),
+  operationOrder: [] as string[],
   requireHostedAppSessionFromRequest: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   stripeBillingPortalSessionCreate: vi.fn<
@@ -31,8 +32,8 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  assertNoHostedDirectSubscriptionStripeEffectTx:
-    mocks.assertNoHostedDirectSubscriptionStripeEffectTx,
+  assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx:
+    mocks.assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx,
   assertHostedStripeEffectClaimAbsent: (claimId: string | null | undefined) => {
     if (claimId !== null && claimId !== undefined) {
       throw hostedOnboardingError({
@@ -43,13 +44,17 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
       });
     }
   },
-  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock: mocks.withHostedMemberStripeMutationLock,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD:
     "hosted-account-group-billing-ref.stripe-customer-id",
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", () => ({
+  HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD:
+    "hosted-member-billing-ref.stripe-customer-id",
 }));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
@@ -72,19 +77,44 @@ const originalFamilyPortalConfigurationId =
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  mocks.operationOrder.splice(0);
   delete process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   const prisma = {
     hostedAccountGroup: {
       findUnique: mocks.hostedAccountGroupFindUnique,
     },
+    hostedMemberBillingRef: {
+      findUnique: mocks.hostedMemberBillingRefFindUnique,
+    },
   };
   mocks.getPrisma.mockReturnValue(prisma as never);
   mocks.withHostedMemberStripeMutationLock.mockImplementation(
-    async (input: { run: (tx: unknown) => Promise<unknown> }) => input.run(prisma),
+    async (input: { run: (tx: unknown) => Promise<unknown> }) => {
+      mocks.operationOrder.push("lock:start");
+      try {
+        return await input.run(prisma);
+      } finally {
+        mocks.operationOrder.push("lock:end");
+      }
+    },
   );
-  mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockResolvedValue(undefined);
-  mocks.decryptHostedWebNullableString.mockResolvedValue("cus_family_123");
+  mocks.assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx
+    .mockImplementation(async () => {
+      mocks.operationOrder.push("direct-claim-check");
+    });
+  mocks.decryptHostedWebNullableString.mockImplementation(async (input: {
+    field: string;
+    value: string | null;
+  }) => {
+    mocks.operationOrder.push("decrypt");
+    if (input.value === null) {
+      return null;
+    }
+    return input.field === "hosted-member-billing-ref.stripe-customer-id"
+      ? "cus_123"
+      : "cus_family_123";
+  });
   mocks.hostedAccountGroupFindUnique.mockResolvedValue({
     billingRef: {
       stripeCustomerIdEncrypted: "encrypted:cus_family_123",
@@ -102,18 +132,27 @@ beforeEach(async () => {
       suspendedAt: null,
     },
   });
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
-    memberId: "member_123",
-    stripeCustomerId: "cus_123",
-    stripeSubscriptionId: "sub_123",
+  mocks.hostedMemberBillingRefFindUnique.mockImplementation(async () => {
+    mocks.operationOrder.push("member-read");
+    return {
+      stripeCustomerIdEncrypted: "encrypted:cus_123",
+      stripeCustomerLookupKey: "lookup:cus_123",
+      stripeEffectClaimId: null,
+      stripeSubscriptionLookupKey: "lookup:sub_123",
+    };
   });
   mocks.requireHostedStripeApi.mockReturnValue({
     billingPortal: {
       sessions: {
-        create: mocks.stripeBillingPortalSessionCreate.mockResolvedValue({
-          id: "bps_123",
-          url: "https://stripe.example.test/portal/session_123",
-        }),
+        create: mocks.stripeBillingPortalSessionCreate.mockImplementation(
+          async () => {
+            mocks.operationOrder.push("stripe");
+            return {
+              id: "bps_123",
+              url: "https://stripe.example.test/portal/session_123",
+            };
+          },
+        ),
       },
     },
   });
@@ -146,16 +185,42 @@ test("creates a Stripe billing portal session for an authenticated hosted member
   });
   expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-  expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledWith({
-    memberId: "member_123",
-    prisma: expect.any(Object),
+  expect(mocks.hostedMemberBillingRefFindUnique).toHaveBeenCalledWith({
+    select: {
+      stripeCustomerIdEncrypted: true,
+      stripeCustomerLookupKey: true,
+      stripeEffectClaimId: true,
+      stripeSubscriptionLookupKey: true,
+    },
+    where: { memberId: "member_123" },
   });
   expect(mocks.stripeBillingPortalSessionCreate).toHaveBeenCalledWith({
     customer: "cus_123",
     return_url: "https://join.example.test/settings",
   });
   expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(2);
-  expect(mocks.assertNoHostedDirectSubscriptionStripeEffectTx).toHaveBeenCalledTimes(2);
+  expect(
+    mocks.assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx,
+  ).toHaveBeenCalledTimes(2);
+  expect(mocks.decryptHostedWebNullableString).toHaveBeenCalledOnce();
+  expect(mocks.decryptHostedWebNullableString).toHaveBeenCalledWith({
+    field: "hosted-member-billing-ref.stripe-customer-id",
+    memberId: "member_123",
+    prisma: expect.any(Object),
+    value: "encrypted:cus_123",
+  });
+  expect(mocks.operationOrder).toEqual([
+    "lock:start",
+    "member-read",
+    "direct-claim-check",
+    "lock:end",
+    "decrypt",
+    "stripe",
+    "lock:start",
+    "member-read",
+    "direct-claim-check",
+    "lock:end",
+  ]);
 });
 
 test("creates a Stripe billing portal session for a family owner group", async () => {
@@ -200,7 +265,7 @@ test("creates a Stripe billing portal session for a family owner group", async (
     prisma: expect.any(Object),
     value: "encrypted:cus_family_123",
   });
-  expect(mocks.readHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  expect(mocks.hostedMemberBillingRefFindUnique).not.toHaveBeenCalled();
   expect(mocks.stripeBillingPortalSessionCreate).toHaveBeenCalledWith({
     customer: "cus_family_123",
     return_url: "https://join.example.test/settings",
@@ -233,7 +298,8 @@ test.each([
       ownerMemberId: "member_123",
     });
   } else {
-    mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockRejectedValueOnce(rejection);
+    mocks.assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx
+      .mockRejectedValueOnce(rejection);
   }
 
   const response = await billingPortalRoute.POST(
@@ -261,7 +327,7 @@ test.each([
 });
 
 test("does not return a newly created Portal URL when a claim wins the final owner check", async () => {
-  mocks.assertNoHostedDirectSubscriptionStripeEffectTx
+  mocks.assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx
     .mockResolvedValueOnce(undefined)
     .mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_STRIPE_EFFECT_PENDING",
@@ -282,7 +348,9 @@ test("does not return a newly created Portal URL when a claim wins the final own
     error: { code: "HOSTED_STRIPE_EFFECT_PENDING" },
   });
   expect(mocks.stripeBillingPortalSessionCreate).toHaveBeenCalledOnce();
-  expect(mocks.assertNoHostedDirectSubscriptionStripeEffectTx).toHaveBeenCalledTimes(2);
+  expect(
+    mocks.assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx,
+  ).toHaveBeenCalledTimes(2);
 });
 
 test("does not return or re-decrypt a Family Portal URL when a claim wins the final check", async () => {
@@ -428,10 +496,11 @@ test.each([
 );
 
 test("fails closed when the hosted member has no stored Stripe customer", async () => {
-  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-    memberId: "member_123",
-    stripeCustomerId: null,
-    stripeSubscriptionId: null,
+  mocks.hostedMemberBillingRefFindUnique.mockResolvedValueOnce({
+    stripeCustomerIdEncrypted: null,
+    stripeCustomerLookupKey: null,
+    stripeEffectClaimId: null,
+    stripeSubscriptionLookupKey: null,
   });
 
   const response = await billingPortalRoute.POST(

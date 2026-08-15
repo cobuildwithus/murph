@@ -691,6 +691,7 @@ async function revalidateHostedBillingCheckoutAttemptTx(input: {
         select: {
           currentBillingPhase: true,
           currentCheckoutOffer: true,
+          stripeEffectClaimId: true,
           stripeSubscriptionLookupKey: true,
         },
       },
@@ -706,6 +707,24 @@ async function revalidateHostedBillingCheckoutAttemptTx(input: {
         httpStatus: 403,
         message:
           "This hosted account is suspended. Contact support to restore access.",
+      }),
+      kind: "blocked",
+    };
+  }
+  if (member.billingRef?.stripeEffectClaimId != null) {
+    await clearHostedMemberStripeCheckoutAttemptTx({
+      attemptId: input.attempt.attemptId,
+      expectedSessionId: input.attempt.stripeCheckoutSessionId,
+      intentHash: input.attempt.intentHash,
+      memberId: input.memberId,
+      tx: input.tx,
+    });
+    return {
+      error: hostedOnboardingError({
+        code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+        httpStatus: 409,
+        message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+        retryable: true,
       }),
       kind: "blocked",
     };
