@@ -1,6 +1,6 @@
 # Index image-completion candidates for hot replies
 
-Status: active
+Status: completed
 Created: 2026-08-15
 Updated: 2026-08-15
 
@@ -80,10 +80,11 @@ Updated: 2026-08-15
 - Treat `hasImageCompletionCandidate` as an additive, conservative derived hint
   within the existing v2 exact-ack index. Do not add a v3 migration lane or
   compatibility subsystem; document the strict-reader rollback floor instead.
-- Coverage is the only applicable preliminary specialist lens. Product
-  experience, prompt, and frontend are not changed. The final cross-cutting
-  ReviewGPT gate applies because persisted hosted-runtime state and foreground
-  ordering are affected.
+- Coverage and product experience are the applicable preliminary specialist
+  lenses: the member-visible interaction and recovery semantics do not change,
+  but removing foreground hydration changes ordinary reply timing. Prompt and
+  frontend are not changed. The final cross-cutting ReviewGPT gate applies
+  because persisted hosted-runtime state and foreground ordering are affected.
 
 ## Verification
 
@@ -91,7 +92,39 @@ Updated: 2026-08-15
 - `pnpm --filter @murphai/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-pending-input-index.test.ts test/hosted-runtime-turn-input.test.ts`
 - `git diff --check`
 - Secret-safe diff/path privacy scan and supplied-patch SHA-256 verification.
-- Expected: typecheck succeeds; both focused test files pass; the ordinary path
-  records no pending-event hydration; completion, legacy-state, compaction, and
-  established positive recovery cases pass; no whitespace or identifier leak is
-  present.
+- Result: typecheck passed; both focused test files passed with 73 tests on the
+  corrected head. The ordinary path records no pending-event hydration;
+  completion, legacy-state, compaction, missing-event fail-safe, and established
+  positive recovery cases passed.
+- Result: the supplied patch SHA-256 matched
+  `1493bdbe301e5c4404a10f5c81487b14d56ddfda8c18fbf2e7fc5f35bf49951f`;
+  diff/whitespace and secret-safe privacy checks passed.
+
+## Review disposition
+
+- The preliminary specialist reviewed the immutable production candidate
+  `e4587d839c4fbc8f306c9a9e4e4cac88da437dda` for 20m46s. Captured metadata
+  bound the response to `gpt-5-6-pro`. Product experience passed with no
+  findings; prompt and frontend were not applicable; coverage produced one
+  medium finding requesting direct proof of the missing-event conservative
+  branch.
+- The finding was accepted and resolved at
+  `ca03c9df662f545bb26e7ab63724a1e48a15f93f` with six test-only assertion
+  lines proving the complete recovery cohort immediately after enqueue and
+  after compaction. The specialist attachment could not be downloaded, so its
+  narrowly stated correction was implemented manually and verified locally.
+- Final ReviewGPT round 1 reviewed the same immutable production candidate for
+  22m25s, with captured `gpt-5-6-pro` metadata, and returned
+  `ROUND_OUTCOME: PASS`, `REVIEW_COMPLETE`, and no qualifying findings. The
+  later correction is test-only, so the repository workflow does not require a
+  new substantive final round.
+- Parent review traced enqueue, parsing, merge, backfill, compaction, exact
+  acknowledgement, foreground selection, and positive completion recovery. It
+  found no unresolved correctness or architectural issue and confirmed that a
+  stale projection can only retain old work, not suppress a completion.
+- All required GitHub checks passed on the corrected candidate
+  `ca03c9df662f545bb26e7ab63724a1e48a15f93f`, including release build and
+  typecheck, assistant/CLI/platform coverage, release app verification, the CLI
+  host matrix, billing boundaries, frontend proof, fixture coverage, and
+  tracked-artifact checks.
+Completed: 2026-08-15
