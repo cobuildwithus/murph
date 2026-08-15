@@ -131,5 +131,6 @@ Updated: 2026-08-14
   Queue/route/device-sync HTTP 46 tests pass; hosted-control, Cloudflare, and
   prepared Web typechecks pass. The focused Node crypto and Queue rotation suites
   add 11 passing tests, the real workerd reseal regression passes, and the
-  runtime-state, hosted-control, and Cloudflare typechecks pass. Exact-head CI,
-  correction ReviewGPT, and the corrected production canary remain pending.
+  runtime-state, hosted-control, Cloudflare, and prepared Web typechecks pass.
+  The 45 focused changelog contract tests also pass. Exact-head CI, correction
+  ReviewGPT, and the corrected production canary remain pending.

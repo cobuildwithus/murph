@@ -9,6 +9,6 @@
     "summary": "Connected wearables now buffer large bursts of provider updates so they do not overwhelm sync admission.",
     "details": "Murph verifies and encrypts each supported update before durable handoff, processes updates with bounded database pressure, and retains failed work for recovery. Existing consent, connection, source, and duplicate checks still run before an update becomes sync work.",
     "relevanceTags": ["wearables", "reliability", "sync", "privacy"],
-    "sourcePullRequests": [1766]
+    "sourcePullRequests": [1766, 1869]
   }
 }
