@@ -1,6 +1,7 @@
 import * as z from '@murphai/contracts/zod-runtime'
 import {
-  compactTableResponseCardAuthoringV1Schema,
+  compactTableGenericResponseCardV1Schema,
+  compactTableWorkoutResponseCardAuthoringV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   isStrictIsoDate,
 } from '@murphai/contracts'
@@ -331,9 +332,15 @@ const attachDailyNutritionResponseCardArgumentsSchema = z
   })
   .strict()
 
-const attachCompactTableResponseCardArgumentsSchema = z
+const attachCompactTableGenericResponseCardArgumentsSchema = z
   .object({
-    card: compactTableResponseCardAuthoringV1Schema,
+    card: compactTableGenericResponseCardV1Schema,
+  })
+  .strict()
+
+const attachCompactTableWorkoutResponseCardArgumentsSchema = z
+  .object({
+    card: compactTableWorkoutResponseCardAuthoringV1Schema,
   })
   .strict()
   .superRefine(addAttachResponseCardArgumentIssues)
@@ -7166,7 +7173,21 @@ function readAttachResponseCardDiagnosticError(
     return parsed.success ? fallbackError : parsed.error
   }
   if (card?.kind === 'compact_table') {
-    const parsed = attachCompactTableResponseCardArgumentsSchema.safeParse(value)
+    const hasWorkoutShape = Object.hasOwn(card, 'workout')
+      || asRecord(card.tracking)?.kind === 'workout'
+    const hasGenericShape = ['rowHeader', 'columns', 'rows']
+      .some((key) => Object.hasOwn(card, key))
+    if (hasWorkoutShape === hasGenericShape) {
+      return new z.ZodError([{
+        code: z.ZodIssueCode.custom,
+        message: 'Choose one compact-table card shape.',
+        path: ['card'],
+      }])
+    }
+    const diagnosticSchema = hasWorkoutShape
+      ? attachCompactTableWorkoutResponseCardArgumentsSchema
+      : attachCompactTableGenericResponseCardArgumentsSchema
+    const parsed = diagnosticSchema.safeParse(value)
     return parsed.success ? fallbackError : parsed.error
   }
   return fallbackError

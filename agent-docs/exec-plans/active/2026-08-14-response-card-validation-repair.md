@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-14
-Updated: 2026-08-14
+Updated: 2026-08-15
 
 ## Goal
 
@@ -74,11 +74,15 @@ Updated: 2026-08-14
   this one refinement and the runtime returns the exact repair hint.
 - Use bounded structured JSON hints and omit received shapes and submitted
   values from the model-facing failure response.
+- Select one compact-table diagnostic branch from the schema-owned generic or
+  workout fields before building repair hints. Ambiguous and hybrid shapes get
+  one bounded card-level shape-choice hint; the authoritative acceptance union
+  remains unchanged.
 
 ## Verification
 
 - Passed: safe-digest, audience-scoped diagnostics, and one-retry response-card
-  focused tests (7 tests).
+  focused tests, including mutually exclusive compact-table branch hints.
 - Passed: existing response-card tool suite (26 tests).
 - Passed: operator-config response-card tests and the 4,911-byte schema
   compaction boundary (24 tests); exact-head full operator-config package
@@ -88,6 +92,9 @@ Updated: 2026-08-14
 - Passed: the real App Server same-turn private invalid-call/corrected-call/card
   delivery proof and a separate malformed group-card feedback proof (2 tests).
 - Passed: operator-config, assistant-engine, and CLI package typechecks.
+- Passed: full assistant-engine coverage with an 8 GB Node heap (240 files
+  passed, 1 skipped; 3,740 tests passed, 79 skipped). The default 4 GB heap
+  attempt exhausted memory before completing; no product failure was observed.
 - Passed: normalized complete first-provider request capture with the pinned
   real Codex App Server, `gpt-5.6-terra`, low reasoning, production code mode,
   identical synthetic direct/group turns, and `gpt-tokenizer` 3.4.0
@@ -112,3 +119,13 @@ Updated: 2026-08-14
 - Accepted the same-turn journey-proof finding. The production App Server
   harness now proves invalid call, bounded repair result, corrected call, and
   terminal card delivery in one inbound turn.
+
+## Final review round 1 disposition
+
+- Accepted the compact-table cross-branch diagnostic finding. Diagnostics now
+  choose exactly one existing contract schema, generic and workout failures
+  exclude the other branch's fields, and the same-turn App Server proof starts
+  with a genuinely malformed nested generic card.
+- Updated the existing pending-vault-file diagnostic assertion for the shared
+  conventional array path (`intentIds[]`) and explicitly covered the new
+  metadata-only issue shape and summary; submitted content remains absent.

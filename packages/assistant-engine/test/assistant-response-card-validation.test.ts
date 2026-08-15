@@ -4,6 +4,9 @@ import {
   executeMurphDynamicToolRequest,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  buildResponseCardValidationFeedback,
+} from '../src/assistant-codex/response-card-validation-feedback.ts'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 
 const INVALID_TABLE = {
@@ -183,5 +186,132 @@ describe('response-card validation feedback', () => {
       ...INVALID_TABLE,
       rows: [{ label: 'Monday', values: ['Strength', '3 sets'] }],
     })).toMatchObject({ kind: 'attach-response-card' })
+  })
+
+  it('keeps compact-table repair hints on exactly one card shape', () => {
+    const genericWithoutColumns = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Weekly plan',
+      subtitle: null,
+      rowHeader: 'Day',
+      rows: [{ label: 'Monday', values: ['Strength'] }],
+      footer: null,
+      tracking: null,
+    }
+    const genericRequest = readCardToolRequest(genericWithoutColumns)
+    expect(genericRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({ path: 'card.columns' }),
+        ]),
+      },
+    })
+    const genericFeedback = JSON.stringify(genericRequest)
+    expect(genericFeedback).not.toContain('card.workout')
+    expect(genericFeedback).not.toContain('card.tracking')
+
+    const workoutRequest = readCardToolRequest({
+      kind: 'compact_table',
+      version: 1,
+      title: 'Synthetic workout',
+      subtitle: null,
+      footer: null,
+      tracking: {
+        kind: 'workout',
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        snapshotAt: '2026-08-09T19:45:00.000Z',
+      },
+      workout: {
+        version: 1,
+        state: 'active',
+      },
+    })
+    expect(workoutRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({ path: 'card.workout.exercises' }),
+        ]),
+      },
+    })
+    const workoutFeedback = JSON.stringify(workoutRequest)
+    expect(workoutFeedback).not.toContain('card.rowHeader')
+    expect(workoutFeedback).not.toContain('card.columns')
+    expect(workoutFeedback).not.toContain('card.rows')
+
+    const workoutWithoutDetailRequest = readCardToolRequest({
+      kind: 'compact_table',
+      version: 1,
+      title: 'Synthetic workout',
+      subtitle: null,
+      footer: null,
+      tracking: {
+        kind: 'workout',
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        snapshotAt: '2026-08-09T19:45:00.000Z',
+      },
+    })
+    expect(workoutWithoutDetailRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({ path: 'card.workout' }),
+        ]),
+      },
+    })
+
+    const conflictingShapeRequest = readCardToolRequest({
+      ...INVALID_TABLE,
+      tracking: {
+        kind: 'workout',
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        snapshotAt: '2026-08-09T19:45:00.000Z',
+      },
+    })
+    expect(conflictingShapeRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: [{
+          path: 'card',
+          code: 'custom',
+        }],
+      },
+    })
+
+    const shapeChoiceRequest = readCardToolRequest({
+      kind: 'compact_table',
+      version: 1,
+      title: 'Synthetic table',
+      subtitle: null,
+      footer: null,
+      tracking: null,
+    })
+    expect(shapeChoiceRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: [{
+          path: 'card',
+          code: 'custom',
+        }],
+      },
+    })
+    if (
+      !shapeChoiceRequest
+      || shapeChoiceRequest.kind !== 'invalid-response-card-arguments'
+    ) {
+      throw new Error('expected compact-table shape choice feedback')
+    }
+    expect(buildResponseCardValidationFeedback(
+      shapeChoiceRequest.validationDigest,
+    )).toBe(JSON.stringify({
+      error: 'invalid_response_card_arguments',
+      hints: [{
+        field: 'card',
+        code: 'custom',
+        expected: 'compact_table.generic_or_workout_shape',
+      }],
+    }))
   })
 })

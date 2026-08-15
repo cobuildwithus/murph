@@ -143,7 +143,7 @@ const compactTableResponseCardHeaderV1Shape = {
   subtitle: singleLineText(compactTableCardV1Bounds.subtitle).nullable(),
 } as const;
 
-const compactTableGenericResponseCardV1Schema = z
+export const compactTableGenericResponseCardV1Schema = z
   .object({
     ...compactTableResponseCardHeaderV1Shape,
     rowHeader: singleLineText(compactTableCardV1Bounds.rowHeader),
@@ -180,7 +180,7 @@ const compactTableGenericResponseCardV1Schema = z
     addEncodedLengthIssues(envelope, context, "compact table");
   });
 
-const compactTableWorkoutResponseCardAuthoringV1Schema = z
+export const compactTableWorkoutResponseCardAuthoringV1Schema = z
   .object({
     ...compactTableResponseCardHeaderV1Shape,
     footer: singleLineText(compactTableCardV1Bounds.footer).nullable(),

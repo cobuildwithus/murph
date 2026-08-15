@@ -5416,12 +5416,20 @@ if (!tool) {
       footer: null,
       tracking: null,
     } as const
+    const malformedCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Synthetic plan',
+      subtitle: null,
+      rowHeader: 'Day',
+      rows: [{ label: 'Monday', values: ['Strength'] }],
+      footer: null,
+      tracking: null,
+    } as const
     scenario.stub.queue(
       {
         functionCall: {
-          arguments: {
-            typo: { marker: 'synthetic-private-marker' },
-          },
+          arguments: { card: malformedCard },
           name: 'attach_response_card',
           namespace: 'murph',
         },
@@ -5446,10 +5454,10 @@ if (!tool) {
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
-    expect(invalidOutput).toContain('"field":"card"')
+    expect(invalidOutput).toContain('"field":"card.columns"')
+    expect(invalidOutput).not.toContain('card.workout')
+    expect(invalidOutput).not.toContain('card.tracking')
     expect(invalidOutput).not.toContain('challengeSlug')
-    expect(invalidOutput).not.toContain('synthetic-private-marker')
-    expect(invalidOutput).not.toContain('typo')
     expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
       'response card attached',
     )

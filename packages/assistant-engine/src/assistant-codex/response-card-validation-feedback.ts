@@ -6,6 +6,7 @@ const MAX_RESPONSE_CARD_REPAIR_HINTS = 4
 const MAX_RESPONSE_CARD_VALIDATION_FEEDBACK_LENGTH = 1_600
 
 const CUSTOM_EXPECTED_SHAPES: Readonly<Record<string, string>> = {
+  card: 'compact_table.generic_or_workout_shape',
   'card.goals.calories.status': 'consistent_with_total_and_target',
   'card.goals.carbsGrams.status': 'consistent_with_total_and_target',
   'card.goals.fatGrams.status': 'consistent_with_total_and_target',
