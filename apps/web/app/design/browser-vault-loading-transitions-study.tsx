@@ -10,6 +10,7 @@ import type {
 import {
   BiomarkerDetailContent,
   BiomarkerDetailShell,
+  BiomarkerStaleRefreshAlert,
   EmptyBiomarkerDetailCard,
 } from "@/src/components/biomarkers/lab-biomarker-detail-view";
 import {
@@ -360,6 +361,7 @@ export function BrowserVaultLoadingTransitionsStudy() {
             detail={DESIGN_LAB_DETAIL}
             summary="Synthetic iron-storage marker history for layout review."
           >
+            <BiomarkerStaleRefreshAlert hasResults onRefresh={() => undefined} />
             <BiomarkerDetailContent detail={DESIGN_LAB_DETAIL} fallbackRanges={[]} />
           </BiomarkerDetailShell>
         </StudyState>
@@ -374,6 +376,7 @@ export function BrowserVaultLoadingTransitionsStudy() {
         </StudyState>
         <StudyState label="Stale empty result" state="stale-empty">
           <BiomarkerDetailShell chatAction={null} detail={null} summary={null}>
+            <BiomarkerStaleRefreshAlert hasResults={false} onRefresh={() => undefined} />
             <EmptyBiomarkerDetailCard
               authRequired={false}
               preparing={false}

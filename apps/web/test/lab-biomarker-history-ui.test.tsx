@@ -935,7 +935,7 @@ test("a pending refresh keeps ready empty replicas in the preparing state", asyn
   }
 });
 
-test("stale list and detail states stay quiet while the shared provider owns refresh", async () => {
+test("a stale detail without an active provider refresh keeps explicit recovery", async () => {
   browserVaultMock.value.client = clientWithRows([]);
   browserVaultMock.value.freshness = "stale";
   browserVaultMock.value.status = "ready";
@@ -964,10 +964,17 @@ test("stale list and detail states stay quiet while the shared provider owns ref
   );
   try {
     expect(detail.container.textContent).toContain("No results found");
-    expect(detail.container.textContent).not.toContain("This history may be out of date");
-    expect(detail.container.textContent).not.toContain("Refresh");
+    expect(detail.container.textContent).toContain("This history may be out of date");
+    const refreshButton = [...detail.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Refresh",
+    );
+    expect(refreshButton).not.toBeUndefined();
     expect(detail.container.querySelector('[aria-live="polite"]')).toBeNull();
-    expect(refresh).not.toHaveBeenCalled();
+    await act(async () => {
+      refreshButton?.dispatchEvent(new detail.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
   } finally {
     await detail.cleanup();
   }
@@ -999,22 +1006,31 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   browserVaultMock.value.freshness = "stale";
   browserVaultMock.value.status = "ready";
   const refresh = browserVaultMock.value.refresh;
+  refresh.mockClear();
   const stale = await renderClientComponent(
     <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
     { requireButton: false },
   );
   try {
     expect(stale.container.textContent).toContain("HbA1c");
-    expect(stale.container.textContent).not.toContain("This history may be out of date");
+    expect(stale.container.textContent).toContain("This history may be out of date");
     expect(stale.container.textContent).not.toContain("Refreshing this history");
     expect(stale.container.textContent).not.toContain("while Murph checks");
-    expect(stale.container.textContent).not.toContain("Refresh");
+    const refreshButton = [...stale.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Refresh",
+    );
+    expect(refreshButton).not.toBeUndefined();
     expect(stale.container.querySelector('[aria-live="polite"]')).toBeNull();
-    expect(refresh).not.toHaveBeenCalled();
+    await act(async () => {
+      refreshButton?.dispatchEvent(new stale.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
   } finally {
     await stale.cleanup();
   }
 
+  refresh.mockClear();
   browserVaultMock.value.refreshPending = true;
   const refreshing = await renderClientComponent(
     <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
@@ -1026,6 +1042,7 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
     expect(refreshing.container.textContent).not.toContain("last saved results remain visible");
     expect(refreshing.container.textContent).not.toContain("Refresh");
     expect(refreshing.container.querySelector('[aria-live="polite"]')).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
   } finally {
     await refreshing.cleanup();
   }
@@ -1040,6 +1057,15 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   try {
     expect(error.container.textContent).toContain("Could not load this biomarker");
     expect(error.container.textContent).not.toContain("internal diagnostic");
+    const retryButton = [...error.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Retry",
+    );
+    expect(retryButton).not.toBeUndefined();
+    await act(async () => {
+      retryButton?.dispatchEvent(new error.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
     expectPageIdentity(error.container);
   } finally {
     await error.cleanup();

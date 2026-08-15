@@ -35,6 +35,8 @@ test("the design catalog renders each Browser Vault loading transition with synt
   expect(markup).toContain('data-design-state="stale-empty"');
   expect(markup).toContain("Ferritin");
   expect(markup).toContain("No results found");
+  expect(markup).toContain("This history may be out of date");
+  expect(markup).toContain("Refresh");
   expect(markup).not.toContain("Refreshing this history");
   expect(markup).not.toContain("last saved results remain visible");
   expect(markup).toContain('inert=""');

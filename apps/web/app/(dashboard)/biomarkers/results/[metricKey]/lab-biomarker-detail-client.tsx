@@ -14,6 +14,7 @@ import {
 import {
   BiomarkerDetailContent,
   BiomarkerDetailShell,
+  BiomarkerStaleRefreshAlert,
   EmptyBiomarkerDetailCard,
 } from "@/src/components/biomarkers/lab-biomarker-detail-view";
 import { BiomarkerDetailSkeleton } from "@/src/components/biomarkers/lab-biomarker-detail-skeleton";
@@ -43,6 +44,7 @@ export function LabBiomarkerDetailClient({
 }: LabBiomarkerDetailClientProps) {
   const {
     error,
+    freshness,
     refresh,
     refreshPending,
     status,
@@ -85,19 +87,35 @@ export function LabBiomarkerDetailClient({
     );
   } else if (!detail) {
     content = (
-      <EmptyBiomarkerDetailCard
-        authRequired={authRequired}
-        preparing={refreshPending}
-        uploadLabsAction={uploadLabsAction}
-      />
+      <>
+        {freshness === "stale" && !refreshPending ? (
+          <BiomarkerStaleRefreshAlert
+            hasResults={false}
+            onRefresh={() => void refresh()}
+          />
+        ) : null}
+        <EmptyBiomarkerDetailCard
+          authRequired={authRequired}
+          preparing={refreshPending}
+          uploadLabsAction={uploadLabsAction}
+        />
+      </>
     );
   } else {
     visibleDetail = detail;
     content = (
-      <BiomarkerDetailContent
-        detail={detail}
-        fallbackRanges={fallbackRanges}
-      />
+      <>
+        {freshness === "stale" && !refreshPending ? (
+          <BiomarkerStaleRefreshAlert
+            hasResults
+            onRefresh={() => void refresh()}
+          />
+        ) : null}
+        <BiomarkerDetailContent
+          detail={detail}
+          fallbackRanges={fallbackRanges}
+        />
+      </>
     );
   }
 

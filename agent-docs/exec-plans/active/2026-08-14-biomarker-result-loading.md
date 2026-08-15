@@ -7,15 +7,16 @@ Updated: 2026-08-14
 ## Goal
 
 - Make the biomarker-result loading state preserve the real page hierarchy and
-  remove the visible stale-refresh notice while the existing background refresh
-  owner continues to converge saved data.
+  remove the visible refreshing notice while an active background refresh owner
+  continues to converge saved data. Preserve explicit recovery when no refresh
+  is in flight.
 - Separate the user-facing UI repair from the diagnosed production latency
   incident so no speculative data-path abstraction is added to this patch.
 
 ## Success criteria
 
-- The detail route shows no stale or refreshing banner when saved results remain
-  usable.
+- The detail route stays quiet while a provider refresh is active, while stale
+  populated and empty states with no active refresh expose a working action.
 - The loading skeleton mirrors the latest-reading/chart shell and year-grouped
   result ledger at desktop and mobile widths.
 - Focused component coverage proves quiet stale and refresh-pending states,
@@ -47,16 +48,17 @@ Updated: 2026-08-14
     artifacts.
 - Product/process constraints:
   - Reuse the production component in `/design?tab=sections`.
-  - Keep the solution proportional and delete the obsolete notice rather than
-    replacing it with different refresh copy.
+  - Keep the solution proportional: delete obsolete in-progress copy, but do
+    not conceal recovery when the provider has no active refresh owner.
   - Production deployment is protected external state and is diagnosis-only in
     this task without separate authorization.
 
 ## Risks and mitigations
 
 1. Risk: Removing the banner also removes its manual refresh action.
-   Mitigation: Preserve the shared provider's existing automatic stale refresh
-   and retain the explicit retry action for actual load errors.
+   Mitigation: Keep active refreshes quiet, restore the stale/no-pending action
+   for populated and empty states, and retain the explicit retry action for
+   actual load errors.
 2. Risk: A polished skeleton could drift from the loaded layout.
    Mitigation: Use the same container, grid, breakpoint, spacing, and ledger
    hierarchy as the production result content, then render it in the catalog.
@@ -68,7 +70,8 @@ Updated: 2026-08-14
 
 ## Tasks
 
-1. Remove the detail stale-refresh notice and unused manual-refresh plumbing.
+1. Remove the in-progress refresh notice while preserving stale/no-pending
+   recovery.
 2. Rebuild the skeleton around the latest-reading/chart and results-ledger
    structure.
 3. Add the production skeleton to the Browser Vault transitions study and
@@ -86,14 +89,17 @@ Updated: 2026-08-14
   blocked before Worker deploy and later candidates also failed protected
   gates.
 - Do not alter refresh state semantics. Stale saved data stays visible while the
-  provider refreshes quietly; true transport errors keep the existing retry.
+  provider refreshes quietly; a stale/no-pending state keeps a manual action,
+  and true transport errors keep the existing retry.
 - Use an abstract chart trace in the skeleton so it communicates final layout
   without pretending to contain real health data.
 
 ## Verification
 
 - Completed local proof:
-  - Focused Vitest passed all 34 biomarker-history UI tests.
+  - The corrected focused Vitest run passed all 110 biomarker-history,
+    Browser Vault provider, loading-transition catalog, and design-catalog
+    tests.
   - Changelog generation and 53 focused fragment, archive, and page tests
     passed.
   - Hosted Web typecheck passed.
@@ -107,13 +113,27 @@ Updated: 2026-08-14
     loading screenshots did not cover the changed stale populated,
     refresh-pending populated, and stale empty states. The catalog now renders
     the real shared production presentation for all three states, and the
-    inspected corrected desktop/mobile evidence covers each state without the
-    removed notice or manual action.
+    inspected corrected desktop/mobile evidence covers each state.
+  - The corrected specialist pass found that stale/no-pending sessions are a
+    supported non-polling provider state. The finding was accepted: those
+    populated and empty states now retain a working Refresh action, while the
+    refresh-pending populated state remains quiet. A real provider-boundary test
+    proves the stale empty action starts a provider load after the non-polling
+    interval.
+  - Hosted Web typecheck, focused ESLint, and full lint passed after the
+    correction; full lint retained the same 43 pre-existing warnings and no
+    touched-file diagnostics.
+  - Updated synthetic desktop/mobile renders confirm the recovery alert is
+    responsive, the refresh-pending state remains unchanged, and the real chart
+    and result ledger render without overflow.
   - The final catalog cold compile completed in 15.9 minutes after shorter
     bounded attempts expired; the task Frog entry records this proof-loop
     friction.
 - Remaining completion proof:
-  - Exact-head PR CI and the corrected routed completion-specialists review.
+  - Push the corrected exact head and complete PR CI. The hosted design-proof
+    gate still requires hosted desktop/mobile image URLs; local redacted images
+    are ready, but this environment has neither an uploader credential nor a
+    GitHub attachment API.
   - The Claude UI check could not start because Claude Code is not installed in
     this environment; repository guidance requires recording that exact gap
     without a substitute local reviewer.

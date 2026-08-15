@@ -16,8 +16,10 @@ import {
   type LabBiomarkerReferenceRangeTone,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Badge } from "@/src/components/ui/badge";
+import { Button } from "@/src/components/ui/button";
 import {
   Card,
   CardContent,
@@ -192,6 +194,32 @@ export function BiomarkerDetailContent({
         </div>
       </section>
     </>
+  );
+}
+
+export function BiomarkerStaleRefreshAlert({
+  hasResults,
+  onRefresh,
+}: {
+  hasResults: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <Alert>
+      <AlertTitle>This history may be out of date</AlertTitle>
+      <AlertDescription>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            {hasResults
+              ? "These are your last saved results and may not include newer lab data."
+              : "This saved view may not include newer lab data. Refresh to check again."}
+          </span>
+          <Button onClick={onRefresh} size="sm" variant="outline">
+            Refresh
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 
