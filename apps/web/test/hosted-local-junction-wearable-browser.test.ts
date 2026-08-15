@@ -162,7 +162,11 @@ describe("hosted-local Junction wearable browser authorization", () => {
       config,
       () => now,
     )).rejects.toThrow(
-      "WHOOP did not expose an automated authorization action.",
+      [
+        "WHOOP did not expose an automated authorization action.",
+        "Authorization surface: frames=1 actions=0 enabledActions=0",
+        "uncheckedCheckboxes=0.",
+      ].join(" "),
     );
     expect(now).toBe(15_000);
     },

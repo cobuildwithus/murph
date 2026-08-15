@@ -260,8 +260,9 @@ async function completeExternalAuthorization(
           `${config.label} authorization was blocked by an external provider challenge.`,
         );
       }
+      const surface = await describeAuthorizationSurface(page);
       throw new Error(
-        `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run.`,
+        `${config.label} did not expose an automated authorization action. ${surface} Manual completion is available only in a headed non-CI run.`,
       );
     }
     await page.waitForTimeout(1_000);
@@ -376,6 +377,32 @@ async function clickFirstVisibleAction(
     }
   }
   return false;
+}
+
+async function describeAuthorizationSurface(page: Page): Promise<string> {
+  const actionSelectors = [
+    "button:visible",
+    'input[type="button"]:visible',
+    'input[type="submit"]:visible',
+    '[role="button"]:visible',
+    'a[href]:visible',
+  ];
+  const visibleActions = actionSelectors.join(", ");
+  const enabledVisibleActions = actionSelectors
+    .map((selector) => `${selector}:not(:disabled)`)
+    .join(", ");
+  const [actions, enabledActions, uncheckedCheckboxes] = await Promise.all([
+      page.locator(visibleActions).count(),
+      page.locator(enabledVisibleActions).count(),
+      page.locator('input[type="checkbox"]:visible:not(:checked)').count(),
+    ]);
+  return [
+    "Authorization surface:",
+    `frames=${page.frames().length}`,
+    `actions=${actions}`,
+    `enabledActions=${enabledActions}`,
+    `uncheckedCheckboxes=${uncheckedCheckboxes}.`,
+  ].join(" ");
 }
 
 async function assertWearableConnectionState(
