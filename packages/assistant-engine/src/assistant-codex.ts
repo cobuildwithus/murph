@@ -4245,6 +4245,11 @@ async function runCodexAppServerTurnOnProcess(
         automationRelativeDateReferenceWindows[
           dynamicToolRequestDeliveryContextOrdinal
         ] ?? null,
+      responseCardAudience: input.groupConversation === true
+        ? 'group'
+        : input.groupConversation === false
+          ? 'private'
+          : null,
     })
     if (!dynamicToolRequest) {
       denyUnsupportedCodexServerRequest({

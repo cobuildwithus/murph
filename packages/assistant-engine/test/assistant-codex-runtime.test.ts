@@ -16858,10 +16858,17 @@ describe('assistant codex runtime', () => {
         phase: 'tool_call',
         issueKind: 'schema_rejection',
         severity: 'warning',
+        summary: 'Tool input failed schema validation.',
         errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
         details: expect.objectContaining({
           detailsSchema: 'murph.tool-call-validation-digest.v1',
-          invalidPaths: ['intentIds.[]'],
+          invalidPaths: ['intentIds[]'],
+          pathIssues: [{
+            code: 'invalid_format',
+            expected: 'string',
+            path: 'intentIds[]',
+            received: 'string.len_1_32',
+          }],
           schemaName: 'murph.pending_vault_files.input',
           toolName: 'murph.pending_vault_files',
         }),

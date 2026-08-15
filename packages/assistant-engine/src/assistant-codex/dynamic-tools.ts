@@ -1,5 +1,10 @@
 import * as z from '@murphai/contracts/zod-runtime'
-import { isStrictIsoDate } from '@murphai/contracts'
+import {
+  compactTableGenericResponseCardV1Schema,
+  compactTableWorkoutResponseCardAuthoringV1Schema,
+  dailyNutritionResponseCardV2AuthoringSchema,
+  isStrictIsoDate,
+} from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
@@ -143,6 +148,7 @@ import {
 } from '../assistant/response-media.js'
 import {
   buildSafeToolCallValidationDigest,
+  collectSafeJsonSchemaValidationPaths,
   type SafeToolCallValidationDigest,
 } from '../assistant/tool-validation-digest.js'
 import type {
@@ -247,6 +253,9 @@ import {
   type PhysicalNoteDynamicToolRequest,
 } from './dynamic-tools/physical-notes.js'
 import {
+  buildResponseCardValidationFeedback,
+} from './response-card-validation-feedback.js'
+import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
@@ -295,39 +304,59 @@ import {
 } from './dynamic-tool-catalog.js'
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
+function addAttachResponseCardArgumentIssues(
+  value: { card: AssistantResponseCard },
+  context: z.RefinementCtx,
+): void {
+  if (
+    value.card.kind === 'compact_table' &&
+    'workout' in value.card &&
+    value.card.subtitle !== null
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Structured workout card subtitles must be null.',
+      params: { murphExpectedShape: 'null_for_workout_card' },
+      path: ['card', 'subtitle'],
+    })
+  }
+}
+
 const attachResponseCardArgumentsSchema = z
   .object({
     card: assistantResponseCardAuthoringSchema,
   })
   .strict()
-  .superRefine((value, context) => {
-    if (
-      value.card.kind === 'compact_table' &&
-      'workout' in value.card &&
-      value.card.subtitle !== null
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Structured workout card subtitles must be null.',
-        path: ['card', 'subtitle'],
-      })
-    }
+  .superRefine(addAttachResponseCardArgumentIssues)
+
+const attachDailyNutritionResponseCardArgumentsSchema = z
+  .object({
+    card: dailyNutritionResponseCardV2AuthoringSchema,
   })
+  .strict()
+
+const attachCompactTableGenericResponseCardArgumentsSchema = z
+  .object({
+    card: compactTableGenericResponseCardV1Schema,
+  })
+  .strict()
+
+const attachCompactTableWorkoutResponseCardArgumentsSchema = z
+  .object({
+    card: compactTableWorkoutResponseCardAuthoringV1Schema,
+  })
+  .strict()
+  .superRefine(addAttachResponseCardArgumentIssues)
+
+const attachResponseCardValidationPaths =
+  collectSafeJsonSchemaValidationPaths(MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema)
 
 const attachSemanticWorkoutResponseCardArgumentsSchema = z
   .object({
     card: assistantWorkoutResponseCardSemanticSchema,
   })
   .strict()
-  .superRefine((value, context) => {
-    if (value.card.subtitle !== null) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Structured workout card subtitles must be null.',
-        path: ['card', 'subtitle'],
-      })
-    }
-  })
+  .superRefine(addAttachResponseCardArgumentIssues)
 
 const attachGroupChallengeResponseCardArgumentsSchema =
   groupChallengeResponseCardToolInputSchema
@@ -1426,6 +1455,7 @@ export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
   input?: {
     automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
+    responseCardAudience?: 'group' | 'private' | null
   },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
@@ -1541,7 +1571,10 @@ export function readMurphDynamicToolRequest(
       }
     }
     case MURPH_ATTACH_RESPONSE_CARD_TOOL.name: {
-      const parsed = parseAttachResponseCardArguments(request.arguments)
+      const parsed = parseAttachResponseCardArguments(
+        request.arguments,
+        input?.responseCardAudience ?? null,
+      )
       if (!parsed.ok) {
         if (parsed.reason === 'workout-envelope-too-large') {
           return {
@@ -2112,7 +2145,10 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-card-arguments':
-      return toolTextResult(false, 'invalid response card arguments')
+      return toolTextResult(
+        false,
+        buildResponseCardValidationFeedback(input.request.validationDigest),
+      )
     case 'response-card-envelope-too-large':
       if (input.privateDirectResponseCardAllowed !== true) {
         return toolTextResult(
@@ -7108,6 +7144,7 @@ function parseComputerArguments<TArgs>(input: {
 
 function parseAttachResponseCardArguments(
   value: unknown,
+  audience: 'group' | 'private' | null,
 ):
   | { ok: true; card: AssistantResponseCard; groupChallenge: false }
   | {
@@ -7127,34 +7164,44 @@ function parseAttachResponseCardArguments(
     } {
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
-  const parsed = attachResponseCardArgumentsSchema.safeParse(value)
-  if (parsed.success) {
-    return {
-      card: parsed.data.card,
-      groupChallenge: false,
-      ok: true,
-    }
-  }
-  if (Object.hasOwn(asRecord(value) ?? {}, 'card')) {
-    const semanticWorkout =
-      attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(value)
-    if (semanticWorkout.success) {
+  if (audience !== 'group') {
+    const parsed = attachResponseCardArgumentsSchema.safeParse(value)
+    if (parsed.success) {
       return {
-        card: semanticWorkout.data.card,
-        ok: false,
-        reason: 'workout-envelope-too-large',
+        card: parsed.data.card,
+        groupChallenge: false,
+        ok: true,
       }
     }
-    return {
-      ok: false,
-      reason: 'invalid',
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName,
-        schemaRootKeys: ['card'],
-        toolName,
-      }),
+    if (
+      audience === 'private'
+      || Object.hasOwn(asRecord(value) ?? {}, 'card')
+    ) {
+      const semanticWorkout =
+        attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(value)
+      if (semanticWorkout.success) {
+        return {
+          card: semanticWorkout.data.card,
+          ok: false,
+          reason: 'workout-envelope-too-large',
+        }
+      }
+      const diagnosticError = readAttachResponseCardDiagnosticError(
+        value,
+        parsed.error,
+      )
+      return {
+        ok: false,
+        validationDigest: buildDynamicToolValidationDigest({
+          error: diagnosticError,
+          rawInput: value,
+          schemaName,
+          schemaPaths: attachResponseCardValidationPaths,
+          schemaRootKeys: ['card'],
+          toolName,
+        }),
+        reason: 'invalid',
+      }
     }
   }
   const groupChallengeParsed =
@@ -7180,6 +7227,52 @@ function parseAttachResponseCardArguments(
     input: groupChallengeParsed.data,
     ok: true,
   }
+}
+
+function readAttachResponseCardDiagnosticError(
+  value: unknown,
+  fallbackError: z.ZodError,
+): z.ZodError {
+  const card = asRecord(asRecord(value)?.card)
+  if (card?.kind === 'daily_nutrition') {
+    const parsed = attachDailyNutritionResponseCardArgumentsSchema.safeParse(value)
+    return parsed.success ? fallbackError : parsed.error
+  }
+  if (card?.kind === 'compact_table') {
+    const hasExplicitWorkoutShape = Object.hasOwn(card, 'workout')
+    const hasWorkoutTracking = asRecord(card.tracking)?.kind === 'workout'
+    const hasGenericShape = ['rowHeader', 'columns', 'rows']
+      .some((key) => Object.hasOwn(card, key))
+    if (
+      (hasExplicitWorkoutShape && hasGenericShape)
+      || (!hasGenericShape && !hasExplicitWorkoutShape && !hasWorkoutTracking)
+    ) {
+      return new z.ZodError([{
+        code: z.ZodIssueCode.custom,
+        message: 'Choose one compact-table card shape.',
+        params: {
+          murphExpectedShape: 'compact_table.generic_or_workout_shape',
+        },
+        path: ['card'],
+      }])
+    }
+    const diagnosticSchema = hasGenericShape
+      ? attachCompactTableGenericResponseCardArgumentsSchema
+      : attachCompactTableWorkoutResponseCardArgumentsSchema
+    const parsed = diagnosticSchema.safeParse(value)
+    return parsed.success ? fallbackError : parsed.error
+  }
+  if (card) {
+    return new z.ZodError([{
+      code: z.ZodIssueCode.custom,
+      message: 'Choose a supported response-card family.',
+      params: {
+        murphExpectedShape: 'daily_nutrition_or_compact_table',
+      },
+      path: ['card', 'kind'],
+    }])
+  }
+  return fallbackError
 }
 
 function parseAttachExerciseRoutineCardArguments(
@@ -7294,6 +7387,7 @@ function buildDynamicToolValidationDigest(input: {
   error: unknown
   rawInput: unknown
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys: readonly string[]
   toolName: string
 }): SafeToolCallValidationDigest {
@@ -7302,6 +7396,7 @@ function buildDynamicToolValidationDigest(input: {
     rawInput: input.rawInput,
     requestedToolName: input.toolName,
     schemaName: input.schemaName,
+    schemaPaths: input.schemaPaths,
     schemaRootKeys: input.schemaRootKeys,
     toolName: input.toolName,
   })
