@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 100,
+  "item": {
+    "id": "clearer-biomarker-result-loading",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer biomarker result loading",
+    "summary": "Biomarker result pages now keep their reading, trend, and history structure visible while saved labs load.",
+    "details": "Usable saved results stay in place without an extra refresh notice while Murph checks for updates in the background.",
+    "relevanceTags": ["biomarkers", "labs", "loading"],
+    "sourcePullRequests": [1831],
+    "tryIt": {
+      "href": "/biomarkers",
+      "label": "View your biomarkers"
+    }
+  }
+}
