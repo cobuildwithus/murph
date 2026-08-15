@@ -410,9 +410,10 @@ the current user explicitly asks for it.
    authority.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
-   through five lanes and defaults to five. A local
-   `$XDG_CONFIG_HOME/murph/review-gpt.conf` may set this without committing
-   machine-specific preferences or account details.
+   through five lanes and defaults to four. A host with a provisioned
+   Vonneumann profile opts into all five by setting it in the local
+   `$XDG_CONFIG_HOME/murph/review-gpt.conf`, without committing machine-specific
+   preferences or account details.
 
    A lane is considered usable when its managed profile is unlocked, or when its
    configured CDP endpoint is already alive. The default random path skips a

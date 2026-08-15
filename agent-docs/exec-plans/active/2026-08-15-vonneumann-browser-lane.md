@@ -14,8 +14,9 @@ Updated: 2026-08-15
 
 - `REVIEW_GPT_BROWSER_LANE=vonneumann` resolves to the Vonneumann app/profile
   and an unused dedicated CDP port.
-- Automatic lane selection supports all five isolated lanes and preserves the
-  existing availability/lock checks.
+- Automatic lane selection supports all five isolated lanes after a
+  provisioned host opts into lane count five, while the portable repository
+  default remains the existing four lanes.
 - Focused tooling tests, shell syntax validation, and a ReviewGPT dry run pass.
 - The local Vonneumann app bundle has a unique bundle identifier, display name,
   custom icon, executable Brave binary, and valid ad-hoc code signature.
@@ -70,6 +71,9 @@ Updated: 2026-08-15
   `vonneumann`.
 - Use port `9446`; it is distinct from Phlebas `9442`, Hercules `9444`, Eragon
   `9448`, Mountain `9450`, and Main `9452`.
+- Keep the portable repository default at four lanes. Hosts opt into all five
+  through the existing machine-local lane-count preference only after the
+  Vonneumann profile is provisioned.
 - Keep the generated icon and full app bundle local rather than committing
   machine-specific binary assets.
 - Use a small bundle-local launcher to supply the lane's CDP port and profile
@@ -86,13 +90,16 @@ Updated: 2026-08-15
 - The local app bundle is installed with a unique identifier, launcher,
   isolated profile, ad-hoc signature, and generated icon. Its CDP endpoint is
   live on port `9446`.
+- The preliminary specialist review identified the unprovisioned-host default
+  risk and missing dynamic pin/isolation proof. Both findings were accepted and
+  remediated without adding a provisioning detector or new abstraction.
 
 ## Verification
 
 - `bash -n scripts/review-gpt.config.sh`
 - Focused `release-script-coverage-audit` test invocation.
-- `REVIEW_GPT_BROWSER_LANE=vonneumann pnpm --silent review:gpt pr-review --dry-run`
-  with safe PR-preflight inputs once a PR exists.
+- An exact-head `completion-specialists` run pinned to
+  `REVIEW_GPT_BROWSER_LANE=vonneumann` with safe PR-preflight inputs.
 - `codesign --verify --deep --strict`, `plutil -lint`, bundle metadata readback,
   executable/icon checks, port mapping readback, and privacy-safe diff review.
 
@@ -101,8 +108,13 @@ Current evidence:
 - Shell syntax checks pass for the repository config, machine-local selector,
   and bundle launcher.
 - Focused static and dynamic `release-script-coverage-audit` tests pass,
-  including automatic selection of Vonneumann when the first four lanes are
-  unavailable.
+  including portable four-lane default behavior, host opt-in selection of
+  Vonneumann, explicit pinning, unique ports/profile isolation, and later-round
+  prompt reuse.
 - `pnpm --filter @murphai/murph typecheck` passes.
 - Bundle signature, plist, executable, icon, version, wrapper-equivalent lane
   readback, older-worktree compatibility, and live CDP checks pass.
+- The exact-head specialist run packaged and submitted through the existing
+  Vonneumann profile on port `9446`. Its two findings were accepted and fixed;
+  the exported response reported unknown model confirmation, so model
+  provenance remains an explicit ReviewGPT evidence gap rather than a pass.

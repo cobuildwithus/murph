@@ -1462,6 +1462,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
     expect(reviewGptConfig).toContain(
@@ -1730,6 +1731,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('default randomized usable managed')
     expect(prReviewGptLoop).toContain('Hercules on `9444`')
     expect(prReviewGptLoop).toContain('Vonneumann on `9446`')
+    expect(prReviewGptLoop).toContain('through five lanes and defaults to four')
     expect(prReviewGptLoop).toContain('current installed Brave binary')
     expect(prReviewGptLoop).toContain(
       "passes none of Chromium's background-timer, occluded-window, or renderer",
@@ -2247,8 +2249,8 @@ printf '%s|%s|%s|%s|%s\n' \
         defaultBackgroundMode,
         defaultDisplayMode,
       ] = defaultResult.stdout.trim().split('|')
-      expect(defaultLane).toBe('vonneumann')
-      expect(defaultLaneCount).toBe('5')
+      expect(['eragon', 'phlebas', 'hercules', 'mountain']).toContain(defaultLane)
+      expect(defaultLaneCount).toBe('4')
       expect(defaultBrowser).toBe(
         '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       )
@@ -2268,8 +2270,89 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(mainResult.status, mainResult.stderr).toBe(0)
       expect(mainResult.stdout.trim()).toBe(
-        'main|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
+      )
+      const optedInResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(optedInResult.status, optedInResult.stderr).toBe(0)
+      expect(optedInResult.stdout.trim()).toBe(
+        'vonneumann|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+      )
+
+      const vonneumannFollowupHarness = `${configHarness}
+printf '%s|%s|%s|%s|%s\n' \
+  "$review_gpt_selected_browser_lane" \
+  "$review_gpt_selected_browser_display" \
+  "$review_gpt_selected_browser_port" \
+  "$managed_browser_user_data_dir" \
+  "$review_gpt_pr_review_prompt_file"
+review_gpt_managed_ports=()
+for review_gpt_lane in main eragon phlebas hercules mountain vonneumann; do
+  review_gpt_managed_ports+=("$(review_gpt_browser_lane_port "$review_gpt_lane")")
+done
+printf '%s\n' "\${review_gpt_managed_ports[*]}"
+`
+      const vonneumannFollowupResult = spawnSync(
+        'bash',
+        ['-c', vonneumannFollowupHarness],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...cleanBrowserPreferenceEnv(),
+            HOME: harnessRoot,
+            REPO_ROOT: repoRoot,
+            REVIEW_GPT_BROWSER_LANE: 'vonneumann',
+            REVIEW_GPT_REVIEW_PHASE: 'final',
+            REVIEW_GPT_ROUND_NUMBER: '2',
+            REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
+            XDG_CONFIG_HOME: localConfigRoot,
+          },
+        },
+      )
+      expect(
+        vonneumannFollowupResult.status,
+        vonneumannFollowupResult.stderr,
+      ).toBe(0)
+      const vonneumannFollowupLines = vonneumannFollowupResult.stdout
+        .trim()
+        .split('\n')
+      expect(vonneumannFollowupLines.at(-2)).toBe(
+        [
+          'vonneumann',
+          'Vonneumann',
+          '9446',
+          path.join(
+            harnessRoot,
+            'Library/Application Support/MurphReviewGPT/Vonneumann',
+          ),
+          'pr-followup-review.md',
+        ].join('|'),
+      )
+      const managedPorts = vonneumannFollowupLines.at(-1)?.split(' ') ?? []
+      expect(managedPorts).toEqual([
+        '9452',
+        '9448',
+        '9442',
+        '9444',
+        '9450',
+        '9446',
+      ])
+      expect(new Set(managedPorts).size).toBe(managedPorts.length)
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
