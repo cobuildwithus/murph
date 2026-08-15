@@ -15866,26 +15866,43 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("runs one requested member action after the current foreground reply", async () => {
+  it.each([
+    {
+      item: createMemberActivationSignupWelcomeSystemMailboxItem(),
+      label: "member activation",
+      mailboxLane: "member-activated" as const,
+      routeAction: "apply-member-activation" as const,
+    },
+    {
+      item: createMemberActionSystemMailboxItem(),
+      label: "requested member action",
+      mailboxLane: "member-action" as const,
+      routeAction: "apply-member-action" as const,
+    },
+  ])("runs one $label after the current foreground reply", async ({
+    item,
+    label,
+    mailboxLane,
+    routeAction,
+  }) => {
     const sequence: string[] = [];
     let newerForegroundInputArrived = false;
     const deliveryEffect = createDeliveryEffect();
-    const memberActionItem = createMemberActionSystemMailboxItem();
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
       async (preparationInput) => {
         if (
-          preparationInput.allowedRouteActions?.length === 1
-          && preparationInput.allowedRouteActions[0] === "apply-member-action"
+          preparationInput.allowedRouteActions?.length === 2
+          && preparationInput.allowedRouteActions.includes(routeAction)
         ) {
-          sequence.push("member-action");
+          sequence.push(label);
           return {
-            item: memberActionItem,
-            itemId: memberActionItem.itemId,
+            item,
+            itemId: item.itemId,
             metrics: {
               bootstrapResult: null,
               conversationMetrics: null,
-              mailboxLane: "member-action" as const,
-              postCheckpointRecord: memberActionItem.postCheckpointRecord,
+              mailboxLane,
+              postCheckpointRecord: item.postCheckpointRecord,
               redactedLogEntries: [],
             },
             status: "processed" as const,
@@ -15930,13 +15947,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(sequence).toEqual([
       "provider",
       "foreground-delivery",
-      "member-action",
+      label,
     ]);
     expect(
       mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.at(-1)?.[0],
     ).toEqual(expect.objectContaining({
-      allowedRouteActions: ["apply-member-action"],
-      allowedWakeKinds: ["member.action.requested"],
+      allowedRouteActions: ["apply-member-activation", "apply-member-action"],
+      allowedWakeKinds: ["member.activated", "member.action.requested"],
       shouldYieldBackgroundMaintenance: null,
     }));
     expect(postCheckpoint).toEqual(expect.objectContaining({
@@ -15950,7 +15967,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
 
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
-      item: memberActionItem,
+      item,
       operatorHomeRoot: "/tmp/murph-operator-home",
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
