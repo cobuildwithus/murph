@@ -1836,6 +1836,21 @@ describe('Codex assistant registry helpers', () => {
     expect(labels).not.toContain('replayed-binary')
     expect(labels).not.toContain('tool-1')
     expect(labels).not.toContain('tool-2')
+
+    const persisted = parseAssistantUsageRecord({
+      attemptCount: 1,
+      credentialSource: 'platform',
+      inputTokens: 34,
+      occurredAt: '2026-06-10T12:00:00.000Z',
+      outputTokens: 34,
+      provider: 'codex-cli',
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'asst_caps',
+      turnId: 'turn_caps',
+      turnProfileJson: profile,
+      usageId: 'turn_caps.attempt-1',
+    })
+    expect(persisted.turnProfileJson).toEqual(profile)
   })
 
   it('keeps per-turn profile command labels member-content safe at the edges', () => {
