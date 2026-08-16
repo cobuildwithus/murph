@@ -20,6 +20,7 @@ import {
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorTerminal,
   persistAssistantOutboxIntentLinqAppCardTextFallback,
+  preserveAssistantOutboxAcceptedMediaDeliveryOrder,
   resetAssistantOutboxPreparedDispatch,
   sameAssistantChannelDelivery,
   updateAssistantOutboxAfterDispatchFailure,
@@ -63,6 +64,93 @@ it('distinguishes physical media ownership in delivery equality', () => {
       providerMessageId: 'provider-message-media-owner',
     }],
   })).toBe(false)
+})
+
+it('keeps one accepted Linq media delivery order through partial retries and completion', async () => {
+  await withTempVault(async (vault) => {
+    const sending = await createSendingIntent({
+      attemptCount: 2,
+      channel: 'linq',
+      vault,
+    })
+    const idempotencyKey = `assistant-outbox:${sending.intentId}`
+    const firstAcceptedAt = '2030-04-13T00:30:00.000Z'
+    const acceptedMediaDelivery = {
+      channel: 'linq',
+      idempotencyKey,
+      messageLength: sending.message.length,
+      providerMessageEffects: [{
+        carriesIntentMedia: true,
+        message: 'Generated image',
+        providerMessageId: 'provider-media-primary',
+      }],
+      providerMessageId: 'provider-media-primary',
+      providerMessageIds: ['provider-media-primary'],
+      providerThreadId: 'thread-media-retry',
+      sentAt: firstAcceptedAt,
+      target: 'thread-media-retry',
+      targetKind: 'thread',
+    } satisfies AssistantMessageChannelDelivery
+    const acceptedIntent = await saveAssistantOutboxIntent(vault, {
+      ...sending,
+      delivery: acceptedMediaDelivery,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: idempotencyKey,
+    })
+
+    const repeatedPartial = preserveAssistantOutboxAcceptedMediaDeliveryOrder({
+      delivery: {
+        ...acceptedMediaDelivery,
+        sentAt: '2030-04-13T00:31:00.000Z',
+      },
+      intent: acceptedIntent,
+    })
+    expect(expectMessageDelivery(repeatedPartial).sentAt).toBe(firstAcceptedAt)
+
+    const completed = preserveAssistantOutboxAcceptedMediaDeliveryOrder({
+      delivery: {
+        ...acceptedMediaDelivery,
+        idempotencyKey: `${idempotencyKey}:link`,
+        providerMessageEffects: [
+          ...acceptedMediaDelivery.providerMessageEffects,
+          {
+            message: null,
+            providerMessageId: 'provider-rich-link',
+          },
+        ],
+        providerMessageId: 'provider-rich-link',
+        providerMessageIds: [
+          'provider-media-primary',
+          'provider-rich-link',
+        ],
+        sentAt: '2030-04-13T00:32:00.000Z',
+        targetKind: 'explicit',
+      },
+      intent: {
+        ...acceptedIntent,
+        delivery: repeatedPartial,
+      },
+    })
+    expect(expectMessageDelivery(completed).sentAt).toBe(firstAcceptedAt)
+
+    const unrelated = preserveAssistantOutboxAcceptedMediaDeliveryOrder({
+      delivery: {
+        ...expectMessageDelivery(completed),
+        providerMessageEffects: [{
+          carriesIntentMedia: true,
+          message: 'Different image',
+          providerMessageId: 'provider-other-media',
+        }],
+        providerMessageId: 'provider-other-media',
+        providerMessageIds: ['provider-other-media'],
+        sentAt: '2030-04-13T00:33:00.000Z',
+      },
+      intent: acceptedIntent,
+    })
+    expect(expectMessageDelivery(unrelated).sentAt).toBe(
+      '2030-04-13T00:33:00.000Z',
+    )
+  })
 })
 
 const OUTBOX_RESPONSE_CARD = {

@@ -4,9 +4,13 @@ import { test, vi } from "vitest";
 
 import {
   createVaultReadModel,
+  readMealNutrientTotals,
   readMealNutritionTotals,
+  summarizeMealNutrientTotals,
   summarizeMealNutritionTotals,
   type CanonicalEntity,
+  type MealNutrientKey,
+  type MealNutrientTotal,
 } from "../src/index.ts";
 import * as modelModule from "../src/model.ts";
 
@@ -41,6 +45,246 @@ function createMealEntity(
     ...overrides,
   };
 }
+
+function requireNutrient(
+  nutrients: readonly MealNutrientTotal[],
+  key: MealNutrientKey,
+): MealNutrientTotal {
+  const nutrient = nutrients.find((candidate) => candidate.key === key);
+  assert.ok(nutrient, `Expected nutrient ${key}.`);
+  return nutrient;
+}
+
+test("summarizeMealNutrientTotals exposes stable units and sparse meal coverage", () => {
+  const readModel = createVaultReadModel({
+    vaultRoot: "./vault",
+    entities: [
+      createMealEntity("meal_1", "2026-04-10T12:00:00.000Z", {
+        mealId: "meal_1",
+        nutrition: {
+          totals: {
+            waterGrams: 320,
+          },
+          micros: {
+            ironMg: 4,
+            sodiumGrams: 0.5,
+            vitaminCMg: 30,
+          },
+        },
+      }),
+      createMealEntity("meal_2", "2026-04-10T19:00:00.000Z", {
+        mealId: "meal_2",
+        nutrition: {
+          micros: {
+            ironMg: 0,
+            vitaminCMg: 20,
+            zincMg: 0,
+          },
+        },
+      }),
+      createMealEntity("meal_3", "2026-04-10T21:00:00.000Z", {
+        mealId: "meal_3",
+      }),
+      createMealEntity("meal_outside_range", "2026-04-11T08:00:00.000Z", {
+        mealId: "meal_outside_range",
+        nutrition: {
+          micros: {
+            potassiumGrams: 2,
+          },
+        },
+      }),
+    ],
+  });
+
+  const result = summarizeMealNutrientTotals(readModel, {
+    from: "2026-04-10",
+    to: "2026-04-10",
+  });
+
+  assert.equal(result.mealCount, 3);
+  assert.equal(result.nutrients.length, 29);
+  assert.deepEqual(requireNutrient(result.nutrients, "waterGrams"), {
+    category: "water",
+    contributingMealCount: 1,
+    key: "waterGrams",
+    label: "Water",
+    total: 320,
+    unit: "g",
+  });
+  assert.deepEqual(requireNutrient(result.nutrients, "sodiumGrams"), {
+    category: "mineral",
+    contributingMealCount: 1,
+    key: "sodiumGrams",
+    label: "Sodium",
+    total: 0.5,
+    unit: "g",
+  });
+  assert.deepEqual(requireNutrient(result.nutrients, "ironMg"), {
+    category: "mineral",
+    contributingMealCount: 2,
+    key: "ironMg",
+    label: "Iron",
+    total: 4,
+    unit: "mg",
+  });
+  assert.deepEqual(requireNutrient(result.nutrients, "zincMg"), {
+    category: "mineral",
+    contributingMealCount: 1,
+    key: "zincMg",
+    label: "Zinc",
+    total: 0,
+    unit: "mg",
+  });
+  assert.deepEqual(requireNutrient(result.nutrients, "potassiumGrams"), {
+    category: "mineral",
+    contributingMealCount: 0,
+    key: "potassiumGrams",
+    label: "Potassium",
+    total: null,
+    unit: "g",
+  });
+  assert.equal(result.days.length, 1);
+  assert.equal(result.days[0]?.date, "2026-04-10");
+  assert.equal(result.days[0]?.mealCount, 3);
+  assert.deepEqual(
+    requireNutrient(result.days[0]?.nutrients ?? [], "vitaminCMg"),
+    {
+      category: "vitamin",
+      contributingMealCount: 2,
+      key: "vitaminCMg",
+      label: "Vitamin C",
+      total: 50,
+      unit: "mg",
+    },
+  );
+});
+
+test("summarizeMealNutrientTotals keeps only the latest imported meal revision", () => {
+  const readModel = createVaultReadModel({
+    vaultRoot: "./vault",
+    entities: [
+      createMealEntity("evt_old_imported_meal", "2026-04-14T08:00:00.000Z", {
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-cronometer-meal",
+          resourceId: "meal-1",
+          facet: "meal",
+        },
+        mealId: "meal_imported_1",
+        nutrition: { micros: { magnesiumMg: 40 } },
+        recordedAt: "2026-04-14T08:01:00.000Z",
+        source: "device",
+      }),
+      createMealEntity("evt_new_imported_meal", "2026-04-14T08:00:00.000Z", {
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-cronometer-meal",
+          resourceId: "meal-1",
+          facet: "meal",
+        },
+        mealId: "meal_imported_1",
+        nutrition: { micros: { magnesiumMg: 55 } },
+        recordedAt: "2026-04-14T08:05:00.000Z",
+        source: "device",
+      }),
+    ],
+  });
+
+  const result = summarizeMealNutrientTotals(readModel);
+
+  assert.equal(result.mealCount, 1);
+  assert.deepEqual(requireNutrient(result.nutrients, "magnesiumMg"), {
+    category: "mineral",
+    contributingMealCount: 1,
+    key: "magnesiumMg",
+    label: "Magnesium",
+    total: 55,
+    unit: "mg",
+  });
+});
+
+test("meal nutrition date bounds apply after imported revision collapse", () => {
+  const externalRef = {
+    system: "junction",
+    resourceType: "junction-cronometer-meal",
+    resourceId: "meal-date-correction",
+    facet: "meal",
+  };
+  const readModel = createVaultReadModel({
+    vaultRoot: "./vault",
+    entities: [
+      createMealEntity("evt_old_date", "2026-04-14T23:30:00.000Z", {
+        externalRef,
+        mealId: "meal_imported_date_correction",
+        nutrition: {
+          micros: { magnesiumMg: 40 },
+          totals: { calories: 200 },
+        },
+        recordedAt: "2026-04-14T23:35:00.000Z",
+        source: "device",
+      }),
+      createMealEntity("evt_corrected_date", "2026-04-15T00:30:00.000Z", {
+        externalRef,
+        mealId: "meal_imported_date_correction",
+        nutrition: {
+          micros: { magnesiumMg: 55 },
+          totals: { calories: 250 },
+        },
+        recordedAt: "2026-04-15T01:00:00.000Z",
+        source: "device",
+      }),
+    ],
+  });
+
+  const oldDayNutrients = summarizeMealNutrientTotals(readModel, {
+    from: "2026-04-14",
+    to: "2026-04-14",
+  });
+  const newDayNutrients = summarizeMealNutrientTotals(readModel, {
+    from: "2026-04-15",
+    to: "2026-04-15",
+  });
+  const combinedNutrients = summarizeMealNutrientTotals(readModel, {
+    from: "2026-04-14",
+    to: "2026-04-15",
+  });
+  const oldDayMacros = summarizeMealNutritionTotals(readModel, {
+    from: "2026-04-14",
+    to: "2026-04-14",
+  });
+  const newDayMacros = summarizeMealNutritionTotals(readModel, {
+    from: "2026-04-15",
+    to: "2026-04-15",
+  });
+  const combinedMacros = summarizeMealNutritionTotals(readModel, {
+    from: "2026-04-14",
+    to: "2026-04-15",
+  });
+
+  assert.equal(oldDayNutrients.mealCount, 0);
+  assert.equal(
+    requireNutrient(oldDayNutrients.nutrients, "magnesiumMg").total,
+    null,
+  );
+  assert.equal(newDayNutrients.mealCount, 1);
+  assert.equal(
+    requireNutrient(newDayNutrients.nutrients, "magnesiumMg").total,
+    55,
+  );
+  assert.equal(combinedNutrients.mealCount, 1);
+  assert.equal(
+    requireNutrient(combinedNutrients.nutrients, "magnesiumMg").total,
+    55,
+  );
+
+  assert.deepEqual(
+    [oldDayMacros.mealCount, newDayMacros.mealCount, combinedMacros.mealCount],
+    [0, 1, 1],
+  );
+  assert.equal(oldDayMacros.totals.calories.total, null);
+  assert.equal(newDayMacros.totals.calories.total, 250);
+  assert.equal(combinedMacros.totals.calories.total, 250);
+});
 
 test("summarizeMealNutritionTotals aggregates range and day totals from meal nutrition", () => {
   const readModel = createVaultReadModel({
@@ -360,6 +604,46 @@ test("readMealNutritionTotals reads the vault before summarizing", async () => {
     assert.equal(result.mealCount, 1);
     assert.equal(result.totals.calories.total, 500);
     assert.equal(result.days[0]?.date, "2026-04-14");
+  } finally {
+    readVaultSpy.mockRestore();
+  }
+});
+
+test("readMealNutrientTotals reads the vault before summarizing", async () => {
+  const readModel = createVaultReadModel({
+    vaultRoot: "./vault",
+    entities: [
+      createMealEntity("meal_1", "2026-04-14T08:00:00.000Z", {
+        mealId: "meal_1",
+        nutrition: {
+          micros: {
+            vitaminB12Mcg: 2.4,
+          },
+        },
+      }),
+    ],
+  });
+  const readVaultSpy = vi
+    .spyOn(modelModule, "readVault")
+    .mockResolvedValue(readModel);
+
+  try {
+    const result = await readMealNutrientTotals("./vault", {
+      from: "2026-04-14",
+      to: "2026-04-14",
+    });
+
+    assert.equal(readVaultSpy.mock.calls.length, 1);
+    assert.deepEqual(readVaultSpy.mock.calls[0], ["./vault"]);
+    assert.equal(result.mealCount, 1);
+    assert.deepEqual(requireNutrient(result.nutrients, "vitaminB12Mcg"), {
+      category: "vitamin",
+      contributingMealCount: 1,
+      key: "vitaminB12Mcg",
+      label: "Vitamin B12",
+      total: 2.4,
+      unit: "mcg",
+    });
   } finally {
     readVaultSpy.mockRestore();
   }

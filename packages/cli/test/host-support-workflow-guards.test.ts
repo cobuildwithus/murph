@@ -6,6 +6,9 @@ import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const hostSupportWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'host-support.yml')
+const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
+  scripts?: Record<string, string>
+}
 const actionsCacheV5 = 'actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5'
 
 function getJob(workflow: string, jobName: string, nextJobName: string): string {
@@ -40,6 +43,11 @@ describe('host support workflow guards', () => {
       'release-build-typecheck-linux',
       'release-package-coverage-linux',
     )
+    const fixtureCoverageJob = getJob(
+      workflow,
+      'release-fixture-coverage-linux',
+      'release-checks-linux',
+    )
 
     expect(workflow).toContain('name: Release build/typecheck (ubuntu)')
     expect(workflow).toContain('name: Release package coverage (${{ matrix.shard }})')
@@ -68,8 +76,13 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain('POSTGRES_DB: murph_search_test')
     expect(workflow).toContain('POSTGRES_USER: postgres')
     expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
-    expect(workflow).toContain('pnpm exec tsx e2e/smoke/verify-scenario-integrity.ts --coverage')
-    expect(workflow).toContain('MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50%')
+    expect(fixtureCoverageJob).toContain('run: pnpm test:scenario-integrity')
+    expect(rootPackageJson.scripts?.['test:scenario-integrity']).toBe(
+      'tsx e2e/smoke/verify-scenario-integrity.ts --coverage',
+    )
+    expect(workflow).toContain(
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS=50%',
+    )
     expect(workflow).not.toContain('run: pnpm release:check')
   })
 

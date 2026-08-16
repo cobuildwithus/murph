@@ -4,7 +4,7 @@ import {
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
 import {
-  assertLinqMessageTextPartWithinLimit,
+  assertLinqMessagePartsWithinLimits,
   checkLinqIMessageCapability,
   createLinqChat,
   isDefinitiveLinqIMessageAppCardRejection,
@@ -98,7 +98,7 @@ type PreparedTelegramPhoto =
 type TelegramMessageEntity = {
   length: number
   offset: number
-  type: MessageTextDecoration['style']
+  type: MessageTextDecoration['style'] | 'pre'
 }
 
 type DecoratedTelegramPhotoCaption = {
@@ -196,7 +196,10 @@ export async function sendTelegramRichMessage(
   providerMessageIds?: string[]
   target: string
 }> {
-  assertSingleTelegramRichFallbackMessage(input.fallbackMessage)
+  assertSingleTelegramRichFallbackMessage(
+    input.fallbackMessage,
+    input.richMessage.skip_entity_detection === true,
+  )
   const env = dependencies.env ?? process.env
   const token = resolveTelegramBotToken(env)
   if (!token) {
@@ -280,6 +283,8 @@ export async function sendTelegramRichMessage(
           {
             idempotencyKey: input.idempotencyKey ?? null,
             message: input.fallbackMessage,
+            protectAutomaticEntities:
+              input.richMessage.skip_entity_detection === true,
             replyToMessageId: input.replyToMessageId ?? null,
             target: targetLabel,
           },
@@ -711,6 +716,7 @@ export async function sendLinqMessage(
   const shouldAttemptDirectNativeCard =
     card !== null &&
     card.kind !== 'exercise_routine' &&
+    card.kind !== 'telegram_rich_content' &&
     input.targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&
@@ -804,7 +810,7 @@ export async function sendLinqMessage(
   const message = responseMedia.some((item) => item.kind === 'vault_file')
     ? ''
     : appendImageAlternativeText(input.message, responseMedia)
-  assertLinqMessageTextPartWithinLimit({
+  assertLinqMessagePartsWithinLimits({
     message,
     operation: participantFromPhoneNumber ? 'create_chat' : 'send_message',
     requestAttachmentMediaPartCount: responseMedia.filter((item) =>
@@ -1396,6 +1402,7 @@ async function sendTelegramMessageDetailed(
   input: {
     idempotencyKey?: string | null
     message: string
+    protectAutomaticEntities?: boolean
     replyToMessageId?: string | null
     target: string
   },
@@ -1437,7 +1444,9 @@ async function sendTelegramMessageDetailed(
   const providerMessageIds: string[] = []
   let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
 
-  const renderedMessage = renderMarkdownMessageText(input.message)
+  const renderedMessage = input.protectAutomaticEntities
+    ? { decorations: [], text: input.message }
+    : renderMarkdownMessageText(input.message)
   const chunks = splitDecoratedMessageText(renderedMessage, TELEGRAM_MAX_TEXT_LENGTH)
   const maxDeliveryAttempts = requireTelegramMaxDeliveryAttempts(
     dependencies.maxDeliveryAttempts,
@@ -1447,7 +1456,9 @@ async function sendTelegramMessageDetailed(
       const delivered = await sendTelegramTextChunk({
         authorityBoundTarget: dependencies.authorityBoundTarget,
         baseUrl,
-        entities: buildTelegramMessageEntities(chunk.decorations),
+        entities: input.protectAutomaticEntities
+          ? [{ length: chunk.text.length, offset: 0, type: 'pre' }]
+          : buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
         maxDeliveryAttempts,
         replyToMessageId,
@@ -2305,8 +2316,13 @@ function markTelegramDeliveryAmbiguous(
   })
 }
 
-function assertSingleTelegramRichFallbackMessage(message: string): void {
-  const renderedMessage = renderMarkdownMessageText(message)
+function assertSingleTelegramRichFallbackMessage(
+  message: string,
+  protectAutomaticEntities: boolean,
+): void {
+  const renderedMessage = protectAutomaticEntities
+    ? { decorations: [], text: message }
+    : renderMarkdownMessageText(message)
   const chunks = splitDecoratedMessageText(
     renderedMessage,
     TELEGRAM_MAX_TEXT_LENGTH,

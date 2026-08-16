@@ -1,7 +1,7 @@
 import { BROWSER_VAULT_TRAINING_SESSION_SCHEMA } from "@murphai/contracts/browser-vault";
 import type {
+  BrowserVaultCoreCapableQueryClient,
   BrowserVaultEntity,
-  BrowserVaultQueryClient,
 } from "@murphai/query/browser-replica-client";
 
 const RECENT_SESSION_LIMIT = 24;
@@ -101,7 +101,7 @@ type TrainingSessionRecord = TrainingSessionView & {
 };
 
 export function createTrainingHandoffBaseline(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
 ): TrainingHandoffBaseline {
   const sessions = listTrainingSessions(client);
   const manualSessionFingerprints = collectManualSessionFingerprints(sessions);
@@ -124,7 +124,7 @@ export function createTrainingHandoffBaseline(
 
 export function isTrainingHandoffComplete(
   baseline: TrainingHandoffBaseline,
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
 ): boolean {
   const sessions = listTrainingSessions(client);
   if (baseline.kind === "continue") {
@@ -143,7 +143,7 @@ export function isTrainingHandoffComplete(
 }
 
 export function selectBrowserVaultTraining(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
   options: { now?: Date; timeZone?: string } = {},
 ): BrowserTrainingView {
   const generatedAt = client.replica.generatedAt;
@@ -186,7 +186,7 @@ export function selectBrowserVaultTraining(
 }
 
 function listTrainingSessions(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
 ): TrainingSessionRecord[] {
   return client.entities
     .list({ families: ["event"], kinds: ["activity_session"] })

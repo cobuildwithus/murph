@@ -119,9 +119,9 @@ beforeEach(() => {
 describe("runHostedIdleCheckpointMaintenance", () => {
   it("keeps idle-shutdown compaction below the hosted Codex auto-compact ceiling", () => {
     expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(50_000);
-    expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(100_000);
-    expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(164_000);
-    expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(164_000);
+    expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(90_000);
+    expect(HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(132_000);
+    expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(132_000);
     expect(HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS).toBe(30_000);
   });
 
@@ -171,7 +171,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
-  it("records provider compaction usage from the warm thread's actual model", async () => {
+  it("records local OpenAI compaction usage with hosted Flex evidence", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "compacted",
       durationMs: 1_200,
@@ -193,7 +193,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "member",
       memberId: "member_1",
       model: "gpt-5.6-sol",
-      providerName: "hosted-openai",
+      providerName: "openai-local-test",
       pendingWork: false,
       recordUsage: async (record) => {
         recorded.push(record);

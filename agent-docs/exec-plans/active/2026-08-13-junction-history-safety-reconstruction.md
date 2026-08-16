@@ -462,6 +462,90 @@ Updated: 2026-08-14
   a schema field, alias compatibility owner, retry, queue, manager, repair, or
   reconciliation path. One real-Postgres owner-race test is the complete proof
   boundary; no cross-owner mega-test is needed.
+- Valid final ReviewGPT round 12 reviewed exact behavior head
+  `1c01b72f56047aa692032d0a6bfce3c832750ccf` in the existing thread and
+  returned `ROUND_OUTCOME: PASS` plus `REVIEW_COMPLETE` after about 68 minutes.
+  The response hash matches the package-owned `gpt-5-6-pro` sidecar. Mountain
+  failed before send because its composer attachment input did not match the
+  target; the pinned Phlebas retry sent once. The fresh full audit verified the
+  round-11 physical-rekey deletion and all prior correction mechanisms and
+  reported no remaining qualifying finding. The final ReviewGPT gate is
+  complete with zero unresolved accepted findings.
+- Final ReviewGPT round 13 reviewed exact current-main integration head
+  `f34b9ac3a237a07c9cb91449b801af60f3f124a0` in the existing thread and
+  returned `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE` after about 58
+  minutes. The prompt was accepted once, but ReviewGPT could not persist its
+  initial capture metadata; the same-thread wake path recovered the completed
+  response without resending the round.
+- Accepted the integration identity seam. Current main intentionally preserves
+  an established opaque Junction source key, but local reconnect start, hosted
+  source start/callback, and hosted runtime apply still used the catalog-derived
+  key as an existence key. Reconnect could therefore create a second physical
+  row without advancing the old worker revision or hosted parent boundary, and
+  a stale source-first blood-pressure completion could survive the callback as
+  current coverage. Focused SQLite, hosted-start, and runtime-apply regressions
+  reproduced all three missed-owner effects before remediation.
+- The accepted correction at `0186631c3d33` resolves route-equivalent source
+  authority before choosing the physical point-write identity. Existing opaque
+  identity is preserved; the deterministic key is used only for a genuinely
+  new source. One shared pure hosted resolver composes the existing identity
+  and lifecycle rules for source start, callback, and runtime apply. No finding
+  was rejected. The fix adds no persisted field, provider generation, queue,
+  retry owner, manager, repair loop, reconciliation process, or provider call;
+  its only structural cost is the small stateless resolver shared by the three
+  existing Web owners.
+- Final ReviewGPT round 14 reviewed exact remediated head
+  `3d3f53514ac1187a6f60987059d780b15f9bdd8e` in the existing thread and
+  returned `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` plus `REVIEW_COMPLETE`.
+  It found that native companion reconnect still rebuilt the deterministic
+  source key after admission had resolved an established opaque Apple Health
+  identity. A later disconnect could therefore write an older opaque row while
+  a webhook had advanced the deterministic row, letting provider revoke succeed
+  without making the durable semantic source disconnected.
+- Accepted the round-14 finding and repeated-owner retrospective. Round 13
+  inventoried route-equivalent reads and the browser/runtime point writers but
+  did not explicitly follow the native companion reconnect through webhook and
+  disconnect as one cross-row lifecycle. The durable stance is now explicit:
+  a bounded legacy duplicate set is supported, but it represents one semantic
+  source; admission resolves one established physical identity at the maximum
+  lifecycle epoch, and every existing-source point write carries that epoch
+  onto that identity. Deterministic identity is used only when no semantic
+  source exists. The owners covered are native capture/start, browser start and
+  callback, registration webhook, disconnect/cleanup, companion admission, and
+  hosted runtime apply.
+- No round-14 finding was rejected. The correction adds one bounded admission
+  sentinel and reuses the existing pure semantic resolver and point-write
+  owners. It adds no persisted field, duplicate repair, deletion pass, queue,
+  retry policy, lifecycle manager, or provider call. The production delta is
+  deliberately smaller than the regression proof required to cover the full
+  native-connect, webhook, disconnect, reconnect sequence in real Postgres.
+- The user explicitly requested the latest ReviewGPT before the next round.
+  The repo first advanced to `@cobuild/review-gpt` `^0.5.131` with the matching
+  exact minimum-release-age exception and minimal lockfile resolution update.
+  After round 15 completed, `0.5.132` became the registry latest, so the same
+  narrow consumer files advance again before round 16. No transitive resolution
+  changes are admitted beyond the ReviewGPT package entry.
+- Final ReviewGPT round 15 reviewed exact head
+  `0eb0e97ade06b6bf863d8c93cef85e727e65f9f5` in the existing thread and
+  returned `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE`. The initial waited
+  capture failed closed after send because ChatGPT did not retain provable ZIP
+  attachment metadata; the committed-turn recovery watched the active review
+  to completion, and a read-only final-assistant export recovered the one marked
+  substantive result without resending the round.
+- Accepted the round-15 explicit companion-connect finding. The native start
+  owner still returned early for a connected, unfenced semantic source, so an
+  explicit `connectionIntent: connect` could mint a usable SDK token without
+  writing the pending source boundary or advancing the parent connection
+  version. Its later signed provider-registration webhook then classified the
+  unchanged source as already admitted and retained old schedule-time coverage.
+- No round-15 finding was rejected. Delete that early return so every explicit
+  companion connect reuses the existing source-start transaction, while the
+  separate passive `resume` path remains non-mutating. Established identity,
+  current lifecycle epoch, retained source-start coverage, parent-version fence,
+  webhook epoch advance, exact 12-coordinate clearing, and replacement
+  scheduling all remain owned by their existing paths. The correction removes
+  a branch and adds no state, status, provider read, field, queue, retry owner,
+  manager, cleanup process, or reconciliation loop.
 
 ## Verification
 
@@ -649,3 +733,43 @@ Updated: 2026-08-14
     status, error, and timestamp supersession cases. Prepared Web typecheck and
     touched-file lint pass. The hosted stale-residue guard, targeted proof-owner
     inspection, privacy scan, and `git diff --check` pass.
+  - Final ReviewGPT round 12 binds exact behavior head
+    `1c01b72f56047aa692032d0a6bfce3c832750ccf`, the requested model, the
+    package-owned response hash, `ROUND_OUTCOME: PASS`, and `REVIEW_COMPLETE`.
+    Its full-patch audit found no remaining qualifying issue.
+  - Round-13 integration proof first reproduced the defect at all three owner
+    boundaries: local reconnect left `local_connection_revision` unchanged,
+    hosted start skipped the parent-version boundary, and hosted runtime apply
+    rejected or redirected an update away from the established opaque row.
+    After correction, device-sync store/service passes 176 tests,
+    assistant hosted runtime passes 107 tests, and hosted wake/runtime authority
+    passes 248 tests. Device-sync, assistant-runtime, and prepared Web typechecks
+    pass; `git diff --check` and the added-line privacy/identifier scan pass.
+  - Round-14 remediation proof passes 271 focused hosted source-store, wake,
+    and runtime-authority tests. The isolated migrated-Postgres authority file
+    passes all 4 tests, including the established opaque Apple Health sequence
+    across native reconnect, webhook epoch advance, provider disconnect, a
+    lower-epoch deterministic duplicate, a second reconnect, and a final
+    webhook. Prepared Web typecheck, touched-file lint, `git diff --check`,
+    dependency policy, ignored-build inspection, and frozen dependency install
+    pass. ReviewGPT CLI and registry latest both report `0.5.131`.
+  - Round-15 remediation proof passes all 165 hosted-wake tests. The isolated
+    migrated-Postgres authority file passes all 4 cases with its established
+    opaque Apple Health source seeded connected before explicit native connect,
+    then proves pending source start, webhook epoch advance, provider disconnect,
+    bounded lower-epoch duplicate handling, reconnect, and final webhook. The
+    ReviewGPT 0.5.132 package-contract test passes after aligning its version,
+    configurable marked-response threshold, independent model-fallback constant,
+    extracted fail-closed helper, and current README contract assertions.
+  - Exact-head CI's assistant package shard also reported one timing-sensitive
+    outbox assertion outside the latest diff. Its exact named test passes alone
+    with 104 adjacent tests skipped, so no assistant production or test change
+    is made for that unrelated flake.
+  - ReviewGPT is updated to registry latest `0.5.132`; the frozen install,
+    dependency policy, ignored-build inspection, and exact CLI package-contract
+    test pass. Two round-16 preflights stopped before packaging or send because
+    the optional local preference overwrote an explicit supported four-lane
+    command value with the unsupported value five. The required Frog entry
+    records the precedence defect and the bounded workaround: isolate optional
+    local preferences for this invocation while retaining the repository's
+    browser defaults and an explicit supported lane count.

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+review_gpt_completion_specialists_prompt_max_bytes=6500
 
 usage() {
   cat >&2 <<'EOF'
@@ -68,47 +69,210 @@ review_gpt_phase_for_preset() {
   esac
 }
 
+review_gpt_option_requires_value() {
+  # Incur accepts options before the positional preset and accepts both the
+  # schema's camelCase names and their kebab-case aliases. Skip each option's
+  # value so it cannot be mistaken for that positional preset.
+  case "$1" in
+    --config \
+      | --preset \
+      | --prompt \
+      | --prompt-file \
+      | --promptFile \
+      | --model \
+      | --thinking \
+      | --app-connector \
+      | --appConnector \
+      | --connector \
+      | --chat \
+      | --chat-url \
+      | --chatUrl \
+      | --chat-id \
+      | --chatId \
+      | --wait-timeout \
+      | --waitTimeout \
+      | --timeout \
+      | --idle-draft-timeout \
+      | --idleDraftTimeout \
+      | --response-file \
+      | --responseFile \
+      | --response-marker \
+      | --responseMarker \
+      | --browser-path \
+      | --browserPath \
+      | --filter-output \
+      | --filterOutput \
+      | --format \
+      | --token-limit \
+      | --tokenLimit \
+      | --token-offset \
+      | --tokenOffset \
+      | --minimum-marked-response-time \
+      | --minimumMarkedResponseTime)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 review_gpt_detect_pr_phase() {
   local argument
+  local -a arguments=("$@")
   local detected_phase=""
+  local index=0
   local phase
-  local positional_presets=1
+  local positional_preset_seen=0
   local preset_token
+  local preset_token_count=0
   local preset_value
-  local read_preset_value=0
 
-  for argument in "$@"; do
+  while (( index < ${#arguments[@]} )); do
+    argument="${arguments[$index]}"
     preset_value=""
-    if [[ "$read_preset_value" == "1" ]]; then
-      preset_value="$argument"
-      read_preset_value=0
-    elif [[ "$argument" == "--preset" ]]; then
-      read_preset_value=1
-      positional_presets=0
-      continue
-    elif [[ "$argument" == --preset=* ]]; then
-      preset_value="${argument#--preset=}"
-      positional_presets=0
-    elif [[ "$positional_presets" == "1" && "$argument" != -* ]]; then
-      preset_value="$argument"
-    elif [[ "$argument" == -* ]]; then
-      positional_presets=0
-    fi
+    case "$argument" in
+      --preset)
+        index=$((index + 1))
+        if (( index >= ${#arguments[@]} )); then
+          echo "Error: --preset requires a value." >&2
+          return 64
+        fi
+        preset_value="${arguments[$index]}"
+        ;;
+      --preset=*)
+        preset_value="${argument#--preset=}"
+        ;;
+      --*=*)
+        ;;
+      --*)
+        if review_gpt_option_requires_value "$argument"; then
+          index=$((index + 1))
+        fi
+        ;;
+      -*)
+        ;;
+      *)
+        if [[ "$positional_preset_seen" == "0" ]]; then
+          preset_value="$argument"
+          positional_preset_seen=1
+        fi
+        ;;
+    esac
 
-    [[ -z "$preset_value" ]] && continue
-    while IFS= read -r preset_token; do
-      [[ -z "$preset_token" ]] && continue
-      phase="$(review_gpt_phase_for_preset "$preset_token")"
-      [[ -z "$phase" ]] && continue
-      if [[ -n "$detected_phase" && "$detected_phase" != "$phase" ]]; then
-        echo "Error: preliminary and final PR ReviewGPT presets cannot run together." >&2
-        exit 64
-      fi
-      detected_phase="$phase"
-    done < <(printf '%s\n' "$preset_value" | tr ',' '\n')
+    if [[ -n "$preset_value" ]]; then
+      while IFS= read -r preset_token; do
+        [[ -z "$preset_token" ]] && continue
+        preset_token_count=$((preset_token_count + 1))
+        phase="$(review_gpt_phase_for_preset "$preset_token")"
+        [[ -z "$phase" ]] && continue
+        if [[ -n "$detected_phase" && "$detected_phase" != "$phase" ]]; then
+          echo "Error: preliminary and final PR ReviewGPT presets cannot run together." >&2
+          return 64
+        fi
+        detected_phase="$phase"
+      done < <(printf '%s\n' "$preset_value" | tr ',' '\n')
+    fi
+    index=$((index + 1))
   done
 
+  if [[ "$detected_phase" == "preliminary" ]] \
+    && [[ "$preset_token_count" != "1" ]]; then
+    echo "Error: completion-specialists must run as the only preset so its assembled prompt budget is complete." >&2
+    return 64
+  fi
+
   printf '%s\n' "$detected_phase"
+}
+
+review_gpt_trimmed_prompt_file_bytes() {
+  local prompt_file="$1"
+
+  if [[ "$prompt_file" != /* ]]; then
+    prompt_file="$ROOT_DIR/$prompt_file"
+  fi
+  if [[ ! -f "$prompt_file" ]]; then
+    echo "Error: cannot measure missing completion-specialists prompt file: $1" >&2
+    return 1
+  fi
+  node -e \
+    'const fs = require("node:fs"); process.stdout.write(String(Buffer.byteLength(fs.readFileSync(process.argv[1], "utf8").trimEnd())));' \
+    "$prompt_file"
+}
+
+review_gpt_require_completion_specialists_prompt_budget() {
+  local argument
+  local assembled_bytes=0
+  local part_bytes
+  local part_count=0
+  local pending_prompt_part=""
+  local prompt_file_value
+  local -a prompt_part_bytes
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "Error: node is required to measure the assembled completion-specialists prompt." >&2
+    return 127
+  fi
+
+  part_bytes="$(
+    review_gpt_trimmed_prompt_file_bytes \
+      "scripts/chatgpt-review-presets/completion-specialists.md"
+  )" || return
+  prompt_part_bytes=("$part_bytes")
+
+  for argument in "$@"; do
+    if [[ -n "$pending_prompt_part" ]]; then
+      if [[ "$pending_prompt_part" == "file" ]]; then
+        part_bytes="$(review_gpt_trimmed_prompt_file_bytes "$argument")" || return
+      else
+        part_bytes="$(printf '%s' "$argument" | LC_ALL=C wc -c | tr -d '[:space:]')"
+      fi
+      prompt_part_bytes+=("$part_bytes")
+      pending_prompt_part=""
+      continue
+    fi
+
+    case "$argument" in
+      --prompt)
+        pending_prompt_part="inline"
+        ;;
+      --prompt=*)
+        part_bytes="$(
+          printf '%s' "${argument#--prompt=}" | LC_ALL=C wc -c | tr -d '[:space:]'
+        )"
+        prompt_part_bytes+=("$part_bytes")
+        ;;
+      --prompt-file | --promptFile)
+        pending_prompt_part="file"
+        ;;
+      --prompt-file=* | --promptFile=*)
+        prompt_file_value="${argument#*=}"
+        part_bytes="$(
+          review_gpt_trimmed_prompt_file_bytes "$prompt_file_value"
+        )" || return
+        prompt_part_bytes+=("$part_bytes")
+        ;;
+    esac
+  done
+
+  if [[ -n "$pending_prompt_part" ]]; then
+    echo "Error: --prompt and --prompt-file require a value." >&2
+    return 64
+  fi
+
+  for part_bytes in "${prompt_part_bytes[@]}"; do
+    if [[ "$part_bytes" == "0" ]]; then
+      continue
+    fi
+    if (( part_count > 0 )); then
+      assembled_bytes=$((assembled_bytes + 2))
+    fi
+    assembled_bytes=$((assembled_bytes + part_bytes))
+    part_count=$((part_count + 1))
+  done
+
+  if (( assembled_bytes > review_gpt_completion_specialists_prompt_max_bytes )); then
+    echo "Error: assembled completion-specialists prompt is ${assembled_bytes} bytes; the canonical/Frog budget is ${review_gpt_completion_specialists_prompt_max_bytes}. Keep --prompt to target/head metadata and remove duplicated PR or lens text." >&2
+    return 1
+  fi
 }
 
 review_gpt_run() {
@@ -121,6 +285,9 @@ review_gpt_run() {
     if [[ -n "$explicit_phase" && "$explicit_phase" != "$detected_phase" ]]; then
       echo "Error: REVIEW_GPT_REVIEW_PHASE=$explicit_phase conflicts with the selected $detected_phase PR review preset." >&2
       exit 64
+    fi
+    if [[ "$detected_phase" == "preliminary" ]]; then
+      review_gpt_require_completion_specialists_prompt_budget "$@"
     fi
     if [[ -z "$pr_ref" ]]; then
       if ! command -v gh >/dev/null 2>&1; then
@@ -141,13 +308,19 @@ review_gpt_run() {
   exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "$@"
 }
 
-if [[ "${1:-}" == "--run" ]]; then
-  shift
-  review_gpt_run "$@"
-fi
+review_gpt_main() {
+  if [[ "${1:-}" == "--run" ]]; then
+    shift
+    review_gpt_run "$@"
+  fi
 
-if [[ "$#" -ne 1 ]]; then
-  usage
-fi
+  if [[ "$#" -ne 1 ]]; then
+    usage
+  fi
 
-review_gpt_require_pr_head "$1"
+  review_gpt_require_pr_head "$1"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  review_gpt_main "$@"
+fi

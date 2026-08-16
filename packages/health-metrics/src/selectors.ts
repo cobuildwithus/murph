@@ -303,9 +303,55 @@ export function selectAuthoritativeMetricPoint(
   points: readonly MetricPoint[],
   options: { preferFasting?: boolean } = {},
 ): MetricPoint | null {
-  return points.slice().sort((left, right) =>
+  const precedenceCandidates = selectHighestPrecedenceCandidates(points, options);
+  return retainGreatestCausalSequence(precedenceCandidates).sort((left, right) =>
     compareMetricPointsForSelection(left, right, options)
   ).at(0) ?? null;
+}
+
+function selectHighestPrecedenceCandidates(
+  points: readonly MetricPoint[],
+  options: { preferFasting?: boolean },
+): MetricPoint[] {
+  let candidates = points.slice();
+  if (options.preferFasting && candidates.length > 0) {
+    const highestFastingRank = Math.max(...candidates.map(fastingRank));
+    candidates = candidates.filter((candidate) =>
+      fastingRank(candidate) === highestFastingRank
+    );
+  }
+  const fastingCandidates = candidates;
+  const latestEffectiveDate = fastingCandidates.reduce(
+    (latest, candidate) => candidate.effectiveDate > latest ? candidate.effectiveDate : latest,
+    "",
+  );
+  candidates = fastingCandidates.filter((candidate) =>
+    candidate.effectiveDate === latestEffectiveDate
+  );
+  if (candidates.length === 0) {
+    return candidates;
+  }
+  const highestSourcePriority = Math.min(...candidates.map(sourcePriority));
+  return candidates.filter((candidate) =>
+    sourcePriority(candidate) === highestSourcePriority
+  );
+}
+
+function retainGreatestCausalSequence(points: readonly MetricPoint[]): MetricPoint[] {
+  const causalSequences = points.flatMap((point) => {
+    const causalSeq = readPositiveCausalSeq(point.context.causalSeq);
+    return causalSeq === null ? [] : [causalSeq];
+  });
+  if (causalSequences.length === 0) {
+    return points.slice();
+  }
+  const greatestCausalSeq = causalSequences.reduce((greatest, candidate) =>
+    candidate > greatest ? candidate : greatest
+  );
+  return points.filter((point) => {
+    const causalSeq = readPositiveCausalSeq(point.context.causalSeq);
+    return causalSeq === null || causalSeq === greatestCausalSeq;
+  });
 }
 
 function compareMetricPointsForSelection(
@@ -330,6 +376,14 @@ function compareMetricPointsForSelection(
     return right.recordedAt.localeCompare(left.recordedAt);
   }
   return left.id.localeCompare(right.id);
+}
+
+function readPositiveCausalSeq(value: string | undefined): bigint | null {
+  if (!value || !/^[1-9][0-9]{0,18}$/u.test(value)) {
+    return null;
+  }
+  const causalSeq = BigInt(value);
+  return causalSeq <= 9_223_372_036_854_775_807n ? causalSeq : null;
 }
 
 function sourcePriority(point: MetricPoint): number {

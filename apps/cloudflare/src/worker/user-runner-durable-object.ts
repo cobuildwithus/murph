@@ -146,6 +146,18 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.rememberHostedWorkspaceSnapshotPresignedPut(input);
   }
 
+  async admitHostedBrowserVaultReplicaDirectPut(
+    input: Parameters<HostedUserRunner["admitHostedBrowserVaultReplicaDirectPut"]>[0],
+  ): ReturnType<HostedUserRunner["admitHostedBrowserVaultReplicaDirectPut"]> {
+    return this.runner.admitHostedBrowserVaultReplicaDirectPut(input);
+  }
+
+  async releaseHostedBrowserVaultReplicaDirectPut(
+    input: Parameters<HostedUserRunner["releaseHostedBrowserVaultReplicaDirectPut"]>[0],
+  ): ReturnType<HostedUserRunner["releaseHostedBrowserVaultReplicaDirectPut"]> {
+    return this.runner.releaseHostedBrowserVaultReplicaDirectPut(input);
+  }
+
   async readHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]> {

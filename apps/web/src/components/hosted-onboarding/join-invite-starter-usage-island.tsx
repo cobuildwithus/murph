@@ -46,7 +46,11 @@ export function JoinInviteStarterUsageIsland({
 
     try {
       const enrollment = await requestHostedStarterUsageEnrollment({ inviteCode });
-      replace(
+      // Enrollment changes the member's server-side access boundary. A client
+      // router replacement can update the URL while leaving the pre-enrollment
+      // Join tree committed, so force a fresh document that re-evaluates Home
+      // with the newly granted access.
+      window.location.replace(
         consumeHostedGroupStartHandoff()
           ? HOSTED_GROUP_START_PATH
           : enrollment.redirectPath,
@@ -55,7 +59,7 @@ export function JoinInviteStarterUsageIsland({
       startedRef.current = false;
       setErrorState(buildStarterUsageErrorState(error));
     }
-  }, [inviteCode, replace]);
+  }, [inviteCode]);
 
   const startPaidCheckout = useCallback(async () => {
     setCheckoutPending(true);

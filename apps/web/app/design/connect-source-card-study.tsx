@@ -30,6 +30,23 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
     authenticated: true,
     errorMessage: null,
+    source: {
+      connectTarget: "cronometer",
+      description:
+        "Meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
+      id: "cronometer",
+      logo: {
+        className: "size-11 object-contain",
+        height: 44,
+        src: "/brand-logos/connect/cronometer.png",
+        width: 44,
+      },
+      name: "Cronometer",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
     source: ZEPP_CONNECT_SOURCE,
   },
   {
@@ -275,16 +292,24 @@ export function ConnectSourceCardStudy({
   const searchParams = useSearchParams();
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
   const disconnectDialogSource = studyState === "source"
-    ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
-    : studyState === "dexcom-disconnect"
-      ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) =>
-          source.id === "dexcom-recovery"
+    ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) => source.id === "zepp")
+      ?.source ?? null
+    : studyState === "disconnect-retry"
+      ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
+          source.id === "garmin-disconnect-journey"
         )?.source ?? null
-      : studyState === "shared-dexcom-disconnect"
-        ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
-            source.id === "garmin-disconnect-journey"
+      : studyState === "dexcom-disconnect"
+        ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) =>
+            source.id === "dexcom-recovery"
           )?.source ?? null
-      : null;
+        : studyState === "shared-dexcom-disconnect"
+          ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
+              source.id === "garmin-disconnect-journey"
+            )?.source ?? null
+          : null;
+  const disconnectErrorMessage = studyState === "disconnect-retry"
+    ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
+    : null;
   const disconnectUnavailableSourceNames = disconnectDialogSource
     ? [
         ...DESIGN_CONNECT_SOURCE_CASES,
@@ -337,7 +362,7 @@ export function ConnectSourceCardStudy({
 
       <ConnectDisconnectDialog
         affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
-        errorMessage={null}
+        errorMessage={disconnectErrorMessage}
         inert
         pending={false}
         source={disconnectDialogSource}

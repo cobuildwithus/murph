@@ -147,24 +147,64 @@ acceptance. A failed or ambiguous enqueue never falls through to synchronous
 admission; provider redelivery converges through the existing provider-scoped
 trace identity. Neither path invokes the provider verifier twice.
 
+The OIDC control boundary projects Queue-ingress failures through a closed,
+value-free stage code. The code distinguishes malformed or unsafe visible
+metadata, hosted-crypto environment mismatch, unavailable recipient keys,
+root-key unwrap failure, authenticated-payload open failure, persistence-key
+selection, resealing, Queue availability, and `Queue.send` rejection. It must
+never serialize the caught exception, envelope, key id or material, provider
+payload, account, event, or trace identity. Web retains the stage only as the
+allowlisted log `type`; the public provider response keeps the generic retryable
+Queue-enqueue code. Provider rollout remains disabled
+until the exact deployed Web and Worker pair completes this transport contract;
+a failed canary is rolled back to the synchronous path before investigation.
+
 The Queue consumer is configured for 100 messages, five-second collection,
 one consumer, ten retries, and an encrypted DLQ. It decrypts outside Postgres
-and partitions each delivery into signed Web callbacks of at most 25 messages.
-Web validates the whole callback, then uses an explicit serial loop around the
-existing shared ingress's prepared-event admission. It does not re-run the
-provider signature verifier or parser. The frozen receipt instant and parsed
-meaning therefore survive provider secret or parser rotation while queued; the
-trace processing lease begins at Web admission time so a delayed delivery never
-starts with an expired lease. Every emitted prepared schema decoder must remain
-readable through the maximum Queue, DLQ, and redrive horizon, just as an old
-transport recipient key remains decrypt-only during its retention window.
-Existing trace claims, health-data consent,
-provider-application revision, setup, source, reconnect, disconnect, dirty
-state, exact encrypted payload, mailbox wake, and post-commit Temporal behavior
-remain unchanged. Thus a 100-message burst creates peak-one webhook admission
-pressure, although it still performs the existing sequential canonical writes.
-No raw-SQL batch owner, Queue database, Durable Object state, Vercel Workflow,
-or Temporal webhook workflow is introduced.
+and normally sends each delivery as one signed Web callback of at most 100
+messages. It partitions only when the exact UTF-8 callback would exceed the
+2 MiB Web body contract, so individually valid large events remain admissible.
+Web validates the whole callback, groups prepared events by provider account,
+and runs at most four independent account lanes. One account remains ordered
+and serial. Each event acquires its existing trace-processing lease only when
+that exact event starts durable admission. Web never preclaims later events in
+an account lane, so a callback deadline or process termination cannot leave
+not-yet-started events waiting on five-minute processing leases. Web does not
+re-run the provider signature verifier or parser.
+The frozen receipt instant and parsed meaning therefore survive provider secret
+or parser rotation while queued; the trace processing lease begins at Web
+admission time so a delayed delivery never starts with an expired lease. Every
+emitted prepared schema decoder must remain readable through the maximum Queue,
+DLQ, and redrive horizon, just as an old transport recipient key remains
+decrypt-only during its retention window.
+
+Transport admission is batched; durable database ownership remains per event.
+Trace admission, health-data consent, provider-application revision, setup,
+source, reconnect, disconnect, dirty state, exact encrypted payload, mailbox
+wake, trace completion, and post-commit Temporal behavior retain their existing
+per-event authority checks and independently retryable transactions.
+Cloudflare consumer concurrency remains one, so the four-lane Web bound is also
+the composed database-concurrency bound for this Queue. Value-free batch logs
+report input, lane, disposition, failure-code count, and duration totals; they
+never include account, trace, transport, provider payload, or exception values.
+No Queue database, Durable Object state, Vercel Workflow, Temporal webhook
+workflow, or cross-event processing lease is introduced.
+
+The historical three-account five-minute peak was 2,675 events; its 10x model
+is 26,750 events (about 89/s average and 222/s in the peak minute). At 200 ms of
+per-event durable work, the old serial path takes about 89 minutes. Four evenly
+loaded lanes approach 22 minutes, but the observed top account carried about
+65% of the five-minute peak, so preserving its order puts the conservative
+lower bound near 58 minutes. At 500 ms/event,
+the corresponding bounds are about 56 minutes when evenly loaded and 2.4 hours
+at the observed skew instead of 3.7 hours. These are service-time bounds, not a
+production latency guarantee: connection authority, consent, locks, crypto,
+dirty persistence, mailbox and signal work remain part of every exact event.
+A one-account storm remains serial because parallel writes to the same
+member/connection lock would amplify contention and cannot safely reorder exact
+resource work. The throughput gain therefore comes from fewer signed Vercel
+callbacks and bounded progress across independent accounts, not from acquiring
+database authority for future same-account events.
 
 Queue-visible state contains random transport identifiers, ciphertext, and key
 wrap metadata only. Provider, account, event, trace, and prepared job meaning

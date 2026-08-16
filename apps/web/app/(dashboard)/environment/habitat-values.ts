@@ -3,12 +3,12 @@ import {
   validateHabitatIndicatorValue,
   type HabitatIndicatorValue,
 } from "@murphai/contracts";
-import type { BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
+import type { BrowserVaultCoreCapableQueryClient } from "@murphai/query/browser-replica-client";
 
 import type { HabitatValues } from "./home-model";
 
 export function selectEnvironmentHabitatValues(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
 ): HabitatValues {
   const values: HabitatValues = {};
 

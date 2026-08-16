@@ -5,6 +5,7 @@ import {
   HostedBrowserVaultReplicaTooLargeError,
   assertHostedBrowserVaultReplicaByteLength,
   encodeHostedBrowserVaultReplicaJson,
+  encodeHostedBrowserVaultReplicaShardJson,
 } from "../src/browser-vault-limits.ts";
 
 const LAB_HISTORY_YEARS = 50;
@@ -105,4 +106,52 @@ describe("browser-vault replica limits", () => {
       })
     ).toThrow(HostedBrowserVaultReplicaTooLargeError);
   });
+
+  it("gzip-encodes repetitive shards only when the result is smaller", async () => {
+    const shard = {
+      metricRows: Array.from({ length: 2_000 }, (_, index) => ({
+        metricKey: "heart-rate",
+        observedAt: `2026-01-${String((index % 28) + 1).padStart(2, "0")}T08:00:00.000Z`,
+        value: 60 + (index % 20),
+      })),
+      schema: "murph.browser-vault-replica.metrics.v1",
+    };
+
+    const encoded = await encodeHostedBrowserVaultReplicaShardJson({ shard });
+
+    expect(encoded.contentEncoding).toBe("gzip");
+    expect(encoded.encodedByteLength).toBeLessThan(encoded.byteLength / 10);
+    const decoded = await decompressGzip(encoded.bytes);
+    expect(decoded.byteLength).toBe(encoded.byteLength);
+    expect(JSON.parse(new TextDecoder().decode(decoded))).toEqual(shard);
+  });
+
+  it("keeps tiny incompressible shard payloads as identity", async () => {
+    const encoded = await encodeHostedBrowserVaultReplicaShardJson({ shard: null });
+
+    expect(encoded).toEqual({
+      byteLength: 4,
+      bytes: new TextEncoder().encode("null"),
+      contentEncoding: "identity",
+      encodedByteLength: 4,
+    });
+  });
+
+  it("checks the decoded shard size before compression", async () => {
+    await expect(encodeHostedBrowserVaultReplicaShardJson({
+      maxBytes: 8,
+      shard: { value: "larger than eight bytes" },
+    })).rejects.toThrow(HostedBrowserVaultReplicaTooLargeError);
+  });
 });
+
+async function decompressGzip(bytes: Uint8Array): Promise<Uint8Array> {
+  const compressed = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+  const stream = new Blob([compressed])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
