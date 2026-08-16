@@ -9,7 +9,7 @@ import {
 } from "../src/hosted-runtime/wake-candidates.ts";
 
 describe("hosted runtime wake candidates", () => {
-  it("keeps the first candidate when candidates tie on timestamp", () => {
+  it("preserves device-sync ownership when candidates tie on timestamp", () => {
     const selected = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate("2026-04-08T00:30:00.000Z", "assistant"),
       createHostedRuntimeWakeCandidate(
@@ -20,7 +20,7 @@ describe("hosted runtime wake candidates", () => {
 
     assert.deepEqual(selected, {
       at: "2026-04-08T00:30:00.000Z",
-      reason: "assistant",
+      reason: "device-sync.reconcile",
     });
   });
 

@@ -1480,6 +1480,30 @@ export async function readHostedVaultShareProjectionCiphertextForTest(input: {
   });
 }
 
+export async function seedHostedWorkspaceWakeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+  wakeAt: Date | string;
+  wakeReason: string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const result = await deps.prisma.hostedWorkspace.updateMany({
+      data: {
+        nextWakeAt: new Date(input.wakeAt),
+        nextWakeReason: input.wakeReason,
+      },
+      where: {
+        userId: input.userId,
+      },
+    });
+    if (result.count !== 1) {
+      throw new Error(
+        "Hosted-local workspace wake seed requires exactly one existing workspace.",
+      );
+    }
+  });
+}
+
 export async function seedHostedWorkspaceInboxMediaRetentionWakeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   userId: string;

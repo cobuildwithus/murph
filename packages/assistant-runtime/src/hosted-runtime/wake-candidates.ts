@@ -63,7 +63,11 @@ function hostedWakeCandidateWins(
     return candidateTime < selectedTime;
   }
 
-  return false;
+  return hostedWakeReasonPriority(candidate.reason) > hostedWakeReasonPriority(selected.reason);
+}
+
+function hostedWakeReasonPriority(reason: string | null): number {
+  return reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON ? 1 : 0;
 }
 
 // Projection provenance rules: an already-due candidate is one logical state
