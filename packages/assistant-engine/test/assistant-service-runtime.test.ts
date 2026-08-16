@@ -2447,6 +2447,7 @@ describe("assistant delivery orchestration seam", () => {
       media: [],
       message: "reply body",
       nativeReplyRequested: undefined,
+      plannedOccurrenceAt: null,
       replyToMessageId: "reply-input",
       reviewedAssistantAskCompletionExpiresAt: null,
       scheduledOccurrenceAt: null,
