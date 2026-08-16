@@ -68,11 +68,15 @@ export function ShareLinkPreviewsStudy() {
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The 1200x630 OpenGraph cards behind links Murph or members send:
           approvals, referral invites, device connect nudges, and group
-          sponsorship. Each study renders the exact production card
-          component, so the previews cannot drift. None of the cards imitates
-          a tappable control, none promises a capability the landing page has
-          not yet verified, and none exposes member details: link previews
-          are fetched without authentication.
+          sponsorship. Biomarker and experiment pages ship the same frame
+          with subject-specific headlines. Each study renders the exact
+          production card component, so the previews cannot drift. None of
+          the cards imitates a tappable control, none promises a capability
+          the landing page has not yet verified, and none exposes member
+          details: link previews are fetched without authentication. Card
+          image routes live outside route groups: grouped metadata images get
+          hash-suffixed URLs in production, which silently breaks the
+          advertised link.
         </p>
       </div>
       <div className="grid gap-6 sm:grid-cols-2">

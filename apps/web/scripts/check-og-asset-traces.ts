@@ -35,14 +35,14 @@ const requiredOgAssetSuffixes = [
 // metadata image routes stays matched if its exact shape changes.
 const requiredOgRouteTraceMarkers = [
   "server/app/approve/[approvalId]/opengraph-image",
-  "server/app/(dashboard)/connect/opengraph-image",
+  "server/app/connect/opengraph-image",
   "server/app/groups/fund/[joinCode]/opengraph-image",
   "server/app/r/[referralCode]/opengraph-image",
   "server/app/join/[inviteCode]/opengraph-image",
   "server/app/family/accept/[inviteCode]/opengraph-image",
   "server/app/groups/join/[joinCode]/opengraph-image",
-  "server/app/(dashboard)/biomarkers/[biomarkerId]/opengraph-image",
-  "server/app/(dashboard)/experiments/[experimentId]/opengraph-image",
+  "server/app/biomarkers/[biomarkerId]/opengraph-image",
+  "server/app/experiments/[experimentId]/opengraph-image",
   "server/app/(dashboard)/experiments/[experimentId]/card/route.js.nft.json",
   "server/app/changelog/card/v1/[items]/route.js.nft.json",
   "server/app/imessage/card/v1/[payload]/route.js.nft.json",

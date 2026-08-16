@@ -251,6 +251,9 @@ export function SectionsContent() {
 
       <Separator />
 
+      {/* Card image routes must live in ungrouped app segments: metadata
+          images inside a route group emit hash-suffixed URLs in production,
+          which 404s the exact URL the pages advertise. */}
       <StudySection title="Share link previews">
         <div data-design-section="share-link-previews">
           <ShareLinkPreviewsStudy />
