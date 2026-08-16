@@ -2592,6 +2592,57 @@ describe("check-provider-request-boundaries", () => {
     }
   });
 
+  it("projects call-produced helper defaults after resolving their values", () => {
+    const sourceLines = [
+      "const dynamicKey = readKey();",
+      "const defaults = { route: { endpoint: '/internal' } };",
+      "function makeRoot() { return defaults.route; }",
+      "function makeExact() { return defaults.route; }",
+      "function makeWildcard() { return defaults.route; }",
+      "function root({ endpoint } = makeRoot()) { return endpoint; }",
+      "function exact({ route: { endpoint } = makeExact() } = {}) { return endpoint; }",
+      "function wildcard({ [dynamicKey]: { endpoint } = makeWildcard() } = {}) { return endpoint; }",
+      "defaults.route.endpoint = 'https://api.openai.com/v1/responses';",
+      "await fetch(root(), { method: 'POST' }); // violation",
+      "await fetch(exact({}), { method: 'POST' }); // violation",
+      "await fetch(wildcard({}), { method: 'POST' }); // violation",
+      "const internalDefaults = { route: { endpoint: '/internal' } };",
+      "function makeInternal() { return internalDefaults.route; }",
+      "function internal({ endpoint } = makeInternal()) { return endpoint; }",
+      "await fetch(internal(), { method: 'POST' });",
+      "const shadowDefaults = { route: { endpoint: '/internal' } };",
+      "function makeShadow() { return shadowDefaults.route; }",
+      "function shadow({ endpoint } = makeShadow()) { return endpoint; }",
+      "{",
+      "  const shadowDefaults = { route: { endpoint: '/internal' } };",
+      "  shadowDefaults.route.endpoint = 'https://api.openai.com/v1/images';",
+      "}",
+      "await fetch(shadow(), { method: 'POST' });",
+      "const lateDefaults = { route: { endpoint: '/internal' } };",
+      "function makeLate() { return lateDefaults.route; }",
+      "function late({ endpoint } = makeLate()) { return endpoint; }",
+      "await fetch(late(), { method: 'POST' });",
+      "lateDefaults.route.endpoint = 'https://api.openai.com/v1/audio';",
+      "let reassignedDefaults = { route: { endpoint: 'https://api.openai.com/v1/files' } };",
+      "function makeReassigned() { return reassignedDefaults.route; }",
+      "function reassigned({ endpoint } = makeReassigned()) { return endpoint; }",
+      "reassignedDefaults = { route: { endpoint: '/internal' } };",
+      "await fetch(reassigned(), { method: 'POST' });",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/call-produced-provider-default.mjs",
+      "scripts/call-produced-provider-default.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
   it("resolves chronologically possible local helper callables", () => {
     const sourceLines = [
       "const arrowTarget = () => 'https://api.openai.com/v1/responses';",

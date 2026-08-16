@@ -610,6 +610,9 @@ Last verified: 2026-08-15
   value retains its source reference paths and the call-site observation
   position until ordered property projection is complete; later direct member
   writes therefore remain visible through static computed destructuring.
+  Supported same-file calls resolve their direct-return values in that same
+  authority before ordered projection, so a call-produced object or array and
+  any member reference it returns cannot be discarded as raw call syntax.
   Duplicate function declarations, nested functions, and recursive cycles are
   excluded, and
   file-level fallback hints are disabled inside the callee so a generic returned

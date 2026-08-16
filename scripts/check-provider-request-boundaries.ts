@@ -2967,6 +2967,59 @@ function readProviderCallPossibleValues(input: {
       propertySteps: [],
     });
   }
+  if (isCallExpression(expression) || isOptionalCallExpression(expression)) {
+    const callee = unwrapExpression(expression.callee);
+    if (isIdentifier(callee)) {
+      const callableValues = readProviderCallPossibleValues({
+        ...input,
+        defaultExpression: null,
+        node: callee,
+        propertySteps: [],
+      });
+      const returnedValues: ProviderCallParameterValue[] = [];
+      let matchedCallable = false;
+      for (const callableValue of callableValues) {
+        const callable = callableValue.node;
+        if (!isFunction(callable)) {
+          continue;
+        }
+        matchedCallable = true;
+        const callableStart = callable.start ?? 0;
+        const bindingKey =
+          `provider-function:${callee.name}:${callableStart}`;
+        if (input.resolving.has(bindingKey)) {
+          continue;
+        }
+        const resolving = new Set(input.resolving);
+        resolving.add(bindingKey);
+        const callParameterValues = readProviderCallParameterValues({
+          analysis: input.analysis,
+          bindings: input.bindings,
+          call: expression,
+          callerParameterValues: callableValue.callParameterValues ??
+            input.callParameterValues,
+          callable,
+        });
+        for (const returned of readDirectFunctionReturnExpressions(callable)) {
+          returnedValues.push(...readProviderCallPossibleValues({
+            ...input,
+            before: returned.start ?? callableStart,
+            callParameterValues,
+            defaultExpression: null,
+            lexicalBefore: returned.start ?? callableStart,
+            node: returned,
+            projectionBefore: input.projectionBefore ?? input.before,
+            projectionReferencePaths: readPossibleReferencePaths(returned),
+            propertySteps: [],
+            resolving,
+          }));
+        }
+      }
+      if (matchedCallable) {
+        return dedupeProviderCallValues(returnedValues);
+      }
+    }
+  }
   const direct = [{
     before: input.before,
     callParameterValues: input.callParameterValues,
@@ -3349,56 +3402,35 @@ function inferProviderExpressionFacts(input: {
         inferProviderExpressionFacts({ ...input, node: node.callee.object }),
       );
     }
-    const callee = unwrapExpression(node.callee);
-    if (isIdentifier(callee)) {
-      const callableValues = readProviderCallPossibleValues({
-        analysis: input.analysis,
-        before: input.before,
-        bindings: input.bindings,
-        callParameterValues: input.callParameterValues,
-        defaultCallParameterValues: undefined,
-        defaultExpression: null,
-        node: callee,
-        propertySteps: [],
-        resolving: input.resolving,
-      });
-      for (const callableValue of callableValues) {
-        const callable = callableValue.node;
-        const returnedExpressions = readDirectFunctionReturnExpressions(
-          callable,
-        );
-        if (returnedExpressions.length === 0) {
-          continue;
-        }
-        const callableStart = callable.start ?? 0;
-        const bindingKey =
-          `provider-function:${callee.name}:${callableStart}`;
-        if (input.resolving.has(bindingKey)) {
-          continue;
-        }
-        const resolving = new Set(input.resolving);
-        resolving.add(bindingKey);
-        const callParameterValues = readProviderCallParameterValues({
-          analysis: input.analysis,
-          bindings: input.bindings,
-          call: node,
-          callerParameterValues: input.callParameterValues,
-          callable,
-        });
-        for (const returned of returnedExpressions) {
-          mergeProviderExpressionFacts(
-            facts,
-            inferProviderExpressionFacts({
-              ...input,
-              before: returned.start ?? callableStart,
-              callParameterValues,
-              node: returned,
-              resolving,
-              suppressFileFallback: true,
-            }),
-          );
-        }
+    const callValues = readProviderCallPossibleValues({
+      analysis: input.analysis,
+      before: input.before,
+      bindings: input.bindings,
+      callParameterValues: input.callParameterValues,
+      defaultCallParameterValues: undefined,
+      defaultExpression: null,
+      node,
+      propertySteps: [],
+      resolving: input.resolving,
+    });
+    for (const value of callValues) {
+      if (
+        value.node.type === node.type &&
+        value.node.start === node.start &&
+        value.node.end === node.end
+      ) {
+        continue;
       }
+      mergeProviderExpressionFacts(
+        facts,
+        inferProviderExpressionFacts({
+          ...input,
+          before: value.before,
+          callParameterValues: value.callParameterValues,
+          node: value.node,
+          suppressFileFallback: true,
+        }),
+      );
     }
     for (const argument of node.arguments) {
       if (argument.type !== "ArgumentPlaceholder" && argument.type !== "SpreadElement") {

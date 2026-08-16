@@ -687,6 +687,43 @@ Updated: 2026-08-15
   gardening, diff integrity, and the diff-aware verifier pass. The full
   repository-tools matrix passes twice at 39 files and 770 tests.
 
+### ReviewGPT round 24 requirement-level retrospective
+
+- Exact full-snapshot head `fc16222c8bf22cb9022721bfb09ebc9356e58242`
+  returned `RETROSPECTIVE_REQUIRED`. The round-23 default transition preserved
+  lexical scope, binding chronology, source references, and call-time member
+  observation for direct values, but an aggregate produced by an already
+  supported same-file helper was still projected while it remained a raw call
+  expression. Root, exact-property, and wildcard-property defaults could
+  therefore discard a provider-mutated member before the existing direct-return
+  expansion ran. This repeats the accepted helper-value provenance mechanism
+  and is review-induced.
+- Requirement decision: same-file call-produced aggregates and the static
+  members they return remain part of the bounded helper grammar. Narrowing them
+  would make already-supported helper calls and destructured defaults unsafe to
+  compose and would reopen the registered-provider raw-HTTP bypass. Possible
+  helper return values must be established before ordered property projection;
+  lexical visibility and return-local value chronology remain distinct from
+  call-time member-mutation observation.
+- Redesign decision: move the existing direct-return expansion into the one
+  helper-value resolver and make provider-fact inference consume that resolver's
+  values. Delete the separate direct-return expansion from provider-fact
+  inference rather than add another resolver, registry, provenance table,
+  syntax owner, exception, compatibility path, or provider request. Recursive
+  cycles and unsupported callees remain bounded by the existing value resolver.
+- Executable `.mjs` and `.mts` proofs cover root, exact-property, and
+  wildcard-property defaults whose same-file helper returns a member-produced
+  aggregate mutated to a provider before the call. Clean controls cover an
+  internal aggregate, an out-of-scope shadow mutation, a mutation after the
+  helper call, and a definitive internal aggregate reassignment. The focused
+  provider-guard suite passes 140 tests. Repo-tools TypeScript compilation, the
+  production provider scan, doc gardening, diff integrity, dependency policy,
+  and the diff-aware verifier pass. The full repository-tools matrix and the
+  diff-aware verifier's repeated matrix each pass 39 files and 771 tests. One
+  initial aggregate run hit the unchanged worktree-storage guard's fixed
+  15-second process timeout; that exact case passed in isolation, and the clean
+  aggregate rerun did not reproduce it.
+
 ## Verification
 
 - `pnpm provider-requests:guard`
@@ -698,6 +735,13 @@ Updated: 2026-08-15
 
 Current evidence:
 
+- Round-24 retrospective focused provider-guard suite: 140 tests passed across
+  `.mjs` and `.mts` fixtures. Repo-tools TypeScript compilation, the production
+  provider scan, doc gardening, `git diff --check`, and dependency policy pass.
+  The clean full repository-tools rerun and the diff-aware verifier's repeated
+  matrix each pass 39 files and 771 tests. An unchanged worktree-storage case
+  hit its fixed 15-second process timeout in the first aggregate, passed in the
+  immediate isolated retry, and stayed green in both complete passing runs.
 - Round-23 retrospective focused provider-guard suite: 139 tests passed across
   `.mjs` and `.mts` fixtures. Repo-tools TypeScript compilation, the production
   provider scan, doc gardening, and `git diff --check` pass. The full
