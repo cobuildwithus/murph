@@ -1250,6 +1250,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       Parameters<typeof offerCapturedHostedVaultShareProjectionBestEffort>[0],
       "shouldStop"
     >,
+    shouldStop?: () => boolean,
   ): OwnedVaultShareProjection["promise"] => {
     if (pendingOwnedVaultShareProjection) {
       throw new Error("Hosted vault-share projection already has an invocation owner.");
@@ -1259,6 +1260,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...offerInput,
       shouldStop: () =>
         foregroundPreempted
+        || shouldStop?.() === true
         || hostAbortObserved
         || runtimeAbortController.signal.aborted
         || options.shutdownSignal?.aborted === true,
@@ -2424,6 +2426,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         | { outcome: "completed"; result: HostedVaultShareProjectionOfferResult }
         | { outcome: "preempted" }
       > => {
+        if (shouldYieldSystemMailboxWork()) {
+          return { outcome: "preempted" };
+        }
         const vaultSharePort = foregroundRuntime.platform.vaultSharePort ?? null;
         if (!vaultSharePort) {
           return { outcome: "completed", result: { outcome: "no-port" } };
@@ -2524,7 +2529,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (result.outcome === "error") {
             logHostedVaultShareProjectionOfferOutcome(result);
           }
-          return consumeForegroundWake()
+          return shouldYieldSystemMailboxWork()
             ? { outcome: "preempted" }
             : { outcome: "completed", result };
         }
@@ -2545,7 +2550,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (workSignal.aborted) {
           throw readHostedRuntimeAbortReason(workSignal);
         }
-        if (consumeForegroundWake()) {
+        if (shouldYieldSystemMailboxWork()) {
           return { outcome: "preempted" };
         }
         if (capture.outcome !== "captured") {
@@ -2560,7 +2565,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           () => startOwnedVaultShareProjection({
             capture: capture.capture,
             vaultSharePort,
-          }),
+          }, shouldYieldSystemMailboxWork),
           "retain",
         );
         if (offerResult.kind === "wake") {
@@ -2570,7 +2575,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (offerResult.value.outcome === "preempted") {
           return { outcome: "preempted" };
         }
-        return consumeForegroundWake()
+        return shouldYieldSystemMailboxWork()
           ? { outcome: "preempted" }
           : { outcome: "completed", result: offerResult.value };
       };
@@ -2752,6 +2757,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             );
             return { preempted: true, prepared: true };
           }
+          if (shouldYieldSystemMailboxWork()) {
+            return { preempted: true, prepared: true };
+          }
           emitPhaseLog({
             details: {
               workspacePresent: activeWorkspace !== null,
@@ -2765,6 +2773,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           let refresh: HostedBrowserVaultReplicaRefreshResult;
           try {
             refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+              deadlineMs: assistantCronDeadlineMs,
               force: true,
               generatedAt: new Date().toISOString(),
               platform: foregroundRuntime.platform,
@@ -2797,11 +2806,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             if (refresh.status === "deferred_runtime_wake") {
               foregroundWakeObserved = true;
             }
-            consumeForegroundWake();
+            const shouldYield = shouldYieldSystemMailboxWork();
             return {
-              preempted: foregroundWakeObserved || hostAbortObserved,
+              preempted: shouldYield || hostAbortObserved,
               prepared: true,
             };
+          }
+          if (shouldYieldSystemMailboxWork()) {
+            return { preempted: true, prepared: true };
           }
           const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
             enabled: true,
@@ -2851,7 +2863,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (recordWakeInterruption.takeNotification()) {
             foregroundWakeObserved = true;
           }
-          return { preempted: foregroundWakeObserved, prepared: true };
+          return {
+            preempted: shouldYieldSystemMailboxWork(),
+            prepared: true,
+          };
         });
       };
 
