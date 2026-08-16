@@ -121,6 +121,7 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('vault-cli workout start')
     expect(skill).toContain('vault-cli workout active')
     expect(skill).toContain('vault-cli workout exercise add')
+    expect(skill).toContain('[--sets <n>]')
     expect(skill).toContain('vault-cli workout set log')
     expect(skill).toContain('vault-cli workout set clear')
     expect(skill).toContain('vault-cli workout finish')
@@ -250,6 +251,25 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(skill).toContain(
       'do not claim that any set was saved',
+    )
+    expect(skill).not.toContain('or clearly began a workout')
+    expect(skill).toContain(
+      'the member accepts the exact bounded recovery offer below',
+    )
+    expect(skill).toContain(
+      'create only enough pending set coordinates through the named set',
+    )
+    expect(skill).toContain(
+      'the same response must then ask one bounded recovery question',
+    )
+    expect(skill).toContain(
+      'Do not stop after the no-active statement',
+    )
+    expect(skill).toContain(
+      'A contextual affirmative answer to that exact offer authorizes only the proposed start and exact set write',
+    )
+    expect(skill).toContain(
+      'If an active workout now exists, do not retarget the accepted recovery',
     )
   })
 

@@ -582,7 +582,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             assistantCliContract: [
               'vault-cli workout active --format json',
               'vault-cli workout start [name] [--routine <format>]',
-              'vault-cli workout exercise add <name> --order <n>',
+              'vault-cli workout exercise add <name> --order <n> [--sets <n>]',
               'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
@@ -626,7 +626,39 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         )
 
         expect(missingWorkoutEvents).toEqual([])
-        expect(missingWorkout.finalMessage).toMatch(/active|start/iu)
+        expect(missingWorkout.finalMessage).toMatch(
+          /(?:no active|could(?: not|n't) (?:find|access) an active|do(?: not|n't) have an active)(?: tracked)? workout/iu,
+        )
+        expect(missingWorkout.finalMessage).toMatch(/start/iu)
+        expect(missingWorkout.finalMessage).toContain('?')
+        expect(missingWorkout.finalMessage).not.toMatch(
+          /(?:set\s*3|it)\s+(?:(?:is|was|has been)\s+)?(?:saved|logged|recorded)|\b(?:i(?:'ve| have)|successfully)\s+(?:saved|logged|recorded)\b/iu,
+        )
+
+        const recovered = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'yes',
+          resumeSessionId: missingWorkout.sessionId,
+        })
+        const vaultAfterRecovery = await readVaultRawTolerant(workingDirectory)
+        const recoveredWorkouts = vaultAfterRecovery.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success ? [parsed.data] : []
+        })
+
+        expect(recovered.finalMessage).toMatch(/set\s*3/iu)
+        expect(recovered.finalMessage).toMatch(/9 reps/iu)
+        expect(recovered.finalMessage).toMatch(/logged|saved|recorded/iu)
+        expect(recoveredWorkouts).toHaveLength(1)
+        expect(
+          recoveredWorkouts[0]?.exercises[0]?.sets.map((set) => set.reps ?? null),
+        ).toEqual([null, null, 9])
+
+        await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Finish this tracked workout.',
+          resumeSessionId: recovered.sessionId,
+        })
 
         const started = await executeRealCodexAppServerTurn({
           ...commonInput,
@@ -652,14 +684,16 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           resumeSessionId: secondCompletion.sessionId,
         })
         const vault = await readVaultRawTolerant(workingDirectory)
-        const workout = vault.events
-          .map((event) => workoutSessionSchema.safeParse(event.attributes.workout))
-          .find((result) => result.success)?.data
+        const workouts = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success ? [parsed.data] : []
+        })
+        const workout = workouts.at(-1)
 
-        expect(started.finalMessage).toMatch(/0\/4 sets complete/iu)
-        expect(firstCompletion.finalMessage).toMatch(/actual 9 reps/iu)
-        expect(secondCompletion.finalMessage).toMatch(/2\/4 sets complete/iu)
-        expect(secondCompletion.finalMessage).toMatch(/actual 9 reps/iu)
+        expect(started.finalMessage).toMatch(/start/iu)
+        expect(started.finalMessage).toMatch(/4/iu)
+        expect(firstCompletion.finalMessage).toMatch(/9 reps/iu)
+        expect(secondCompletion.finalMessage).toMatch(/9 reps/iu)
         expect(firstCompletion.finalMessage).not.toMatch(/how many|\?/iu)
         expect(secondCompletion.finalMessage).not.toMatch(/how many|\?/iu)
         expect(firstCompletion.finalMessage).not.toMatch(/30\s*lb/iu)

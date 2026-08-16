@@ -158,14 +158,24 @@ A short acknowledgement after a set message or assistant reply is not another
 set completion. It cannot move the write target to the next set. The last set
 coordinate the member explicitly named remains the only candidate. If that set
 still needs a result, Murph asks one narrow question about it. If the canonical
-result already matches, the acknowledgement causes no workout mutation.
+result already matches, the acknowledgement causes no workout mutation. The
+sole exception is a contextual affirmative that accepts the exact bounded
+missing-workout recovery offer below.
 
 Every completion, correction, and acknowledgement follow-up first resolves the
 canonical active workout. A missing active workout fails closed. Murph does not
 start a workout to make an earlier assistant confirmation appear true, does not
 write a later set, and does not claim that any set was saved. It states that no
-active tracked workout was found and asks whether to start one, unless the
-current member message itself clearly requests a new workout.
+active tracked workout was found. A completion or correction alone never
+authorizes a new workout. Murph may start one only when the current message
+explicitly requests it or the member accepts one exact recovery offer. That
+offer repeats the proposed workout, exercise, set coordinate, and stated result.
+Acceptance creates only enough pending coordinates through that set and writes
+only the named set. Murph rechecks active state before acting and never retargets
+the accepted recovery if another active workout has appeared. The missing-state
+response includes both the truthful no-save result and that exact recovery
+question. It does not stop after the failure statement or give generic retry
+advice.
 
 An active workout may have zero pending sets after the final result is logged; it remains active until the member explicitly finishes it.
 
