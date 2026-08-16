@@ -2382,6 +2382,63 @@ describe("check-provider-request-boundaries", () => {
     }
   });
 
+  it("selects helper values through one cross-kind lexical authority", () => {
+    const sourceLines = [
+      "function providerBlock(choose) {",
+      "  {",
+      "    function choose() { return 'https://api.openai.com/v1/responses'; }",
+      "    return choose();",
+      "  }",
+      "}",
+      "function internalBlock(choose) {",
+      "  {",
+      "    function choose() { return '/internal'; }",
+      "    return choose();",
+      "  }",
+      "}",
+      "function outerProvider() { return 'https://api.openai.com/v1/images'; }",
+      "function parameterShadow(outerProvider) { return outerProvider(); }",
+      "function conditionalFunction(choose) {",
+      "  {",
+      "    function choose() { return 'https://api.openai.com/v1/audio'; }",
+      "    if (Date.now() > 0) choose = () => '/internal';",
+      "    return choose();",
+      "  }",
+      "}",
+      "function definitiveParameter(choose) {",
+      "  choose = () => '/internal';",
+      "  return choose();",
+      "}",
+      "const variableChoice = () => '/internal';",
+      "{",
+      "  function variableChoice() { return 'https://api.openai.com/v1/models'; }",
+      "  await fetch(variableChoice(), { method: 'POST' }); // violation",
+      "}",
+      "const providerVariableChoice = () => 'https://api.openai.com/v1/models';",
+      "{",
+      "  function providerVariableChoice() { return '/internal'; }",
+      "  await fetch(providerVariableChoice(), { method: 'POST' });",
+      "}",
+      "await fetch(providerBlock(() => '/internal'), { method: 'POST' }); // violation",
+      "await fetch(internalBlock(() => 'https://api.openai.com/v1/files'), { method: 'POST' });",
+      "await fetch(parameterShadow(() => '/internal'), { method: 'POST' });",
+      "await fetch(conditionalFunction(() => '/internal'), { method: 'POST' }); // violation",
+      "await fetch(definitiveParameter(() => 'https://api.openai.com/v1/files'), { method: 'POST' });",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/cross-kind-provider-url-shadow.mjs",
+      "scripts/cross-kind-provider-url-shadow.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
   it("projects static and dynamic computed helper parameters conservatively", () => {
     const sourceLines = [
       "const dynamicKey = readKey();",
@@ -2408,6 +2465,44 @@ describe("check-provider-request-boundaries", () => {
     for (const relativePath of [
       "scripts/computed-provider-url-parameters.mjs",
       "scripts/computed-provider-url-parameters.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
+  it("preserves call-site references through computed helper projection", () => {
+    const sourceLines = [
+      "function target({ ['endpoint']: endpoint }) { return endpoint; }",
+      "function nestedTarget({ holder: { ['endpoint']: endpoint } }) { return endpoint; }",
+      "const mutatedOptions = { endpoint: '/internal' };",
+      "mutatedOptions.endpoint = 'https://api.openai.com/v1/responses';",
+      "const aliasedOptions = mutatedOptions;",
+      "const nestedOptions = { holder: { endpoint: '/internal' } };",
+      "nestedOptions.holder.endpoint = 'https://api.openai.com/v1/audio';",
+      "const internalOptions = { endpoint: '/internal' };",
+      "const shadowedOptions = { endpoint: '/internal' };",
+      "{",
+      "  const shadowedOptions = { endpoint: '/internal' };",
+      "  shadowedOptions.endpoint = 'https://api.openai.com/v1/images';",
+      "}",
+      "let reassignedOptions = { endpoint: 'https://api.openai.com/v1/audio' };",
+      "reassignedOptions = { endpoint: '/internal' };",
+      "await fetch(target(mutatedOptions), { method: 'POST' }); // violation",
+      "await fetch(target(aliasedOptions), { method: 'POST' }); // violation",
+      "await fetch(nestedTarget(nestedOptions), { method: 'POST' }); // violation",
+      "await fetch(target(internalOptions), { method: 'POST' });",
+      "await fetch(target(shadowedOptions), { method: 'POST' });",
+      "await fetch(target(reassignedOptions), { method: 'POST' });",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/mutated-computed-provider-url-parameter.mjs",
+      "scripts/mutated-computed-provider-url-parameter.mts",
     ]) {
       const matches = violationsOfKind("raw-provider-http", source, relativePath);
       expect(matches.map((match) => match.line)).toEqual(expectedLines);

@@ -611,6 +611,45 @@ Updated: 2026-08-15
   scan, doc gardening, diff integrity, and the diff-aware verifier pass. The
   full repository-tools matrix passed twice at 39 files and 766 tests.
 
+### ReviewGPT round 22 requirement-level retrospective
+
+- Exact full-snapshot head `de634e047f106de9d6d43e48632f648f32fbbfcc`
+  returned `RETROSPECTIVE_REQUIRED`. The round-21 consolidation still chose a
+  mapped parameter and chronological variable values before considering a
+  nearer block function declaration. It also collapsed an argument reference
+  to its declaration initializer and rewound the observation position before
+  applying a static computed destructuring step, so a later reachable member
+  write disappeared. Both failures are the same residual helper-value
+  provenance mechanism and are accepted as review-induced.
+- Requirement decision: retain the bounded same-file helper grammar and its
+  existing computed projection. Narrowing it would silently classify already
+  supported cross-kind shadows and mutation-aware aggregate inputs as
+  provider-neutral, reopening the registered-provider raw-HTTP bypass. The
+  supported resolver must compare mapped parameters, uniquely resolved
+  function declarations, and chronological local writes before selecting any
+  values, and it must preserve the source reference plus call-site observation
+  position until all property steps finish.
+- Redesign decision: extend the existing helper-value record rather than add a
+  resolver, registry, provenance table, or syntax scanner. One identifier
+  branch now selects the nearest parameter or function declaration as its
+  lexical owner, admits only writes inside that owner, and retains the owner
+  when the oldest admitted write may be skipped. The same values carry their
+  original reference paths and distinct projection position through variable
+  aliases, parameter forwarding, and ordered property steps, allowing the
+  existing effective-member reader to observe later writes without changing
+  helper resolution chronology.
+- Executable `.mjs` and `.mts` proofs cover a nested provider function
+  declaration shadowing an internal mapped parameter, an internal block
+  declaration shadowing a provider argument, an outer function shadowed by a
+  mapped parameter, a conditional write retaining a block declaration, and a
+  definitive internal parameter write. Computed-destructuring proofs cover a
+  later provider member write through direct, aliased, and nested aggregate
+  paths, an unmutated internal object, an out-of-scope shadow mutation, and a
+  definitive internal aggregate reassignment. The focused guard suite passes
+  137 tests. Repo-tools TypeScript compilation, the production provider scan,
+  doc gardening, diff integrity, and the diff-aware verifier pass. The full
+  repository-tools matrix passes twice at 39 files and 768 tests.
+
 ## Verification
 
 - `pnpm provider-requests:guard`
@@ -622,6 +661,11 @@ Updated: 2026-08-15
 
 Current evidence:
 
+- Round-22 retrospective focused provider-guard suite: 137 tests passed across
+  `.mjs` and `.mts` fixtures. Repo-tools TypeScript compilation, the production
+  provider scan, doc gardening, and `git diff --check` pass. The full
+  repository-tools matrix and the diff-aware verifier's repeated matrix each
+  pass 39 files and 768 tests.
 - Round-21 consolidation focused provider-guard suite: 135 tests passed.
   Repo-tools TypeScript compilation, the production provider scan, doc
   gardening, and `git diff --check` pass. The full repository-tools matrix and

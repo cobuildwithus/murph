@@ -433,6 +433,8 @@ interface ProviderCallParameterValue {
   readonly before: number;
   readonly callParameterValues?: ProviderCallParameterValues;
   readonly node: Node;
+  readonly projectionBefore: number;
+  readonly projectionReferencePaths: readonly (readonly string[])[];
 }
 
 interface ProviderCallPropertyStep {
@@ -2659,6 +2661,8 @@ function readProviderCallParameterValues(input: {
           defaultExpression: null,
           defaultCallParameterValues: valuesByName,
           node: root.node,
+          projectionBefore: root.projectionBefore,
+          projectionReferencePaths: root.projectionReferencePaths,
           propertySteps: entry.propertySteps,
           resolving: new Set(),
         }));
@@ -2677,6 +2681,8 @@ function readProviderCallPossibleValues(input: {
   readonly defaultExpression: Expression | null;
   readonly defaultCallParameterValues?: ProviderCallParameterValues;
   readonly node: Node | null;
+  readonly projectionBefore?: number;
+  readonly projectionReferencePaths?: readonly (readonly string[])[];
   readonly propertySteps: readonly ProviderCallPropertyStep[];
   readonly resolving: ReadonlySet<string>;
 }): ProviderCallParameterValue[] {
@@ -2710,8 +2716,9 @@ function readProviderCallPossibleValues(input: {
         alternative.node,
         [propertyStep.propertyName],
         input.bindings,
-        alternative.before,
+        alternative.projectionBefore,
         input.analysis.sourceFile,
+        alternative.projectionReferencePaths,
       );
       for (const node of projected) {
         values.push(...readProviderCallPossibleValues({
@@ -2720,6 +2727,14 @@ function readProviderCallPossibleValues(input: {
           callParameterValues: alternative.callParameterValues,
           defaultExpression: propertyStep.defaultExpression,
           node,
+          projectionBefore: alternative.projectionBefore,
+          projectionReferencePaths: dedupeReferencePaths([
+            ...alternative.projectionReferencePaths.map((referencePath) => [
+              ...referencePath,
+              propertyStep.propertyName as string,
+            ]),
+            ...readPossibleReferencePaths(node),
+          ]),
           propertySteps: remainingPropertySteps,
           resolving: new Set(),
         }));
@@ -2758,6 +2773,10 @@ function readProviderCallPossibleValues(input: {
         before: input.defaultExpression.start ?? input.before,
         callParameterValues: input.defaultCallParameterValues,
         node: input.defaultExpression,
+        projectionBefore: input.defaultExpression.start ?? input.before,
+        projectionReferencePaths: readPossibleReferencePaths(
+          input.defaultExpression,
+        ),
       }]
       : [];
   if (!input.node) {
@@ -2786,15 +2805,44 @@ function readProviderCallPossibleValues(input: {
       expression.name,
       input.before,
     );
+    const callable = resolveFunctionBinding(
+      input.analysis.functionBindings,
+      expression.name,
+      input.before,
+    );
+    const sameScopeCallables = callable
+      ? input.analysis.functionBindings.get(expression.name)?.filter(
+        (binding) =>
+          binding.scopeStart === callable.scopeStart &&
+          binding.scopeEnd === callable.scopeEnd,
+      ) ?? []
+      : [];
+    const functionBinding = callable && sameScopeCallables.length === 1
+      ? callable
+      : null;
+    const lexicalOwner = functionBinding &&
+        (!parameter || functionBinding.scopeStart > parameter.scopeStart)
+      ? {
+        kind: "function" as const,
+        scopeEnd: functionBinding.scopeEnd,
+        scopeStart: functionBinding.scopeStart,
+      }
+      : parameter
+        ? {
+          kind: "parameter" as const,
+          scopeEnd: parameter.scopeEnd,
+          scopeStart: parameter.scopeStart,
+        }
+        : null;
     const possibleBindings = resolvePossibleBindings(
       input.bindings,
       expression.name,
       input.before,
     );
-    const possible = parameter
+    const possible = lexicalOwner
       ? possibleBindings.filter((binding) =>
-        binding.writeScopeStart > parameter.scopeStart &&
-        binding.writeScopeEnd <= parameter.scopeEnd
+        binding.writeScopeStart >= lexicalOwner.scopeStart &&
+        binding.writeScopeEnd <= lexicalOwner.scopeEnd
       )
       : possibleBindings;
     const resolved: ProviderCallParameterValue[] = [];
@@ -2811,24 +2859,26 @@ function readProviderCallPossibleValues(input: {
             ...input,
             before: binding.start - 1,
             node: value,
+            projectionBefore: input.projectionBefore ?? input.before,
+            projectionReferencePaths: input.projectionReferencePaths ??
+              readPossibleReferencePaths(expression),
             propertySteps: [],
             resolving,
-        }));
+          }));
       }));
     }
     const callParameterValues = input.callParameterValues?.get(
       expression.name,
     ) ?? [];
-    if (
-      parameter &&
-      callParameterValues.length > 0 &&
+    const retainLexicalOwner = possible.length === 0 ||
       (
-        possible.length === 0 ||
-        (
-          possible.at(-1)?.definitive === false &&
-          possible.at(-1)?.conditionallyExecuted === true
-        )
-      )
+        possible.at(-1)?.definitive === false &&
+        possible.at(-1)?.conditionallyExecuted === true
+      );
+    if (
+      lexicalOwner?.kind === "parameter" &&
+      callParameterValues.length > 0 &&
+      retainLexicalOwner
     ) {
       resolved.push(...callParameterValues.flatMap((value) => {
         const key =
@@ -2843,34 +2893,28 @@ function readProviderCallPossibleValues(input: {
           before: value.before,
           callParameterValues: value.callParameterValues,
           node: value.node,
+          projectionBefore: value.projectionBefore,
+          projectionReferencePaths: value.projectionReferencePaths,
           propertySteps: [],
           resolving,
         });
       }));
     }
+    if (
+      lexicalOwner?.kind === "function" &&
+      functionBinding &&
+      retainLexicalOwner
+    ) {
+      resolved.push({
+        before: input.before,
+        callParameterValues: input.callParameterValues,
+        node: functionBinding.node,
+        projectionBefore: input.projectionBefore ?? input.before,
+        projectionReferencePaths: input.projectionReferencePaths ?? [],
+      });
+    }
     if (possible.length > 0 || resolved.length > 0) {
       return dedupeProviderCallValues(resolved);
-    }
-    if (!parameter) {
-      const callable = resolveFunctionBinding(
-        input.analysis.functionBindings,
-        expression.name,
-        input.before,
-      );
-      const sameScopeBindings = callable
-        ? input.analysis.functionBindings.get(expression.name)?.filter(
-          (binding) =>
-            binding.scopeStart === callable.scopeStart &&
-            binding.scopeEnd === callable.scopeEnd,
-        ) ?? []
-        : [];
-      if (callable && sameScopeBindings.length === 1) {
-        return [{
-          before: input.before,
-          callParameterValues: input.callParameterValues,
-          node: callable.node,
-        }];
-      }
     }
   }
   if (
@@ -2913,6 +2957,9 @@ function readProviderCallPossibleValues(input: {
     before: input.before,
     callParameterValues: input.callParameterValues,
     node: expression,
+    projectionBefore: input.projectionBefore ?? input.before,
+    projectionReferencePaths: input.projectionReferencePaths ??
+      readPossibleReferencePaths(expression),
   }];
   return providerCallValueIsDefinitelyDefined(expression)
     ? direct
@@ -3029,7 +3076,12 @@ function dedupeProviderCallValues(
       candidate.node.start === value.node.start &&
       candidate.node.end === value.node.end &&
       candidate.before === value.before &&
-      candidate.callParameterValues === value.callParameterValues
+      candidate.callParameterValues === value.callParameterValues &&
+      candidate.projectionBefore === value.projectionBefore &&
+      referencePathsEqual(
+        candidate.projectionReferencePaths,
+        value.projectionReferencePaths,
+      )
     ) === valueIndex
   );
 }
@@ -5520,6 +5572,27 @@ function readPossibleReferencePaths(node: Node): readonly string[][] {
     );
   }
   return [];
+}
+
+function referencePathsEqual(
+  left: readonly (readonly string[])[],
+  right: readonly (readonly string[])[],
+): boolean {
+  return left.length === right.length && left.every((path, pathIndex) =>
+    path.length === right[pathIndex]?.length &&
+    path.every((part, partIndex) => part === right[pathIndex]?.[partIndex])
+  );
+}
+
+function dedupeReferencePaths(
+  paths: readonly (readonly string[])[],
+): readonly (readonly string[])[] {
+  return paths.filter((path, pathIndex) =>
+    paths.findIndex((candidate) =>
+      candidate.length === path.length &&
+      candidate.every((part, partIndex) => part === path[partIndex])
+    ) === pathIndex
+  );
 }
 
 function isClosedNonAliasValue(node: Node): boolean {

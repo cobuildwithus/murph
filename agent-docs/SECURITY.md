@@ -603,8 +603,15 @@ Last verified: 2026-08-15
   arrows, function expressions, and object/array property steps. A mapped
   parameter shadows an unrelated outer variable; a nested local declaration or
   definitive assignment remains authoritative, while a conditional local write
-  retains the mapped parameter as an earlier possible value. Duplicate function
-  declarations, nested functions, and recursive cycles are excluded, and
+  retains the mapped parameter as an earlier possible value. Parameter,
+  function-declaration, and chronological-write candidates are compared in one
+  lexical decision before any value is selected, so a block declaration can
+  shadow a mapped parameter while an outer declaration cannot. Each selected
+  value retains its source reference paths and the call-site observation
+  position until ordered property projection is complete; later direct member
+  writes therefore remain visible through static computed destructuring.
+  Duplicate function declarations, nested functions, and recursive cycles are
+  excluded, and
   file-level fallback hints are disabled inside the callee so a generic returned
   `Request` cannot inherit an unrelated provider marker elsewhere in the module.
   Static computed destructuring keys use exact property projection. Dynamic
