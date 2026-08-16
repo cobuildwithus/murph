@@ -400,7 +400,7 @@ describe("changelog registry", () => {
     );
 
     expect(item).toMatchObject({
-      sourcePullRequests: [857, 1351, 1363],
+      sourcePullRequests: [857, 1363],
       details: expect.stringContaining(
         "asks what happened instead of guessing the outcome",
       ),

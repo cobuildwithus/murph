@@ -266,3 +266,7 @@ the member's current authorized Telegram route.
   confirmation, and does not resend after restart; the manual result remains
   idle-gated. The 10-case real mailbox/outbox matrix, the paired three-case
   phase unit test, and Assistant Runtime typecheck pass.
+- Exact-head app verification then exposed one stale changelog assertion that
+  still attributed the reverted legacy entry to PR #1351. The expectation now
+  preserves that entry's original PR ownership; the structured scheduled-call
+  item remains the sole changelog evidence for this PR.
