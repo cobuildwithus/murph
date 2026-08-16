@@ -254,6 +254,9 @@ describe('assistant skill assets', () => {
     expect(daily).toContain(
       'Treat an empty `splits` array as no retained split facets for that workout',
     )
+    expect(daily).toContain(
+      'Power fields ending in `Watts` are watts,',
+    )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
   })

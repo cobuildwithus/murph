@@ -99,11 +99,12 @@ Current providers:
   steps-per-minute, cycling cadence uses rpm, and swimming uses 100-meter rather
   than 1-kilometer splits. Newer versions authoritatively withdraw omitted split
   facets. Raw points, coordinates, complete curves, and provider arrays never
-  cross the importer boundary. The existing `wearables activity list` read
-  groups live feature facets by their internal hashed workout identity and
-  exposes only the provider, sport, timestamps, compact metrics, and splits for
-  each workout. This adds no control-database collection path, pooled
-  transaction, or sample persistence.
+  cross the importer boundary. The rebuildable query projection groups live
+  feature facets once by their internal hashed workout identity; the existing
+  `wearables activity list` filtered summary read exposes only provider, sport,
+  timestamps, unit-bearing compact metrics, and splits for each workout. This
+  adds no control-database collection path, pooled transaction, foreground
+  full-vault hydration, or sample persistence.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day

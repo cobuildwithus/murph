@@ -56,8 +56,8 @@ permanent-versus-transient credential failure handling are jointly specified by
 `agent-docs/RELIABILITY.md`.
 
 Bounded Junction workout-stream reduction, fixed-distance split correction,
-query-time per-workout feature association without public provider IDs, and
-raw-point nonretention are specified by `agent-docs/RELIABILITY.md`,
+projection-owned per-workout feature association without public provider IDs,
+and raw-point nonretention are specified by `agent-docs/RELIABILITY.md`,
 `packages/device-syncd/README.md`, and
 `docs/device-provider-compatibility-matrix.md`.
 

@@ -119,6 +119,7 @@ import type {
   ProjectedWearableSleepSummary,
   ProjectedWearableSourceHealthSummary,
 } from "./wearables/types.ts";
+import { compareWorkoutFeatures } from "./wearables/workout-features.ts";
 import {
   ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
@@ -195,6 +196,11 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
   const activitySessionDayRollupsByDate = groupActivitySessionAggregatesByDate(
     dataset.activitySessionDayRollups,
   );
+  const workoutFeaturesByDate = new Map<string, WearableDataset["workoutFeatures"]>();
+  for (const candidate of dataset.workoutFeatures) {
+    const candidates = workoutFeaturesByDate.get(candidate.date) ?? [];
+    workoutFeaturesByDate.set(candidate.date, [...candidates, candidate]);
+  }
   const dates = collectSortedDatesDesc([
     ...metricCandidatesByDate.keys(),
     ...activitySessionDayRollupsByDate.keys(),
@@ -365,6 +371,10 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       sessionMinutes,
       summaryConfidence,
     });
+    const workoutFeatures = (workoutFeaturesByDate.get(date) ?? [])
+      .map((candidate) => candidate.feature)
+      .sort(compareWorkoutFeatures)
+      .slice(0, 32);
 
     return {
       activityAverageHeartRate,
@@ -395,6 +405,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       totalCalories,
       totalElevationGainMeters,
       walkingAverageHeartRate,
+      workoutFeatures,
       workoutStrain,
     };
   });

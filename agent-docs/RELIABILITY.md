@@ -963,11 +963,14 @@ Last verified: 2026-08-15
   newer correction withdraws omitted splits. Only reduced duration, distance,
   heart-rate shape, cadence, power, speed, and split scalars cross the importer;
   raw points, coordinates, provider arrays, and full curves never enter job
-  state, evidence, or canonical samples. At query time, `wearables activity
-  list` groups the live measurement facets by the existing hashed workout
-  resource identity. Its public `workoutFeatures` projection carries only the
-  source provider, activity type, start time, compact overall scalars, and live
-  splits; provider workout IDs and source-instance IDs remain internal.
+  state, evidence, or canonical samples. The rebuildable query projection
+  groups live measurement facets once by the existing hashed workout resource
+  identity and stores them in provider-scoped wearable activity summaries.
+  `wearables activity list` reads those summaries by date/provider without
+  hydrating the full projected vault. Its public `workoutFeatures` carries only
+  the source provider, activity type, start time, unit-bearing compact overall
+  scalars, and live splits; provider workout IDs and source-instance IDs remain
+  internal.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection

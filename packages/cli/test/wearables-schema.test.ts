@@ -31,7 +31,8 @@ test("wearables activity schema preserves bounded workout features", () => {
         activityType: "cycling",
         averageCadence: 90,
         averageHeartRate: 145,
-        averagePower: 220,
+        averagePowerWatts: 220,
+        averageSpeedMps: 5,
         cadenceUnit: "rpm",
         provider: "garmin",
         splits: [],
@@ -44,6 +45,16 @@ test("wearables activity schema preserves bounded workout features", () => {
 
   assert.deepEqual(parsed.items[0]?.workoutFeatures?.[0]?.splits, []);
   assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.cadenceUnit, "rpm");
+  assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.averagePowerWatts, 220);
+  assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.averageSpeedMps, 5);
+  assert.equal(
+    Object.hasOwn(parsed.items[0]?.workoutFeatures?.[0] ?? {}, "averagePower"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(parsed.items[0]?.workoutFeatures?.[0] ?? {}, "averageSpeed"),
+    false,
+  );
   assert.equal("vault" in parsed, false);
 });
 

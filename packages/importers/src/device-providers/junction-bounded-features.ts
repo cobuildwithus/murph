@@ -27,6 +27,7 @@ const WORKOUT_FIELDS = new Set([
   "firstHalfAverageHeartRate", "secondHalfAverageHeartRate",
   "averageCadence", "maxCadence", "cadenceUnit", "averagePower", "maxPower",
   "averageSpeed", "maxSpeed", "sampleCount", "splits", "version",
+  "workoutDayKey",
   "sourceProviderSlug", "sourceType", "sourceInstanceId",
 ]);
 
@@ -201,6 +202,7 @@ export function reduceJunctionWorkoutStreamPayload(
     : undefined;
   const powerStats = workoutSeriesStats(power, points, "power", 0, 5_000);
   const speedStats = workoutSeriesStats(speeds, points, "speed", 0, 150);
+  const startAtRaw = firstString(summary, ["time_start", "timeStart", "startAt", "start_at", "start"]);
   const startAt = firstTimestamp(summary, ["time_start", "timeStart", "startAt", "start_at", "start"])
     ?? new Date(firstMs).toISOString();
   const endAt = firstTimestamp(summary, ["time_end", "timeEnd", "endAt", "end_at", "end"])
@@ -232,6 +234,7 @@ export function reduceJunctionWorkoutStreamPayload(
     sampleCount: times.length,
     splits,
     version: firstTimestamp(summary, ["updated_at", "updatedAt"]) ?? endAt,
+    workoutDayKey: resolveWorkoutDayKey(summary, startAtRaw, startAt),
     sourceProviderSlug: origin.sourceProviderSlug,
     sourceType: origin.sourceType,
     sourceInstanceId: origin.sourceInstanceId ?? undefined,
@@ -485,6 +488,118 @@ function resolveWorkoutCadenceUnit(sport: string | undefined): "rpm" | "steps-pe
     : undefined;
 }
 
+const WORKOUT_LOCAL_DATE_PATHS = [
+  "calendarDate",
+  "calendar_date",
+  "localDate",
+  "local_date",
+] as const;
+const WORKOUT_OFFSET_MINUTE_PATHS = [
+  "timeZoneOffsetMinutes",
+  "time_zone_offset_minutes",
+  "timezoneOffsetMinutes",
+  "timezone_offset_minutes",
+  "utcOffsetMinutes",
+  "utc_offset_minutes",
+] as const;
+const WORKOUT_OFFSET_SECOND_PATHS = [
+  "timezone_offset",
+  "timezoneOffset",
+  "timeZoneOffset",
+  "time_zone_offset",
+  "timezoneOffsetSeconds",
+  "timezone_offset_seconds",
+  "timeZoneOffsetSeconds",
+  "time_zone_offset_seconds",
+  "utcOffsetSeconds",
+  "utc_offset_seconds",
+] as const;
+
+function resolveWorkoutDayKey(
+  summary: PlainObject,
+  startAtRaw: string | undefined,
+  startAt: string,
+): string | undefined {
+  for (const path of WORKOUT_LOCAL_DATE_PATHS) {
+    const dayKey = strictDayKey(firstString(summary, [path]));
+    if (dayKey) {
+      return dayKey;
+    }
+  }
+  if (!startAtRaw) {
+    return undefined;
+  }
+
+  const explicitSemantics = firstString(summary, [
+    "timestampSemantics",
+    "timestamp_semantics",
+  ]);
+  const semantics = explicitSemantics === "utc"
+    || explicitSemantics === "offset"
+    || explicitSemantics === "floating"
+    || explicitSemantics === "unknown"
+    ? explicitSemantics
+    : /z$/iu.test(startAtRaw)
+      ? "utc"
+      : /[+-]\d{2}:?\d{2}$/u.test(startAtRaw)
+        ? "offset"
+        : /^\d{4}-\d{2}-\d{2}(?:$|[ t]\d{2}:\d{2})/iu.test(startAtRaw)
+          ? "floating"
+          : "unknown";
+  if (semantics === "offset" || semantics === "floating") {
+    return strictDayKey(startAtRaw);
+  }
+
+  const offsetSeconds =
+    firstWorkoutOffset(summary, WORKOUT_OFFSET_MINUTE_PATHS, 60)
+    ?? firstWorkoutOffset(summary, WORKOUT_OFFSET_SECOND_PATHS, 1);
+  if (offsetSeconds === undefined || Math.abs(offsetSeconds) > 24 * 60 * 60) {
+    return undefined;
+  }
+  const startMs = Date.parse(startAt);
+  return Number.isFinite(startMs)
+    ? new Date(startMs + offsetSeconds * 1_000).toISOString().slice(0, 10)
+    : undefined;
+}
+
+function firstWorkoutOffset(
+  summary: PlainObject,
+  paths: readonly string[],
+  numericMultiplier: number,
+): number | undefined {
+  for (const path of paths) {
+    const value = readPath(summary, path);
+    const numeric = finiteNumber(value);
+    if (numeric !== undefined) {
+      return numeric * numericMultiplier;
+    }
+    if (typeof value !== "string") {
+      continue;
+    }
+    const match = /^([+-])(\d{2}):?(\d{2})$/u.exec(value.trim());
+    if (!match) {
+      continue;
+    }
+    const hours = Number(match[2]);
+    const minutes = Number(match[3]);
+    if (hours <= 24 && minutes <= 59) {
+      return (match[1] === "-" ? -1 : 1) * (hours * 60 + minutes) * 60;
+    }
+  }
+  return undefined;
+}
+
+function strictDayKey(value: string | undefined): string | undefined {
+  const dayKey = /^\d{4}-\d{2}-\d{2}/u.exec(value ?? "")?.[0];
+  if (!dayKey) {
+    return undefined;
+  }
+  const parsed = new Date(`${dayKey}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().startsWith(dayKey)
+    ? dayKey
+    : undefined;
+}
+
 export function resolveJunctionBoundedFeatureRecords(
   resource: "electrocardiogram_voltage" | "workout_stream",
   records: readonly unknown[],
@@ -685,6 +800,7 @@ function assertFeature(
     || (!ecg && averageSpeed !== undefined && (averageSpeed < 0 || averageSpeed > 150))
     || (!ecg && maxSpeed !== undefined && (maxSpeed < 0 || maxSpeed > 150))
     || (!ecg && averageSpeed !== undefined && maxSpeed !== undefined && averageSpeed > maxSpeed)
+    || (!ecg && feature.workoutDayKey !== undefined && strictDayKey(firstString(feature, ["workoutDayKey"])) !== feature.workoutDayKey)
     || (!ecg && !firstTimestamp(feature, ["version"]))
     || (ecg && (voltageMin === undefined || voltageMax === undefined || voltageMean === undefined || voltageRms === undefined))
     || (ecg && voltageMin !== undefined && voltageMax !== undefined && voltageMin > voltageMax)

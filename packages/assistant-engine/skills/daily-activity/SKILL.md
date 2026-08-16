@@ -36,7 +36,9 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
   associates bounded heart-rate, cadence, power, speed, and split details with
   each workout by provider and start time. Use that association for multiple
   workouts on the same date; do not stop at one selected activity or rebuild
-  the rollup from provider records.
+  the rollup from provider records. Power fields ending in `Watts` are watts,
+  and speed fields ending in `Mps` are meters per second; include those units
+  when answering.
 - When the day or activity summary omits the specific signal the user asked
   about, use the lossless global observation read
   `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`.

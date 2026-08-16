@@ -64,7 +64,6 @@ import {
   upsertEventRecordFromInput,
   upsertProviderRecordFromInput,
 } from "./provider-event.js"
-import { listJunctionWorkoutFeaturesByDay } from "./junction-workout-features.js"
 import {
   addDailyFoodRecord,
   deleteFoodRecord,
@@ -1389,19 +1388,11 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const [rawItems, workoutFeaturesByDay] = await Promise.all([
-        query.summarizeWearableActivityRuntime(input.vault, normalized.queryFilters),
-        listJunctionWorkoutFeaturesByDay(query, input.vault, normalized.queryFilters),
-      ])
-      const items = limitedCompactWearableCommandSummaryArray(
-        rawItems.map((item) => {
-          const workoutFeatures = workoutFeaturesByDay.get(item.date)
-          return workoutFeatures?.length
-            ? { ...item, workoutFeatures }
-            : item
-        }),
-        normalized.filters.limit,
+      const rawItems = await query.summarizeWearableActivityRuntime(
+        input.vault,
+        normalized.queryFilters,
       )
+      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
 
       return {
         filters: normalized.filters,

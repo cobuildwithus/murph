@@ -452,7 +452,7 @@ describe('real codex app-server with scripted provider', () => {
         skillSlug: 'daily-activity',
       },
       {
-        answer: 'Your morning run averaged 142 bpm and its corrected record has no retained splits. Your evening ride averaged 150 bpm with 90 rpm cadence; its first 1 km split took 300 seconds.',
+        answer: 'Your morning run averaged 142 bpm and its corrected record has no retained splits. Your evening ride averaged 150 bpm with 90 rpm cadence, 5 m/s speed, and 220 W power; its first 1 km split took 300 seconds at 225 W.',
         command: 'wearables activity list --date 2026-07-12 --format json',
         evidence: {
           count: 1,
@@ -480,6 +480,8 @@ describe('real codex app-server with scripted provider', () => {
               activityType: 'cycling',
               averageCadence: 90,
               averageHeartRate: 150,
+              averagePowerWatts: 220,
+              averageSpeedMps: 5,
               cadenceUnit: 'rpm',
               provider: 'garmin',
               splits: [{
@@ -487,12 +489,13 @@ describe('real codex app-server with scripted provider', () => {
                 durationSeconds: 300,
                 endedAt: '2026-07-12T18:05:00.000Z',
                 index: 1,
+                averagePowerWatts: 225,
               }],
               startedAt: '2026-07-12T18:00:00.000Z',
             }],
           }],
         },
-        prompt: 'Compare my two workouts on July 12: average heart rate, cycling cadence, and retained splits.',
+        prompt: 'Compare my two workouts on July 12: average heart rate, cycling cadence, speed, power, and retained splits.',
         skillHeading: '# Daily Activity',
         skillSlug: 'daily-activity',
       },

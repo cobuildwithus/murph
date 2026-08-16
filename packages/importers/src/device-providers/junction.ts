@@ -2166,11 +2166,13 @@ function pushJunctionWorkoutStreamFeature(
   }
 
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
-  const timestamp = withTimestampOverride(baseTimestamp, {
+  const workoutDayKey = firstStringFromPaths(entry, ["workoutDayKey"]);
+  const timestamp = {
+    ...baseTimestamp,
     occurredAt,
-    dayKey: extractIsoDatePrefix(occurredAt) ?? baseTimestamp.dayKey,
+    dayKey: workoutDayKey,
     observedAtRaw: stringId(startRaw) ?? occurredAt,
-  });
+  };
   const durationSeconds = firstNonNegativeNumberFromPaths(entry, ["durationSeconds"]);
   const distanceMeters = firstNonNegativeNumberFromPaths(entry, ["distanceMeters"]);
   const averageHeartRate = firstNonNegativeNumberFromPaths(entry, ["averageHeartRate"]);
