@@ -1164,9 +1164,12 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
     initialResult: boundedResult,
     provider,
   });
+  // Bounded dual-owner shape: seven ordinary UTC provider-date requests from
+  // the broad correction sweep plus one exact vault-local temporal window for
+  // the newest lag-closed day.
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
-    1,
+    8,
   );
 
   const completed = createScheduledJobs(

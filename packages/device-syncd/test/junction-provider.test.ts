@@ -5484,9 +5484,14 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
       "legacy-rowless-activity-1",
     ],
   );
+  // The ordinary calendar-day pull and the temporal-authority window may each
+  // import the connected record; canonical import converges the duplicate.
+  // The fenced source must never appear.
   assert.deepEqual(
-    importedSnapshots.flatMap((snapshot) => snapshot.timeseries?.blood_oxygen ?? [])
-      .map((record) => record.id),
+    [...new Set(
+      importedSnapshots.flatMap((snapshot) => snapshot.timeseries?.blood_oxygen ?? [])
+        .map((record) => record.id),
+    )],
     ["garmin-blood-oxygen-1"],
   );
 });

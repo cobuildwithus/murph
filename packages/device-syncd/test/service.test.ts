@@ -1974,11 +1974,13 @@ test("device sync service reports canonical counts separately from durable deliv
     assert.deepEqual(importReceipts, [
       {
         canonicalEventCount: 2,
+        canonicalEventDayKeys: [],
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },
       {
         canonicalEventCount: 0,
+        canonicalEventDayKeys: [],
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },
