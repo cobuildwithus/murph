@@ -8736,28 +8736,37 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
 
     // Every supported form of the accepted timestamp language imports: an
     // absolute fractional instant, plain UTC, an explicit offset, a floating
-    // clock with seconds, and a floating clock without seconds.
+    // clock with seconds, a floating clock without seconds, and a floating
+    // clock with fractional seconds. The fractional floating clock is the
+    // latest sample, so the facet instant proves the fraction survives.
     activeRows = [
       { timestamp: "2026-08-12T07:00:00.000Z", value: 20 },
       { timestamp: "2026-08-12T07:05:00Z", value: 30 },
       { timestamp: "2026-08-12T07:10:00+00:00", value: 25 },
       { timestamp: "2026-08-12 19:00:30", value: 70 },
       { timestamp: "2026-08-12 19:05", value: 80 },
+      { timestamp: "2026-08-12 19:59:30.250", value: 60 },
     ];
     const seedJob = enqueueDay("junction-temporal-authority:v1:ambiguous-seed");
     assert.equal(
       (await fixture.service.runWorkerOnce(account.id))?.id,
       seedJob.id,
     );
-    assert.equal((await liveFacets()).length, 3);
+    const seededFacets = await liveFacets();
+    assert.equal(seededFacets.length, 3);
+    for (const record of seededFacets) {
+      assert.equal(record.occurredAt, "2026-08-12T19:59:30.250Z");
+    }
     const ledgerBefore = await readFile(
       path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"),
       "utf8",
     );
 
     // Any value outside the anchored language — including a valid prefix with
-    // trailing unsupported text or semantics contradicting the raw shape —
-    // fails the day retryably with zero canonical mutation.
+    // trailing unsupported text, semantics contradicting the raw shape, or a
+    // lexically valid but impossible calendar or clock value that permissive
+    // parsing would silently roll onto a neighboring valid day — fails the
+    // day retryably with zero canonical mutation.
     const invalidRows: ReadonlyArray<Record<string, unknown>> = [
       { timestamp: "not-a-timestamp", value: 50 },
       { timestamp: "2026-08-12T07:00:00Z-extra", value: 50 },
@@ -8765,6 +8774,14 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
       { timestamp: "2026-08-12T07:00trailing", value: 50 },
       { timestamp: "2026-08-12T07:00:00+9:30", value: 50 },
       { timestamp: "2026-08-12 07:00", timestampSemantics: "utc", value: 50 },
+      { timestamp: "2026-02-29T07:00:00Z", value: 50 },
+      { timestamp: "2026-04-31T07:00:00Z", value: 50 },
+      { timestamp: "2026-08-11T24:00:00Z", value: 50 },
+      { timestamp: "2026-08-12T07:60:00Z", value: 50 },
+      { timestamp: "2026-08-12T07:00:60Z", value: 50 },
+      { timestamp: "2026-08-12T07:00:00+24:00", value: 50 },
+      { timestamp: "2026-02-29 07:00", value: 50 },
+      { timestamp: "2026-02-30", value: 50 },
     ];
     for (const [index, invalidRow] of invalidRows.entries()) {
       activeRows = [
@@ -8810,6 +8827,25 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
     assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, dateOnlyJob.id);
     assert.equal(fixture.store.getJobById(dateOnlyJob.id)?.status, "succeeded");
     assert.equal((await liveFacets()).length, 0);
+
+    // Fractional seconds on an absolute instant survive into the canonical
+    // facet instant exactly, and the repopulated day replaces the retraction.
+    activeRows = [
+      { timestamp: "2026-08-12T07:00:00.125Z", value: 20 },
+      { timestamp: "2026-08-12T07:05:00Z", value: 30 },
+      { timestamp: "2026-08-12T07:10:00Z", value: 25 },
+      { timestamp: "2026-08-12T19:00:30Z", value: 70 },
+      { timestamp: "2026-08-12T19:05:00Z", value: 80 },
+      { timestamp: "2026-08-12T21:15:45.125Z", value: 60 },
+    ];
+    const fractionalJob = enqueueDay("junction-temporal-authority:v1:ambiguous-fractional");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, fractionalJob.id);
+    assert.equal(fixture.store.getJobById(fractionalJob.id)?.status, "succeeded");
+    const fractionalFacets = await liveFacets();
+    assert.equal(fractionalFacets.length, 3);
+    for (const record of fractionalFacets) {
+      assert.equal(record.occurredAt, "2026-08-12T21:15:45.125Z");
+    }
   } finally {
     fixture.close();
   }

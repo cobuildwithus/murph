@@ -29,6 +29,7 @@ import {
   identifyJunctionBloodPressureProviderRecords,
   normalizeJunctionCanonicalBodyTimestamp,
   JUNCTION_DENSE_FIDELITY_RESOURCES,
+  parseJunctionCompleteDayTimestamp,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
   resolveJunctionBoundedFeatureRecords,
@@ -7238,17 +7239,19 @@ function filterJunctionTimeseriesRecordsToWindow(
     }
 
     if (authorizedLocalDay) {
-      if (!hasAbsoluteJunctionTimeseriesTimestamp(rawTimestamp, entry)) {
-        const rawDayKey = /^\d{4}-\d{2}-\d{2}/u.exec(rawTimestamp)?.[0];
-        // Filter only rows that prove a different calendar day. A row whose
-        // timestamp yields no day stays in the collection so the importer's
-        // fail-closed owner rejects the lossy day instead of certifying a
-        // partial or empty replacement.
-        return rawDayKey === undefined || rawDayKey === authorizedLocalDay.dayKey;
+      // Drop only rows the strict complete-day parse proves belong to a
+      // different valid calendar day. Anything that parse rejects stays in
+      // the collection so the importer's fail-closed owner rejects the lossy
+      // day instead of certifying a partial or empty replacement.
+      const parsed = parseJunctionCompleteDayTimestamp(rawTimestamp);
+      if (!parsed) {
+        return true;
       }
-      const recordedMs = Date.parse(rawTimestamp);
-      return !Number.isFinite(recordedMs)
-        || (recordedMs >= startMs && recordedMs < endMs);
+      if (parsed.kind === "absolute") {
+        return toLocalDayKey(parsed.instant, authorizedLocalDay.timeZone)
+          === authorizedLocalDay.dayKey;
+      }
+      return parsed.dayKey === authorizedLocalDay.dayKey;
     }
 
     if (!hasAbsoluteJunctionTimeseriesTimestamp(rawTimestamp, entry) && vaultTimeZone) {

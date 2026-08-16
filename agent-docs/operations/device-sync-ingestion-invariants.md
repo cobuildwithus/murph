@@ -226,23 +226,28 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    vault day fails the import retryably before any canonical write. A
    structurally empty grouped response remains the only valid authoritative
    empty. Complete-source-day authority accepts exactly one anchored timestamp
-   language, owned by a single importer-side parse that yields semantics, day
-   membership, and temporal-instant eligibility together: a pure `YYYY-MM-DD`
-   date proves day membership with zero temporal coverage; a floating
-   datetime with an `HH:mm` clock (optional seconds and fraction, omitted
-   seconds resolving as zero) contributes a vault-local instant; a supported
-   absolute ISO-8601 value ending in `Z` or an explicit offset contributes an
-   exact instant. The full raw value must be consumed — a valid prefix with
-   trailing unsupported text, contradictory semantics, or a clock that cannot
-   resolve in the retained authority timezone fails the import retryably
-   instead of fabricating or laundering an instant. The temporal replacement
+   language, owned by a single importer-side strict parse that yields
+   semantics, day membership, and temporal-instant eligibility together and
+   admits only valid Gregorian calendar instants — real dates (leap years and
+   month lengths proven, never normalized), in-range clock and offset fields,
+   and fractional seconds preserved into the resulting instant: a pure
+   `YYYY-MM-DD` date proves day membership with zero temporal coverage; a
+   floating datetime with an `HH:mm` clock (optional seconds and fraction,
+   omitted seconds resolving as zero) contributes a vault-local instant; a
+   supported absolute ISO-8601 value ending in `Z` or an explicit offset
+   contributes the exact instant derived from its validated parts, never from
+   permissive runtime date parsing. The full raw value must be consumed — a
+   valid prefix with trailing unsupported text, an impossible calendar or
+   clock value, contradictory semantics, or a clock that cannot resolve in
+   the retained authority timezone fails the import retryably instead of
+   fabricating or laundering an instant. The temporal replacement
    domain keys on the stable Junction import identity derived from the external
    account, never the machine-local account row, so hosted cold restores retract
    and replace the same facets they seeded. Under complete-day authority the
-   provider filter excludes only rows that prove a different calendar day;
-   a row whose timestamp yields no day stays in the collection so the importer
-   fails the day closed instead of certifying a laundered partial or empty
-   replacement. Complete-source-day
+   provider filter reuses that same strict parse and excludes only rows it
+   proves belong to a different valid calendar day; a row the parse rejects
+   stays in the collection so the importer fails the day closed instead of
+   certifying a laundered partial or empty replacement. Complete-source-day
    imports never reach the generic provider-snapshot evidence fallback: they
    persist only adapter-produced compact evidence, so a day with zero temporal
    samples carries the authoritative set with zero evidence parts and retains

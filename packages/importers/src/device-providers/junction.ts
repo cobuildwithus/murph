@@ -4079,18 +4079,105 @@ function resolveJunctionTemporalFeatureVaultLocalMinuteOfDay(
 // day membership.
 const JUNCTION_COMPLETE_DAY_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const JUNCTION_COMPLETE_DAY_FLOATING_PATTERN =
-  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/u;
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/u;
 const JUNCTION_COMPLETE_DAY_ABSOLUTE_PATTERN =
-  /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]\d{2}:?\d{2})$/u;
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?:[Zz]|([+-])(\d{2}):?(\d{2}))$/u;
 
-// The importer's complete-day boundary is the one acceptance owner: a single
-// parse of the raw value yields semantics agreement, day membership, and
+export type JunctionCompleteDayTimestamp =
+  | { kind: "date-only"; dayKey: string }
+  | {
+      kind: "floating";
+      dayKey: string;
+      hour: number;
+      minute: number;
+      second: number;
+      millisecond: number;
+    }
+  | { kind: "absolute"; instant: string };
+
+function readJunctionCompleteDayClock(
+  match: RegExpMatchArray,
+): { hour: number; minute: number; second: number; millisecond: number } | null {
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  const second = match[4] === undefined ? 0 : Number(match[4]);
+  if (hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+  const fraction = match[5];
+  const millisecond = fraction === undefined
+    ? 0
+    : Number(fraction.slice(0, 3).padEnd(3, "0"));
+  return { hour, minute, second, millisecond };
+}
+
+// The one strict acceptance parse for the complete-source-day timestamp
+// language. It consumes the entire raw value, proves the actual Gregorian
+// calendar date and clock/offset field ranges, and preserves fractional
+// seconds, so a lexically plausible but impossible value (a non-leap
+// February 29, an April 31, a 24:00 clock) can never be normalized onto a
+// neighboring valid day. Both the importing owner and the provider's
+// authorized-day filter consume this one result; a value this parse rejects
+// must be retained for the importer to fail closed, never reinterpreted.
+export function parseJunctionCompleteDayTimestamp(
+  value: string,
+): JunctionCompleteDayTimestamp | null {
+  const raw = value.trim();
+  if (JUNCTION_COMPLETE_DAY_DATE_ONLY_PATTERN.test(raw)) {
+    return isStrictIsoDate(raw) ? { kind: "date-only", dayKey: raw } : null;
+  }
+  const floatingMatch = raw.match(JUNCTION_COMPLETE_DAY_FLOATING_PATTERN);
+  if (floatingMatch) {
+    const dayKey = floatingMatch[1] ?? "";
+    const clock = readJunctionCompleteDayClock(floatingMatch);
+    if (!clock || !isStrictIsoDate(dayKey)) {
+      return null;
+    }
+    return { kind: "floating", dayKey, ...clock };
+  }
+  const absoluteMatch = raw.match(JUNCTION_COMPLETE_DAY_ABSOLUTE_PATTERN);
+  if (!absoluteMatch) {
+    return null;
+  }
+  const dayKey = absoluteMatch[1] ?? "";
+  const clock = readJunctionCompleteDayClock(absoluteMatch);
+  if (!clock || !isStrictIsoDate(dayKey)) {
+    return null;
+  }
+  const offsetHours = absoluteMatch[7] === undefined ? 0 : Number(absoluteMatch[7]);
+  const offsetMinutesPart = absoluteMatch[8] === undefined ? 0 : Number(absoluteMatch[8]);
+  if (offsetHours > 23 || offsetMinutesPart > 59) {
+    return null;
+  }
+  const offsetMinutes =
+    (absoluteMatch[6] === "-" ? -1 : 1) * (offsetHours * 60 + offsetMinutesPart);
+  const [year, month, day] = dayKey.split("-").map(Number) as [number, number, number];
+  const local = new Date(Date.UTC(
+    year,
+    month - 1,
+    day,
+    clock.hour,
+    clock.minute,
+    clock.second,
+    clock.millisecond,
+  ));
+  local.setUTCFullYear(year);
+  return {
+    kind: "absolute",
+    instant: new Date(local.getTime() - offsetMinutes * 60_000).toISOString(),
+  };
+}
+
+// The importer's complete-day boundary is the one acceptance owner: the
+// single strict parse above yields semantics agreement, day membership, and
 // temporal-instant eligibility together. Date-only rows return null (day
 // membership, zero temporal coverage); floating clocks resolve in the
-// retained authority timezone with omitted seconds as zero; supported
-// absolute forms use their exact instant. Anything else — including a valid
-// prefix with trailing unsupported text or semantics that contradict the raw
-// shape — fails the import retryably before any canonical write.
+// retained authority timezone with omitted seconds as zero and fractional
+// seconds preserved; absolute forms use the exact instant derived from their
+// validated parts, never from permissive runtime normalization. Anything
+// else — trailing unsupported text, an impossible calendar or clock value,
+// or semantics that contradict the raw shape — fails the import retryably
+// before any canonical write.
 function resolveJunctionTemporalFeatureInstant(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   timeZone: string,
@@ -4099,34 +4186,31 @@ function resolveJunctionTemporalFeatureInstant(
   if (!raw) {
     throw new JunctionSparseCalendarRepairNormalizationError();
   }
-  if (JUNCTION_COMPLETE_DAY_DATE_ONLY_PATTERN.test(raw)) {
+  const parsed = parseJunctionCompleteDayTimestamp(raw);
+  if (!parsed) {
+    throw new JunctionSparseCalendarRepairNormalizationError();
+  }
+  if (parsed.kind === "date-only") {
     if (timestamp.timestampSemantics !== "floating") {
       throw new JunctionSparseCalendarRepairNormalizationError();
     }
     return null;
   }
-  const floatingMatch = raw.match(JUNCTION_COMPLETE_DAY_FLOATING_PATTERN);
-  if (!floatingMatch) {
-    if (!JUNCTION_COMPLETE_DAY_ABSOLUTE_PATTERN.test(raw)) {
+  if (parsed.kind === "absolute") {
+    if (timestamp.timestampSemantics === "floating") {
       throw new JunctionSparseCalendarRepairNormalizationError();
     }
-    const instant = timestamp.occurredAt ?? timestamp.recordedAt;
-    if (timestamp.timestampSemantics === "floating" || !instant) {
-      throw new JunctionSparseCalendarRepairNormalizationError();
-    }
-    return instant;
+    return parsed.instant;
   }
   if (timestamp.timestampSemantics !== "floating") {
     throw new JunctionSparseCalendarRepairNormalizationError();
   }
-  const [year, month, day, hour, minute] = floatingMatch.slice(1, 6).map(Number) as [
-    number,
-    number,
+  const [year, month, day] = parsed.dayKey.split("-").map(Number) as [
     number,
     number,
     number,
   ];
-  const second = floatingMatch[6] === undefined ? 0 : Number(floatingMatch[6]);
+  const { hour, minute, second } = parsed;
   const targetPseudoMs = Date.UTC(year, month - 1, day, hour, minute, second);
   let candidateMs = targetPseudoMs;
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -4152,7 +4236,7 @@ function resolveJunctionTemporalFeatureInstant(
   ) {
     throw new JunctionSparseCalendarRepairNormalizationError();
   }
-  return new Date(candidateMs).toISOString();
+  return new Date(candidateMs + parsed.millisecond).toISOString();
 }
 
 function withJunctionCompactTimeseriesMetadata(
