@@ -14066,6 +14066,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -14474,6 +14475,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
@@ -14648,6 +14650,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -14704,6 +14707,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -14771,6 +14775,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -15004,6 +15009,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [deliveryIntentId],
       vaultRoot: "/tmp/murph-vault",
@@ -15111,6 +15117,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [deliveryIntentId],
       vaultRoot: "/tmp/murph-vault",
@@ -15179,6 +15186,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
+        messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [pendingEffectsItem.wake.effectId],
         preferredIntentIds: [],
         vaultRoot: "/tmp/murph-vault",
@@ -15328,6 +15336,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -15459,6 +15468,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
+        messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [effectId],
         preferredIntentIds: [],
         vaultRoot,
@@ -15591,6 +15601,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -15688,6 +15699,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
+        messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [scenario.effectId],
         preferredIntentIds: [],
         vaultRoot: scenario.vaultRoot,
@@ -18901,6 +18913,7 @@ function createPhaseInput(input: {
       },
       effectsPort: {
         readRawEmailMessage: vi.fn(async () => null),
+        recordOutboundMessageVolumeReceipt: vi.fn(async () => ({ recorded: true })),
         sendEmail: vi.fn(async () => undefined),
       },
       ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
@@ -18938,6 +18951,7 @@ function createPhaseInput(input: {
         },
         effectsPort: {
           readRawEmailMessage: vi.fn(async () => null),
+          recordOutboundMessageVolumeReceipt: vi.fn(async () => ({ recorded: true })),
           sendEmail: vi.fn(async () => undefined),
         },
         ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
