@@ -416,3 +416,25 @@ the member's current authorized Telegram route.
   result delivery, Telegram dispatch, Telegram settings sync, and Privy
   authentication; the five-case PostgreSQL concurrent Telegram-routing suite;
   the hosted Web typecheck; scoped ESLint; and `git diff --check`.
+
+## Round 19 remediation and release-build proof
+
+- ReviewGPT round 19 at `0bbb45be66fed2803147c394435c3215a671068e`
+  confirmed the deterministic single-owner Workflow direction and found one
+  incomplete completion predicate. Retell can authoritatively accept a late
+  analysis for a failed call when the exact provider id and end timestamp are
+  present, but reconciliation previously disposed the sole hook before that
+  possible result arrived.
+- The correction aligns the tracked-result predicate with the existing
+  late-analysis authority: a provider-identified, ended, failed Telegram call
+  remains pending, while a definitive pre-provider failure without provider
+  identity remains terminal. It adds no state, owner, workflow, or timer.
+- Exact-head CI independently exposed a deterministic V8 OOM in Next's
+  generated-contract TypeScript worker. The 3 GiB cold worker failed both the
+  original job, its one retry, and the exact local production build. Replacing
+  the new Workflow body with the old one-line step did not change the failure,
+  ruling out hook inference as the cause. An exact cold generated-contract
+  check passed at the next 512 MiB step, and the complete cold production Next
+  build then passed at the 1 GiB parent / 3.5 GiB worker split, including all
+  248 static pages. The production script, its focused guards, and current
+  verification docs now carry that measured limit.

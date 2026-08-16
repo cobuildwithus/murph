@@ -690,6 +690,60 @@ describe("createHostedPhoneCall", () => {
     expect(finalizeStoredResult).toHaveBeenCalledOnce();
   });
 
+  it("keeps a provider-identified failed call alive for its accepted late analysis", async () => {
+    const endedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      endedAt,
+      id: "hpc_failed_before_analysis",
+      providerCallId: "retell_failed_before_analysis",
+      resultNotificationChannel: "telegram",
+      status: "failed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const recordTerminalUsage = vi.fn(async () => undefined);
+    const runtime = {
+      ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      resolveTerminalUsage: vi.fn(async () => ({
+        state: "ready" as const,
+        usage: {
+          combinedCostUsdMicros: 125_000,
+          occurredAt: endedAt,
+          providerCallId: "retell_failed_before_analysis",
+        },
+      })),
+    };
+
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage,
+      },
+      runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+
+    expect(recordTerminalUsage).toHaveBeenCalledOnce();
+  });
+
+  it("finishes a definitive pre-provider failed call without retaining recovery", async () => {
+    const existing = buildHostedPhoneCall({
+      endedAt: new Date("2026-06-25T01:00:00.000Z"),
+      id: "hpc_failed_without_provider",
+      providerCallId: null,
+      resultNotificationChannel: "telegram",
+      status: "failed",
+    });
+    const store = createPhoneCallStore({ existing });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+  });
+
   it("keeps an analyzed result pending until its durable notification succeeds", async () => {
     const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
     const existing = buildHostedPhoneCall({

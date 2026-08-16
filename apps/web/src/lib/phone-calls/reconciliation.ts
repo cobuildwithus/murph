@@ -226,7 +226,13 @@ function isHostedPhoneCallTrackedResultOutstanding(
       "failed",
     ].includes(call.resultDeliveryStatus);
   }
-  return call.status === "calling" || call.status === "ended";
+  return call.status === "calling"
+    || call.status === "ended"
+    || (
+      call.status === "failed"
+      && call.endedAt !== null
+      && call.providerCallId !== null
+    );
 }
 
 function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {

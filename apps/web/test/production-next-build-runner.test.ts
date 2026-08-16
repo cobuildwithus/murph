@@ -113,7 +113,7 @@ test("production Next runner owns the Webpack cache epoch transition", async () 
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
     await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache\n");
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
-      "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
+      "NODE_OPTIONS=--trace-warnings --max-old-space-size=3584",
       "--max-old-space-size=1024",
       "/fixture/next",
       "build",

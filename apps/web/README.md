@@ -1661,14 +1661,17 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
 The production build launches the parent Next process explicitly through Node
 with `--max-old-space-size=1024` while appending
-`--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
+`--max-old-space-size=3584` to `NODE_OPTIONS`. Node gives the direct CLI flag
 precedence in the parent. Next 16.3 reconstructs its non-isolated TypeScript
 worker options from the parent arguments followed by `NODE_OPTIONS`, so the
-mandatory generated-contract validation receives the 3 GiB limit. Next removes
+mandatory generated-contract validation receives the 3.5 GiB limit. Next removes
 that option from its isolated static workers. The existing caller options are
 preserved. The shared script is used by the Vercel package build and the CI
 memory-observation lane. This bounds the compile parent without starving the
-later validation worker or changing the compiled application. Repeated
+later validation worker or changing the compiled application. The worker was
+ratcheted from 3 GiB only after an exact cold generated-contract check
+deterministically exhausted that heap and passed at the next 512 MiB step.
+Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
 upgrade must revalidate this worker boundary.
 

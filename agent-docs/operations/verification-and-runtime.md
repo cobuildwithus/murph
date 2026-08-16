@@ -830,14 +830,16 @@ and then execs the build as the invoking user with the caller's environment,
 working directory, and stdio unchanged. In the current observe-only state it
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
 Vercel package build starts the parent Next process with a direct 1 GiB
-old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS`. Node applies
+old-space flag and appends a 3.5 GiB old-space flag to `NODE_OPTIONS`. Node applies
 the direct flag to the parent; Next 16.3.0 rebuilds its non-isolated TypeScript
 worker options from the parent arguments followed by `NODE_OPTIONS`, so the
-mandatory generated-contract validation receives 3 GiB. Next removes the flag
+mandatory generated-contract validation receives 3.5 GiB. Next removes the flag
 from isolated static workers. The same script owns the Vercel package build and
 CI memory-observation invocation. This bounds the compile parent without
 weakening validation, but only repeated forced-cold Standard previews prove the
-real Vercel boundary. A 2 GiB parent-bound candidate passed one forced-cold
+real Vercel boundary. The worker limit moved from 3 GiB to 3.5 GiB only after an
+exact cold generated-contract check succeeded at 3.5 GiB and deterministically
+exhausted the 3 GiB heap. A 2 GiB parent-bound candidate passed one forced-cold
 preview but the next identical build was still killed by the 8 GB container
 OOM boundary. Single
 global 1 GiB and 1.5 GiB limits starved Next's generated-contract TypeScript
