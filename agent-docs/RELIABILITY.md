@@ -1782,9 +1782,12 @@ Last verified: 2026-08-15
   those exact dedupe-key families and carries only the just-created causal
   outbox intent into the existing write-ahead provider drain. Private Assistant
   Ask completion still repeats its Web-owned text, member, expiry, and direct
-  route authority before every provider attempt, and non-idempotent transport
-  work remains checkpoint-gated. Generic notifications or unrelated pending
-  outbox work cannot hitchhike. Fresh conversation input retains priority.
+  route authority before every provider attempt. The exact generation-scoped
+  phone-call result may enter that drain on Telegram only after its stable
+  current intent is persisted through the existing `outbox_sending` durability
+  barrier. Generic non-idempotent transport work remains excluded from the hot
+  pass, and generic notifications or unrelated pending outbox work cannot
+  hitchhike. Fresh conversation input retains priority.
   Referral recovery also selects each lane containing a live pending celebration
   and re-signals only its first live item above the canonical lane-consumption
   cursor. The shared live-row predicates naturally skip retention-old or expired

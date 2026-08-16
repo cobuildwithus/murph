@@ -230,3 +230,17 @@ the member's current authorized Telegram route.
   proves zero Telegram requests before a lost callback response, one request on
   a valid retry, definitive route failure before fetch, and terminal ambiguity
   for a may-have-succeeded outcome. Web typecheck passes.
+- ReviewGPT round 13 at
+  `0d2d57f9a73909bafc3580373a9c03beb51647ce` found that the exact Telegram
+  result composed its stable outbox intent during the dirty hot pass but then
+  waited for the routine 180-second idle checkpoint. Repeated ordinary chat
+  work resets that quiet window, so a member continuing the conversation could
+  starve the already-ready call result indefinitely.
+- The remediation admits only the exact generation-scoped phone-result family
+  through the existing foreground delivery preparation after fresh
+  conversation input wins. Its current intent crosses the existing canonical
+  persistence and `outbox_sending` barrier before Telegram begins; generic
+  non-idempotent effects remain excluded. Production-delay proof injects three
+  ordinary Telegram messages ahead of the result, observes one provider call
+  before any routine idle snapshot, receives terminal confirmation, and starts
+  a fresh runtime invocation without resending.
