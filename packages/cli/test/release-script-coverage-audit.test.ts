@@ -1089,9 +1089,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
       'bash scripts/review-gpt-pr-head-preflight.sh --run',
     )
-    expect(reviewGptConfig).toContain('minimum_marked_response_ms=300000')
+    expect(reviewGptConfig).not.toContain('minimum_marked_response_ms=300000')
     expect(reviewGptPrHeadPreflight).toContain(
       'review_gpt_reject_repository_policy_overrides "$@"',
+    )
+    expect(reviewGptPrHeadPreflight).toContain(
+      '"$@" \\\n    --minimum-marked-response-time 5m',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
@@ -1991,7 +1994,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
-  it('applies ReviewGPT response timeout precedence from repo config to one run', () => {
+  it('applies ReviewGPT wrapper precedence while preserving direct package config', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-timeout-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
     const reviewGptBin = path.join(
@@ -2000,38 +2003,53 @@ describe('monorepo release flow coverage audit', () => {
       '.bin',
       'cobuild-review-gpt',
     )
-    const runDry = (extraArgs: string[] = []) =>
+    const dryArgs = [
+      '--wait',
+      '--response-marker',
+      'REVIEW_COMPLETE',
+      '--dry-run',
+      '--no-zip',
+      '--browser-path',
+      process.execPath,
+      '--prompt',
+      'Validate response timeout precedence.',
+    ]
+    const spawnOptions = {
+      cwd: repoRoot,
+      encoding: 'utf8' as const,
+      env: {
+        ...withoutNodeV8Coverage(),
+        HOME: harnessRoot,
+        ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
+        REVIEW_GPT_BROWSER_LANE_COUNT: '1',
+        XDG_CONFIG_HOME: localConfigRoot,
+      },
+    }
+    const runRepositoryDry = (extraArgs: string[] = []) =>
+      spawnSync(
+        'bash',
+        [
+          'scripts/review-gpt-pr-head-preflight.sh',
+          '--run',
+          ...dryArgs,
+          ...extraArgs,
+        ],
+        spawnOptions,
+      )
+    const runDirectDry = (extraArgs: string[] = []) =>
       spawnSync(
         reviewGptBin,
         [
           '--config',
           'scripts/review-gpt.config.sh',
-          '--wait',
-          '--response-marker',
-          'REVIEW_COMPLETE',
-          '--dry-run',
-          '--no-zip',
-          '--browser-path',
-          process.execPath,
-          '--prompt',
-          'Validate response timeout precedence.',
+          ...dryArgs,
           ...extraArgs,
         ],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: {
-            ...withoutNodeV8Coverage(),
-            HOME: harnessRoot,
-            ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
-            REVIEW_GPT_BROWSER_LANE_COUNT: '1',
-            XDG_CONFIG_HOME: localConfigRoot,
-          },
-        },
+        spawnOptions,
       )
 
     try {
-      const defaultResult = runDry()
+      const defaultResult = runRepositoryDry()
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
       expect(defaultResult.stdout).toContain(
         'Response capture: enabled (10800000ms timeout)',
@@ -2048,12 +2066,28 @@ describe('monorepo release flow coverage audit', () => {
         'murph/review-gpt.conf',
         'minimum_marked_response_ms=1\nresponse_timeout_ms=7654321\n',
       )
-      const localResult = runDry()
+      const localResult = runRepositoryDry()
       expect(localResult.status, localResult.stderr).toBe(0)
       expect(localResult.stdout).toContain(
         'Response capture: enabled (7654321ms timeout)',
       )
       expect(localResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
+      )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        [
+          'minimum_marked_response_ms=1',
+          'response_timeout_ms=7654321',
+          'review_gpt_register_preset_group() { minimum_marked_response_ms=1; }',
+          '',
+        ].join('\n'),
+      )
+      const callbackResult = runRepositoryDry()
+      expect(callbackResult.status, callbackResult.stderr).toBe(0)
+      expect(callbackResult.stdout).toContain(
         'Minimum marked response time: 300000ms',
       )
 
@@ -2067,13 +2101,18 @@ describe('monorepo release flow coverage audit', () => {
           '',
         ].join('\n'),
       )
-      const directOverrideResult = runDry(['--config', weakConfigPath])
+      const directOverrideResult = runDirectDry(['--config', weakConfigPath])
       expect(directOverrideResult.status, directOverrideResult.stderr).toBe(0)
       expect(directOverrideResult.stdout).toContain(
         'Minimum marked response time: 1ms',
       )
 
-      const perRunResult = runDry(['--wait-timeout', '42m', '--idle-draft-timeout', '2s'])
+      const perRunResult = runRepositoryDry([
+        '--wait-timeout',
+        '42m',
+        '--idle-draft-timeout',
+        '2s',
+      ])
       expect(perRunResult.status, perRunResult.stderr).toBe(0)
       expect(perRunResult.stdout).toContain(
         'Response capture: enabled (2520000ms timeout)',

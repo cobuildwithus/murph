@@ -11,10 +11,6 @@ if [[ -r "$review_gpt_local_config" ]]; then
   source "$review_gpt_local_config"
 fi
 
-# The package keeps this configurable for direct callers, but Murph's review
-# gate owns one non-configurable five-minute minimum after local preferences.
-minimum_marked_response_ms=300000
-
 review_gpt_invalid_browser_lane() {
   echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, phlebas, hercules, or mountain." >&2
 }

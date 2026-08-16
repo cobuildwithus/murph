@@ -322,7 +322,10 @@ review_gpt_run() {
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
   fi
 
-  exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "$@"
+  exec pnpm exec cobuild-review-gpt \
+    --config scripts/review-gpt.config.sh \
+    "$@" \
+    --minimum-marked-response-time 5m
 }
 
 review_gpt_main() {
