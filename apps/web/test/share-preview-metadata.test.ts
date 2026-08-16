@@ -67,7 +67,7 @@ describe("share preview metadata", () => {
 
     expect(metadata.title).toBe("Join Murph");
     expectDedicatedImage(metadata, {
-      alt: "Murph, your private health assistant. Don’t do it alone.",
+      alt: "Meet Murph, your private health assistant.",
       url: "/r/ref-code/opengraph-image",
     });
     expect(metadata.robots).toEqual({ follow: false, index: false });

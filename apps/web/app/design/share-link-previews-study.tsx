@@ -25,9 +25,9 @@ const PREVIEWS = [
     route: "/r/[referralCode]",
     note:
       "The referral link members text friends. The recipient has no Murph "
-      + "conversation yet, so the card frames the brand line instead of "
-      + "speaking as Murph, and stays capability-neutral so it remains true "
-      + "for expired links.",
+      + "conversation yet, so the card introduces Murph instead of speaking "
+      + "as it, and stays capability-neutral so it remains true for expired "
+      + "links.",
     alt: REFERRAL_OG_ALT,
     card: <ReferralShareCard logoDataUri="/logo.svg" />,
   },
