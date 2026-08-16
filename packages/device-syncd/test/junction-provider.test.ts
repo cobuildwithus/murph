@@ -242,7 +242,7 @@ async function executeTemporalAuthorityChildren(input: {
   provider: ReturnType<typeof createJunctionProvider>;
 }): Promise<void> {
   const temporalChildren = input.initialResult.scheduledJobs?.filter((job) =>
-    job.payload?.temporalAuthorityDayKey !== undefined
+    job.payload?.temporalAuthorityTimeZone !== undefined
   ) ?? [];
   for (const [index, child] of temporalChildren.entries()) {
     await executeJunctionJob(
@@ -9604,12 +9604,12 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
     catchUpJobs.at(-1),
     "Expected the ordinary timeseries continuation after temporal catch-up jobs.",
   );
-  assert.equal(ordinaryContinuation.payload?.temporalAuthorityDayKey, undefined);
+  assert.equal(ordinaryContinuation.payload?.temporalAuthorityTimeZone, undefined);
   assert.equal(ordinaryContinuation.payload?.timeseriesResourceCursor, "blood_oxygen");
   assert.deepEqual(
     catchUpJobs.slice(0, 4).map((job) => ({
       availableAt: job.availableAt,
-      dayKey: job.payload?.temporalAuthorityDayKey,
+      dayKey: String(job.payload?.windowStart ?? "").slice(0, 10),
       priority: job.priority,
       resource: job.payload?.resource,
       windowEnd: job.payload?.windowEnd,
@@ -9744,8 +9744,12 @@ test("Junction reconcile preserves healthy temporal work and the older backlog w
   );
   assert.deepEqual(
     (result.scheduledJobs ?? []).map((job) => [
-      job.payload?.temporalAuthorityDayKey,
-      job.payload?.resource,
+      job.payload?.temporalAuthorityTimeZone === undefined
+        ? undefined
+        : String(job.payload?.windowStart ?? "").slice(0, 10),
+      job.payload?.temporalAuthorityTimeZone === undefined
+        ? undefined
+        : job.payload?.resource,
     ]),
     [
       ["2026-04-04", "blood_oxygen"],
@@ -9801,8 +9805,8 @@ test("Junction reconcile durably schedules yielded temporal work and the older b
   assert.deepEqual(requestedResources, ["blood_oxygen"]);
   assert.deepEqual(
     (result.scheduledJobs ?? [])
-      .filter((job) => job.payload?.temporalAuthorityDayKey)
-      .map((job) => [job.payload?.temporalAuthorityDayKey, job.payload?.resource]),
+      .filter((job) => job.payload?.temporalAuthorityTimeZone)
+      .map((job) => [String(job.payload?.windowStart ?? "").slice(0, 10), job.payload?.resource]),
     [
       ["2026-04-04", "stress_level"],
       ["2026-04-03", "blood_oxygen"],
@@ -9934,11 +9938,14 @@ test("Junction temporal recovery clamps its composed horizon to fourteen days", 
   assert.equal(temporalRequests, 2);
   assert.equal(result.scheduledJobs?.length, 27);
   assert.deepEqual(
-    result.scheduledJobs?.slice(0, 2).map((job) => job.payload?.temporalAuthorityDayKey),
+    result.scheduledJobs?.slice(0, 2).map((job) => String(job.payload?.windowStart ?? "").slice(0, 10)),
     ["2026-04-17", "2026-04-17"],
   );
   assert.deepEqual(
-    result.scheduledJobs?.slice(-3).map((job) => job.payload?.temporalAuthorityDayKey),
+    result.scheduledJobs?.slice(-3).map((job) =>
+      job.payload?.temporalAuthorityTimeZone === undefined
+        ? undefined
+        : String(job.payload?.windowStart ?? "").slice(0, 10)),
     ["2026-04-05", "2026-04-05", undefined],
   );
 });
@@ -10559,7 +10566,8 @@ test("Junction daily timeseries continues healthy peers and queues a failed temp
   );
   assert.deepEqual(importedTimeseries, ["water", "hrv"]);
   assert.equal((result.scheduledJobs ?? []).some((job) =>
-    job.payload?.temporalAuthorityDayKey === "2026-04-02"
+    job.payload?.temporalAuthorityTimeZone !== undefined
+    && String(job.payload?.windowStart ?? "").startsWith("2026-04-02")
     && job.payload?.resource === "blood_oxygen"
   ), true);
 });

@@ -8344,7 +8344,7 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
     const queuedRows = jobs.filter((job) => job.status === "queued");
     const queuedJobs = queuedRows.map((job) => fixture.store.getJobById(job.id));
     const temporalJobs = queuedJobs.filter((job) =>
-      job?.kind === "resource" && job.payload.temporalAuthorityDayKey
+      job?.kind === "resource" && job.payload.temporalAuthorityTimeZone
     );
     const reconcileFollowUp = queuedJobs.find((job) => job?.kind === "reconcile");
 
@@ -8353,7 +8353,7 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
     assert.equal(temporalJobs.length, 3);
     assert.deepEqual(
       new Set(temporalJobs.map((job) =>
-        `${String(job?.payload.temporalAuthorityDayKey)}:${String(job?.payload.resource)}`
+        `${String(job?.payload.windowStart).slice(0, 10)}:${String(job?.payload.resource)}`
       )),
       new Set([
         "2026-08-10:stress_level",
@@ -8555,7 +8555,8 @@ test("Junction scheduled temporal history refetches after a new source and late 
     assert.equal((await fixture.service.runWorkerOnce(account.id))?.kind, "reconcile");
     const firstOlderDay = await fixture.service.runWorkerOnce(account.id);
     assert.equal(firstOlderDay?.kind, "resource");
-    assert.equal(firstOlderDay.payload.temporalAuthorityDayKey, "2026-08-09");
+    assert.equal(String(firstOlderDay.payload.windowStart).slice(0, 10), "2026-08-09");
+    assert.equal(firstOlderDay.payload.temporalAuthorityTimeZone, "UTC");
     assert.equal(
       requestedDays.filter((day) => day === "2026-08-09T00:00:00.000Z").length,
       1,
@@ -8583,7 +8584,8 @@ test("Junction scheduled temporal history refetches after a new source and late 
 
       const repeatedOlderDay = await restarted.service.runWorkerOnce(account.id);
       assert.equal(repeatedOlderDay?.kind, "resource");
-      assert.equal(repeatedOlderDay.payload.temporalAuthorityDayKey, "2026-08-09");
+      assert.equal(String(repeatedOlderDay.payload.windowStart).slice(0, 10), "2026-08-09");
+      assert.equal(repeatedOlderDay.payload.temporalAuthorityTimeZone, "UTC");
       assert.notEqual(repeatedOlderDay.id, firstOlderDay.id);
       assert.equal(
         requestedDays.filter((day) => day === "2026-08-09T00:00:00.000Z").length,

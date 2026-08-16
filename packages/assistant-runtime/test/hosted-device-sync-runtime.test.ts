@@ -13408,6 +13408,234 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test.each([
+    { restoredTimeZone: "UTC", slug: "same-timezone" },
+    { restoredTimeZone: "America/Chicago", slug: "changed-timezone" },
+  ])("hosted cold restore preserves Junction temporal authority ($slug)", async ({
+    restoredTimeZone,
+    slug,
+  }) => {
+    const buildWorkspaceService = async (workspaceSlug: string, timeZone: string) => {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        `hosted-device-sync-junction-temporal-cold-restore-${slug}-${workspaceSlug}-`,
+      );
+      await initializeVault({
+        createdAt: "2026-04-01T00:00:00.000Z",
+        timezone: timeZone,
+        vaultRoot,
+      });
+      return { cleanup, vaultRoot };
+    };
+    const hostedConnectionId = `hosted_conn_junction_temporal_cold_restore_${slug.replaceAll("-", "_")}`;
+    const externalAccountId = `junction-temporal-cold-restore-${slug}`;
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    assert.ok(sourceInstanceKey);
+    const now = "2026-04-24T12:00:00.000Z";
+    const snapshot = buildRuntimeSnapshot({
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      connectionId: hostedConnectionId,
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      externalAccountId,
+      generatedAt: now,
+      hostedUpdatedAt: now,
+      localState: { nextReconcileAt: null },
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2026-03-01T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-01T00:00:00.000Z",
+      },
+      provider: "junction",
+      providerConfigs: {
+        junction: {
+          environment: "sandbox",
+          reconcileDays: 3,
+          reconcileIntervalMs: 60 * 60_000,
+          region: "us",
+          summaryBackfillDays: 3,
+          summaryResources: [],
+          timeseriesBackfillDays: 3,
+        },
+      },
+      sources: [{
+        displayName: "Garmin",
+        firstSeenAt: "2026-04-01T00:00:00.000Z",
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: now,
+        resourceCount: 1,
+        resourceAvailabilitySummary: { stress_level: true },
+        sourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }],
+    });
+    const buildProvider = () => {
+      const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+        junction: {
+          apiKey: "sk_us_test_123",
+          clientUserIdSecret: "junction-client-user-id-secret",
+          environment: "sandbox",
+          region: "us",
+          reconcileDays: 3,
+          reconcileIntervalMs: 60 * 60_000,
+          summaryBackfillDays: 3,
+          summaryResources: [],
+          timeseriesBackfillDays: 3,
+          timeseriesResources: ["stress_level"],
+          fetchImpl: async (input) => {
+            const url = new URL(readTestUrl(input));
+            if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+              return createTestJsonResponse({ providers: [{
+                id: "provider-garmin-temporal-cold-restore",
+                slug: "garmin",
+                name: "Garmin",
+                status: "connected",
+                resource_availability: { stress_level: true },
+              }] });
+            }
+            if (url.pathname.startsWith("/v2/summary/")
+              && url.pathname.endsWith(`/${externalAccountId}`)) {
+              return createTestJsonResponse({ data: [] });
+            }
+            if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+              return createTestJsonResponse({ groups: { garmin: [{
+                data: [
+                  { timestamp: "2026-04-22T07:00:00.000Z", value: 20 },
+                  { timestamp: "2026-04-22T07:05:00.000Z", value: 30 },
+                  { timestamp: "2026-04-22T19:00:00.000Z", value: 70 },
+                  { timestamp: "2026-04-22T19:05:00.000Z", value: 80 },
+                ],
+                source: { provider: "garmin", type: "watch" },
+              }] } });
+            }
+            throw new Error(`Unexpected Junction cold-restore request: ${url.pathname}`);
+          },
+        },
+      });
+      assert.ok(provider);
+      return provider;
+    };
+    const buildService = (vaultRoot: string) => createHostedRuntimeDeviceSyncService({
+      clock: { now: () => new Date(now) },
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+      providers: [buildProvider()],
+      secret: DEVICE_SYNC_SECRET,
+    });
+
+    const firstWorkspace = await buildWorkspaceService("first", "UTC");
+    const restoredWorkspace = await buildWorkspaceService("restored", restoredTimeZone);
+    const firstService = buildService(firstWorkspace.vaultRoot);
+    const restoredService = buildService(restoredWorkspace.vaultRoot);
+    let firstClosed = false;
+
+    try {
+      const wake = buildDeviceSyncWake({
+        connectionId: hostedConnectionId,
+        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+        occurredAt: now,
+        provider: "junction",
+        reason: "webhook_hint",
+      });
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        snapshot,
+        wake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(firstAccountId);
+      getStore(firstService).enqueueJob({
+        accountId: firstAccountId,
+        availableAt: now,
+        dedupeKey: "junction-temporal-authority:v1:cold-restore",
+        kind: "resource",
+        payload: {
+          resource: "stress_level",
+          resourceCategory: "timeseries",
+          temporalAuthorityTimeZone: "UTC",
+          windowEnd: "2026-04-23T00:00:00.000Z",
+          windowStart: "2026-04-22T00:00:00.000Z",
+        },
+        priority: 45,
+        provider: "junction",
+      });
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake,
+      });
+      assert.ok(recovery);
+      const retainedHint = (recovery.wake.hint?.jobs ?? []).find((hint) =>
+        (hint.payload as { resource?: string } | undefined)?.resource === "stress_level"
+      );
+      assert.ok(retainedHint);
+      assert.equal(
+        (retainedHint.payload as { temporalAuthorityTimeZone?: string }).temporalAuthorityTimeZone,
+        "UTC",
+      );
+      assert.equal(
+        (retainedHint.payload as { windowStart?: string }).windowStart,
+        "2026-04-22T00:00:00.000Z",
+      );
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        snapshot,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(restoredAccountId);
+      const processed = await restoredService.runWorkerOnce(restoredAccountId);
+      assert.equal(processed?.kind, "resource");
+
+      if (restoredTimeZone === "UTC") {
+        const records = await readCanonicalEventRecords(restoredWorkspace.vaultRoot);
+        assert.equal(records.some((record) =>
+          record.kind === "observation"
+          && typeof record.metric === "string"
+          && record.metric.startsWith("stress-")
+          && record.metric !== "stress-level"
+        ), true);
+        assert.equal(records.some((record) => eventHasMetric(record, "stress-level")), false);
+      } else {
+        // The retained authority timezone no longer matches the account; the
+        // stale job must terminate without minting authority and without
+        // running as ordinary ingestion for the temporal resource.
+        await assert.rejects(
+          readCanonicalEventRecords(restoredWorkspace.vaultRoot),
+          /VAULT_FILE_MISSING|Missing required file/u,
+        );
+      }
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
   test("hosted custom importers without a timezone resolver remain ordinary and fail authority closed", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-junction-no-timezone-resolver-",

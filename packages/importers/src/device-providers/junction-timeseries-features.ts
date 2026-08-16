@@ -15,19 +15,6 @@ export const JUNCTION_TEMPORAL_FEATURE_RESOURCES = Object.freeze([
 export type JunctionTemporalFeatureResource =
   (typeof JUNCTION_TEMPORAL_FEATURE_RESOURCES)[number];
 
-export const JUNCTION_TEMPORAL_FEATURE_METRICS = Object.freeze({
-  blood_oxygen: Object.freeze([
-    "spo2-samples-below-90-percent",
-    "spo2-below-90-run-count",
-    "spo2-longest-below-90-sample-count",
-  ]),
-  stress_level: Object.freeze([
-    "stress-above-daily-mean-run-count",
-    "stress-mean-absolute-successive-difference",
-    "stress-evening-minus-morning-score",
-  ]),
-} satisfies Record<JunctionTemporalFeatureResource, readonly string[]>);
-
 export interface JunctionTemporalFeatureSample {
   localMinuteOfDay?: number;
   recordedAt: string;

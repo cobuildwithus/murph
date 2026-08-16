@@ -4215,7 +4215,7 @@ test("device sync store sweeps Junction temporal terminal history across the rol
         assert.equal(enqueueCoordinate(
           timeZone,
           String(job.payload.resource),
-          String(job.payload.temporalAuthorityDayKey),
+          String(job.payload.temporalAuthorityDayKey ?? job.payload.windowStart).slice(0, 10),
           availableAt,
         ).id, job.id);
       }

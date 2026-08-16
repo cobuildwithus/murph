@@ -329,7 +329,6 @@ interface JunctionWindowFetchOptions {
 }
 
 interface JunctionDailyTimeseriesWindow {
-  authoritative: boolean;
   dayKey: string;
   windowEnd: string;
   windowStart: string;
@@ -8096,7 +8095,6 @@ function buildLatestAuthoritativeDailyWindows(input: {
       continue;
     }
     windows.push({
-      authoritative: true,
       dayKey,
       ...window,
     });
@@ -8118,7 +8116,6 @@ function buildJunctionTemporalAuthorityJobs(input: {
       const payload = {
         resource,
         resourceCategory: "timeseries",
-        temporalAuthorityDayKey: window.dayKey,
         temporalAuthorityTimeZone: input.timeZone,
         windowEnd: window.windowEnd,
         windowStart: window.windowStart,
@@ -8147,16 +8144,23 @@ function readJunctionTemporalAuthorityJob(job: DeviceSyncJobRecord): {
   if (job.kind !== "resource") {
     return null;
   }
-  const dayKey = normalizeString(job.payload.temporalAuthorityDayKey);
+  // The retained authority timezone is the only persisted authority state;
+  // the day key derives from the stored exact window so hosted wake hints
+  // cannot restore a temporal child with partial authority. Legacy payloads
+  // may still carry temporalAuthorityDayKey; it is ignored.
   const timeZone = normalizeString(job.payload.temporalAuthorityTimeZone);
   const resource = normalizeJunctionResourceName(job.payload.resource);
+  const windowStart = normalizeString(job.payload.windowStart);
   if (
-    !dayKey
-    || !/^\d{4}-\d{2}-\d{2}$/u.test(dayKey)
-    || !timeZone
+    !timeZone
     || !resource
     || !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+    || !windowStart
   ) {
+    return null;
+  }
+  const dayKey = toLocalDayKey(windowStart, timeZone);
+  if (!dayKey || !/^\d{4}-\d{2}-\d{2}$/u.test(dayKey)) {
     return null;
   }
   return { dayKey, resource, timeZone };
@@ -8213,57 +8217,11 @@ function buildClosedDailyWindows(
     }
     const dailyWindowStart = new Date(chunkStartMs).toISOString();
     windows.push({
-      authoritative: false,
       dayKey: dailyWindowStart.slice(0, 10),
       windowStart: dailyWindowStart,
       windowEnd: new Date(chunkEndMs).toISOString(),
     });
     chunkStartMs = chunkEndMs;
-  }
-
-  return windows;
-}
-
-function buildClosedVaultLocalDailyWindows(
-  windowStart: string,
-  windowEnd: string,
-  timeZone: string,
-  now: string,
-): JunctionDailyTimeseriesWindow[] {
-  const startMs = Date.parse(windowStart);
-  const endMs = Date.parse(windowEnd);
-  const nowMs = Date.parse(now);
-  if (
-    !Number.isFinite(startMs)
-    || !Number.isFinite(endMs)
-    || !Number.isFinite(nowMs)
-    || startMs >= endMs
-  ) {
-    return [];
-  }
-
-  const windows: JunctionDailyTimeseriesWindow[] = [];
-  let dayKey = toLocalDayKey(
-    new Date(startMs - TIMESERIES_CHUNK_MS).toISOString(),
-    timeZone,
-  );
-  const finalDayKey = toLocalDayKey(new Date(endMs).toISOString(), timeZone);
-  for (let dayCount = 0; dayCount < 10_000 && dayKey <= finalDayKey; dayCount += 1) {
-    const localWindow = resolveVaultLocalDayWindow(dayKey, timeZone);
-    if (
-      localWindow
-      && Date.parse(localWindow.windowStart) >= startMs
-      && Date.parse(localWindow.windowEnd) <= endMs
-      && Date.parse(localWindow.windowEnd) <= nowMs
-    ) {
-      windows.push({
-        authoritative:
-          Date.parse(localWindow.windowEnd) + JUNCTION_TEMPORAL_AUTHORITY_LAG_MS <= nowMs,
-        dayKey,
-        ...localWindow,
-      });
-    }
-    dayKey = addIsoDateDays(dayKey, 1);
   }
 
   return windows;

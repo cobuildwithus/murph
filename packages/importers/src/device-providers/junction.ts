@@ -9348,29 +9348,6 @@ function firstTimestampSemantics(entry: PlainObject): TimestampSemantics | undef
     : undefined;
 }
 
-function resolveJunctionTemporalFeatureTimestamp(
-  entry: PlainObject,
-  timestamp: ReturnType<typeof resolveRecordTimestamp>,
-): ReturnType<typeof resolveRecordTimestamp> {
-  if (!isImplicitJunctionCanonicalUtcTimestamp(entry, timestamp)) {
-    return timestamp;
-  }
-
-  // Junction's canonical +00:00 timestamps are UTC (except providers already
-  // admitted as floating above). Drop the raw UTC calendar day inferred by the
-  // generic offset parser so provider offset or vault timezone owns local day.
-  const correctedTimestamp: ReturnType<typeof resolveRecordTimestamp> = {
-    ...timestamp,
-    timestampSemantics: "utc",
-  };
-  delete correctedTimestamp.dayKey;
-  const explicitDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
-  if (explicitDayKey) {
-    correctedTimestamp.dayKey = explicitDayKey;
-  }
-  return correctedTimestamp;
-}
-
 function isImplicitJunctionCanonicalUtcTimestamp(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
@@ -9423,25 +9400,6 @@ function hasValidJunctionExplicitTimeseriesTimestamp(
   }
 
   return normalizeTimestamp(timestamp.observedAtRaw) !== undefined;
-}
-
-/** Resolve the same source-local date used by Junction daily aggregation. */
-export function resolveJunctionTimeseriesSourceDayKey(
-  entry: Record<string, unknown>,
-  defaultTimeZone?: string,
-): string | undefined {
-  const sourceProviderSlug = readJunctionSourceProviderSlug(entry, undefined);
-  const timestamp = resolveJunctionTemporalFeatureTimestamp(
-    entry,
-    resolveRecordTimestamp(entry, {}, sourceProviderSlug),
-  );
-  const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp, false);
-  return resolveJunctionTimeseriesAggregateDayKey(
-    entry,
-    timestamp,
-    sampleAt,
-    defaultTimeZone,
-  );
 }
 
 function resolveJunctionDailyAggregateSampleAt(

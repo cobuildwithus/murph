@@ -35,7 +35,6 @@ export {
   normalizeJunctionResourceName,
   normalizeJunctionSnapshot,
   resolveJunctionWeightProviderRecordIdentity,
-  resolveJunctionTimeseriesSourceDayKey,
   type JunctionSnapshotInput,
   type JunctionBloodPressureProviderRecordIdentityEvidence,
   type JunctionSummaryNormalizationEvidence,
