@@ -10148,6 +10148,17 @@ test("Junction temporal authority fetches reject structurally incomplete respons
     { groups: { garmin: null } },
     { groups: { garmin: [null] } },
     { groups: { garmin: [{ data: [null], source: { provider: "garmin", type: "watch" } }] } },
+    // Schema-drifted singletons: a source group or data value that is an
+    // object instead of an array cannot certify a complete collection.
+    { groups: { garmin: { data: [], source: { provider: "garmin", type: "watch" } } } },
+    {
+      groups: {
+        garmin: [{
+          data: { timestamp: "2026-04-22T07:00:00.000Z", value: 40 },
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    },
     // Generic and legacy transport envelopes parse for ordinary ingestion but
     // carry no grouped proof, so they can never certify a complete source day.
     [],
@@ -10197,41 +10208,48 @@ test("Junction temporal authority fetches reject structurally incomplete respons
     assert.equal(importedSnapshots.length, 0);
   }
 
-  const emptyImports: Array<{ options: unknown }> = [];
-  const emptyProvider = createJunctionProvider(async (input) => {
-    const url = new URL(readUrl(input));
-    if (url.pathname === "/v2/user/providers/junction-user-1") {
-      return createJsonResponse({ providers: [] });
-    }
-    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
-      return createJsonResponse({ groups: {} });
-    }
-    throw new Error(`Unexpected request: ${url.toString()}`);
-  }, { timeseriesResources: ["stress_level"] });
-  await executeJunctionJob(
-    emptyProvider,
-    createJunctionJobContext({
-      now: "2026-04-24T12:00:00.000Z",
-      importSnapshot: async (_snapshot, options) => {
-        emptyImports.push({ options });
-        return { imported: true };
-      },
-    }),
-    createJob("resource", {
-      resource: "stress_level",
-      resourceCategory: "timeseries",
-      temporalAuthorityDayKey: "2026-04-22",
-      temporalAuthorityTimeZone: "UTC",
-      windowStart: "2026-04-22T00:00:00.000Z",
-      windowEnd: "2026-04-23T00:00:00.000Z",
-    }),
-  );
-  assert.equal(emptyImports.length, 1);
-  assert.deepEqual(
-    (emptyImports[0]?.options as { completeSourceDay?: { dayKey?: string } })
-      ?.completeSourceDay?.dayKey,
-    "2026-04-22",
-  );
+  const emptyPayloads: unknown[] = [
+    { groups: {} },
+    { groups: { garmin: [] } },
+    { groups: { garmin: [{ data: [], source: { provider: "garmin", type: "watch" } }] } },
+  ];
+  for (const emptyPayload of emptyPayloads) {
+    const emptyImports: Array<{ options: unknown }> = [];
+    const emptyProvider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+        return createJsonResponse(emptyPayload);
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, { timeseriesResources: ["stress_level"] });
+    await executeJunctionJob(
+      emptyProvider,
+      createJunctionJobContext({
+        now: "2026-04-24T12:00:00.000Z",
+        importSnapshot: async (_snapshot, options) => {
+          emptyImports.push({ options });
+          return { imported: true };
+        },
+      }),
+      createJob("resource", {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-22",
+        temporalAuthorityTimeZone: "UTC",
+        windowStart: "2026-04-22T00:00:00.000Z",
+        windowEnd: "2026-04-23T00:00:00.000Z",
+      }),
+    );
+    assert.equal(emptyImports.length, 1);
+    assert.deepEqual(
+      (emptyImports[0]?.options as { completeSourceDay?: { dayKey?: string } })
+        ?.completeSourceDay?.dayKey,
+      "2026-04-22",
+    );
+  }
 });
 
 test("Junction successful-empty temporal days still carry authoritative replacement proof", async () => {

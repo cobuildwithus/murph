@@ -1761,6 +1761,11 @@ function flattenGroupedTimeseries(
     if (options.strict && (rawGroups === undefined || rawGroups === null)) {
       throw incompleteJunctionCalendarCollectionError();
     }
+    // A complete collection proof requires real arrays: a schema-drifted
+    // singleton object must fail retryably rather than certify the day.
+    if (options.strict && !Array.isArray(rawGroups)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
     for (const rawGroup of asArray(rawGroups)) {
       const group = readPlainObject(rawGroup);
       if (!group) {
@@ -1776,6 +1781,9 @@ function flattenGroupedTimeseries(
         options.strict
         && (!("data" in group) || group.data === undefined || group.data === null)
       ) {
+        throw incompleteJunctionCalendarCollectionError();
+      }
+      if (options.strict && !Array.isArray(group.data)) {
         throw incompleteJunctionCalendarCollectionError();
       }
 
