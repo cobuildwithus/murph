@@ -1,6 +1,6 @@
 # Prefer Telegram Rich Messages for structured replies
 
-Status: active
+Status: completed
 Created: 2026-08-16
 Updated: 2026-08-16
 
@@ -111,8 +111,22 @@ Updated: 2026-08-16
 - ReviewGPT round 3 opened no ordinary finding. It required the mandatory
   round-three anomaly retrospective, which is recorded in the PR body and this
   plan with the explicit decision to continue.
+- ReviewGPT round 4 returned `ROUND_OUTCOME: PASS` for commit
+  `d2c502551c61675b5f953f280311254b71db088b`. It confirmed that both prior
+  findings are resolved and opened no new finding.
+- Parent corrected-head review found no remaining product, authorization,
+  delivery, fallback, or complexity issue. The implementation keeps one shared
+  audience rule and the existing Telegram delivery path.
+- All relevant GitHub Actions passed on the code-bearing remediation head. The
+  native iOS job failed before app tests because its GitHub App id was absent,
+  and the runner sandbox gate reported the same pre-existing bundle-budget
+  overage seen on unrelated PRs. The user explicitly allowed merge past those
+  unrelated failures.
+- The merge-tree preflight remained clean against current `origin/main` at
+  `9330b2476d81bff977dacb3c1978fa6a20c82fc7`.
 - Current official OpenAI prompt guidance was checked before prompt review. The
   final guidance uses clear high-level rules and bounded examples while leaving
   layout choice to the model.
-- Remaining gates: exact-head ReviewGPT, required GitHub Actions, merge-tree
-  preflight, merge, and worktree retirement.
+- The final docs-only plan archive still requires its exact-head GitHub Actions,
+  merge, and worktree retirement before handoff.
+Completed: 2026-08-16
