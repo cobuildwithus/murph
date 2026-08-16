@@ -84,7 +84,11 @@ describe("share preview metadata", () => {
       alt: "Let’s connect your device. Wearables and health data sources.",
       url: "/connect/opengraph-image",
     });
-    expectRouteFile("../app/(dashboard)/connect/opengraph-image.tsx");
+    // The route file lives OUTSIDE the (dashboard) group: metadata images
+    // inside route groups get hash-suffixed URLs in production, so the
+    // advertised unhashed URL only resolves from an ungrouped segment
+    // (the /environment card established this pattern).
+    expectRouteFile("../app/connect/opengraph-image.tsx");
   });
 
   it("group funding pages advertise the sponsor card", async () => {
@@ -116,6 +120,7 @@ describe("share preview metadata", () => {
       alt: expect.stringMatching(/^.+, a Murph biomarker\.$/),
       url: "/biomarkers/deep-sleep-minutes/opengraph-image",
     });
+    expectRouteFile("../app/biomarkers/[biomarkerId]/opengraph-image.tsx");
   });
 
   it("experiment research keeps the parent experiment card", async () => {
@@ -130,6 +135,7 @@ describe("share preview metadata", () => {
       alt: expect.stringMatching(/^.+, a Murph experiment\.$/),
       url: "/experiments/cold-plunge/opengraph-image",
     });
+    expectRouteFile("../app/experiments/[experimentId]/opengraph-image.tsx");
   });
 
   it("experiment results keeps the parent experiment card", async () => {
