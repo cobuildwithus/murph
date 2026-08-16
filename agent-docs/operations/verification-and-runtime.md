@@ -859,16 +859,14 @@ correction remains a boundary fix but was not sufficient capacity proof on
 Next 16.2.6. Production and Linux CI now use Next 16.3's supported Webpack
 fallback through the same shared production-build selector, with the isolated
 Webpack build worker and memory optimizations enabled. Interactive development
-and the dev-smoke lane remain on Turbopack. The shared production runner owns
-the fail-closed cache-epoch, cold-Webpack-cache, and production build-watchdog
-contract; `apps/web/README.md` § "Production build memory guard" is the single
-prose owner for those mechanics, and `run-production-next-build.sh` plus its
-runner regression test are the behavioral authority. Warm restored Webpack
-caches were the trigger for the August 2026 steady-state 8 GB container OOM
-kills and silent compile hangs that followed the cutover. The verification
-implication here is that the verify lane intentionally builds with `VERCEL=1
-VERCEL_ENV=preview`, which compiles Webpack cold but never arms the
-production-only build deadline. The Workflow
+and the dev-smoke lane remain on Turbopack. `apps/web/README.md` § "Production
+build memory guard" is the single prose owner for the production build cache,
+epoch, and deadline contract. Warm restored Webpack caches were the trigger
+for the August 2026 steady-state 8 GB container OOM kills and silent compile
+hangs that followed the cutover. The verification implication here is that
+the verify lane intentionally builds with `VERCEL=1 VERCEL_ENV=preview`,
+which compiles Webpack cold but never arms the production-only build
+deadline. The Workflow
 integration runs through its native Next integration: exact-head CI proves the
 complete compile, type-validation, static-generation, and directive-discovery
 path, while focused Stripe and phone-call suites prove the existing

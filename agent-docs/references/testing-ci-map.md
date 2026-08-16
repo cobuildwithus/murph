@@ -395,12 +395,12 @@ supported provider credential.
   `NODE_OPTIONS`, so the sequential Webpack compiler workers receive 3 GiB and
   the later generated-contract TypeScript validation child inherits the same
   limit, while isolated static workers have the flag removed. The same script
-  owns the Vercel package build and CI memory-observation invocation, plus the
-  cold-Webpack-cache policy and the production-only build watchdog;
+  owns the Vercel package build and CI memory-observation invocation.
   `apps/web/README.md` § "Production build memory guard" is the single prose
-  owner for that mutable contract. The CI-relevant fact is that the verify
-  lane's `VERCEL=1 VERCEL_ENV=preview` build shape compiles Webpack cold
-  without activating the watchdog. The split reduces the compile-parent peak without
+  owner for the mutable production build cache, epoch, and deadline contract.
+  The CI-relevant fact is that the verify lane's `VERCEL=1 VERCEL_ENV=preview`
+  build shape compiles Webpack cold without arming the production-only build
+  deadline. The split reduces the compile-parent peak without
   weakening generated-contract validation, while repeated forced-cold Standard
   previews remain the real Vercel acceptance proof. A 2 GiB parent-bound
   candidate passed one forced-cold Standard preview but the next identical

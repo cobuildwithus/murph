@@ -36,6 +36,18 @@ const wedgedTreeSource = `
   process.stdout.write("pids " + process.pid + " " + grandchild.pid + "\\n");
   setInterval(() => {}, 1000);
 `;
+// A leader that exits on the deadline's TERM while its grandchild ignores it:
+// the descendant-outlives-leader topology that motivated supervisor-owned
+// group reaping.
+const exitingLeaderTreeSource = `
+  import { spawn } from "node:child_process";
+  const grandchild = spawn(process.execPath, [
+    "-e",
+    "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);",
+  ], { stdio: "ignore" });
+  process.stdout.write("pids " + process.pid + " " + grandchild.pid + "\\n");
+  setInterval(() => {}, 1000);
+`;
 
 afterEach(async () => {
   for (const child of children) {
@@ -317,6 +329,24 @@ describe("shared-host verification slots", () => {
     ownedDescendantPids.add(grandchildPid);
 
     await waitForStderrLine(child, "terminating its process group");
+    const status = await waitForExit(child);
+    expect(status).toBe(124);
+    await waitForOwnedProcessExit(parentPid);
+    await waitForOwnedProcessExit(grandchildPid);
+    expect(readdirSync(stateRoot)).toEqual([]);
+  });
+
+  it("a deadline whose group leader exits on TERM still reaps a surviving descendant", async () => {
+    const stateRoot = makeTempRoot();
+    const child = startCommand("exiting leader", stateRoot, exitingLeaderTreeSource, {
+      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
+      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "300",
+    });
+
+    const [parentPid, grandchildPid] = await waitForPids(child);
+    ownedDescendantPids.add(parentPid);
+    ownedDescendantPids.add(grandchildPid);
+
     const status = await waitForExit(child);
     expect(status).toBe(124);
     await waitForOwnedProcessExit(parentPid);

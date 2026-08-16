@@ -1641,12 +1641,12 @@ from selecting the isolated build worker automatically. The hosted local-
 development wrapper remains on Turbopack and rejects an explicit Webpack flag.
 The production runner also owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
-compilation and writes the epoch only after Next succeeds and the post-success
-Webpack-cache discard completes. Production Webpack compiles are additionally
-cold-cache by policy: the runner removes
-`.next/cache/webpack` before every compile and discards it again after a
-successful compile, so a READY deployment cannot seed the next build with warm
-Webpack state. Warm restored Webpack caches on Vercel's 8 GB Standard builder
+compilation and writes the epoch only after Next succeeds. Production Webpack
+compiles are additionally cold-cache by policy: the runner removes
+`.next/cache/webpack` before every compile, and because that removal precedes
+the only Next invocation and aborts the build on failure, a restored warm
+Webpack cache can never reach the compiler regardless of what an earlier
+deployment uploaded. Warm restored Webpack caches on Vercel's 8 GB Standard builder
 were the trigger for the August 2026 steady-state OOM kills and silent
 compile hangs; only the cold path is proven. Other cache subtrees such as SWC
 remain warm. On Vercel production builds (`VERCEL=1` with
@@ -1654,8 +1654,10 @@ remain warm. On Vercel production builds (`VERCEL=1` with
 whole-build deadline (`MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS=900000`) that the
 package-build process owner, `scripts/run-with-host-verification-slot.mjs`,
 enforces on the one detached process group it already creates: at the deadline
-it TERMs the entire group, escalates to KILL after a 30-second grace, waits
-until the group has fully exited, and returns exit 124 with an explicit
+it TERMs the entire group, force-kills survivors with KILL (each phase bounded
+by a 30-second grace, so a leader that exits mid-grace hands surviving
+descendants to one fresh grace before their KILL), waits until the group has
+fully exited, and returns exit 124 with an explicit
 diagnostic. Because the deadline owns the whole group, a wedged Webpack
 compiler worker descendant is terminated too, and an externally cancelled
 build is reaped with the same escalation instead of orphaning the compile.

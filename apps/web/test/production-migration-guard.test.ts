@@ -1466,10 +1466,6 @@ describe("hosted web production migration guard", () => {
       productionNextBuildScript,
       /node \.\.\/\.\.\/scripts\/rm-paths\.mjs "\$webpack_cache_dir"/u,
     );
-    assert.match(
-      productionNextBuildScript,
-      /Discarding Webpack cache after successful production compile/u,
-    );
 
     // The production build deadline lives in the package-build process owner,
     // not in the runner: vercel-build.sh arms it for production deployments
@@ -1518,17 +1514,25 @@ describe("hosted web production migration guard", () => {
     assert.match(readmeDoc, /## Production build memory guard/u);
     assert.match(readmeDoc, /`VERCEL=1` with\s+`VERCEL_ENV=production`/u);
     assert.match(readmeDoc, /`\.next\/cache\/webpack` before every compile/u);
-    assert.match(readmeDoc, /post-success\s+Webpack-cache discard/u);
     for (const [docName, doc] of [
       ["verification-and-runtime.md", verificationDoc],
       ["testing-ci-map.md", testingCiMapDoc],
     ] as const) {
-      assert.match(doc, /Production build memory guard/u, `${docName} must reference the owner`);
+      assert.match(
+        doc,
+        /Production\s+build memory guard/u,
+        `${docName} must reference the owner`,
+      );
       for (const copiedMechanic of [
         /preserves ordinary warm caching/u,
         /15-minute `timeout`/u,
         /kill-after/u,
         /SIGKILL 30/u,
+        // The deadline is owned by vercel-build.sh arming plus the shared
+        // supervisor; secondary guidance must not assign watchdog ownership
+        // or behavioral authority to the build runner.
+        /watchdog/u,
+        /behavioral authority/u,
       ]) {
         assert.doesNotMatch(
           doc,

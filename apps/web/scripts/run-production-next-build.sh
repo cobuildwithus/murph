@@ -39,9 +39,6 @@ printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_m
   "$next_child_old_space_mb"
 node "--max-old-space-size=$parent_old_space_mb" "$next_bin" build --webpack
 
-printf '[apps/web build] Discarding Webpack cache after successful production compile\n'
-node ../../scripts/rm-paths.mjs "$webpack_cache_dir"
-
 if [[ "$cache_reset" == 1 ]]; then
   mkdir -p "$(dirname "$build_cache_stamp")"
   printf '%s\n' "$build_cache_epoch" > "$build_cache_stamp"
