@@ -4073,30 +4073,60 @@ function resolveJunctionTemporalFeatureVaultLocalMinuteOfDay(
 // never become temporal observations. A supplied clock that cannot resolve in
 // the retained authority timezone (a daylight-saving gap or malformed clock)
 // fails the complete-day import retryably instead of inventing an instant.
+// The single accepted timestamp language for complete-source-day authority.
+// Every pattern is anchored: the full raw value must be consumed, so a valid
+// prefix followed by unsupported text can never certify a temporal instant or
+// day membership.
+const JUNCTION_COMPLETE_DAY_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const JUNCTION_COMPLETE_DAY_FLOATING_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/u;
+const JUNCTION_COMPLETE_DAY_ABSOLUTE_PATTERN =
+  /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]\d{2}:?\d{2})$/u;
+
+// The importer's complete-day boundary is the one acceptance owner: a single
+// parse of the raw value yields semantics agreement, day membership, and
+// temporal-instant eligibility together. Date-only rows return null (day
+// membership, zero temporal coverage); floating clocks resolve in the
+// retained authority timezone with omitted seconds as zero; supported
+// absolute forms use their exact instant. Anything else — including a valid
+// prefix with trailing unsupported text or semantics that contradict the raw
+// shape — fails the import retryably before any canonical write.
 function resolveJunctionTemporalFeatureInstant(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   timeZone: string,
 ): string | null {
+  const raw = timestamp.observedAtRaw?.trim();
+  if (!raw) {
+    throw new JunctionSparseCalendarRepairNormalizationError();
+  }
+  if (JUNCTION_COMPLETE_DAY_DATE_ONLY_PATTERN.test(raw)) {
+    if (timestamp.timestampSemantics !== "floating") {
+      throw new JunctionSparseCalendarRepairNormalizationError();
+    }
+    return null;
+  }
+  const floatingMatch = raw.match(JUNCTION_COMPLETE_DAY_FLOATING_PATTERN);
+  if (!floatingMatch) {
+    if (!JUNCTION_COMPLETE_DAY_ABSOLUTE_PATTERN.test(raw)) {
+      throw new JunctionSparseCalendarRepairNormalizationError();
+    }
+    const instant = timestamp.occurredAt ?? timestamp.recordedAt;
+    if (timestamp.timestampSemantics === "floating" || !instant) {
+      throw new JunctionSparseCalendarRepairNormalizationError();
+    }
+    return instant;
+  }
   if (timestamp.timestampSemantics !== "floating") {
-    return timestamp.occurredAt ?? timestamp.recordedAt ?? null;
+    throw new JunctionSparseCalendarRepairNormalizationError();
   }
-  if (!timestamp.observedAtRaw) {
-    return null;
-  }
-  const match = timestamp.observedAtRaw.match(
-    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/u,
-  );
-  if (!match) {
-    return null;
-  }
-  const [year, month, day, hour, minute] = match.slice(1, 6).map(Number) as [
+  const [year, month, day, hour, minute] = floatingMatch.slice(1, 6).map(Number) as [
     number,
     number,
     number,
     number,
     number,
   ];
-  const second = match[6] === undefined ? 0 : Number(match[6]);
+  const second = floatingMatch[6] === undefined ? 0 : Number(floatingMatch[6]);
   const targetPseudoMs = Date.UTC(year, month - 1, day, hour, minute, second);
   let candidateMs = targetPseudoMs;
   for (let attempt = 0; attempt < 6; attempt += 1) {

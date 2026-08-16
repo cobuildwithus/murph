@@ -8647,7 +8647,7 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   const externalAccountId = "junction-ambiguous-rows";
   const now = new Date("2026-08-15T12:00:00.000Z");
-  let phase: "seed" | "lossy" | "lossy-only" = "seed";
+  let activeRows: readonly Record<string, unknown>[] = [];
 
   await initializeVault({ vaultRoot, timezone: "UTC" });
   const canonicalImporter = createImporters();
@@ -8672,20 +8672,9 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
         });
       }
       if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
-        const validRows = [
-          { timestamp: "2026-08-12T07:00:00.000Z", value: 20 },
-          { timestamp: "2026-08-12T07:05:00.000Z", value: 30 },
-          { timestamp: "2026-08-12T19:00:00.000Z", value: 70 },
-          { timestamp: "2026-08-12T19:05:00.000Z", value: 80 },
-        ];
-        const rows = phase === "seed"
-          ? validRows
-          : phase === "lossy"
-            ? [...validRows, { timestamp: "not-a-timestamp", value: 50 }]
-            : [{ timestamp: "not-a-timestamp", value: 50 }];
         return createJsonResponse({
           groups: {
-            garmin: [{ data: rows, source: { provider: "garmin", type: "watch" } }],
+            garmin: [{ data: activeRows, source: { provider: "garmin", type: "watch" } }],
           },
         });
       }
@@ -8745,6 +8734,16 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
       && record.metric !== "stress-level"
     );
 
+    // Every supported form of the accepted timestamp language imports: an
+    // absolute fractional instant, plain UTC, an explicit offset, a floating
+    // clock with seconds, and a floating clock without seconds.
+    activeRows = [
+      { timestamp: "2026-08-12T07:00:00.000Z", value: 20 },
+      { timestamp: "2026-08-12T07:05:00Z", value: 30 },
+      { timestamp: "2026-08-12T07:10:00+00:00", value: 25 },
+      { timestamp: "2026-08-12 19:00:30", value: 70 },
+      { timestamp: "2026-08-12 19:05", value: 80 },
+    ];
     const seedJob = enqueueDay("junction-temporal-authority:v1:ambiguous-seed");
     assert.equal(
       (await fixture.service.runWorkerOnce(account.id))?.id,
@@ -8756,25 +8755,41 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
       "utf8",
     );
 
-    // Valid rows plus one unparseable timestamp: the filter keeps the
-    // ambiguous row, the importer fails closed, nothing is written.
-    phase = "lossy";
-    const lossyJob = enqueueDay("junction-temporal-authority:v1:ambiguous-lossy");
-    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, lossyJob.id);
-    assert.equal(fixture.store.getJobById(lossyJob.id)?.status, "queued");
-    assert.equal(
-      fixture.store.getJobById(lossyJob.id)?.lastErrorCode,
-      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
-    );
-    assert.equal(
-      await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
-      ledgerBefore,
-    );
-    assert.equal((await liveFacets()).length, 3);
+    // Any value outside the anchored language — including a valid prefix with
+    // trailing unsupported text or semantics contradicting the raw shape —
+    // fails the day retryably with zero canonical mutation.
+    const invalidRows: ReadonlyArray<Record<string, unknown>> = [
+      { timestamp: "not-a-timestamp", value: 50 },
+      { timestamp: "2026-08-12T07:00:00Z-extra", value: 50 },
+      { timestamp: "2026-08-12T07:00:00garbage", value: 50 },
+      { timestamp: "2026-08-12T07:00trailing", value: 50 },
+      { timestamp: "2026-08-12T07:00:00+9:30", value: 50 },
+      { timestamp: "2026-08-12 07:00", timestampSemantics: "utc", value: 50 },
+    ];
+    for (const [index, invalidRow] of invalidRows.entries()) {
+      activeRows = [
+        { timestamp: "2026-08-12T07:00:00.000Z", value: 20 },
+        { timestamp: "2026-08-12 19:05", value: 80 },
+        invalidRow,
+      ];
+      const lossyJob = enqueueDay(`junction-temporal-authority:v1:ambiguous-lossy-${index}`);
+      assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, lossyJob.id);
+      assert.equal(fixture.store.getJobById(lossyJob.id)?.status, "queued");
+      assert.equal(
+        fixture.store.getJobById(lossyJob.id)?.lastErrorCode,
+        "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+        JSON.stringify(invalidRow),
+      );
+      assert.equal(
+        await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+        ledgerBefore,
+      );
+      assert.equal((await liveFacets()).length, 3);
+      fixture.store.completeJob(lossyJob.id, now.toISOString());
+    }
 
-    // The malformed row alone must not become an authoritative empty.
-    phase = "lossy-only";
-    fixture.store.completeJob(lossyJob.id, now.toISOString());
+    // A malformed row alone must not become an authoritative empty.
+    activeRows = [{ timestamp: "not-a-timestamp", value: 50 }];
     const lossyOnlyJob = enqueueDay("junction-temporal-authority:v1:ambiguous-only");
     assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, lossyOnlyJob.id);
     assert.equal(
@@ -8786,6 +8801,15 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
       ledgerBefore,
     );
     assert.equal((await liveFacets()).length, 3);
+    fixture.store.completeJob(lossyOnlyJob.id, now.toISOString());
+
+    // A valid exact date-only day succeeds with zero temporal samples, and
+    // its empty facet set legitimately retracts the stale facets.
+    activeRows = [{ timestamp: "2026-08-12", value: 55 }];
+    const dateOnlyJob = enqueueDay("junction-temporal-authority:v1:ambiguous-date-only");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, dateOnlyJob.id);
+    assert.equal(fixture.store.getJobById(dateOnlyJob.id)?.status, "succeeded");
+    assert.equal((await liveFacets()).length, 0);
   } finally {
     fixture.close();
   }

@@ -225,11 +225,17 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    that cannot normalize into an owned source, usable value, and the target
    vault day fails the import retryably before any canonical write. A
    structurally empty grouped response remains the only valid authoritative
-   empty. Temporal samples come only from rows with a genuine provider clock:
-   date-only rows prove raw-day membership and stay ordinary daily inputs with
-   zero temporal coverage, omitted seconds resolve as zero, and a supplied
-   clock that cannot resolve in the retained authority timezone fails the
-   import retryably instead of fabricating an instant. The temporal replacement
+   empty. Complete-source-day authority accepts exactly one anchored timestamp
+   language, owned by a single importer-side parse that yields semantics, day
+   membership, and temporal-instant eligibility together: a pure `YYYY-MM-DD`
+   date proves day membership with zero temporal coverage; a floating
+   datetime with an `HH:mm` clock (optional seconds and fraction, omitted
+   seconds resolving as zero) contributes a vault-local instant; a supported
+   absolute ISO-8601 value ending in `Z` or an explicit offset contributes an
+   exact instant. The full raw value must be consumed — a valid prefix with
+   trailing unsupported text, contradictory semantics, or a clock that cannot
+   resolve in the retained authority timezone fails the import retryably
+   instead of fabricating or laundering an instant. The temporal replacement
    domain keys on the stable Junction import identity derived from the external
    account, never the machine-local account row, so hosted cold restores retract
    and replace the same facets they seeded. Under complete-day authority the
