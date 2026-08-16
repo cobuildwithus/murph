@@ -1474,6 +1474,28 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )
         expect(compactSchedule.finalMessage.trim()).toBe('')
 
+        const conversationalReply = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: [
+            'Reply as a normal conversation in three short paragraphs.',
+            'Explain why building a new habit can feel uneven, acknowledge that',
+            'one difficult day does not erase progress, and end with an',
+            'encouraging thought. Do not make a plan, checklist, schedule, or list.',
+          ].join(' '),
+        })
+        const conversationalActions = readCapabilityRoutingActions(
+          conversationalReply.jsonEvents,
+        )
+        expect(conversationalActions.some((action) =>
+          action.kind === 'dynamic'
+          && (
+            action.tool === MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name
+            || action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+          )
+        )).toBe(false)
+        expect(conversationalReply.responseCard).toBeNull()
+        expect(conversationalReply.finalMessage.trim()).not.toBe('')
+
         const shortReply = await executeRealCodexAppServerTurn({
           ...common,
           prompt: 'Reply with one short sentence confirming that 3:00 PM works.',

@@ -25,11 +25,12 @@ Updated: 2026-08-16
 - In scope:
   - Assistant system prompt and dynamic tool descriptions.
   - Generic Telegram Rich Message availability in authenticated group turns.
+  - The shared card-audience rule at outbox and hosted delivery boundaries.
   - Exercise catalog presentation guidance.
   - Focused tests and durable product, architecture, and reliability documentation.
   - A member-facing changelog entry.
 - Out of scope:
-  - Card schemas, renderers, Telegram delivery, outbox, retry, or provider changes.
+  - Card schemas, renderers, Telegram transport, retry, or provider changes.
   - Image support inside generic Rich Message HTML.
   - Migration or rewriting of existing scheduled automation instructions.
   - Changes to nutrition or tracked-workout source-of-truth rules.
@@ -48,7 +49,7 @@ Updated: 2026-08-16
 ## Risks and mitigations
 
 1. Risk: A group turn could attach a card outside an authorized Telegram room.
-   Mitigation: Expose and admit the generic card only after the existing authenticated group-route check.
+   Mitigation: Expose and admit the presentation cards only after the existing authenticated group-route check, then enforce the same narrow audience rule at every durable delivery boundary.
 2. Risk: Generic cards could bypass nutrition or tracked-workout safety rules.
    Mitigation: Keep those domain rules explicit while removing presentation exclusivity.
 3. Risk: The model could over-format casual conversation.
@@ -70,6 +71,9 @@ Updated: 2026-08-16
 - Content structure decides whether to use a card. Message length alone does not decide it.
 - Existing card tools are examples and reusable options. The model may compose a custom Rich Message.
 - Images are optional but recommended when they make exercise instructions easier to understand.
+- The accepted review finding showed that group cards reached the tool layer but
+  failed at the outbox. One shared pure predicate now keeps the outbox,
+  persisted-intent parser, and hosted parser aligned without a new delivery path.
 
 ## Verification
 

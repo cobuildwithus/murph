@@ -2146,9 +2146,11 @@ Trusted code derives that fallback from the accepted HTML, so the model cannot
 provide a different fallback copy. The card then uses the existing response-card
 effect, Telegram projection, provider entry, and outbox lifecycle. Group access
 uses the existing authenticated Telegram room route and exposes only the
-presentation-only Telegram tools, not private semantic cards. A defensive Linq
-path renders deterministic text and never attempts a Messages card. No new
-delivery or persistence owner exists.
+presentation-only Telegram tools, not private semantic cards. One shared
+audience predicate admits those two card kinds at outbox creation, persisted
+intent parsing, and hosted delivery parsing. A defensive Linq path renders
+deterministic text and never attempts a Messages card. No new delivery or
+persistence owner exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
