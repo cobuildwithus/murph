@@ -31,6 +31,12 @@ Success means:
   persists only the legacy three-field result shape. Adding reader acceptance
   alone therefore creates the required consumer-first deployment without a
   flag, compatibility shim, second representation, or new state owner.
+- The preliminary specialist found that syntactic acceptance alone was not a
+  safe rollback floor: stored recovery on the reader-only release would parse
+  a future policy but still derive required-send behavior only from the lost
+  transient boolean. The accepted correction makes the existing notification
+  owner derive one trusted value from either source while leaving the producer
+  policy-free.
 
 ## Implementation
 
@@ -57,6 +63,17 @@ Success means:
 - Run Hosted Execution and Web typechecks.
 - Inspect the diff, run privacy and `git diff --check`, then complete the
   required exact-head ReviewGPT and GitHub Actions gates.
+
+Current evidence:
+
+- 3 Hosted Execution mixed-version schema cases pass;
+- 11 Web stored-recovery and Retell lifecycle cases pass, including durable
+  policy recovery, legacy optional behavior, and producer absence;
+- Hosted Execution and Web typechecks pass;
+- preliminary specialists returned one accepted semantic-consumer finding and
+  no patch artifact; and
+- final ReviewGPT round 1 passed the original reader split, but a new round is
+  required because the accepted specialist remediation changes behavior.
 
 ## Deployment
 
