@@ -1003,7 +1003,9 @@ function createReplyGroupItem(
       groupRoomBatchingEligible: false,
       projectionReady: true,
       replyToMessageId:
-        metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
+        metadata?.kind === 'linq' || metadata?.kind === 'telegram'
+          ? metadata.replyToMessageId ?? null
+          : null,
       captureId: capture.captureId,
     },
     telegramMetadata,
@@ -1046,7 +1048,9 @@ function createCapturelessReplyGroupItem(
         metadata.externalThreadRouteAuthorityPresent === true,
       projectionReady: candidate.projection.status !== 'pending',
       replyToMessageId:
-        metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
+        metadata?.kind === 'linq' || metadata?.kind === 'telegram'
+          ? metadata.replyToMessageId ?? null
+          : null,
       captureId: candidate.event.inputId,
     },
     telegramMetadata: null,
@@ -5975,6 +5979,108 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toMatchObject({
       advanceCursor: true,
       checkpointRequired: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+  })
+
+  it('leaves a late direct Telegram native reply for a fresh turn', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+        {
+          mediaGroupId: null,
+          messageId: 'initial_msg_1',
+          replyContext: null,
+        },
+      ),
+    ])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const lateReply = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-1',
+      inputId: 'ain_cccccccccccccccccccccccccccccccc',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'late_msg_1',
+        threadId: 'thread-1',
+      },
+      source: 'telegram',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+        replyToMessageId: 'earlier_assistant_msg_1',
+      },
+      text: 'late native reply',
+    })
+    const inputSource = {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      async listNewConversationInputs() {
+        return {
+          inputs: [lateReply],
+          nextCursor: lateReply.event.cursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toEqual({ kind: 'no-new-input' })
+      return {
+        delivery: {
+          channel: 'telegram',
+          target: 'target-1',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'initial response',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
       failed: 0,
       replied: 1,
       skipped: 0,
