@@ -311,3 +311,21 @@ the member's current authorized Telegram route.
 - ReviewGPT `0.5.133` is now the repository version. The frozen install and
   installed CLI version are proved locally; the next sensitive full-snapshot
   round will use that version.
+- ReviewGPT round 17 started on the exact merged candidate
+  `0d8fefbf0d2852d2a7f69a69e8fb15e926c0ec9c` with `0.5.133`. Exact-head CI
+  then exposed two measured Cloudflare runner bundle ratchets, so that round is
+  retained as review evidence but cannot be the final candidate gate.
+- The Cloudflare runner failure was budget enforcement, not a newly introduced
+  boot dependency: Linux CI measured the already-bundled vault CLI graph at
+  9,164,533 bytes against 9,152,000, and exact macOS assembly measured the
+  existing entrypoint static closure at 8,266,461 bytes against 8,259,368. The
+  narrow correction ratchets only those understood totals while retaining the
+  existing CLI entry, CLI static-startup, entrypoint entry, total, and fixed
+  variance gates. Full production bundle assembly and parity passed; the two
+  focused budget suites passed 51 tests; Cloudflare typecheck passed.
+- The production reader prerequisite is live. The guarded writer cutover first
+  paused exact-path call admission, waited the full configured five-minute call
+  lifetime, and proved no provider-bound call awaited analysis and no phone-call
+  reconciliation workflow was running or pending. Exact result ingress was then
+  paused and independently returned the expected firewall denial. Both scoped
+  barriers remain live through the result drain and writer activation.
