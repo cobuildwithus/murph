@@ -1334,7 +1334,7 @@ describe('assistant execution prompt contract', () => {
     expect(linqPrompt).toContain(
       'For Linq/iMessage and Telegram, native text styles are supported by the delivery layer',
     )
-    expect(linqPrompt).toContain('Prefer plain text')
+    expect(linqPrompt).toContain('For ordinary text messages, prefer plain text')
     expect(linqPrompt).toContain(
       'Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability',
     )

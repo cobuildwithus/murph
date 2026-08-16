@@ -1573,13 +1573,13 @@ describe('assistant skill assets', () => {
       '`murph.attach_exercise_routine_card`',
     )
     expect(compactCatalog).toContain(
-      'use one card when it alone fully answers the request',
+      'prefer a Rich Message when its structure',
     )
     expect(compactCatalog).toContain(
-      'Do not replace that card with one or more long plain-text messages.',
+      '`murph.attach_telegram_rich_content` tool is also valid when a custom or mixed layout is clearer.',
     )
     expect(compactCatalog).toContain(
-      'when the member asks to repeat, resend, or improve the layout of a routine already present in the conversation',
+      'These tools are presentation options, not exclusive content owners.',
     )
     expect(compactCatalog).toContain(
       'Styled Telegram text is not a Rich Message',
@@ -1588,21 +1588,20 @@ describe('assistant skill assets', () => {
       'do not pad a short plan to sound more substantial.',
     )
     expect(compactCatalog).toContain(
-      'Use the strongest presentation supported by the current channel.',
+      'Exercise images are optional, but use them when available and helpful',
     )
     expect(compactCatalog).toContain(
-      'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
+      'especially for unfamiliar or technique-sensitive movements',
     )
     expect(compactCatalog).toContain(
-      'Familiarity alone is not a reason to omit images. Omit exercise images only when the user explicitly asks for a response without them.',
+      'Choose the smallest useful set and keep the complete response at eight images or fewer.',
     )
     expect(compactCatalog).toContain(
-      'at least one useful returned catalog image for every exercise that has one by default.',
+      'Construct its source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`',
     )
     expect(compactCatalog).toContain(
-      'Construct source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`.',
+      'never imply that an image was attached.',
     )
-    expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
     )

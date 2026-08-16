@@ -2102,10 +2102,11 @@ member-directed request for the complete semantic text when the accepted card
 cannot render. No persisted card state, authenticated card API, cleanup owner,
 extension network read, or second queue exists.
 
-Private Telegram exercise routine cards use the same singular outbox effect
-through a dedicated model tool so both model-facing schemas stay below the
-Codex compaction limit. Linq/iMessage does not expose that tool and keeps its
-existing catalog response-media path for visual movement guidance.
+Telegram exercise routine cards use the same singular outbox effect through a
+dedicated model tool so both model-facing schemas stay below the Codex
+compaction limit. Authenticated direct and group Telegram turns may expose that
+tool. Linq/iMessage does not expose it and keeps its existing catalog
+response-media path for visual movement guidance.
 The frozen V1 snapshot contains bounded localized labels, concrete cues, honest
 per-exercise and transition timing, and only catalog-backed public exercise
 image URLs with their alt text and provenance. Image provenance uses the
@@ -2130,21 +2131,28 @@ the deterministic routine text remains only compatibility behavior for retained
 card state. The card still cannot coexist with response media, and no new queue,
 persisted state owner, callback action, or mutable message state exists.
 
-Private Telegram can also attach one model-authored rich-content card when a
-complete structured answer does not fit the nutrition, compact-table, workout,
-or catalog exercise contracts. Those semantic cards keep exclusive ownership
-and remain unchanged. If an owning semantic card cannot attach, the reply stays
-ordinary text. The new card stores only bounded Rich HTML from a closed
-presentation-only subset. Contract parsing rejects explicit links and remote media,
+Authenticated direct and group Telegram turns can also attach one
+model-authored rich-content card when structure makes the complete answer
+easier to read or use. Specialized cards remain useful presentation options,
+but they do not exclusively own a layout or content category. The model may use
+one that fits or compose bounded Rich HTML for a custom or mixed layout.
+Presentation choice never weakens canonical data or safety workflows for
+nutrition and tracked workouts. Contract parsing rejects explicit links and remote media,
 provider fetches, unknown tags or attributes, malformed nesting, oversized
 tables, and content whose derived text exceeds one Telegram fallback message.
-and its Telegram projection sets `skip_entity_detection` so plain domains,
+Its Telegram projection sets `skip_entity_detection` so plain domains,
 email addresses, mentions, hashtags, commands, and phone numbers stay text.
 Trusted code derives that fallback from the accepted HTML, so the model cannot
 provide a different fallback copy. The card then uses the existing response-card
-effect, Telegram projection, provider entry, and outbox lifecycle. The tool is
-private-Telegram-only. A defensive Linq path renders its deterministic text and
-never attempts a Messages card. No new delivery or persistence owner exists.
+effect, Telegram projection, provider entry, and outbox lifecycle. Group access
+uses the existing authenticated Telegram room route and exposes only the
+presentation-only Telegram tools, not private semantic cards. One shared
+audience predicate admits those two card kinds at outbox creation, persisted
+intent parsing, and hosted delivery parsing. After the first group presentation
+card is persisted, this audience-capable runner bundle is the rollback floor
+because the preceding strict readers reject the non-direct card. A defensive
+Linq path renders deterministic text and never attempts a Messages card. No new
+delivery or persistence owner exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
