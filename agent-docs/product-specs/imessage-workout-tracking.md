@@ -154,6 +154,19 @@ This narrow same-conversation repetition rule does not create a card-level
 target, prior workout value, assistant suggestion, or non-repetition
 prescription into an actual set.
 
+A short acknowledgement after a set message or assistant reply is not another
+set completion. It cannot move the write target to the next set. The last set
+coordinate the member explicitly named remains the only candidate. If that set
+still needs a result, Murph asks one narrow question about it. If the canonical
+result already matches, the acknowledgement causes no workout mutation.
+
+Every completion, correction, and acknowledgement follow-up first resolves the
+canonical active workout. A missing active workout fails closed. Murph does not
+start a workout to make an earlier assistant confirmation appear true, does not
+write a later set, and does not claim that any set was saved. It states that no
+active tracked workout was found and asks whether to start one, unless the
+current member message itself clearly requests a new workout.
+
 An active workout may have zero pending sets after the final result is logged; it remains active until the member explicitly finishes it.
 
 ## Direct action loop

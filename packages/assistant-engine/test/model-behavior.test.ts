@@ -1800,7 +1800,7 @@ describe('assistant consumption lookup guidance', () => {
       'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
     )
     expect(prompt).toContain(
-      'Live workout/card: read strength-training and tracked-table.',
+      'Live workout/card: read strength-training and tracked-table, including on a short follow-up in a conversation about a live workout.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',

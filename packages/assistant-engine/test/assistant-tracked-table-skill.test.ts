@@ -89,6 +89,9 @@ describe('assistant tracked workout table skill', () => {
     expect(matches[0]?.triggerHint).toContain('structured tracker')
     expect(matches[0]?.triggerHint).toContain('live workout log')
     expect(matches[0]?.triggerHint).toContain('start or resume a live workout')
+    expect(matches[0]?.triggerHint).toContain(
+      'continues a live-workout exchange with a short follow-up',
+    )
     expect(matches[0]?.triggerHint).toContain('updated/refreshed table')
   })
 
@@ -103,6 +106,9 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(strengthSkill).toContain('put a workout log in a table')
     expect(strengthSkill).toContain('start or resume a canonical live workout')
+    expect(strengthSkill).toContain(
+      'continues one with a short follow-up',
+    )
     expect(strengthSkill).toContain('instead of Markdown table syntax')
   })
 
@@ -221,6 +227,29 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(skill).toContain(
       'Do not preempt that validation from an estimated exercise or set count',
+    )
+  })
+
+  it('keeps bare acknowledgements from advancing or inventing a workout set', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill).toContain(
+      'A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion',
+    )
+    expect(skill).toContain(
+      'never advance to another set from that acknowledgement',
+    )
+    expect(skill).toContain(
+      'Keep the last set coordinate the member explicitly identified',
+    )
+    expect(skill).toContain(
+      'Do not start a workout to reconcile a prior assistant claim or confirmation',
+    )
+    expect(skill).toContain(
+      'do not claim that any set was saved',
     )
   })
 

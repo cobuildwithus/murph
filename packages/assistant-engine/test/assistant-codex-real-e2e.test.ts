@@ -547,7 +547,7 @@ describe('onboarding policy read detection', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
-    'reuses exact repetitions without carrying forward a planned load',
+    'fails closed without an active workout and keeps a bare acknowledgement from advancing the next set',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -616,6 +616,18 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           sandbox: 'workspace-write',
           workingDirectory,
         }
+        const missingWorkout = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Seated cable curl set 3 complete: 9 reps.',
+        })
+        const vaultAfterMissingWorkout = await readVaultRawTolerant(workingDirectory)
+        const missingWorkoutEvents = vaultAfterMissingWorkout.events.filter((event) =>
+          workoutSessionSchema.safeParse(event.attributes.workout).success
+        )
+
+        expect(missingWorkoutEvents).toEqual([])
+        expect(missingWorkout.finalMessage).toMatch(/active|start/iu)
+
         const started = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
@@ -633,6 +645,11 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ...commonInput,
           prompt: 'Second set complete.',
           resumeSessionId: firstCompletion.sessionId,
+        })
+        await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'ok',
+          resumeSessionId: secondCompletion.sessionId,
         })
         const vault = await readVaultRawTolerant(workingDirectory)
         const workout = vault.events

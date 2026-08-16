@@ -44,6 +44,10 @@ A target is not a completed set. When a table needs planned targets, read the re
 6. Use `workout set log` again to correct a set. Use `workout set clear` for “undo that set,” “I didn’t do it,” or an accidental log. Clearing preserves the placeholder and later set numbering.
 7. Finish only when the member explicitly says they are done, asks to finish, or unmistakably closes the session. `workout finish` records `endedAt` and final elapsed duration; it does not invent missing set values.
 
+A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion. Keep the last set coordinate the member explicitly identified. If that exact coordinate still needs an actual result, ask one narrow question about it. If its canonical result already matches, treat the acknowledgement as a conversation-only no-op; never advance to another set from that acknowledgement.
+
+If `workout active` returns no event during a completion request, correction request, or acknowledgement follow-up, fail closed. Do not start a workout to reconcile a prior assistant claim or confirmation. Do not mutate workout state, and do not claim that any set was saved. Say that no active tracked workout was found and ask whether the member wants to start one, unless their current message itself clearly asks to start a workout.
+
 The legacy `workout edit` full-structure replacement remains available only for a deliberate structural operation that the targeted surface cannot express, such as a requested reorder or full routine rewrite. Read the complete record first and preserve every unrequested field. The CLI refuses a structured replacement that omits a saved exercise or set. Use `--clear-workout` only when the member explicitly wants to remove all structured workout details while preserving the event, and use `vault-cli workout delete <evt_id>` only when they want to remove the entire record.
 
 ## Starting a workout

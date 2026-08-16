@@ -1452,7 +1452,7 @@ function buildAssistantSkillRouteHintText(
     "- Eye-health evidence, symptom urgency, contact-lens safety, and refractive guidance come from the required Health Commons lookup. Use computer-use only after the answer establishes the safe action and exact care destination.",
     "- Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.",
     "- Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.",
-    "- Live workout/card: read strength-training and tracked-table.",
+    "- Live workout/card: read strength-training and tracked-table, including on a short follow-up in a conversation about a live workout.",
     "- Mind/substances: stress-regulation, cognitive-focus, substance-load. Chronic care: chronic-illness-support, chronic-pain-support.",
     "- Care logistics: appointment-scheduling. Transports and services: connected-apps, computer-use, phone-calls. Account products: murph-family. Artifacts: pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.",
     "- Overlaps: sleep-improvement owns sleep mechanics; circadian-rhythm clock timing; sleep-recovery-readiness an acute train/modify/rest decision; hrv-resting-heart-rate marker interpretation; energy-fatigue persistent fatigue.",
