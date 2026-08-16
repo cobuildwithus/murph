@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/src/components/ui/card";
+import { decodeURIComponentOrRaw } from "@/src/lib/http";
 import {
   createMurphOgImageRef,
   createMurphPageMetadata,
@@ -16,9 +17,11 @@ export async function generateMetadata({
   const { inviteCode } = await params;
   // Keep the parent invite card: createMurphPageMetadata otherwise injects
   // the site default, which overrides the parent segment's dedicated image.
+  // Tolerant decode: metadata must not become a new failure path for
+  // malformed codes.
   const ogImage = createMurphOgImageRef({
     alt: "You’re invited to Murph.",
-    url: `/join/${encodeURIComponent(decodeURIComponent(inviteCode))}/opengraph-image`,
+    url: `/join/${encodeURIComponent(decodeURIComponentOrRaw(inviteCode))}/opengraph-image`,
   });
 
   return createMurphPageMetadata({

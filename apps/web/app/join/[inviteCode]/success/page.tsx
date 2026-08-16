@@ -6,6 +6,7 @@ import {
   parseJoinInvitePreviewStage,
 } from "@/src/components/hosted-onboarding/join-invite-preview";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { decodeURIComponentOrRaw } from "@/src/lib/http";
 import {
   createMurphOgImageRef,
   createMurphPageMetadata,
@@ -20,9 +21,10 @@ export async function generateMetadata({
   const { inviteCode } = await params;
   // Keep the parent invite card: createMurphPageMetadata otherwise injects
   // the site default, which overrides the parent segment's dedicated image.
+  // Tolerant decode: this page accepts malformed codes, so metadata must too.
   const ogImage = createMurphOgImageRef({
     alt: "You’re invited to Murph.",
-    url: `/join/${encodeURIComponent(decodeURIComponent(inviteCode))}/opengraph-image`,
+    url: `/join/${encodeURIComponent(decodeURIComponentOrRaw(inviteCode))}/opengraph-image`,
   });
 
   return createMurphPageMetadata({
@@ -73,12 +75,4 @@ export default async function JoinInviteSuccessPage(input: {
       sessionId={sessionId}
     />
   );
-}
-
-function decodeURIComponentOrRaw(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }

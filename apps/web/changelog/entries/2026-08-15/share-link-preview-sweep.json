@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Clear previews for more Murph links",
-    "summary": "Referral invites, device connect nudges, group sponsorship links, and settings links now unfurl with dedicated cards instead of the generic homepage preview.",
-    "details": "Biomarker research, experiment research and results, and checkout pages also show their own cards again. Previews stay generic on purpose: they are fetched without your login, so they never include your data.",
+    "summary": "Referral invites, device connect nudges, and group sponsorship links now unfurl with dedicated cards instead of the generic homepage preview.",
+    "details": "Biomarker research, experiment research and results, and checkout pages also show their own cards again. Previews stay generic on purpose: they are fetched without your login, so they never include your data or promise anything a link can no longer deliver.",
     "relevanceTags": ["messaging", "groups", "devices"],
     "sourcePullRequests": [1920]
   }

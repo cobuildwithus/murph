@@ -1,9 +1,9 @@
 "use client";
 
-import { ConnectShareCard } from "@/app/(dashboard)/connect/connect-share-card";
-import { SettingsShareCard } from "@/app/(dashboard)/settings/settings-share-card";
-import { GroupFundShareCard } from "@/app/groups/fund/[joinCode]/group-fund-share-card";
-import { ReferralShareCard } from "@/app/r/[referralCode]/referral-share-card";
+import { ConnectShareCard, CONNECT_OG_ALT } from "@/app/(dashboard)/connect/connect-share-card";
+import { ApproveShareCard, APPROVE_OG_ALT } from "@/app/approve/[approvalId]/approve-share-card";
+import { GroupFundShareCard, GROUP_FUND_OG_ALT } from "@/app/groups/fund/[joinCode]/group-fund-share-card";
+import { ReferralShareCard, REFERRAL_OG_ALT } from "@/app/r/[referralCode]/referral-share-card";
 
 import { ScaledSharePreview } from "./scaled-share-preview";
 
@@ -11,12 +11,24 @@ import "./share-preview-fonts.css";
 
 const PREVIEWS = [
   {
+    frameId: "approve",
+    route: "/approve/[approvalId]",
+    note:
+      "The approval link unfurl. It lands inside a conversation with Murph, "
+      + "right under the message that sent the link, so the headline speaks "
+      + "as Murph and the request details never appear.",
+    alt: APPROVE_OG_ALT,
+    card: <ApproveShareCard logoDataUri="/logo.svg" />,
+  },
+  {
     frameId: "referral",
     route: "/r/[referralCode]",
     note:
       "The referral link members text friends. The recipient has no Murph "
-      + "conversation yet, so the card frames the invite around the brand "
-      + "line instead of speaking as Murph.",
+      + "conversation yet, so the card frames the brand line instead of "
+      + "speaking as Murph, and stays capability-neutral so it remains true "
+      + "for expired links.",
+    alt: REFERRAL_OG_ALT,
     card: <ReferralShareCard logoDataUri="/logo.svg" />,
   },
   {
@@ -25,6 +37,7 @@ const PREVIEWS = [
     note:
       "Murph texts this link for first-time device connects and reconnects; "
       + "the copy stays true for both flows.",
+    alt: CONNECT_OG_ALT,
     card: <ConnectShareCard logoDataUri="/logo.svg" />,
   },
   {
@@ -32,16 +45,10 @@ const PREVIEWS = [
     route: "/groups/fund/[joinCode]",
     note:
       "Dropped into group chats next to the group join card, so it keeps the "
-      + "same group eyebrow.",
+      + "same group eyebrow. Capability-neutral copy: it describes what "
+      + "sponsoring is rather than promising this link is live.",
+    alt: GROUP_FUND_OG_ALT,
     card: <GroupFundShareCard logoDataUri="/logo.svg" />,
-  },
-  {
-    frameId: "settings",
-    route: "/settings",
-    note:
-      "Billing and usage nudges deep-link here; the card names the real "
-      + "settings sections instead of the homepage pitch.",
-    card: <SettingsShareCard logoDataUri="/logo.svg" />,
   },
 ] as const;
 
@@ -60,11 +67,12 @@ export function ShareLinkPreviewsStudy() {
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The 1200x630 OpenGraph cards behind links Murph or members send:
-          referral invites, device connect nudges, group sponsorship, and
-          settings. Each study renders the exact production card component,
-          so the previews cannot drift. None of the cards imitates a tappable
-          control, and none exposes member details: link previews are fetched
-          without authentication.
+          approvals, referral invites, device connect nudges, and group
+          sponsorship. Each study renders the exact production card
+          component, so the previews cannot drift. None of the cards imitates
+          a tappable control, none promises a capability the landing page has
+          not yet verified, and none exposes member details: link previews
+          are fetched without authentication.
         </p>
       </div>
       <div className="grid gap-6 sm:grid-cols-2">
@@ -76,12 +84,17 @@ export function ShareLinkPreviewsStudy() {
             <p className="text-sm leading-6 text-muted-foreground">
               {preview.note}
             </p>
-            {/* Only the rendered preview is inert; captions stay reachable. */}
+            {/* Only the rendered preview is inert; captions stay reachable.
+                The shipped alt text below carries the card copy for
+                assistive tech and pins the alt contract for reviewers. */}
             <div className="mt-auto" inert>
               <ScaledSharePreview frameId={preview.frameId}>
                 {preview.card}
               </ScaledSharePreview>
             </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              Alt text: {preview.alt}
+            </p>
           </div>
         ))}
       </div>

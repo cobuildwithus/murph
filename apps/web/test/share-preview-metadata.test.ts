@@ -66,7 +66,7 @@ describe("share preview metadata", () => {
 
     expect(metadata.title).toBe("Join Murph");
     expectDedicatedImage(metadata, {
-      alt: "You’re invited to Murph, your private health assistant.",
+      alt: "Murph, your private health assistant. Don’t do it alone.",
       url: "/r/ref-code/opengraph-image",
     });
     expect(metadata.robots).toEqual({ follow: false, index: false });
@@ -96,23 +96,10 @@ describe("share preview metadata", () => {
 
     expect(metadata.title).toBe("Sponsor Murph in this chat");
     expectDedicatedImage(metadata, {
-      alt: "Keep Murph in this chat. Sponsor Murph for the whole chat.",
+      alt: "Sponsor Murph for your group. How groups keep Murph running.",
       url: "/groups/fund/join-code/opengraph-image",
     });
     expectRouteFile("../app/groups/fund/[joinCode]/opengraph-image.tsx");
-  });
-
-  it("settings advertises the settings card", async () => {
-    const { metadata } = await import(
-      "../app/(dashboard)/settings/page-metadata"
-    );
-
-    expect(metadata.title).toBe("Settings — Murph");
-    expectDedicatedImage(metadata, {
-      alt: "Manage your Murph. Account, plan, usage, and privacy.",
-      url: "/settings/opengraph-image",
-    });
-    expectRouteFile("../app/(dashboard)/settings/opengraph-image.tsx");
   });
 
   it("biomarker research keeps the parent biomarker card", async () => {
@@ -171,6 +158,16 @@ describe("share preview metadata", () => {
       expectDedicatedImage(metadata, {
         alt: "You’re invited to Murph.",
         url: "/join/invite-code/opengraph-image",
+      });
+
+      // These pages tolerate malformed percent-encoding; metadata must not
+      // become a new failure path for the same codes.
+      const malformed = await generateMetadata({
+        params: Promise.resolve({ inviteCode: "invite%zz" }),
+      });
+      expectDedicatedImage(malformed, {
+        alt: "You’re invited to Murph.",
+        url: "/join/invite%25zz/opengraph-image",
       });
     }
   });

@@ -387,26 +387,26 @@ beforeEach(() => {
   mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue(null);
 });
 
-test("SettingsPage metadata uses the dedicated settings preview image", async () => {
+test("SettingsPage metadata uses the shared preview image", async () => {
   const { metadata } = await import("../app/(dashboard)/settings/page");
 
   assert.equal(metadata.title, "Settings — Murph");
   assert.equal(metadata.description, "Manage your Murph account settings.");
   assert.deepEqual(metadata.openGraph?.images, [
     {
-      alt: "Manage your Murph. Account, plan, usage, and privacy.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
-      url: "/settings/opengraph-image",
+      url: "/opengraph-image",
       width: 1200,
     },
   ]);
   assert.deepEqual(metadata.twitter?.images, [
     {
-      alt: "Manage your Murph. Account, plan, usage, and privacy.",
+      alt: "Health is hard. Don’t do it alone.",
       height: 630,
       type: "image/png",
-      url: "/settings/opengraph-image",
+      url: "/opengraph-image",
       width: 1200,
     },
   ]);

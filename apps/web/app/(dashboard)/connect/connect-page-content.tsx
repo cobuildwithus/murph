@@ -36,7 +36,6 @@ import type {
   LogoAsset,
 } from "./connect-page-types";
 
-
 export type ConnectPageSearchParams = Record<
   string,
   string | string[] | undefined

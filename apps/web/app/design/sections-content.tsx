@@ -40,7 +40,6 @@ import {
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
-import { ApproveSharePreviewStudy } from "./approve-share-preview-study";
 import { ShareLinkPreviewsStudy } from "./share-link-previews-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
@@ -247,14 +246,6 @@ export function SectionsContent() {
       <StudySection title="Secure approval pending and recorded states">
         <div id="action-approval-lifecycle">
           <ActionApprovalLifecycleStudy />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Approval link share preview">
-        <div data-design-section="approve-share-preview">
-          <ApproveSharePreviewStudy />
         </div>
       </StudySection>
 
