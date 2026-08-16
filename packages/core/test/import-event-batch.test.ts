@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -7,17 +8,23 @@ import { test } from "vitest";
 import type { AuditRecord, EventRecord } from "@murphai/contracts";
 
 import {
+  acquireCanonicalWriteLock,
   deleteEvent,
   findEventByExternalRef,
   findEventsByRawRefs,
+  importDocument,
   importEventBatch,
   initializeVault,
   listHistoryEvents,
   readJsonlRecords,
+  resolveWorkoutSourceImportStatus,
+  statAndHashVaultFile,
   updateVaultSummary,
   upsertEvent,
   VaultError,
+  withCanonicalWriteLockScope,
 } from "../src/index.ts";
+import { emitAuditRecord } from "../src/audit.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -31,6 +38,60 @@ async function makeVault(name: string, timezone?: string): Promise<string> {
     ...(timezone ? { timezone } : {}),
   });
   return vaultRoot;
+}
+
+async function importWorkoutSourceDocument(vaultRoot: string, name: string) {
+  const sourceRoot = await makeTempDirectory(`${name}-source`);
+  const sourcePath = path.join(sourceRoot, "workout-source.csv");
+  await fs.writeFile(sourcePath, "session,exercise\na,Squat\n", "utf8");
+  return {
+    ...await importDocument({ vaultRoot, sourcePath, reuseExact: true }),
+    sourcePath,
+  };
+}
+
+async function readAllAuditRecords(vaultRoot: string): Promise<AuditRecord[]> {
+  const auditRoot = path.join(vaultRoot, "audit");
+  const paths = await fs.readdir(auditRoot, { recursive: true });
+  const records = await Promise.all(paths
+    .filter((relativePath) => relativePath.endsWith(".jsonl"))
+    .map((relativePath) => readJsonlRecords({
+      vaultRoot,
+      relativePath: path.posix.join("audit", relativePath),
+    })));
+  return records.flat() as AuditRecord[];
+}
+
+async function waitForNewStagedDocumentOperation(
+  vaultRoot: string,
+  existingEntries: ReadonlySet<string>,
+): Promise<void> {
+  const operationDirectory = path.join(vaultRoot, ".runtime", "operations");
+  for (let attempt = 0; attempt < 3_000; attempt += 1) {
+    const entries = await fs.readdir(operationDirectory).catch(() => [] as string[]);
+    for (const entry of entries) {
+      if (existingEntries.has(entry) || !entry.endsWith(".json")) {
+        continue;
+      }
+      const candidate = JSON.parse(
+        await fs.readFile(path.join(operationDirectory, entry), "utf8"),
+      ) as {
+        operationType?: unknown;
+        status?: unknown;
+        actions?: unknown[];
+      };
+      if (
+        candidate.operationType === "document_import"
+        && candidate.status === "staged"
+        && Array.isArray(candidate.actions)
+        && candidate.actions.length >= 4
+      ) {
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for the ordinary document import to finish staging.");
 }
 
 function buildSleepSessionPayload(dayOfMonth: number, overrides: Record<string, unknown> = {}) {
@@ -67,6 +128,25 @@ function buildObservationPayload(dayOfMonth: number, facet: string, value: numbe
       resourceType: "sleep",
       resourceId: `sleep-2026-03-${day}`,
       facet,
+    },
+  };
+}
+
+function buildActivitySessionPayload(rawRef: string, durationMinutes = 45) {
+  return {
+    kind: "activity_session",
+    occurredAt: "2026-03-13T17:00:00.000Z",
+    source: "import",
+    title: "Strength training",
+    activityType: "strength-training",
+    durationMinutes,
+    rawRefs: [rawRef],
+    workout: {
+      exercises: [{
+        name: "Squat",
+        order: 1,
+        sets: [{ order: 1, reps: 5 }],
+      }],
     },
   };
 }
@@ -192,6 +272,558 @@ test("importEventBatch dry-run reports counts without writing", async () => {
 
   const shardPath = result.eventShardPaths[0]!;
   await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
+});
+
+test("source-guarded workout batches land once and retain completion through edits and deletion", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-guard");
+  const source = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-guard");
+  const rawRef = source.raw.relativePath;
+  const sourceAudit = (await readAllAuditRecords(vaultRoot)).find(
+    (record) => record.commandName === "core.importDocument",
+  );
+  assert.equal(
+    sourceAudit?.targetIds?.some((targetId) =>
+      /^raw-source-v1:sha256:[a-f0-9]{64}:bytes:\d+$/u.test(targetId)
+    ),
+    true,
+  );
+
+  const dryRun = await importEventBatch({
+    vaultRoot,
+    payloads: [buildActivitySessionPayload(rawRef)],
+    rejectIfSourceRawRefAlreadyImported: rawRef,
+  });
+  assert.equal(dryRun.applied, false);
+  assert.equal(dryRun.createdCount, 1);
+  assert.equal(await resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }), "not_imported");
+
+  const applied = await importEventBatch({
+    vaultRoot,
+    payloads: [buildActivitySessionPayload(rawRef)],
+    rejectIfSourceRawRefAlreadyImported: rawRef,
+    apply: true,
+  });
+  assert.equal(applied.applied, true);
+  assert.equal(applied.createdCount, 1);
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef,
+  }), "completed");
+  const completionAudit = (await readAllAuditRecords(vaultRoot)).find(
+    (record) => record.commandName === "core.importEventBatch.sourceRawRefOnce",
+  );
+  assert.ok(completionAudit);
+  assert.equal(
+    completionAudit.targetIds?.some((targetId) =>
+      /^raw-source-v1:sha256:[a-f0-9]{64}:bytes:\d+$/u.test(targetId)
+    ),
+    true,
+  );
+
+  const eventId = applied.eventIds[0];
+  assert.ok(eventId);
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      ...buildActivitySessionPayload(rawRef),
+      id: eventId,
+      title: "Member-edited workout",
+      rawRefs: [],
+    },
+  });
+  await deleteEvent({ vaultRoot, eventId });
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef,
+  }), "completed");
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [buildActivitySessionPayload(rawRef, 60)],
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ALREADY_IMPORTED");
+      return true;
+    },
+  );
+});
+
+test("damaged document evidence cannot become a fresh workout source", async () => {
+  const cases = [
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "missing-manifest",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.rm(path.join(vaultRoot, source.manifestPath));
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "malformed-manifest",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, source.manifestPath), "not-json\n", "utf8");
+      },
+    },
+    {
+      exactReuseCode: "RAW_REFERENCE_MISSING",
+      guardedCode: "EVENT_BATCH_SOURCE_RAW_REF_MISSING",
+      name: "missing-artifact",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.rm(path.join(vaultRoot, source.raw.relativePath));
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE",
+      name: "artifact-digest-drift",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, source.raw.relativePath), "changed source\n", "utf8");
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "missing-document-event",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, source.eventPath), "", "utf8");
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "contract-invalid-document-event",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(
+          path.join(vaultRoot, source.eventPath),
+          `${JSON.stringify({ ...source.event, schemaVersion: "invalid" })}\n`,
+          "utf8",
+        );
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "completion-without-source-owner",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, source.eventPath), "", "utf8");
+        await fs.rm(path.join(vaultRoot, source.manifestPath));
+        if (!source.auditPath) {
+          throw new Error("Document import did not return its source receipt audit path.");
+        }
+        const auditPath = path.join(vaultRoot, source.auditPath);
+        const retainedAuditLines = (await fs.readFile(auditPath, "utf8"))
+          .split("\n")
+          .filter(Boolean)
+          .filter((line) => {
+            const record: unknown = JSON.parse(line);
+            return !(
+              typeof record === "object"
+              && record !== null
+              && "commandName" in record
+              && record.commandName === "core.importDocument"
+            );
+          });
+        await fs.writeFile(
+          auditPath,
+          retainedAuditLines.length > 0 ? `${retainedAuditLines.join("\n")}\n` : "",
+          "utf8",
+        );
+      },
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const vaultRoot = await makeVault(`murph-event-batch-damaged-source-${testCase.name}`);
+    const source = await importWorkoutSourceDocument(
+      vaultRoot,
+      `murph-event-batch-damaged-source-${testCase.name}`,
+    );
+    const rawRef = source.raw.relativePath;
+    const payloads = [buildActivitySessionPayload(rawRef)];
+    const applied = await importEventBatch({
+      vaultRoot,
+      payloads,
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    });
+    assert.equal(applied.createdCount, 1);
+    await testCase.damage(vaultRoot, source);
+    const completionAuditsBefore = (await readAllAuditRecords(vaultRoot)).filter(
+      (record) => record.commandName === "core.importEventBatch.sourceRawRefOnce",
+    ).length;
+
+    await assert.rejects(
+      importDocument({ vaultRoot, sourcePath: source.sourcePath, reuseExact: true }),
+      (error: unknown) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, testCase.exactReuseCode);
+        return true;
+      },
+    );
+    await assert.rejects(
+      resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }),
+      (error: unknown) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, testCase.guardedCode);
+        return true;
+      },
+    );
+    await assert.rejects(
+      importEventBatch({
+        vaultRoot,
+        payloads,
+        rejectIfSourceRawRefAlreadyImported: rawRef,
+        apply: true,
+      }),
+      (error: unknown) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, testCase.guardedCode);
+        return true;
+      },
+    );
+
+    const workoutRecords = (await Promise.all(applied.eventShardPaths.map((relativePath) =>
+      readJsonlRecords({ vaultRoot, relativePath })
+    ))).flat();
+    assert.equal(
+      workoutRecords.filter((record) =>
+        typeof record === "object"
+        && record !== null
+        && "kind" in record
+        && record.kind === "activity_session"
+      ).length,
+      1,
+    );
+    assert.equal(
+      (await readAllAuditRecords(vaultRoot)).filter(
+        (record) => record.commandName === "core.importEventBatch.sourceRawRefOnce",
+      ).length,
+      completionAuditsBefore,
+    );
+  }
+});
+
+test("source-guarded workout batches reject partial history without a completion receipt", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-partial");
+  const source = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-partial");
+  const rawRef = source.raw.relativePath;
+
+  const unguarded = await importEventBatch({
+    vaultRoot,
+    payloads: [buildActivitySessionPayload(rawRef)],
+    apply: true,
+  });
+  assert.equal(unguarded.applied, true);
+  assert.equal(await resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }), "partial_conflict");
+
+  const sourceIntegrity = await statAndHashVaultFile(vaultRoot, rawRef);
+  assert.ok(sourceIntegrity);
+  await emitAuditRecord({
+    vaultRoot,
+    action: "event_upsert",
+    commandName: "core.importEventBatch.sourceRawRefOnce",
+    summary: "Marker without source-event authority.",
+    targetIds: [
+      `raw-source-v1:sha256:${sourceIntegrity.sha256}:bytes:${sourceIntegrity.byteSize}`,
+      "evt_01JQ9R7WF97M1WAB2B4QF2Q1AZ",
+    ],
+  });
+  assert.equal(await resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }), "partial_conflict");
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [buildActivitySessionPayload(rawRef, 60)],
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_PARTIAL_CONFLICT");
+      return true;
+    },
+  );
+});
+
+test("workout source status waits for an active canonical write", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-status-lock");
+  const source = await importWorkoutSourceDocument(
+    vaultRoot,
+    "murph-event-batch-source-status-lock",
+  );
+  const lock = await acquireCanonicalWriteLock(vaultRoot);
+  let released = false;
+  try {
+    let settled = false;
+    const statusPromise = resolveWorkoutSourceImportStatus({
+      vaultRoot,
+      rawRef: source.raw.relativePath,
+    }).then((status) => {
+      settled = true;
+      return status;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(settled, false);
+    await lock.release();
+    released = true;
+    assert.equal(await statusPromise, "not_imported");
+  } finally {
+    if (!released) {
+      await lock.release();
+    }
+  }
+});
+
+test("an ordinary alias committed before guarded apply shares whole-source completion", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-alias");
+  const first = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-alias");
+  const alias = await importDocument({
+    vaultRoot,
+    sourcePath: first.sourcePath,
+  });
+  assert.notEqual(alias.raw.relativePath, first.raw.relativePath);
+
+  const applied = await importEventBatch({
+    vaultRoot,
+    payloads: [buildActivitySessionPayload(first.raw.relativePath)],
+    rejectIfSourceRawRefAlreadyImported: first.raw.relativePath,
+    apply: true,
+  });
+  assert.equal(applied.applied, true);
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef: alias.raw.relativePath,
+  }), "completed");
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [buildActivitySessionPayload(alias.raw.relativePath)],
+      rejectIfSourceRawRefAlreadyImported: alias.raw.relativePath,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ALREADY_IMPORTED");
+      return true;
+    },
+  );
+});
+
+test("an ordinary alias staged before guarded apply shares completion after its later commit", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-alias-interleaving");
+  const first = await importWorkoutSourceDocument(
+    vaultRoot,
+    "murph-event-batch-source-alias-interleaving",
+  );
+  const operationDirectory = path.join(vaultRoot, ".runtime", "operations");
+  const existingOperations = new Set(
+    await fs.readdir(operationDirectory).catch(() => [] as string[]),
+  );
+  const childScript = [
+    "const core = await import(process.env.MURPH_TEST_CORE_MODULE_URL);",
+    "const result = await core.importDocument({",
+    "  vaultRoot: process.env.MURPH_TEST_VAULT_ROOT,",
+    "  sourcePath: process.env.MURPH_TEST_SOURCE_PATH,",
+    "});",
+    "process.stdout.write(JSON.stringify({ rawRef: result.raw.relativePath }));",
+  ].join("\n");
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "--eval", childScript],
+    {
+      env: {
+        ...process.env,
+        MURPH_TEST_CORE_MODULE_URL: new URL("../src/index.ts", import.meta.url).href,
+        MURPH_TEST_SOURCE_PATH: first.sourcePath,
+        MURPH_TEST_VAULT_ROOT: vaultRoot,
+      },
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
+  let childOutput = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    childOutput += chunk;
+  });
+  const childExit = new Promise<number | null>((resolve) => {
+    child.once("exit", (code) => resolve(code));
+  });
+
+  await withCanonicalWriteLockScope(vaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(vaultRoot);
+    try {
+      await waitForNewStagedDocumentOperation(vaultRoot, existingOperations);
+      const reused = await importDocument({
+        vaultRoot,
+        sourcePath: first.sourcePath,
+        reuseExact: true,
+      });
+      assert.equal(reused.documentId, first.documentId);
+
+      const applied = await importEventBatch({
+        vaultRoot,
+        payloads: [buildActivitySessionPayload(first.raw.relativePath)],
+        rejectIfSourceRawRefAlreadyImported: first.raw.relativePath,
+        apply: true,
+      });
+      assert.equal(applied.applied, true);
+    } finally {
+      await lock.release();
+    }
+  });
+
+  assert.equal(await childExit, 0);
+  const alias = JSON.parse(childOutput) as { rawRef?: unknown };
+  if (typeof alias.rawRef !== "string") {
+    throw new Error("Ordinary document child did not return a raw reference.");
+  }
+  const aliasRawRef = alias.rawRef;
+  assert.notEqual(aliasRawRef, first.raw.relativePath);
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef: first.raw.relativePath,
+  }), "completed");
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef: aliasRawRef,
+  }), "completed");
+  assert.equal(
+    (await readAllAuditRecords(vaultRoot)).filter(
+      (record) => record.commandName === "core.importEventBatch.sourceRawRefOnce",
+    ).length,
+    1,
+  );
+
+  for (const rawRef of [first.raw.relativePath, aliasRawRef]) {
+    await assert.rejects(
+      importEventBatch({
+        vaultRoot,
+        payloads: [buildActivitySessionPayload(rawRef, 60)],
+        rejectIfSourceRawRefAlreadyImported: rawRef,
+        apply: true,
+      }),
+      (error) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ALREADY_IMPORTED");
+        return true;
+      },
+    );
+  }
+});
+
+test("source-guarded apply rejects a source document deleted after dry-run", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-deleted-before-apply");
+  const source = await importWorkoutSourceDocument(
+    vaultRoot,
+    "murph-event-batch-source-deleted-before-apply",
+  );
+  const rawRef = source.raw.relativePath;
+  const payloads = [buildActivitySessionPayload(rawRef)];
+
+  const dryRun = await importEventBatch({
+    vaultRoot,
+    payloads,
+    rejectIfSourceRawRefAlreadyImported: rawRef,
+  });
+  assert.equal(dryRun.applied, false);
+  assert.equal(dryRun.createdCount, 1);
+
+  await deleteEvent({ vaultRoot, eventId: source.event.id });
+  const importAuditCountBeforeApply = (await readAllAuditRecords(vaultRoot))
+    .filter((record) => record.commandName === "core.importEventBatch").length;
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads,
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE");
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE");
+      return true;
+    },
+  );
+  assert.equal(
+    (await readAllAuditRecords(vaultRoot))
+      .filter((record) => record.commandName === "core.importEventBatch").length,
+    importAuditCountBeforeApply,
+  );
+});
+
+test("source-guarded workout batches reject any non-workout or unreferenced row atomically", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-guard-contract");
+  const source = await importWorkoutSourceDocument(
+    vaultRoot,
+    "murph-event-batch-source-guard-contract",
+  );
+  const rawRef = source.raw.relativePath;
+  const activity = buildActivitySessionPayload(rawRef);
+  const invalidRow = buildSleepSessionPayload(10, { rawRefs: [rawRef] });
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [activity, invalidRow],
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ROW_INVALID");
+      return true;
+    },
+  );
+
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef,
+  }), "not_imported");
+  assert.equal(await findEventByExternalRef({
+    vaultRoot,
+    system: invalidRow.externalRef.system,
+    resourceType: invalidRow.externalRef.resourceType,
+    resourceId: invalidRow.externalRef.resourceId,
+  }), null);
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [{
+        ...activity,
+        externalRef: {
+          system: "model-authored",
+          resourceType: "workout-session",
+          resourceId: "session-a",
+        },
+      }],
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ROW_INVALID");
+      return true;
+    },
+  );
 });
 
 test("importEventBatch apply writes all rows once and re-runs are idempotent", async () => {

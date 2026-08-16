@@ -12,6 +12,10 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
 import {
+  listHostedBundleInlineFiles,
+  snapshotHostedExecutionContext,
+} from '@murphai/runtime-state/node'
+import {
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
@@ -109,6 +113,8 @@ const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
 const SCRIPTED_MODEL = 'gpt-5.6-terra'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
+const WORKOUT_CSV_ATTEMPT_RELATIVE_PATH =
+  '.runtime/tmp/workout-csv-import/attempt-scripted'
 const execFileAsync = promisify(execFile)
 const RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
   include_apps_instructions: false,
@@ -306,6 +312,20 @@ type ScriptedResponse = ScriptedResponseRoute & (
     }
 )
 
+function waitForDeferredExecResponses(): ScriptedResponse[] {
+  return ['1', '2', '3'].flatMap((cellId) =>
+    Array.from({ length: 4 }, () => ({
+      functionCall: {
+        arguments: {
+          cell_id: cellId,
+          yield_time_ms: 30_000,
+        },
+        name: 'wait',
+      },
+      requestIncludes: [`Script running with cell ID ${cellId}`],
+    })))
+}
+
 interface ScriptedStub {
   baseUrl: string
   captureProviderRequestDiagnostics(): void
@@ -372,6 +392,199 @@ function quotePosixShellLiteral(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
+async function writeWorkoutCsvTransformHelperFixture(): Promise<string> {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-workout-csv-helper-'),
+  )
+  temporaryPaths.push(fixtureDirectory)
+  const helperPath = path.join(fixtureDirectory, 'workout-csv-helper.py')
+  await writeFile(
+    helperPath,
+    `from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import sys
+from collections import OrderedDict
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+
+def digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def canonical_timestamp(value: str, time_zone: str) -> str:
+    parsed = datetime.fromisoformat(value.strip())
+    zone = ZoneInfo(time_zone)
+    if parsed.tzinfo is not None:
+        localized = parsed.astimezone(zone)
+        return localized.isoformat()
+
+    valid_by_offset: dict[object, datetime] = {}
+    for fold in (0, 1):
+        candidate = parsed.replace(tzinfo=zone, fold=fold)
+        round_trip = candidate.astimezone(timezone.utc).astimezone(zone)
+        if round_trip.replace(tzinfo=None) == parsed:
+            valid_by_offset[candidate.utcoffset()] = candidate
+    if len(valid_by_offset) != 1:
+        issue = "nonexistent" if not valid_by_offset else "ambiguous"
+        raise ValueError(f"{issue} local time {value!r} in {time_zone}")
+    localized = next(iter(valid_by_offset.values()))
+    return localized.isoformat()
+
+
+def transform(source: Path, receipt_path: Path, output: Path, digest_path: Path, identity_mode: str) -> None:
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    raw_ref = receipt["rawFile"]
+    groups: OrderedDict[str, dict[str, object]] = OrderedDict()
+    source_rows = 0
+
+    with source.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        group_column = "session_key" if identity_mode == "stable" else "block"
+        for row in reader:
+            source_rows += 1
+            group_key = (row.get(group_column) or "").strip()
+            if not group_key:
+                raise ValueError(f"missing {group_column} on source row {source_rows}")
+            time_zone = (row.get("time_zone") or "America/New_York").strip()
+            occurred_at = canonical_timestamp(row["occurred_at"], time_zone)
+            group = groups.setdefault(group_key, {
+                "duration": int(row["duration_minutes"]),
+                "exercises": OrderedDict(),
+                "occurred_at": occurred_at,
+                "time_zone": time_zone,
+                "title": row["workout_title"],
+            })
+            exercises = group["exercises"]
+            if not isinstance(exercises, OrderedDict):
+                raise TypeError("exercise grouping failed")
+            exercise_name = row["exercise"].strip()
+            sets = exercises.setdefault(exercise_name, [])
+            workout_set: dict[str, object] = {
+                "order": len(sets) + 1,
+                "reps": int(row["reps"]),
+            }
+            if row.get("weight"):
+                workout_set["weight"] = float(row["weight"])
+                workout_set["weightUnit"] = row["weight_unit"].strip().lower()
+            if row.get("note"):
+                workout_set["note"] = row["note"].strip()
+            sets.append(workout_set)
+
+    payloads: list[dict[str, object]] = []
+    for group_key, group in groups.items():
+        exercises = group["exercises"]
+        if not isinstance(exercises, OrderedDict):
+            raise TypeError("exercise grouping failed")
+        payload: dict[str, object] = {
+            "kind": "activity_session",
+            "occurredAt": group["occurred_at"],
+            "timeZone": group["time_zone"],
+            "source": "import",
+            "title": group["title"],
+            "activityType": "strength-training",
+            "durationMinutes": group["duration"],
+            "rawRefs": [raw_ref],
+            "workout": {
+                "sourceApp": "custom-csv",
+                "startedAt": group["occurred_at"],
+                "exercises": [
+                    {
+                        "name": name,
+                        "order": exercise_index,
+                        "sets": sets,
+                    }
+                    for exercise_index, (name, sets) in enumerate(exercises.items(), start=1)
+                ],
+            },
+        }
+        payloads.append(payload)
+
+    output.write_text(
+        "".join(json.dumps(payload, separators=(",", ":")) + "\\n" for payload in payloads),
+        encoding="utf-8",
+    )
+    digest_path.write_text(digest(output) + "\\n", encoding="utf-8")
+    output.with_name("transform-summary.json").write_text(json.dumps({
+        "groupedWorkouts": len(payloads),
+        "sourceRows": source_rows,
+    }), encoding="utf-8")
+
+
+def verify(path: Path, digest_path: Path) -> None:
+    expected = digest_path.read_text(encoding="utf-8").strip()
+    if digest(path) != expected:
+        raise ValueError("JSONL changed after dry run")
+
+
+def summarize(paths: list[Path]) -> None:
+    transform_summary, dry_run, apply, readback = [
+        json.loads(path.read_text(encoding="utf-8")) for path in paths
+    ]
+    print(json.dumps({
+        **transform_summary,
+        "dryRunCreated": dry_run["createdCount"],
+        "appliedCreated": apply["createdCount"],
+        "readbackCount": readback["count"],
+    }, separators=(",", ":")))
+
+
+mode = sys.argv[1]
+if mode == "digest":
+    print(digest(Path(sys.argv[2])))
+elif mode == "transform":
+    transform(Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4]), Path(sys.argv[5]), sys.argv[6])
+elif mode == "verify":
+    verify(Path(sys.argv[2]), Path(sys.argv[3]))
+elif mode == "summarize":
+    summarize([Path(value) for value in sys.argv[2:]])
+else:
+    raise ValueError(f"unsupported mode: {mode}")
+`,
+    { encoding: 'utf8', mode: 0o600 },
+  )
+  return helperPath
+}
+
+async function createWorkoutCsvTestResultPath(): Promise<string> {
+  const resultDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-workout-csv-result-'),
+  )
+  temporaryPaths.push(resultDirectory)
+  return path.join(resultDirectory, 'result.json')
+}
+
+async function expectWorkoutCsvScratchExcludedFromHostedSnapshot(
+  workingDirectory: string,
+): Promise<void> {
+  const snapshot = await snapshotHostedExecutionContext({
+    vaultRoot: workingDirectory,
+  })
+  const snapshottedPaths = listHostedBundleInlineFiles({
+    bytes: snapshot.bundle,
+    expectedKind: 'vault',
+  }).map((file) => file.path)
+
+  expect(snapshottedPaths.filter((filePath) =>
+    filePath.startsWith('.runtime/tmp/workout-csv-import/')),
+  ).toEqual([])
+}
+
+async function expectWorkoutCsvScratchCleanedAndExcluded(
+  workingDirectory: string,
+): Promise<void> {
+  await expect(readFile(path.join(
+    workingDirectory,
+    WORKOUT_CSV_ATTEMPT_RELATIVE_PATH,
+    'workout-csv-helper.py',
+  ))).rejects.toMatchObject({ code: 'ENOENT' })
+  await expectWorkoutCsvScratchExcludedFromHostedSnapshot(workingDirectory)
+}
+
 async function requireScriptedStub(): Promise<ScriptedStub> {
   stub ??= await startScriptedResponsesStub()
   return stub
@@ -408,6 +621,1084 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('executes the unfamiliar workout CSV skill with exact-byte batch safety', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const workdir = scenario.turnInput.workingDirectory
+    const durableVaultState = await mkdtemp(
+      path.join(tmpdir(), 'murph-workout-csv-durable-state-'),
+    )
+    temporaryPaths.push(durableVaultState)
+    const skillsRoot = path.join(workdir, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(skillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    const workoutCsvHelperFixture = await writeWorkoutCsvTransformHelperFixture()
+    const workoutCsvTestResult = await createWorkoutCsvTestResultPath()
+    const sourceCsv = [
+      'session_key,occurred_at,time_zone,duration_minutes,workout_title,exercise,reps,weight,weight_unit,note',
+      'session-a,2026-01-15 18:30:00,America/Chicago,45,Lower body,Squat,5,135,lb,ROW_PRIVATE_ALPHA',
+      'session-a,2026-01-15 18:30:00,America/Chicago,45,Lower body,Bench press,8,95,lb,ROW_PRIVATE_BETA',
+      'session-b,2026-07-15 18:30:00,America/Chicago,30,Upper body,Pull-up,6,,,ROW_PRIVATE_GAMMA',
+      '',
+    ].join('\n')
+    await writeFile(path.join(workdir, 'workout-history.csv'), sourceCsv, 'utf8')
+    await writeFile(
+      path.join(workdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":3,"warnings":["unrecognized workout CSV layout"]}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  mkdir -p "$DURABLE_WORKOUT_IMPORT_STATE/raw/documents"
+  cp "$3" "$DURABLE_WORKOUT_IMPORT_STATE/raw/documents/workout-source.csv"
+  printf '%s\\n' '{"documentId":"doc_source","rawFile":"raw/documents/workout-source.csv","manifestFile":"raw/manifests/workout-source.json"}'
+  exit 0
+fi
+if [ "$1 $2" = "document workout-import-status" ]; then
+  if [ -f "$DURABLE_WORKOUT_IMPORT_STATE/import-state" ]; then
+    printf '%s\\n' '{"status":"completed"}'
+  else
+    printf '%s\\n' '{"status":"not_imported"}'
+  fi
+  exit 0
+fi
+if [ "$1 $2" = "event payload-schema" ]; then
+  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"required":["kind","occurredAt","title","durationMinutes"]}}'
+  exit 0
+fi
+if [ "$1 $2" = "event import-jsonl" ]; then
+  input_path=''
+  apply='false'
+  for arg in "$@"; do
+    case "$arg" in
+      @*) input_path="\${arg#@}" ;;
+      --apply) apply='true' ;;
+    esac
+  done
+  digest="$(python3 .runtime/tmp/workout-csv-import/attempt-scripted/workout-csv-helper.py digest "$input_path")"
+  printf '%s\\n' "$digest" >> import-digests.log
+  if [ "$apply" = 'true' ]; then
+    cp "$input_path" "$DURABLE_WORKOUT_IMPORT_STATE/imported-events.jsonl"
+    printf '%s\\n' '2' > "$DURABLE_WORKOUT_IMPORT_STATE/import-state"
+    printf '%s\\n' '{"applied":true,"receivedCount":2,"createdCount":2,"skippedExistingCount":0,"supersededCount":0}'
+  else
+    printf '%s\\n' '{"applied":false,"receivedCount":2,"createdCount":2,"skippedExistingCount":0,"supersededCount":0}'
+  fi
+  exit 0
+fi
+if [ "$1 $2" = "event list" ]; then
+  test "$(cat "$DURABLE_WORKOUT_IMPORT_STATE/import-state")" = '2'
+  printf '%s\\n' '{"count":2,"items":[{"title":"Lower body","occurredAt":"2026-01-15T18:30:00-06:00","dayKey":"2026-01-15"},{"title":"Upper body","occurredAt":"2026-07-15T18:30:00-05:00","dayKey":"2026-07-15"}]}' | tee "$DURABLE_WORKOUT_IMPORT_STATE/canonical-readback.json"
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(workdir, 'run-workout-csv-import'),
+      `#!/bin/sh
+set -eu
+attempt='.runtime/tmp/workout-csv-import/attempt-scripted'
+mkdir -p "$attempt"
+cp "$WORKOUT_CSV_HELPER_FIXTURE" "$attempt/workout-csv-helper.py"
+chmod 600 "$attempt/workout-csv-helper.py"
+trap 'rm -rf "$attempt"' EXIT HUP INT TERM
+./vault-cli workout import inspect workout-history.csv --format json > "$attempt/inspect.json"
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > "$attempt/document.json"
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > "$attempt/status.json"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$attempt/status.json")" = 'not_imported'
+./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > "$attempt/schema.json"
+python3 "$attempt/workout-csv-helper.py" transform workout-history.csv "$attempt/document.json" "$attempt/events.jsonl" "$attempt/events.sha256" stable
+./vault-cli event import-jsonl --input @"$attempt/events.jsonl" --source-raw-ref-once raw/documents/workout-source.csv --format json > "$attempt/dry-run.json"
+python3 "$attempt/workout-csv-helper.py" verify "$attempt/events.jsonl" "$attempt/events.sha256"
+./vault-cli event import-jsonl --input @"$attempt/events.jsonl" --source-raw-ref-once raw/documents/workout-source.csv --apply --format json > "$attempt/apply.json"
+python3 "$attempt/workout-csv-helper.py" verify "$attempt/events.jsonl" "$attempt/events.sha256"
+./vault-cli event list --kind activity_session --from 2026-01-15 --to 2026-07-15 --limit 10 --format json > "$attempt/readback.json"
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > "$attempt/replay-status.json"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$attempt/replay-status.json")" = 'completed'
+python3 "$attempt/workout-csv-helper.py" summarize "$attempt/transform-summary.json" "$attempt/dry-run.json" "$attempt/apply.json" "$attempt/readback.json" | tee "$WORKOUT_CSV_TEST_RESULT"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    const progressUpdates: string[] = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { text: 'I’m mapping the workout columns and validating the full batch.' },
+          name: 'send_progress_update',
+          namespace: 'murph',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md && ./run-workout-csv-import",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      ...waitForDeferredExecResponses(),
+      {
+        text: 'Done — I imported 2 workouts from January 15–July 15. The source had 3 set rows and none were ignored. I applied the Chicago timezone with the correct winter and summer offsets, validated the full batch, saved and confirmed both workouts, and the exact source file is replay-safe.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        DURABLE_WORKOUT_IMPORT_STATE: durableVaultState,
+        WORKOUT_CSV_HELPER_FIXTURE: workoutCsvHelperFixture,
+        WORKOUT_CSV_TEST_RESULT: workoutCsvTestResult,
+      },
+      progressDelivery: {
+        send: async (text) => {
+          progressUpdates.push(text)
+          return { kind: 'sent', source: 'model' }
+        },
+      },
+      prompt: 'Import workout-history.csv. It is an unfamiliar workout CSV; also verify whether replaying this exact source would be safe.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(progressUpdates).toEqual([
+      'I’m mapping the workout columns and validating the full batch.',
+    ])
+    expect(result.finalMessage).toContain('imported 2 workouts')
+    expect(result.finalMessage).not.toContain('ROW_PRIVATE_')
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    const commandLog = await readFile(path.join(workdir, 'commands.log'), 'utf8')
+      .catch(() => null)
+    expect(commandLog, toolOutputs).not.toBeNull()
+    const commands = (commandLog ?? '').trim().split('\n')
+    expect(commands, toolOutputs).toEqual([
+      'workout import inspect workout-history.csv --format json',
+      'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
+      'document workout-import-status raw/documents/workout-source.csv --format json',
+      'event payload-schema --for import-jsonl --kind activity_session --format json',
+      'event import-jsonl --input @.runtime/tmp/workout-csv-import/attempt-scripted/events.jsonl --source-raw-ref-once raw/documents/workout-source.csv --format json',
+      'event import-jsonl --input @.runtime/tmp/workout-csv-import/attempt-scripted/events.jsonl --source-raw-ref-once raw/documents/workout-source.csv --apply --format json',
+      'event list --kind activity_session --from 2026-01-15 --to 2026-07-15 --limit 10 --format json',
+      'document workout-import-status raw/documents/workout-source.csv --format json',
+    ])
+    const digests = (await readFile(path.join(workdir, 'import-digests.log'), 'utf8'))
+      .trim()
+      .split('\n')
+    expect(digests).toHaveLength(2)
+    expect(new Set(digests).size).toBe(1)
+    expect(
+      await readFile(
+        path.join(durableVaultState, 'raw/documents/workout-source.csv'),
+        'utf8',
+      ),
+    ).toBe(sourceCsv)
+    const payloads = (await readFile(
+      path.join(durableVaultState, 'imported-events.jsonl'),
+      'utf8',
+    ))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    expect(payloads).toHaveLength(2)
+    expect(payloads.every((payload) => payload.externalRef == null)).toBe(true)
+    expect(payloads.map((payload) => payload.occurredAt)).toEqual([
+      '2026-01-15T18:30:00-06:00',
+      '2026-07-15T18:30:00-05:00',
+    ])
+    expect(payloads.every((payload) => payload.dayKey == null)).toBe(true)
+    expect(payloads.every((payload) => payload.timeZone === 'America/Chicago')).toBe(true)
+    const canonicalReadback = JSON.parse(
+      await readFile(path.join(durableVaultState, 'canonical-readback.json'), 'utf8'),
+    ) as { items: Array<{ dayKey: string, occurredAt: string }> }
+    expect(canonicalReadback.items.map((item) => item.occurredAt)).toEqual([
+      '2026-01-15T18:30:00-06:00',
+      '2026-07-15T18:30:00-05:00',
+    ])
+    expect(canonicalReadback.items.map((item) => item.dayKey)).toEqual([
+      '2026-01-15',
+      '2026-07-15',
+    ])
+    expect(payloads.every((payload) =>
+      Array.isArray(payload.rawRefs)
+      && payload.rawRefs[0] === 'raw/documents/workout-source.csv')).toBe(true)
+    expect(await readFile(workoutCsvTestResult, 'utf8')).toContain(
+      '{"groupedWorkouts":2,"sourceRows":3,"dryRunCreated":2,"appliedCreated":2,"readbackCount":2}',
+    )
+    expect(toolOutputs).not.toContain('ROW_PRIVATE_')
+    await expectWorkoutCsvScratchCleanedAndExcluded(workdir)
+
+    const interruptedAttempt = path.join(
+      workdir,
+      '.runtime/tmp/workout-csv-import/attempt-interrupted',
+    )
+    await mkdir(interruptedAttempt, { recursive: true, mode: 0o700 })
+    await writeFile(path.join(interruptedAttempt, 'events.jsonl'), 'PRIVATE_ROW\n')
+    await writeFile(path.join(interruptedAttempt, 'events.sha256'), 'digest\n')
+    await expectWorkoutCsvScratchExcludedFromHostedSnapshot(workdir)
+    await rm(interruptedAttempt, { force: true, recursive: true })
+
+    const retryScenario = await prepareScriptedTurnScenario()
+    const retryWorkdir = retryScenario.turnInput.workingDirectory
+    const retrySkillsRoot = path.join(retryWorkdir, 'skills')
+    const retryTestResult = await createWorkoutCsvTestResultPath()
+    await mkdir(retrySkillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(retrySkillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    await writeFile(path.join(retryWorkdir, 'workout-history.csv'), sourceCsv, 'utf8')
+    await writeFile(
+      path.join(retryWorkdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":3,"warnings":["unrecognized workout CSV layout"]}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  cmp "$3" "$DURABLE_WORKOUT_IMPORT_STATE/raw/documents/workout-source.csv"
+  printf '%s\\n' '{"documentId":"doc_source","rawFile":"raw/documents/workout-source.csv","manifestFile":"raw/manifests/workout-source.json","created":false}'
+  exit 0
+fi
+if [ "$1 $2" = "document workout-import-status" ]; then
+  test "$(cat "$DURABLE_WORKOUT_IMPORT_STATE/import-state")" = '2'
+  printf '%s\\n' '{"status":"completed"}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"retry must stop before transformation or event import"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(retryWorkdir, 'run-workout-csv-retry-check'),
+      `#!/bin/sh
+set -eu
+attempt='.runtime/tmp/workout-csv-import/attempt-scripted'
+mkdir -p "$attempt"
+trap 'rm -rf "$attempt"' EXIT HUP INT TERM
+./vault-cli workout import inspect workout-history.csv --format json > "$attempt/inspect.json"
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > "$attempt/document.json"
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > "$attempt/status.json"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$attempt/status.json")" = 'completed'
+printf '%s\\n' '{"status":"already_imported","transformed":false,"writeAttempted":false}' | tee "$WORKOUT_CSV_TEST_RESULT"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    retryScenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md && ./run-workout-csv-retry-check",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      ...waitForDeferredExecResponses(),
+      {
+        text: 'This exact workout source was already imported, so I stopped before rebuilding or writing anything.',
+      },
+    )
+
+    const retryResult = await executeCodexAppServerTurn({
+      ...retryScenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...retryScenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: retrySkillsRoot,
+        DURABLE_WORKOUT_IMPORT_STATE: durableVaultState,
+        WORKOUT_CSV_TEST_RESULT: retryTestResult,
+      },
+      prompt: 'Import workout-history.csv. This is a fresh assistant turn and workspace.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(retryResult.finalMessage).toContain('already imported')
+    expect(retryResult.finalMessage).toContain('stopped before rebuilding or writing')
+    const retryCommands = (await readFile(path.join(retryWorkdir, 'commands.log'), 'utf8'))
+      .trim()
+      .split('\n')
+    expect(retryCommands).toEqual([
+      'workout import inspect workout-history.csv --format json',
+      'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
+      'document workout-import-status raw/documents/workout-source.csv --format json',
+    ])
+    expect(await readFile(retryTestResult, 'utf8')).toContain(
+      '{"status":"already_imported","transformed":false,"writeAttempted":false}',
+    )
+    await expectWorkoutCsvScratchCleanedAndExcluded(retryWorkdir)
+  })
+
+  it('retries once after a returned pre-commit workout apply failure is proven safe', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const workdir = scenario.turnInput.workingDirectory
+    const skillsRoot = path.join(workdir, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(skillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    const workoutCsvHelperFixture = await writeWorkoutCsvTransformHelperFixture()
+    const workoutCsvTestResult = await createWorkoutCsvTestResultPath()
+    await writeFile(
+      path.join(workdir, 'workout-history.csv'),
+      [
+        'block,occurred_at,duration_minutes,workout_title,exercise,reps,weight,weight_unit,note',
+        '1,2026-03-15T10:00:00-04:00,30,Custom workout,Deadlift,5,155,lb,ROW_PRIVATE_DELTA',
+        '1,2026-03-15T10:00:00-04:00,30,Custom workout,Row,8,75,lb,ROW_PRIVATE_EPSILON',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":2}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  mkdir -p raw/documents
+  cp "$3" raw/documents/workout-source.csv
+  printf '%s\\n' '{"documentId":"doc_source","rawFile":"raw/documents/workout-source.csv"}'
+  exit 0
+fi
+if [ "$1 $2" = "document workout-import-status" ]; then
+  if [ -f import-state ]; then
+    printf '%s\\n' '{"status":"completed"}'
+  else
+    printf '%s\\n' '{"status":"not_imported"}'
+  fi
+  exit 0
+fi
+if [ "$1 $2" = "event payload-schema" ]; then
+  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"required":["kind","occurredAt","title","durationMinutes"]}}'
+  exit 0
+fi
+if [ "$1 $2" = "event import-jsonl" ]; then
+  input_path=''
+  apply='false'
+  for arg in "$@"; do
+    case "$arg" in
+      @*) input_path="\${arg#@}" ;;
+      --apply) apply='true' ;;
+    esac
+  done
+  python3 .runtime/tmp/workout-csv-import/attempt-scripted/workout-csv-helper.py digest "$input_path" >> import-digests.log
+  if [ "$apply" = 'true' ]; then
+    printf '%s\\n' 'attempted' >> apply-attempts.log
+    attempt_count="$(wc -l < apply-attempts.log | tr -d ' ')"
+    if [ "$attempt_count" = '1' ]; then
+      printf '%s\\n' 'process exited before commit' >&2
+      exit 70
+    fi
+    printf '%s\\n' 'saved' > import-state
+    printf '%s\\n' '{"applied":true,"receivedCount":1,"createdCount":1,"skippedExistingCount":0,"supersededCount":0}'
+    exit 0
+  fi
+  printf '%s\\n' '{"applied":false,"receivedCount":1,"createdCount":1,"skippedExistingCount":0,"supersededCount":0}'
+  exit 0
+fi
+if [ "$1 $2" = "event list" ]; then
+  test "$(cat import-state)" = 'saved'
+  printf '%s\\n' '{"count":1,"items":[{"title":"Custom workout","occurredAt":"2026-03-15T10:00:00-04:00"}]}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(workdir, 'run-append-only-workout-import'),
+      `#!/bin/sh
+set -eu
+attempt='.runtime/tmp/workout-csv-import/attempt-scripted'
+mkdir -p "$attempt"
+cp "$WORKOUT_CSV_HELPER_FIXTURE" "$attempt/workout-csv-helper.py"
+chmod 600 "$attempt/workout-csv-helper.py"
+trap 'rm -rf "$attempt"' EXIT HUP INT TERM
+./vault-cli workout import inspect workout-history.csv --format json > "$attempt/inspect.json"
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > "$attempt/document.json"
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > "$attempt/status.json"
+./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > "$attempt/schema.json"
+python3 "$attempt/workout-csv-helper.py" transform workout-history.csv "$attempt/document.json" "$attempt/events.jsonl" "$attempt/events.sha256" append-only
+./vault-cli event import-jsonl --input @"$attempt/events.jsonl" --source-raw-ref-once raw/documents/workout-source.csv --format json > "$attempt/dry-run.json"
+python3 "$attempt/workout-csv-helper.py" verify "$attempt/events.jsonl" "$attempt/events.sha256"
+set +e
+./vault-cli event import-jsonl --input @"$attempt/events.jsonl" --source-raw-ref-once raw/documents/workout-source.csv --apply --format json > "$attempt/apply.json" 2> "$attempt/apply-error.txt"
+apply_status=$?
+set -e
+test "$apply_status" -ne 0
+python3 "$attempt/workout-csv-helper.py" verify "$attempt/events.jsonl" "$attempt/events.sha256"
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > "$attempt/recovery-status.json"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$attempt/recovery-status.json")" = 'not_imported'
+python3 "$attempt/workout-csv-helper.py" verify "$attempt/events.jsonl" "$attempt/events.sha256"
+./vault-cli event import-jsonl --input @"$attempt/events.jsonl" --source-raw-ref-once raw/documents/workout-source.csv --apply --format json > "$attempt/recovery-apply.json"
+python3 "$attempt/workout-csv-helper.py" verify "$attempt/events.jsonl" "$attempt/events.sha256"
+./vault-cli event list --kind activity_session --from 2026-03-15 --to 2026-03-15 --limit 10 --format json > "$attempt/readback.json"
+printf '%s\\n' '{"status":"recovered_after_precommit_failure","applyAttempts":2,"successfulApplies":1,"groupedWorkouts":1,"readbackCount":1}' | tee "$WORKOUT_CSV_TEST_RESULT"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    const progressUpdates: string[] = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            text: 'I’ll preserve this exact source and validate the full batch. If the apply process returns without a receipt, I’ll resolve its exact-source status before deciding whether one safe recovery attempt is possible.',
+          },
+          name: 'send_progress_update',
+          namespace: 'murph',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md && ./run-append-only-workout-import",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      ...waitForDeferredExecResponses(),
+      {
+        text: 'Done — the first apply process exited before committing. I proved the exact source was still not imported, retried the unchanged validated batch once, and confirmed 1 saved workout in canonical history.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        WORKOUT_CSV_HELPER_FIXTURE: workoutCsvHelperFixture,
+        WORKOUT_CSV_TEST_RESULT: workoutCsvTestResult,
+      },
+      progressDelivery: {
+        send: async (text) => {
+          progressUpdates.push(text)
+          return { kind: 'sent', source: 'model' }
+        },
+      },
+      prompt: 'Import workout-history.csv. The block column only marks row adjacency and is not a stable session identifier.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(progressUpdates).toEqual([
+      'I’ll preserve this exact source and validate the full batch. If the apply process returns without a receipt, I’ll resolve its exact-source status before deciding whether one safe recovery attempt is possible.',
+    ])
+    expect(result.finalMessage).toContain('retried the unchanged validated batch once')
+    expect(result.finalMessage).toContain('confirmed 1 saved workout')
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    const commandLog = await readFile(path.join(workdir, 'commands.log'), 'utf8')
+      .catch(() => null)
+    expect(commandLog, toolOutputs).not.toBeNull()
+    const commands = (commandLog ?? '').trim().split('\n')
+    expect(
+      commands.filter((command) => command.includes('--apply')),
+      toolOutputs,
+    ).toHaveLength(2)
+    expect(commands.filter((command) =>
+      command === 'document workout-import-status raw/documents/workout-source.csv --format json',
+    )).toHaveLength(2)
+    expect(commands.filter((command) =>
+      command.includes('--source-raw-ref-once raw/documents/workout-source.csv')),
+    ).toHaveLength(3)
+    expect(commands).toContain(
+      'event list --kind activity_session --from 2026-03-15 --to 2026-03-15 --limit 10 --format json',
+    )
+    expect((await readFile(path.join(workdir, 'apply-attempts.log'), 'utf8'))
+      .trim()
+      .split('\n')).toHaveLength(2)
+    const digests = (await readFile(path.join(workdir, 'import-digests.log'), 'utf8'))
+      .trim()
+      .split('\n')
+    expect(digests).toHaveLength(3)
+    expect(new Set(digests).size).toBe(1)
+    expect(await readFile(workoutCsvTestResult, 'utf8')).toContain(
+      '{"status":"recovered_after_precommit_failure","applyAttempts":2,"successfulApplies":1,"groupedWorkouts":1,"readbackCount":1}',
+    )
+    expect(toolOutputs).not.toContain('ROW_PRIVATE_')
+    await expectWorkoutCsvScratchCleanedAndExcluded(workdir)
+  })
+
+  it('confirms a committed workout apply after its receipt is lost without retrying', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const workdir = scenario.turnInput.workingDirectory
+    const skillsRoot = path.join(workdir, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(skillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    const workoutCsvHelperFixture = await writeWorkoutCsvTransformHelperFixture()
+    const workoutCsvTestResult = await createWorkoutCsvTestResultPath()
+    await writeFile(
+      path.join(workdir, 'workout-history.csv'),
+      [
+        'block,occurred_at,duration_minutes,workout_title,exercise,reps,weight,weight_unit,note',
+        '1,2026-03-16T10:00:00-04:00,30,Committed workout,Squat,5,135,lb,ROW_PRIVATE_ZETA',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":1}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  mkdir -p raw/documents
+  cp "$3" raw/documents/workout-source.csv
+  printf '%s\\n' '{"documentId":"doc_source","rawFile":"raw/documents/workout-source.csv"}'
+  exit 0
+fi
+if [ "$1 $2" = "document workout-import-status" ]; then
+  if [ -f import-state ]; then
+    printf '%s\\n' '{"status":"completed"}'
+  else
+    printf '%s\\n' '{"status":"not_imported"}'
+  fi
+  exit 0
+fi
+if [ "$1 $2" = "event payload-schema" ]; then
+  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"required":["kind","occurredAt","title","durationMinutes"]}}'
+  exit 0
+fi
+if [ "$1 $2" = "event import-jsonl" ]; then
+  input_path=''
+  apply='false'
+  for arg in "$@"; do
+    case "$arg" in
+      @*) input_path="\${arg#@}" ;;
+      --apply) apply='true' ;;
+    esac
+  done
+  python3 .runtime/tmp/workout-csv-import/attempt-scripted/workout-csv-helper.py digest "$input_path" >> import-digests.log
+  if [ "$apply" = 'true' ]; then
+    test ! -f apply-attempted
+    printf '%s\\n' 'attempted' > apply-attempted
+    printf '%s\\n' 'saved' > import-state
+    printf '%s\\n' 'connection closed after commit but before the receipt' >&2
+    exit 70
+  fi
+  printf '%s\\n' '{"applied":false,"receivedCount":1,"createdCount":1,"skippedExistingCount":0,"supersededCount":0}'
+  exit 0
+fi
+if [ "$1 $2" = "event list" ]; then
+  test "$(cat import-state)" = 'saved'
+  printf '%s\\n' '{"count":1,"items":[{"title":"Committed workout","occurredAt":"2026-03-16T10:00:00-04:00"}]}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(workdir, 'run-committed-workout-import'),
+      `#!/bin/sh
+set -eu
+attempt='.runtime/tmp/workout-csv-import/attempt-scripted'
+mkdir -p "$attempt"
+cp "$WORKOUT_CSV_HELPER_FIXTURE" "$attempt/workout-csv-helper.py"
+chmod 600 "$attempt/workout-csv-helper.py"
+trap 'rm -rf "$attempt"' EXIT HUP INT TERM
+./vault-cli workout import inspect workout-history.csv --format json > "$attempt/inspect.json"
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > "$attempt/document.json"
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > "$attempt/status.json"
+./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > "$attempt/schema.json"
+python3 "$attempt/workout-csv-helper.py" transform workout-history.csv "$attempt/document.json" "$attempt/events.jsonl" "$attempt/events.sha256" append-only
+./vault-cli event import-jsonl --input @"$attempt/events.jsonl" --source-raw-ref-once raw/documents/workout-source.csv --format json > "$attempt/dry-run.json"
+python3 "$attempt/workout-csv-helper.py" verify "$attempt/events.jsonl" "$attempt/events.sha256"
+set +e
+./vault-cli event import-jsonl --input @"$attempt/events.jsonl" --source-raw-ref-once raw/documents/workout-source.csv --apply --format json > "$attempt/apply.json" 2> "$attempt/apply-error.txt"
+apply_status=$?
+set -e
+test "$apply_status" -ne 0
+python3 "$attempt/workout-csv-helper.py" verify "$attempt/events.jsonl" "$attempt/events.sha256"
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > "$attempt/recovery-status.json"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$attempt/recovery-status.json")" = 'completed'
+./vault-cli event list --kind activity_session --from 2026-03-16 --to 2026-03-16 --limit 10 --format json > "$attempt/readback.json"
+printf '%s\\n' '{"status":"confirmed_after_lost_receipt","applyAttempts":1,"successfulApplies":1,"groupedWorkouts":1,"readbackCount":1}' | tee "$WORKOUT_CSV_TEST_RESULT"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md && ./run-committed-workout-import",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      ...waitForDeferredExecResponses(),
+      {
+        text: 'Done — the apply committed even though its receipt was lost. I confirmed the exact-source completion state and 1 saved workout in canonical history without applying it again.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        WORKOUT_CSV_HELPER_FIXTURE: workoutCsvHelperFixture,
+        WORKOUT_CSV_TEST_RESULT: workoutCsvTestResult,
+      },
+      prompt: 'Import workout-history.csv and safely resolve any returned apply failure before replying.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toContain('receipt was lost')
+    expect(result.finalMessage).toContain('without applying it again')
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    const commandLog = await readFile(path.join(workdir, 'commands.log'), 'utf8')
+      .catch(() => null)
+    expect(commandLog, toolOutputs).not.toBeNull()
+    const commands = (commandLog ?? '').trim().split('\n')
+    expect(
+      commands.filter((command) => command.includes('--apply')),
+      toolOutputs,
+    ).toHaveLength(1)
+    expect(commands.filter((command) =>
+      command === 'document workout-import-status raw/documents/workout-source.csv --format json',
+    )).toHaveLength(2)
+    expect(commands.filter((command) =>
+      command.includes('--source-raw-ref-once raw/documents/workout-source.csv')),
+    ).toHaveLength(2)
+    expect(commands).toContain(
+      'event list --kind activity_session --from 2026-03-16 --to 2026-03-16 --limit 10 --format json',
+    )
+    expect(await readFile(path.join(workdir, 'apply-attempted'), 'utf8')).toBe(
+      'attempted\n',
+    )
+    const digests = (await readFile(path.join(workdir, 'import-digests.log'), 'utf8'))
+      .trim()
+      .split('\n')
+    expect(digests).toHaveLength(2)
+    expect(new Set(digests).size).toBe(1)
+    expect(await readFile(workoutCsvTestResult, 'utf8')).toContain(
+      '{"status":"confirmed_after_lost_receipt","applyAttempts":1,"successfulApplies":1,"groupedWorkouts":1,"readbackCount":1}',
+    )
+    expect(toolOutputs).not.toContain('ROW_PRIVATE_')
+    await expectWorkoutCsvScratchCleanedAndExcluded(workdir)
+  })
+
+  it('stops before event import for a nonexistent daylight-saving wall time', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const workdir = scenario.turnInput.workingDirectory
+    const skillsRoot = path.join(workdir, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(skillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    const workoutCsvHelperFixture = await writeWorkoutCsvTransformHelperFixture()
+    const workoutCsvTestResult = await createWorkoutCsvTestResultPath()
+    await writeFile(
+      path.join(workdir, 'workout-history.csv'),
+      [
+        'session_key,occurred_at,time_zone,duration_minutes,workout_title,exercise,reps,weight,weight_unit,note',
+        'session-a,2026-03-08 02:30:00,America/Chicago,45,Lower body,Squat,5,135,lb,ROW_PRIVATE_DST_GAP',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":1}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  printf '%s\\n' '{"documentId":"doc_source","rawFile":"raw/documents/workout-source.csv"}'
+  exit 0
+fi
+if [ "$1 $2" = "document workout-import-status" ]; then
+  printf '%s\\n' '{"status":"not_imported"}'
+  exit 0
+fi
+if [ "$1 $2" = "event payload-schema" ]; then
+  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"required":["kind","occurredAt","title","durationMinutes"]}}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"daylight-saving validation must stop before event import"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(workdir, 'run-dst-gap-check'),
+      `#!/bin/sh
+set -eu
+attempt='.runtime/tmp/workout-csv-import/attempt-scripted'
+mkdir -p "$attempt"
+cp "$WORKOUT_CSV_HELPER_FIXTURE" "$attempt/workout-csv-helper.py"
+chmod 600 "$attempt/workout-csv-helper.py"
+trap 'rm -rf "$attempt"' EXIT HUP INT TERM
+./vault-cli workout import inspect workout-history.csv --format json > "$attempt/inspect.json"
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > "$attempt/document.json"
+./vault-cli document workout-import-status raw/documents/workout-source.csv --format json > "$attempt/status.json"
+./vault-cli event payload-schema --for import-jsonl --kind activity_session --format json > "$attempt/schema.json"
+set +e
+python3 "$attempt/workout-csv-helper.py" transform workout-history.csv "$attempt/document.json" "$attempt/events.jsonl" "$attempt/events.sha256" stable 2> "$attempt/transform-error.txt"
+transform_status=$?
+set -e
+test "$transform_status" -ne 0
+grep -q "nonexistent local time '2026-03-08 02:30:00' in America/Chicago" "$attempt/transform-error.txt"
+test ! -e "$attempt/events.jsonl"
+printf '%s\\n' '{"status":"nonexistent_local_time","writeAttempted":false,"questionRequired":true}' | tee "$WORKOUT_CSV_TEST_RESULT"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md && ./run-dst-gap-check",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      ...waitForDeferredExecResponses(),
+      {
+        text: 'The CSV says 2:30 AM in Chicago on March 8, but that local time did not exist because the clock jumped forward. I stopped before importing anything. What was the intended workout time?',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        WORKOUT_CSV_HELPER_FIXTURE: workoutCsvHelperFixture,
+        WORKOUT_CSV_TEST_RESULT: workoutCsvTestResult,
+      },
+      prompt: 'Import workout-history.csv using its America/Chicago timestamps.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toContain('that local time did not exist')
+    expect(result.finalMessage).toContain('stopped before importing anything')
+    expect((await readFile(path.join(workdir, 'commands.log'), 'utf8')).trim().split('\n'))
+      .toEqual([
+        'workout import inspect workout-history.csv --format json',
+        'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
+        'document workout-import-status raw/documents/workout-source.csv --format json',
+        'event payload-schema --for import-jsonl --kind activity_session --format json',
+      ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(await readFile(workoutCsvTestResult, 'utf8')).toContain(
+      '{"status":"nonexistent_local_time","writeAttempted":false,"questionRequired":true}',
+    )
+    expect(toolOutputs).not.toContain('ROW_PRIVATE_DST_GAP')
+    await expectWorkoutCsvScratchCleanedAndExcluded(workdir)
+  })
+
+  it('stops before transformation when a deleted exact source also has a live alias', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const workdir = scenario.turnInput.workingDirectory
+    const workoutCsvTestResult = await createWorkoutCsvTestResultPath()
+    const skillsRoot = path.join(workdir, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(skillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    await writeFile(
+      path.join(workdir, 'workout-history.csv'),
+      'session,exercise,reps\na,Squat,5\n',
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'source-identity-state.json'),
+      '{"deletedExactIdentity":true,"liveExactAlias":true}\n',
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":1}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  grep -q '"deletedExactIdentity":true' source-identity-state.json
+  grep -q '"liveExactAlias":true' source-identity-state.json
+  printf '%s\\n' '{"ok":false,"error":{"code":"conflict","message":"An exact source document existed but was deleted. Exact reuse will not create a replacement identity."}}' >&2
+  exit 2
+fi
+printf '%s\\n' '{"error":"deleted-source recovery must stop before Python or event import"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(workdir, 'run-deleted-source-recovery'),
+      `#!/bin/sh
+set -eu
+attempt='.runtime/tmp/workout-csv-import/attempt-scripted'
+mkdir -p "$attempt"
+trap 'rm -rf "$attempt"' EXIT HUP INT TERM
+./vault-cli workout import inspect workout-history.csv --format json > "$attempt/inspect.json"
+set +e
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > "$attempt/document.json" 2> "$attempt/document-error.json"
+import_status=$?
+set -e
+test "$import_status" -ne 0
+grep -q '"code":"conflict"' "$attempt/document-error.json"
+grep -q 'exact source document existed but was deleted' "$attempt/document-error.json"
+printf '%s\\n' '{"status":"deleted_exact_source","transformed":false,"writeAttempted":false}' | tee "$WORKOUT_CSV_TEST_RESULT"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md && ./run-deleted-source-recovery",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      ...waitForDeferredExecResponses(),
+      {
+        text: 'I found that this exact workout source had been preserved before, but its source document was deleted. I stopped before rebuilding or importing anything so I would not duplicate your workout history.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        WORKOUT_CSV_TEST_RESULT: workoutCsvTestResult,
+      },
+      prompt: 'Import workout-history.csv again from a replacement workspace.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toContain('source document was deleted')
+    expect(result.finalMessage).toContain('stopped before rebuilding or importing')
+    expect((await readFile(path.join(workdir, 'commands.log'), 'utf8')).trim().split('\n'))
+      .toEqual([
+        'workout import inspect workout-history.csv --format json',
+        'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
+      ])
+    expect(await readFile(workoutCsvTestResult, 'utf8')).toContain(
+      '{"status":"deleted_exact_source","transformed":false,"writeAttempted":false}',
+    )
+    await expectWorkoutCsvScratchCleanedAndExcluded(workdir)
+  })
+
+  it.sequential.each([
+    {
+      evidenceState: '{"canonicalDocumentExists":true,"requiredManifestPresent":false}\n',
+      name: 'missing manifest',
+      stateAssertions: `grep -q '"canonicalDocumentExists":true' source-evidence-state.json
+grep -q '"requiredManifestPresent":false' source-evidence-state.json`,
+    },
+    {
+      evidenceState: '{"canonicalDocumentEventValid":false,"rawManifestPresent":true,"rawArtifactVerified":true}\n',
+      name: 'missing canonical document event',
+      stateAssertions: `grep -q '"canonicalDocumentEventValid":false' source-evidence-state.json
+grep -q '"rawManifestPresent":true' source-evidence-state.json
+grep -q '"rawArtifactVerified":true' source-evidence-state.json`,
+    },
+    {
+      evidenceState: '{"canonicalSourceReceiptPresent":false,"guardedCompletionReceiptPresent":true,"workoutProvenancePresent":true}\n',
+      name: 'completion receipt without source owner',
+      stateAssertions: `grep -q '"canonicalSourceReceiptPresent":false' source-evidence-state.json
+grep -q '"guardedCompletionReceiptPresent":true' source-evidence-state.json
+grep -q '"workoutProvenancePresent":true' source-evidence-state.json`,
+    },
+  ])('stops before transformation when preserved exact-source evidence is damaged ($name)', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ evidenceState, stateAssertions }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const workdir = scenario.turnInput.workingDirectory
+    const workoutCsvTestResult = await createWorkoutCsvTestResultPath()
+    const skillsRoot = path.join(workdir, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(skillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    await writeFile(
+      path.join(workdir, 'workout-history.csv'),
+      'session,exercise,reps\na,Squat,5\n',
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'source-evidence-state.json'),
+      evidenceState,
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":1}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  ${stateAssertions}
+  printf '%s\\n' '{"ok":false,"error":{"code":"conflict","message":"Preserved exact source evidence is incomplete or damaged. Exact reuse will not create a replacement identity."}}' >&2
+  exit 2
+fi
+printf '%s\\n' '{"error":"damaged-source recovery must stop before Python or event import"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(workdir, 'run-damaged-source-recovery'),
+      `#!/bin/sh
+set -eu
+attempt='.runtime/tmp/workout-csv-import/attempt-scripted'
+mkdir -p "$attempt"
+trap 'rm -rf "$attempt"' EXIT HUP INT TERM
+./vault-cli workout import inspect workout-history.csv --format json > "$attempt/inspect.json"
+set +e
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > "$attempt/document.json" 2> "$attempt/document-error.json"
+import_status=$?
+set -e
+test "$import_status" -ne 0
+grep -q '"code":"conflict"' "$attempt/document-error.json"
+grep -q 'source evidence is incomplete or damaged' "$attempt/document-error.json"
+printf '%s\\n' '{"status":"damaged_exact_source","transformed":false,"writeAttempted":false}' | tee "$WORKOUT_CSV_TEST_RESULT"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md && ./run-damaged-source-recovery",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      ...waitForDeferredExecResponses(),
+      {
+        text: 'I found that this exact workout source was preserved before, but its required source evidence is incomplete or damaged. I stopped before rebuilding or importing anything so I would not duplicate your workout history; the preserved evidence needs explicit recovery first.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        WORKOUT_CSV_TEST_RESULT: workoutCsvTestResult,
+      },
+      prompt: 'Import workout-history.csv again from a replacement workspace.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toContain('source evidence is incomplete or damaged')
+    expect(result.finalMessage).toContain('stopped before rebuilding or importing')
+    expect(result.finalMessage).toContain('needs explicit recovery')
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    const commandLog = await readFile(path.join(workdir, 'commands.log'), 'utf8')
+      .catch(() => null)
+    expect(commandLog, toolOutputs).not.toBeNull()
+    expect(commandLog?.trim().split('\n'))
+      .toEqual([
+        'workout import inspect workout-history.csv --format json',
+        'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
+      ])
+    expect(await readFile(workoutCsvTestResult, 'utf8')).toContain(
+      '{"status":"damaged_exact_source","transformed":false,"writeAttempted":false}',
+    )
+    await expectWorkoutCsvScratchCleanedAndExcluded(workdir)
   })
 
   it('carries expanded connected-health questions through the production prompt, skill, command, evidence, and answer boundary', {
