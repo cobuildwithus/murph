@@ -163,6 +163,7 @@ import type {
   HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
+  accumulateHostedWorkspaceRunnerAssistantInputBatch,
   createHostedWorkspaceCheckpointRequestBuilder,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   finishHostedMailboxImportPostCheckpointEffects,
@@ -594,6 +595,7 @@ async function createHostedForegroundMailboxPrefetch(input: {
 }
 
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
+  "assistant.notification.requested:signup-welcome:",
   "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
   "aask_done_",
@@ -634,6 +636,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
   containsOnlySafeSystemWakes: boolean;
+  containsSignupWelcomeActivation: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -683,6 +686,22 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
     && systemItems.length === 1
     && systemItems[0]?.kind === "member.activated"
     && parseHostedMailboxSeqOrNull(systemItems[0].laneSeq) === 1n;
+  const containsSignupWelcomeActivation = reachesSystemLaneHighWater
+    && systemItems.some((item) =>
+      item.kind === "assistant.notification.requested"
+      && item.dedupeKey.startsWith(
+        "assistant.notification.requested:signup-welcome:",
+      )
+    )
+    && systemItems.every((item) =>
+      item.kind === "member.activated"
+      || (
+        item.kind === "assistant.notification.requested"
+        && item.dedupeKey.startsWith(
+          "assistant.notification.requested:signup-welcome:",
+        )
+      )
+    );
   return {
     containsOnlyBrowserVaultRefreshWakes: response.items.length > 0
       && response.items.every((item) =>
@@ -696,7 +715,9 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
         && item.kind === "device-sync.wake"
       ),
     containsOnlyInitialMemberActivation,
-    containsOnlySafeSystemWakes: containsOnlyInitialMemberActivation
+    containsOnlySafeSystemWakes:
+      containsOnlyInitialMemberActivation
+      || containsSignupWelcomeActivation
       || (
         response.items.length > 0
         && response.items.every((item) =>
@@ -714,6 +735,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           )
         )
       ),
+    containsSignupWelcomeActivation,
     hasSystemWork: response.items.some((item) => item.lane === "system"),
   };
 }
@@ -4374,14 +4396,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }): Promise<HostedWorkspaceRunnerResult> => {
         const resolveForegroundRerunAssistantInputBatch = (
           passResult: HostedWorkspaceRunnerResult,
-        ): HostedWorkspaceRunnerAssistantInputBatch | null =>
-          hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
-            ? passResult.latestAssistantInputBatch
-            : null;
+          passWasForegroundCausalOnly: boolean,
+        ): HostedWorkspaceRunnerAssistantInputBatch | null => {
+          if (hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)) {
+            return passResult.latestAssistantInputBatch;
+          }
+          if (
+            !passWasForegroundCausalOnly
+            || readHostedWorkspaceInvocationRedactedNumber(
+              buildHostedWorkspaceRunnerRedactedStatus(passResult),
+              "hostedSystemMailboxRetryableFailed",
+            ) > 0
+          ) {
+            return null;
+          }
+          return accumulateHostedWorkspaceRunnerAssistantInputBatch({
+            assistantInputBatchLimit: mailboxBudget.fetchLimitPerLane,
+            current: null,
+            result: passResult.initialMailboxImport,
+          });
+        };
         const shouldContinueForegroundCausalPass = (
           passResult: HostedWorkspaceRunnerResult,
+          passWasForegroundCausalOnly: boolean,
         ): boolean =>
-          wakeInput.foregroundCausalOnly === true
+          passWasForegroundCausalOnly
           && passResult.assistantPhaseResult?.progressed === true
           && !mailboxBudgetExhausted()
           && readHostedWorkspaceInvocationRedactedNumber(
@@ -4437,6 +4476,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return result;
         };
 
+        let passWasForegroundCausalOnly = wakeInput.foregroundCausalOnly === true;
         let passResult = await runSingleForegroundPass(wakeInput);
         // Generation can finish during a provider pass. Stage it before
         // choosing the rerun batch so it enters the next Codex context ahead
@@ -4447,21 +4487,28 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           assistantProviderHandoffRequested
             ? null
             : prependReadyImageCompletionInputs(
-                resolveForegroundRerunAssistantInputBatch(passResult),
+                resolveForegroundRerunAssistantInputBatch(
+                  passResult,
+                  passWasForegroundCausalOnly,
+                ),
               );
         let continueForegroundCausalPass =
           !assistantProviderHandoffRequested
-          && shouldContinueForegroundCausalPass(passResult);
+          && shouldContinueForegroundCausalPass(
+            passResult,
+            passWasForegroundCausalOnly,
+          );
         while (
           options.shutdownSignal?.aborted !== true
           && (rerunAssistantInputBatch || continueForegroundCausalPass)
         ) {
           // The mailbox-import boundary belongs only to the first foreground
           // pass. A rerun is a new causal pass and must not inherit that tick.
+          const rerunForegroundCausalOnly =
+            rerunAssistantInputBatch === null
+            && passWasForegroundCausalOnly;
           passResult = await runSingleForegroundPass({
-            foregroundCausalOnly:
-              rerunAssistantInputBatch === null
-              && wakeInput.foregroundCausalOnly === true,
+            foregroundCausalOnly: rerunForegroundCausalOnly,
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
             initialMailboxImportContext:
@@ -4476,16 +4523,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
           });
+          passWasForegroundCausalOnly = rerunForegroundCausalOnly;
           await flushImageGenerationWork();
           rerunAssistantInputBatch =
             assistantProviderHandoffRequested
               ? null
               : prependReadyImageCompletionInputs(
-                  resolveForegroundRerunAssistantInputBatch(passResult),
+                  resolveForegroundRerunAssistantInputBatch(
+                    passResult,
+                    passWasForegroundCausalOnly,
+                  ),
                 );
           continueForegroundCausalPass =
             !assistantProviderHandoffRequested
-            && shouldContinueForegroundCausalPass(passResult);
+            && shouldContinueForegroundCausalPass(
+              passResult,
+              passWasForegroundCausalOnly,
+            );
         }
         return passResult;
       };
@@ -4624,14 +4678,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           input.rearmIdleCheckpointAfterEmptyProbe
             ? `${input.requestIdKind}-rearm`
             : input.requestIdKind;
-        const initialMailboxPrefetch = input.initialMailboxPrefetch
-          ?? await createHostedForegroundMailboxPrefetch({
+        let initialMailboxPrefetch = input.initialMailboxPrefetch ?? null;
+        if (!initialMailboxPrefetch?.lanes.includes("system")) {
+          initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
             lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
             limitPerLane: mailboxBudget.fetchLimitPerLane,
             requestId:
               `${requestId}:${foregroundProbeRequestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
             runnerInput: baseRunnerInput,
           });
+        }
         if (input.signal) {
           try {
             await raceHostedRuntimeCancellation(
@@ -4706,13 +4762,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               invocationLocalAssistantInputBatch,
             );
         }
-        const preCheckpointSystemPrefetch =
-          input.systemMailboxAdmission === "pre_checkpoint_safe"
-          && runtimeStateDirtyBeforeMailboxImport
-            ? await inspectHostedPreCheckpointSystemMailboxPrefetch(
-                initialMailboxPrefetch,
-              )
-            : null;
         const hasForegroundConversationWork =
           hostedAssistantInputBatchHasWork(
             invocationLocalAssistantInputBatch,
@@ -4720,18 +4769,59 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           || hostedMailboxImportHasForegroundConversationWork(
             conversationImport,
           );
+        let preCheckpointSystemPrefetch: Awaited<
+          ReturnType<typeof inspectHostedPreCheckpointSystemMailboxPrefetch>
+        > | null = null;
+        if (
+          hasForegroundConversationWork
+          || (
+            input.systemMailboxAdmission === "pre_checkpoint_safe"
+            && runtimeStateDirtyBeforeMailboxImport
+          )
+        ) {
+          try {
+            preCheckpointSystemPrefetch =
+              await inspectHostedPreCheckpointSystemMailboxPrefetch(
+                initialMailboxPrefetch,
+              );
+          } catch (error) {
+            if (input.signal?.aborted) {
+              throw error;
+            }
+            const retryPrefetch = await createHostedForegroundMailboxPrefetch({
+              lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+              limitPerLane: mailboxBudget.fetchLimitPerLane,
+              requestId:
+                `${requestId}:${foregroundProbeRequestIdKind}`
+                + `-system-inspection-retry:${idleWakeOrdinal + 1}`,
+              runnerInput: baseRunnerInput,
+            });
+            preCheckpointSystemPrefetch =
+              await inspectHostedPreCheckpointSystemMailboxPrefetch(
+                retryPrefetch,
+              );
+          }
+        }
+        const shouldImportSignupWelcomeBeforeConversation =
+          hasForegroundConversationWork
+          && preCheckpointSystemPrefetch?.containsSignupWelcomeActivation === true;
         const shouldRunLocalPreCheckpointSystemWork =
-          input.systemMailboxAdmission === "pre_checkpoint_safe"
-          && !hasForegroundConversationWork
+          (
+            input.systemMailboxAdmission === "pre_checkpoint_safe"
+            || hasForegroundConversationWork
+          )
+          && !shouldImportSignupWelcomeBeforeConversation
           && await hasHostedPreCheckpointLocalExternalCompletion({
             now: baseRunnerInput.now?.() ?? new Date().toISOString(),
             vaultRoot: restored.vaultRoot,
           });
-        const shouldRunConversationAssistant = shouldContinue() && (
-          input.runAssistantWithoutMailboxWork === true
-          || hasForegroundConversationWork
-          || shouldRunLocalPreCheckpointSystemWork
-        );
+        const shouldRunConversationAssistant = shouldContinue()
+          && !shouldImportSignupWelcomeBeforeConversation
+          && (
+            input.runAssistantWithoutMailboxWork === true
+            || hasForegroundConversationWork
+            || shouldRunLocalPreCheckpointSystemWork
+          );
         if (!shouldContinue()) {
           await finishMailboxImportWithoutAssistant(conversationImport);
           return false;
@@ -4760,6 +4850,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return true;
         }
         const shouldImportSystemMailbox = input.systemMailboxAdmission === "all"
+          || shouldImportSignupWelcomeBeforeConversation
           || preCheckpointSystemPrefetch?.containsOnlySafeSystemWakes === true;
         if (!shouldImportSystemMailbox) {
           if (preCheckpointSystemPrefetch?.hasSystemWork !== true) {
@@ -4794,7 +4885,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         try {
           await runForegroundPassAfterMailboxImport({
             foregroundCausalOnly:
-              input.systemMailboxAdmission === "pre_checkpoint_safe",
+              input.systemMailboxAdmission === "pre_checkpoint_safe"
+              || shouldImportSignupWelcomeBeforeConversation,
             initialAssistantInputBatch:
               invocationLocalAssistantInputBatch,
             initialMailboxImport: systemImport,
@@ -4942,6 +5034,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
       };
 
+      const initialMailboxPrefetchInspection = initialMailboxImportResult.prefetch
+        ? await inspectHostedPreCheckpointSystemMailboxPrefetch(
+            initialMailboxImportResult.prefetch,
+          )
+        : null;
+      const initialSignupWelcomePrecedesConversation =
+        hostedMailboxImportHasForegroundConversationWork(initialMailboxImport)
+        && initialMailboxPrefetchInspection?.containsSignupWelcomeActivation === true;
       result = await runForegroundPass({
         ...(systemMailboxForegroundWakePrefetch
           ? {
@@ -4957,6 +5057,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               initialMailboxPrefetch: initialMailboxImportResult.prefetch,
             }),
         latencySeed: null,
+        ...(initialSignupWelcomePrecedesConversation
+          ? { foregroundCausalOnly: true }
+          : {}),
         ...(initialProviderStartCriticalPath
           ? { providerStartCriticalPath: initialProviderStartCriticalPath }
           : {}),

@@ -14875,6 +14875,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it.each([
     {
       dedupeKey:
+        "assistant.notification.requested:signup-welcome:member_synthetic",
+      label: "signup welcome",
+    },
+    {
+      dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_123",
       label: "phone-call result",
     },
@@ -14983,6 +14988,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         3,
         expect.objectContaining({
           allowedMailboxDedupeKeyPrefixes: [
+            "assistant.notification.requested:signup-welcome:",
             "assistant.notification.requested:phone-call-result:",
             "assistant.notification.requested:usage-referral-reward:",
             "aask_done_",

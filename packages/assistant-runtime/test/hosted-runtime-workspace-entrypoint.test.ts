@@ -7616,6 +7616,15 @@ describe("hosted workspace runtime entrypoint", () => {
       preCheckpointSafe: true,
     },
     {
+      conversationPrefixCount: 1,
+      dedupeKey:
+        "assistant.notification.requested:signup-welcome:member_synthetic",
+      kind: "assistant.notification.requested",
+      label: "signup welcome overlapping the first conversation",
+      preCheckpointSafe: true,
+      precedesForegroundConversation: true,
+    },
+    {
       dedupeKey:
         "assistant.notification.requested:usage-referral-reward:referral_synthetic",
       kind: "assistant.notification.requested",
@@ -7657,7 +7666,12 @@ describe("hosted workspace runtime entrypoint", () => {
       try {
         const initialPrefetchFails = "initialPrefetchFails" in completion
           && completion.initialPrefetchFails === true;
-        if (!initialPrefetchFails) {
+        const precedesForegroundConversation =
+          "precedesForegroundConversation" in completion
+          && completion.precedesForegroundConversation === true;
+        const restoresWorkspaceSnapshot =
+          initialPrefetchFails || precedesForegroundConversation;
+        if (!restoresWorkspaceSnapshot) {
           await initializeVault({ createdAt: TEST_NOW, vaultRoot });
           await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
         }
@@ -7745,7 +7759,20 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             async importItem(item) {
               events.push(`mailbox.importItem:${item.item.id}`);
-              return { status: "imported" };
+              const assistantInputId =
+                item.item.lane === "conversation"
+                && precedesForegroundConversation
+                  ? await stageAssistantInputEventForMailboxItem({
+                      item: item.item,
+                      vaultRoot,
+                    })
+                  : null;
+              return {
+                ...(assistantInputId
+                  ? { assistantInputId }
+                  : {}),
+                status: "imported",
+              };
             },
             platform: createPlatform({
               mailboxPort,
@@ -7753,17 +7780,19 @@ describe("hosted workspace runtime entrypoint", () => {
                 checkpointRequests,
                 events,
                 workspace: createWorkspaceState({
-                  ...(initialPrefetchFails
+                  ...(restoresWorkspaceSnapshot
                     ? {
                         snapshotRef: createWorkspaceSnapshotV2Ref(
-                          "external-completion-prefetch-retry",
+                          initialPrefetchFails
+                            ? "external-completion-prefetch-retry"
+                            : "external-completion-overlap",
                         ),
                       }
                     : {}),
                   version: "0",
                 }),
               }),
-              ...(initialPrefetchFails
+              ...(restoresWorkspaceSnapshot
                 ? {
                     workspaceSnapshotPort: {
                       async abortSnapshotSession() {
@@ -7792,8 +7821,24 @@ describe("hosted workspace runtime entrypoint", () => {
                 : {}),
             }),
             runtimeWakeSignal,
-            async runAssistantPhase() {
+            async runAssistantPhase(phaseInput) {
               assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase-mode:${
+                  phaseInput.foregroundCausalOnly === true
+                    ? "causal"
+                    : "foreground"
+                }`,
+              );
+              if (precedesForegroundConversation) {
+                return {
+                  checkpointReason:
+                    phaseInput.foregroundCausalOnly === true
+                      ? "system_mailbox_receipt"
+                      : "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
               if (assistantPhaseCalls === 1 && !withConversationPrefix) {
                 setTimeout(() => {
                   mailboxItems.push(createMailboxItem({
@@ -7818,7 +7863,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
         const result = await withRealTimeout(
           resultPromise,
-          2_000,
+          precedesForegroundConversation ? 10_000 : 2_000,
           () => events.join(","),
         );
         const importIndex = requireEventIndex(
@@ -7835,10 +7880,27 @@ describe("hosted workspace runtime entrypoint", () => {
         } else {
           assert.ok(idleCheckpointIndex < importIndex, events.join(","));
         }
+        if (
+          "precedesForegroundConversation" in completion
+          && completion.precedesForegroundConversation === true
+        ) {
+          const causalPhaseIndex = events.indexOf("assistant.phase-mode:causal");
+          assert.notEqual(causalPhaseIndex, -1, events.join(","));
+          assert.ok(importIndex < causalPhaseIndex, events.join(","));
+          assert.ok(
+            causalPhaseIndex
+              < requireEventIndex(events, "assistant.phase-mode:foreground"),
+            events.join(","),
+          );
+        }
         assert.equal(
           result.status,
           conversationHighWaterAhead
-            || (withConversationPrefix && !initialPrefetchFails)
+            || (
+              withConversationPrefix
+              && !initialPrefetchFails
+              && !precedesForegroundConversation
+            )
             ? "scheduled"
             : "idle",
         );

@@ -2925,6 +2925,15 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
       expect.objectContaining({
+        route: {
+          channel: "telegram",
+          deliverySource: null,
+          deliveryTarget: "telegram_thread_123",
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
         slug: "finish-onboarding-followup",
       }),
     );

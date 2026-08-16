@@ -1827,7 +1827,7 @@ function hostedMailboxImportFetchedSystemLane(
   return result.importResult.fetchedLanes?.includes("system") === true;
 }
 
-function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
+export function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
   assistantInputBatchLimit: number;
   current: HostedWorkspaceRunnerAssistantInputBatch | null;
   result: HostedMailboxImportCheckpointResult;

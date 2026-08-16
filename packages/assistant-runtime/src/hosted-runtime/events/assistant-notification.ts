@@ -481,8 +481,7 @@ function buildOnboardingFollowupAutomationRoute(
     deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
     identityId: route.identityId,
     participantId: delivery.kind === "participant" ? delivery.target : null,
-    threadId:
-      route.threadId ?? (delivery.kind === "thread" ? delivery.target : null),
+    threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
   };
 }

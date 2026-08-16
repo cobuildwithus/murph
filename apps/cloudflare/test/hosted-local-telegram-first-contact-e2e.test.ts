@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
@@ -74,15 +75,11 @@ describe("hosted local Telegram auto-reply e2e", () => {
     telegramStub = null;
   }, 120_000);
 
-  it("sends Telegram typing and a reply after an inbound Telegram message", async () => {
+  it("sends signup welcome before an overlapping first Telegram reply", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
-    await requireScenario().runWake(buildSignupWelcomeActivationWake(userId), userId);
-
-    await requireScenario().waitForHostedCompletion(userId);
-    await requireTelegramStub().waitForRequestsToSettle({
-      scenario: requireScenario(),
-      userId,
-    });
+    const signupWelcomeWakes = buildSignupWelcomeWakes(userId);
+    await requireScenario().enqueueWake(signupWelcomeWakes.activation, userId);
+    await requireScenario().enqueueWake(signupWelcomeWakes.notification, userId);
 
     requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT], {
       matchInputContains: defaultTelegramInboundText,
@@ -442,14 +439,15 @@ function buildActivationWake(userId: string) {
   });
 }
 
-function buildSignupWelcomeActivationWake(userId: string) {
+function buildSignupWelcomeWakes(userId: string) {
   const identifierBlind = createHostedAssistantConversationIdentifierBlind({
     secret: buildTelegramThreadId(userId),
     userId,
   });
   const threadId = buildTelegramThreadId(userId);
+  const occurredAt = new Date().toISOString();
 
-  return buildHostedExecutionMemberActivatedWake({
+  const activation = buildHostedExecutionMemberActivatedWake({
     eventId: `member.activated:local:${userId}:evt_telegram_signup_welcome`,
     memberId: userId,
     memberChannels: {
@@ -457,7 +455,7 @@ function buildSignupWelcomeActivationWake(userId: string) {
       linq: false,
       telegram: true,
     },
-    occurredAt: new Date().toISOString(),
+    occurredAt,
     signupWelcome: {
       route: {
         actorId: null,
@@ -476,6 +474,38 @@ function buildSignupWelcomeActivationWake(userId: string) {
       text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     },
   });
+  const signupWelcome = activation.signupWelcome;
+  if (!signupWelcome) {
+    throw new Error("Expected a signup welcome payload.");
+  }
+  const deliveryIdentity = `signup-welcome:${userId}`;
+  return {
+    activation,
+    notification: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId:
+        `assistant.notification.requested:signup-welcome:${userId}:${activation.eventId}`,
+      memberId: userId,
+      notification: {
+        deliveryDedupeToken: deliveryIdentity,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: deliveryIdentity,
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: [
+          "Prepare the first in-chat onboarding reply.",
+          "Use this user-facing reply only:",
+          MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        ].join("\n\n"),
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        },
+        route: signupWelcome.route,
+      },
+      occurredAt,
+    }),
+  };
 }
 
 function buildInboundTelegramWake(

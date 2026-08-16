@@ -314,6 +314,7 @@ const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_WAKE_KINDS = [
   "assistant.notification.requested",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
+  "assistant.notification.requested:signup-welcome:",
   "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
   "aask_done_",
