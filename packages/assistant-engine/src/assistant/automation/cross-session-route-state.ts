@@ -139,6 +139,7 @@ export function resolveAssistantAutoReplyInputExactRoute(input: {
 
   const actorScope = resolveAssistantAutoReplyActorScope({
     actorId: input.conversation.actorId,
+    channel,
     threadIsDirect: input.conversation.threadIsDirect,
   })
   const threadId = normalizeNullableString(input.conversation.threadId)
@@ -200,6 +201,7 @@ export function resolveAssistantAutoReplyOutboxExactRoute(
 
   const actorScope = resolveAssistantAutoReplyActorScope({
     actorId: intent.actorId,
+    channel,
     threadIsDirect: intent.threadIsDirect,
   })
   const threadId = normalizeNullableString(intent.threadId)
@@ -1154,10 +1156,15 @@ function resolveExactLinqProviderThreadTarget(
 
 function resolveAssistantAutoReplyActorScope(input: {
   actorId: string | null | undefined
+  channel: string
   threadIsDirect: boolean | null | undefined
 }): string | null {
   return normalizeNullableString(input.actorId)
-    ?? (input.threadIsDirect === true ? '@direct' : null)
+    ?? (
+      input.channel === 'telegram' && input.threadIsDirect === true
+        ? '@direct'
+        : null
+    )
 }
 
 function normalizeRouteChannel(value: string | null | undefined): string | null {

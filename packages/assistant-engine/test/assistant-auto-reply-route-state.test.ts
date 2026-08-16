@@ -88,6 +88,20 @@ describe('assistant auto-reply exact route state', () => {
       }),
       deliveryTarget: 'serialized-email-target-a',
     })).digest).not.toBe(emailInputA.digest)
+    expect(resolveAssistantAutoReplyInputExactRoute({
+      conversation: createConversation({
+        actorId: null,
+        source: 'email',
+        threadIsDirect: true,
+      }),
+      deliveryTarget: 'serialized-email-target-a',
+    })).toBeNull()
+    expect(resolveAssistantAutoReplyOutboxExactRoute(createOutboxIntent({
+      actorId: null,
+      channel: 'email',
+      target: 'serialized-email-target-c',
+      threadIsDirect: true,
+    }))).toBeNull()
 
     const telegramRoute = requireRoute(resolveAssistantAutoReplyInputExactRoute({
       conversation: createConversation({ source: 'telegram' }),
