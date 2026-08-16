@@ -354,6 +354,38 @@ describe("shared-host verification slots", () => {
     expect(readdirSync(stateRoot)).toEqual([]);
   });
 
+  it("a cancellation during post-leader reaping keeps ownership until the descendant is dead", async () => {
+    const stateRoot = makeTempRoot();
+    const child = startCommand("cancelled during reap", stateRoot, exitingLeaderTreeSource, {
+      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "600",
+      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "300",
+    });
+
+    const [parentPid, grandchildPid] = await waitForPids(child);
+    ownedDescendantPids.add(parentPid);
+    ownedDescendantPids.add(grandchildPid);
+
+    // Wait for the deadline to fell the leader while the TERM-ignoring
+    // grandchild survives into the reaping grace, then cancel externally.
+    const reapWindowDeadline = Date.now() + 2_000;
+    while (isProcessRunning(parentPid) || !isProcessRunning(grandchildPid)) {
+      if (Date.now() > reapWindowDeadline) {
+        throw new Error("Never reached the post-leader reaping window");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    child.kill("SIGTERM");
+
+    const status = await waitForExit(child);
+    expect(status).toBe(143);
+    // Ownership must have been held until the whole group was gone: the
+    // grandchild is already dead by the time the supervisor returns.
+    expect(isProcessRunning(grandchildPid)).toBe(false);
+    ownedDescendantPids.delete(grandchildPid);
+    await waitForOwnedProcessExit(parentPid);
+    expect(readdirSync(stateRoot)).toEqual([]);
+  });
+
   it("external cancellation with a configured deadline escalates to KILL and reaps the group", async () => {
     const stateRoot = makeTempRoot();
     const child = startCommand("cancelled command", stateRoot, wedgedTreeSource, {

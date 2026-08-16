@@ -269,16 +269,23 @@ async function runCommand(commandArgs, env) {
       clearTimeout(killTimer);
       reject(error);
     });
+    // The direct child's exit must not release process ownership yet: with a
+    // command deadline configured, a surviving descendant in the detached
+    // group is still owned work, and a termination signal arriving during
+    // reaping must keep targeting that group instead of exiting immediately.
     child.on("exit", (code, signal) => {
-      activeChild = null;
       clearTimeout(deadlineTimer);
       clearTimeout(killTimer);
       resolve({ code, pid: child.pid ?? null, signal });
     });
   });
 
-  if (commandTimeoutMs > 0 && exitState.pid !== null) {
-    await reapCommandProcessGroup(exitState.pid);
+  try {
+    if (commandTimeoutMs > 0 && exitState.pid !== null) {
+      await reapCommandProcessGroup(exitState.pid);
+    }
+  } finally {
+    activeChild = null;
   }
 
   if (forcedExitCode !== null) {
@@ -290,6 +297,11 @@ async function runCommand(commandArgs, env) {
   return exitState.code ?? 1;
 }
 
+// Group signals tolerate EPERM as well as ESRCH: on macOS a killed group
+// member that has not been reaped yet (a zombie) makes kill(-pgid, ...)
+// return EPERM even though there is nothing left to signal. The group probe
+// treats that same state as "still draining" so the reaper keeps waiting
+// until the member is reaped and the group reports ESRCH.
 function signalProcessGroup(pid, signalName) {
   if (!pid) {
     return;
@@ -297,7 +309,7 @@ function signalProcessGroup(pid, signalName) {
   try {
     process.kill(-pid, signalName);
   } catch (error) {
-    if (!isMissingProcessError(error)) {
+    if (!isMissingProcessError(error) && !isNotPermittedProcessError(error)) {
       throw error;
     }
   }
@@ -430,15 +442,15 @@ function handleTerminationSignal(signalName, exitCode) {
     process.exit(exitCode);
   }
 
-  try {
-    if (useDetachedChildProcessGroup) {
-      process.kill(-activeChild.pid, signalName);
-    } else {
+  if (useDetachedChildProcessGroup) {
+    signalProcessGroup(activeChild.pid, signalName);
+  } else {
+    try {
       activeChild.kill(signalName);
-    }
-  } catch (error) {
-    if (!isMissingProcessError(error)) {
-      throw error;
+    } catch (error) {
+      if (!isMissingProcessError(error)) {
+        throw error;
+      }
     }
   }
 
@@ -562,6 +574,10 @@ function isMissingPathError(error) {
 
 function isMissingProcessError(error) {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "ESRCH");
+}
+
+function isNotPermittedProcessError(error) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "EPERM");
 }
 
 function delay(delayMs) {
