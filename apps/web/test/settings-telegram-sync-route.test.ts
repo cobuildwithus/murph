@@ -173,7 +173,7 @@ describe("settings telegram sync route", () => {
     });
   });
 
-  it("returns a retryable error when committed route restoration cannot re-arm recovery", async () => {
+  it("keeps committed route restoration successful when its recovery hint fails", async () => {
     mocks.rearmHostedPhoneCallResultNotificationRecovery.mockRejectedValueOnce(
       hostedOnboardingError({
         code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
@@ -194,14 +194,12 @@ describe("settings telegram sync route", () => {
       }),
     );
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
     expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledOnce();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
     await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
-        retryable: true,
-      },
+      ok: true,
+      telegramUserId: "456",
     });
   });
 

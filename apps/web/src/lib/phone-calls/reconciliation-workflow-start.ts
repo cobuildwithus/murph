@@ -3,9 +3,10 @@ import type { PrismaClient } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { startHostedPointerWorkflow } from "../hosted-onboarding/workflow-start";
 import { getPrisma } from "../prisma";
-import type {
-  HostedPhoneCallReconciliationWorkflowInput,
-  HostedPhoneCallReconciliationWorkflowStartResult,
+import {
+  HOSTED_PHONE_CALL_RECONCILIATION_SIGNAL_TIMEOUT_MS,
+  type HostedPhoneCallReconciliationWorkflowInput,
+  type HostedPhoneCallReconciliationWorkflowStartResult,
 } from "./reconciliation-workflow-types";
 import type {
   HostedPhoneCallReconciliationHookResumer,
@@ -50,6 +51,13 @@ export async function signalHostedPhoneCallResultNotificationRecovery(input: {
   signal?: AbortSignal;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
+  const timeoutSignal = AbortSignal.timeout(
+    HOSTED_PHONE_CALL_RECONCILIATION_SIGNAL_TIMEOUT_MS,
+  );
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, timeoutSignal])
+    : timeoutSignal;
+  signal.throwIfAborted();
   // Signal one existing per-call Workflow. A terminal outcome callback signals
   // the next member-local obligation, so restoration never fans out work or
   // treats transport-retention artifacts as delivery truth.
@@ -68,6 +76,7 @@ export async function signalHostedPhoneCallResultNotificationRecovery(input: {
       resultNotificationChannel: "telegram",
     },
   });
+  signal.throwIfAborted();
   if (!call) {
     return false;
   }
@@ -78,7 +87,7 @@ export async function signalHostedPhoneCallResultNotificationRecovery(input: {
   await signalHostedPhoneCallReconciliation({
     ...(input.hookResumer ? { hookResumer: input.hookResumer } : {}),
     phoneCallId: call.id,
-    signal: input.signal ?? new AbortController().signal,
+    signal,
   });
   return true;
 }

@@ -135,10 +135,15 @@ export async function completeHostedPrivyVerification(input: {
 
     assertHostedMemberNotSuspended(member);
     if (memberResolution.identity.telegram?.telegramUserId) {
-      await signalHostedPhoneCallResultNotificationRecovery({
-        memberId: member.id,
-        prisma,
-      });
+      try {
+        await signalHostedPhoneCallResultNotificationRecovery({
+          memberId: member.id,
+          prisma,
+        });
+      } catch {
+        // The per-call Workflow timer owns eventual recovery. Authentication
+        // must not fail after its durable identity/routing work committed.
+      }
     }
 
     const messagingSetupState = await readHostedMemberMessagingSetupState({

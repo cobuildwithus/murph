@@ -51,6 +51,7 @@ import {
 } from "@/src/lib/phone-calls/reconciliation-workflow-steps";
 import {
   buildHostedPhoneCallReconciliationHookToken,
+  HOSTED_PHONE_CALL_RECONCILIATION_SIGNAL_TIMEOUT_MS,
   HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK,
   HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK,
   HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_STEP_MAX_RETRIES,
@@ -156,6 +157,40 @@ describe("hosted phone-call reconciliation Workflow", () => {
     })).rejects.toThrow("workflow unavailable");
 
     expect(hookResumer).toHaveBeenCalledOnce();
+  });
+
+  it("bounds a stalled result-recovery hint when no caller signal exists", async () => {
+    const timeoutController = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(
+      timeoutController.signal,
+    );
+    const hookResumer = vi.fn(() => new Promise<never>(() => undefined));
+    mocks.getPrisma.mockReturnValue({
+      hostedPhoneCall: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "hpc_result_pending",
+          resultDeliveryStatus: "pending",
+        }),
+      },
+    });
+
+    try {
+      const recovery = signalHostedPhoneCallResultNotificationRecovery({
+        hookResumer,
+        memberId: "member_123",
+      });
+      await vi.waitFor(() => {
+        expect(hookResumer).toHaveBeenCalledOnce();
+      });
+      timeoutController.abort();
+
+      await expect(recovery).rejects.toMatchObject({ name: "AbortError" });
+      expect(timeoutSpy).toHaveBeenCalledWith(
+        HOSTED_PHONE_CALL_RECONCILIATION_SIGNAL_TIMEOUT_MS,
+      );
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   it("does not signal past an older provider-owned delivery", async () => {

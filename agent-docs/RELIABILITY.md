@@ -1964,12 +1964,19 @@ Last verified: 2026-08-16
   no-effect outcome returns either a queued or sending generation to `pending`;
   a may-have-succeeded outcome remains terminally ambiguous. Every committed
   exact-route bind and each terminal callback re-arms at most one oldest member-local
-  nonterminal call, so there is no second queue or fanout scheduler. Tracked
+  nonterminal call, so there is no second queue or fanout scheduler. Every
+  recovery-hint attempt uses the existing five-second reconciliation-signal
+  bound. Browser authentication and settings treat a failed or timed-out hint
+  as best-effort after their route mutation commits, so they cannot turn a
+  durable success into a user-visible failure. Exact webhook and terminal-
+  callback replay owners may propagate that bounded failure because their
+  idempotent retry re-attempts only the same latency hint; dropping every hint
+  still converges through the sole per-call Workflow timer. Tracked
   direct results are required-send and bind the exact live Telegram route into
   each generation. Route-restoration requests do not acknowledge success until
-  they have synchronously re-armed the oldest obligation; Telegram webhook
-  handling first hands off its foreground wake, then returns a retryable error
-  when re-arm fails so an idempotent retry repeats the lookup and start.
+  replay-capable webhook handling has synchronously re-armed the oldest
+  obligation; it first hands off its foreground wake, then returns a retryable
+  error when re-arm fails so an idempotent retry repeats the lookup and start.
   Request-key replay still requires exact stored-channel
   equality, including legacy null, before provider work. Tracked and
   generationless manual direct transfers write the same bounded completion

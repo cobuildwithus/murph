@@ -1824,7 +1824,11 @@ describe("completeHostedPrivyVerification", () => {
     );
     await expect(
       completeHostedPrivyVerification(verificationInput),
-    ).rejects.toBe(recoveryError);
+    ).resolves.toMatchObject({
+      memberId: existingMember.id,
+      stage: "checkout",
+    });
+    expect(phoneCallResultRecoveryMocks.rearmRequired).toHaveBeenCalledTimes(2);
   });
 
   it("fails closed when Telegram auth resolves to multiple members across blind-index read candidates", async () => {

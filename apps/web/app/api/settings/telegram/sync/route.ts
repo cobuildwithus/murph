@@ -77,11 +77,16 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  await signalHostedPhoneCallResultNotificationRecovery({
-    memberId: auth.member.id,
-    prisma,
-    signal: request.signal,
-  });
+  try {
+    await signalHostedPhoneCallResultNotificationRecovery({
+      memberId: auth.member.id,
+      prisma,
+      signal: request.signal,
+    });
+  } catch {
+    // The binding is already durable and the per-call Workflow timer owns
+    // eventual recovery; this wake only reduces result-delivery latency.
+  }
 
   if (channelSyncDispatch) {
     await signalHostedMailboxAppendBestEffort({
