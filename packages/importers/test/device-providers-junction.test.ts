@@ -1365,6 +1365,194 @@ test("Junction complete source days reject lossy rows before the canonical write
   }
 });
 
+test.each([
+  { timeZone: "America/Chicago", zoneSlug: "utc-negative" },
+  { timeZone: "Asia/Tokyo", zoneSlug: "utc-positive" },
+])("Junction temporal reduction admits only genuinely clocked readings ($zoneSlug)", ({ timeZone }) => {
+  const mixedRows = [
+    // Date-only rows: raw-day membership only, never temporal samples.
+    { timestamp: "2026-04-22", value: 88 },
+    { timestamp: "2026-04-22", value: 87 },
+    // Floating clocks without seconds resolve with seconds = 0.
+    { timestamp: "2026-04-22 07:00", value: 94 },
+    { timestamp: "2026-04-22 07:05", value: 95 },
+    { timestamp: "2026-04-22 19:00", value: 96 },
+    { timestamp: "2026-04-22 19:05:30", value: 97 },
+  ];
+  const payload = normalizeCompleteTemporalSourceDay({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: {
+      blood_oxygen: {
+        groups: {
+          garmin: [{
+            data: mixedRows,
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  }, "2026-04-22", "2026-04-24T12:00:00.000Z", timeZone);
+  const [artifact] = findJunctionTemporalFeatureArtifacts(payload, "blood-oxygen");
+  const content = artifact?.content as Record<string, unknown>;
+
+  assert.equal(content.sampleCount, 4);
+  assert.equal(content.status, "complete");
+  const expectedFirstInstant = timeZone === "America/Chicago"
+    ? "2026-04-22T12:00:00.000Z"
+    : "2026-04-21T22:00:00.000Z";
+  assert.equal(content.firstSampleAt, expectedFirstInstant);
+  const burden = payload.events?.find((event) =>
+    event.fields?.metric === "spo2-samples-below-90-percent"
+  );
+  // The 88/87 date-only readings never reach the reducer, so the burden from
+  // genuinely clocked readings is zero.
+  assert.equal(burden?.fields?.value, 0);
+  const qualifiers = burden?.fields?.qualifiers as Record<string, unknown> | undefined;
+  assert.equal(qualifiers?.sampleCount, 4);
+  assert.doesNotMatch(JSON.stringify(content), /23:59:59|T00:00:00\.000Z","value":88/u);
+});
+
+test("Junction complete days fail retryably for clocks the authority timezone cannot resolve", () => {
+  assert.throws(
+    () => normalizeCompleteTemporalSourceDay({
+      importedAt: "2026-03-10T12:00:00.000Z",
+      timeseries: {
+        stress_level: {
+          groups: {
+            garmin: [{
+              data: [
+                { timestamp: "2026-03-08 01:30", value: 20 },
+                // 02:30 falls inside the America/Chicago spring-forward gap.
+                { timestamp: "2026-03-08 02:30", value: 30 },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    }, "2026-03-08", "2026-03-10T12:00:00.000Z", "America/Chicago"),
+    JunctionSparseCalendarRepairNormalizationError,
+  );
+});
+
+test("Junction date-only complete days retract stale facets and keep ordinary facts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-date-only-complete-day");
+  const clockedRows = [
+    { timestamp: "2026-04-22 07:00", value: 20 },
+    { timestamp: "2026-04-22 07:05", value: 30 },
+    { timestamp: "2026-04-22 19:00", value: 70 },
+    { timestamp: "2026-04-22 19:05", value: 80 },
+  ];
+  const dateOnlyRows = [
+    { timestamp: "2026-04-22", value: 55 },
+  ];
+  const importDay = (
+    rows: readonly Record<string, unknown>[],
+    revisionAt: string,
+    withAuthority: boolean,
+  ) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      ...(withAuthority
+        ? {
+            completeSourceDay: {
+              connectionId: "junction-test-connection",
+              dayKey: "2026-04-22",
+              resources: ["stress_level"],
+              revisionAt,
+              timeZone: "UTC",
+            },
+          }
+        : {}),
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-account-hash-1",
+        importedAt: revisionAt,
+        timeseries: {
+          stress_level: {
+            groups: {
+              garmin: [{ data: rows, source: { provider: "garmin", type: "watch" } }],
+            },
+          },
+        },
+      },
+    },
+    { corePort: coreRuntime },
+  );
+  const liveRecordsOf = async () => latestLiveRecords(
+    await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/events/2026/2026-04.jsonl",
+    }),
+  );
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    // Ordinary daily aggregation still admits date-only rows (base behavior).
+    const ordinary = await importDay(dateOnlyRows, "2026-04-24T10:00:00.000Z", false);
+    assert.equal(
+      ordinary.events.filter((event) =>
+        event.kind === "observation" && event.metric === "stress-level"
+      ).length,
+      1,
+    );
+
+    const seeded = await importDay(clockedRows, "2026-04-24T12:00:00.000Z", true);
+    assert.equal(
+      seeded.events.filter((event) =>
+        event.kind === "observation"
+        && typeof event.metric === "string"
+        && event.metric.startsWith("stress-")
+        && event.metric !== "stress-level"
+      ).length,
+      3,
+    );
+
+    // A structurally complete day holding only date-only rows succeeds with an
+    // empty facet set, so authoritative replacement retracts the stale facets
+    // while the ordinary daily fact is untouched.
+    await importDay(dateOnlyRows, "2026-04-24T13:00:00.000Z", true);
+    const afterRetraction = await liveRecordsOf();
+    assert.equal(
+      afterRetraction.filter((record) =>
+        record.kind === "observation"
+        && typeof record.metric === "string"
+        && record.metric.startsWith("stress-")
+        && record.metric !== "stress-level"
+      ).length,
+      0,
+    );
+    const ordinaryFacts = afterRetraction.filter((record) =>
+      record.kind === "observation" && record.metric === "stress-level"
+    );
+    assert.equal(ordinaryFacts.length, 1);
+    assert.equal(storedObservationValue(ordinaryFacts[0]), 55);
+    assert.deepEqual(
+      ordinaryFacts.map((record) => eventRevisionFromLifecycle(record.lifecycle)),
+      [1],
+    );
+
+    // Byte-identical replay of the date-only complete day appends nothing.
+    const ledgerBefore = await readFile(
+      join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      "utf8",
+    );
+    await importDay(dateOnlyRows, "2026-04-24T14:00:00.000Z", true);
+    const ledgerAfter = await readFile(
+      join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      "utf8",
+    );
+    assert.equal(ledgerAfter, ledgerBefore);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction temporal replays converge without canonical growth and reassert through the set seam", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-temporal-replay-bounds");
   const rowsFor = (values: readonly number[]) => values.map((value, index) => ({

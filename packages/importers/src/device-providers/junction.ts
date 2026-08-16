@@ -3755,20 +3755,21 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       }
     }
 
-    if (ownsTemporalFeatures && !temporalFeatureImportSuppressed) {
+    const temporalSourceDay = ownsTemporalFeatures && !temporalFeatureImportSuppressed
+      ? input.context.temporalFeatureSourceDay
+      : undefined;
+    const temporalSampleAt = temporalSourceDay
+      ? resolveJunctionTemporalFeatureInstant(timestamp, temporalSourceDay.timeZone)
+      : null;
+    if (temporalSourceDay && temporalSampleAt !== null) {
       temporalFeatureInputCount += 1;
       if (temporalFeatureInputCount > JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT) {
         temporalFeatureImportSuppressed = true;
         for (const current of temporalAggregates.values()) {
           delete current.temporalFeatureSamples;
         }
-      } else if (input.context.temporalFeatureSourceDay) {
-        const sourceDay = input.context.temporalFeatureSourceDay;
-        const temporalSampleAt = resolveJunctionTemporalFeatureSampleAt(
-          timestamp,
-          sampleAt,
-          sourceDay.timeZone,
-        );
+      } else {
+        const sourceDay = temporalSourceDay;
         const vaultDayKey = toLocalDayKey(temporalSampleAt, sourceDay.timeZone);
         if (vaultDayKey !== sourceDay.dayKey) {
           // The provider fetched the exact authorized window, so a row that
@@ -4067,32 +4068,35 @@ function resolveJunctionTemporalFeatureVaultLocalMinuteOfDay(
   }
 }
 
-function resolveJunctionTemporalFeatureSampleAt(
+// Temporal samples require a genuine provider clock. Date-only rows prove raw
+// source-day membership for ordinary daily facts but return null here so they
+// never become temporal observations. A supplied clock that cannot resolve in
+// the retained authority timezone (a daylight-saving gap or malformed clock)
+// fails the complete-day import retryably instead of inventing an instant.
+function resolveJunctionTemporalFeatureInstant(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
-  fallbackSampleAt: string,
   timeZone: string,
-): string {
-  if (timestamp.timestampSemantics !== "floating" || !timestamp.observedAtRaw) {
-    return fallbackSampleAt;
+): string | null {
+  if (timestamp.timestampSemantics !== "floating") {
+    return timestamp.occurredAt ?? timestamp.recordedAt ?? null;
+  }
+  if (!timestamp.observedAtRaw) {
+    return null;
   }
   const match = timestamp.observedAtRaw.match(
     /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/u,
   );
   if (!match) {
-    return fallbackSampleAt;
+    return null;
   }
-  const target = match.slice(1, 7).map(Number);
-  if (target.some((part) => !Number.isInteger(part))) {
-    return fallbackSampleAt;
-  }
-  const [year, month, day, hour, minute, second] = target as [
-    number,
+  const [year, month, day, hour, minute] = match.slice(1, 6).map(Number) as [
     number,
     number,
     number,
     number,
     number,
   ];
+  const second = match[6] === undefined ? 0 : Number(match[6]);
   const targetPseudoMs = Date.UTC(year, month - 1, day, hour, minute, second);
   let candidateMs = targetPseudoMs;
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -4108,14 +4112,17 @@ function resolveJunctionTemporalFeatureSampleAt(
     candidateMs += targetPseudoMs - observedPseudoMs;
   }
   const resolved = formatTimeZoneDateTimeParts(candidateMs, timeZone);
-  return resolved.year === year
-      && resolved.month === month
-      && resolved.day === day
-      && resolved.hour === hour
-      && resolved.minute === minute
-      && resolved.second === second
-    ? new Date(candidateMs).toISOString()
-    : fallbackSampleAt;
+  if (
+    resolved.year !== year
+    || resolved.month !== month
+    || resolved.day !== day
+    || resolved.hour !== hour
+    || resolved.minute !== minute
+    || resolved.second !== second
+  ) {
+    throw new JunctionSparseCalendarRepairNormalizationError();
+  }
+  return new Date(candidateMs).toISOString();
 }
 
 function withJunctionCompactTimeseriesMetadata(

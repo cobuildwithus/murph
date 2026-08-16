@@ -225,7 +225,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    that cannot normalize into an owned source, usable value, and the target
    vault day fails the import retryably before any canonical write. A
    structurally empty grouped response remains the only valid authoritative
-   empty. The authorized result
+   empty. Temporal samples come only from rows with a genuine provider clock:
+   date-only rows prove raw-day membership and stay ordinary daily inputs with
+   zero temporal coverage, omitted seconds resolve as zero, and a supplied
+   clock that cannot resolve in the retained authority timezone fails the
+   import retryably instead of fabricating an instant. The authorized result
    treats the fixed feature facets as an unversioned replacement set whose
    ordering authority is the serialized authoritative-set seam itself: a facet
    declared current with identical live content is a no-op, an omitted facet
