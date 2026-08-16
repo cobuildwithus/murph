@@ -86,6 +86,12 @@ export const ASSISTANT_SKILLS = [
       'Use for daily movement and wearable day facts: steps, NEAT, sedentary time, walking breaks, all workouts, or total workout time for a date. Use running-cardio or strength-training for workout programming.',
   },
   {
+    slug: 'workout-csv-import',
+    name: 'workout-csv-import',
+    triggerHint:
+      'Use when a member sends or references a workout-history CSV for import, including Strong, Hevy, an unknown export format, or a large custom spreadsheet whose rows must be grouped into canonical workouts. Owns provider inspection, source preservation, local Python transformation, schema validation, batch import, and replay safety; use strength-training only when programming or interpretation is also requested.',
+  },
+  {
     slug: 'mobility-posture',
     name: 'mobility-posture',
     triggerHint:

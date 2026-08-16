@@ -481,23 +481,45 @@ Last verified: 2026-08-15
   region so their counters cannot collide. Missing either expected port leaves
   the family unknown. An observed port can still produce a positive
   non-replayable condition; when every available signal is safe and only this
-  family is incomplete, the monitor uses that same bounded retry as a
-  confirmation scrape. Every available confirmation signal is evaluated;
+  family is incomplete, the monitor waits one second before one confirmation
+  scrape. PlanetScale's documented example 30-second Prometheus scrape
+  configuration is not a freshness guarantee, so it does not justify a longer
+  delay or another provider call. Every available confirmation signal is
+  evaluated;
   complementary observed ports can be composed with the original complete
-  gauge evidence, while a failed or still-incomplete confirmation retains the
-  original partial observation. Each observed port replaces and advances only
-  its own usable series baseline, an omitted port retains its prior baseline,
+  gauge evidence, while a failed confirmation retains the original partial
+  observation. A safe still-incomplete confirmation contributes its observed
+  counters to the original complete gauge evidence so a port first observed by
+  confirmation advances its baseline. Each observed port replaces and advances
+  only its own usable series baseline, an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed. This makes
   transient counter-family omission less noisy without converting unknown to
   zero, replaying an old delta, or weakening the two-check telemetry fallback.
+  The confirmation retains the existing two-observation/four-request ceiling.
+  Including two sequential ten-second fetch timeouts per observation, its
+  41-second worst-case wall time remains below the persisted two-minute run
+  lease and the platform's 15-minute scheduled runtime. Structured failure
+  warnings include the actual parsed-observation count and per-port omission
+  counts, without raw provider payloads or signed scrape values.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
-  consecutive runs before paging the monitoring condition. Crossing that
-  threshold persists one bounded telemetry-page obligation in the existing
-  incident row. The represented first two-check window counts incomplete versus
-  unavailable observations, unions only canonical missing families observed on
-  partial checks, and uses the threshold time as its window end. One bounded
-  evidence value on each existing sample preserves that aggregate provenance
-  across restart. The obligation survives an occupied pending-message slot,
+  consecutive runs before paging the monitoring condition. A failed check never
+  erases a successfully parsed observation: even an all-family-
+  missing parse remains an incomplete observation if its retry later fails,
+  while `unavailable` means that the check produced no parsed observation.
+  Crossing the threshold persists one bounded telemetry-page obligation in the
+  existing incident row. The represented first two-check window counts
+  incomplete versus unavailable observations, unions only canonical missing
+  families, and sums parsed observations plus exact 5432/6432 omission counts
+  from partial checks.
+  It uses the threshold time as its window end. One bounded evidence value on
+  each existing sample
+  preserves that aggregate provenance across restart. Legacy evidence without
+  port detail remains readable; any window containing it reports unavailable
+  port detail rather than presenting the detailed portion as an exact ratio.
+  Each failed check also retains the connection-error family whenever any of its
+  parsed observations omitted an expected port, keeping strict persistence
+  validation aligned with the operator diagnosis. The obligation survives an
+  occupied pending-message slot,
   restart, recovery, and connection-error-only prioritization; only
   acknowledgment of a pending body that includes the monitoring condition
   clears it. Recovery and another threshold before acknowledgment deliberately
@@ -1236,17 +1258,29 @@ Last verified: 2026-08-15
   pending state; an incident closes only after the pending page is cleared and
   both Queue observations are healthy. The monitor persists no
   webhook ciphertext, provider identity, member identity, or Queue message id.
-- Junction Link setup remains retryable but inert before proof-verified callback
-  completion. Webhooks for an active `pending_link` or `link_returned` account
-  release their trace claim and return a retryable not-ready response; they do
-  not persist dirty state or wake work. Manual reconcile, due scheduling,
-  ordinary queued jobs, and sync-success promotion apply the same account phase
-  gate. After a shared account is `source_confirmed`, a new target source does
+- Junction Link setup remains retryable and inert until either a proof-verified
+  browser callback completes or hosted Web verifies the exact prepared source
+  against Junction's current provider list after an authenticated,
+  source-attributed webhook. The webhook is only a reconciliation trigger. It
+  cannot confirm setup by itself. Hosted recovery rechecks consent, shared-app
+  binding, connection epoch, credential epoch, source epoch, and disconnect
+  fences before it commits `source_confirmed`, source admission,
+  callback-equivalent source-scoped initial work, its mandatory mailbox
+  handoff, dirty state, and trace completion in one locked transaction. The
+  initial handoff is required even when dirty state already exists. If its
+  post-commit Temporal signal fails, the existing scheduled mailbox-handoff
+  sweep selects one exact unconsumed `device-sync.wake` pointer per user and
+  retries from mailbox truth without scanning dirty rows. A pending webhook
+  without that exact provider proof releases its trace claim and returns a retryable
+  not-ready response. Manual reconcile, due scheduling, ordinary queued jobs,
+  and sync-success promotion apply the same account phase gate. After a shared
+  account is `source_confirmed`, a new target source does
   not move the account back into a pending phase. Its `DeviceConnectionSource`
   remains `disconnected`, and source-attributed webhooks, dirty-state commit
   races, and provider pulls fail or exit without admitting target data until
-  callback completion reaches the sole runtime connection-established admission
-  boundary. Shared ingress marks every account persistence request with the
+  callback completion or the same provider-verified hosted webhook admission
+  reaches the runtime-owned admission boundary. Shared ingress marks every
+  account persistence request with the
   closed `replace` or `preserve_established` policy; hosted Prisma and local
   SQLite apply the same shared predicate inside their persistence transactions,
   so neither adapter may reinterpret a source addition as an account reconnect.
