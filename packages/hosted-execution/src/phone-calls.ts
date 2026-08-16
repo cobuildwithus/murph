@@ -98,6 +98,7 @@ export const hostedPhoneCallAdviceSchema = z
 
 export const hostedPhoneCallResultSchema = z
   .object({
+    completionPolicy: z.enum(["transfer_follow_up_required"]).optional(),
     followUp: z.string().trim().max(1_000).optional(),
     outcome: z.enum(["completed", "not_completed", "needs_user"]),
     summary: z.string().trim().min(1).max(2_000),
