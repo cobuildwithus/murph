@@ -1176,11 +1176,15 @@ async function unwrapEnvelopeForWeb(input: {
   await verifyEnvelopeAuthoritySignature(input.envelope);
   const recipient = kmsRecipientForDomain(input.envelope.domain);
   if (!recipient) {
-    throw new Error(`Web has no KMS recipient for hosted ${input.envelope.domain} roots.`);
+    throw new Error(
+      `Web has no KMS recipient for hosted ${input.envelope.domain} roots.`,
+    );
   }
   const wrap = findHostedDomainRootWrap({ envelope: input.envelope, recipient });
   if (!wrap || wrap.kind !== "gcp-kms") {
-    throw new Error(`Hosted ${input.envelope.domain} root envelope is missing ${recipient} wrap.`);
+    throw new Error(
+      `Hosted ${input.envelope.domain} root envelope is missing ${recipient} wrap.`,
+    );
   }
   assertExpectedGcpKmsWrap({ envelope: input.envelope, recipient, wrap });
   const decrypted = await config.gcpKms.decrypt({
@@ -1191,7 +1195,9 @@ async function unwrapEnvelopeForWeb(input: {
   });
   if (decrypted.plaintext.byteLength !== 32) {
     decrypted.plaintext.fill(0);
-    throw new Error(`Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`);
+    throw new Error(
+      `Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`,
+    );
   }
   return decrypted.plaintext;
 }
@@ -1207,7 +1213,9 @@ async function verifyEnvelopeAuthoritySignature(envelope: HostedDomainRootKeyEnv
     publicKeyPem,
   });
   if (!valid) {
-    throw new Error("Hosted domain root envelope authority signature verification failed.");
+    throw new Error(
+      "Hosted domain root envelope authority signature verification failed.",
+    );
   }
 }
 
@@ -1218,7 +1226,9 @@ function assertExpectedGcpKmsWrap(input: {
 }): void {
   const config = getHostedWebCryptoConfig();
   if (input.wrap.kmsKeyName !== config.webWrapKmsKeyName) {
-    throw new Error(`Hosted ${input.envelope.domain} root envelope uses an unexpected GCP KMS key.`);
+    throw new Error(
+      `Hosted ${input.envelope.domain} root envelope uses an unexpected GCP KMS key.`,
+    );
   }
   const expectedContext = buildHostedDomainRootWrapContext({
     domain: input.envelope.domain,
@@ -1229,13 +1239,17 @@ function assertExpectedGcpKmsWrap(input: {
   });
   const expectedAad = serializeAdditionalAuthenticatedData(expectedContext);
   if (input.wrap.additionalAuthenticatedData !== expectedAad) {
-    throw new Error("Hosted domain root KMS AAD mismatch.");
+    throw new Error(
+      "Hosted domain root KMS AAD mismatch.",
+    );
   }
   if (
     serializeAdditionalAuthenticatedData(input.wrap.encryptionContext)
     !== serializeAdditionalAuthenticatedData(expectedContext)
   ) {
-    throw new Error("Hosted domain root KMS encryption context mismatch.");
+    throw new Error(
+      "Hosted domain root KMS encryption context mismatch.",
+    );
   }
 }
 
@@ -1421,15 +1435,25 @@ async function parseAssertAndVerifyEnvelope(
   row: HostedUserCryptoEnvelopeRow,
   expected: { domain: HostedCryptoDomain; rootKeyId?: string | null; userId: string },
 ): Promise<HostedDomainRootKeyEnvelopeV1> {
-  const envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
-  if (envelope.userId !== expected.userId || envelope.domain !== expected.domain) {
-    throw new Error("Hosted domain root envelope row does not match requested user/domain.");
-  }
-  if (expected.rootKeyId && envelope.rootKeyId !== expected.rootKeyId) {
-    throw new Error("Hosted domain root envelope row does not match requested rootKeyId.");
-  }
-  if (envelope.rootKeyId !== row.rootKeyId) {
-    throw new Error("Hosted domain root envelope row rootKeyId mismatch.");
+  let envelope: HostedDomainRootKeyEnvelopeV1;
+  try {
+    envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
+    if (envelope.userId !== expected.userId || envelope.domain !== expected.domain) {
+      throw new Error("Hosted domain root envelope row does not match requested user/domain.");
+    }
+    if (expected.rootKeyId && envelope.rootKeyId !== expected.rootKeyId) {
+      throw new Error("Hosted domain root envelope row does not match requested rootKeyId.");
+    }
+    if (envelope.rootKeyId !== row.rootKeyId) {
+      throw new Error("Hosted domain root envelope row rootKeyId mismatch.");
+    }
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Hosted domain root envelope is structurally invalid.",
+      { cause: error },
+    );
   }
   await verifyEnvelopeAuthoritySignature(envelope);
   return envelope;

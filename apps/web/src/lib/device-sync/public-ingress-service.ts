@@ -101,15 +101,12 @@ export class HostedDeviceSyncPublicIngressService {
       registry: input.registry,
       store: input.store,
       hooks: {
-        // Hosted source lifecycle is admitted under the same consent/app/
-        // connection transaction as receipt, dirty state, and trace completion.
-        onConnectionSourceObserved: ({ eventType, sourceProviderSlug }) =>
-          normalizeJunctionProviderSlug(sourceProviderSlug)
-            === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-            && (
-              eventType === "provider.connection.created"
-              || eventType === "provider.connection.updated"
-            )
+        // Provider-authored Junction events can trigger exact-source
+        // verification. Hosted admission still commits only after the provider
+        // confirms access under the consent/app/connection/source fences.
+        onConnectionSourceObserved: ({ account, sourceProviderSlug }) =>
+          account.provider === "junction"
+            && normalizeJunctionProviderSlug(sourceProviderSlug) !== null
             ? { sourceAdmissionDeferred: true }
             : undefined,
         onConnectionEstablished: async ({
@@ -161,6 +158,7 @@ export class HostedDeviceSyncPublicIngressService {
         onWebhookAccepted: async ({
           account,
           claimToken,
+          sourceAdmissionDeferred,
           traceId,
           webhook,
           provider,
@@ -173,6 +171,7 @@ export class HostedDeviceSyncPublicIngressService {
             now,
             ownerId,
             registry: input.registry,
+            sourceAdmissionDeferred,
             store: this.context.store,
             traceId,
             webhook,
@@ -439,17 +438,21 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
-  async discardConnectionCallback(provider: string): Promise<void> {
+  async discardConnectionCallback(
+    provider: string,
+    options: { expectedOwnerId: string },
+  ): Promise<void> {
     const url = new URL(this.context.request.url);
     const state = url.searchParams.get("murph_state") ?? url.searchParams.get("state");
     if (!state) {
       return;
     }
 
-    await this.context.store.consumeOAuthState(
+    await this.context.store.discardUnconsumedOAuthState(
       state,
       new Date().toISOString(),
       provider,
+      options.expectedOwnerId,
     );
   }
 
@@ -673,7 +676,6 @@ export class HostedDeviceSyncPublicIngressService {
       store: this.context.store,
       userId,
     });
-
     return {
       connection: this.toBrowserConnection(disconnected.connection),
       // The browser chooses the manual-removal-before-reconnect guidance from this
@@ -716,8 +718,7 @@ export class HostedDeviceSyncPublicIngressService {
     disconnectedCount: number;
     failedCount: number;
   }> {
-    const connections = (await this.context.store.listConnectionsForUser(userId))
-      .filter((connection) => connection.status !== "disconnected");
+    const connections = await this.context.store.listConnectionsRequiringCleanupForUser(userId);
     let attemptedCount = 0;
     let disconnectedCount = 0;
     let failedCount = 0;
@@ -738,7 +739,7 @@ export class HostedDeviceSyncPublicIngressService {
           provider: connection.provider,
           resolveSharedRegistry: () => this.registry,
         });
-        await disconnectHostedDeviceSyncConnection({
+        const disconnected = await disconnectHostedDeviceSyncConnection({
           connectionId: connection.id,
           registry: cleanup.registry ?? this.registry,
           revokeAccess: cleanup.revokeAccessOverride,
@@ -746,7 +747,11 @@ export class HostedDeviceSyncPublicIngressService {
           store: this.context.store,
           userId,
         });
-        disconnectedCount += 1;
+        if (disconnected.connection.status === "disconnected") {
+          disconnectedCount += 1;
+        } else {
+          failedCount += 1;
+        }
       } catch (error) {
         failedCount += 1;
         console.error("Health-data consent withdrawal could not disconnect a source.", {

@@ -9,6 +9,7 @@ describe('assistant automation wake controller', () => {
     const wakeController = createAssistantAutomationWakeController()
     const abortController = new AbortController()
     let resolved = false
+    expect(wakeController.hasPendingWake()).toBe(false)
 
     const waitPromise = wakeController
       .waitForWakeOrDeadline(
@@ -23,10 +24,12 @@ describe('assistant automation wake controller', () => {
     expect(resolved).toBe(false)
 
     wakeController.requestWake()
+    expect(wakeController.hasPendingWake()).toBe(true)
     await waitPromise
 
     expect(resolved).toBe(true)
     expect(wakeController.consumePendingWake()).toBe(true)
+    expect(wakeController.hasPendingWake()).toBe(false)
     expect(wakeController.consumePendingWake()).toBe(false)
   })
 

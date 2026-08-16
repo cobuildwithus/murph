@@ -42,8 +42,15 @@ export class PrismaHostedLocalHeartbeatStore {
       });
     }
 
+    if (existing.status === "reauthorization_required") {
+      throw localHeartbeatReauthorizationRequiredError(connectionId);
+    }
+
     const localState = buildHostedLocalHeartbeatRuntimeLocalStateUpdate(existing, patch);
     const durableConnection = await this.connections.syncDurableConnectionLocalHeartbeatState(existing, localState, tx);
+    if (!durableConnection) {
+      throw localHeartbeatReauthorizationRequiredError(connectionId);
+    }
     const responseLocalState = "lastErrorMessage" in localState
       ? {
           ...localState,
@@ -56,4 +63,15 @@ export class PrismaHostedLocalHeartbeatStore {
       ...responseLocalState,
     };
   }
+}
+
+function localHeartbeatReauthorizationRequiredError(connectionId: string) {
+  return deviceSyncError({
+    code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+    message: "Hosted device-sync connection requires reauthorization before local heartbeat state can be accepted.",
+    retryable: false,
+    httpStatus: 409,
+    accountStatus: "reauthorization_required",
+    details: { connectionId },
+  });
 }

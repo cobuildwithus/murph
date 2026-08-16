@@ -29,6 +29,7 @@ import {
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
   createHostedStripeCheckoutSessionLookupKey,
+  createHostedStripeCheckoutSessionLookupKeyReadCandidates,
   createHostedTelegramUsernameLookupKey,
   createHostedTelegramUsernameLookupKeyReadCandidates,
   createHostedStripeCustomerLookupKey,
@@ -107,6 +108,8 @@ import {
   type HostedMemberCoreState,
 } from "./hosted-member-store";
 import {
+  assertHostedStripeEffectClaimAbsent,
+  assertNoHostedMemberStripeEffectTx,
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
@@ -231,13 +234,13 @@ const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_TELEGRAM_USERNAME_FIELD =
   "hosted-account-group-invite.target-telegram-username";
 const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_EMAIL_FIELD =
   "hosted-account-group-invite.target-email";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD =
   "hosted-account-group-billing-ref.stripe-customer-id";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-account-group-billing-ref.stripe-subscription-id";
 const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_ITEM_FIELD =
   "hosted-account-group-billing-ref.stripe-subscription-item-id";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
   "hosted-account-group-billing-ref.stripe-checkout-session-id";
 
 const hostedAccountGroupAccessSelect =
@@ -329,6 +332,7 @@ const hostedFamilyOwnerDraftSelect =
         stripeCheckoutSessionLookupKey: true,
         stripeCustomerIdEncrypted: true,
         stripeCustomerLookupKey: true,
+        stripeEffectClaimId: true,
         stripeSubscriptionIdEncrypted: true,
         stripeSubscriptionItemIdEncrypted: true,
         stripeSubscriptionItemLookupKey: true,
@@ -410,6 +414,11 @@ export type HostedMemberFamilyBillingClaim =
   | {
       groupId: string;
       kind: "bound_subscription";
+      ownerMemberId: string;
+    }
+  | {
+      groupId: string;
+      kind: "stripe_effect";
       ownerMemberId: string;
     };
 
@@ -841,6 +850,14 @@ export async function readHostedFamilyAccessForMember(input: {
   });
 }
 
+function compareHostedFamilyOwnerSnapshotRows(
+  left: { createdAt: Date; id: string },
+  right: { createdAt: Date; id: string },
+): number {
+  return left.createdAt.getTime() - right.createdAt.getTime()
+    || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+}
+
 export async function readHostedFamilyOwnerSnapshotForMember(input: {
   memberId: string;
   now?: Date;
@@ -848,72 +865,130 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
 }): Promise<HostedFamilyOwnerSnapshot | null> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const group = await prisma.hostedAccountGroup.findUnique({
-    select: {
-      billingStatus: true,
-      displayName: true,
-      id: true,
-      ownerMemberId: true,
-      suspendedAt: true,
-    },
-    where: {
-      ownerMemberId: input.memberId,
-    },
-  });
+  const readDatabaseSnapshot = async (readPrisma: HostedOnboardingReadClient) => {
+    const group = await readPrisma.hostedAccountGroup.findUnique({
+      select: {
+        billingStatus: true,
+        displayName: true,
+        id: true,
+        ownerMemberId: true,
+        suspendedAt: true,
+      },
+      where: {
+        ownerMemberId: input.memberId,
+      },
+    });
 
-  if (!group) {
+    if (!group) {
+      return null;
+    }
+
+    const [memberships, invites, paidCapacities] = await Promise.all([
+      readPrisma.hostedAccountGroupMembership.findMany({
+        select: {
+          createdAt: true,
+          id: true,
+          joinedAt: true,
+          memberId: true,
+          pendingPlanCode: true,
+          planCode: true,
+          role: true,
+          status: true,
+        },
+        take: HOSTED_FAMILY_MAX_SEATS + 1,
+        where: {
+          groupId: group.id,
+          status: "active",
+        },
+      }),
+      readPrisma.hostedAccountGroupInvite.findMany({
+        orderBy: [
+          { expiresAt: "asc" },
+          { id: "asc" },
+        ],
+        select: hostedAccountGroupInviteSelect,
+        take: HOSTED_FAMILY_MAX_SEATS + 1,
+        where: {
+          expiresAt: {
+            gt: now,
+          },
+          groupId: group.id,
+          status: "pending",
+        },
+      }),
+      readHostedFamilyPlanCapacitiesTx({
+        groupId: group.id,
+        tx: readPrisma,
+      }),
+    ]);
+
+    if (
+      memberships.length > HOSTED_FAMILY_MAX_SEATS
+      || invites.length > HOSTED_FAMILY_MAX_SEATS
+      || memberships.length + invites.length > HOSTED_FAMILY_MAX_SEATS
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SNAPSHOT_CAPACITY_INVALID",
+        httpStatus: 500,
+        message: "Family membership exceeds the supported seat capacity.",
+      });
+    }
+
+    // Keep pre-limit work on query-shaped indexes, then restore the prior
+    // presentation order only after cardinality is proven to be at most six.
+    memberships.sort(compareHostedFamilyOwnerSnapshotRows);
+    invites.sort(compareHostedFamilyOwnerSnapshotRows);
+
+    const acceptedInvites = await readFirstAcceptedHostedFamilyInvitesForMembers({
+      group,
+      memberIds: memberships
+        .map((membership) => membership.memberId)
+        .filter((memberId) => memberId !== group.ownerMemberId),
+      prisma: readPrisma,
+    });
+
+    return {
+      acceptedInvites,
+      group,
+      invites,
+      memberships,
+      paidCapacities,
+    };
+  };
+
+  // Invite acceptance atomically moves one row from pending invites to active
+  // memberships. Keep both cap reads and accepted-history authority on one
+  // MVCC snapshot so READ COMMITTED cannot combine opposite sides of that move.
+  const maybeTransaction = prisma as {
+    $transaction?: <T>(
+      run: (tx: Prisma.TransactionClient) => Promise<T>,
+      options?: {
+        isolationLevel?: Prisma.TransactionIsolationLevel;
+        maxWait?: number;
+      },
+    ) => Promise<T>;
+  };
+  const databaseSnapshot = typeof maybeTransaction.$transaction === "function"
+    ? await maybeTransaction.$transaction(
+        async (tx) => readDatabaseSnapshot(tx),
+        {
+          ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        },
+      )
+    : await readDatabaseSnapshot(prisma);
+
+  if (!databaseSnapshot) {
     return null;
   }
 
-  const [memberships, invites, acceptedInvites, paidCapacities] = await Promise.all([
-    prisma.hostedAccountGroupMembership.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: {
-        joinedAt: true,
-        memberId: true,
-        pendingPlanCode: true,
-        planCode: true,
-        role: true,
-        status: true,
-      },
-      where: {
-        groupId: group.id,
-        status: "active",
-      },
-    }),
-    prisma.hostedAccountGroupInvite.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: hostedAccountGroupInviteSelect,
-      where: {
-        expiresAt: {
-          gt: now,
-        },
-        groupId: group.id,
-        status: "pending",
-      },
-    }),
-    prisma.hostedAccountGroupInvite.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: hostedAccountGroupInviteSelect,
-      where: {
-        acceptedByMemberId: {
-          not: null,
-        },
-        groupId: group.id,
-        status: "accepted",
-      },
-    }),
-    readHostedFamilyPlanCapacitiesTx({
-      groupId: group.id,
-      tx: prisma,
-    }),
-  ]);
+  const {
+    acceptedInvites,
+    group,
+    invites,
+    memberships,
+    paidCapacities,
+  } = databaseSnapshot;
 
   const firstAcceptedInviteByMember = new Map<string, (typeof acceptedInvites)[number]>();
   for (const invite of acceptedInvites) {
@@ -1030,6 +1105,60 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
     },
     suspendedAt: group.suspendedAt,
   };
+}
+
+async function readFirstAcceptedHostedFamilyInvitesForMembers(input: {
+  group: HostedAccountGroupAccessSnapshot;
+  memberIds: string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedAccountGroupInviteSnapshot[]> {
+  if (input.memberIds.length === 0) {
+    return [];
+  }
+
+  const invites = await input.prisma.$queryRaw<Array<
+    Omit<HostedAccountGroupInviteSnapshot, "group">
+  >>(Prisma.sql`
+    WITH current_member(member_id) AS (
+      SELECT unnest(ARRAY[${Prisma.join(input.memberIds)}]::text[])
+    )
+    SELECT
+      accepted_invite.accepted_at AS "acceptedAt",
+      accepted_invite.accepted_by_member_id AS "acceptedByMemberId",
+      accepted_invite.channel,
+      accepted_invite.created_at AS "createdAt",
+      accepted_invite.expires_at AS "expiresAt",
+      accepted_invite.group_id AS "groupId",
+      accepted_invite.id,
+      accepted_invite.invite_code AS "inviteCode",
+      accepted_invite.invited_by_member_id AS "invitedByMemberId",
+      accepted_invite.plan_code AS "planCode",
+      accepted_invite.status,
+      accepted_invite.target_email_encrypted AS "targetEmailEncrypted",
+      accepted_invite.target_email_lookup_key AS "targetEmailLookupKey",
+      accepted_invite.target_label AS "targetLabel",
+      accepted_invite.target_phone_lookup_key AS "targetPhoneLookupKey",
+      accepted_invite.target_phone_number_encrypted AS "targetPhoneNumberEncrypted",
+      accepted_invite.target_telegram_username_encrypted AS "targetTelegramUsernameEncrypted",
+      accepted_invite.target_telegram_username_lookup_key AS "targetTelegramUsernameLookupKey",
+      accepted_invite.updated_at AS "updatedAt"
+    FROM current_member
+    CROSS JOIN LATERAL (
+      SELECT invite.*
+      FROM hosted_account_group_invite AS invite
+      WHERE invite.group_id = ${input.group.id}
+        AND invite.accepted_by_member_id = current_member.member_id
+        AND invite.status = 'accepted'
+      ORDER BY invite.created_at ASC, invite.id ASC
+      LIMIT 1
+    ) AS accepted_invite
+    ORDER BY current_member.member_id ASC
+  `);
+
+  return invites.map((invite) => ({
+    ...invite,
+    group: input.group,
+  }));
 }
 
 /**
@@ -1367,10 +1496,25 @@ export async function readHostedAccountGroupStripeBillingRef(input: {
   return billingRef ? projectHostedAccountGroupBillingRefSnapshot(billingRef, prisma) : null;
 }
 
+export async function assertNoHostedFamilyStripeEffectTx(input: {
+  groupId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const billingRef = await input.tx.hostedAccountGroupBillingRef.findFirst({
+    select: { stripeEffectClaimId: true },
+    where: {
+      groupId: input.groupId,
+      stripeEffectClaimId: { not: null },
+    },
+  });
+  assertHostedStripeEffectClaimAbsent(billingRef?.stripeEffectClaimId);
+}
+
 /**
- * A Family membership can own billing before it grants active access. Direct
- * Checkout must respect the persisted Family attempt or subscription as well
- * as an already-active sponsorship.
+ * A Family membership can own billing before it grants active access. This is
+ * the complete bounded Family authority reader for direct billing: it returns
+ * only active sponsorships or groups with a persisted Checkout, Subscription,
+ * or future effect claim, and a second result is already ambiguous authority.
  */
 export async function readHostedMemberFamilyBillingClaim(input: {
   memberId: string;
@@ -1384,6 +1528,7 @@ export async function readHostedMemberFamilyBillingClaim(input: {
           billingRef: {
             select: {
               checkoutAttemptId: true,
+              stripeEffectClaimId: true,
               stripeSubscriptionIdEncrypted: true,
             },
           },
@@ -1394,13 +1539,41 @@ export async function readHostedMemberFamilyBillingClaim(input: {
         },
       },
     },
+    take: 2,
     where: {
+      group: {
+        OR: [
+          {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          {
+            billingRef: {
+              is: {
+                OR: [
+                  { checkoutAttemptId: { not: null } },
+                  { stripeEffectClaimId: { not: null } },
+                  { stripeSubscriptionIdEncrypted: { not: null } },
+                ],
+              },
+            },
+          },
+        ],
+      },
       memberId: input.memberId,
       status: "active",
     },
   });
   const claims: HostedMemberFamilyBillingClaim[] = [];
   for (const { group } of memberships) {
+    if (group.billingRef?.stripeEffectClaimId != null) {
+      claims.push({
+        groupId: group.id,
+        kind: "stripe_effect",
+        ownerMemberId: group.ownerMemberId,
+      });
+      continue;
+    }
     if (
       !group.suspendedAt
       && group.billingStatus === HostedBillingStatus.active
@@ -2470,6 +2643,13 @@ async function createOrResumeHostedFamilyBillingCheckout(
     }
 
     await lockHostedMemberRow(tx, group.ownerMemberId);
+    await Promise.all([
+      assertNoHostedFamilyStripeEffectTx({ groupId: group.id, tx }),
+      assertNoHostedMemberStripeEffectTx({
+        memberId: group.ownerMemberId,
+        tx,
+      }),
+    ]);
     if (hasHostedAccountGroupAccess(group)) {
       return {
         alreadyActive: true,
@@ -2624,6 +2804,18 @@ async function createOrResumeHostedFamilyBillingCheckout(
       });
     }
 
+    await prisma.$transaction(
+      (tx) => revalidateHostedFamilyCheckoutClaimTx({
+        checkoutAttemptId: checkoutInput.checkoutAttemptId,
+        groupId: checkoutInput.group.id,
+        ownerMemberId: checkoutInput.group.ownerMemberId,
+        sessionId: null,
+        subscriptionId: null,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+
     const metadata = buildHostedFamilyStripeMetadata(checkoutInput.group);
     metadata.checkoutAttemptId = checkoutInput.checkoutAttemptId;
     const checkoutParams: Stripe.Checkout.SessionCreateParams = {
@@ -2668,7 +2860,10 @@ async function createOrResumeHostedFamilyBillingCheckout(
     } catch (error) {
       if (
         isHostedOnboardingError(error)
-        && error.code === "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE"
+        && (
+          error.code === "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE"
+          || error.code === "HOSTED_STRIPE_EFFECT_PENDING"
+        )
       ) {
         await reconcileOrCloseHostedFamilyCheckoutAfterLostBind({
           attemptId: checkoutInput.checkoutAttemptId,
@@ -2762,17 +2957,31 @@ async function resumeHostedFamilyBillingCheckout(input: {
         retryable: true,
       });
     }
-    await input.prisma.$transaction(
-      (tx) => revalidateHostedFamilyCheckoutClaimTx({
-        checkoutAttemptId: input.checkoutInput.checkoutAttemptId,
-        groupId: input.checkoutInput.group.id,
-        ownerMemberId: input.checkoutInput.group.ownerMemberId,
-        sessionId: session.id,
-        subscriptionId: null,
-        tx,
-      }),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-    );
+    try {
+      await input.prisma.$transaction(
+        (tx) => revalidateHostedFamilyCheckoutClaimTx({
+          checkoutAttemptId: input.checkoutInput.checkoutAttemptId,
+          groupId: input.checkoutInput.group.id,
+          ownerMemberId: input.checkoutInput.group.ownerMemberId,
+          sessionId: session.id,
+          subscriptionId: null,
+          tx,
+        }),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+    } catch (error) {
+      if (
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_STRIPE_EFFECT_PENDING"
+      ) {
+        await closeUnboundHostedSubscriptionCheckout({
+          deleteSessionCustomer: false,
+          sessionId: session.id,
+          stripe: input.stripe,
+        });
+      }
+      throw error;
+    }
     return {
       alreadyActive: false,
       url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: session.url }) ??
@@ -2858,20 +3067,39 @@ async function revalidateHostedFamilyCheckoutClaimTx(input: {
   checkoutAttemptId: string;
   groupId: string;
   ownerMemberId: string;
-  sessionId: string;
+  sessionId: string | null;
   subscriptionId: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<"current" | "subscription_bound"> {
   await lockHostedMemberRow(input.tx, input.ownerMemberId);
-  const group = await input.tx.hostedAccountGroup.findUnique({
-    select: {
-      id: true,
-      ownerMemberId: true,
-    },
-    where: {
-      id: input.groupId,
-    },
-  });
+  const [group, owner, billingRef, memberBillingRef] = await Promise.all([
+    input.tx.hostedAccountGroup.findUnique({
+      select: {
+        id: true,
+        ownerMemberId: true,
+      },
+      where: {
+        id: input.groupId,
+      },
+    }),
+    input.tx.hostedMember.findUnique({
+      select: { suspendedAt: true },
+      where: { id: input.ownerMemberId },
+    }),
+    input.tx.hostedAccountGroupBillingRef.findUnique({
+      select: {
+        checkoutAttemptId: true,
+        stripeCheckoutSessionLookupKey: true,
+        stripeEffectClaimId: true,
+        stripeSubscriptionLookupKey: true,
+      },
+      where: { groupId: input.groupId },
+    }),
+    input.tx.hostedMemberBillingRef.findUnique({
+      select: { stripeEffectClaimId: true },
+      where: { memberId: input.ownerMemberId },
+    }),
+  ]);
   if (!group || group.ownerMemberId !== input.ownerMemberId) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
@@ -2880,20 +3108,41 @@ async function revalidateHostedFamilyCheckoutClaimTx(input: {
       retryable: true,
     });
   }
+  if (!owner || isHostedMemberSuspended(owner.suspendedAt)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+      message:
+        "This hosted account is suspended. Contact support to restore access.",
+    });
+  }
 
-  const billingRef = await readHostedAccountGroupStripeBillingRef({
-    groupId: input.groupId,
-    prisma: input.tx,
-  });
+  assertHostedStripeEffectClaimAbsent(billingRef?.stripeEffectClaimId);
+  assertHostedStripeEffectClaimAbsent(
+    memberBillingRef?.stripeEffectClaimId,
+  );
+  const subscriptionLookupKeys =
+    createHostedStripeSubscriptionLookupKeyReadCandidates(
+      input.subscriptionId,
+    );
   if (
-    input.subscriptionId
-    && billingRef?.stripeSubscriptionId === input.subscriptionId
+    subscriptionLookupKeys.length > 0
+    && billingRef?.stripeSubscriptionLookupKey != null
+    && subscriptionLookupKeys.includes(
+      billingRef.stripeSubscriptionLookupKey,
+    )
   ) {
     return "subscription_bound";
   }
+  const sessionLookupKeys =
+    createHostedStripeCheckoutSessionLookupKeyReadCandidates(input.sessionId);
+  const sessionMatches = input.sessionId === null
+    ? billingRef?.stripeCheckoutSessionLookupKey == null
+    : billingRef?.stripeCheckoutSessionLookupKey != null
+      && sessionLookupKeys.includes(billingRef.stripeCheckoutSessionLookupKey);
   if (
     billingRef?.checkoutAttemptId !== input.checkoutAttemptId
-    || billingRef.stripeCheckoutSessionId !== input.sessionId
+    || !sessionMatches
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
@@ -3028,6 +3277,13 @@ async function upgradeHostedFamilyDirectPaidSubscription(
           retryable: true,
         });
       }
+      await Promise.all([
+        assertNoHostedFamilyStripeEffectTx({ groupId: input.group.id, tx }),
+        assertNoHostedMemberStripeEffectTx({
+          memberId: input.group.ownerMemberId,
+          tx,
+        }),
+      ]);
       return upgradeHostedFamilyDirectPaidSubscriptionUnderOwnerLock(input);
     },
   });
@@ -3453,6 +3709,7 @@ export async function updateHostedFamilyPlanCapacities(input: {
           message: "Family billing must be active before changing capacity.",
         });
       }
+      await assertNoHostedFamilyStripeEffectTx({ groupId: group.id, tx });
       await assertHostedFamilyOwnerCanStartBillingTx({
         allowDirectPaidOwner: true,
         groupId: group.id,
@@ -3746,13 +4003,23 @@ async function bindHostedFamilyCheckoutSessionTx(input: {
   sessionId: string;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
-  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
-  const owner = await input.tx.hostedMember.findUnique({
-    select: { suspendedAt: true },
-    where: { id: input.group.ownerMemberId },
-  });
-  if (!owner || owner.suspendedAt) {
-    return false;
+  try {
+    await revalidateHostedFamilyCheckoutClaimTx({
+      checkoutAttemptId: input.attemptId,
+      groupId: input.group.id,
+      ownerMemberId: input.group.ownerMemberId,
+      sessionId: null,
+      subscriptionId: null,
+      tx: input.tx,
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_MEMBER_SUSPENDED"
+    ) {
+      return false;
+    }
+    throw error;
   }
 
   const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
@@ -4208,6 +4475,10 @@ export async function issueHostedFamilyInviteTx(input: {
   }
 
   await lockHostedMemberRow(input.tx, input.invitedByMemberId);
+  await assertNoHostedFamilyStripeEffectTx({
+    groupId: group.id,
+    tx: input.tx,
+  });
   const capacities = await readConfirmedHostedFamilyPlanCapacitiesTx({
     group,
     tx: input.tx,
@@ -5406,6 +5677,16 @@ export async function acceptHostedFamilyInviteTx(input: {
     await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
   }
   await lockHostedMemberRow(input.tx, input.acceptedMemberId);
+  await Promise.all([
+    assertNoHostedFamilyStripeEffectTx({
+      groupId: invite.groupId,
+      tx: input.tx,
+    }),
+    assertNoHostedMemberStripeEffectTx({
+      memberId: input.acceptedMemberId,
+      tx: input.tx,
+    }),
+  ]);
   const existingGroupMembership = await input.tx.hostedAccountGroupMembership.findFirst({
     select: { id: true },
     where: {
@@ -5684,6 +5965,7 @@ export async function updateHostedFamilyMemberPlan(input: {
       });
     }
     await lockHostedMemberRow(tx, group.ownerMemberId);
+    await assertNoHostedFamilyStripeEffectTx({ groupId: group.id, tx });
     const [membership, capacities, assignments, pendingElsewhere] = await Promise.all([
       tx.hostedAccountGroupMembership.findFirst({
         select: { id: true, pendingPlanCode: true, planCode: true, updatedAt: true },
@@ -5810,6 +6092,7 @@ export async function updateHostedFamilyMemberPlan(input: {
               message: "Family billing must be active before changing member tiers.",
             });
           }
+          await assertNoHostedFamilyStripeEffectTx({ groupId: group.id, tx });
           await assertHostedFamilyOwnerCanStartBillingTx({
             allowDirectPaidOwner: true,
             groupId: group.id,
@@ -5962,6 +6245,10 @@ export async function removeHostedFamilyMemberTx(input: {
   }
 
   await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  await assertNoHostedFamilyStripeEffectTx({
+    groupId: group.id,
+    tx: input.tx,
+  });
   const membership = await input.tx.hostedAccountGroupMembership.findFirst({
     select: { id: true, pendingPlanCode: true },
     where: {
@@ -6018,6 +6305,11 @@ export async function revokeHostedFamilyInviteTx(input: {
     });
   }
 
+  await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  await assertNoHostedFamilyStripeEffectTx({
+    groupId: group.id,
+    tx: input.tx,
+  });
   const result = await input.tx.hostedAccountGroupInvite.updateMany({
     data: {
       status: "revoked",
@@ -6682,7 +6974,8 @@ function classifyHostedFamilyOwnerDraft(
     return "inert";
   }
   if (
-    billingRef.stripeCustomerIdEncrypted
+    billingRef.stripeEffectClaimId != null
+    || billingRef.stripeCustomerIdEncrypted
     || billingRef.stripeCustomerLookupKey
     || billingRef.stripeSubscriptionIdEncrypted
     || billingRef.stripeSubscriptionLookupKey

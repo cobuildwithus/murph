@@ -150,6 +150,9 @@ import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.js'
+import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+} from '../src/assistant/shared.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
@@ -1113,7 +1116,8 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames.filter((name) =>
         name !== 'attach_response_card' &&
-        name !== 'attach_exercise_routine_card'
+        name !== 'attach_exercise_routine_card' &&
+        name !== 'attach_telegram_rich_content'
       ),
     )
 
@@ -2559,6 +2563,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -2568,7 +2573,7 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('offers audience-scoped private and Linq group challenge cards only', async () => {
+  it('offers private semantic cards and Telegram presentation cards to their valid audiences', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -2616,6 +2621,9 @@ describe('assistant Codex turn planning', () => {
     expect(privateTools.map((tool) => tool.name)).toContain(
       'attach_exercise_routine_card',
     )
+    expect(privateTools.map((tool) => tool.name)).toContain(
+      'attach_telegram_rich_content',
+    )
     const privateSchema = JSON.stringify(privateTool!.inputSchema)
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
@@ -2638,6 +2646,9 @@ describe('assistant Codex turn planning', () => {
     expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
       'attach_exercise_routine_card',
     )
+    expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
+      'attach_telegram_rich_content',
+    )
 
     const scheduledPrivateOptions = {
       input: {
@@ -2654,6 +2665,7 @@ describe('assistant Codex turn planning', () => {
     await expect(dynamicToolsFor(scheduledPrivateOptions)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+        expect.objectContaining({ name: 'attach_telegram_rich_content' }),
       ]),
     )
 
@@ -2741,7 +2753,7 @@ describe('assistant Codex turn planning', () => {
       threadId: 'telegram-group-challenge-card',
       threadIsDirect: false,
     })
-    await expect(cardTool({
+    const telegramGroupOptions = {
       executionContext: hostedExecutionContext,
       input: {
         ...linqGroupInput,
@@ -2749,7 +2761,32 @@ describe('assistant Codex turn planning', () => {
         threadId: 'telegram-group-challenge-card',
       },
       sharedPlan: telegramGroupPlan,
-    })).resolves.toBeUndefined()
+    } satisfies Parameters<typeof dynamicToolsFor>[0]
+    await expect(cardTool(telegramGroupOptions)).resolves.toBeUndefined()
+    await expect(dynamicToolsFor(telegramGroupOptions)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+        expect.objectContaining({ name: 'attach_telegram_rich_content' }),
+      ]),
+    )
+
+    await expect(dynamicToolsFor({
+      ...telegramGroupOptions,
+      input: {
+        ...telegramGroupOptions.input,
+        scheduledInvocationAuthority: {
+          automationId: 'automation_group_routine',
+          occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+        },
+        scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
+        turnTrigger: 'automation-cron',
+      },
+    })).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+        expect.objectContaining({ name: 'attach_telegram_rich_content' }),
+      ]),
+    )
   })
 
   it('offers scheduled image generation only on routes that can deliver vault images', async () => {
@@ -3063,7 +3100,8 @@ describe('assistant Codex turn planning', () => {
         .map((tool) => tool.name)
         .filter((name) =>
           name !== 'attach_response_card' &&
-          name !== 'attach_exercise_routine_card'
+          name !== 'attach_exercise_routine_card' &&
+          name !== 'attach_telegram_rich_content'
         ),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
@@ -3147,6 +3185,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
@@ -3323,6 +3362,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3349,6 +3389,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3428,6 +3469,7 @@ describe('assistant Codex turn planning', () => {
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
@@ -3486,6 +3528,10 @@ describe('assistant Codex turn planning', () => {
           ...createMessageInput(),
           ...(scheduledOccurrence
             ? {
+                scheduledInvocationAuthority: {
+                  automationId: 'automation_group_shared_read',
+                  occurrenceAt: '2026-07-18T13:00:00.000Z',
+                },
                 scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
                 turnTrigger: 'automation-cron' as const,
               }
@@ -5180,6 +5226,162 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('marks cold conversation history incomplete after transcript text retention', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-retired-human-history-',
+    ))
+    const answeredSession = {
+      ...createSession({ turnCount: 1 }),
+      conversationId: 'session-retired-human-answer',
+      sessionId: 'session-retired-human-answer',
+    }
+    const unansweredSession = {
+      ...createSession({ turnCount: 1 }),
+      conversationId: 'session-no-human-answer',
+      sessionId: 'session-no-human-answer',
+    }
+    const cadenceQuestion =
+      'Monthly room reset. Should I keep these, change them, or pause?'
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+
+    try {
+      await appendAssistantTranscriptEntries(vault, answeredSession.sessionId, [
+        {
+          createdAt: '2026-01-01T10:00:00.000Z',
+          kind: 'assistant',
+          text: cadenceQuestion,
+        },
+        {
+          contentReceivedAt: '2026-01-01T10:01:00.000Z',
+          createdAt: '2026-01-01T10:01:00.000Z',
+          kind: 'user',
+          text: 'Keep it.',
+        },
+      ])
+      await appendAssistantTranscriptEntries(vault, unansweredSession.sessionId, [
+        {
+          createdAt: '2026-01-01T10:00:00.000Z',
+          kind: 'assistant',
+          text: cadenceQuestion,
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-02-01T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const buildPlan = async (session: AssistantSession) =>
+        resolveAssistantRouteTurnPlan({
+          executionContext: null,
+          input: {
+            ...createMessageInput(),
+            vault,
+          },
+          profile: executionProfile,
+          promptTimeContext: {
+            currentLocalDate: '2026-02-01',
+            currentTimeZone: 'UTC',
+          },
+          route: createRoute(),
+          session,
+          sharedPlan: createPrivateSharedPlan(),
+        })
+
+      await expect(buildPlan(answeredSession)).resolves.toMatchObject({
+        conversationHistoryMessages: [
+          {
+            content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+            role: 'assistant',
+          },
+          { content: cadenceQuestion, role: 'assistant' },
+        ],
+      })
+      await expect(buildPlan(unansweredSession)).resolves.toMatchObject({
+        conversationHistoryMessages: [
+          { content: cadenceQuestion, role: 'assistant' },
+        ],
+      })
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('marks cold conversation history incomplete when the message-count bound omits details', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-bounded-history-',
+    ))
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const buildPlan = async (session: AssistantSession) =>
+      resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-02-01',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+    try {
+      const countBoundSession = {
+        ...createSession({ turnCount: 1 }),
+        conversationId: 'session-count-bounded-history',
+        sessionId: 'session-count-bounded-history',
+      }
+      await appendAssistantTranscriptEntries(
+        vault,
+        countBoundSession.sessionId,
+        Array.from({ length: 30 }, (_, index) => ({
+          kind: 'assistant' as const,
+          text: `Committed message ${index + 1}`,
+        })),
+      )
+
+      const countBoundPlan = await buildPlan(countBoundSession)
+      expect(countBoundPlan.conversationHistoryMessages).toHaveLength(24)
+      expect(countBoundPlan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        ...Array.from({ length: 23 }, (_, index) => ({
+          content: `Committed message ${index + 8}`,
+          role: 'assistant' as const,
+        })),
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('replays explicit no-reply transcript markers as assistant history', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -5281,7 +5483,10 @@ describe('assistant Codex turn planning', () => {
 
       const history = plan.conversationHistoryMessages ?? []
       expect(history).toHaveLength(3)
-      expect(history[0]?.content).toEqual(expect.stringMatching(/^message-2:/u))
+      expect(history[0]?.content).toBe(
+        ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+      )
+      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-3:/u))
       expect(history[2]?.content).toEqual(expect.stringMatching(/^message-4:/u))
       let totalBytes = 0
       for (const message of history) {
@@ -5343,13 +5548,17 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.conversationHistoryMessages).toEqual([
         {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        {
           content: expect.stringMatching(
             /^\[This response included an image attachment\.\]/u,
           ),
           role: 'assistant',
         },
       ])
-      const content = plan.conversationHistoryMessages?.[0]?.content
+      const content = plan.conversationHistoryMessages?.[1]?.content
       const contentBytes =
         typeof content === 'string' ? Buffer.byteLength(content, 'utf8') : 0
       expect(contentBytes).toBeLessThanOrEqual(4_000)

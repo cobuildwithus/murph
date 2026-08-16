@@ -182,6 +182,16 @@ describe("hosted usage-referral recovery", () => {
       referralId: "referral_failed",
     });
     expect(findMailboxItems).toHaveBeenCalledOnce();
+    const recoveryQuery = findMailboxItems.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    } | undefined;
+    const recoverySql = recoveryQuery?.strings?.join("?") ?? "";
+    expect(recoverySql).toContain("FROM hosted_usage_referral AS referral");
+    expect(recoverySql).toContain(
+      "notification.dedupe_key = (",
+    );
+    expect(recoverySql).toContain("LIMIT ?");
+    expect(recoverySql).not.toContain("dedupe_key LIKE");
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(
       1,
       {

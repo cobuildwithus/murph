@@ -90,10 +90,11 @@ declare module 'incur' {
       'doctor': { args: {}; options: { requestId?: string; repair: boolean } }
       'document delete': { args: { id: string }; options: { requestId?: string } }
       'document edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute" } }
-      'document import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; note?: string; source?: "manual" | "import" | "device" | "derived" } }
+      'document import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; note?: string; source?: "manual" | "import" | "device" | "derived"; reuseExact: boolean } }
       'document list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
+      'document workout-import-status': { args: { rawRef: string }; options: { requestId?: string } }
       'encounter import-json': { args: {}; options: { requestId?: string; input: string } }
       'encounter payload-schema': { args: {}; options: {} }
       'encounter scaffold': { args: {}; options: { requestId?: string } }
@@ -104,7 +105,7 @@ declare module 'incur' {
       'event encounter add': { args: {}; options: { requestId?: string; encounterType: string; location?: string; providerId?: string; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event exposure add': { args: {}; options: { requestId?: string; exposureType: string; substance: string; duration?: string; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event import-json': { args: {}; options: { requestId?: string; input: string } }
-      'event import-jsonl': { args: {}; options: { requestId?: string; input: string; apply: boolean } }
+      'event import-jsonl': { args: {}; options: { requestId?: string; input: string; apply: boolean; sourceRawRefOnce?: string } }
       'event list': { args: {}; options: { requestId?: string; kind?: string; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
@@ -207,6 +208,7 @@ declare module 'incur' {
       'meal import-json': { args: {}; options: { requestId?: string; input: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; ingredient?: string[]; nutritionCalories?: number; nutritionProteinGrams?: number; nutritionCarbsGrams?: number; nutritionFatGrams?: number; nutritionFiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string } }
       'meal list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'meal manifest': { args: { id: string }; options: { requestId?: string } }
+      'meal nutrients': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'meal remove-photo': { args: { id: string }; options: { requestId?: string } }
       'meal show': { args: { id: string }; options: { requestId?: string } }
       'meal totals': { args: {}; options: { requestId?: string; from?: string; to?: string } }

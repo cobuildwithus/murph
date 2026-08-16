@@ -15,6 +15,7 @@ import {
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
   renderAssistantResponseCardText,
   type AssistantResponseCard,
@@ -85,6 +86,7 @@ import {
   assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   persistAssistantOutboxIntentLinqAppCardTextFallback,
+  preserveAssistantOutboxAcceptedMediaDeliveryOrder,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
   sameAssistantChannelDelivery,
@@ -320,13 +322,13 @@ export async function createAssistantOutboxIntent(
       ...input,
       replyToMessageId,
     })
-    if (
-      card?.kind === 'challenge_standings' &&
-      !(
-        persistedTarget.threadIsDirect === false &&
-        persistedTarget.channel?.trim().toLowerCase() === 'linq'
-      )
-    ) {
+    if (card?.kind === 'challenge_standings' && !(
+      assistantResponseCardMatchesConversationAudience({
+        card,
+        channel: persistedTarget.channel,
+        threadIsDirect: persistedTarget.threadIsDirect,
+      })
+    )) {
       throw new VaultCliError(
         'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
         'A challenge standings response card requires an authenticated Linq group conversation.',
@@ -335,7 +337,11 @@ export async function createAssistantOutboxIntent(
     if (
       card !== null &&
       card.kind !== 'challenge_standings' &&
-      persistedTarget.threadIsDirect !== true
+      !assistantResponseCardMatchesConversationAudience({
+        card,
+        channel: persistedTarget.channel,
+        threadIsDirect: persistedTarget.threadIsDirect,
+      })
     ) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
@@ -716,6 +722,14 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       }
     }
 
+    if (resolvePersistedAssistantOutboxDelivery(intent)) {
+      return {
+        action: 'reconcile' as const,
+        intent,
+        intentPath,
+      }
+    }
+
     if (
       (
         intent.status === 'retryable' ||
@@ -822,6 +836,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(prepared.intent)
     if (recoveredDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: recoveredDelivery,
+          intent: prepared.intent,
+        }),
         delivery: recoveredDelivery,
         intent: prepared.intent,
         intentPath: prepared.intentPath,
@@ -883,6 +901,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(prepared.intent)
     if (recoveredDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: recoveredDelivery,
+          intent: prepared.intent,
+        }),
         delivery: recoveredDelivery,
         intent: prepared.intent,
         intentPath: prepared.intentPath,
@@ -933,6 +955,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(dispatchIntent)
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: reconciledDelivery,
+          intent: dispatchIntent,
+        }),
         delivery: reconciledDelivery,
         intent: dispatchIntent,
         intentPath: dispatchIntentPath,
@@ -1028,11 +1054,16 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       ...dispatchIntent,
       vault: input.vault,
     })
-    const delivery = assistantChannelDeliverySchema.parse({
+    const completedDelivery = assistantChannelDeliverySchema.parse({
       ...delivered.delivery,
       idempotencyKey:
         delivered.delivery.idempotencyKey ??
         dispatchIntent.deliveryIdempotencyKey,
+    })
+    const completedAt = completedDelivery.sentAt
+    const delivery = preserveAssistantOutboxAcceptedMediaDeliveryOrder({
+      delivery: completedDelivery,
+      intent: effectiveDispatchIntent,
     })
     deliveryTransportIdempotent =
       dispatchIntent.deliveryTransportIdempotent ||
@@ -1056,6 +1087,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
 
     const durableDeliveredIntent =
       await persistAssistantOutboxIntentDeliveryPendingConfirmation({
+        completedAt,
         delivery,
         deliveryTransportIdempotent,
         intent: deliveredIntent,
@@ -1089,6 +1121,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     })
     preparedDispatchReserved = false
     const sentIntent = await markAssistantOutboxIntentSent({
+      completedAt,
       delivery,
       intent: deliveredOwnerIntent,
       intentPath: dispatchIntentPath,
@@ -2261,6 +2294,15 @@ function resolvePersistedAssistantOutboxDelivery(
   }
 
   return intent.delivery
+}
+
+function resolveRecoveredAssistantOutboxDeliveryCompletedAt(input: {
+  delivery: AssistantChannelDelivery
+  intent: AssistantOutboxIntent
+}): string {
+  return resolvePersistedAssistantOutboxDelivery(input.intent)
+    ? input.intent.updatedAt
+    : input.delivery.sentAt
 }
 
 function shouldFailClosedAssistantOutboxStaleSendingIntent(

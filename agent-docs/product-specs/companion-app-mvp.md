@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-14
+Last verified: 2026-08-15
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -53,24 +53,24 @@ desired categories and tap **Allow** before connecting Apple Health in Murph.
 WHOOP does not document a supported settings deep link, so Murph must not
 fabricate one.
 
-### Time-boxed Messages extension proof (explicit scope exception)
+### Messages extension action bridge (explicit scope exception)
 
-The 2026-07-10 Linq iMessage mini-app proof is a deliberate, isolated
+The Messages mini-app bridge is a deliberate, isolated
 exception to the two-screen Health sync MVP above. It may add one settings
-control to the containing app and one Messages extension target, but it does
+integration to the containing app and one Messages extension target, but it does
 not make chat, polls, or mobile account state a new responsibility of the
 companion app.
 
-The proof has one question: can an installed Murph Messages extension perform
-a Murph-account action whose authority originates from the containing app's
-current Privy session? The smallest honest implementation is:
+The bridge lets an installed Murph Messages extension perform a bounded
+Murph-account action whose authority originates from the containing app's
+current Privy session. The smallest honest implementation is:
 
 1. Linq delivers a single `imessage_app` card associated with the exact signed
    Murph Messages extension Team ID and bundle ID. Linq does not host the UI or
    receive button-tap webhooks.
-2. The card URL is a capability-less first-party HTTPS locator containing only
-   a public card identifier. It never contains a Privy token, derived
-   credential, member ID, participant UUID, or health data.
+2. The card URL is a capability-less first-party HTTPS presentation snapshot.
+   It never contains a Privy token, derived credential, member ID, participant
+   UUID, canonical record ID, or write authority.
 3. The containing app, while Privy-authenticated, calls `POST
    /api/device-sync/companion/imessage-mini-app/enrollment`. The server verifies
    the bounded request body, verifies the identity token, then serializes with
@@ -84,10 +84,14 @@ current Privy session? The smallest honest implementation is:
    addressed shared Keychain access group. Privy's own access, refresh, and
    identity tokens remain in Privy's host-app-private storage.
 5. The extension calls `POST
-   /api/device-sync/companion/imessage-mini-app/proof-action` with the derived
-   bearer and a closed, versioned choice envelope. The server re-checks active
-   access and launch consent and returns the accepted choice. This spike does
-   not persist a poll or imply durable product truth.
+   /api/device-sync/companion/imessage-mini-app/member-actions` with the derived
+   bearer and a closed, bounded, versioned action envelope. The server derives
+   the member, re-checks active access and historical launch consent, and
+   appends the request to the existing encrypted mailbox before returning
+   `202 Accepted`. The runtime dispatches it directly to the existing domain
+   use case with no assistant turn. Workout is the first action family; future
+   editors extend the closed union rather than gaining arbitrary patch or tool
+   authority.
 6. Disabling the feature or signing out calls `DELETE
    /api/device-sync/companion/imessage-mini-app/enrollment` best-effort and
    always clears the local derived bearer, even if the network revoke fails.
@@ -489,6 +493,46 @@ Stop and reconsider the architecture if the spike shows: backfill too
 shallow for credible baselines; background latency incompatible with daily
 challenge mechanics; overlapping-writer dedupe intractable server-side; or
 licensing unresolved.
+
+## Automated hosted/native E2E acceptance
+
+The required automated acceptance lane for companion auth/control/device-sync
+changes is documented in `agent-docs/references/testing-ci-map.md`. It supersedes
+any plan language that treats mocked or hermetic native/client flow as acceptance
+proof; lower-level route, SDK-wrapper, hosted-local, and fixture tests cannot
+satisfy this gate.
+
+For a selected PR, trusted default-branch Actions code deploys the exact PR SHA
+as a normal minified build into Vercel custom environment `native-ios-e2e`, using
+an isolated real database, the dedicated real non-production Privy app/test
+credential, and a real Junction sandbox API key/team dedicated exclusively to
+this lane. Trusted orchestration proves the exact candidate origin is publicly
+reachable without a Vercel bypass or login before native dispatch. The private
+lane runs the normally compiled app on an Apple simulator through fresh Privy OTP signup,
+companion onboarding/legal consent/sign-in-token persistence, real Junction/Vital
+Health SDK connection and the real iOS HealthKit permission UI, sign-out, and
+returning sign-in. No synthetic token, fake provider, fixture transport, local
+hosted substitute, or product test bypass is allowed. Native completion alone is
+not acceptance: before cleanup, trusted orchestration must re-read the fixed
+Privy principal and prove it was created inside this run, then resolve the
+corresponding real Junction sandbox user and require a connected
+`apple_health_kit` provider.
+
+Fresh-signup reset is `orchestrator_owned_reset` and fail-closed: before and
+after the PR lane it retires only lane-owned E2E deployments, enumerates the
+lane-exclusive Junction sandbox team, rejects more than one or any unexpected
+user, deletes the production-derived user when the isolated member exists or the
+sole orphan when that member is already absent, proves the team empty, resets
+only the explicitly E2E-named isolated database through the real Prisma
+migration toolchain, and deletes only the fixed Privy test user. This does not
+add or restore an internal/admin member-reset route. Production canary mode keeps an existing
+identity and performs no destructive cleanup.
+
+The main repo consumes only the exact private workflow run status/conclusion.
+Auth, OTP, legal/HealthKit consent, and provider-token stages must not export
+screenshots, video, raw xcresult bundles, traces, response bodies, or log tails;
+only privacy-safe structured stage name/status results may cross the artifact
+boundary.
 
 ## TestFlight MVP Acceptance
 

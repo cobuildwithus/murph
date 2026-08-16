@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   diagnoseBackfill: vi.fn(),
   disconnectConnection: vi.fn(),
   disconnectConnectionSource: vi.fn(),
+  findFirstDeviceConnection: vi.fn(),
   findManyDeviceConnectionSources: vi.fn(),
   findManyDeviceConnections: vi.fn(),
   getConnectionForUser: vi.fn(),
@@ -35,10 +36,15 @@ const mocks = vi.hoisted(() => ({
   probeRest: vi.fn(),
   prepareConnectionStart: vi.fn(),
   prismaClient: {} as {
-    deviceConnection: { findMany: ReturnType<typeof vi.fn> };
+    $queryRaw: ReturnType<typeof vi.fn>;
+    deviceConnection: {
+      findFirst: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
+    };
     deviceConnectionSource: { findMany: ReturnType<typeof vi.fn> };
     label: string;
   },
+  queryWhoopMembers: vi.fn(),
   registryGet: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   startConnection: vi.fn(),
@@ -308,12 +314,14 @@ describe("device sync settings routes", () => {
       "https://join.example.test/api/device-sync",
     );
     mocks.prismaClient.deviceConnection = {
+      findFirst: mocks.findFirstDeviceConnection,
       findMany: mocks.findManyDeviceConnections,
     };
     mocks.prismaClient.deviceConnectionSource = {
       findMany: mocks.findManyDeviceConnectionSources,
     };
     mocks.prismaClient.label = "test-prisma";
+    mocks.prismaClient.$queryRaw = mocks.queryWhoopMembers;
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
@@ -382,6 +390,8 @@ describe("device sync settings routes", () => {
       }),
     ]);
     mocks.findManyDeviceConnectionSources.mockResolvedValue([]);
+    mocks.findFirstDeviceConnection.mockResolvedValue(null);
+    mocks.queryWhoopMembers.mockResolvedValue([]);
     mocks.diagnoseBackfill.mockResolvedValue({
       generatedAt: "2026-04-03T12:00:00.000Z",
       provider: "junction",
@@ -1447,8 +1457,9 @@ describe("device sync settings routes", () => {
         sourceProviderSlug: "whoop_v2",
       },
     );
-    expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith({
+    expect(mocks.findFirstDeviceConnection).toHaveBeenCalledWith({
       where: {
+        userId: "member_123",
         status: { not: "disconnected" },
         OR: [
           { provider: "whoop" },
@@ -1463,17 +1474,18 @@ describe("device sync settings routes", () => {
           },
         ],
       },
-      select: { userId: true },
-      distinct: ["userId"],
+      select: { id: true },
     });
+    expect(mocks.queryWhoopMembers).toHaveBeenCalledOnce();
   });
 
   it("rejects a new member when current WHOOP capacity is full", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
-    mocks.findManyDeviceConnections.mockResolvedValueOnce(
-      Array.from({ length: 10 }, (_, index) => ({ userId: `member_existing_${index}` })),
-    );
+    mocks.queryWhoopMembers.mockResolvedValueOnce([
+      { userId: "member_existing_one" },
+      { userId: "member_existing_two" },
+    ]);
 
     const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(
@@ -1503,9 +1515,9 @@ describe("device sync settings routes", () => {
   it("allows a new member to take the second current WHOOP slot", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
-    mocks.findManyDeviceConnections.mockResolvedValueOnce(
-      Array.from({ length: 1 }, (_, index) => ({ userId: `member_existing_${index}` })),
-    );
+    mocks.queryWhoopMembers.mockResolvedValueOnce([
+      { userId: "member_existing_one" },
+    ]);
 
     const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(
@@ -1536,10 +1548,9 @@ describe("device sync settings routes", () => {
   it("allows an existing WHOOP member to reconnect when capacity is full", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
-    mocks.findManyDeviceConnections.mockResolvedValueOnce([
-      { userId: "member_123" },
-      ...Array.from({ length: 9 }, (_, index) => ({ userId: `member_existing_${index}` })),
-    ]);
+    mocks.findFirstDeviceConnection.mockResolvedValueOnce({
+      id: "dsc_whoop_existing",
+    });
 
     const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(
@@ -1565,6 +1576,7 @@ describe("device sync settings routes", () => {
         sourceProviderSlug: null,
       },
     );
+    expect(mocks.queryWhoopMembers).not.toHaveBeenCalled();
   });
 
   it("uses the preferred source target when a visible source selector omits provider", async () => {
@@ -2056,6 +2068,33 @@ describe("device sync settings routes", () => {
       "Member-owned provider setup disconnect projection failed.",
       { errorType: "Error", provider: "strava" },
     );
+  });
+
+  it("returns a retryable failure when provider revoke leaves disconnect unfinished", async () => {
+    mocks.disconnectConnection.mockResolvedValueOnce({
+      connection: { status: "reauthorization_required" },
+      warning: {
+        code: "PROVIDER_REVOKE_FAILED",
+        message: "Provider revocation timed out.",
+      },
+    });
+
+    const response = await settingsDeviceSyncDisconnectRoute.POST(
+      new Request("https://join.example.test/api/settings/device-sync/connections/dspc_oura_123/disconnect", {
+        headers: { origin: "https://join.example.test" },
+        method: "POST",
+      }),
+      createRouteContext({ connectionId: "dspc_oura_123" }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "CONNECTION_DISCONNECT_NOT_FINISHED",
+        message: "Disconnect not finished. Remove Murph access in the provider account, then retry Disconnect here.",
+        retryable: true,
+      },
+    });
   });
 
   it("disconnects only the selected hosted Junction source", async () => {

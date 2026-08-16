@@ -1,4 +1,13 @@
+import {
+  resolveBiomarkerChangeSentiment,
+} from "@murphai/query/browser-experiments";
+import type {
+  BrowserVaultExperimentRunCardMetric as ProjectedRunCardMetric,
+  BrowserVaultExperimentRunCardSummary as ProjectedRunCardSummary,
+} from "@murphai/query/browser-overview";
+
 import { formatNumber } from "@/src/lib/browser-vault/display";
+import { resolveBiomarkerDesiredDirection } from "@/src/lib/health-commons/biomarker-desired-direction";
 import type {
   ExperimentRunProjection,
   ExperimentSignal,
@@ -45,6 +54,43 @@ export function buildExperimentRunCardSummary(
       ? buildMetric(primarySignal, primaryTrend)
       : undefined,
     metrics: buildMetrics(run.signals),
+  };
+}
+
+/** Restore web-only health-commons sentiment without loading raw metric rows. */
+export function projectBrowserVaultExperimentRunCardSummary(
+  summary: ProjectedRunCardSummary,
+): ExperimentRunCardSummary {
+  return {
+    ...(summary.completionPercent === undefined
+      ? {}
+      : { completionPercent: summary.completionPercent }),
+    ...(summary.dailyCadence ? { dailyCadence: summary.dailyCadence } : {}),
+    ...(summary.dateRange ? { dateRange: summary.dateRange } : {}),
+    ...(summary.day === undefined ? {} : { day: summary.day }),
+    ...(summary.metric
+      ? { metric: projectBrowserVaultExperimentRunCardMetric(summary.metric) }
+      : {}),
+    metrics: summary.metrics.map(projectBrowserVaultExperimentRunCardMetric),
+  };
+}
+
+function projectBrowserVaultExperimentRunCardMetric(
+  metric: ProjectedRunCardMetric,
+): ExperimentRunCardMetric {
+  return {
+    ...(metric.baseline === undefined ? {} : { baseline: metric.baseline }),
+    current: metric.current,
+    ...(metric.delta === undefined ? {} : { delta: metric.delta }),
+    label: metric.label,
+    ...(metric.biomarkerKey && metric.direction
+      ? {
+          sentiment: resolveBiomarkerChangeSentiment(
+            metric.direction,
+            resolveBiomarkerDesiredDirection(metric.biomarkerKey),
+          ),
+        }
+      : {}),
   };
 }
 

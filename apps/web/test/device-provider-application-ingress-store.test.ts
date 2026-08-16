@@ -16,6 +16,10 @@ describe("DeviceProviderApplicationIngressStore", () => {
     const consumeOAuthStateWithProviderApplication = vi.fn(async () => ({
       status: "missing" as const,
     }));
+    const discardUnconsumedOAuthStateWithProviderApplication = vi.fn(async () => ({
+      status: "missing" as const,
+    }));
+    const resolveOAuthStateWithoutProviderAuthority = vi.fn(async () => true);
     const upsertConnectionWithProviderApplication = vi.fn(async () => ({
       account: { id: "dsc_123" },
       previousAccount: null,
@@ -23,6 +27,8 @@ describe("DeviceProviderApplicationIngressStore", () => {
     const delegate = {
       consumeOAuthStateWithProviderApplication,
       createOAuthStateWithProviderApplication,
+      discardUnconsumedOAuthStateWithProviderApplication,
+      resolveOAuthStateWithoutProviderAuthority,
       upsertConnectionWithProviderApplication,
     } as never;
     const store = new DeviceProviderApplicationIngressStore(binding, delegate);
@@ -59,6 +65,16 @@ describe("DeviceProviderApplicationIngressStore", () => {
       oauthState.provider,
       oauthState.ownerId ?? undefined,
     );
+    await store.discardUnconsumedOAuthState(
+      oauthState.state,
+      oauthState.createdAt,
+      oauthState.provider,
+      oauthState.ownerId ?? undefined,
+    );
+    await store.resolveOAuthStateWithoutProviderAuthority({
+      state: oauthState.state,
+      consumedAt: oauthState.createdAt,
+    });
     await store.upsertConnection(connection);
 
     expect(createOAuthStateWithProviderApplication).toHaveBeenCalledWith(
@@ -72,6 +88,17 @@ describe("DeviceProviderApplicationIngressStore", () => {
       oauthState.provider,
       oauthState.ownerId,
     );
+    expect(discardUnconsumedOAuthStateWithProviderApplication).toHaveBeenCalledWith(
+      oauthState.state,
+      oauthState.createdAt,
+      binding,
+      oauthState.provider,
+      oauthState.ownerId,
+    );
+    expect(resolveOAuthStateWithoutProviderAuthority).toHaveBeenCalledWith({
+      state: oauthState.state,
+      consumedAt: oauthState.createdAt,
+    });
     expect(upsertConnectionWithProviderApplication).toHaveBeenCalledWith(
       connection,
       binding,

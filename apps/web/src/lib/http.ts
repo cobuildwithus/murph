@@ -232,6 +232,19 @@ export async function resolveDecodedRouteParam<
   }
 }
 
+/**
+ * Tolerant variant for surfaces that must not fail on malformed
+ * percent-encoding (for example metadata on pages whose bodies deliberately
+ * accept raw values): falls back to the raw value instead of throwing.
+ */
+export function decodeURIComponentOrRaw(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export function mapDomainJsonError(error: {
   code: string;
   message: string;

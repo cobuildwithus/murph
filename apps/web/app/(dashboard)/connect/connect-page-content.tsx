@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import {
   DEVICE_CONNECT_SOURCES,
   isDeviceConnectSourceAvailableForConnection,
@@ -35,7 +34,6 @@ import type {
 import { resolveDeviceSyncVoiceMemoSources } from "@/src/lib/device-sync/device-sync-voice-memos";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI } from "./apple-health-relay-connect-sources";
 import { ConnectSourcesGrid } from "./connect-page-client";
@@ -47,11 +45,6 @@ import type {
   ConnectSource,
   LogoAsset,
 } from "./connect-page-types";
-
-export const metadata: Metadata = createMurphPageMetadata({
-  title: "Connect Devices — Murph",
-  description: "Connect your wearables and health data sources.",
-});
 
 export type ConnectPageSearchParams = Record<
   string,
@@ -311,7 +304,8 @@ const CONNECT_SOURCE_UI = {
     name: "Kardia",
   },
   cronometer: {
-    description: "Calories, macros, micronutrients, and meal timing.",
+    description:
+      "Meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
     logo: logoAsset("cronometer.png"),
     name: "Cronometer",
   },

@@ -481,6 +481,26 @@ it has been explicitly elevated to a cross-cutting invariant.
   transaction, or returning control to a caller that may do either. Preserve the
   first observed failure while awaiting siblings; fail-fast observation must not
   leave detached work mutating scoped state after finalization.
+- Public Linq unbound-group pending-setup admission is bounded by the
+  provider-proven 32-member roster. Before `BEGIN`, its owner performs one
+  candidate projection, canonical batch runtime-access read, active-managed-line
+  set read, narrow home-recipient-phone projection whose plaintext open is
+  limited to already-eligible candidates, and one recovery
+  intent read for all five bounded attempt ids per candidate; it prewarms only
+  the exact selected payload root. Domain-root metadata is set-based,
+  external unwrap concurrency is at most four, and no provider or KMS call may
+  run while a transaction or selected setup-row lock is active. The transaction
+  repeats the complete live candidate selection and exact authority/fingerprint
+  checks, performs the selected payload's authenticated local AES open after
+  taking its row lock, delegates final route authority to the canonical route
+  owner, and may request only the existing single fresh-preparation retry. A
+  replacement-line candidate id is immutable across that retry. Selected-root,
+  envelope, KMS/provider, signature, and authentication failures preserve the
+  setup row for retry. Only successfully authenticated plaintext with malformed
+  JSON or an invalid application schema is consumed after exact lock and
+  revalidation. That exact terminal `invalid_payload` result may continue
+  same-event fallback or ordinary handoff; claim races, authority changes, and
+  transient failures remain route-free.
 - A database transaction holds one pooled connection for its full duration.
   Never open one transaction per collection item concurrently; batch the items
   into one transaction or process them sequentially, and count concurrent

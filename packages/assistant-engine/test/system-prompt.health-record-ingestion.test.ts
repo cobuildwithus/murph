@@ -1,5 +1,12 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
+import {
+  ASSISTANT_SKILLS,
+  resolveAssistantSkillsRoot,
+} from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 function buildPrompt(): string {
@@ -53,5 +60,32 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(prompt).toContain(
       'A loaded skill may explicitly split independent canonical persistence from the durably accepted current input across bounded children.',
     )
+  })
+
+  it('routes workout CSV imports to the on-demand owner', async () => {
+    const prompt = buildPrompt()
+    const skill = ASSISTANT_SKILLS.find(({ slug }) => slug === 'workout-csv-import')
+    const instructions = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill?.triggerHint).toContain('Strong, Hevy, an unknown export format')
+    expect(prompt).toContain('workout-csv-import owns workout CSVs')
+    expect(prompt).not.toContain('one `activity_session` row per grouped workout')
+    expect(instructions).toContain('vault-cli workout import inspect')
+    expect(instructions).toContain('vault-cli document import')
+    expect(instructions).toContain('standard library only')
+    expect(instructions).toContain('zoneinfo.ZoneInfo')
+    expect(instructions).toContain('ambiguous or nonexistent daylight-saving wall time')
+    expect(instructions).toContain('one temporary JSONL row per workout')
+    expect(instructions).toContain('document workout-import-status')
+    expect(instructions).toContain('event import-jsonl --input @<temporary.jsonl> --source-raw-ref-once')
+    expect(instructions).toContain('Do not add model-authored `externalRef` values')
+    expect(instructions).toContain('prior source document was deleted')
+    expect(instructions).toContain('Confirm the JSONL SHA-256 is unchanged')
+    expect(instructions).toContain('Never blindly retry a failed apply')
+    expect(instructions).toContain('status check again in the same turn')
+    expect(instructions).toContain('exactly one proof-backed recovery apply')
   })
 })

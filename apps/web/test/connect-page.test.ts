@@ -245,12 +245,20 @@ function createStravaSetupProjection(input: {
 }
 
 test("ConnectPage renders source search, source names, and logo marks", async () => {
-  const { default: ConnectPage, metadata } = await import(
+  const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
+  // Read metadata through the page module so the route-owner re-export is
+  // proven, not just the helper module.
+  const { metadata } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(metadata.title, "Connect Devices — Murph");
+  const ogImages = metadata.openGraph?.images;
+  assert.ok(Array.isArray(ogImages));
+  const [ogImage] = ogImages;
+  assert.ok(typeof ogImage === "object" && ogImage !== null && "url" in ogImage);
+  assert.equal(String(ogImage.url), "/connect/opengraph-image");
   assert.match(markup, /Sync your biomarkers/);
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
@@ -479,7 +487,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     {
       assetPath: "/brand-logos/connect/cronometer.png",
       description:
-        "Nutrition logs, calories, macros, micronutrients, and meal timing from Cronometer.",
+        "Cronometer meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
       name: "Cronometer",
     },
     {
@@ -5325,7 +5333,7 @@ test("ConnectSourcesGrid walks connection-reset sources through account disconne
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid explains an unfinished historical reset when disconnect returns a warning", async () => {
+test("ConnectSourcesGrid keeps an unfinished historical-reset disconnect open for retry", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -5393,7 +5401,7 @@ test("ConnectSourcesGrid explains an unfinished historical reset when disconnect
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Disconnected this connection\. Your history is still saved\. The historical reset did not finish\. Remove the old connection in your wearable provider account before reconnecting here\./,
+      /Disconnect not finished\. Remove the old connection in your wearable provider account, then retry Disconnect here\./,
     );
   });
   assert.equal(
@@ -5405,16 +5413,16 @@ test("ConnectSourcesGrid explains an unfinished historical reset when disconnect
     /did not fully confirm/u,
   );
 
-  const connectButton = rendered.container.querySelector(
-    "button[aria-label='Connect Garmin']",
+  assert.match(rendered.container.textContent ?? "", /Disconnect account\?/);
+  assert.equal(
+    rendered.container.querySelector("button[aria-label='Connect Garmin']"),
+    null,
   );
-  assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
-  assert.equal(connectButton.textContent, "Connect");
 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid explains an unfinished historical reset when a healthy sibling card starts the disconnect", async () => {
+test("ConnectSourcesGrid keeps a shared historical-reset disconnect open for retry", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -5503,7 +5511,7 @@ test("ConnectSourcesGrid explains an unfinished historical reset when a healthy 
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Disconnected this connection\. Your history is still saved\. The historical reset did not finish\. Remove the old connection in your wearable provider account before reconnecting here\./,
+      /Disconnect not finished\. Remove the old connection in your wearable provider account, then retry Disconnect here\./,
     );
   });
   assert.equal(
@@ -5518,7 +5526,7 @@ test("ConnectSourcesGrid explains an unfinished historical reset when a healthy 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid keeps ordinary disconnect warnings generic", async () => {
+test("ConnectSourcesGrid keeps ordinary failed revokes on the disconnect path", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -5582,7 +5590,7 @@ test("ConnectSourcesGrid keeps ordinary disconnect warnings generic", async () =
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Disconnected Whoop\. Your history is still saved\. The provider did not fully confirm, so check that account if you want access removed there too\./,
+      /Disconnect not finished\. Remove Murph access in the provider account, then retry Disconnect here\./,
     );
   });
   assert.equal(
@@ -5592,6 +5600,11 @@ test("ConnectSourcesGrid keeps ordinary disconnect warnings generic", async () =
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
     /historical reset/iu,
+  );
+  assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
+  assert.equal(
+    rendered.container.querySelector("button[aria-label='Connect Whoop']"),
+    null,
   );
 
   await rendered.cleanup();

@@ -776,6 +776,7 @@ describe("selectHostedAssistantInputIds", () => {
       inputId: pending.inputId,
       vaultRoot,
     });
+    const readInputSpy = vi.spyOn(assistantEngine, "readAssistantInputEvent");
 
     const selection = await selectHostedAssistantInputIds({
       freshAssistantInputIds: [fresh.inputId],
@@ -785,6 +786,9 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection.inputIds).toEqual([fresh.inputId]);
     expect(selection.pendingInputIds).toEqual([]);
+    expect(readInputSpy.mock.calls.map((call) => call[0].inputId)).toEqual([
+      fresh.inputId,
+    ]);
   });
 
   it("batches rapid same-wake messages in cursor order", async () => {

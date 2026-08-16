@@ -33,12 +33,18 @@ import {
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
-import { HostedOnboardingError, hostedOnboardingError } from "./errors";
+import {
+  HostedOnboardingError,
+  hostedOnboardingError,
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+  HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+} from "./errors";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
 import {
   acceptHostedMemberStripeCheckoutCompletionTx,
+  assertNoHostedMemberStripeEffectTx,
   clearHostedMemberLegacyTrialBillingUnderLockTx,
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
   prepareHostedMemberStripeCheckoutCompletion,
@@ -93,6 +99,7 @@ import {
   applyHostedFamilyStripeCheckoutExpiredTx,
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
+  assertNoHostedFamilyStripeEffectTx,
   HOSTED_FAMILY_BILLING_PLAN_CODE,
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
   lookupHostedAccountGroupIdByStripeSubscriptionId,
@@ -114,6 +121,7 @@ import { cleanupHostedStandardCheckoutLoser } from "./stripe-checkout-loser-clea
 export type HostedStripeActivatedMemberOutcome = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  hostedExecutionMailboxItemId?: string | null;
 };
 
 export interface HostedStripeCheckoutCleanup {
@@ -228,6 +236,14 @@ async function classifyHostedFamilyBillingClaimTx(input: {
   });
   if (!familyClaim) {
     return "none";
+  }
+  if (familyClaim.kind === "stripe_effect") {
+    throw hostedOnboardingError({
+      code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+      httpStatus: 409,
+      message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+      retryable: true,
+    });
   }
   if (input.stripeSubscriptionId) {
     const familyGroupId =
@@ -857,9 +873,12 @@ async function convertHostedLegacyPulseTrialToStarterTx(input: {
   });
 
   return {
-    activatedMemberId: activation.activated ? input.member.id : null,
+    activatedMemberId: activation.hostedExecutionEventId
+      ? input.member.id
+      : null,
     cleanupPulseTrialStripeSubscriptionId,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
     runtimeRecheckMemberIds: [input.member.id],
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
       ? input.member.id
@@ -950,6 +969,16 @@ export async function cleanupHostedFamilySponsoredDirectSubscription(input: {
       ) {
         throw new HostedStripeFamilySponsoredCleanupPendingError();
       }
+      await Promise.all([
+        assertNoHostedFamilyStripeEffectTx({
+          groupId: familyClaim.groupId,
+          tx,
+        }),
+        assertNoHostedMemberStripeEffectTx({
+          memberId: input.memberId,
+          tx,
+        }),
+      ]);
 
       const familyBillingRef = await readHostedAccountGroupStripeBillingRef({
         groupId: familyClaim.groupId,
@@ -1451,8 +1480,11 @@ export async function applyStripeInvoicePaid(
   });
 
   return {
-    activatedMemberId: activation.activated ? updatedMember.core.id : null,
+    activatedMemberId: activation.hostedExecutionEventId
+      ? updatedMember.core.id
+      : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
     runtimeRecheckMemberIds: runtimeRecheckMemberId
       ? [runtimeRecheckMemberId]
       : [],
@@ -1538,10 +1570,15 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
   familySubscription: HostedFamilyStripeSubscriptionResult,
 ): HostedStripeActivationOutcome {
   const activatedMembers = familySubscription.activations
-    .filter((activation) => activation.activated && activation.hostedExecutionEventId)
+    .filter((activation) =>
+      activation.hostedExecutionEventId
+      && (activation.activated || activation.hostedExecutionMailboxItemId)
+    )
     .map((activation) => ({
       activatedMemberId: activation.memberId,
       hostedExecutionEventId: activation.hostedExecutionEventId,
+      hostedExecutionMailboxItemId:
+        activation.hostedExecutionMailboxItemId ?? null,
     }));
   const firstActivation = activatedMembers[0] ?? null;
 

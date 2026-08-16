@@ -53,6 +53,7 @@ import {
 } from '../src/assistant/onboarding-followup-automation.ts'
 import { applyMurphManagedAutomations } from '../src/assistant/managed-automations.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
+import { runAssistantAutomationPass } from '../src/assistant/automation/run-loop.ts'
 import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
@@ -163,6 +164,37 @@ const CHALLENGE_STANDINGS_RESPONSE_CARD: AssistantResponseCard = {
   footer: null,
 }
 
+const EXERCISE_ROUTINE_RESPONSE_CARD: AssistantResponseCard = {
+  exercises: [{
+    dose: '8 repetitions',
+    estimatedSeconds: 45,
+    images: [],
+    instructions: ['Move slowly.'],
+    name: 'Shoulder circles',
+  }],
+  footer: null,
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain increases.',
+  subtitle: null,
+  title: 'Short reset',
+  totalSeconds: 60,
+  transitionSeconds: 15,
+  version: 1,
+}
+
+const TELEGRAM_RICH_CONTENT_RESPONSE_CARD: AssistantResponseCard = {
+  html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol>',
+  kind: 'telegram_rich_content',
+  version: 1,
+}
+
 const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
   kind: 'compact_table',
   version: 1,
@@ -177,21 +209,10 @@ const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
   workout: {
     version: 1,
     state: 'active',
-    exercises: [{
-      name: 'Bench press',
-      sets: [
-        {
-          status: 'completed',
-          target: '185 lb × 8',
-          actual: '185 lb × 8',
-        },
-        {
-          status: 'pending',
-          target: '185 lb × 6–8',
-          actual: null,
-        },
-      ],
-    }],
+    exercises: Array.from({ length: 11 }, (_, index) => ({
+      name: `Exercise ${index + 1}`,
+      sets: [{ status: 'pending', target: '8 reps', actual: null }],
+    })),
   },
 }
 
@@ -1292,7 +1313,7 @@ describe('assistant outbox runtime', () => {
 
     await expect(createAssistantOutboxIntent({
       card: NUTRITION_RESPONSE_CARD,
-      channel: 'linq',
+      channel: 'telegram',
       message: rendered,
       sessionId: 'session-response-card-group-conflict',
       threadId: 'thread-response-card-group',
@@ -1302,6 +1323,63 @@ describe('assistant outbox runtime', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
     })
+  })
+
+  it('persists and dispatches presentation cards for Telegram groups', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-telegram-group-card-',
+    )
+
+    for (const [index, card] of [
+      EXERCISE_ROUTINE_RESPONSE_CARD,
+      TELEGRAM_RICH_CONTENT_RESPONSE_CARD,
+    ].entries()) {
+      const rendered = renderAssistantResponseCardText(card)
+      const intent = await createAssistantOutboxIntent({
+        card,
+        channel: 'telegram',
+        dedupeToken: `stable-telegram-group-card-${index}`,
+        message: 'model-authored text must not become the durable card message',
+        sessionId: `session-telegram-group-card-${index}`,
+        threadId: 'thread-telegram-group-card',
+        threadIsDirect: false,
+        turnId: `turn-telegram-group-card-${index}`,
+        vault: vaultRoot,
+      })
+
+      expect(intent.card).toEqual(card)
+      expect(intent.message).toBe(rendered)
+      expect(intent.threadIsDirect).toBe(false)
+
+      mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+        delivery: createDelivery({
+          channel: 'telegram',
+          providerMessageId: `telegram-group-card-${index}`,
+          target: 'thread-telegram-group-card',
+          targetKind: 'thread',
+        }),
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: true,
+        outboxIntentId: null,
+        session: undefined,
+      })
+
+      const dispatched = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: intent.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(dispatched.intent.status).toBe('sent')
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          card,
+          media: [],
+          message: rendered,
+        }),
+        expect.any(Object),
+      )
+    }
   })
 
   it('persists and dispatches challenge standings cards for Linq groups only', async () => {
@@ -1424,6 +1502,13 @@ describe('assistant outbox runtime', () => {
         status: 'retryable',
       }),
     ])
+    expect(retryable.card).toMatchObject({
+      workout: {
+        exercises: expect.arrayContaining([
+          expect.objectContaining({ name: 'Exercise 11' }),
+        ]),
+      },
+    })
   })
 
   it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
@@ -2978,6 +3063,396 @@ describe('assistant outbox runtime', () => {
     expect(expectMessageDelivery(reconciledFromPersistedDelivery.intent.delivery).providerMessageId).toBe(
       'provider-still-pending',
     )
+  })
+
+  it('uses the persisted completion checkpoint when crash recovery finalizes delivery', async () => {
+    vi.useFakeTimers()
+    const occurrenceAt = '2026-04-08T01:00:00.000Z'
+    const acceptedMediaAt = '2026-04-08T01:01:00.000Z'
+    const completedAt = '2026-04-08T01:03:00.000Z'
+    const recoveredAt = '2026-04-08T01:13:00.000Z'
+    vi.setSystemTime(new Date(recoveredAt))
+    const { paths, vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-completion-checkpoint-crash-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      instructions: 'Send the hourly checkpoint reminder.',
+      now: new Date(occurrenceAt),
+      route: {
+        ...scaffold.route,
+        channel: 'linq',
+        threadId: 'linq-thread-completion-checkpoint-crash',
+      },
+      schedule: { everyMs: 60 * 60 * 1_000, kind: 'every' },
+      slug: 'completion-checkpoint-crash',
+      title: 'Completion checkpoint crash',
+      vaultRoot,
+    })
+    const seeded = await createIntent(vaultRoot, {
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'linq',
+      createdAt: occurrenceAt,
+      explicitTarget: 'linq-thread-completion-checkpoint-crash',
+      identityId: 'phone_lookup_completion_checkpoint_crash',
+      message: 'Checkpoint recovery reminder',
+      sessionId: 'session-completion-checkpoint-crash',
+      threadId: 'linq-thread-completion-checkpoint-crash',
+      turnId: 'turn-completion-checkpoint-crash',
+    })
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'Send the checkpoint recovery reminder.',
+      provider: 'codex-cli',
+      providerModel: 'gpt-test',
+      sessionId: seeded.sessionId,
+      startedAt: occurrenceAt,
+      turnId: seeded.turnId,
+      vault: vaultRoot,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 1,
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: 'completion-checkpoint-crash',
+        providerMessageId: 'provider-completion-checkpoint-crash',
+        providerThreadId: 'linq-thread-completion-checkpoint-crash',
+        sentAt: acceptedMediaAt,
+        target: 'linq-thread-completion-checkpoint-crash',
+        targetKind: 'thread',
+      }),
+      deliveryConfirmationPending: true,
+      deliveryIdempotencyKey: 'completion-checkpoint-crash',
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: completedAt,
+      lastError: createConfirmationPendingError(),
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: completedAt,
+    })
+    const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: automation.record.automationId,
+      now: automation.record.updatedAt,
+    })
+    runtimeRecord.updatedAt = occurrenceAt
+    runtimeRecord.state.lastRunAt = occurrenceAt
+    runtimeRecord.state.pendingDeliveryIntentId = seeded.intentId
+    runtimeRecord.state.pendingOccurrenceAt = occurrenceAt
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeRecord],
+      version: 1,
+    })
+
+    const recovered = await dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date(recoveredAt),
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    expect(recovered.intent).toMatchObject({
+      sentAt: completedAt,
+      status: 'sent',
+      updatedAt: completedAt,
+    })
+    expect(recovered.intent.delivery?.sentAt).toBe(acceptedMediaAt)
+    const receipt = await readAssistantTurnReceipt(vaultRoot, seeded.turnId)
+    expect(receipt?.timeline.filter(
+      (event) => event.kind === 'delivery.sent',
+    )).toEqual([
+      expect.objectContaining({ at: completedAt }),
+    ])
+    const diagnosticEvents = (await readFile(paths.diagnosticEventsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { at: string; kind: string })
+    expect(diagnosticEvents).toContainEqual(expect.objectContaining({
+      at: completedAt,
+      kind: 'delivery.sent',
+    }))
+    expect(await readAssistantDiagnosticsSnapshot(vaultRoot)).toMatchObject({
+      lastEventAt: completedAt,
+      updatedAt: completedAt,
+    })
+    const cronRuntime = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(cronRuntime.jobs[0]?.state).toMatchObject({
+      lastSucceededAt: completedAt,
+      pendingOccurrenceAt: null,
+    })
+    expect(cronRuntime.jobs[0]?.state.pendingDeliveryIntentId).toBeUndefined()
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
+      expect.objectContaining({
+        jobId: automation.record.automationId,
+        state: expect.objectContaining({
+          lastSucceededAt: completedAt,
+          nextRunAt: '2026-04-08T02:03:00.000Z',
+        }),
+      }),
+    )
+  })
+
+  it('retains the completion checkpoint when the post-persistence hook throws', async () => {
+    vi.useFakeTimers()
+    const acceptedMediaAt = '2026-04-08T02:01:00.000Z'
+    const completedAt = '2026-04-08T02:03:00.000Z'
+    const hookFailedAt = '2026-04-08T02:04:00.000Z'
+    vi.setSystemTime(new Date(completedAt))
+    const { paths, vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-completion-checkpoint-hook-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      instructions: 'Send the hourly hook checkpoint reminder.',
+      now: new Date('2026-04-08T02:00:00.000Z'),
+      route: {
+        ...scaffold.route,
+        channel: 'linq',
+        threadId: 'linq-thread-completion-checkpoint-hook',
+      },
+      schedule: { everyMs: 60 * 60 * 1_000, kind: 'every' },
+      slug: 'completion-checkpoint-hook',
+      title: 'Completion checkpoint hook',
+      vaultRoot,
+    })
+    const seeded = await createIntent(vaultRoot, {
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'linq',
+      createdAt: '2026-04-08T02:00:00.000Z',
+      explicitTarget: 'linq-thread-completion-checkpoint-hook',
+      identityId: 'phone_lookup_completion_checkpoint_hook',
+      media: [createVoiceMemoMedia()],
+      message: 'Checkpoint hook recovery reminder',
+      sessionId: 'session-completion-checkpoint-hook',
+      threadId: 'linq-thread-completion-checkpoint-hook',
+      turnId: 'turn-completion-checkpoint-hook',
+    })
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'Send the hook checkpoint recovery reminder.',
+      provider: 'codex-cli',
+      providerModel: 'gpt-test',
+      sessionId: seeded.sessionId,
+      startedAt: '2026-04-08T02:00:00.000Z',
+      turnId: seeded.turnId,
+      vault: vaultRoot,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 1,
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: seeded.deliveryIdempotencyKey,
+        providerMessageEffects: [{
+          carriesIntentMedia: true,
+          message: 'Checkpoint hook recovery reminder',
+          providerMessageId: 'provider-completion-checkpoint-media',
+        }],
+        providerMessageId: 'provider-completion-checkpoint-media',
+        providerMessageIds: ['provider-completion-checkpoint-media'],
+        providerThreadId: 'linq-thread-completion-checkpoint-hook',
+        sentAt: acceptedMediaAt,
+        target: 'linq-thread-completion-checkpoint-hook',
+        targetKind: 'thread',
+      }),
+      deliveryConfirmationPending: false,
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: acceptedMediaAt,
+      lastError: {
+        code: 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
+        message: 'The accepted media awaits its rich-link sibling.',
+      },
+      nextAttemptAt: completedAt,
+      status: 'retryable',
+      updatedAt: acceptedMediaAt,
+    })
+    const runtimeRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: automation.record.automationId,
+      now: automation.record.updatedAt,
+    })
+    runtimeRecord.updatedAt = '2026-04-08T02:00:00.000Z'
+    runtimeRecord.state.lastRunAt = '2026-04-08T02:00:00.000Z'
+    runtimeRecord.state.pendingDeliveryIntentId = seeded.intentId
+    runtimeRecord.state.pendingOccurrenceAt = '2026-04-08T02:00:00.000Z'
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeRecord],
+      version: 1,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: seeded.deliveryIdempotencyKey,
+        providerMessageEffects: [{
+          carriesIntentMedia: true,
+          message: 'Checkpoint hook recovery reminder',
+          providerMessageId: 'provider-completion-checkpoint-media',
+        }],
+        providerMessageId: 'provider-completion-checkpoint-media',
+        providerMessageIds: [
+          'provider-completion-checkpoint-media',
+          'provider-completion-checkpoint-rich-link',
+        ],
+        providerThreadId: 'linq-thread-completion-checkpoint-hook',
+        sentAt: completedAt,
+        target: 'linq-thread-completion-checkpoint-hook',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+    const postPersistenceError = new Error('post-persistence hook failed')
+
+    const interrupted = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        persistDeliveredIntent: async () => {
+          vi.setSystemTime(new Date(hookFailedAt))
+          throw postPersistenceError
+        },
+      },
+      intentId: seeded.intentId,
+      now: new Date(completedAt),
+      vault: vaultRoot,
+    })
+
+    expect(interrupted.intent).toMatchObject({
+      deliveryConfirmationPending: true,
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: completedAt,
+    })
+    expect(interrupted.intent.delivery?.sentAt).toBe(acceptedMediaAt)
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    const staleRecoveryAt = new Date(
+      Date.parse(completedAt) + 10 * 60 * 1_000,
+    ).toISOString()
+    const idlePass = await runAssistantAutomationPass({
+      requestId: 'request-completion-checkpoint-hook-wake',
+      vault: vaultRoot,
+    })
+    expect(idlePass).toMatchObject({
+      nextWakeAt: staleRecoveryAt,
+      outboxAttempted: 0,
+      progressed: false,
+    })
+    vi.setSystemTime(new Date(staleRecoveryAt))
+
+    const recovered = await dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date(staleRecoveryAt),
+      vault: vaultRoot,
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    expect(recovered.intent).toMatchObject({
+      sentAt: completedAt,
+      status: 'sent',
+      updatedAt: completedAt,
+    })
+    expect(recovered.intent.delivery?.sentAt).toBe(acceptedMediaAt)
+    const receipt = await readAssistantTurnReceipt(vaultRoot, seeded.turnId)
+    expect(receipt?.timeline.filter(
+      (event) => event.kind === 'delivery.sent',
+    )).toEqual([
+      expect.objectContaining({ at: completedAt }),
+    ])
+    const diagnosticEvents = (await readFile(paths.diagnosticEventsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { at: string; kind: string })
+    expect(diagnosticEvents).toContainEqual(expect.objectContaining({
+      at: completedAt,
+      kind: 'delivery.sent',
+    }))
+    const cronRuntime = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(cronRuntime.jobs[0]?.state).toMatchObject({
+      lastSucceededAt: completedAt,
+      pendingOccurrenceAt: null,
+    })
+    expect(cronRuntime.jobs[0]?.state.pendingDeliveryIntentId).toBeUndefined()
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
+      expect.objectContaining({
+        jobId: automation.record.automationId,
+        state: expect.objectContaining({
+          lastSucceededAt: completedAt,
+          nextRunAt: '2026-04-08T03:03:00.000Z',
+        }),
+      }),
+    )
+  })
+
+  it('does not resend a non-idempotent delivery after its persistence hook fails', async () => {
+    vi.useFakeTimers()
+    const completedAt = '2026-04-08T04:03:00.000Z'
+    const hookFailedAt = '2026-04-08T04:04:00.000Z'
+    vi.setSystemTime(new Date(completedAt))
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-non-idempotent-checkpoint-hook-',
+    )
+    const seeded = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T04:00:00.000Z',
+      message: 'Non-idempotent checkpoint recovery reminder',
+      sessionId: 'session-non-idempotent-checkpoint-hook',
+      turnId: 'turn-non-idempotent-checkpoint-hook',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey: seeded.deliveryIdempotencyKey,
+        providerMessageId: 'provider-non-idempotent-checkpoint-hook',
+        sentAt: completedAt,
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const interrupted = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        persistDeliveredIntent: async () => {
+          vi.setSystemTime(new Date(hookFailedAt))
+          throw new Error('non-idempotent post-persistence hook failed')
+        },
+      },
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date(completedAt),
+      vault: vaultRoot,
+    })
+
+    expect(interrupted.intent).toMatchObject({
+      deliveryConfirmationPending: false,
+      deliveryTransportIdempotent: false,
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: completedAt,
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+
+    const staleRecoveryAt = new Date(
+      Date.parse(completedAt) + 10 * 60 * 1_000,
+    ).toISOString()
+    vi.setSystemTime(new Date(staleRecoveryAt))
+    const recovered = await dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date(staleRecoveryAt),
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    expect(recovered.intent).toMatchObject({
+      sentAt: completedAt,
+      status: 'sent',
+      updatedAt: completedAt,
+    })
   })
 
   it('delivers immediately, reuses sent dedupe hits, and supports queue-only mode', async () => {
@@ -6687,17 +7162,32 @@ describe('assistant outbox runtime', () => {
       updatedAt: '2026-04-08T05:04:30.000Z',
     })
 
+    const freshSending = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T05:05:00.000Z',
+      message: 'fresh sending checkpoint',
+      sessionId: 'session-summary-sending',
+      turnId: 'turn-summary-sending',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...freshSending,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T05:20:00.000Z',
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T05:20:00.000Z',
+    })
+
     const summary = await buildAssistantOutboxSummary(vaultRoot)
     expect(summary).toEqual({
       abandoned: 1,
       failed: 2,
-      nextAttemptAt: '2026-04-08T06:00:00.000Z',
+      nextAttemptAt: '2026-04-08T05:30:00.000Z',
       oldestPendingAt: futureRetryable.createdAt,
       pending: 0,
       retryable: 1,
-      sending: 0,
+      sending: 1,
       sent: 1,
-      total: 5,
+      total: 6,
     })
   })
 })

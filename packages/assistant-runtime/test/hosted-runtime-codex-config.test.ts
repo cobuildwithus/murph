@@ -28,6 +28,9 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+} from "@murphai/operator-config/assistant/target-runtime";
+import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -67,9 +70,10 @@ const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
 const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
   ? test
   : test.skip;
-const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
+const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 132_000;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
-const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
+const HOSTED_CODEX_AUTOCOMPACTION_E2E_INPUT_TOKENS =
+  HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT + 1_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
@@ -547,12 +551,12 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
 
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "hosted-openai",
+    "openai-local-test",
   );
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "hosted-openai"/u);
-  assert.match(config, /\[model_providers\."hosted-openai"\]/u);
+  assert.match(config, /model_provider = "openai-local-test"/u);
+  assert.match(config, /\[model_providers\."openai-local-test"\]/u);
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
@@ -602,8 +606,12 @@ test("hosted Codex runtime config accepts a Linux Docker bridge model provider o
     },
   });
 
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "openai-local-test",
+  );
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "hosted-openai"/u);
+  assert.match(config, /model_provider = "openai-local-test"/u);
   assert.match(config, /base_url = "http:\/\/172\.17\.0\.1:4567\/v1"/u);
 });
 
@@ -977,8 +985,12 @@ testHostedCodexAuthE2e(
       });
       const config = await readFile(result.codexConfigPath, "utf8");
 
-      assert.match(config, /^model_provider = "hosted-openai"$/mu);
-      assert.match(config, /\[model_providers\."hosted-openai"\]/u);
+      assert.equal(
+        result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+        HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      );
+      assert.match(config, /^model_provider = "openai-local-test"$/mu);
+      assert.match(config, /\[model_providers\."openai-local-test"\]/u);
       assert.match(config, /^env_key = "OPENAI_API_KEY"$/mu);
       assert.match(config, /^requires_openai_auth = false$/mu);
       assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
@@ -1282,13 +1294,13 @@ testHostedCodexAuthE2e(
 );
 
 testHostedCodexAutocompactionE2e(
-  "hosted Codex app-server auto-compacts managed inference resumed context",
+  "hosted Codex app-server auto-compacts managed inference at the configured default",
   () => runHostedCodexAutocompactionE2e("managed"),
   150_000,
 );
 
 testHostedCodexAutocompactionE2e(
-  "hosted Codex app-server locally compacts custom inference resumed context",
+  "hosted Codex app-server auto-compacts custom inference at its derived limit",
   () => runHostedCodexAutocompactionE2e("custom"),
   150_000,
 );
@@ -1301,6 +1313,15 @@ async function runHostedCodexAutocompactionE2e(
   const vaultRoot = path.join(workspaceRoot, "vault");
   const rawContextMarker =
     `HOSTED_CODEX_AUTOCOMPACTION_RAW_${providerKind}_${Date.now()}`;
+  const goalSentinel = `AUTOCOMPACTION_GOAL_${providerKind}`;
+  const constraintSentinel = `AUTOCOMPACTION_CONSTRAINT_${providerKind}`;
+  const toolResultSentinel = `AUTOCOMPACTION_TOOL_RESULT_${providerKind}`;
+  const finalReply = [
+    "second assistant reply after auto-compaction",
+    goalSentinel,
+    constraintSentinel,
+    toolResultSentinel,
+  ].join(" ");
   const rawContext = Array.from(
     { length: 12 },
     (_, index) =>
@@ -1327,27 +1348,46 @@ async function runHostedCodexAutocompactionE2e(
         )
       ) {
         compactionRequestIndexes.add(requestIndex);
-        return `${HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL}: the first turn included a large synthetic context and received a brief reply.`;
+        return [
+          HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL,
+          goalSentinel,
+          constraintSentinel,
+          toolResultSentinel,
+        ].join(" ");
       }
 
-      return "second assistant reply after auto-compaction";
+      assert.equal(body.includes(goalSentinel), true);
+      assert.equal(body.includes(constraintSentinel), true);
+      assert.equal(body.includes(toolResultSentinel), true);
+      return finalReply;
     },
-    usageForRequest: (_body, requestIndex) =>
-      compactionRequestIndexes.has(requestIndex)
-        ? {
-            input_tokens: 300,
-            input_tokens_details: null,
-            output_tokens: 80,
-            output_tokens_details: null,
-            total_tokens: 380,
-          }
-        : {
-            input_tokens: 13_000,
-            input_tokens_details: null,
-            output_tokens: 500,
-            output_tokens_details: null,
-            total_tokens: 13_500,
-          },
+    usageForRequest: (_body, requestIndex) => {
+      if (compactionRequestIndexes.has(requestIndex)) {
+        return {
+          input_tokens: 300,
+          input_tokens_details: null,
+          output_tokens: 80,
+          output_tokens_details: null,
+          total_tokens: 380,
+        };
+      }
+      if (requestIndex === 1) {
+        return {
+          input_tokens: HOSTED_CODEX_AUTOCOMPACTION_E2E_INPUT_TOKENS,
+          input_tokens_details: null,
+          output_tokens: 500,
+          output_tokens_details: null,
+          total_tokens: HOSTED_CODEX_AUTOCOMPACTION_E2E_INPUT_TOKENS + 500,
+        };
+      }
+      return {
+        input_tokens: 300,
+        input_tokens_details: null,
+        output_tokens: 80,
+        output_tokens_details: null,
+        total_tokens: 380,
+      };
+    },
   });
 
   try {
@@ -1375,6 +1415,18 @@ async function runHostedCodexAutocompactionE2e(
         PATH: process.env.PATH ?? "",
       },
     });
+    const preparedConfig = await readFile(prepared.codexConfigPath, "utf8");
+    assert.match(
+      preparedConfig,
+      new RegExp(
+        `^model_auto_compact_token_limit = ${
+          providerKind === "managed"
+            ? HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT
+            : 98_304
+        }$`,
+        "mu",
+      ),
+    );
     const codexEnv = {
       CODEX_HOME: prepared.runtimeEnv.CODEX_HOME,
       HOME: operatorHomeRoot,
@@ -1388,17 +1440,16 @@ async function runHostedCodexAutocompactionE2e(
           }),
       PATH: prepared.runtimeEnv.PATH ?? process.env.PATH ?? "",
     };
-    const configOverrides = [
-      `model_auto_compact_token_limit=${HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT}`,
-    ];
     const firstResult = await executeCodexAppServerTurn({
       abortSignal: AbortSignal.timeout(60_000),
       approvalPolicy: "never",
       codexHome: prepared.runtimeEnv.CODEX_HOME,
-      configOverrides,
       env: codexEnv,
       prompt: [
-        "Please acknowledge this synthetic oversized hosted Codex context briefly.",
+        "Continue this multi-step task after compaction without losing its goal, constraint, or completed tool result.",
+        `Goal: ${goalSentinel}`,
+        `Constraint: ${constraintSentinel}`,
+        `Completed tool result: ${toolResultSentinel}`,
         rawContext,
       ].join("\n\n"),
       sandbox: "danger-full-access",
@@ -1412,15 +1463,14 @@ async function runHostedCodexAutocompactionE2e(
       abortSignal: AbortSignal.timeout(60_000),
       approvalPolicy: "never",
       codexHome: prepared.runtimeEnv.CODEX_HOME,
-      configOverrides,
       env: codexEnv,
-      prompt: "Please use the compacted context and answer with a short second reply.",
+      prompt: "Finish the task using the compacted goal, constraint, and completed tool result.",
       resumeSessionId: firstResult.threadId,
       sandbox: "danger-full-access",
       workingDirectory: vaultRoot,
     });
 
-    assert.equal(secondResult.finalMessage, "second assistant reply after auto-compaction");
+    assert.equal(secondResult.finalMessage, finalReply);
     assert.equal(secondResult.threadId, firstResult.threadId);
     assert.equal(
       compactionRequestIndexes.size > 0,
@@ -1464,6 +1514,14 @@ async function runHostedCodexAutocompactionE2e(
       true,
       "Expected the resumed turn to include the compacted summary.",
     );
+    for (const sentinel of [goalSentinel, constraintSentinel, toolResultSentinel]) {
+      assert.equal(
+        secondTurnInput.includes(sentinel),
+        true,
+        `Expected the resumed turn to preserve ${sentinel}.`,
+      );
+      assert.equal(secondResult.finalMessage.includes(sentinel), true);
+    }
     assert.equal(
       secondTurnInput.includes("first assistant reply before auto-compaction"),
       false,

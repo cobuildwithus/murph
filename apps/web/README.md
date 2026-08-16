@@ -50,6 +50,14 @@ device or connected-app completion result takes foreground priority; closing it
 refreshes plain Home so pending onboarding appears next instead of mounting a
 second dialog.
 
+Generic dashboard contact resolution reads only complete opaque member-channel
+markers and Murph-owned destinations. It never unwraps a member encryption root
+or reads the Stripe checkout email: the assigned text destination resolves from
+the locally encrypted `HostedLinqLine` row, and the email option uses the signed
+reply alias without exposing the member's verified address. Provider-specific
+webmail shortcuts remain a Settings concern, where that verified address is
+already loaded for the account-email surface.
+
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
@@ -432,6 +440,38 @@ build; a 30-second caller does not remain compatible with the 40-second web
 deadline, so do not roll Cloudflare back below 45 seconds while that web build
 is active.
 
+The encrypted phone-call result reader accepts an optional bounded completion
+policy as a consumer-first schema release. This reader-only release must deploy
+before any Web version writes that policy. The reader-only release continues to
+emit the legacy result shape; it is a compatible consumer prerequisite, not a
+safe active producer after writer activation. After the production alias serves
+this reader, the first writer cutover must pause new phone-call admission and
+wait the platform's full configured start-route lifetime so every previously
+admitted request either exits or exposes its durable call and Workflow. Keep
+analyzed-result webhook ingress live while every result-capable provider call
+and every phone-call reconciliation Workflow pinned to any pre-writer
+deployment, including this reader-only release, settles. Then freeze that result
+ingress, wait its full configured route lifetime, and re-prove zero provider
+calls, pre-writer Workflows, or other legacy-producer executions before the
+writer activates. Resume ingress and admission only after that reader-plus-writer
+release is current. Vercel Workflow runs retain the deployment that started
+them, so elapsed route lifetime alone is not Workflow drain proof. No execution
+capable of invoking a legacy result producer may survive the first policy write.
+Tracked and generationless manual direct transfers share the later writer;
+group normalization disables transfer authority and is outside this policy
+evolution. After writer activation, the first release that both reads and
+writes the durable policy is the operational rollback floor. A lower release
+may consume existing policy-bearing results, but must not produce new transfer
+results. An emergency below-floor rollback must pause new phone-call admission
+and drain the full configured start-route lifetime first. Keep analyzed-result
+webhook ingress live while every result-capable provider call and
+deployment-pinned reconciliation run settles. Then freeze and drain result
+ingress, re-prove zero legacy-producer execution, and transition. A zero count
+of non-null
+result-notification-channel rows proves only
+generation-state compatibility; it cannot prove encrypted-result compatibility.
+Prefer a compatible forward deployment.
+
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
@@ -630,10 +670,21 @@ label row's `serving_grams` when it is available instead of storing manual
 product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
-The current search path uses built-in Postgres full-text search only. No
-extensions such as `pg_trgm`, `pgvector`, or vector indexes are required for
-supplement label lookup. Food label lookup additionally applies `pg_trgm` in
-`sql/foods/schema.sql` for name search support.
+The current search path uses built-in Postgres full-text search plus the
+`pg_trgm` extension for indexed name similarity. Public food searches retain
+their existing 250-candidate SQL bound, and supplement searches retain their
+existing ranking path. Private food-name search uses a separate bounded
+retrieval contract for the roughly two-million-row foods corpus: it admits at
+most 250 literal exact-name rows, 5,000 nearest-name matches, and 5,000
+deterministic canonical representatives from either its full-text arm or its
+trigram fallback before similarity scoring, canonical-key deduplication, and
+window sorting. Ranking is deterministic within that admitted set; it is
+intentionally not an exhaustive whole-catalog ranking. Exact IDs and UPCs
+continue to use direct lookup paths.
+
+For an existing labels database, create the foods exact-name-rank, GiST
+name-rank, and canonical-rank indexes concurrently before deploying web code
+that uses this query shape.
 
 The supplement payload constraint is additive for existing databases:
 `sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new
@@ -1586,12 +1637,18 @@ later validation worker or changing the compiled application. Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
 upgrade must revalidate this worker boundary.
 
-Production builds use Next 16.3's default Turbopack path. The production script
-does not pass `--webpack`, and the Next config does not retain Webpack-only
-worker or memory flags. The hosted local-development wrapper also selects
-Turbopack unconditionally and rejects an explicit Webpack flag. Workflow
-directive discovery runs through its native Next integration without a custom
-repository Webpack configuration.
+Production builds use Next 16.3's supported Webpack fallback. The production
+script passes `--webpack`, and the Next config explicitly enables
+`webpackBuildWorker` plus `webpackMemoryOptimizations` because the Workflow
+integration contributes Webpack configuration that otherwise prevents Next
+from selecting the isolated build worker automatically. The hosted local-
+development wrapper remains on Turbopack and rejects an explicit Webpack flag.
+The production runner also owns a versioned cache epoch inside `.next/cache`.
+When that stamp is absent or differs, it removes the incompatible cache before
+compilation and writes the epoch only after Next succeeds. This gives the
+Turbopack-to-Webpack rollout one cold build without permanently disabling warm
+Webpack caching; bump the epoch only when a proven compiler/cache transition
+requires another invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions
@@ -1623,15 +1680,25 @@ preview nevertheless OOM-killed Turbopack, so the catalog correction is kept
 for its proven boundary and graph improvement but is not claimed as sufficient
 capacity relief.
 
-The historical memory-optimized Webpack fallback compiled the complete
-application within the local heap policy and exposed stricter route-contract
-issues: a browser-vault parser re-export through a server-heavy cursor, an
-extra helper export from a page module, optional page props, and one synchronous
-route-param compatibility union. Those corrections remain in place, but the
-fallback itself is no longer active. A forced-cold Next 16.3 Standard preview
-subsequently completed with Turbopack on 4 vCPUs and 8 GB RAM: compilation took
-91 seconds, the complete Vercel build stage took four minutes, and all 233
-static pages were generated without an out-of-memory failure.
+The memory-optimized Webpack path compiled the complete application within the
+local heap policy and exposed stricter route-contract issues: a browser-vault
+parser re-export through a server-heavy cursor, an extra helper export from a
+page module, optional page props, and one synchronous route-param compatibility
+union. Those corrections remain in place. Three consecutive forced-cold
+Webpack previews, a later integration preview, and the final corrected head all
+completed on the Standard builder without an OOM.
+
+Next 16.3 Turbopack was later restored after forced-cold previews completed in
+about four minutes, but that bounded proof did not disprove the already observed
+intermittent memory failure. On 2026-08-14, two production builds remained in
+Turbopack compilation until Vercel's build-duration ceiling and another exited
+137 during compilation with Vercel's explicit container-OOM report. Production
+therefore uses the repeatedly proven Webpack path again. The first restored
+preview inherited the old Vercel build cache and remained in Webpack compilation
+for more than 15 minutes, despite the same Next 16.3 Webpack lane previously
+compiling in 2.6 to 3.2 minutes. That evidence owns the cache epoch above. A
+future Turbopack production cutover must prove repeated cold builds over a
+representative change window, not only isolated preview successes.
 
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build

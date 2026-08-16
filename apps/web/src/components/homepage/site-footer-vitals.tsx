@@ -32,11 +32,19 @@ const AVAILABILITY_PRESENTATION: Record<
   },
 };
 
-function useStatusPageAvailability(): StatusPageAvailability {
+export type SiteFooterVitalsMode = "live" | "synthetic";
+
+function useStatusPageAvailability(
+  enabled: boolean,
+): StatusPageAvailability {
   const [availability, setAvailability] =
     useState<StatusPageAvailability>("unknown");
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     let cancelled = false;
     void fetch(STATUS_PAGE_SUMMARY_ENDPOINT)
       .then((response) => (response.ok ? response.json() : null))
@@ -50,20 +58,25 @@ function useStatusPageAvailability(): StatusPageAvailability {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
-  return availability;
+  return enabled ? availability : "unknown";
 }
 
-export function SiteFooterVitals() {
-  const availability = useStatusPageAvailability();
+export function SiteFooterVitals({
+  mode = "live",
+}: {
+  mode?: SiteFooterVitalsMode;
+}) {
+  const live = mode === "live";
+  const availability = useStatusPageAvailability(live);
   const presentation = AVAILABILITY_PRESENTATION[availability];
 
   return (
     <div className="flex flex-col items-start gap-5">
       <div>
         <p className="font-serif text-[2rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
-          <MessageVolumeCount />
+          <MessageVolumeCount enabled={live} />
         </p>
         <p className="mt-2 text-[0.875rem] text-[#736a58]">
           messages and counting

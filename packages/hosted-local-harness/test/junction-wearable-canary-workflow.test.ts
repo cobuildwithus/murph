@@ -89,8 +89,13 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
     expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
     expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop");
-    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "1"');
-    expect(workflow).toContain("run: pnpm hosted-local e2e device-connect");
+    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "0"');
+    expect(workflow).toContain("      - name: Verify stable Chrome\n");
+    expect(workflow).toContain("run: google-chrome --version");
+    expect(workflow).not.toContain("playwright install");
+    expect(workflow).toContain(
+      "run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect",
+    );
     expect(workflow).toContain("image: public.ecr.aws/docker/library/postgres:17");
 
     const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];
@@ -117,6 +122,46 @@ describe("live Junction wearable canary workflow", () => {
     expect(browserRunner).toContain(
       'disclosureSourceName: source === "oura" ? "Oura" : "Whoop"',
     );
+  });
+
+  it("keeps headed CI authorization automated and fail-closed", () => {
+    expect(browserRunner).toContain(
+      'const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";',
+    );
+    expect(browserRunner).toContain(
+      "if (source === \"oura\" && !manualAuthorizationAllowed && !otp)",
+    );
+    expect(browserRunner).toContain(
+      'browserChannel: !headless && !manualAuthorizationAllowed ? "chrome" : undefined,',
+    );
+    expect(browserRunner).toContain("channel: config.browserChannel,");
+
+    const clickedBranchOffset = browserRunner.indexOf("if (clicked) {");
+    const blockedWindowResetOffset = browserRunner.indexOf(
+      "automationBlockedObservedAt = null;",
+      clickedBranchOffset,
+    );
+    const challengeClassificationResetOffset = browserRunner.indexOf(
+      "blockedWindowObservedChallenge = false;",
+      blockedWindowResetOffset,
+    );
+    const automatedProgressOffset = browserRunner.indexOf(
+      "await page.waitForTimeout(750);",
+      challengeClassificationResetOffset,
+    );
+    const manualRecoveryOffset = browserRunner.indexOf(
+      "if (config.manualAuthorizationAllowed) {",
+      automatedProgressOffset,
+    );
+    expect(clickedBranchOffset).toBeGreaterThan(0);
+    expect(blockedWindowResetOffset).toBeGreaterThan(clickedBranchOffset);
+    expect(challengeClassificationResetOffset).toBeGreaterThan(
+      blockedWindowResetOffset,
+    );
+    expect(automatedProgressOffset).toBeGreaterThan(
+      challengeClassificationResetOffset,
+    );
+    expect(manualRecoveryOffset).toBeGreaterThan(automatedProgressOffset);
   });
 
   it("keeps Playwright's closing quote out of redacted navigation URLs", () => {

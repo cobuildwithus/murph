@@ -7,6 +7,7 @@ import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 export const POST = withJsonError(async (
   request: Request,
@@ -20,6 +21,16 @@ export const POST = withJsonError(async (
     auth.member.id,
     connectionId,
   );
+  if (disconnected.connection.status !== "disconnected") {
+    throw deviceSyncError({
+      code: "CONNECTION_DISCONNECT_NOT_FINISHED",
+      message: disconnected.warning?.historicalResetIncomplete === true
+        ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
+        : "Disconnect not finished. Remove Murph access in the provider account, then retry Disconnect here.",
+      retryable: true,
+      httpStatus: 503,
+    });
+  }
   const registration = readMemberOwnedProviderSetupRegistration(
     disconnected.connection.provider,
   );

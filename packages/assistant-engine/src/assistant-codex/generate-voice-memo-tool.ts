@@ -46,6 +46,39 @@ export interface GenerateVoiceMemoToolResult {
 
 export type VoiceMemoDeliveryChannel = 'linq' | 'telegram'
 
+type VoiceMemoPhaseTimingMedia = Readonly<{
+  mediaKind: 'song' | 'voice_memo'
+}>
+
+export type VoiceMemoPhaseTiming = VoiceMemoPhaseTimingMedia &
+  (
+    | Readonly<{
+        deliveryMode: 'deferred'
+        generationDurationMs?: never
+        outcome: 'deferred'
+        terminalPhase: 'delivery'
+        uploadDurationMs?: never
+      }>
+    | Readonly<{
+        deliveryMode: 'synchronous'
+        generationDurationMs: number
+        outcome: 'aborted' | 'generation_failed' | 'invalid_audio'
+        terminalPhase: 'generation'
+        uploadDurationMs?: never
+      }>
+    | Readonly<{
+        deliveryMode: 'synchronous'
+        generationDurationMs: number
+        outcome: 'aborted' | 'succeeded' | 'upload_failed'
+        terminalPhase: 'upload'
+        uploadDurationMs: number
+      }>
+  )
+
+export type VoiceMemoPhaseTimingRecorder = (
+  timing: VoiceMemoPhaseTiming,
+) => void
+
 export interface VoiceMemoElevenLabsRuntimeConfig {
   apiKeyAvailable: boolean
   defaultVoiceId?: string | null
@@ -91,6 +124,7 @@ export type VoiceMemoToolRuntime =
       generateAndUpload(input: {
         filenameBase: string
         generation: AssistantVoiceMemoGeneration
+        recordPhaseTiming?: VoiceMemoPhaseTimingRecorder
         signal?: AbortSignal | null
       }): Promise<VoiceMemoToolRuntimeResult>
       kind: 'linq'
@@ -129,6 +163,7 @@ export async function executeGenerateVoiceMemoTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateVoiceMemoToolArgs
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
   const mediaConflict = rejectIfResponseMediaConflicts(
@@ -177,6 +212,7 @@ export async function executeGenerateVoiceMemoTool(input: {
       text: input.args.text,
       voiceId,
     },
+    recordPhaseTiming: input.recordPhaseTiming ?? null,
     runtime,
     signal: input.abortSignal ?? null,
   })
@@ -205,6 +241,7 @@ export async function executeGenerateSongTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
   const mediaConflict = rejectIfResponseMediaConflicts(
@@ -235,6 +272,7 @@ export async function executeGenerateSongTool(input: {
       outputFormat: assistantVoiceMemoMusicOutputFormat,
       prompt: input.args.prompt,
     },
+    recordPhaseTiming: input.recordPhaseTiming ?? null,
     runtime,
     signal: input.abortSignal ?? null,
   })
@@ -243,12 +281,21 @@ export async function executeGenerateSongTool(input: {
 async function executeGeneratedVoiceMemo(input: {
   filenameBase: string
   generation: AssistantVoiceMemoGeneration
+  recordPhaseTiming: VoiceMemoPhaseTimingRecorder | null
   runtime: VoiceMemoToolRuntime
   signal: AbortSignal | null
 }): Promise<GenerateVoiceMemoToolResult> {
-  const { label, transcript } = describeVoiceMemoGeneration(input.generation)
+  const { label, mediaKind, transcript } = describeVoiceMemoGeneration(
+    input.generation,
+  )
   const filename = `${input.filenameBase}.mp3`
   if (input.runtime.kind === 'telegram') {
+    recordVoiceMemoPhaseTiming(input.recordPhaseTiming, {
+      deliveryMode: 'deferred',
+      mediaKind,
+      outcome: 'deferred',
+      terminalPhase: 'delivery',
+    })
     return {
       responseMedia: [
         {
@@ -271,6 +318,13 @@ async function executeGeneratedVoiceMemo(input: {
     runtimeResult = await input.runtime.generateAndUpload({
       filenameBase: input.filenameBase,
       generation: input.generation,
+      ...(input.recordPhaseTiming
+        ? {
+            recordPhaseTiming: (timing: VoiceMemoPhaseTiming) => {
+              recordVoiceMemoPhaseTiming(input.recordPhaseTiming, timing)
+            },
+          }
+        : {}),
       signal: input.signal,
     })
   } catch (error) {
@@ -389,13 +443,35 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+function recordVoiceMemoPhaseTiming(
+  recorder: VoiceMemoPhaseTimingRecorder | null,
+  timing: VoiceMemoPhaseTiming,
+): void {
+  if (!recorder) {
+    return
+  }
+  try {
+    recorder(timing)
+  } catch {
+    // Phase timing is diagnostic-only and must not change tool behavior.
+  }
+}
+
 function describeVoiceMemoGeneration(
   generation: AssistantVoiceMemoGeneration,
-): { label: VoiceMemoGenerationLabel; transcript: string | null } {
+): {
+  label: VoiceMemoGenerationLabel
+  mediaKind: VoiceMemoPhaseTiming['mediaKind']
+  transcript: string | null
+} {
   switch (generation.kind) {
     case 'elevenlabs_speech':
-      return { label: 'voice memo', transcript: generation.text }
+      return {
+        label: 'voice memo',
+        mediaKind: 'voice_memo',
+        transcript: generation.text,
+      }
     case 'elevenlabs_music':
-      return { label: 'song', transcript: null }
+      return { label: 'song', mediaKind: 'song', transcript: null }
   }
 }

@@ -62,12 +62,15 @@ jobs:
           echo "${codex_bin_dir}" >> "$GITHUB_PATH"
           "${codex_bin_dir}/codex" --version
 
-      - name: Install Chromium
-        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+      # The protected WHOOP proof uses Playwright's stable Chrome channel so
+      # the provider sees the current public browser rather than the ahead-of-
+      # stable bundled Chromium build. Ubuntu 24.04 runners include Chrome.
+      - name: Verify stable Chrome
+        run: google-chrome --version
 
-      # Keep credentials off every checkout, install, bundle, and browser-install
+      # Keep credentials off every checkout, install, bundle, and browser-check
       # step. The hosted-local suite further partitions Junction authority into
-      # the platform and one provider login at a time into the Chromium child.
+      # the platform and one provider login at a time into the Chrome child.
       - name: Run live Junction wearable browser canary
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync
@@ -79,8 +82,11 @@ jobs:
           MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"
           MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop
           MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: member_e2e_junction_whoop_github_canary
-          MURPH_E2E_WEARABLE_HEADLESS: "1"
+          # WHOOP's identity boundary challenges Playwright's bundled browser.
+          # Use the stable Chrome channel headed inside the runner's isolated
+          # virtual display; authorization and callback assertions stay exact.
+          MURPH_E2E_WEARABLE_HEADLESS: "0"
           MURPH_E2E_WEARABLE_TIMEOUT_MS: "420000"
           MURPH_E2E_WHOOP_EMAIL: ${{ secrets.WHOOP_CANARY_EMAIL }}
           MURPH_E2E_WHOOP_PASSWORD: ${{ secrets.WHOOP_CANARY_PASSWORD }}
-        run: pnpm hosted-local e2e device-connect
+        run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect

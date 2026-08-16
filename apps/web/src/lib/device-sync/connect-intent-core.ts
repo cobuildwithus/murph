@@ -48,13 +48,6 @@ export async function createHostedDeviceConnectIntentTx(input: {
   const claim = generateHostedDeviceConnectIntentClaim();
   const claimHash = hashHostedDeviceConnectIntentClaim(claim);
   const providerSetupId = input.providerSetupId ?? null;
-  await input.tx.deviceConnectIntent.deleteMany({
-    where: {
-      expiresAt: {
-        lte: now,
-      },
-    },
-  });
 
   await input.tx.deviceConnectIntent.create({
     data: {

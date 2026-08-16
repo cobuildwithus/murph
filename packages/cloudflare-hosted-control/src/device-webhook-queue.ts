@@ -36,11 +36,21 @@ export const HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH =
 export const DEVICE_WEBHOOK_TRANSPORT_USER_ID =
   "device-webhook-transport" as const;
 export const DEVICE_WEBHOOK_QUEUE_MAX_BATCH_SIZE = 100;
-export const DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE = 25;
+export const DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE = 100;
+export const DEVICE_WEBHOOK_ADMISSION_ACCOUNT_LANES = 4;
 export const DEVICE_WEBHOOK_QUEUE_MAX_ENVELOPE_BYTES = 120 * 1024;
 export const DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEVICE_WEBHOOK_ADMISSION_HANDLER_MAX_DURATION_SECONDS = 90;
 export const DEVICE_WEBHOOK_ADMISSION_TIMEOUT_MS = 110_000;
+
+export type DeviceWebhookQueuePersistenceFailureCode =
+  | "persistence_key_unavailable"
+  | "persistence_reseal_failed"
+  | "transport_context_mismatch"
+  | "transport_metadata_invalid"
+  | "transport_payload_open_failed"
+  | "transport_recipient_key_unavailable"
+  | "transport_root_key_unwrap_failed";
 
 const DEVICE_WEBHOOK_QUEUE_TRANSPORT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -80,6 +90,24 @@ export interface DeviceWebhookAdmissionResultEntry {
 export interface DeviceWebhookAdmissionResultV1 {
   entries: DeviceWebhookAdmissionResultEntry[];
   schema: typeof DEVICE_WEBHOOK_ADMISSION_RESULT_SCHEMA;
+}
+
+class DeviceWebhookQueuePersistenceError extends Error {
+  readonly code: DeviceWebhookQueuePersistenceFailureCode;
+
+  constructor(code: DeviceWebhookQueuePersistenceFailureCode, cause: unknown) {
+    super(`Device webhook Queue persistence failed at ${code}.`, { cause });
+    this.name = "DeviceWebhookQueuePersistenceError";
+    this.code = code;
+  }
+}
+
+export function readDeviceWebhookQueuePersistenceFailureCode(
+  error: unknown,
+): DeviceWebhookQueuePersistenceFailureCode | null {
+  return error instanceof DeviceWebhookQueuePersistenceError
+    ? error.code
+    : null;
 }
 
 export function canQueuePreparedDeviceWebhook(
@@ -157,7 +185,14 @@ export async function openDeviceWebhookQueueEnvelope(input: {
   privateKeyring: HostedRecipientPrivateKeyring;
 }): Promise<DeviceWebhookQueuePayloadV1> {
   const envelope = parseDeviceWebhookQueueEnvelope(input.envelope);
-  assertSafeVisibleEnvelopeMetadata(envelope);
+  try {
+    assertSafeVisibleEnvelopeMetadata(envelope);
+  } catch (cause) {
+    throw new DeviceWebhookQueuePersistenceError(
+      "transport_metadata_invalid",
+      cause,
+    );
+  }
   const expectedContext = buildHostedDomainRootWrapContext({
     domain: "ingress",
     env: requireNonEmptyString(input.env, "Device webhook transport env"),
@@ -166,34 +201,60 @@ export async function openDeviceWebhookQueueEnvelope(input: {
     userId: DEVICE_WEBHOOK_TRANSPORT_USER_ID,
   });
   if (canonicalJson(envelope.rootKeyWrap.encryptionContext) !== canonicalJson(expectedContext)) {
-    throw new Error("Device webhook transport root-key context mismatch.");
-  }
-  const privateKey = selectHostedRecipientPrivateKeyForDecrypt({
-    keyring: input.privateKeyring,
-    recipient: "cloudflare-automation-secret",
-    recipientKeyId: envelope.rootKeyWrap.recipientKeyId,
-  });
-  const rootKey = await unwrapHostedDomainRootKeyWithP256Ecdh({
-    privateJwk: privateKey.privateJwk,
-    wrap: envelope.rootKeyWrap,
-  });
-  try {
-    const plaintext = await openHostedSecureBox({
-      aad: createDeviceWebhookTransportAad(envelope.transportId),
-      envelope: envelope.encryptedPayload,
-      expectedDomain: "ingress",
-      expectedLane: "device-webhook-transport",
-      expectedRootKeyId: envelope.encryptedPayload.rootKeyId,
-      expectedScope: envelope.transportId,
-      rootKey,
-    });
-    const payload = parseDeviceWebhookQueuePayload(
-      JSON.parse(textDecoder.decode(plaintext)),
+    throw new DeviceWebhookQueuePersistenceError(
+      "transport_context_mismatch",
+      new Error("Device webhook transport root-key context mismatch."),
     );
-    if (payload.transportId !== envelope.transportId) {
-      throw new Error("Device webhook transport id mismatch.");
+  }
+  let privateKey: ReturnType<typeof selectHostedRecipientPrivateKeyForDecrypt>;
+  try {
+    privateKey = selectHostedRecipientPrivateKeyForDecrypt({
+      keyring: input.privateKeyring,
+      recipient: "cloudflare-automation-secret",
+      recipientKeyId: envelope.rootKeyWrap.recipientKeyId,
+    });
+  } catch (cause) {
+    throw new DeviceWebhookQueuePersistenceError(
+      "transport_recipient_key_unavailable",
+      cause,
+    );
+  }
+  let rootKey: Uint8Array;
+  try {
+    rootKey = await unwrapHostedDomainRootKeyWithP256Ecdh({
+      privateJwk: privateKey.privateJwk,
+      wrap: envelope.rootKeyWrap,
+    });
+  } catch (cause) {
+    throw new DeviceWebhookQueuePersistenceError(
+      "transport_root_key_unwrap_failed",
+      cause,
+    );
+  }
+  try {
+    try {
+      const plaintext = await openHostedSecureBox({
+        aad: createDeviceWebhookTransportAad(envelope.transportId),
+        envelope: envelope.encryptedPayload,
+        expectedDomain: "ingress",
+        expectedLane: "device-webhook-transport",
+        expectedRootKeyId: envelope.encryptedPayload.rootKeyId,
+        expectedScope: envelope.transportId,
+        rootKey,
+      });
+      const payload = parseDeviceWebhookQueuePayload(
+        JSON.parse(textDecoder.decode(plaintext)),
+      );
+      if (payload.transportId !== envelope.transportId) {
+        throw new Error("Device webhook transport id mismatch.");
+      }
+      return payload;
+    } catch (cause) {
+      throw new DeviceWebhookQueuePersistenceError(
+        "transport_payload_open_failed",
+        cause,
+      );
     }
-    return payload;
   } finally {
     rootKey.fill(0);
   }
@@ -217,21 +278,22 @@ export function createDeviceWebhookTransportPrivateKeyringFromJson(input: {
   activeRecipientKeyId: string;
   keyringJson?: string | null;
 }): HostedRecipientPrivateKeyring {
-  let activePrivateJwk: unknown;
   try {
-    activePrivateJwk = JSON.parse(input.activePrivateJwkJson);
-  } catch {
-    throw new TypeError("Device webhook transport private JWK must be valid JSON.");
+    return createHostedRecipientPrivateKeyring({
+      activePrivateJwk: parseHostedUserRecipientPrivateKeyJwk(
+        JSON.parse(input.activePrivateJwkJson),
+        "Device webhook transport private JWK",
+      ),
+      activeRecipient: "cloudflare-automation-secret",
+      activeRecipientKeyId: input.activeRecipientKeyId,
+      keyringJson: input.keyringJson,
+    });
+  } catch (cause) {
+    throw new DeviceWebhookQueuePersistenceError(
+      "persistence_key_unavailable",
+      cause,
+    );
   }
-  return createHostedRecipientPrivateKeyring({
-    activePrivateJwk: parseHostedUserRecipientPrivateKeyJwk(
-      activePrivateJwk,
-      "Device webhook transport private JWK",
-    ),
-    activeRecipient: "cloudflare-automation-secret",
-    activeRecipientKeyId: input.activeRecipientKeyId,
-    keyringJson: input.keyringJson,
-  });
 }
 
 export function parseDeviceWebhookQueueEnvelope(
@@ -289,28 +351,43 @@ export async function reencryptDeviceWebhookQueueEnvelopeForPersistence(input: {
     envelope,
     privateKeyring: input.privateKeyring,
   });
-  const activePrivateKey = selectHostedRecipientPrivateKeyForDecrypt({
-    keyring: input.privateKeyring,
-    recipient: "cloudflare-automation-secret",
-    recipientKeyId: input.activeRecipientKeyId,
-  });
-  if (activePrivateKey.status !== "active") {
-    throw new TypeError("Device webhook persistence key must be active.");
+  let activePrivateKey: ReturnType<typeof selectHostedRecipientPrivateKeyForDecrypt>;
+  try {
+    activePrivateKey = selectHostedRecipientPrivateKeyForDecrypt({
+      keyring: input.privateKeyring,
+      recipient: "cloudflare-automation-secret",
+      recipientKeyId: input.activeRecipientKeyId,
+    });
+    if (activePrivateKey.status !== "active") {
+      throw new TypeError("Device webhook persistence key must be active.");
+    }
+  } catch (cause) {
+    throw new DeviceWebhookQueuePersistenceError(
+      "persistence_key_unavailable",
+      cause,
+    );
   }
   const { crv, kty, x, y } = activePrivateKey.privateJwk;
-  return sealDeviceWebhookQueueEnvelope({
-    env: input.env,
-    preparedWebhook: payload.preparedWebhook,
-    recipientKeyId: activePrivateKey.recipientKeyId,
-    recipientPublicJwk: {
-      crv,
-      ext: true,
-      key_ops: [],
-      kty,
-      x,
-      y,
-    },
-  });
+  try {
+    return await sealDeviceWebhookQueueEnvelope({
+      env: input.env,
+      preparedWebhook: payload.preparedWebhook,
+      recipientKeyId: activePrivateKey.recipientKeyId,
+      recipientPublicJwk: {
+        crv,
+        ext: true,
+        key_ops: [],
+        kty,
+        x,
+        y,
+      },
+    });
+  } catch (cause) {
+    throw new DeviceWebhookQueuePersistenceError(
+      "persistence_reseal_failed",
+      cause,
+    );
+  }
 }
 
 export function parseDeviceWebhookQueuePayload(

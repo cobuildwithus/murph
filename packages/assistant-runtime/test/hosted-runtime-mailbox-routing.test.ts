@@ -43,6 +43,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "apply-member-action",
+        kind: "member.action.requested",
+        lane: "system",
+      },
+      {
         action: "dispatch-assistant-notification",
         kind: "assistant.notification.requested",
         lane: "system",
@@ -70,6 +75,11 @@ describe("hosted mailbox routing", () => {
       {
         action: "run-environment-voice",
         kind: "environment-voice.captured",
+        lane: "system",
+      },
+      {
+        action: "import-reported-daily-metric",
+        kind: "health.daily-metric.reported",
         lane: "system",
       },
       {
@@ -144,6 +154,7 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.activated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.preferences.updated"), "system");
+    assert.equal(resolveExpectedLaneForHostedMailboxKind("member.action.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.ask.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.ask.completed"), "system");

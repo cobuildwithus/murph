@@ -40,6 +40,7 @@ import {
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
+import { ShareLinkPreviewsStudy } from "./share-link-previews-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
@@ -78,6 +79,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
+import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 import { MemberOwnedProviderSetupFlowStudy } from "./member-owned-provider-setup-study";
 
 function StudySection({
@@ -245,6 +247,17 @@ export function SectionsContent() {
       <StudySection title="Secure approval pending and recorded states">
         <div id="action-approval-lifecycle">
           <ActionApprovalLifecycleStudy />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      {/* Card image routes must live in ungrouped app segments: metadata
+          images inside a route group emit hash-suffixed URLs in production,
+          which 404s the exact URL the pages advertise. */}
+      <StudySection title="Share link previews">
+        <div data-design-section="share-link-previews">
+          <ShareLinkPreviewsStudy />
         </div>
       </StudySection>
 
@@ -531,6 +544,7 @@ export function SectionsContent() {
           <SiteFooter
             id="design-site-footer-preview"
             referralsAvailable
+            vitalsMode="synthetic"
           />
         </div>
       </StudySection>
@@ -579,7 +593,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source availability, actions, and disconnect lifecycle">
+      <StudySection title="Connect source capabilities, availability, actions, and disconnect lifecycle">
         <ConnectSourceCardStudy
           androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
         />
@@ -618,6 +632,7 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
+        {/* Includes the signed-out account-deletion handoff rendered by this study. */}
         <SettingsAuthRequiredStudy />
       </StudySection>
 
@@ -629,7 +644,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Account deletion during migration maintenance">
+      <StudySection title="Account deletion billing, maintenance, provider-access, and connected-app recovery">
         <AccountDeletionMaintenanceStudy />
       </StudySection>
 
@@ -637,6 +652,12 @@ export function SectionsContent() {
 
       <StudySection title="Home partial-load and vault-unavailable recovery">
         <HomeLoadStateStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
+        <BrowserVaultLoadingTransitionsStudy />
       </StudySection>
 
       <Separator />
@@ -681,7 +702,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops usage dashboard">
+      <StudySection title="Ops usage dashboard pagination">
         <OpsUsageStudy />
       </StudySection>
 

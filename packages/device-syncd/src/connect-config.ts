@@ -32,6 +32,7 @@ export {
   type DeviceSyncConnectTarget,
 } from "./config/connect-targets.ts";
 export {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
   DEVICE_CONNECT_SOURCE_BY_ID,
   DEVICE_CONNECT_SOURCES,
   listDefaultJunctionLinkProviderSlugs,

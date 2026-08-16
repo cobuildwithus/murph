@@ -21,6 +21,11 @@ import {
   type HostedLinqChatHandleSummary,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import {
+  parseHostedFamilyInviteStartToken,
+  resolveHostedFamilyInviteCodeFromTelegramStartFallback,
+  resolveHostedFamilyInviteTokenForInbound,
+} from "./family-plan";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import {
   planHostedLinqPermanentHomeRouteRecovery,
@@ -39,10 +44,10 @@ import {
   HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
+  prepareHostedLinqThreadContainerAdmission,
   prewarmHostedLinqMessageEditPreparation,
   readHostedLinqMessageEditPreparation,
   resolveHostedLinqDirectPreparationMemberId,
-  resolveHostedLinqThreadContainerCryptoPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
   type HostedLinqMessageEditPreparation,
@@ -82,13 +87,19 @@ import {
   prepareHostedDomainRootForWeb,
   prepareHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
+  unwrapHostedDomainRootForWebByRootKeyId,
   unwrapHostedDomainRootsForWebByRootKeyIds,
   type PreparedHostedCryptoDomainRootCandidates,
   type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
+import {
+  readHostedUserSecureBoxStringRootReference,
+} from "../hosted-crypto/secure-box";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   isHostedMailboxSourceConversationPreparationMismatchError,
+  prepareHostedMailboxItemAppendCrypto,
+  type PreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import {
   runWithPrismaOperationTimings,
@@ -142,12 +153,6 @@ import {
   type PreparedHostedThreadContainerDeliveryRoute,
 } from "../hosted-routing/thread-container-service";
 import {
-  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
-  prepareHostedPendingGroupSetupClaimForParticipants,
-  readHostedPendingGroupSetupPreparationFailure,
-  type PreparedHostedPendingGroupSetupClaim,
-} from "../hosted-groups/pending-group-setup";
-import {
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
 } from "../hosted-routing/thread-delivery-route";
 import {
@@ -196,6 +201,10 @@ import {
 import {
   lookupHostedGroupParticipantMemberIdsByHandles,
 } from "../hosted-groups/participant-member";
+import {
+  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
+  type HostedPreparedPendingGroupSetupPackage,
+} from "../hosted-groups/pending-group-setup";
 import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "../hosted-growth/usage-referral";
@@ -577,13 +586,23 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
             })
           : null;
-      const runPlan = (instantStartAllowed = true) => {
+      let requiredPendingGroupSetupCandidateId: string | null = null;
+      const runPlan = async (instantStartAllowed = true) => {
         let reusableDirectCryptoDomainRoots: {
           memberId: string;
           preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
         } | null = null;
-        return runHostedThreadRoutingPreparedTransaction({
+        const planned = await runHostedThreadRoutingPreparedTransaction({
           plan: async ({ preparation, transaction }) => {
+            const preparedSelection =
+              preparation.preparedPendingGroupSetup?.selected;
+            if (
+              requiredPendingGroupSetupCandidateId === null
+              && preparedSelection?.admissionKind === "replacement_line"
+            ) {
+              requiredPendingGroupSetupCandidateId =
+                preparedSelection.candidateId;
+            }
             const planPreparedWebhook = () =>
               planHostedOnboardingLinqWebhook({
                 affirmativeReaction,
@@ -594,12 +613,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
                 pendingGroupRosterUnavailable:
                   planningResolution.pendingGroupRosterUnavailable ?? false,
-                ...(preparation.failedPendingGroupSetupPreparationClaim
-                  ? {
-                      failedPendingGroupSetupPreparationClaim:
-                        preparation.failedPendingGroupSetupPreparationClaim,
-                    }
-                  : {}),
                 ...("directMailboxPreparationFailure" in preparation
                   ? {
                       directMailboxPreparationFailure:
@@ -612,11 +625,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                         preparation.preparedDirectMailboxPayloadRoot ?? null,
                     }
                   : {}),
-                ...(preparation.preparedPendingGroupSetupClaim
+                ...(preparation.preparedPendingGroupSetup
                   ? {
-                      preparedPendingGroupSetupClaim:
-                        preparation.preparedPendingGroupSetupClaim,
+                      preparedPendingGroupSetup:
+                        preparation.preparedPendingGroupSetup,
                     }
+                  : {}),
+                ...(requiredPendingGroupSetupCandidateId
+                  ? { requiredPendingGroupSetupCandidateId }
                   : {}),
                 ...(preparation.preparedThreadContainerCreation
                   ? {
@@ -688,6 +704,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prisma,
         });
+        if (
+          planned.nextRequiredPendingGroupSetupCandidateId !== undefined
+        ) {
+          requiredPendingGroupSetupCandidateId =
+            planned.nextRequiredPendingGroupSetupCandidateId;
+        }
+        return planned;
       };
       const planAfterBlockedAdmission = (reason?: string) =>
         requireFirstContactAdmission
@@ -1901,9 +1924,20 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     };
   }
 
+  let initialDirectSenderResolution:
+    | "ambiguous"
+    | "found"
+    | "missing"
+    | undefined;
   const plan = await runHostedThreadRoutingPreparedTransaction({
     plan: ({ preparation, transaction }) =>
       planHostedOnboardingTelegramWebhook({
+        ...(preparation.preparedDirectTelegramRouting
+          ? {
+              preparedDirectTelegramRouting:
+                preparation.preparedDirectTelegramRouting,
+            }
+          : {}),
         ...(preparation.preparedSenderMemberId
           ? {
               preparedSenderMemberId:
@@ -1925,10 +1959,23 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
         prisma: transaction,
         update,
       }),
-    prepare: () => prepareHostedTelegramThreadRoutingCrypto({
-      prisma,
-      update,
-    }),
+    prepare: async ({ attempt }) => {
+      const preparation = await prepareHostedTelegramThreadRoutingCrypto({
+        ...(initialDirectSenderResolution
+          ? { initialDirectSenderResolution }
+          : {}),
+        prisma,
+        update,
+      });
+      const preparedDirectRouting = preparation.preparedDirectTelegramRouting;
+      if (
+        attempt === 0
+        && preparedDirectRouting?.kind === "member"
+      ) {
+        initialDirectSenderResolution = preparedDirectRouting.senderResolution;
+      }
+      return preparation;
+    },
     prisma,
   });
 
@@ -2013,10 +2060,32 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
   await reconcile();
 }
 
+interface HostedDirectTelegramFamilyRoutingCryptoPreparation {
+  kind: "family";
+  telegramThreadId: string;
+  telegramUserId: string;
+}
+
+interface HostedDirectTelegramMemberRoutingCryptoPreparation {
+  existingControlRootKeyId: string | null;
+  initialSenderResolution: "ambiguous" | "found" | "missing";
+  kind: "member";
+  memberId: string | null;
+  preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+  preparedMailboxCrypto: PreparedHostedMailboxItemAppendCrypto | null;
+  senderResolution: "ambiguous" | "found" | "missing";
+  telegramThreadId: string;
+  telegramUserId: string;
+}
+
+type HostedDirectTelegramRoutingCryptoPreparation =
+  | HostedDirectTelegramFamilyRoutingCryptoPreparation
+  | HostedDirectTelegramMemberRoutingCryptoPreparation;
+
 interface HostedThreadRoutingCryptoPreparation {
   directMailboxPreparationFailure?: unknown;
-  failedPendingGroupSetupPreparationClaim?: PreparedHostedPendingGroupSetupClaim;
   pendingGroupSetupPreparationFailure?: unknown;
+  preparedDirectTelegramRouting?: HostedDirectTelegramRoutingCryptoPreparation;
   preparedDirectMailboxPayloadRoot?: {
     memberId: string;
     preparedControlRoot: PreparedHostedDomainRootForWeb;
@@ -2029,11 +2098,21 @@ interface HostedThreadRoutingCryptoPreparation {
     routingRecord: HostedMemberRoutingRecord | null;
     routingState: HostedMemberRoutingStateSnapshot | null;
   } | null;
-  threadContainerPreparationFailure?: unknown;
-  preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
+  preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedSenderMemberId?: string;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+  threadContainerPreparationFailure?: unknown;
+}
+
+class HostedRequiredPreTransactionPreparationError extends Error {
+  readonly preparationError: unknown;
+
+  constructor(preparationError: unknown) {
+    super("Hosted required pre-transaction preparation failed.");
+    this.name = "HostedRequiredPreTransactionPreparationError";
+    this.preparationError = preparationError;
+  }
 }
 
 async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
@@ -2123,65 +2202,48 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   }
 
   if (context.messageEvent.data.chat?.is_group === true) {
-    const preparationTarget =
-      await resolveHostedLinqThreadContainerCryptoPreparationTarget({
-        event: input.event,
-        participantMemberIds: input.participantMemberIds,
-        pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
-        prisma: input.prisma,
-      });
-    if (!preparationTarget) {
-      return {};
-    }
-    if (!accountLookupKey) {
-      return {};
-    }
-    const [pendingSetupResult, containerResult] = await Promise.allSettled([
-      prepareHostedPendingGroupSetupClaimForParticipants({
-        occurredAt: preparationTarget.occurredAt,
-        participantMemberIds: preparationTarget.participantMemberIds,
-        prisma: input.prisma,
-        recipientPhoneLookupKeys:
-          preparationTarget.recipientPhoneLookupKeys,
-        requiredCandidateId:
-          preparationTarget.requiredPendingSetupCandidateId,
-        senderMemberId: preparationTarget.senderMemberId,
-      }),
-      prepareHostedThreadContainerCreation({
-        accountLookupKey,
-        channel: "linq",
-        prisma: input.prisma,
-        threadId: context.summary.chatId,
-      }),
-    ]);
-    const pendingGroupSetupPreparationFailure =
-      pendingSetupResult.status === "rejected"
-        ? readHostedPendingGroupSetupPreparationFailure(
-            pendingSetupResult.reason,
-          )
-        : null;
-    return {
-      ...(pendingGroupSetupPreparationFailure
+    const admission = await prepareHostedLinqThreadContainerAdmission({
+      event: input.event,
+      participantMemberIds: input.participantMemberIds,
+      pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
+      prisma: input.prisma,
+    });
+    const pendingGroupPreparation: HostedThreadRoutingCryptoPreparation =
+      admission.preparedPendingGroupSetup
         ? {
-            failedPendingGroupSetupPreparationClaim:
-              pendingGroupSetupPreparationFailure.preparedClaim,
+            ...(admission.preparedPendingGroupSetup.selectedPayload?.kind
+                === "failed"
+              ? {
+                  pendingGroupSetupPreparationFailure:
+                    admission.preparedPendingGroupSetup.selectedPayload.error,
+                }
+              : {}),
+            preparedPendingGroupSetup: admission.preparedPendingGroupSetup,
           }
-        : {}),
-      ...(pendingSetupResult.status === "fulfilled"
-        && pendingSetupResult.value
-        ? { preparedPendingGroupSetupClaim: pendingSetupResult.value }
-        : {}),
-      ...(pendingSetupResult.status === "rejected"
-        ? {
-            pendingGroupSetupPreparationFailure:
-              pendingGroupSetupPreparationFailure?.error
-              ?? pendingSetupResult.reason,
-          }
-        : {}),
-      ...(containerResult.status === "fulfilled"
-        ? { preparedThreadContainerCreation: containerResult.value }
-        : { threadContainerPreparationFailure: containerResult.reason }),
-    };
+        : {};
+    if (!admission.shouldPrepareThreadContainer || !accountLookupKey) {
+      return pendingGroupPreparation;
+    }
+    try {
+      return {
+        ...pendingGroupPreparation,
+        preparedThreadContainerCreation:
+          await prepareHostedThreadContainerCreation({
+            accountLookupKey,
+            channel: "linq",
+            prisma: input.prisma,
+            threadId: context.summary.chatId,
+          }),
+      };
+    } catch (error) {
+      if (admission.preparedPendingGroupSetup) {
+        return {
+          ...pendingGroupPreparation,
+          threadContainerPreparationFailure: error,
+        };
+      }
+      throw error;
+    }
   }
 
   // Direct preparation resolves the member from participant and saved-home
@@ -2210,6 +2272,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
 }
 
 async function prepareHostedTelegramThreadRoutingCrypto(input: {
+  initialDirectSenderResolution?: "ambiguous" | "found" | "missing";
   prisma: PrismaClient;
   update: ReturnType<typeof parseHostedTelegramWebhookUpdate>;
 }): Promise<HostedThreadRoutingCryptoPreparation> {
@@ -2218,12 +2281,45 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
   if (
     !summary
     || summary.isBotMessage
-    || summary.isDirect
     || !summary.senderTelegramUserId
     || !message
   ) {
     return {};
   }
+
+  if (summary.isDirect) {
+    try {
+      if (await shouldDeferDirectTelegramPreparationToFamilyRouting({
+        occurredAt: summary.occurredAt,
+        prisma: input.prisma,
+        telegramUsername: summary.senderTelegramUsername,
+        text: message.text ?? null,
+      })) {
+        return {
+          preparedDirectTelegramRouting: {
+            kind: "family",
+            telegramThreadId: message.threadId,
+            telegramUserId: summary.senderTelegramUserId,
+          },
+        };
+      }
+      return await prepareHostedDirectTelegramThreadRoutingCrypto({
+        ...(input.initialDirectSenderResolution
+          ? { initialSenderResolution: input.initialDirectSenderResolution }
+          : {}),
+        prisma: input.prisma,
+        senderTelegramUserId: summary.senderTelegramUserId,
+        threadId: message.threadId,
+      });
+    } catch (error) {
+      // A direct message must either preserve Family precedence or carry
+      // the exact ordinary-member package. Do not open a transaction merely
+      // to rediscover a required preflight failure while holding a pooled
+      // connection and member/root locks.
+      throw new HostedRequiredPreTransactionPreparationError(error);
+    }
+  }
+
   const memberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
@@ -2286,6 +2382,174 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
       },
     });
   return { preparedSenderMemberId, preparedThreadDeliveryRoute };
+}
+
+async function shouldDeferDirectTelegramPreparationToFamilyRouting(input: {
+  occurredAt: string;
+  prisma: PrismaClient;
+  telegramUsername: string | null;
+  text: string | null;
+}): Promise<boolean> {
+  const explicitInviteCode = await resolveHostedFamilyInviteTokenForInbound({
+    prisma: input.prisma,
+    text: input.text,
+  });
+  if (explicitInviteCode) {
+    return true;
+  }
+
+  const familyStartText = parseHostedFamilyInviteStartToken(input.text)
+    ? "/start"
+    : input.text;
+  return await resolveHostedFamilyInviteCodeFromTelegramStartFallback({
+    now: new Date(input.occurredAt),
+    prisma: input.prisma,
+    telegramUsername: input.telegramUsername,
+    text: familyStartText,
+  }) !== null;
+}
+
+async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
+  initialSenderResolution?: "ambiguous" | "found" | "missing";
+  prisma: PrismaClient;
+  senderTelegramUserId: string;
+  threadId: string;
+}): Promise<HostedThreadRoutingCryptoPreparation> {
+  const memberLookup = await resolveHostedMemberCoreByTelegramUserId({
+    prisma: input.prisma,
+    telegramUserId: input.senderTelegramUserId,
+  });
+  const preparedDirectTelegramRouting: HostedDirectTelegramMemberRoutingCryptoPreparation = {
+    existingControlRootKeyId: null,
+    initialSenderResolution:
+      input.initialSenderResolution ?? memberLookup.status,
+    kind: "member",
+    memberId: memberLookup.status === "found" ? memberLookup.core.id : null,
+    preparedControlRoot: null,
+    preparedMailboxCrypto: null,
+    senderResolution: memberLookup.status,
+    telegramThreadId: input.threadId,
+    telegramUserId: input.senderTelegramUserId,
+  };
+
+  if (
+    memberLookup.status !== "found"
+    || isHostedMemberSuspended(memberLookup.core.suspendedAt)
+  ) {
+    return { preparedDirectTelegramRouting };
+  }
+
+  const access = await readHostedRuntimeAiAccessDecision({
+    memberId: memberLookup.core.id,
+    now: new Date(),
+    prisma: input.prisma,
+  });
+  const controlRootRequired = access.allowed
+    || access.reason !== "health_data_consent_withdrawn";
+  const mailboxRootRequired = access.allowed;
+  if (!controlRootRequired && !mailboxRootRequired) {
+    return { preparedDirectTelegramRouting };
+  }
+
+  let routeEncrypted: string | null = null;
+  if (controlRootRequired) {
+    const routing = await input.prisma.hostedMemberRouting.findUnique({
+      select: {
+        telegramUserIdEncrypted: true,
+      },
+      where: {
+        memberId: memberLookup.core.id,
+      },
+    });
+    routeEncrypted = routing?.telegramUserIdEncrypted ?? null;
+  }
+  const existingControlRoot = readHostedUserSecureBoxStringRootReference({
+    lane: "hosted-member-private-field",
+    value: routeEncrypted,
+  });
+
+  let firstRootPreparationError: unknown;
+  let hasRootPreparationError = false;
+  const preserveFirstRootPreparationError = async <T>(
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!hasRootPreparationError) {
+        firstRootPreparationError = error;
+        hasRootPreparationError = true;
+      }
+      throw error;
+    }
+  };
+  const [controlRootResult, mailboxRootResult] = await Promise.allSettled([
+    preserveFirstRootPreparationError(() =>
+      controlRootRequired
+        ? prepareHostedDomainRootForWeb({
+            domain: getHostedCryptoDomainForLane(
+              "hosted-member-private-field",
+            ),
+            prepareMissing: false,
+            prisma: input.prisma,
+            reason: "hosted-onboarding.direct-telegram-control-root",
+            userId: memberLookup.core.id,
+          })
+        : Promise.resolve(null)
+    ),
+    preserveFirstRootPreparationError(() =>
+      mailboxRootRequired
+        ? prepareHostedMailboxItemAppendCrypto({
+            prisma: input.prisma,
+            userId: memberLookup.core.id,
+          })
+        : Promise.resolve(null)
+    ),
+  ]);
+  if (hasRootPreparationError) {
+    throw firstRootPreparationError;
+  }
+  if (controlRootResult.status === "rejected") {
+    throw controlRootResult.reason;
+  }
+  if (mailboxRootResult.status === "rejected") {
+    throw mailboxRootResult.reason;
+  }
+
+  const preparedControlRoot = controlRootResult.value;
+  if (
+    existingControlRoot
+    && existingControlRoot.rootKeyId !== preparedControlRoot?.rootKeyId
+  ) {
+    const root = await unwrapHostedDomainRootForWebByRootKeyId({
+      domain: existingControlRoot.domain,
+      prisma: input.prisma,
+      rootKeyId: existingControlRoot.rootKeyId,
+      userId: memberLookup.core.id,
+    });
+    try {
+      if (
+        root.envelope.domain !== existingControlRoot.domain
+        || root.envelope.rootKeyId !== existingControlRoot.rootKeyId
+        || root.envelope.userId !== memberLookup.core.id
+      ) {
+        throw new Error(
+          "Hosted direct Telegram route preparation returned the wrong control root.",
+        );
+      }
+    } finally {
+      root.rootKey.fill(0);
+    }
+  }
+
+  return {
+    preparedDirectTelegramRouting: {
+      ...preparedDirectTelegramRouting,
+      existingControlRootKeyId: existingControlRoot?.rootKeyId ?? null,
+      preparedControlRoot,
+      preparedMailboxCrypto: mailboxRootResult.value,
+    },
+  };
 }
 
 const HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES = new Set([
@@ -2375,6 +2639,7 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
     let preparation: HostedThreadRoutingCryptoPreparation = {};
     const preparationFailures: unknown[] = [];
     let pendingGroupSetupPreparationFailure: unknown;
+    let threadContainerPreparationFailure: unknown;
     try {
       return await runHostedOnboardingWebhookTransaction(
         input.prisma,
@@ -2387,9 +2652,8 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
                 preparation.pendingGroupSetupPreparationFailure;
             }
             if (preparation.threadContainerPreparationFailure !== undefined) {
-              preparationFailures.push(
-                preparation.threadContainerPreparationFailure,
-              );
+              threadContainerPreparationFailure =
+                preparation.threadContainerPreparationFailure;
             }
           } catch (error) {
             preparationFailures.push(error);
@@ -2398,6 +2662,9 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
         },
       );
     } catch (error) {
+      if (error instanceof HostedRequiredPreTransactionPreparationError) {
+        throw error.preparationError;
+      }
       if (
         pendingGroupSetupPreparationFailure !== undefined
         && isHostedOnboardingError(error)
@@ -2415,6 +2682,14 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
           message: "Hosted pending group setup payload preparation failed.",
           retryable: true,
         });
+      }
+      if (
+        threadContainerPreparationFailure !== undefined
+        && isHostedOnboardingError(error)
+        && error.code === "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED"
+        && error.details?.preparationTarget !== "pending_group_setup_payload"
+      ) {
+        throw threadContainerPreparationFailure;
       }
       if (
         preparationFailures.length > 0
@@ -2730,6 +3005,9 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
           try {
             await warmUnwrapCache();
           } catch (error) {
+            if (error instanceof HostedRequiredPreTransactionPreparationError) {
+              throw error;
+            }
             // A failed preflight must not suppress branches that never need
             // this root. If the planner does request it, the scoped cache
             // returns the retained rejection instead of repeating KMS while a

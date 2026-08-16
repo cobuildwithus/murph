@@ -16,7 +16,7 @@ import type {
   BrowserVaultLabResultReferenceRange,
   BrowserVaultLabResultRow,
   BrowserVaultLabSpecimenKind,
-  BrowserVaultQueryClient,
+  BrowserVaultLabsCapableQueryClient,
 } from "./shared.ts";
 
 export const BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA = "murph.browser-vault.lab-result-row.v1" as const;
@@ -157,7 +157,7 @@ export function sortBrowserVaultLabResultRows(
 }
 
 export function selectBrowserVaultMeasuredBiomarkers(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultLabsCapableQueryClient,
 ): BrowserVaultMeasuredBiomarker[] {
   const rowsByMetricKey = new Map<string, BrowserVaultLabResultRow[]>();
   for (const row of client.labResults.list()) {
@@ -194,7 +194,7 @@ export function selectBrowserVaultMeasuredBiomarkers(
 }
 
 export function selectBrowserVaultLabBiomarkerDetail(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultLabsCapableQueryClient,
   metricKey: string,
 ): BrowserVaultLabBiomarkerDetail | null {
   const rows = client.labResults.list({ metricKey });

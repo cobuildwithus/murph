@@ -204,13 +204,27 @@ default destination for every goal or the definition of activation.
   or improve that answer keeps the same owned presentation when it still fits.
 - Telegram Rich Messages support headings, paragraphs, lists, quotations,
   bordered or striped tables, expandable details, collages, slideshows, and
-  embedded media. Murph authors semantic cards through its tools; the Telegram
-  renderer owns provider HTML or blocks. Do not ask the model to write Telegram
-  markup. See the official [Telegram Bot API Rich Messages documentation](https://core.telegram.org/bots/api#rich-messages).
+  embedded media. In direct and group Telegram conversations, prefer a Rich
+  Message when structure makes a reply easier to read or use. This includes
+  plans, schedules, steps, comparisons, multi-part instructions, and exercise
+  guidance. Normal conversation can remain ordinary text, including a reply
+  with several paragraphs. Existing cards are useful presentation options and
+  examples, not exclusive content owners. Murph may choose one that fits or
+  compose validated Rich HTML for a custom or mixed layout. Exercise images
+  are optional but recommended when catalog media makes the movement clearer.
+  Presentation must not bypass canonical reads, writes, or safety rules for
+  nutrition and tracked workouts. Generic Rich HTML rejects explicit links,
+  remote media, unsupported tags or attributes, deep nesting, and content that
+  cannot fit one text fallback. Telegram's automatic detection stays disabled
+  for this generic card. See the official [Telegram Bot API Rich Messages documentation](https://core.telegram.org/bots/api#rich-messages).
 - iMessage presentation can use the Murph Messages extension's interactive
   cards, provider-owned static card layouts, and ordered response media. The
   current routine path uses response media rather than pretending Telegram's
   table, details, or slideshow UI exists in Messages.
+- An active workout card may open a direct native editor. It submits a bounded,
+  typed action through the Messages-scoped credential and existing mailbox;
+  it does not ask the member to translate structured sets into chat text or
+  invoke a model for deterministic data entry.
 - Share the product meaning across channels: exercise steps, nutrition facts,
   progress, summaries, tables, and safety context should stay consistent.
   Adapt the visible UI to each platform's current capabilities. Telegram and

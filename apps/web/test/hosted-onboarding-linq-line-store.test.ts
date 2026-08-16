@@ -10,6 +10,7 @@ import {
   assertHostedLinqAssignableHomeLinePoolReady,
   claimHostedLinqProactiveConversationCapacityTx,
   hasActiveHostedLinqManagedLine,
+  readActiveHostedLinqManagedLineLookupKeys,
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
@@ -19,6 +20,9 @@ import {
   syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
+import {
+  readHostedLinqLinePhoneNumberByLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-line-phone-resolver";
 import {
   encryptHostedLinqLinePhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
@@ -129,18 +133,18 @@ describe("listHostedLinqContactCardLines", () => {
 
 describe("hasActiveHostedLinqManagedLine", () => {
   it("recognizes configured inbound lines independently of outbound health", async () => {
-    const findFirst = vi.fn().mockResolvedValue({
+    const findMany = vi.fn().mockResolvedValue([{
       phoneNumberLookupKey: "lookup:line",
-    });
+    }]);
 
     await expect(hasActiveHostedLinqManagedLine({
       phoneNumberLookupKeys: ["lookup:line"],
       prisma: {
-        hostedLinqLine: { findFirst },
+        hostedLinqLine: { findMany },
       } as never,
     })).resolves.toBe(true);
 
-    expect(findFirst).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
       select: { phoneNumberLookupKey: true },
       where: {
         configuredAt: { not: null },
@@ -148,6 +152,105 @@ describe("hasActiveHostedLinqManagedLine", () => {
         phoneNumberLookupKey: { in: ["lookup:line"] },
       },
     });
+  });
+
+  it("returns every active managed line from one set read", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { phoneNumberLookupKey: "lookup:a" },
+      { phoneNumberLookupKey: "lookup:b" },
+    ]);
+
+    await expect(readActiveHostedLinqManagedLineLookupKeys({
+      phoneNumberLookupKeys: ["lookup:b", "lookup:a", "lookup:b"],
+      prisma: { hostedLinqLine: { findMany } } as never,
+    })).resolves.toEqual(new Set(["lookup:a", "lookup:b"]));
+
+    expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      select: { phoneNumberLookupKey: true },
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: { in: ["lookup:b", "lookup:a"] },
+      },
+    });
+  });
+});
+
+describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
+  it("resolves a locally encrypted line only when its blind lookup key matches", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
+    });
+    const phoneNumber = "+15550100001";
+    const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
+    if (!phoneNumberLookupKey) {
+      throw new Error("Expected a hosted phone lookup key for the test line.");
+    }
+    const findUnique = vi.fn().mockResolvedValue({
+      phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+    });
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey,
+      prisma: {
+        hostedLinqLine: { findUnique },
+      } as never,
+    })).resolves.toBe(phoneNumber);
+
+    expect(findUnique).toHaveBeenCalledWith({
+      select: { phoneNumberEncrypted: true },
+      where: { phoneNumberLookupKey },
+    });
+  });
+
+  it("fails closed for absent keys, missing rows, and mismatched lines", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
+    });
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({
+        phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber("+15550100001"),
+      });
+    const prisma = {
+      hostedLinqLine: { findUnique },
+    } as never;
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: "  ",
+      prisma,
+    })).resolves.toBeNull();
+    expect(findUnique).not.toHaveBeenCalled();
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: "hbidx:phone:v1:missing-line",
+      prisma,
+    })).resolves.toBeNull();
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: "hbidx:phone:v1:mismatched-line",
+      prisma,
+    })).resolves.toBeNull();
+  });
+
+  it("surfaces a malformed local line envelope for the caller to isolate", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
+    });
+
+    await expect(readHostedLinqLinePhoneNumberByLookupKey({
+      phoneNumberLookupKey: "hbidx:phone:v1:malformed-line",
+      prisma: {
+        hostedLinqLine: {
+          findUnique: vi.fn().mockResolvedValue({
+            phoneNumberEncrypted: "malformed-envelope",
+          }),
+        },
+      } as never,
+    })).rejects.toBeInstanceOf(Error);
   });
 });
 

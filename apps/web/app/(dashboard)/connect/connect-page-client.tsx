@@ -61,6 +61,7 @@ import type {
 } from "./connect-page-types";
 
 interface HostedDeviceSyncDisconnectResponse {
+  connection?: { status: string };
   warning?: { historicalResetIncomplete?: boolean; message: string };
 }
 
@@ -735,6 +736,20 @@ export function ConnectSourcesGrid({
           method: "POST",
           url: disconnectUrl,
         });
+      if (
+        !sourceProviderSlug
+        && (
+          result.warning
+          || (
+            result.connection
+            && result.connection.status !== "disconnected"
+          )
+        )
+      ) {
+        throw new Error(result.warning?.historicalResetIncomplete === true
+          ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
+          : "Disconnect not finished. Remove Murph access in the provider account, then retry Disconnect here.");
+      }
       setDisconnectSource(null);
       if (sourceProviderSlug) {
         setDisconnectedSourceIds((current) => new Set([...current, source.id]));

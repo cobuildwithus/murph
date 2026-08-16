@@ -4,6 +4,10 @@ import {
 import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+} from "@murphai/hosted-execution/browser-vault";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { after } from "next/server";
 
@@ -59,6 +63,10 @@ export const POST = withJsonError(async (request: Request) => {
     body.browserPublicKeyJwk,
     "Settings vault export browserPublicKeyJwk",
   );
+  const acceptsBucketedReplica = readSettingsVaultExportBucketCapability({
+    requestedMetricBuckets: body.requestedMetricBuckets,
+    requestedShards: body.requestedShards,
+  });
 
   // Verify the MFA-bound signature but do NOT consume the challenge yet:
   // the challenge stays valid through the workspace re-read and the replica
@@ -147,13 +155,18 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  let session: Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
+  let session:
+    | Awaited<ReturnType<typeof client.createBrowserVaultExportSession>>
+    | Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
   try {
-    session = await client.createBrowserVaultSession({
+    const sessionInput = {
       browserPublicKeyJwk,
       replicaRef,
       userId: auth.member.id,
-    });
+    };
+    session = acceptsBucketedReplica
+      ? await client.createBrowserVaultExportSession(sessionInput)
+      : await client.createBrowserVaultSession(sessionInput);
   } catch (error) {
     if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
       if (healthDataProcessingRevoked) {
@@ -230,4 +243,43 @@ function scheduleBrowserVaultRefreshAfterResponse(input: { userId: string }): vo
   } catch {
     void task();
   }
+}
+
+function readSettingsVaultExportBucketCapability(input: {
+  requestedMetricBuckets: unknown;
+  requestedShards: unknown;
+}): boolean {
+  if (
+    input.requestedMetricBuckets === undefined
+    && input.requestedShards === undefined
+  ) {
+    return false;
+  }
+  if (
+    !hasExactStringMembers(
+      input.requestedShards,
+      HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+    )
+    || !hasExactStringMembers(
+      input.requestedMetricBuckets,
+      HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      httpStatus: 400,
+      message: "Settings vault export capability must include the complete replica.",
+    });
+  }
+  return true;
+}
+
+function hasExactStringMembers(
+  value: unknown,
+  expected: readonly string[],
+): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && new Set(value).size === expected.length
+    && expected.every((entry) => value.includes(entry));
 }

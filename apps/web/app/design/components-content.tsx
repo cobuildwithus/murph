@@ -163,7 +163,11 @@ import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
-import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
+import {
+  HostedAccountDeletionErrorAlert,
+  HostedAccountDeletionStatus,
+} from "@/src/components/settings/hosted-data-privacy-settings";
+import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
   EnvironmentCaptureCard,
@@ -1136,7 +1140,16 @@ export function ComponentsContent() {
         <Section title="Input OTP">
           <div className="grid gap-2">
             <Label htmlFor="otp-ds">Verification code</Label>
-            <InputOTP id="otp-ds" maxLength={6} autoComplete="one-time-code">
+            <InputOTP
+              id="otp-ds"
+              maxLength={6}
+              autoComplete="one-time-code"
+              data-1p-ignore
+              data-bwignore="true"
+              data-form-type="other"
+              data-lpignore="true"
+              pushPasswordManagerStrategy="none"
+            >
               <InputOTPGroup>
                 <InputOTPSlot index={0} className="size-11 bg-card text-base" />
                 <InputOTPSlot index={1} className="size-11 bg-card text-base" />
@@ -1327,13 +1340,15 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Setup Loader">
+        <Section id="setup-loader" title="Setup Loader">
           <p className="text-sm text-muted-foreground">
             Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
-            Starter usage is activated. The Murph mark fires a sonar ripple from its two
-            largest core dots outward — each dot&apos;s delay is proportional to its distance
-            from center, so the wave radiates through the constellation rather than pulsing
-            uniformly. Honors <code className="font-mono text-xs">prefers-reduced-motion</code>.
+            Starter usage is activated. Successful activation replaces the document so Home
+            re-evaluates the new access grant instead of retaining this loading tree. The Murph
+            mark fires a sonar ripple from its two largest core dots outward — each dot&apos;s delay
+            is proportional to its distance from center, so the wave radiates through the
+            constellation rather than pulsing uniformly. Honors{" "}
+            <code className="font-mono text-xs">prefers-reduced-motion</code>.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col items-center justify-center gap-6 rounded-2xl bg-[#FAF8F4] px-8 py-16 ring-1 ring-[#1A1F16]/[0.06]">
@@ -1390,6 +1405,16 @@ export function ComponentsContent() {
           <div className="grid gap-4 lg:grid-cols-2">
             <HostedAccountDeletionStatus cleanupPending={false} />
             <HostedAccountDeletionStatus cleanupPending />
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Account Deletion Recovery Alert">
+          <div className="max-w-md">
+            <HostedAccountDeletionErrorAlert
+              message={HOSTED_STRIPE_EFFECT_PENDING_MESSAGE}
+            />
           </div>
         </Section>
 

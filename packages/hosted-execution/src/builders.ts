@@ -1,4 +1,12 @@
 import type {
+  MemberActionOutcomeV1,
+  MemberActionRequestV1,
+} from "@murphai/contracts";
+import {
+  parseMemberActionOutcomeV1,
+  parseMemberActionRequestV1,
+} from "@murphai/contracts";
+import type {
   HostedExecutionAssistantAskCompletedPayload,
   HostedExecutionAssistantAskCompletedWake,
   HostedExecutionAssistantAskRequestedPayload,
@@ -9,6 +17,7 @@ import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionDailyMetricReportedWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
@@ -24,6 +33,8 @@ import type {
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedWake,
   HostedExecutionMealPhotoCapturedWake,
+  HostedExecutionMemberActionRequestedWake,
+  HostedExecutionMemberActionCompletedWake,
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
@@ -57,6 +68,9 @@ import {
 import {
   parseHostedExecutionInitialGroupRoomModelMarkdown,
 } from "./pending-group-setup.ts";
+import {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "./daily-metric.ts";
 
 function cloneLinqMessagePart(
   value: HostedExecutionLinqConversationMessagePart,
@@ -156,6 +170,8 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionMemberPreferencesUpdatedWake
+  | HostedExecutionMemberActionRequestedWake
+  | HostedExecutionMemberActionCompletedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake;
 
@@ -729,6 +745,40 @@ export function buildHostedExecutionMemberPreferencesUpdatedWake(input: {
   };
 }
 
+export function buildHostedExecutionMemberActionRequestedWake(input: {
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  request: MemberActionRequestV1;
+}): HostedExecutionMemberActionRequestedWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "member.action.requested",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    request: parseMemberActionRequestV1(input.request),
+  };
+}
+
+export function buildHostedExecutionMemberActionCompletedWake(input: {
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  outcome: MemberActionOutcomeV1;
+}): HostedExecutionMemberActionCompletedWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "member.action.completed",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    outcome: parseMemberActionOutcomeV1(input.outcome),
+  };
+}
+
 export function buildHostedExecutionRuntimeTimerWake(input: {
   eventId: string;
   occurredAt: string;
@@ -873,6 +923,31 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
       mealPhotoKey: input.mealPhotoKey,
       sha256: input.sha256,
     },
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
+export function buildHostedExecutionDailyMetricReportedWake(input: {
+  date: string;
+  eventId: string;
+  memberId: string;
+  metric: string;
+  occurredAt: string;
+  unit: string;
+  value: number;
+}): HostedExecutionDailyMetricReportedWake {
+  const dailyMetric = parseHostedExecutionDailyMetricReportedPayload({
+    date: input.date,
+    metric: input.metric,
+    unit: input.unit,
+    value: input.value,
+  });
+
+  return {
+    dailyMetric,
+    eventId: input.eventId,
+    kind: "health.daily-metric.reported",
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };

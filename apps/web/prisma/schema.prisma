@@ -680,6 +680,8 @@ model HostedMember {
   ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
   threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
   pendingGroupSetup              HostedPendingGroupSetup?
+  groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")
+  groupCurrentSenderClarificationsAsTarget  HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -1038,6 +1040,12 @@ model HostedMemberBillingRef {
   checkoutAttemptId                 String?      @map("checkout_attempt_id")
   checkoutIntentHash                String?      @map("checkout_intent_hash")
   checkoutCreatedAt                 DateTime?    @map("checkout_created_at")
+  stripeEffectClaimId               String?      @map("stripe_effect_claim_id")
+  stripeEffectKind                  String?      @map("stripe_effect_kind")
+  stripeEffectTargetPlanCode        String?      @map("stripe_effect_target_plan_code")
+  stripeEffectClaimedAt             DateTime?    @map("stripe_effect_claimed_at")
+  stripeEffectExecutionId           String?      @map("stripe_effect_execution_id")
+  stripeEffectExecutionStartedAt    DateTime?    @map("stripe_effect_execution_started_at")
   currentBillingPlanCode        String?      @map("current_billing_plan_code")
   currentBillingPhase           String?      @map("current_billing_phase")
   currentCheckoutOffer          String?      @map("current_checkout_offer")
@@ -1344,6 +1352,7 @@ model HostedAccountGroupInvite {
   acceptedBy                      HostedMember?       @relation("HostedAccountGroupInviteAcceptor", fields: [acceptedByMemberId], references: [id], onDelete: SetNull)
 
   @@index([groupId, status, createdAt])
+  @@index([groupId, status, expiresAt, id], map: "hagi_group_status_expires_id_idx")
   @@index([targetPhoneLookupKey])
   @@index([targetTelegramUsernameLookupKey], map: "hagi_target_telegram_username_lookup_key_idx")
   @@index([targetEmailLookupKey], map: "hagi_target_email_lookup_key_idx")
@@ -1379,6 +1388,20 @@ model HostedAccountGroupBillingRef {
   checkoutSeatCount                 Int?            @map("checkout_seat_count")
   checkoutCreatedAt                 DateTime?       @map("checkout_created_at")
   billedSeatCount                   Int?            @map("billed_seat_count")
+  stripeEffectClaimId               String?         @map("stripe_effect_claim_id")
+  stripeEffectKind                  String?         @map("stripe_effect_kind")
+  stripeEffectSourcePulseSeats      Int?            @map("stripe_effect_source_pulse_seats")
+  stripeEffectSourceEdgeSeats       Int?            @map("stripe_effect_source_edge_seats")
+  stripeEffectSourceMaxSeats        Int?            @map("stripe_effect_source_max_seats")
+  stripeEffectTargetPulseSeats      Int?            @map("stripe_effect_target_pulse_seats")
+  stripeEffectTargetEdgeSeats       Int?            @map("stripe_effect_target_edge_seats")
+  stripeEffectTargetMaxSeats        Int?            @map("stripe_effect_target_max_seats")
+  stripeEffectBeneficiaryMemberId   String?         @map("stripe_effect_beneficiary_member_id")
+  stripeEffectFamilySubscriptionLookupKey String?   @map("stripe_effect_family_subscription_lookup_key")
+  stripeEffectDirectSubscriptionLookupKey String?   @map("stripe_effect_direct_subscription_lookup_key")
+  stripeEffectClaimedAt             DateTime?       @map("stripe_effect_claimed_at")
+  stripeEffectExecutionId           String?         @map("stripe_effect_execution_id")
+  stripeEffectExecutionStartedAt    DateTime?       @map("stripe_effect_execution_started_at")
   currentBillingPlanCode        String?             @map("current_billing_plan_code")
   currentBillingPhase           String?             @map("current_billing_phase")
   currentPeriodStart            DateTime?           @map("current_period_start")
@@ -1463,6 +1486,7 @@ model HostedStripeEvent {
   nextAttemptAt    DateTime                @default(now()) @map("next_attempt_at")
   claimExpiresAt   DateTime?               @map("claim_expires_at")
   processedAt      DateTime?               @map("processed_at")
+  activationResultJson Json?                @map("activation_result_json")
   subscriptionCancellationEmailSentAt DateTime?               @map("subscription_cancellation_email_sent_at")
   lastErrorCode    String?                 @map("last_error_code")
   lastErrorMessage String?                 @map("last_error_message")
@@ -1826,6 +1850,7 @@ model HostedGroupMember {
   @@unique([groupId, memberId])
   @@index([memberId])
   @@index([groupId])
+  @@index([groupId, createdAt, id], map: "hosted_group_member_group_created_id_idx")
   @@map("hosted_group_member")
 }
 
@@ -1855,6 +1880,25 @@ model HostedGroupDisclosureGrant {
   @@index([membershipId, revokedAt, grantedAt])
   @@index([permissionId])
   @@map("hosted_group_disclosure_grant")
+}
+
+model HostedGroupCurrentSenderClarification {
+  groupRuntimeMemberId       String       @map("group_runtime_member_id")
+  targetMemberId             String       @map("target_member_id")
+  originAssistantInputId     String       @unique @map("origin_assistant_input_id")
+  originSessionId            String       @map("origin_session_id")
+  sourceCausalSeq            BigInt       @map("source_causal_seq")
+  resolvedByAssistantInputId String?      @map("resolved_by_assistant_input_id")
+  resolvedResultDestination  String?      @map("resolved_audience")
+  expiresAt                  DateTime     @map("expires_at")
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  updatedAt                  DateTime     @updatedAt @map("updated_at")
+  groupRuntimeMember         HostedMember @relation("HostedGroupCurrentSenderClarificationRuntime", fields: [groupRuntimeMemberId], references: [id], onDelete: Cascade)
+  targetMember               HostedMember @relation("HostedGroupCurrentSenderClarificationTarget", fields: [targetMemberId], references: [id], onDelete: Cascade)
+
+  @@id([groupRuntimeMemberId, targetMemberId])
+  @@index([expiresAt])
+  @@map("hosted_group_current_sender_clarification")
 }
 
 model HostedVaultShare {
