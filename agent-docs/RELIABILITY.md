@@ -1929,7 +1929,12 @@ Last verified: 2026-08-16
   detached. This bounds each pass to two concurrent obligation branches. A
   ready stored result is finalized even while usage lookup or ledger persistence
   remains pending, and the workflow completes only after every applicable
-  obligation settles. When Retell reports a terminal transfer and no stored
+  obligation settles. Stored-result finalization runs inside the existing
+  request-scoped domain-root unwrap cache: it prepares the mailbox root before
+  opening the append transaction, and the legacy mailbox append reuses that
+  cached key instead of calling KMS or another provider while database locks and
+  a pooled connection are held. A root-preparation failure opens no transaction.
+  When Retell reports a terminal transfer and no stored
   result exists, its transfer-specific finalizer is synthesized inside the
   usage branch and runs independently of usage persistence. An existing stored
   result remains authoritative and suppresses that synthesis. The existing

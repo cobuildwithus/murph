@@ -3,11 +3,21 @@ import type {
   HostedPhoneCallBrief,
   HostedPhoneCallResult,
 } from "@murphai/hosted-execution/phone-calls";
+import {
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   HostedAssistantNotificationDestination,
 } from "@/src/lib/hosted-routing/assistant-notification-destination";
+import {
+  getHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import {
+  setHostedSecureBoxStringTestCodecForTests,
+} from "@/src/lib/hosted-crypto/secure-box";
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -122,6 +132,7 @@ const TELEGRAM_DESTINATION: HostedAssistantNotificationDestination = {
 describe("default phone-call result notification store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setHostedSecureBoxStringTestCodecForTests(null);
     mocks.signalHostedPhoneCallReconciliation.mockResolvedValue(undefined);
   });
 
@@ -295,6 +306,125 @@ describe("default phone-call result notification store", () => {
     expect(mocks.readHostedPhoneCallBrief).not.toHaveBeenCalled();
     expect(mocks.requireHostedAssistantNotificationDestination).not.toHaveBeenCalled();
     expect(mocks.unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("reuses stored-result root preparation through the real mailbox append", async () => {
+    const storedCall = buildStoredAnalyzedCall({
+      resultDeliveryStatus: "pending",
+      resultNotificationChannel: "telegram",
+    });
+    const fixture = buildRealMailboxPrisma(storedCall);
+    mocks.getPrisma.mockReturnValue(fixture.prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      TELEGRAM_DESTINATION,
+    );
+    const providerCalls: Array<{ transactionOpen: boolean }> = [];
+    mocks.unwrapHostedDomainRootForWeb.mockImplementation(async (input: {
+      domain: string;
+      userId: string;
+    }) => {
+      const cache = getHostedDomainRootUnwrapCache();
+      if (!cache) {
+        throw new Error("Stored-result finalization root cache is missing.");
+      }
+      const activeKey = `${input.userId}|${input.domain}|@active`;
+      const cached = cache.get(activeKey);
+      if (cached) {
+        const unwrapped = await cached;
+        return {
+          envelope: unwrapped.envelope,
+          rootKey: Uint8Array.from(unwrapped.rootKey),
+        };
+      }
+      providerCalls.push({ transactionOpen: fixture.transactionOpen() });
+      fixture.events.push("provider-prepared");
+      if (fixture.transactionOpen()) {
+        throw new Error("Mailbox KMS unwrap started inside the transaction.");
+      }
+      const timestamp = "2026-08-09T00:00:00.000Z";
+      const envelope: HostedDomainRootKeyEnvelopeV1 = {
+        authoritySignature: {
+          alg: "GCP-KMS-EC-P256-SHA256",
+          keyVersionName: "test-authority-key",
+          signature: "test-signature",
+          signedAt: timestamp,
+        },
+        createdAt: timestamp,
+        domain: "ingress",
+        generation: 1,
+        rootKeyId: "root_stored_result_mailbox",
+        schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+        updatedAt: timestamp,
+        userId: input.userId,
+        wraps: [],
+      };
+      const unwrapped = {
+        envelope,
+        rootKey: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+      };
+      const pending = Promise.resolve(unwrapped);
+      cache.set(activeKey, pending);
+      cache.set(
+        `${input.userId}|${input.domain}|${unwrapped.envelope.rootKeyId}`,
+        pending,
+      );
+      return {
+        envelope: unwrapped.envelope,
+        rootKey: Uint8Array.from(unwrapped.rootKey),
+      };
+    });
+    const actualMailboxStore = await vi.importActual<
+      typeof import("@/src/lib/hosted-mailbox/store")
+    >("@/src/lib/hosted-mailbox/store");
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation((input) =>
+      actualMailboxStore.appendHostedMailboxEnvelopeTx(input)
+    );
+    const signalRuntime = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: `hosted-user-runtime:${MEMBER_ID}`,
+    }));
+
+    await expect(finalizeStoredHostedPhoneCallResult(storedCall, {
+      signalRuntime,
+    })).resolves.toBe("pending");
+
+    expect(providerCalls).toEqual([{ transactionOpen: false }]);
+    expect(mocks.unwrapHostedDomainRootForWeb).toHaveBeenCalledTimes(2);
+    expect(fixture.events.indexOf("provider-prepared")).toBeLessThan(
+      fixture.events.indexOf("transaction:start"),
+    );
+    expect(fixture.currentCall()).toMatchObject({
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "queued",
+    });
+    expect(signalRuntime).toHaveBeenCalledOnce();
+  });
+
+  it("does not open stored-result persistence when root preparation fails", async () => {
+    const storedCall = buildStoredAnalyzedCall({
+      resultDeliveryStatus: "pending",
+      resultNotificationChannel: "telegram",
+    });
+    const fixture = buildRealMailboxPrisma(storedCall);
+    mocks.getPrisma.mockReturnValue(fixture.prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      TELEGRAM_DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockRejectedValue(
+      new Error("mailbox root unavailable"),
+    );
+
+    await expect(finalizeStoredHostedPhoneCallResult(storedCall)).rejects.toThrow(
+      "mailbox root unavailable",
+    );
+    expect(fixture.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
@@ -624,5 +754,105 @@ function createDeferred<T>() {
   return {
     promise,
     resolve: resolvePromise,
+  };
+}
+
+function buildRealMailboxPrisma(initialCall: HostedPhoneCall) {
+  let call = initialCall;
+  let transactionOpen = false;
+  const events: string[] = [];
+  const now = new Date("2026-08-09T00:05:00.000Z");
+  const transactionClient = {
+    $executeRaw: vi.fn(async () => 1),
+    $queryRaw: vi.fn(async (
+      strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) => {
+      const sql = strings.join("?");
+      if (sql.includes("hosted_mailbox_lane_counter")) {
+        return [{ seq: 1n }];
+      }
+      if (!sql.includes("INSERT INTO hosted_mailbox_item")) {
+        throw new Error(`Unexpected mailbox query: ${sql}`);
+      }
+      return [{
+        assistantInputLookupKey: values[2] as string | null,
+        causalSeq: values[4] as bigint,
+        consumedAt: null,
+        createdAt: now,
+        dedupeKey: String(values[7]),
+        expiresAt: values[15] as Date | null,
+        id: String(values[0]),
+        kind: String(values[8]),
+        lane: String(values[5]),
+        laneSeq: values[6] as bigint,
+        occurredAt: values[9] as Date,
+        payloadBytes: values[13] as number,
+        payloadHash: String(values[14]),
+        payloadInlineCiphertext: values[11] as string | null,
+        payloadRef: values[12] as string | null,
+        payloadSchema: String(values[10]),
+        sourceMessageLookupKey: values[3] as string | null,
+        updatedAt: now,
+        userId: String(values[1]),
+      }];
+    }),
+    hostedMailboxItem: {
+      findUnique: vi.fn(async () => null),
+    },
+    hostedMailboxPayload: {
+      create: vi.fn(async () => undefined),
+    },
+    hostedPhoneCall: {
+      updateMany: vi.fn(async (input: {
+        data: {
+          resultDeliveryGeneration: number;
+          resultDeliveryStatus: HostedPhoneCall["resultDeliveryStatus"];
+          resultDeliveryTerminalAt: Date | null;
+        };
+        where: {
+          resultDeliveryGeneration: number;
+          resultDeliveryStatus: HostedPhoneCall["resultDeliveryStatus"];
+        };
+      }) => {
+        if (
+          call.resultDeliveryGeneration !== input.where.resultDeliveryGeneration
+          || call.resultDeliveryStatus !== input.where.resultDeliveryStatus
+        ) {
+          return { count: 0 };
+        }
+        call = { ...call, ...input.data };
+        return { count: 1 };
+      }),
+    },
+    hostedWorkspace: {
+      upsert: vi.fn(async () => undefined),
+    },
+  };
+  const prisma = {
+    $transaction: vi.fn(async (
+      run: (tx: typeof transactionClient) => Promise<unknown>,
+    ) => {
+      events.push("transaction:start");
+      transactionOpen = true;
+      try {
+        return await run(transactionClient);
+      } finally {
+        transactionOpen = false;
+        events.push("transaction:end");
+      }
+    }),
+    hostedPhoneCall: {
+      findUnique: vi.fn(async () => call),
+      updateMany: vi.fn(async () => {
+        throw new Error("Stored result must not run the analysis CAS.");
+      }),
+    },
+  };
+  return {
+    currentCall: () => call,
+    events,
+    prisma,
+    transactionOpen: () => transactionOpen,
   };
 }

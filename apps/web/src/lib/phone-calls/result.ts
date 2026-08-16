@@ -390,28 +390,30 @@ export async function finalizeStoredHostedPhoneCallResult(
     return "complete";
   }
   const prisma = resolveHostedPhoneCallWebhookStore(options.prisma);
-  const result = await appendRetellCallAnalyzedNotification({
-    call,
-    prisma,
-    ...(options.abortSignal ? { signal: options.abortSignal } : {}),
-  });
-  if (!result.notificationMailboxItemId) {
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const result = await appendRetellCallAnalyzedNotification({
+      call,
+      prisma,
+      ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+    });
+    if (!result.notificationMailboxItemId) {
+      return await readHostedPhoneCallResultDeliveryCompletion({
+        callId: call.id,
+        prisma,
+        ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+      });
+    }
+    await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
+      abortSignal: options.abortSignal,
+      expectedUserId: result.notificationUserId,
+      mailboxItemId: result.notificationMailboxItemId,
+    });
+    options.abortSignal?.throwIfAborted();
     return await readHostedPhoneCallResultDeliveryCompletion({
       callId: call.id,
       prisma,
       ...(options.abortSignal ? { signal: options.abortSignal } : {}),
     });
-  }
-  await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
-    abortSignal: options.abortSignal,
-    expectedUserId: result.notificationUserId,
-    mailboxItemId: result.notificationMailboxItemId,
-  });
-  options.abortSignal?.throwIfAborted();
-  return await readHostedPhoneCallResultDeliveryCompletion({
-    callId: call.id,
-    prisma,
-    ...(options.abortSignal ? { signal: options.abortSignal } : {}),
   });
 }
 
