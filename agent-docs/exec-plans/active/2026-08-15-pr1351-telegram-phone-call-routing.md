@@ -329,3 +329,26 @@ the member's current authorized Telegram route.
   reconciliation workflow was running or pending. Exact result ingress was then
   paused and independently returned the expected firewall denial. Both scoped
   barriers remain live through the result drain and writer activation.
+- ReviewGPT round 17 at
+  `0d8fefbf0d2852d2a7f69a69e8fb15e926c0ec9c` found that the R3 Telegram
+  route-restoration hook was emitted by every ordinary unchanged direct
+  message. Because each emission could start an independent 120-attempt
+  reconciliation Workflow, ordinary conversation traffic could amplify one
+  pending result into unbounded overlapping recovery work.
+- The correction keeps transition authority in the existing member-row-locked
+  Telegram routing owner. That upsert now reports whether the effective user
+  and thread destination was created, restored, or changed; only that true
+  transition enters the existing post-commit re-arm path. It adds no durable
+  state, lease, run registry, scheduler, or second reconciliation owner.
+- Focused Web proof sends 100 messages on one unchanged route while one recovery
+  Workflow is already represented as armed: the harness observes one route
+  write and a fixed seven route-read calls per message, with zero new recovery
+  starts. One richer route transition emits exactly one re-arm, and a repeat on
+  that route emits none. The two affected unit files pass 131 tests.
+  Local PostgreSQL contention proof passes all five cases and shows that two
+  concurrent direct messages around one restoration serialize so only the
+  transaction observing the transition emits the re-arm. Web typecheck passes.
+- Round 17's rendered-evidence note is not an implementation finding: this PR
+  changes one structured changelog item but no component, screen, or renderer.
+  The repository's changelog validation and Frontend Design Proof are green;
+  adding a repository screenshot would create audit-only product source.

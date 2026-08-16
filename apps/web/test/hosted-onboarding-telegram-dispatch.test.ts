@@ -601,7 +601,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
     const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    let telegramUserIdEncrypted: string | null = null;
+    const hostedMemberRoutingUpsert = vi.fn(async (input: {
+      update: { telegramUserIdEncrypted: string };
+    }) => {
+      telegramUserIdEncrypted = input.update.telegramUserIdEncrypted;
+      return {};
+    });
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: hostedWebhookReceiptCreate,
@@ -619,14 +625,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         updateMany: hostedWebhookReceiptUpdateMany,
       },
       hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
+        findUnique: vi.fn(async () => ({
           member: {
             billingStatus: HostedBillingStatus.active,
             id: "member_telegram_123",
             suspendedAt: null,
           },
           memberId: "member_telegram_123",
-        }),
+          telegramUserIdEncrypted,
+        })),
         upsert: hostedMemberRoutingUpsert,
       },
     });
@@ -732,7 +739,23 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     );
     await expect(handleHostedOnboardingTelegramWebhook({
       prisma,
-      rawBody,
+      rawBody: JSON.stringify({
+        message: {
+          business_connection_id: "biz-restored",
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_601,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 2,
+          text: "restored route",
+        },
+        update_id: 322,
+      }),
       secretToken: "telegram-secret",
     })).rejects.toBe(rearmError);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
@@ -742,18 +765,122 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       mocks.rearmHostedPhoneCallResultNotificationRecovery.mock.invocationCallOrder[1]
       ?? Number.POSITIVE_INFINITY,
     );
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not add recovery for 100 unchanged messages when one call workflow is already armed", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let reconciliationWorkflowStarts = 1;
+    mocks.rearmHostedPhoneCallResultNotificationRecovery.mockImplementation(
+      async () => {
+        reconciliationWorkflowStarts += 1;
+        return true;
+      },
+    );
+    const memberId = "member_telegram_route_recovery";
+    const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId,
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: "123",
+      telegramUserId: "456",
+    });
+    let telegramUserIdEncrypted =
+      existingTelegramPrivateColumns.telegramUserIdEncrypted;
+    const hostedMemberRoutingUpsert = vi.fn(async (input: {
+      update: { telegramUserIdEncrypted: string };
+    }) => {
+      telegramUserIdEncrypted = input.update.telegramUserIdEncrypted;
+      return {};
+    });
+    const hostedMemberRoutingFindUnique = vi.fn(async () => ({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: memberId,
+        suspendedAt: null,
+      },
+      memberId,
+      telegramUserIdEncrypted,
+    }));
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    for (let index = 0; index < 100; index += 1) {
+      await expect(handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: buildDirectTelegramWebhookRawBody({
+          updateId: 800_000 + index,
+        }),
+        secretToken: "telegram-secret",
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+    }
+
+    expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(100);
+    expect(hostedMemberRoutingFindUnique).toHaveBeenCalledTimes(700);
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).not.toHaveBeenCalled();
+    expect(reconciliationWorkflowStarts).toBe(1);
+
+    const buildRestoredRouteWebhook = (updateId: number) => JSON.stringify({
+      message: {
+        business_connection_id: "biz-restored",
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        date: 1_776_000_000,
+        from: {
+          first_name: "Alice",
+          id: 456,
+        },
+        message_id: updateId,
+        text: "hello",
+      },
+      update_id: updateId,
+    });
 
     await expect(handleHostedOnboardingTelegramWebhook({
       prisma,
-      rawBody,
+      rawBody: buildRestoredRouteWebhook(800_100),
       secretToken: "telegram-secret",
     })).resolves.toMatchObject({
       ok: true,
       reason: "wake-appended-active-member",
     });
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildRestoredRouteWebhook(800_101),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(102);
     expect(
       mocks.rearmHostedPhoneCallResultNotificationRecovery,
-    ).toHaveBeenCalledTimes(3);
+    ).toHaveBeenCalledOnce();
+    expect(reconciliationWorkflowStarts).toBe(2);
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId,
+      prisma,
+    });
   });
 
   it("opens zero transactions when direct Telegram root preparation fails", async () => {

@@ -420,6 +420,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 
+  let directTelegramRouteChanged = false;
   if (summary.isDirect) {
     if (preparedDirectAuthority) {
       if (!preparedDirectAuthority.preparedControlRoot) {
@@ -432,7 +433,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       });
     }
     try {
-      await runWithHostedDomainRootProviderCallsDisabled(() =>
+      const routeWrite = await runWithHostedDomainRootProviderCallsDisabled(() =>
         upsertHostedMemberTelegramRoutingBindingTx({
           memberId: existingMember.id,
           prisma: input.prisma,
@@ -440,6 +441,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           telegramUserId: senderTelegramUserId,
         }),
       );
+      directTelegramRouteChanged = routeWrite.effectiveRouteChanged;
     } catch (error) {
       if (error instanceof HostedDomainRootPreparationMismatchError) {
         throw hostedDirectTelegramPreparationRequired("sender_route");
@@ -451,7 +453,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   if (!accessDecision.allowed) {
     return {
       ...buildIgnoredTelegramWebhookPlan("inactive-member"),
-      ...(summary.isDirect
+      ...(directTelegramRouteChanged
         ? {
             postCommitPhoneCallResultRecoveryMemberIds: [existingMember.id],
           }
@@ -671,7 +673,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ? { postCommitUsageReferralIds: qualificationCandidateReferralIds }
       : {}),
     postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
-    ...(summary.isDirect
+    ...(directTelegramRouteChanged
       ? {
           postCommitPhoneCallResultRecoveryMemberIds: [existingMember.id],
         }
