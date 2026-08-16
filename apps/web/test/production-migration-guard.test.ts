@@ -1479,6 +1479,44 @@ describe("hosted web production migration guard", () => {
       productionNextBuildScript,
       /Discarding Webpack cache after successful production compile/u,
     );
+
+    // apps/web/README.md § "Production build memory guard" is the single prose
+    // owner of the mutable runner contract (cache policy, epoch stamping, and
+    // the production watchdog). Secondary guidance documents keep only
+    // purpose-level statements plus a reference to that owner, so drift like a
+    // stale "preserves ordinary warm caching" claim cannot recur unnoticed.
+    const readmeDoc = await readFile(path.join(appRoot, "README.md"), "utf8");
+    const repoRoot = path.join(appRoot, "..", "..");
+    const verificationDoc = await readFile(
+      path.join(repoRoot, "agent-docs", "operations", "verification-and-runtime.md"),
+      "utf8",
+    );
+    const testingCiMapDoc = await readFile(
+      path.join(repoRoot, "agent-docs", "references", "testing-ci-map.md"),
+      "utf8",
+    );
+    assert.match(readmeDoc, /## Production build memory guard/u);
+    assert.match(readmeDoc, /`VERCEL=1` with\s+`VERCEL_ENV=production`/u);
+    assert.match(readmeDoc, /`\.next\/cache\/webpack` before every compile/u);
+    assert.match(readmeDoc, /post-success\s+Webpack-cache discard/u);
+    for (const [docName, doc] of [
+      ["verification-and-runtime.md", verificationDoc],
+      ["testing-ci-map.md", testingCiMapDoc],
+    ] as const) {
+      assert.match(doc, /Production build memory guard/u, `${docName} must reference the owner`);
+      for (const copiedMechanic of [
+        /preserves ordinary warm caching/u,
+        /15-minute `timeout`/u,
+        /kill-after/u,
+        /SIGKILL 30/u,
+      ]) {
+        assert.doesNotMatch(
+          doc,
+          copiedMechanic,
+          `${docName} must not copy mutable runner mechanics (${String(copiedMechanic)})`,
+        );
+      }
+    }
     assert.match(productionNextBuildScript, /compiler=webpack/u);
     assert.match(
       verifyFastScript,

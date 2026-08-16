@@ -395,15 +395,12 @@ supported provider credential.
   `NODE_OPTIONS`, so the sequential Webpack compiler workers receive 3 GiB and
   the later generated-contract TypeScript validation child inherits the same
   limit, while isolated static workers have the flag removed. The same script
-  owns the Vercel package build and CI memory-observation invocation. The
-  production runner keeps Webpack compiles cold-cache (it clears
-  `.next/cache/webpack` before every compile and discards it after success)
-  and, on Vercel production builds only (`VERCEL=1` with
-  `VERCEL_ENV=production`), bounds `next build` with a 15-minute `timeout`
-  watchdog so a wedged compile fails fast instead of reaching Vercel's
-  45-minute ceiling. The verify lane's `VERCEL=1 VERCEL_ENV=preview` build
-  shape stays unbounded. The cache epoch is stamped only after both the
-  successful compile and the post-success Webpack-cache discard. The split reduces the compile-parent peak without
+  owns the Vercel package build and CI memory-observation invocation, plus the
+  cold-Webpack-cache policy and the production-only build watchdog;
+  `apps/web/README.md` § "Production build memory guard" is the single prose
+  owner for that mutable contract. The CI-relevant fact is that the verify
+  lane's `VERCEL=1 VERCEL_ENV=preview` build shape compiles Webpack cold
+  without activating the watchdog. The split reduces the compile-parent peak without
   weakening generated-contract validation, while repeated forced-cold Standard
   previews remain the real Vercel acceptance proof. A 2 GiB parent-bound
   candidate passed one forced-cold Standard preview but the next identical
@@ -433,12 +430,11 @@ supported provider credential.
   Webpack build worker and memory optimizations because Workflow contributes
   Webpack configuration. Three consecutive forced-cold Webpack previews, a
   later integration preview, and the final corrected head previously completed
-  on the Standard builder without OOM. A versioned `.next/cache` epoch clears an
-  incompatible restored cache
-  until one Webpack build succeeds and then preserves ordinary warm caching.
-  The epoch is owned by the shared production runner and changes only after a
-  proven compiler/cache transition; missing or mismatched stamps fail toward a
-  cold build instead of trusting cross-compiler state.
+  on the Standard builder without OOM. The shared production runner owns the
+  versioned `.next/cache` epoch and the per-build cold-Webpack-cache policy;
+  see `apps/web/README.md` § "Production build memory guard" for the exact
+  contract. Missing or mismatched stamps fail toward a cold build instead of
+  trusting cross-compiler state.
   Exact-head CI proves the complete compile, type-validation, static-generation,
   and directive-discovery path,
   while focused Stripe and phone-call suites prove the existing
