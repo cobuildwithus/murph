@@ -320,6 +320,13 @@ test("Junction metabolic intervals admit one exact source-local instant and pres
           unit: "g",
           value: 34,
         },
+        {
+          end: "2026-01-15T08:35:00-05:00",
+          id: "mixed-floating-and-offset",
+          start: "2026-01-15T08:30:00+00:00",
+          unit: "g",
+          value: 35,
+        },
       ]),
       insulin_injection: grouped("freestyle_libre", "cgm", "libre-1", [{
         end: "2026-01-15T09:05:00+00:00",
@@ -349,6 +356,23 @@ test("Junction metabolic intervals admit one exact source-local instant and pres
   );
   assert.deepEqual(insulin.map((event) => event.occurredAt), ["2026-01-15T14:00:00.000Z"]);
   assert.equal((payload.events ?? []).length, 4);
+  assert.equal(
+    carbohydrates.find((event) => event.occurredAt === "2026-01-15T13:00:00.000Z")
+      ?.dataOrigin?.normalizerVersion,
+    "junction-sparse-timeseries.floating-fallback.v2",
+  );
+  assert.equal(
+    carbohydrates.find((event) => event.occurredAt === "2026-11-01T05:15:00.000Z")
+      ?.dataOrigin?.normalizerVersion,
+    "junction-sparse-timeseries.v1",
+  );
+  const fallbackEvidence = payload.evidenceParts?.find((part) =>
+    JSON.stringify(part.content).includes("2026-01-15T08:00:00+00:00")
+  );
+  const fallbackEvidenceJson = JSON.stringify(fallbackEvidence?.content);
+  assert.match(fallbackEvidenceJson, /"startAtRaw":"2026-01-15T08:00:00\+00:00"/u);
+  assert.match(fallbackEvidenceJson, /"endAtRaw":"2026-01-15T08:05:00\+00:00"/u);
+  assert.doesNotMatch(fallbackEvidenceJson, /"occurredAt"|"startAt"|"endAt"/u);
 });
 
 test("Junction id-less Libre metabolic identity ignores mutable vault timezone", () => {
@@ -411,6 +435,127 @@ test("Junction id-less Libre metabolic identity ignores mutable vault timezone",
     central.some((event) => event.occurredAt === "2026-01-15T13:20:00.000Z"),
     true,
   );
+});
+
+test("Junction Libre replays retain the canonical fallback-zone interpretation", async () => {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-junction-libre-canonical-time-"));
+  const buildSnapshot = (input: {
+    end: string;
+    importedAt: string;
+    insulinAmount: number;
+  }) => ({
+    accountId: "junction-account-libre-canonical-time",
+    importedAt: input.importedAt,
+    timeseries: {
+      carbohydrates: grouped("freestyle_libre", "cgm", "libre-1", [{
+        end: "2026-01-15T08:05:00+00:00",
+        id: "carbohydrate-canonical-time",
+        start: "2026-01-15T08:00:00+00:00",
+        unit: "g",
+        value: 30,
+      }]),
+      insulin_injection: grouped("freestyle_libre", "cgm", "libre-1", [{
+        end: input.end,
+        id: "insulin-canonical-time",
+        start: "2026-01-15T09:00:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: input.insulinAmount,
+      }]),
+    },
+  });
+  const importSnapshot = (snapshot: Record<string, unknown>) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        snapshot,
+        vaultRoot,
+      },
+      { corePort: coreRuntime },
+    );
+  const selectMetabolicEvents = (
+    result: Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>,
+  ) => ({
+    carbohydrate: result.events.find((event) =>
+      event.kind === "observation" && event.metric === "carbohydrates"
+    ),
+    insulin: result.events.find((event) =>
+      event.kind === "intervention_session"
+    ),
+  });
+  const readCanonicalEvent = async (
+    event: Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>["events"][number] | undefined,
+  ) => {
+    const externalRef = event?.externalRef;
+    assert.ok(externalRef);
+    return coreRuntime.findEventByExternalRef({
+      vaultRoot,
+      system: externalRef.system,
+      resourceType: externalRef.resourceType,
+      resourceId: externalRef.resourceId,
+      facet: externalRef.facet,
+    });
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const first = selectMetabolicEvents(await importSnapshot(buildSnapshot({
+      end: "2026-01-15T09:05:00+00:00",
+      importedAt: "2026-02-01T00:00:00.000Z",
+      insulinAmount: 4,
+    })));
+
+    assert.equal(first.carbohydrate?.occurredAt, "2026-01-15T13:00:00.000Z");
+    assert.equal(first.carbohydrate?.timeZone, "America/New_York");
+    assert.equal(first.insulin?.occurredAt, "2026-01-15T14:00:00.000Z");
+    assert.equal(first.insulin?.timeZone, "America/New_York");
+
+    await coreRuntime.updateVaultSummary({
+      vaultRoot,
+      timezone: "America/Chicago",
+    });
+    const replayResult = await importSnapshot(buildSnapshot({
+      end: "2026-01-15T09:05:00+00:00",
+      importedAt: "2026-02-02T00:00:00.000Z",
+      insulinAmount: 4,
+    }));
+    const replay = {
+      carbohydrate: await readCanonicalEvent(first.carbohydrate),
+      insulin: await readCanonicalEvent(first.insulin),
+    };
+
+    assert.equal(replayResult.events.length, 0);
+    assert.equal(replay.carbohydrate?.id, first.carbohydrate?.id);
+    assert.equal(replay.carbohydrate?.occurredAt, first.carbohydrate?.occurredAt);
+    assert.equal(replay.carbohydrate?.timeZone, first.carbohydrate?.timeZone);
+    assert.equal(replay.insulin?.id, first.insulin?.id);
+    assert.equal(replay.insulin?.occurredAt, first.insulin?.occurredAt);
+    assert.equal(replay.insulin?.timeZone, first.insulin?.timeZone);
+    assert.equal(replay.insulin?.lifecycle, undefined);
+
+    const corrected = selectMetabolicEvents(await importSnapshot(buildSnapshot({
+      end: "2026-01-15T09:20:00+00:00",
+      importedAt: "2026-02-03T00:00:00.000Z",
+      insulinAmount: 5,
+    })));
+
+    assert.equal(corrected.insulin?.id, first.insulin?.id);
+    assert.equal(corrected.insulin?.occurredAt, first.insulin?.occurredAt);
+    assert.equal(corrected.insulin?.timeZone, first.insulin?.timeZone);
+    assert.equal(corrected.insulin?.lifecycle?.revision, 2);
+    if (corrected.insulin?.kind !== "intervention_session") {
+      assert.fail("expected corrected Libre insulin event");
+    }
+    assert.equal(corrected.insulin.fields?.["dose-amount"], 5);
+    assert.equal(corrected.insulin.fields?.["start-at"], "2026-01-15T14:00:00.000Z");
+    assert.equal(corrected.insulin.fields?.["end-at"], "2026-01-15T14:20:00.000Z");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction glucose summaries expose bounded population variability", () => {

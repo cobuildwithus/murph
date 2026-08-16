@@ -2322,6 +2322,70 @@ function shouldKeepExistingJunctionSleepStageSummaryObservation(
 
 const JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE =
   "companion-whoop-metadata-unverified";
+const JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION =
+  "junction-sparse-timeseries.floating-fallback.v2";
+
+function shiftIsoTimestamp(value: unknown, deltaMs: number): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs) ? new Date(timestampMs + deltaMs).toISOString() : undefined;
+}
+
+function preserveJunctionFloatingFallbackTime(
+  existing: EventRecord,
+  incoming: EventRecord,
+): EventRecord {
+  if (
+    existing.externalRef?.system !== "junction"
+    || incoming.externalRef?.system !== "junction"
+    || incoming.dataOrigin?.normalizerVersion
+      !== JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
+    || existing.dataOrigin?.timestampSemantics !== "floating"
+    || incoming.dataOrigin.timestampSemantics !== "floating"
+    || existing.dataOrigin.observedAtRaw === undefined
+    || existing.dataOrigin.observedAtRaw !== incoming.dataOrigin.observedAtRaw
+    || !deviceDataOriginSourceMatches(existing.dataOrigin, incoming.dataOrigin)
+  ) {
+    return incoming;
+  }
+
+  const deltaMs = Date.parse(existing.occurredAt) - Date.parse(incoming.occurredAt);
+  if (!Number.isFinite(deltaMs)) {
+    return incoming;
+  }
+
+  // Junction documents Libre's +00:00 values as wall clocks, not instants.
+  // Once the event spine accepts a vault-zone interpretation, that existing
+  // canonical owner must not move merely because the member changes their
+  // current profile timezone. Shift corrected interval fields by the same
+  // delta so provider duration changes still supersede normally.
+  const shiftedStartAt = incoming.kind === "intervention_session"
+    ? shiftIsoTimestamp(incoming.fields?.["start-at"], deltaMs)
+    : undefined;
+  const shiftedEndAt = incoming.kind === "intervention_session"
+    ? shiftIsoTimestamp(incoming.fields?.["end-at"], deltaMs)
+    : undefined;
+  const shiftedInterventionFields = incoming.kind === "intervention_session" && incoming.fields
+    ? {
+        ...incoming.fields,
+        ...(shiftedStartAt ? { "start-at": shiftedStartAt } : {}),
+        ...(shiftedEndAt ? { "end-at": shiftedEndAt } : {}),
+      }
+    : undefined;
+  const { timeZone: _incomingTimeZone, ...incomingWithoutTimeZone } = incoming;
+  return {
+    ...incomingWithoutTimeZone,
+    occurredAt: existing.occurredAt,
+    recordedAt: existing.recordedAt,
+    dayKey: existing.dayKey,
+    ...(existing.timeZone ? { timeZone: existing.timeZone } : {}),
+    ...(incoming.kind === "intervention_session" && shiftedInterventionFields
+      ? { fields: shiftedInterventionFields }
+      : {}),
+  };
+}
 
 function parseJunctionCompanionSyncVersion(version: string | undefined): number | undefined {
   if (!version || !/^(?:0|[1-9]\d*)$/u.test(version)) {
@@ -2933,7 +2997,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
   let supersededCount = 0;
   let retractedCount = 0;
 
-  for (const entry of entries) {
+  for (const originalEntry of entries) {
+    let entry = originalEntry;
     const externalRef = entry.record.externalRef;
 
     if (!externalRef) {
@@ -2980,6 +3045,19 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const indexedProviderMatch = matchedEntries.find(
       (match) => match.indexedMatch.record.id === latest.id,
     )?.indexedMatch ?? matchedEntries[0]?.indexedMatch;
+    if (indexedProviderMatch) {
+      const canonicalRecord = preserveJunctionFloatingFallbackTime(
+        indexedProviderMatch.indexedRecord,
+        entry.record,
+      );
+      if (canonicalRecord !== entry.record) {
+        entry = {
+          ...entry,
+          relativePath: toEventLedgerFile(canonicalRecord.occurredAt),
+          record: canonicalRecord,
+        };
+      }
+    }
     const matchesIndexedProviderContent = indexedProviderMatch !== undefined
       && deviceEventContentKey(indexedProviderMatch.indexedRecord)
         === deviceEventContentKey(entry.record);

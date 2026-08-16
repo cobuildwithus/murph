@@ -78,8 +78,12 @@ Current providers:
   at most 3,840 provider rows and 3,000 deterministic canonical facts. Libre's
   documented fake-UTC wall times are admitted only when the vault timezone
   identifies one exact instant; real nonzero offsets stay absolute, while DST
-  gaps and overlaps fail closed. The lifecycle fence rechecks the source after
-  each fetch before import.
+  gaps, overlaps, and mixed floating/absolute intervals fail closed. The first
+  accepted fallback-zone interpretation belongs to the existing canonical event
+  spine, so later profile-timezone changes cannot rewrite only the recently
+  replayed portion of history. Explicit row zones and changed raw wall times
+  remain authoritative corrections. The lifecycle fence rechecks the source
+  after each fetch before import.
 - BMI, body fat, lean body mass, and waist circumference remain product opt-in
   labels. The production provider assembly
   still enables the exhaustive exact code-owned registry; member overlays and

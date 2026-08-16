@@ -253,6 +253,8 @@ const FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "freestyle-libre",
   "freestyle_libre",
 ]);
+const JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION =
+  "junction-sparse-timeseries.floating-fallback.v2";
 const RAW_SOURCE_IDENTIFIER_KEYS = new Set([
   "sourcename",
   "sourcedeviceid",
@@ -2381,6 +2383,11 @@ function pushJunctionSparseTimeseriesRecords(
       timeZone,
       timestamp,
     } = candidate;
+    const usesFloatingFallbackTimeZone = isJunctionSparseFloatingFallbackTimeZone({
+      entry,
+      resource,
+      timestamp,
+    });
     const role = `${baseArtifactRole}:${dayKey}:${identityHash}`;
     pushEvidencePart(
       context.evidenceParts,
@@ -2398,10 +2405,12 @@ function pushJunctionSparseTimeseriesRecords(
             sourceType: resourceContext.origin.sourceType,
             sourceInstanceId: resourceContext.origin.sourceInstanceId,
             observedAtRaw: record.observedAtRaw,
-            occurredAt,
+            occurredAt: usesFloatingFallbackTimeZone ? undefined : occurredAt,
             recordedAt: timestamp.recordedAt,
-            startAt: record.startAt,
-            endAt: record.endAt,
+            startAt: usesFloatingFallbackTimeZone ? undefined : record.startAt,
+            endAt: usesFloatingFallbackTimeZone ? undefined : record.endAt,
+            startAtRaw: usesFloatingFallbackTimeZone ? stringId(entry.start) : undefined,
+            endAtRaw: usesFloatingFallbackTimeZone ? stringId(entry.end) : undefined,
             value: record.value,
             unit: record.unit,
             upstreamUnit: record.upstreamUnit,
@@ -2431,7 +2440,11 @@ function pushJunctionSparseTimeseriesRecords(
         dayKey,
         observedAtRaw: record.observedAtRaw,
       }),
-      { normalizerVersion: "junction-sparse-timeseries.v1" },
+      {
+        normalizerVersion: usesFloatingFallbackTimeZone
+          ? JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
+          : "junction-sparse-timeseries.v1",
+      },
     );
 
     if (descriptor.kind === "insulin") {
@@ -2529,6 +2542,9 @@ function resolveJunctionSparseTimeseriesTimestamp(input: {
     : false;
 
   if (metabolicInterval && (startIsFloating || endIsFloating)) {
+    if (startIsFloating !== endIsFloating) {
+      return null;
+    }
     const timeZone = resolveJunctionFloatingTimestampTimeZone(
       input.entry,
       input.context.defaultTimeZone,
@@ -2587,6 +2603,18 @@ function resolveJunctionSparseTimeseriesTimestamp(input: {
     timeZone: firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
     timestamp,
   });
+}
+
+function isJunctionSparseFloatingFallbackTimeZone(input: {
+  entry: PlainObject;
+  resource: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+}): boolean {
+  return (input.resource === "carbohydrates" || input.resource === "insulin_injection")
+    && input.timestamp.timestampSemantics === "floating"
+    && normalizeIanaTimeZone(
+      firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
+    ) === null;
 }
 
 function parseJunctionSparseTimeseriesRecord(
