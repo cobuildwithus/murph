@@ -581,15 +581,26 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
-  it("keeps recovery pending until terminal Retell usage is durably recorded", async () => {
+  it("settles delivered-result usage when provider readiness changes later", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
     const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
       id: "hpc_existing",
       providerCallId: "retell_call_123",
-      status: "calling",
+      resultDeliveryStatus: "delivered",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
     });
     const store = createPhoneCallStore({ existing });
     const recordTerminalUsage = vi.fn(async () => undefined);
     const resolveTerminalUsage = vi.fn()
+      .mockResolvedValueOnce({ state: "pending" })
+      .mockResolvedValueOnce({ state: "pending" })
       .mockResolvedValueOnce({ state: "pending" })
       .mockResolvedValueOnce({
         state: "ready",
@@ -607,21 +618,29 @@ describe("createHostedPhoneCall", () => {
       ...store.prisma,
       recordTerminalUsage,
     };
+    const finalizeStoredResult = vi.fn(async () => "complete" as const);
+    const signal = new AbortController().signal;
 
-    await expect(processHostedPhoneCallRecoveryById({
-      phoneCallId: existing.id,
-      prisma,
-      runtime,
-      signal: new AbortController().signal,
-    })).resolves.toBe("pending");
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(processHostedPhoneCallRecoveryById({
+        finalizeStoredResult,
+        phoneCallId: existing.id,
+        prisma,
+        runtime,
+        signal,
+      })).resolves.toBe("pending");
+    }
     expect(recordTerminalUsage).not.toHaveBeenCalled();
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
       phoneCallId: existing.id,
       prisma,
       runtime,
-      signal: new AbortController().signal,
+      signal,
     })).resolves.toBe("complete");
+    expect(resolveTerminalUsage).toHaveBeenCalledTimes(4);
+    expect(finalizeStoredResult).toHaveBeenCalledTimes(4);
     expect(recordTerminalUsage).toHaveBeenCalledWith({
       call: existing,
       usage: {

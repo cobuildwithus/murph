@@ -1,7 +1,7 @@
 import { createHook, sleep } from "workflow";
 
 import {
-  probeHostedPhoneCallReconciliationStep,
+  reconcileHostedPhoneCallDurableStep,
   reconcileHostedPhoneCallStep,
 } from "./reconciliation-workflow-steps";
 import type {
@@ -38,7 +38,6 @@ export async function hostedPhoneCallReconciliationWorkflow(
       | typeof HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK
       | typeof HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK =
       HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK;
-    let timerActivatedResultVersion: string | null = null;
 
     while (true) {
       try {
@@ -58,28 +57,19 @@ export async function hostedPhoneCallReconciliationWorkflow(
             break;
           }
 
-          let probe: Awaited<
-            ReturnType<typeof probeHostedPhoneCallReconciliationStep>
+          let result: Awaited<
+            ReturnType<typeof reconcileHostedPhoneCallDurableStep>
           >;
           try {
-            probe = await probeHostedPhoneCallReconciliationStep(input);
+            result = await reconcileHostedPhoneCallDurableStep(input);
           } catch {
-            // The row remains the durable owner. A probe outage cannot end its
-            // sole Workflow, manufacture another recovery owner, or advance
-            // the first successful classification to the daily cadence.
+            // The row remains the durable owner. A durable-pass outage cannot
+            // end its sole Workflow, manufacture another recovery owner, or
+            // advance the first successful classification to the daily cadence.
             continue;
           }
-          if (probe.status === "missing") {
+          if (result !== "pending") {
             return;
-          }
-          if (
-            probe.status === "stored-result"
-            && probe.analyzedAt !== timerActivatedResultVersion
-          ) {
-            timerActivatedResultVersion = probe.analyzedAt;
-            durableRecheckAfter =
-              HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK;
-            break;
           }
           durableRecheckAfter =
             HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK;
