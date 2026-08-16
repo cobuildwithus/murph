@@ -867,8 +867,8 @@ runner regression test are the behavioral authority. Warm restored Webpack
 caches were the trigger for the August 2026 steady-state 8 GB container OOM
 kills and silent compile hangs that followed the cutover. The verification
 implication here is that the verify lane intentionally builds with `VERCEL=1
-VERCEL_ENV=preview`, which compiles Webpack cold but never activates the
-production watchdog, so local macOS verify never needs GNU `timeout`. The Workflow
+VERCEL_ENV=preview`, which compiles Webpack cold but never arms the
+production-only build deadline. The Workflow
 integration runs through its native Next integration: exact-head CI proves the
 complete compile, type-validation, static-generation, and directive-discovery
 path, while focused Stripe and phone-call suites prove the existing

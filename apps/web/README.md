@@ -1650,14 +1650,20 @@ Webpack state. Warm restored Webpack caches on Vercel's 8 GB Standard builder
 were the trigger for the August 2026 steady-state OOM kills and silent
 compile hangs; only the cold path is proven. Other cache subtrees such as SWC
 remain warm. On Vercel production builds (`VERCEL=1` with
-`VERCEL_ENV=production`) the runner also wraps `next build` in a 15-minute
-`timeout` watchdog (SIGTERM, SIGKILL after 30 more seconds) so a wedged
-compile fails the build in minutes instead of occupying the deploy queue until
-Vercel's 45-minute ceiling; exit 124 reports the timeout explicitly. Local and
-CI verify invocations set `VERCEL=1` with `VERCEL_ENV=preview` and skip the
-watchdog, which also keeps the runner off GNU `timeout` on macOS. Bump the
-epoch only when a proven compiler/cache transition requires another full
-invalidation.
+`VERCEL_ENV=production`), `scripts/vercel-build.sh` arms a 15-minute
+whole-build deadline (`MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS=900000`) that the
+package-build process owner, `scripts/run-with-host-verification-slot.mjs`,
+enforces on the one detached process group it already creates: at the deadline
+it TERMs the entire group, escalates to KILL after a 30-second grace, waits
+until the group has fully exited, and returns exit 124 with an explicit
+diagnostic. Because the deadline owns the whole group, a wedged Webpack
+compiler worker descendant is terminated too, and an externally cancelled
+build is reaped with the same escalation instead of orphaning the compile.
+Either way a wedged compile fails the build in minutes instead of occupying
+the deploy queue until Vercel's 45-minute ceiling. Local and CI verify
+invocations build
+with `VERCEL_ENV=preview` and never arm the deadline. Bump the epoch only
+when a proven compiler/cache transition requires another full invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions

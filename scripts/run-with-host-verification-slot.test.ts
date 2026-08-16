@@ -24,6 +24,18 @@ const holderSource = `
   process.stdout.write("ready\\n");
   process.stdin.resume();
 `;
+// A TERM-ignoring parent with a TERM-ignoring grandchild: the wedged-compile
+// topology the command deadline must terminate as one process group.
+const wedgedTreeSource = `
+  import { spawn } from "node:child_process";
+  process.on("SIGTERM", () => {});
+  const grandchild = spawn(process.execPath, [
+    "-e",
+    "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);",
+  ], { stdio: "ignore" });
+  process.stdout.write("pids " + process.pid + " " + grandchild.pid + "\\n");
+  setInterval(() => {}, 1000);
+`;
 
 afterEach(async () => {
   for (const child of children) {
@@ -292,6 +304,44 @@ describe("shared-host verification slots", () => {
     expect(result.status).toBe(7);
     expect(readdirSync(stateRoot)).toEqual([]);
   });
+
+  it("a configured command deadline reaps the whole process group", async () => {
+    const stateRoot = makeTempRoot();
+    const child = startCommand("deadline command", stateRoot, wedgedTreeSource, {
+      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
+      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "300",
+    });
+
+    const [parentPid, grandchildPid] = await waitForPids(child);
+    ownedDescendantPids.add(parentPid);
+    ownedDescendantPids.add(grandchildPid);
+
+    await waitForStderrLine(child, "terminating its process group");
+    const status = await waitForExit(child);
+    expect(status).toBe(124);
+    await waitForOwnedProcessExit(parentPid);
+    await waitForOwnedProcessExit(grandchildPid);
+    expect(readdirSync(stateRoot)).toEqual([]);
+  });
+
+  it("external cancellation with a configured deadline escalates to KILL and reaps the group", async () => {
+    const stateRoot = makeTempRoot();
+    const child = startCommand("cancelled command", stateRoot, wedgedTreeSource, {
+      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
+      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "600000",
+    });
+
+    const [parentPid, grandchildPid] = await waitForPids(child);
+    ownedDescendantPids.add(parentPid);
+    ownedDescendantPids.add(grandchildPid);
+
+    child.kill("SIGTERM");
+    const status = await waitForExit(child);
+    expect(status).toBe(143);
+    await waitForOwnedProcessExit(parentPid);
+    await waitForOwnedProcessExit(grandchildPid);
+    expect(readdirSync(stateRoot)).toEqual([]);
+  });
 });
 
 function makeTempRoot(): string {
@@ -381,6 +431,27 @@ function startRawCommand(source: string): ChildProcess {
 
 async function waitForLine(child: ChildProcess, line: string): Promise<void> {
   await waitForStreamLine(child, child.stdout, line);
+}
+
+async function waitForPids(child: ChildProcess): Promise<[number, number]> {
+  let output = "";
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error(`Timed out waiting for pids; output=${output}`)),
+      2_000,
+    );
+    const onData = (chunk: Buffer | string) => {
+      output += chunk.toString();
+      const match = output.match(/pids (\d+) (\d+)/u);
+      if (match) {
+        clearTimeout(timeout);
+        child.stdout?.off("data", onData);
+        resolve([Number(match[1]), Number(match[2])]);
+      }
+    };
+    child.stdout?.on("data", onData);
+    child.once("error", reject);
+  });
 }
 
 async function waitForStderrLine(child: ChildProcess, line: string): Promise<void> {

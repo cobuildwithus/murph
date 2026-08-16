@@ -3,11 +3,6 @@ set -euo pipefail
 
 parent_old_space_mb=1024
 next_child_old_space_mb=3072
-next_build_timeout=15m
-active_next_build_timeout=disabled
-if [[ "${VERCEL:-}" == "1" && "${VERCEL_ENV:-}" == "production" ]]; then
-  active_next_build_timeout="$next_build_timeout"
-fi
 build_cache_epoch=webpack-next-16.3-v2-cold-webpack
 build_cache_stamp=.next/cache/murph-production-build-epoch
 webpack_cache_dir=.next/cache/webpack
@@ -39,36 +34,10 @@ else
   node ../../scripts/rm-paths.mjs "$webpack_cache_dir"
 fi
 
-printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s next_child_old_space_mb=%s webpack_cache=cold vercel_timeout=%s\n' \
+printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s next_child_old_space_mb=%s webpack_cache=cold\n' \
   "$parent_old_space_mb" \
-  "$next_child_old_space_mb" \
-  "$active_next_build_timeout"
-next_build_command=(
-  node
-  "--max-old-space-size=$parent_old_space_mb"
-  "$next_bin"
-  build
-  --webpack
-)
-
-next_build_status=0
-if [[ "$active_next_build_timeout" != disabled ]]; then
-  # --foreground keeps timeout and Next inside the caller's process group so
-  # the package-build process owner's cancellation signals still reach the
-  # compile; without it GNU timeout detaches into its own group and a canceled
-  # build could orphan the compiler.
-  timeout --verbose --foreground --signal=TERM --kill-after=30s "$active_next_build_timeout" \
-    "${next_build_command[@]}" || next_build_status=$?
-else
-  "${next_build_command[@]}" || next_build_status=$?
-fi
-if [[ "$next_build_status" != 0 ]]; then
-  if [[ "$next_build_status" == 124 ]]; then
-    printf "[apps/web build] ERROR: Next build exceeded %s and was terminated before Vercel's maximum build duration.\n" \
-      "$next_build_timeout" >&2
-  fi
-  exit "$next_build_status"
-fi
+  "$next_child_old_space_mb"
+node "--max-old-space-size=$parent_old_space_mb" "$next_bin" build --webpack
 
 printf '[apps/web build] Discarding Webpack cache after successful production compile\n'
 node ../../scripts/rm-paths.mjs "$webpack_cache_dir"

@@ -1440,11 +1440,6 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
     assert.match(productionNextBuildScript, /next_child_old_space_mb=3072/u);
-    assert.match(productionNextBuildScript, /next_build_timeout=15m/u);
-    assert.match(
-      productionNextBuildScript,
-      /if \[\[ "\$\{VERCEL:-\}" == "1" && "\$\{VERCEL_ENV:-\}" == "production" \]\]; then\s+active_next_build_timeout="\$next_build_timeout"/u,
-    );
     assert.match(
       productionNextBuildScript,
       /build_cache_epoch=webpack-next-16\.3-v2-cold-webpack/u,
@@ -1465,11 +1460,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /next_build_command=\(\s+node\s+"--max-old-space-size=\$parent_old_space_mb"\s+"\$next_bin"\s+build\s+--webpack\s+\)/u,
-    );
-    assert.match(
-      productionNextBuildScript,
-      /timeout --verbose --foreground --signal=TERM --kill-after=30s "\$active_next_build_timeout"/u,
+      /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
     assert.match(
       productionNextBuildScript,
@@ -1479,6 +1470,35 @@ describe("hosted web production migration guard", () => {
       productionNextBuildScript,
       /Discarding Webpack cache after successful production compile/u,
     );
+
+    // The production build deadline lives in the package-build process owner,
+    // not in the runner: vercel-build.sh arms it for production deployments
+    // only, and the supervisor owns whole-group termination and reaping.
+    const vercelBuildScript = await readFile(
+      path.join(appRoot, "scripts", "vercel-build.sh"),
+      "utf8",
+    );
+    assert.match(
+      vercelBuildScript,
+      /if \[ "\$\{VERCEL:-\}" = "1" \] && \[ "\$\{VERCEL_ENV:-\}" = "production" \]; then/u,
+    );
+    assert.match(
+      vercelBuildScript,
+      /MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS="\$\{MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS:-900000\}"/u,
+    );
+    assert.match(vercelBuildScript, /export MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS/u);
+    assert.doesNotMatch(productionNextBuildScript, /timeout /u);
+    assert.doesNotMatch(productionNextBuildScript, /VERCEL/u);
+    const verificationSlotScript = await readFile(
+      path.join(appRoot, "..", "..", "scripts", "run-with-host-verification-slot.mjs"),
+      "utf8",
+    );
+    assert.match(
+      verificationSlotScript,
+      /COMMAND_TIMEOUT_ENV = "MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS"/u,
+    );
+    assert.match(verificationSlotScript, /COMMAND_TIMEOUT_EXIT_CODE = 124/u);
+    assert.match(verificationSlotScript, /reapCommandProcessGroup/u);
 
     // apps/web/README.md § "Production build memory guard" is the single prose
     // owner of the mutable runner contract (cache policy, epoch stamping, and
