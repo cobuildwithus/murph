@@ -37,6 +37,31 @@ async function runCli(argv: string[]): Promise<string> {
   }
 }
 
+test('batch schema explains source output lengths before compact mode', async () => {
+  const raw = await runCli(['batch', '--schema', '--format', 'json'])
+  const schema = JSON.parse(raw) as {
+    output?: {
+      properties?: {
+        commands?: {
+          items?: {
+            properties?: Record<string, { description?: string }>
+          }
+        }
+      }
+    }
+  }
+  const outputProperties = schema.output?.properties?.commands?.items?.properties
+
+  assert.equal(
+    outputProperties?.outputBytes?.description,
+    'UTF-8 byte length of captured child stdout before compact mode may clear stdout.',
+  )
+  assert.equal(
+    outputProperties?.outputChars?.description,
+    'Legacy UTF-16 code-unit length of captured child stdout before compact mode may clear stdout.',
+  )
+})
+
 test('batch runs multiple vault-cli argv arrays in one process', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-'))
   const vault = path.join(parent, 'vault')

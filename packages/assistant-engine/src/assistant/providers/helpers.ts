@@ -23,6 +23,7 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  VAULT_CLI_BATCH_MAX_COMMANDS,
   VAULT_CLI_BATCH_RESULT_SCHEMA,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
@@ -648,13 +649,9 @@ function readAssistantTurnProfileToolAggregates(
   }
 
   if (itemType === 'mcpToolCall' || itemType === 'dynamicToolCall') {
-    const server = readAssistantProviderString(
-      itemType === 'mcpToolCall' ? item.server : item.namespace,
-    )
     const tool = readAssistantProviderString(item.tool)
     const kind = itemType === 'mcpToolCall' ? 'mcp_tool' : 'dynamic_tool'
     const label = buildAssistantTurnProfileToolIdentityLabel({
-      context: server,
       kind,
       tool,
     })
@@ -705,6 +702,7 @@ function readAssistantTurnProfileBatchToolAggregates(
   if (
     !Array.isArray(commands)
     || commands.length === 0
+    || commands.length > VAULT_CLI_BATCH_MAX_COMMANDS
     || typeof count !== 'number'
     || !Number.isSafeInteger(count)
     || count !== commands.length

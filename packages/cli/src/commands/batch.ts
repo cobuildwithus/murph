@@ -8,6 +8,7 @@ import {
 } from '@murphai/operator-config/command-helpers'
 import {
   pathSchema,
+  VAULT_CLI_BATCH_MAX_COMMANDS,
   VAULT_CLI_BATCH_RESULT_SCHEMA,
 } from '@murphai/operator-config/vault-cli-contracts'
 
@@ -18,8 +19,12 @@ const batchCommandResultSchema = z.object({
   argv: z.array(z.string().min(1)),
   durationMs: z.number().int().nonnegative(),
   ok: z.boolean(),
-  outputBytes: z.number().int().nonnegative(),
-  outputChars: z.number().int().nonnegative(),
+  outputBytes: z.number().int().nonnegative().describe(
+    'UTF-8 byte length of captured child stdout before compact mode may clear stdout.',
+  ),
+  outputChars: z.number().int().nonnegative().describe(
+    'Legacy UTF-16 code-unit length of captured child stdout before compact mode may clear stdout.',
+  ),
   stdout: z.string(),
   data: z.unknown().optional(),
   error: z.object({
@@ -43,7 +48,9 @@ export function registerBatchCommands(cli: Cli.Cli) {
       'Run multiple vault-cli argv arrays in one process and return structured per-command results.',
     args: emptyArgsSchema,
     options: withBaseOptions({
-      command: z.array(batchCommandOptionSchema).min(1).max(50),
+      command: z.array(batchCommandOptionSchema).min(1).max(
+        VAULT_CLI_BATCH_MAX_COMMANDS,
+      ),
       compact: z.boolean().default(false).describe(
         'Replace duplicate raw JSON output with an empty stdout string after successful parsing.',
       ),

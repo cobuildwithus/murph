@@ -118,25 +118,19 @@ export function isAssistantTurnProfileCommandFamily(
 }
 
 export function buildAssistantTurnProfileToolIdentityLabel(input: {
-  context: string | null;
   kind: "dynamic_tool" | "mcp_tool";
   tool: string | null;
 }): string {
   const genericLabel = input.kind;
-  const context = input.context ?? "";
   if (
     input.tool === null
     || !isAssistantTurnProfileIdentifierComponent(input.tool)
-    || (
-      input.context !== null
-      && !isAssistantTurnProfileIdentifierComponent(input.context)
-    )
   ) {
     return genericLabel;
   }
 
   const contextPrefix = input.kind === "mcp_tool" ? "s" : "n";
-  const label = `${contextPrefix}${context.length}_${context}t${input.tool.length}_${input.tool}`;
+  const label = `${contextPrefix}0_t${input.tool.length}_${input.tool}`;
   return label.length <= ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
     ? label
     : genericLabel;
@@ -167,7 +161,7 @@ function isAssistantTurnProfileToolIdentityLabel(
   const contextLength = readCanonicalTurnProfileLength(contextLengthText);
   if (
     contextLength === null
-    || contextLength > ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_MAX_LENGTH
+    || contextLength !== 0
   ) {
     return false;
   }

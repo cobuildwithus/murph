@@ -926,7 +926,7 @@ describe('Codex assistant registry helpers', () => {
           durationMs: 900,
           failedCalls: 0,
           kind: 'mcp_tool',
-          label: 's6_imagest8_generate',
+          label: 's0_t8_generate',
           outputBytesMax: 40,
           outputBytesTotal: 40,
         },
@@ -1050,7 +1050,7 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(profile)).not.toContain('private-query')
   })
 
-  it('uses canonical collision-free tool identities and fails closed on unsafe components', () => {
+  it('persists bounded tool identities without namespace or server text', () => {
     const toolEvent = (
       id: string,
       namespace: string,
@@ -1067,41 +1067,70 @@ describe('Codex assistant registry helpers', () => {
         },
       },
     })
+    const mcpEvent = (
+      id: string,
+      server: string,
+      tool: string,
+    ) => ({
+      method: 'item/completed',
+      params: {
+        item: {
+          id,
+          result: '',
+          server,
+          tool,
+          type: 'mcpToolCall',
+        },
+      },
+    })
     const profile = buildAssistantCodexTurnProfileJson({
       rawEvents: [
         { method: 'turn/started', params: { turn: { id: 'turn_tool_identity' } } },
-        toolEvent('item_1', 'a.b', 'c'),
-        toolEvent('item_2', 'a', 'b.c'),
-        toolEvent('item_3', 'ab', 'c'),
-        toolEvent('item_4', 'a', 'bc'),
-        toolEvent('item_5', 'private/path', 'c'),
-        toolEvent('item_6', 'private-prefix-that-is-deliberately-longer-than-forty-eight-characters', 'c'),
+        toolEvent('item_1', 'member_acme_private', 'search'),
+        toolEvent('item_2', 'tenant_two_private', 'search'),
+        toolEvent('item_3', 'safe_namespace', 'member.private'),
+        mcpEvent('item_4', 'member_acme_private', 'generate'),
+        mcpEvent('item_5', 'tenant_two_private', 'generate'),
       ],
       turnId: 'turn_tool_identity',
     })
 
     expect(profile?.tools).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        calls: 4,
+        calls: 2,
+        kind: 'dynamic_tool',
+        label: 'n0_t6_search',
+      }),
+      expect.objectContaining({
+        calls: 1,
         kind: 'dynamic_tool',
         label: 'dynamic_tool',
       }),
       expect.objectContaining({
-        calls: 1,
-        kind: 'dynamic_tool',
-        label: 'n1_at2_bc',
-      }),
-      expect.objectContaining({
-        calls: 1,
-        kind: 'dynamic_tool',
-        label: 'n2_abt1_c',
+        calls: 2,
+        kind: 'mcp_tool',
+        label: 's0_t8_generate',
       }),
     ]))
+    const persisted = parseAssistantUsageRecord({
+      attemptCount: 1,
+      credentialSource: 'platform',
+      inputTokens: 1,
+      occurredAt: '2026-06-10T12:00:00.000Z',
+      outputTokens: 1,
+      provider: 'codex-cli',
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'asst_tool_identity',
+      turnId: 'turn_tool_identity',
+      turnProfileJson: profile,
+      usageId: 'turn_tool_identity.attempt-1',
+    })
+    expect(persisted.turnProfileJson).toEqual(profile)
     const serialized = JSON.stringify(profile)
-    expect(serialized).not.toContain('a.b')
-    expect(serialized).not.toContain('b.c')
-    expect(serialized).not.toContain('private/path')
-    expect(serialized).not.toContain('private-prefix')
+    expect(serialized).not.toContain('member_acme_private')
+    expect(serialized).not.toContain('tenant_two_private')
+    expect(serialized).not.toContain('safe_namespace')
+    expect(serialized).not.toContain('member.private')
   })
 
   it('counts every canonical structural failure signal without reading error text', () => {
@@ -1565,6 +1594,63 @@ describe('Codex assistant registry helpers', () => {
     expect(profile?.toolsTruncated).toBe(false)
     expect(JSON.stringify(profile)).not.toContain('private-')
     expect(JSON.stringify(profile)).not.toContain('/private/member/vault')
+  })
+
+  it('accepts the producer batch maximum and rejects an oversized envelope', () => {
+    const buildProfile = (commandCount: number) => {
+      const commands = Array.from({ length: commandCount }, (_, index) => ({
+        argv: ['goal', 'list'],
+        durationMs: 1,
+        index,
+        ok: true,
+        outputBytes: 0,
+        outputChars: 0,
+        stdout: '',
+      }))
+      return buildAssistantCodexTurnProfileJson({
+        rawEvents: [
+          { method: 'turn/started', params: { turn: { id: 'turn_batch_boundary' } } },
+          {
+            method: 'item/completed',
+            params: {
+              item: {
+                aggregatedOutput: JSON.stringify({
+                  schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
+                  commands,
+                  count: commands.length,
+                  failed: 0,
+                }),
+                command: 'vault-cli batch --compact --format json',
+                durationMs: commandCount,
+                id: 'item_batch_boundary',
+                type: 'commandExecution',
+              },
+            },
+          },
+        ],
+        turnId: 'turn_batch_boundary',
+      })
+    }
+
+    const atLimit = buildProfile(50)
+    expect(atLimit?.tools).toEqual([
+      expect.objectContaining({
+        calls: 50,
+        kind: 'command',
+        label: 'goal.list',
+      }),
+    ])
+    expect(atLimit?.toolsTruncated).toBe(false)
+
+    const oversized = buildProfile(51)
+    expect(oversized?.tools).toEqual([
+      expect.objectContaining({
+        calls: 1,
+        kind: 'command',
+        label: 'vault-cli batch',
+      }),
+    ])
+    expect(oversized?.toolsTruncated).toBe(true)
   })
 
   it('falls back to the outer batch label when structured output is unavailable', () => {

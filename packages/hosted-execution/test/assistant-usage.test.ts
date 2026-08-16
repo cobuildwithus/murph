@@ -779,7 +779,7 @@ test("assistant usage parsing accepts the v2 tool profile and drops invalid v2 i
         durationMs: 0,
         failedCalls: 0,
         kind: "dynamic_tool",
-        label: "n2_abt1_c",
+        label: "n0_t1_c",
         outputBytesMax: 2,
         outputBytesTotal: 2,
       },
@@ -815,6 +815,7 @@ test("assistant usage parsing accepts the v2 tool profile and drops invalid v2 i
     },
     { ...profile.tools[2], label: "a.b.c" },
     { ...profile.tools[2], label: "n01_at1_b" },
+    { ...profile.tools[2], label: "n2_abt1_c" },
     { ...profile.tools[2], label: "n7_private/path_t1_c" },
   ];
   for (const tool of invalidTools) {
