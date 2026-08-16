@@ -216,3 +216,17 @@ the member's current authorized Telegram route.
   That proof plus repeated callback failure, stale receipt, stale ambiguity, and
   the direct rescheduler case passes: 3 files, 5 tests. The complete three-file
   outbox slice passes 162 tests and Assistant Engine typecheck passes.
+- ReviewGPT round 12 at
+  `2b9c9d0f0e56e8fdf9ed66e493f787ab2522700f` found that Web treated every
+  route failure from `sending` as terminal ambiguity. A committed provider-entry
+  callback can lose its response before Runtime invokes Telegram; if the exact
+  route then changes, Runtime's cumulative definitive failure proves that no
+  provider request occurred even though Web still records `sending`.
+- The remediation deletes the `sending` special case. A definitive exact-route
+  failure returns either `queued` or `sending` to `pending` and reuses the
+  existing recovery re-arm, while `sending + failed_ambiguous` remains terminal
+  and can never resend. The focused Web ownership, re-arm, and notification
+  suite passes 32 tests; the paired Runtime boundary proof passes 7 tests and
+  proves zero Telegram requests before a lost callback response, one request on
+  a valid retry, definitive route failure before fetch, and terminal ambiguity
+  for a may-have-succeeded outcome. Web typecheck passes.
