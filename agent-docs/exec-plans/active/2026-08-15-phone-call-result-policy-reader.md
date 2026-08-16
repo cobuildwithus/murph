@@ -16,9 +16,9 @@ Success means:
 - the previous strict reader's rejection of the new field is captured as an
   explicit mixed-version fixture;
 - production rollout keeps all writers on legacy absence until the compatible
-  reader is live, then pauses admission and drains every provider call,
-  pre-writer reconciliation Workflow, and previously admitted result route
-  before the first policy write; and
+  reader is live, then pauses admission and drains every admitted start route,
+  provider call, pre-writer reconciliation Workflow, and admitted result route
+  before a final zero-work proof and the first policy write; and
 - focused tests, affected typechecks, exact-head CI, and ReviewGPT pass.
 
 ## Evidence
@@ -46,7 +46,7 @@ Success means:
   `start()` to the current deployment, and routes later steps back to that
   deployment. Production inspection currently reports no pending or running
   phone-call reconciliation runs, and the same authenticated query can prove
-  the pre-reader drain after deployment.
+  the pre-writer Workflow drain during cutover.
 - Both Assistant and Web group normalization force `allowTransferToUser` to
   false. Only tracked and generationless manual direct transfers are admitted
   producers for this policy evolution.
@@ -100,17 +100,20 @@ the post-write operational floor. Tracked and generationless manual direct
 transfers are in scope; group transfer is unreachable and excluded.
 
 First-write safety requires zero surviving legacy result producers after the
-reader alias is current. Pause new phone-call admission while keeping
-analyzed-webhook ingress live; wait until every result-capable provider call
+reader alias is current. Pause new phone-call admission, then wait the
+platform's full configured start-route lifetime so every previously admitted
+request either exits or exposes its durable call and Workflow. Keep
+analyzed-result webhook ingress live while every result-capable provider call
 and every `hostedPhoneCallReconciliationWorkflow` pinned to any pre-writer
-deployment, including this reader-only release, has settled. Then freeze
-analyzed-webhook ingress and wait the platform's full configured function
-lifetime before activating the writer, so every previously admitted route
-invocation finishes first. Resume ingress and admission only after the
-reader-plus-writer release is current. Vercel pins a Workflow run to the
-deployment that starts it, so elapsed route lifetime is not Workflow proof.
-Any emergency rollback below the later writer floor uses the same order.
-Prefer a compatible forward deployment; add no fallback or recovery guard.
+deployment, including this reader-only release, settles. Then freeze that
+result ingress and wait its full configured route lifetime so every previously
+admitted result invocation finishes. Re-prove zero provider calls, pre-writer
+Workflows, or other legacy-producer executions before activating the writer.
+Resume ingress and admission only after the reader-plus-writer release is
+current. Vercel pins a Workflow run to the deployment that starts it, so
+elapsed route lifetime alone is not Workflow drain proof. Any emergency
+rollback below the later writer floor uses the same order. Prefer a compatible
+forward deployment; add no fallback or recovery guard.
 
 ## ReviewGPT round 3 retrospective addendum
 
@@ -128,6 +131,24 @@ stays live during that drain so terminal results settle; ingress then freezes
 for one full route lifetime before the writer activates. This reuses the
 existing operational pause, drain, and freeze without a flag, state owner,
 fallback, or compatibility mechanism.
+
+## ReviewGPT round 4 finding disposition
+
+Round 4 proved that the corrected drain still observed provider and Workflow
+state too early. An internal phone-call request admitted immediately before the
+pause can spend its bounded start lifetime resolving notification destination
+and authority, reconciling blockers, resolving the transfer destination, and
+encrypting the brief before reservation. The provider-call inventory and
+Workflow inspector cannot see it until reservation, after which it can create a
+reader-release Workflow and dispatch a provider call.
+
+The finding is accepted as review-induced rollout ordering. The correction
+drains admitted start routes before the first provider/Workflow zero proof,
+keeps result ingress live while their newly visible work settles, freezes and
+drains result ingress, and re-proves zero legacy-producer execution before
+writer activation. This is still a reorder of existing operational barriers;
+the consumer code, runtime configuration, schema, and state ownership remain
+unchanged.
 
 ## Verification
 
@@ -149,8 +170,10 @@ Current evidence:
   the semantic correction and required the rollout-contract retrospective
   recorded above; round 3 accepted the implementation but found that the
   first-write drain omitted reader-release Workflows and newly admitted legacy
-  webhook invocations. The corrected invariant and deployment order are
-  recorded above. A later PASS is still required;
+  webhook invocations; round 4 accepted the consumer implementation but found
+  that admitted start routes could remain invisible through the first
+  provider/Workflow zero proof. The start-route drain and final zero re-proof
+  are now explicit. A later PASS is still required;
 - the rollout-contract remediation completed the diff-scoped Web verification:
   821 files / 10,951 tests passed, Web typecheck passed, ESLint completed with
   only pre-existing warnings, dev smoke passed, and the production Next build
@@ -166,12 +189,14 @@ Current evidence:
 
 Deploy this reader-only Web release first. Do not activate any producer that
 writes `completionPolicy` until the production alias serves this release,
-new phone-call admission is paused, every result-capable provider call and
-every reconciliation Workflow pinned to any pre-writer deployment (including
-this release) has settled while analyzed-webhook ingress remains live, and that
-ingress is then frozen for the full configured route lifetime. Activate PR
-#1351 only after those drains; resume ingress and admission after its
+new phone-call admission is paused, and the full configured start-route
+lifetime has elapsed. Keep analyzed-result webhook ingress live until every
+result-capable provider call and every reconciliation Workflow pinned to any
+pre-writer deployment (including this release) has settled. Freeze that ingress
+for its full configured route lifetime, then re-prove zero provider calls,
+pre-writer Workflows, or other legacy-producer executions. Activate PR #1351
+only after those barriers; resume ingress and admission after its
 reader-plus-writer release is current. #1351 becomes the operational post-write
-floor. This release remains a compatible consumer but cannot safely produce
-new transfer results after that activation. A zero tracked-result-channel count
+floor. This release remains a compatible consumer but cannot safely produce new
+transfer results after that activation. A zero tracked-result-channel count
 cannot authorize an older strict reader or prove producer safety.

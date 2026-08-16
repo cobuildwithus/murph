@@ -445,27 +445,29 @@ policy as a consumer-first schema release. This reader-only release must deploy
 before any Web version writes that policy. The reader-only release continues to
 emit the legacy result shape; it is a compatible consumer prerequisite, not a
 safe active producer after writer activation. After the production alias serves
-this reader, the first writer cutover must pause new phone-call admission while
-analyzed-webhook ingress remains live. Wait until every result-capable provider
-call and every phone-call reconciliation Workflow pinned to any pre-writer
-deployment, including this reader-only release, has settled. Then freeze
-analyzed-webhook ingress and wait the platform's full configured function
-lifetime so every previously admitted route invocation finishes before the
+this reader, the first writer cutover must pause new phone-call admission and
+wait the platform's full configured start-route lifetime so every previously
+admitted request either exits or exposes its durable call and Workflow. Keep
+analyzed-result webhook ingress live while every result-capable provider call
+and every phone-call reconciliation Workflow pinned to any pre-writer
+deployment, including this reader-only release, settles. Then freeze that result
+ingress, wait its full configured route lifetime, and re-prove zero provider
+calls, pre-writer Workflows, or other legacy-producer executions before the
 writer activates. Resume ingress and admission only after that reader-plus-writer
 release is current. Vercel Workflow runs retain the deployment that started
-them, so elapsed function lifetime alone is not Workflow drain proof. No
-execution capable of invoking a legacy result producer may survive the first
-policy write.
+them, so elapsed route lifetime alone is not Workflow drain proof. No execution
+capable of invoking a legacy result producer may survive the first policy write.
 Tracked and generationless manual direct transfers share the later writer;
 group normalization disables transfer authority and is outside this policy
 evolution. After writer activation, the first release that both reads and
 writes the durable policy is the operational rollback floor. A lower release
 may consume existing policy-bearing results, but must not produce new transfer
 results. An emergency below-floor rollback must pause new phone-call admission
-while the current writer and analyzed-webhook ingress drain every
-result-capable provider call and deployment-pinned reconciliation run. Freeze
-analyzed-webhook ingress only at the lower-release transition, after proving no
-result-producing work remains. A zero count of non-null
+and drain the full configured start-route lifetime first. Keep analyzed-result
+webhook ingress live while every result-capable provider call and
+deployment-pinned reconciliation run settles. Then freeze and drain result
+ingress, re-prove zero legacy-producer execution, and transition. A zero count
+of non-null
 result-notification-channel rows proves only
 generation-state compatibility; it cannot prove encrypted-result compatibility.
 Prefer a compatible forward deployment.
