@@ -5034,11 +5034,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
       };
 
-      const initialMailboxPrefetchInspection = initialMailboxImportResult.prefetch
-        ? await inspectHostedPreCheckpointSystemMailboxPrefetch(
-            initialMailboxImportResult.prefetch,
-          )
-        : null;
+      let initialMailboxPrefetchInspection: Awaited<
+        ReturnType<typeof inspectHostedPreCheckpointSystemMailboxPrefetch>
+      > | null = null;
+      if (initialMailboxImportResult.prefetch) {
+        try {
+          initialMailboxPrefetchInspection =
+            await inspectHostedPreCheckpointSystemMailboxPrefetch(
+              initialMailboxImportResult.prefetch,
+            );
+        } catch (error) {
+          if (runtimeAbortController.signal.aborted) {
+            throw error;
+          }
+          // The initial mailbox owner already performed its one-shot refetch.
+          // A rejected stale prefetch cannot authorize priority ordering.
+        }
+      }
       const initialSignupWelcomePrecedesConversation =
         hostedMailboxImportHasForegroundConversationWork(initialMailboxImport)
         && initialMailboxPrefetchInspection?.containsSignupWelcomeActivation === true;
