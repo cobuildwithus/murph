@@ -1,5 +1,6 @@
 import {
   access,
+  chmod,
   copyFile,
   mkdir,
   readFile,
@@ -15,6 +16,7 @@ import {
   type AssistantSession,
   type AssistantTranscriptEntry,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -770,6 +772,166 @@ describe('assistant store persistence seams', () => {
         expect.objectContaining({ kind: 'indexes.quarantined' }),
       ]),
     )
+  })
+
+  it('preserves exact route winners after a non-corruption synchronization failure', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-route-write-failure-',
+    )
+    await ensureAssistantState(paths)
+    const selected = createSession({
+      alias: 'work',
+      conversationKey: 'telegram:user-1:thread-shared',
+      lastTurnAt: '2026-04-08T00:01:00.000Z',
+      sessionId: 'session-selected',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:05:00.000Z',
+    })
+    const timestampWinner = createSession({
+      alias: 'work',
+      conversationKey: 'telegram:user-1:thread-shared',
+      lastTurnAt: '2026-04-08T00:04:00.000Z',
+      sessionId: 'session-timestamp-winner',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:04:00.000Z',
+    })
+    await writeAssistantSession(paths, selected)
+    await writeAssistantSession(paths, timestampWinner)
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: { work: selected.sessionId },
+      conversationKeys: {
+        'telegram:user-1:thread-shared': selected.sessionId,
+      },
+      recentSessions: {
+        [selected.sessionId]: selected.updatedAt,
+        [timestampWinner.sessionId]: timestampWinner.updatedAt,
+      },
+    }), 'utf8')
+    await readAssistantSessionRouting(paths, {
+      alias: 'work',
+      conversationKeys: ['telegram:user-1:thread-shared'],
+    })
+
+    const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+    const database = openSqliteRuntimeDatabase(databasePath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    database.exec(`
+      CREATE TRIGGER reject_unrelated_route
+      BEFORE INSERT ON assistant_session_routes
+      WHEN NEW.session_id = 'session-unrelated'
+      BEGIN
+        SELECT RAISE(ABORT, 'injected non-corruption write failure');
+      END;
+    `)
+    database.close()
+
+    const unrelated = createSession({
+      alias: 'unrelated',
+      conversationKey: 'telegram:user-1:thread-unrelated',
+      sessionId: 'session-unrelated',
+      threadId: 'thread-unrelated',
+    })
+    await writeAssistantSession(paths, unrelated)
+    await expect(
+      synchronizeAssistantIndexes(paths, unrelated, null),
+    ).rejects.toThrow('injected non-corruption write failure')
+
+    await expect(access(databasePath)).resolves.toBeUndefined()
+    await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
+    const preserved = await readAssistantSessionRouting(paths, {
+      alias: 'work',
+      conversationKeys: ['telegram:user-1:thread-shared'],
+    })
+    expect(preserved.aliasSessionId).toBe(selected.sessionId)
+    expect(preserved.conversationKeySessionIds.get(
+      'telegram:user-1:thread-shared',
+    )).toBe(selected.sessionId)
+  })
+
+  it('propagates a transient open failure without quarantining or rebuilding', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-route-open-failure-',
+    )
+    await ensureAssistantState(paths)
+    const session = createSession({
+      alias: 'preserved',
+      conversationKey: 'telegram:user-1:thread-preserved',
+      sessionId: 'session-preserved',
+      threadId: 'thread-preserved',
+    })
+    await writeAssistantSession(paths, session)
+    await synchronizeAssistantIndexes(paths, session, null)
+
+    const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+    await chmod(databasePath, 0o000)
+    try {
+      await expect(readAssistantSessionRouting(paths, {
+        alias: 'preserved',
+        conversationKeys: [],
+      })).rejects.toMatchObject({
+        code: 'ERR_SQLITE_ERROR',
+        errcode: 14,
+      })
+    } finally {
+      await chmod(databasePath, 0o600)
+    }
+
+    await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
+    await expect(readAssistantSessionRouting(paths, {
+      alias: 'preserved',
+      conversationKeys: [],
+    })).resolves.toMatchObject({
+      aliasSessionId: session.sessionId,
+    })
+  })
+
+  it('quarantines and rebuilds unsupported or structurally invalid routing databases', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-route-unsupported-version-',
+    )
+    await ensureAssistantState(paths)
+    const session = createSession({
+      alias: 'version-repair',
+      sessionId: 'session-version-repair',
+    })
+    await writeAssistantSession(paths, session)
+    await synchronizeAssistantIndexes(paths, session, null)
+
+    const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+    const database = openSqliteRuntimeDatabase(databasePath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    database.exec('PRAGMA user_version = 2;')
+    database.close()
+
+    await expect(readAssistantSessionRouting(paths, {
+      alias: 'version-repair',
+      conversationKeys: [],
+    })).resolves.toMatchObject({
+      aliasSessionId: session.sessionId,
+    })
+
+    const structurallyInvalid = openSqliteRuntimeDatabase(databasePath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    structurallyInvalid.exec('DROP TABLE assistant_recent_sessions;')
+    structurallyInvalid.close()
+    await expect(readAssistantSessionRouting(paths, {
+      alias: 'version-repair',
+      conversationKeys: [],
+    })).resolves.toMatchObject({
+      aliasSessionId: session.sessionId,
+    })
+
+    const quarantines = await listAssistantQuarantineEntriesAtPaths(paths)
+    expect(quarantines.filter((entry) =>
+      entry.artifactKind === 'indexes' && entry.originalPath === databasePath,
+    )).toHaveLength(2)
   })
 
   it('rebuilds missing session indexes and prefers the newest duplicate conversation binding', async () => {

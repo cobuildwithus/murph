@@ -84,6 +84,13 @@ const ASSISTANT_SESSION_ROUTING_DATABASE_NAME = 'session-routing.sqlite'
 type AssistantSessionRoutingKind = 'alias' | 'conversation-key'
 type AssistantSessionRoutingDatabase = import('node:sqlite').DatabaseSync
 
+class AssistantSessionRoutingDatabaseValidationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'AssistantSessionRoutingDatabaseValidationError'
+  }
+}
+
 const assistantRecentSessionRowSchema = z
   .object({
     sessionId: assistantSessionIdSchema,
@@ -924,20 +931,18 @@ async function withAssistantSessionRoutingDatabase<T>(
   paths: AssistantStatePaths,
   operation: (database: AssistantSessionRoutingDatabase) => T,
 ): Promise<T> {
-  let database = await openOrRebuildAssistantSessionRoutingDatabase(paths)
+  const database = await openOrRebuildAssistantSessionRoutingDatabase(paths)
   try {
-    return operation(database)
-  } catch (error) {
+    const result = operation(database)
     database.close()
-    await quarantineAssistantSessionRoutingDatabase(paths, error)
-    database = await rebuildAssistantSessionRoutingDatabase(paths)
-    return operation(database)
-  } finally {
+    return result
+  } catch (error) {
     try {
       database.close()
     } catch {
-      // A failed operation may already have closed the original handle.
+      // Preserve the operation or close error without invoking recovery.
     }
+    throw error
   }
 }
 
@@ -958,6 +963,9 @@ async function openOrRebuildAssistantSessionRoutingDatabase(
   try {
     return openAssistantSessionRoutingDatabase(paths)
   } catch (error) {
+    if (!isAssistantSessionRoutingDatabaseCorruptionError(error)) {
+      throw error
+    }
     await quarantineAssistantSessionRoutingDatabase(paths, error)
     return await rebuildAssistantSessionRoutingDatabase(paths)
   }
@@ -992,14 +1000,92 @@ function openAssistantSessionRoutingDatabase(
       synchronous: 'FULL',
     },
   )
-  const version = readSqliteRuntimeUserVersion(database)
-  if (version === ASSISTANT_SESSION_ROUTING_DATABASE_VERSION) {
+  try {
+    const version = readSqliteRuntimeUserVersion(database)
+    if (version !== ASSISTANT_SESSION_ROUTING_DATABASE_VERSION) {
+      throw new AssistantSessionRoutingDatabaseValidationError(
+        `Unsupported assistant session routing database version: ${version}.`,
+      )
+    }
+    assertAssistantSessionRoutingDatabaseShape(database)
     return database
+  } catch (error) {
+    try {
+      database.close()
+    } catch {
+      // Preserve the validation or SQLite error for the recovery boundary.
+    }
+    throw error
   }
-  database.close()
-  throw new Error(
-    `Unsupported assistant session routing database version: ${version}.`,
+}
+
+function assertAssistantSessionRoutingDatabaseShape(
+  database: AssistantSessionRoutingDatabase,
+): void {
+  try {
+    database.prepare(`
+      SELECT kind, key_digest, session_id
+      FROM assistant_session_routes
+      LIMIT 0
+    `).all()
+    database.prepare(`
+      SELECT session_id, last_active_at_ms
+      FROM assistant_recent_sessions
+      LIMIT 0
+    `).all()
+  } catch (error) {
+    if (!isAssistantSessionRoutingDatabaseShapeError(error)) {
+      throw error
+    }
+    throw new AssistantSessionRoutingDatabaseValidationError(
+      'Assistant session routing database has an invalid schema.',
+      { cause: error },
+    )
+  }
+}
+
+function isAssistantSessionRoutingDatabaseShapeError(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const candidate = error as {
+    code?: unknown
+    errcode?: unknown
+    message?: unknown
+  }
+  return (
+    candidate.code === 'ERR_SQLITE_ERROR' &&
+    candidate.errcode === 1 &&
+    typeof candidate.message === 'string' &&
+    /^(?:no such (?:column|table)|table .* has no column named)/u.test(
+      candidate.message,
+    )
   )
+}
+
+function isAssistantSessionRoutingDatabaseCorruptionError(
+  error: unknown,
+): boolean {
+  if (error instanceof AssistantSessionRoutingDatabaseValidationError) {
+    return true
+  }
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const candidate = error as {
+    code?: unknown
+    errcode?: unknown
+  }
+  if (
+    candidate.code !== 'ERR_SQLITE_ERROR' ||
+    typeof candidate.errcode !== 'number'
+  ) {
+    return false
+  }
+  const primaryCode = candidate.errcode & 0xff
+  return primaryCode === 11 || primaryCode === 26
 }
 
 function initializeAssistantSessionRoutingDatabase(

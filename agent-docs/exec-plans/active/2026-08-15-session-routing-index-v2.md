@@ -117,6 +117,16 @@ Updated: 2026-08-15
   bundle smoke, and stale warm-runner replacement already implement the needed
   deployment floor. The correction changes the contract and focused proof but
   adds no production state, branch, dependency, or runtime mechanism.
+- ReviewGPT round 4 accepted one review-induced recovery finding: the generic
+  database wrapper quarantined and rebuilt the valid projection after any
+  operation or open error, so a transient failure could destroy its precise
+  route winner. Remove callback retry/recovery, propagate ordinary failures,
+  and quarantine only positively identified corrupt, structurally invalid, or
+  unsupported projections.
+- Round-5 retrospective: not required. The accepted correction deletes the
+  destructive retry branch and narrows one existing open boundary; it adds no
+  durable state or owner and stays within the completed single-projection
+  retrospective.
 
 ## Verification
 
@@ -155,3 +165,6 @@ Updated: 2026-08-15
 - Round-3 rollback correction verification: assistant persistence 26/26,
   focused Cloudflare rollout/runner tests 209/209, and assistant-engine,
   runtime-state, and Cloudflare typechecks all pass.
+- Round-4 recovery correction verification: assistant persistence 29/29,
+  runtime-state SQLite helpers 6/6, and assistant-engine and runtime-state
+  typechecks all pass.
