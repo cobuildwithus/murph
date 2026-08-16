@@ -4467,7 +4467,12 @@ export function createJunctionDeviceSyncProvider(
     }, input.authorizedLocalDay
       ? {
           completeSourceDay: {
-            connectionId: input.context.account.id,
+            // The replacement domain must survive hosted cold restores, so it
+            // keys on the stable Junction import identity rather than the
+            // machine-local account row that hydration re-mints.
+            connectionId: buildJunctionImportAccountId(
+              input.context.account.externalAccountId,
+            ),
             dayKey: input.authorizedLocalDay.dayKey,
             resources: [input.resource],
             revisionAt: input.context.now,
@@ -7234,8 +7239,12 @@ function filterJunctionTimeseriesRecordsToWindow(
 
     if (authorizedLocalDay) {
       if (!hasAbsoluteJunctionTimeseriesTimestamp(rawTimestamp, entry)) {
-        return /^\d{4}-\d{2}-\d{2}/u.exec(rawTimestamp)?.[0]
-          === authorizedLocalDay.dayKey;
+        const rawDayKey = /^\d{4}-\d{2}-\d{2}/u.exec(rawTimestamp)?.[0];
+        // Filter only rows that prove a different calendar day. A row whose
+        // timestamp yields no day stays in the collection so the importer's
+        // fail-closed owner rejects the lossy day instead of certifying a
+        // partial or empty replacement.
+        return rawDayKey === undefined || rawDayKey === authorizedLocalDay.dayKey;
       }
       const recordedMs = Date.parse(rawTimestamp);
       return !Number.isFinite(recordedMs)

@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { readFile, rm } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
@@ -8619,6 +8620,344 @@ test("Junction scheduled temporal history refetches after a new source and late 
   } finally {
     if (!fixtureClosed) {
       fixture.close();
+    }
+  }
+});
+
+function latestLiveRecords(
+  records: readonly Record<string, unknown>[],
+): Array<Record<string, unknown>> {
+  const revisionOf = (record: Record<string, unknown>): number =>
+    Number((record.lifecycle as { revision?: number } | undefined)?.revision ?? 1);
+  const latestById = new Map<string, Record<string, unknown>>();
+  for (const record of records) {
+    const id = String(record.id ?? "");
+    const existing = latestById.get(id);
+    if (!existing || revisionOf(record) > revisionOf(existing)) {
+      latestById.set(id, record);
+    }
+  }
+  return [...latestById.values()].filter((record) =>
+    (record.lifecycle as { state?: string } | undefined)?.state !== "deleted"
+  );
+}
+
+test("Junction ambiguous-timestamp rows fail a complete day closed through the real importer", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-ambiguous-rows");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-ambiguous-rows";
+  const now = new Date("2026-08-15T12:00:00.000Z");
+  let phase: "seed" | "lossy" | "lossy-only" = "seed";
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: [],
+    timeseriesResources: ["stress_level"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-ambiguous-rows",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { stress_level: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+        const validRows = [
+          { timestamp: "2026-08-12T07:00:00.000Z", value: 20 },
+          { timestamp: "2026-08-12T07:05:00.000Z", value: 30 },
+          { timestamp: "2026-08-12T19:00:00.000Z", value: 70 },
+          { timestamp: "2026-08-12T19:05:00.000Z", value: 80 },
+        ];
+        const rows = phase === "seed"
+          ? validRows
+          : phase === "lossy"
+            ? [...validRows, { timestamp: "not-a-timestamp", value: 50 }]
+            : [{ timestamp: "not-a-timestamp", value: 50 }];
+        return createJsonResponse({
+          groups: {
+            garmin: [{ data: rows, source: { provider: "garmin", type: "watch" } }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction ambiguous-row request: ${url.pathname}`);
+    },
+  });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: canonicalImporter,
+    providers: [provider],
+  });
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+    });
+    const enqueueDay = (dedupeKey: string) => fixture.store.enqueueJob({
+      accountId: account.id,
+      availableAt: now.toISOString(),
+      dedupeKey,
+      kind: "resource",
+      payload: {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-08-13T00:00:00.000Z",
+        windowStart: "2026-08-12T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const liveFacets = async () => latestLiveRecords(
+      await (await import("@murphai/core")).readJsonlRecords({
+        vaultRoot,
+        relativePath: "ledger/events/2026/2026-08.jsonl",
+      }),
+    ).filter((record) =>
+      record.kind === "observation"
+      && typeof record.metric === "string"
+      && record.metric.startsWith("stress-")
+      && record.metric !== "stress-level"
+    );
+
+    const seedJob = enqueueDay("junction-temporal-authority:v1:ambiguous-seed");
+    assert.equal(
+      (await fixture.service.runWorkerOnce(account.id))?.id,
+      seedJob.id,
+    );
+    assert.equal((await liveFacets()).length, 3);
+    const ledgerBefore = await readFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"),
+      "utf8",
+    );
+
+    // Valid rows plus one unparseable timestamp: the filter keeps the
+    // ambiguous row, the importer fails closed, nothing is written.
+    phase = "lossy";
+    const lossyJob = enqueueDay("junction-temporal-authority:v1:ambiguous-lossy");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, lossyJob.id);
+    assert.equal(fixture.store.getJobById(lossyJob.id)?.status, "queued");
+    assert.equal(
+      fixture.store.getJobById(lossyJob.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    );
+    assert.equal(
+      await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+      ledgerBefore,
+    );
+    assert.equal((await liveFacets()).length, 3);
+
+    // The malformed row alone must not become an authoritative empty.
+    phase = "lossy-only";
+    fixture.store.completeJob(lossyJob.id, now.toISOString());
+    const lossyOnlyJob = enqueueDay("junction-temporal-authority:v1:ambiguous-only");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, lossyOnlyJob.id);
+    assert.equal(
+      fixture.store.getJobById(lossyOnlyJob.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    );
+    assert.equal(
+      await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+      ledgerBefore,
+    );
+    assert.equal((await liveFacets()).length, 3);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Junction temporal replacement identity survives a hosted cold restore", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-stable-identity");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-stable-identity";
+  const now = new Date("2026-08-15T12:00:00.000Z");
+  let phase: "populated" | "empty" | "corrected" = "populated";
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const buildProvider = () => createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: [],
+    timeseriesResources: ["stress_level"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-stable-identity",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { stress_level: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+        if (phase === "empty") {
+          return createJsonResponse({ groups: {} });
+        }
+        const values = phase === "populated" ? [20, 30, 70, 80] : [25, 35, 60, 90];
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [
+                { timestamp: "2026-08-12T07:00:00.000Z", value: values[0] },
+                { timestamp: "2026-08-12T07:05:00.000Z", value: values[1] },
+                { timestamp: "2026-08-12T19:00:00.000Z", value: values[2] },
+                { timestamp: "2026-08-12T19:05:00.000Z", value: values[3] },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction stable-identity request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: canonicalImporter,
+    providers: [buildProvider()],
+  });
+  const upsertAccount = (fixture: ReturnType<typeof openFixture>) =>
+    fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+    });
+  const enqueueDay = (
+    fixture: ReturnType<typeof openFixture>,
+    accountId: string,
+    dedupeKey: string,
+  ) => fixture.store.enqueueJob({
+    accountId,
+    availableAt: now.toISOString(),
+    dedupeKey,
+    kind: "resource",
+    payload: {
+      resource: "stress_level",
+      resourceCategory: "timeseries",
+      temporalAuthorityTimeZone: "UTC",
+      windowEnd: "2026-08-13T00:00:00.000Z",
+      windowStart: "2026-08-12T00:00:00.000Z",
+    },
+    priority: 45,
+    provider: "junction",
+  });
+  const readFacets = async () => latestLiveRecords(
+    await (await import("@murphai/core")).readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/events/2026/2026-08.jsonl",
+    }),
+  ).filter((record) =>
+    record.kind === "observation"
+    && typeof record.metric === "string"
+    && record.metric.startsWith("stress-")
+    && record.metric !== "stress-level"
+  );
+
+  const first = openFixture();
+  let firstClosed = false;
+  try {
+    const accountA = upsertAccount(first);
+    enqueueDay(first, accountA.id, "junction-temporal-authority:v1:restore-populated");
+    assert.equal((await first.service.runWorkerOnce(accountA.id))?.kind, "resource");
+    const seededFacets = await readFacets();
+    assert.equal(seededFacets.length, 3);
+    const seededResourceIds = new Set(
+      seededFacets.map((record) =>
+        (record.externalRef as { resourceId?: string } | undefined)?.resourceId
+      ),
+    );
+    assert.equal(seededResourceIds.size, 1);
+    first.close();
+    firstClosed = true;
+
+    // Only the machine-local device-sync store is lost; the vault persists.
+    await rm(databasePath, { force: true });
+    const restored = openFixture();
+    try {
+      const accountB = upsertAccount(restored);
+      assert.notEqual(accountB.id, accountA.id);
+
+      // The re-minted local row must not fork the replacement domain: an
+      // authoritative empty retracts the facets imported under row A.
+      phase = "empty";
+      enqueueDay(restored, accountB.id, "junction-temporal-authority:v1:restore-empty");
+      assert.equal((await restored.service.runWorkerOnce(accountB.id))?.kind, "resource");
+      assert.equal((await readFacets()).length, 0);
+
+      phase = "corrected";
+      enqueueDay(restored, accountB.id, "junction-temporal-authority:v1:restore-corrected");
+      assert.equal((await restored.service.runWorkerOnce(accountB.id))?.kind, "resource");
+      const correctedFacets = await readFacets();
+      assert.equal(correctedFacets.length, 3);
+      const correctedResourceIds = new Set(
+        correctedFacets.map((record) =>
+          (record.externalRef as { resourceId?: string } | undefined)?.resourceId
+        ),
+      );
+      assert.deepEqual(correctedResourceIds, seededResourceIds);
+
+      // A byte-identical replay of the corrected day is a no-op.
+      const ledgerBefore = await readFile(
+        path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"),
+        "utf8",
+      );
+      enqueueDay(restored, accountB.id, "junction-temporal-authority:v1:restore-replay");
+      assert.equal((await restored.service.runWorkerOnce(accountB.id))?.kind, "resource");
+      assert.equal(
+        await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+        ledgerBefore,
+      );
+    } finally {
+      restored.close();
+    }
+  } finally {
+    if (!firstClosed) {
+      first.close();
     }
   }
 });

@@ -229,7 +229,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    date-only rows prove raw-day membership and stay ordinary daily inputs with
    zero temporal coverage, omitted seconds resolve as zero, and a supplied
    clock that cannot resolve in the retained authority timezone fails the
-   import retryably instead of fabricating an instant. Complete-source-day
+   import retryably instead of fabricating an instant. The temporal replacement
+   domain keys on the stable Junction import identity derived from the external
+   account, never the machine-local account row, so hosted cold restores retract
+   and replace the same facets they seeded. Under complete-day authority the
+   provider filter excludes only rows that prove a different calendar day;
+   a row whose timestamp yields no day stays in the collection so the importer
+   fails the day closed instead of certifying a laundered partial or empty
+   replacement. Complete-source-day
    imports never reach the generic provider-snapshot evidence fallback: they
    persist only adapter-produced compact evidence, so a day with zero temporal
    samples carries the authoritative set with zero evidence parts and retains

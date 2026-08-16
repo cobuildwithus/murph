@@ -9541,7 +9541,7 @@ test("Junction one-day reconcile still imports the newest lag-complete temporal 
   assert.deepEqual(
     (authority[0] as { completeSourceDay?: unknown })?.completeSourceDay,
     {
-      connectionId: "acct-junction-1",
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
       dayKey: "2026-04-01",
       resources: ["blood_oxygen"],
       revisionAt: "2026-04-03T00:00:00.000Z",
@@ -9674,7 +9674,7 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
   assert.deepEqual(
     (imports.at(-1)?.options as { completeSourceDay?: unknown })?.completeSourceDay,
     {
-      connectionId: "acct-junction-1",
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
       dayKey: "2026-04-03",
       resources: ["blood_oxygen"],
       revisionAt: "2026-04-06T00:00:00.000Z",
@@ -9735,7 +9735,7 @@ test("Junction reconcile preserves healthy temporal work and the older backlog w
   assert.deepEqual(
     (importedAuthority[0] as { completeSourceDay?: unknown })?.completeSourceDay,
     {
-      connectionId: "acct-junction-1",
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
       dayKey: "2026-04-04",
       resources: ["stress_level"],
       revisionAt: "2026-04-06T00:00:00.000Z",
@@ -10129,7 +10129,7 @@ test("Junction closed daily timeseries imports carry the exclusive temporal sour
   assert.deepEqual(
     (importOptions[dailySnapshotIndex] as { completeSourceDay?: unknown })?.completeSourceDay,
     {
-      connectionId: "acct-junction-1",
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
       dayKey: "2026-04-22",
       resources: ["stress_level"],
       revisionAt: "2026-04-24T12:00:00.000Z",
@@ -10289,7 +10289,7 @@ test("Junction successful-empty temporal days still carry authoritative replacem
   assert.deepEqual(
     (authoritativeImport?.options as { completeSourceDay?: unknown })?.completeSourceDay,
     {
-      connectionId: "acct-junction-1",
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
       dayKey: "2026-04-22",
       resources: ["stress_level"],
       revisionAt: "2026-04-24T12:00:00.000Z",
@@ -10489,7 +10489,7 @@ test("Junction temporal authority waits for a closed vault-local day plus the sa
   assert.deepEqual(
     (target?.options as { completeSourceDay?: unknown })?.completeSourceDay,
     {
-      connectionId: "acct-junction-1",
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
       dayKey: "2026-04-22",
       resources: ["stress_level"],
       revisionAt: "2026-04-25T06:00:00.000Z",
