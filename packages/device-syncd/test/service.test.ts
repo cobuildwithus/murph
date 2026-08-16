@@ -8782,6 +8782,12 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
       { timestamp: "2026-08-12T07:00:00+24:00", value: 50 },
       { timestamp: "2026-02-29 07:00", value: 50 },
       { timestamp: "2026-02-30", value: 50 },
+      // Cross-day absolute raws explicitly marked floating are contradictory
+      // input the importer must see, not adjacent-day overlap the provider
+      // filter may discard: one dated on the previous day, and one dated on
+      // the authorized day whose instant maps outside it.
+      { timestamp: "2026-08-11T23:30:00Z", timestampSemantics: "floating", value: 50 },
+      { timestamp: "2026-08-12T23:30:00-05:00", timestampSemantics: "floating", value: 50 },
     ];
     for (const [index, invalidRow] of invalidRows.entries()) {
       activeRows = [
@@ -8819,6 +8825,27 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
     );
     assert.equal((await liveFacets()).length, 3);
     fixture.store.completeJob(lossyOnlyJob.id, now.toISOString());
+
+    // A cross-day absolute raw explicitly marked floating, alone, must stay
+    // retryable instead of being filtered out and minting an authoritative
+    // empty that retracts the live facets.
+    activeRows = [
+      { timestamp: "2026-08-11T23:30:00Z", timestampSemantics: "floating", value: 50 },
+    ];
+    const contradictoryOnlyJob = enqueueDay(
+      "junction-temporal-authority:v1:ambiguous-contradictory-only",
+    );
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, contradictoryOnlyJob.id);
+    assert.equal(
+      fixture.store.getJobById(contradictoryOnlyJob.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    );
+    assert.equal(
+      await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+      ledgerBefore,
+    );
+    assert.equal((await liveFacets()).length, 3);
+    fixture.store.completeJob(contradictoryOnlyJob.id, now.toISOString());
 
     // A valid exact date-only day succeeds with zero temporal samples, and
     // its empty facet set legitimately retracts the stale facets.

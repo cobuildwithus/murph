@@ -10252,6 +10252,70 @@ test("Junction temporal authority fetches reject structurally incomplete respons
   }
 });
 
+test("Junction authorized-day filtering retains contradictory absolute-marked-floating rows for the importer", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [
+              // Semantically agreed adjacent-day overlap is still excluded.
+              { timestamp: "2026-04-21T23:30:00.000Z", value: 10 },
+              { timestamp: "2026-04-22T07:00:00.000Z", value: 40 },
+              // Parser-valid absolute raws explicitly marked floating are
+              // contradictory input the importer must see, never adjacent-day
+              // overlap the filter may discard: one dated on the previous
+              // day, one dated on the authorized day with an instant that
+              // maps outside it.
+              { timestamp: "2026-04-21T23:45:00Z", timestampSemantics: "floating", value: 50 },
+              { timestamp: "2026-04-22T23:30:00-05:00", timestampSemantics: "floating", value: 60 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-24T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      resource: "stress_level",
+      resourceCategory: "timeseries",
+      temporalAuthorityDayKey: "2026-04-22",
+      temporalAuthorityTimeZone: "UTC",
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const rows = (importedSnapshots[0] as {
+    timeseries?: { stress_level?: Array<{ timestamp?: string }> };
+  }).timeseries?.stress_level ?? [];
+  assert.deepEqual(
+    rows.map((row) => row.timestamp),
+    [
+      "2026-04-22T07:00:00.000Z",
+      "2026-04-21T23:45:00Z",
+      "2026-04-22T23:30:00-05:00",
+    ],
+  );
+});
+
 test("Junction successful-empty temporal days still carry authoritative replacement proof", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));

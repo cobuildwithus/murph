@@ -7240,11 +7240,20 @@ function filterJunctionTimeseriesRecordsToWindow(
 
     if (authorizedLocalDay) {
       // Drop only rows the strict complete-day parse proves belong to a
-      // different valid calendar day. Anything that parse rejects stays in
-      // the collection so the importer's fail-closed owner rejects the lossy
-      // day instead of certifying a partial or empty replacement.
+      // different valid calendar day, and only when the raw shape and the
+      // record's declared semantics agree on absoluteness. Anything the
+      // parse rejects — and any raw-versus-semantics disagreement, which the
+      // importer must see to fail the day closed — stays in the collection
+      // so a contradictory row can never be laundered into a partial or
+      // empty replacement by being discarded as adjacent-day overlap.
       const parsed = parseJunctionCompleteDayTimestamp(rawTimestamp);
       if (!parsed) {
+        return true;
+      }
+      if (
+        (parsed.kind === "absolute")
+        !== hasAbsoluteJunctionTimeseriesTimestamp(rawTimestamp, entry)
+      ) {
         return true;
       }
       if (parsed.kind === "absolute") {

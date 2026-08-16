@@ -245,9 +245,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    account, never the machine-local account row, so hosted cold restores retract
    and replace the same facets they seeded. Under complete-day authority the
    provider filter reuses that same strict parse and excludes only rows it
-   proves belong to a different valid calendar day; a row the parse rejects
-   stays in the collection so the importer fails the day closed instead of
-   certifying a laundered partial or empty replacement. Complete-source-day
+   proves belong to a different valid calendar day, and only when the raw
+   shape and the record's declared timestamp semantics agree on absoluteness;
+   a row the parse rejects — or whose declared semantics contradict its raw
+   shape — stays in the collection so the importer fails the day closed
+   instead of certifying a laundered partial or empty replacement. Complete-source-day
    imports never reach the generic provider-snapshot evidence fallback: they
    persist only adapter-produced compact evidence, so a day with zero temporal
    samples carries the authoritative set with zero evidence parts and retains
