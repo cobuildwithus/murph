@@ -101,10 +101,11 @@ Updated: 2026-08-15
 - Upgrade the repository-backed ReviewGPT runner from 0.5.127 to the registry's
   current 0.5.132 release and update its release-contract assertions.
 - Pin `minimum_marked_response_ms=300000` in Murph's repository config after
-  optional local preferences. Reject the package CLI's kebab-case and camelCase
-  threshold options, including separate and equals forms, before package
-  launch. ReviewGPT 0.5.131 intentionally made the value configurable for
-  direct callers, but Murph's completion gate must not inherit any override.
+  optional local preferences. Reject later `--config` arguments and the package
+  CLI's kebab-case and camelCase threshold options, including separate and
+  equals forms, before package launch. ReviewGPT intentionally keeps the value
+  configurable for direct callers, but Murph's completion gate must not inherit
+  any override.
 - Follow the registry to ReviewGPT 0.5.132 when it appears during the gate.
   That release fixes Deep Research conversation identity and timestamped
   submitted-attachment matching; retain Murph's wrapper-owned trust floor.
@@ -123,10 +124,12 @@ Updated: 2026-08-15
 - `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/release-script-coverage-audit.test.ts`
   passed after the trust-floor remediation and again on ReviewGPT 0.5.132: 46
   tests, 1 skipped. The real installed package dry-run starts with ambient and
-  local-config values of `1` and resolves `300000`; all four CLI override forms
-  fail before the package child launches. The in-memory installed-driver
-  harness uses the same repository-owned value, while the existing boundary
-  cases prove `299999` is rejected and `300000` is admitted.
+  local-config values of `1` and resolves `300000`; a direct-package control
+  proves that a later weak config still resolves `1`, while both `--config`
+  forms and all four direct threshold forms fail before the repository wrapper
+  launches the package. The in-memory installed-driver harness uses the same
+  repository-owned value, while the existing boundary cases prove `299999` is
+  rejected and `300000` is admitted.
 - An isolated pinned Codex 0.147.0 config parse accepted
   `features.multi_agent_v2.hide_spawn_agent_metadata = true`, but the final
   executable-path review proved that this setting controls presentation rather
@@ -160,3 +163,9 @@ Updated: 2026-08-15
   hidden-Codex routing claim and the package-precedence/phase-parser bypass.
   The former is resolved by deleting the full runtime/engine delta; the latter
   is resolved at the existing repository config and wrapper boundaries above.
+- The exact long-running round-4 correction review found that a later scalar
+  `--config` still replaced the canonical config after the wrapper's policy
+  check. The wrapper now rejects both config forms in the same pre-launch
+  policy function, and real-package plus no-child-launch tests cover the direct
+  caller and repository-gate sides of that boundary. A fresh exact-head final
+  pass remains pending; no Eragon lane was used.

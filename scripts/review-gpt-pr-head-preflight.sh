@@ -113,16 +113,18 @@ review_gpt_option_requires_value() {
   return 1
 }
 
-review_gpt_reject_minimum_marked_response_override() {
+review_gpt_reject_repository_policy_overrides() {
   local argument
 
   for argument in "$@"; do
     case "$argument" in
-      --minimum-marked-response-time \
+      --config \
+        | --config=* \
+        | --minimum-marked-response-time \
         | --minimum-marked-response-time=* \
         | --minimumMarkedResponseTime \
         | --minimumMarkedResponseTime=*)
-        echo "Error: Murph's repository ReviewGPT trust floor cannot be overridden on the command line." >&2
+        echo "Error: Murph's repository ReviewGPT policy cannot be overridden on the command line." >&2
         return 64
         ;;
     esac
@@ -294,7 +296,7 @@ review_gpt_run() {
   local explicit_phase="${REVIEW_GPT_REVIEW_PHASE:-}"
   local pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
 
-  review_gpt_reject_minimum_marked_response_override "$@" || return
+  review_gpt_reject_repository_policy_overrides "$@" || return
   detected_phase="$(review_gpt_detect_pr_phase "$@")"
   if [[ -n "$detected_phase" ]]; then
     if [[ -n "$explicit_phase" && "$explicit_phase" != "$detected_phase" ]]; then

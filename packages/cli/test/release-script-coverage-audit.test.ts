@@ -1091,7 +1091,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptConfig).toContain('minimum_marked_response_ms=300000')
     expect(reviewGptPrHeadPreflight).toContain(
-      'review_gpt_reject_minimum_marked_response_override "$@"',
+      'review_gpt_reject_repository_policy_overrides "$@"',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
@@ -2057,6 +2057,22 @@ describe('monorepo release flow coverage audit', () => {
         'Minimum marked response time: 300000ms',
       )
 
+      const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
+      writeHarnessFile(
+        harnessRoot,
+        'weak-review-gpt.sh',
+        [
+          `source ${JSON.stringify(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))}`,
+          'minimum_marked_response_ms=1',
+          '',
+        ].join('\n'),
+      )
+      const directOverrideResult = runDry(['--config', weakConfigPath])
+      expect(directOverrideResult.status, directOverrideResult.stderr).toBe(0)
+      expect(directOverrideResult.stdout).toContain(
+        'Minimum marked response time: 1ms',
+      )
+
       const perRunResult = runDry(['--wait-timeout', '42m', '--idle-draft-timeout', '2s'])
       expect(perRunResult.status, perRunResult.stderr).toBe(0)
       expect(perRunResult.stdout).toContain(
@@ -2544,13 +2560,19 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     )
   })
 
-  it('rejects package ReviewGPT marked-response threshold overrides at the repository boundary', () => {
+  it('rejects package ReviewGPT policy overrides at the repository boundary', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'review-gpt-floor-'))
     const binRoot = path.join(harnessRoot, 'bin')
     const fakePnpmPath = path.join(binRoot, 'pnpm')
     const packageInvokedMarker = path.join(harnessRoot, 'package-invoked')
+    const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
     try {
       mkdirSync(binRoot, { recursive: true })
+      writeHarnessFile(
+        harnessRoot,
+        'weak-review-gpt.sh',
+        'minimum_marked_response_ms=1\n',
+      )
       writeFileSync(
         fakePnpmPath,
         '#!/usr/bin/env bash\n: > "$PACKAGE_INVOKED_MARKER"\n',
@@ -2561,6 +2583,8 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
         ['--minimum-marked-response-time=1s'],
         ['--minimumMarkedResponseTime', '1s'],
         ['--minimumMarkedResponseTime=1s'],
+        ['--config', weakConfigPath],
+        [`--config=${weakConfigPath}`],
       ]) {
         rmSync(packageInvokedMarker, { force: true })
         const result = spawnSync(
@@ -2586,7 +2610,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
         )
         expect(result.status).not.toBe(0)
         expect(result.stderr).toContain(
-          "Murph's repository ReviewGPT trust floor cannot be overridden",
+          "Murph's repository ReviewGPT policy cannot be overridden",
         )
         expect(existsSync(packageInvokedMarker)).toBe(false)
       }
