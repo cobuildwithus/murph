@@ -10,6 +10,7 @@ import {
 } from "@murphai/contracts";
 import { initializeVault } from "@murphai/core";
 import { createImporters, prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import { buildJunctionDailyTimeseriesAggregateResourceId } from "@murphai/importers/device-providers/junction";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -650,6 +651,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
     code: "abc",
   });
   assert.equal(connected.account.externalAccountId, "demo-abc");
+  assert.equal(store.summarize().oauthStates, 0);
   assert.equal(service.listAccounts().length, 1);
 
   await service.runWorkerOnce();
@@ -1155,9 +1157,9 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
       if (url.pathname === "/v2/user/providers/junction-user-reconnect") {
         return createJsonResponse({
           providers: [{
-            id: "provider-omron-reconnect",
-            slug: "omron",
-            name: "Omron",
+            id: "provider-apple-health-reconnect",
+            slug: "apple_health",
+            name: "Apple Health",
             status: "connected",
             resource_availability: { blood_pressure: true },
           }],
@@ -1169,7 +1171,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
       ) {
         return createJsonResponse({
           groups: {
-            omron: [{
+            apple_health: [{
               data: [{
                 id: "bp-before-reconnect",
                 timestamp: "2026-05-12T08:30:00.000Z",
@@ -1258,8 +1260,8 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     });
     const source = store.upsertConnectionSource({
       connectionId: account.id,
-      sourceInstanceKey: "omron",
-      sourceProviderSlug: "omron",
+      sourceInstanceKey: "legacy-apple-health-source",
+      sourceProviderSlug: "apple_health",
       status: "connected",
       resourceAvailabilitySummary: { blood_pressure: true },
       firstSeenAt: "2026-05-12T00:00:00.000Z",
@@ -1276,7 +1278,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
         resource: "blood_pressure",
         resourceCategory: "timeseries",
         sourceLifecycleEpoch: source.lifecycleEpoch,
-        sourceProviderSlug: "omron",
+        sourceProviderSlug: "apple_health",
         windowStart: "2026-05-12T00:00:00.000Z",
         windowEnd: "2026-05-14T00:00:00.000Z",
       },
@@ -1293,7 +1295,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     const reconnect = await service.startConnection({
       ownerId: "<REDACTED_OWNER_ID>",
       provider: "junction",
-      sourceProviderSlug: "omron",
+      sourceProviderSlug: "apple_health_kit",
     });
     const revisionAfterReconnectStart =
       store.getAccountById(account.id)?.localConnectionRevision;
@@ -1325,7 +1327,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     const reconnectedAccount = store.getAccountById(account.id);
     assert.ok(reconnectedAccount);
     const reconnectedSource = reconnectedAccount.sources?.find(
-      (candidate) => candidate.sourceProviderSlug === "omron",
+      (candidate) => candidate.sourceProviderSlug === "apple_health",
     );
     assert.equal(reconnectedSource?.lifecycleEpoch, source.lifecycleEpoch + 1);
     const replacementSchedule = executionProvider.jobExecutor?.createScheduledJobs?.(
@@ -1335,13 +1337,13 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     assert.ok(replacementSchedule?.jobs.some((job) =>
       job.kind === "resource"
       && job.payload?.resource === "blood_pressure"
-      && job.payload.sourceProviderSlug === "omron"
+      && job.payload.sourceProviderSlug === "apple_health_kit"
       && job.payload.sourceLifecycleEpoch === reconnectedSource?.lifecycleEpoch
     ));
 
     const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata: reconnectedAccount.metadata,
-      providerSlug: "omron",
+      providerSlug: "apple_health",
       resource: "blood_pressure",
       version: 1,
     });
@@ -1354,7 +1356,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     const ordinaryReconnect = await service.startConnection({
       ownerId: "<REDACTED_OWNER_ID>",
       provider: "junction",
-      sourceProviderSlug: "omron",
+      sourceProviderSlug: "apple_health_kit",
     });
     vi.setSystemTime(new Date("2026-09-01T10:04:00.000Z"));
     await service.handleConnectionCallback({
@@ -1367,7 +1369,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     });
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       store.getAccountById(account.id)?.metadata ?? {},
-      "omron",
+      "apple_health",
       "blood_pressure",
       1,
     ), true);
@@ -3023,8 +3025,10 @@ test("hosted listed-only projection cannot publish connected before explicit rec
   const importedSnapshots: unknown[] = [];
   let hostedSources: ProviderJobConnectionSource[] = [{
     displayName: "Omron",
+    lastDataAt: null,
     lastErrorCode: null,
     lastErrorMessage: null,
+    lastSeenAt: now.toISOString(),
     resourceAvailabilitySummary: { blood_pressure: true },
     sourceInstanceKey: "omron",
     sourceProviderSlug: "omron",
@@ -3148,8 +3152,10 @@ test("hosted listed-only projection cannot publish connected before explicit rec
       assert.ok(source);
       hostedSources = [{
         displayName: source.displayName,
+        lastDataAt: source.lastDataAt,
         lastErrorCode: source.lastErrorCode,
         lastErrorMessage: source.lastErrorMessage,
+        lastSeenAt: source.lastSeenAt,
         resourceAvailabilitySummary: source.resourceAvailabilitySummary,
         sourceInstanceKey: source.sourceInstanceKey,
         sourceProviderSlug: source.sourceProviderSlug,
@@ -3213,7 +3219,13 @@ test("device sync service reports canonical counts separately from durable deliv
       async importDeviceProviderSnapshot() {
         importAttempt += 1;
         return importAttempt === 1
-          ? { events: [{ kind: "activity" }, { kind: "sleep" }] }
+          ? {
+              events: [
+                { dayKey: "2026-04-02", kind: "activity" },
+                { dayKey: "2026-04-03", kind: "sleep" },
+              ],
+              affectedEventDayKeys: ["2026-04-01", "2026-04-03"],
+            }
           : { applied: false, events: [] };
       },
     },
@@ -3239,11 +3251,13 @@ test("device sync service reports canonical counts separately from durable deliv
     assert.deepEqual(importReceipts, [
       {
         canonicalEventCount: 2,
+        canonicalEventDayKeys: ["2026-04-01", "2026-04-02", "2026-04-03"],
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },
       {
         canonicalEventCount: 0,
+        canonicalEventDayKeys: [],
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },
@@ -4453,6 +4467,413 @@ test("device sync service retains one accepted companion RMSSD job until canonic
     assert.equal(store.getJobById(job.id)?.status, "succeeded");
     assert.equal(readJobsForAccountForTesting(store, account.id).length, 1);
     assert.equal(importAttempts, 3);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service retains one accepted sparse calendar job until canonical import succeeds", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-retained-import");
+  let now = new Date("2026-07-10T13:46:00.000Z");
+  let importAttempts = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot({ snapshot }) {
+        importAttempts += 1;
+        if (importAttempts < 3) {
+          throw new Error("Synthetic canonical calendar import failure.");
+        }
+        const sourceInstanceId = (snapshot as {
+          strictSparseCalendarRepair?: { sourceInstanceId?: string };
+        }).strictSparseCalendarRepair?.sourceInstanceId;
+        return {
+          events: [{
+            externalRef: {
+              resourceId: buildJunctionDailyTimeseriesAggregateResourceId({
+                dayKey: "2026-07-08",
+                resource: "water",
+                sourceInstanceId,
+                sourceProviderSlug: "garmin",
+                sourceType: "watch",
+              }),
+            },
+            kind: "observation",
+          }],
+        };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: [],
+        timeseriesResources: ["water"],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+          if (url.includes("/v2/user/providers/")) {
+            return createJsonResponse({
+              providers: [{
+                id: "provider-garmin-1",
+                name: "Garmin",
+                resource_availability: { water: true },
+                slug: "garmin",
+                status: "connected",
+              }],
+            });
+          }
+          if (url.includes("/v2/timeseries/") && url.includes("/water/grouped")) {
+            return createJsonResponse({ groups: {} });
+          }
+          throw new Error(`Unexpected Junction calendar request: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-calendar-retained-import",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-07-08",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        windowEnd: "2026-07-09T00:00:00.000Z",
+        windowStart: "2026-07-08T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      dedupeKey: "calendar-retained-import",
+      maxAttempts: 1,
+    });
+
+    for (let expectedAttempts = 1; expectedAttempts <= 2; expectedAttempts += 1) {
+      await service.runWorkerOnce();
+      const retained = store.getJobById(job.id);
+      assert.equal(retained?.status, "queued");
+      assert.equal(retained?.attempts, expectedAttempts);
+      assert.ok(retained?.availableAt);
+      assert.ok(Date.parse(retained.availableAt) > now.getTime());
+      assert.equal(readJobsForAccountForTesting(store, account.id).length, 1);
+      now = new Date(retained.availableAt);
+    }
+
+    await service.runWorkerOnce();
+
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+    assert.equal(readJobsForAccountForTesting(store, account.id).length, 1);
+    assert.equal(importAttempts, 3);
+
+    const invalidJob = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-07-08",
+        resource: "water",
+        resourceCategory: "timeseries",
+        windowEnd: "2026-07-09T00:00:00.000Z",
+        windowStart: "2026-07-08T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      dedupeKey: "calendar-invalid-terminal",
+      maxAttempts: 1,
+    });
+    await service.runWorkerOnce();
+    assert.equal(store.getJobById(invalidJob.id)?.status, "dead");
+    assert.equal(
+      store.getJobById(invalidJob.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_JOB_INVALID",
+    );
+  } finally {
+    close();
+  }
+});
+
+test("device sync service retries structurally incomplete calendar rows before a partial import", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-strict-completeness");
+  let now = new Date("2026-07-10T13:46:00.000Z");
+  let providerRowsComplete = false;
+  let canonicalImportCalls = 0;
+  const importedDailyValues: unknown[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        canonicalImportCalls += 1;
+        const prepared = await prepareDeviceProviderSnapshotImport(input);
+        const daily = prepared.events?.find((event) =>
+          event.fields && "metric" in event.fields && event.fields.metric === "water"
+        );
+        importedDailyValues.push(
+          daily?.fields && "value" in daily.fields ? daily.fields.value : undefined,
+        );
+        return { events: prepared.events ?? [] };
+      },
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["water"],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+      fetchImpl: async (input) => {
+        const url = readUrl(input);
+        if (url.includes("/v2/user/providers/")) {
+          return createJsonResponse({
+            providers: [{
+              id: "provider-garmin-1",
+              name: "Garmin",
+              resource_availability: { water: true },
+              slug: "garmin",
+              status: "connected",
+            }],
+          });
+        }
+        if (url.includes("/v2/timeseries/") && url.includes("/water/grouped")) {
+          const completeRow = {
+            calendarDate: "2026-07-08",
+            end: "2026-07-08T09:01:00.000Z",
+            id: "water-calendar-second",
+            start: "2026-07-08T09:00:00.000Z",
+            value: 125,
+          };
+          return createJsonResponse({
+            groups: {
+              garmin: [{
+                data: [{
+                  calendarDate: "2026-07-08",
+                  end: "2026-07-08T08:01:00.000Z",
+                  id: "water-calendar-first",
+                  start: "2026-07-08T08:00:00.000Z",
+                  value: 250,
+                }, providerRowsComplete ? completeRow : null],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          });
+        }
+        throw new Error(`Unexpected Junction calendar request: ${url}`);
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-calendar-strict-completeness",
+      displayName: "Junction",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-07-08",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+      },
+      availableAt: now.toISOString(),
+      maxAttempts: 1,
+    });
+
+    await service.runWorkerOnce();
+    const retained = store.getJobById(job.id);
+    assert.equal(retained?.status, "queued");
+    assert.equal(retained?.lastErrorCode, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+    assert.equal(canonicalImportCalls, 0);
+
+    providerRowsComplete = true;
+    now = new Date(retained!.availableAt);
+    await service.runWorkerOnce();
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+    assert.equal(canonicalImportCalls, 1);
+    assert.deepEqual(importedDailyValues, [375]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service keeps calendar work dormant without account authority", async () => {
+  for (const accountState of [
+    { status: "active", setupPhase: "pending_link" },
+    { status: "disconnected", setupPhase: null },
+    { status: "reauthorization_required", setupPhase: null },
+  ] as const) {
+    const vaultRoot = await makeTempDirectory(`murph-device-syncd-calendar-dormant-${accountState.status}`);
+    const providerRequests = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`Unexpected request while authority is unavailable: ${readUrl(input)}`);
+    });
+    const { service, store, close } = createServiceFixture({
+      secret: "secret-for-tests",
+      config: {
+        vaultRoot,
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      },
+      providers: [createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: [],
+        timeseriesResources: ["water"],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: providerRequests,
+      })],
+    });
+    try {
+      const account = store.upsertAccount({
+        provider: "junction",
+        externalAccountId: `junction-calendar-dormant-${accountState.status}`,
+        displayName: "Junction",
+        status: accountState.status,
+        setupPhase: accountState.setupPhase,
+        scopes: [],
+        credential: { kind: "provider_config", providerConfigKey: "junction" },
+        connectedAt: "2026-07-10T13:00:00.000Z",
+      });
+      const job = store.enqueueJob({
+        accountId: account.id,
+        provider: "junction",
+        kind: "resource",
+        payload: {
+          calendarRefreshDay: "2026-07-08",
+          resource: "water",
+          sourceProviderSlug: "garmin",
+        },
+        availableAt: "2026-07-10T13:00:00.000Z",
+      });
+      await service.runWorkerOnce();
+      const retained = store.getJobById(job.id);
+      assert.equal(retained?.status, "queued");
+      assert.equal(retained?.attempts, 1);
+      assert.equal(providerRequests.mock.calls.length, 0);
+    } finally {
+      close();
+    }
+  }
+});
+
+test("device sync service retains calendar work when its exact source is fenced", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-source-fenced");
+  const providerRequests = vi.fn(async (input: RequestInfo | URL) => {
+    throw new Error(`Unexpected request while source is fenced: ${readUrl(input)}`);
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryBackfillDays: 2,
+      summaryResources: [],
+      timeseriesResources: ["water"],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+      fetchImpl: providerRequests,
+    })],
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-calendar-source-fenced",
+      displayName: "Junction",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "junction-garmin",
+      sourceProviderSlug: "garmin",
+      status: "disconnected",
+      firstSeenAt: "2026-07-10T13:00:00.000Z",
+      lastSeenAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-07-08",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      availableAt: "2026-07-10T13:00:00.000Z",
+    });
+    await service.runWorkerOnce();
+    assert.equal(store.getJobById(job.id)?.status, "queued");
+    assert.equal(
+      store.getJobById(job.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_SOURCE_AUTHORITY_UNAVAILABLE",
+    );
+    assert.equal(providerRequests.mock.calls.length, 0);
+
+    store.commitConnectionEstablished({
+      accountId: account.id,
+      expectedSourceLastSeenAt: "2026-07-10T13:00:00.000Z",
+      jobs: [],
+      provider: "junction",
+      source: {
+        connectionId: account.id,
+        sourceInstanceKey: "junction-garmin",
+        sourceProviderSlug: "garmin",
+        status: "connected",
+        firstSeenAt: "2026-07-10T14:00:00.000Z",
+        lastSeenAt: "2026-07-10T14:00:00.000Z",
+      },
+    });
+    assert.equal(
+      store.claimDueJob("worker-source-restored", "2026-07-10T14:00:00.000Z", 60_000)?.id,
+      job.id,
+    );
   } finally {
     close();
   }
@@ -6976,6 +7397,122 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
       windowStart: "2025-10-03T00:00:00.000Z",
       windowEnd: "2026-04-01T00:00:00.000Z",
     });
+  } finally {
+    close();
+  }
+});
+
+test("Junction scheduled reconcile imports a newly closed day after its pre-closure continuation advances the account clock", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-closed-day-floor");
+  let now = new Date("2026-04-02T00:05:00.000Z");
+  const importedSnapshots: unknown[] = [];
+  const timeseriesRequests: URL[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileDays: 1,
+        summaryResources: ["activity"],
+        timeseriesResources: ["glucose"],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+          if (url.pathname === "/v2/user/providers/junction-user-closed-day-floor") {
+            return createJsonResponse({ providers: [] });
+          }
+          if (url.pathname === "/v2/summary/activity/junction-user-closed-day-floor") {
+            return createJsonResponse({ data: [] });
+          }
+          if (url.pathname === "/v2/timeseries/junction-user-closed-day-floor/glucose/grouped") {
+            timeseriesRequests.push(url);
+            return createJsonResponse({
+              groups: {
+                dexcom: [{
+                  data: [{
+                    id: "closed-day-glucose-reading",
+                    recordedAt: "2026-04-02T11:00:00.000Z",
+                    timestamp: "2026-04-01T23:30:00-07:00",
+                    unit: "mmol/L",
+                    value: 7,
+                  }],
+                  source: { provider: "dexcom", type: "cgm" },
+                }],
+              },
+            });
+          }
+          throw new Error(`Unexpected Junction request during closed-day floor test: ${url.toString()}`);
+        },
+      }),
+    ],
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importedSnapshots.push(input.snapshot);
+        return { ok: true };
+      },
+    },
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-closed-day-floor",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    const enqueueReconcile = (dedupeKey: string, priority = 40) => store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-02T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      priority,
+      dedupeKey,
+    });
+    enqueueReconcile("junction-pre-closure-floor");
+    const preClosure = await service.runWorkerOnce();
+    assert.equal(preClosure?.kind, "reconcile");
+    assert.equal(timeseriesRequests.length, 0);
+    const preClosureContinuation = await service.runWorkerOnce();
+    assert.equal(preClosureContinuation?.kind, "reconcile");
+    assert.equal(timeseriesRequests.length, 0);
+    assert.equal(
+      store.getAccountById(account.id)?.lastSyncCompletedAt,
+      "2026-04-02T00:05:00.000Z",
+    );
+
+    now = new Date("2026-04-02T12:02:00.000Z");
+    const postClosureReconcile = enqueueReconcile("junction-post-closure-floor");
+    assert.equal((await service.runWorkerOnce())?.id, postClosureReconcile.id);
+    assert.equal(timeseriesRequests.length, 1);
+    assert.equal(timeseriesRequests[0]?.searchParams.get("start_date"), "2026-04-01");
+    assert.equal(
+      importedSnapshots.some((snapshot) =>
+        Boolean((snapshot as { timeseries?: { glucose?: unknown[] } }).timeseries?.glucose)
+      ),
+      true,
+    );
   } finally {
     close();
   }

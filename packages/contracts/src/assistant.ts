@@ -12,6 +12,10 @@ import {
   exerciseRoutineResponseCardV1Schema,
   type ExerciseRoutineResponseCardV1,
 } from "./exercise-routine-card.ts";
+import {
+  telegramRichContentResponseCardV1Schema,
+  type TelegramRichContentResponseCardV1,
+} from "./telegram-rich-content-card.ts";
 
 export const MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE = `Hey, I'm Murph.
 
@@ -108,6 +112,7 @@ export type AssistantResponseCard =
   | DailyNutritionResponseCard
   | CompactTableResponseCardV1
   | ExerciseRoutineResponseCardV1
+  | TelegramRichContentResponseCardV1
   | ChallengeStandingsResponseCardV1;
 
 const nutritionCardMealCountSchema = z
@@ -131,15 +136,23 @@ function createNutritionCardMetricSchema(
     .strict();
   return totalRequired
     ? supportedMetricSchema
-    : z.union([
-        supportedMetricSchema,
-        z
-          .object({
-            total: z.null(),
-            mealCount: z.literal(0),
-          })
-          .strict(),
-      ]);
+    : z
+        .object({
+          total: totalSchema.nullable(),
+          mealCount: nutritionCardMealCountSchema,
+        })
+        .strict()
+        .superRefine((metric, context) => {
+          if ((metric.total === null) !== (metric.mealCount === 0)) {
+            context.addIssue({
+              code: "custom",
+              message:
+                "A metric has zero supporting meals exactly when its total is unavailable.",
+              params: { murphExpectedShape: "zero_iff_total_null" },
+              path: ["mealCount"],
+            });
+          }
+        });
 }
 
 const calorieMetricSchema = createNutritionCardMetricSchema(
@@ -163,6 +176,7 @@ function addNutritionCardMealCountIssues(
       context.addIssue({
         code: "custom",
         message: "A metric cannot have more supporting meals than the card.",
+        params: { murphExpectedShape: "at_most_card.meal_count" },
         path: ["totals", metricName, "mealCount"],
       });
     }
@@ -188,6 +202,7 @@ function addNutritionCardGoalConsistencyIssue(
       code: "custom",
       message:
         "A missing or partial metric can only have an unavailable goal status.",
+      params: { murphExpectedShape: "unavailable_when_metric_partial" },
       path: ["goals", metricName, "status"],
     });
     return;
@@ -208,6 +223,7 @@ function addNutritionCardGoalConsistencyIssue(
     context.addIssue({
       code: "custom",
       message: "Goal status cannot point opposite the total and target.",
+      params: { murphExpectedShape: "consistent_with_total_and_target" },
       path: ["goals", metricName, "status"],
     });
   }
@@ -364,6 +380,7 @@ export const assistantResponseCardSchema: z.ZodType<AssistantResponseCard> =
     dailyNutritionResponseCardSchema,
     compactTableResponseCardV1Schema,
     exerciseRoutineResponseCardV1Schema,
+    telegramRichContentResponseCardV1Schema,
     challengeStandingsResponseCardV1Schema,
   ]);
 

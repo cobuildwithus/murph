@@ -10,6 +10,7 @@ import {
 } from "@murphai/health-commons/runtime";
 
 import {
+  collectStaticRunnerBundleOutputPaths,
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
 } from "./bundle-shared.js";
@@ -70,12 +71,23 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // total 7,052,933 B across all chunks, entry bin.js 15,569 B. The merged
 // Health Commons, recurring-timezone, workout-card, group-challenge-card, and
 // generated-image-continuity additions are intentional lazy CLI capabilities;
-// no new package enters the graph. The August 2026 Junction temporal-authority
-// and canonical event-schema additions set the current 9,103,326 B baseline;
-// retain 32 KiB of explicit headroom. If a violation fires, investigate the
-// listed largest inputs first and raise only for understood, intended growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_103_326 + 32_768;
+// no new package enters the graph. The deterministic Messages workout action
+// reuses that existing graph and measured 9,111,172 B on macOS after merging
+// current main on 2026-08-14. The reviewed Junction temporal-fidelity and
+// source-authority graph measured 9,128,211 B on Linux CI and 9,175,594 B on
+// macOS after merging current main on 2026-08-14; no package entered the graph.
+// The reviewed cross-session context reply work measured 9,119,111 B after
+// normalizing the esbuild working directory on 2026-08-15; it grows the
+// existing Assistant Engine graph without adding a package. The August 2026
+// Junction temporal-authority and canonical event-schema additions extend the
+// same graph without a new package. The static
+// startup closure measured 24,950 B. Keep total output inside a narrow 32 KiB
+// allowance and static startup inside an 8 KiB allowance. If a
+// violation fires, investigate the listed largest inputs first; only raise the
+// budget deliberately for understood, intended growth.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_227_033;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
+const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
 // Known divergence the parity battery cannot reach (it would need a live
 // codex session): assistant-engine resolves two assets relative to its own
@@ -116,11 +128,12 @@ export async function bundleInstalledVaultCliBinary(
   await rm(bundleOutDir, { force: true, recursive: true });
 
   const buildResult = await build({
+    absWorkingDir: bundleDir,
     banner: {
       js: "import { createRequire as __vaultCliCreateRequire } from 'node:module'; const require = __vaultCliCreateRequire(import.meta.url);",
     },
     bundle: true,
-    entryPoints: [entryPath],
+    entryPoints: [path.relative(bundleDir, entryPath)],
     external: [
       ...VAULT_CLI_BUNDLE_EXTERNALS,
       ...VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES,
@@ -142,7 +155,7 @@ export async function bundleInstalledVaultCliBinary(
   assertVaultCliBundleInlinesSingleCopies(Object.keys(buildResult.metafile.inputs));
   const bundleBytes = assertVaultCliBundleWithinBudgets(buildResult.metafile);
   console.log(
-    `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,
+    `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget, static startup closure ${bundleBytes.staticClosureBytes}B of ${VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET}B budget`,
   );
   const healthCommonsPackageRoot = path.join(
     bundleDir,
@@ -227,11 +240,16 @@ export function assertVaultCliBundleInlinesSingleCopies(inputPaths: string[]): v
 // bytes so the assembly log can report actual-vs-budget on success.
 export function assertVaultCliBundleWithinBudgets(
   metafile: Metafile,
-  budgets: { entryBytes: number; totalBytes: number } = {
+  budgets: {
+    entryBytes: number;
+    staticClosureBytes: number;
+    totalBytes: number;
+  } = {
     entryBytes: VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET,
+    staticClosureBytes: VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET,
     totalBytes: VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET,
   },
-): { entryBytes: number; totalBytes: number } {
+): { entryBytes: number; staticClosureBytes: number; totalBytes: number } {
   const outputs = Object.entries(metafile.outputs);
   const totalBytes = outputs.reduce((sum, [, output]) => sum + output.bytes, 0);
 
@@ -249,6 +267,14 @@ export function assertVaultCliBundleWithinBudgets(
     );
   }
   const [entryPath, { bytes: entryBytes }] = entryOutput;
+  const staticOutputPaths = collectStaticRunnerBundleOutputPaths(
+    metafile,
+    entryPath,
+  );
+  const staticClosureBytes = [...staticOutputPaths].reduce(
+    (sum, outputPath) => sum + (metafile.outputs[outputPath]?.bytes ?? 0),
+    0,
+  );
 
   const violations: string[] = [];
   if (totalBytes > budgets.totalBytes) {
@@ -261,8 +287,13 @@ export function assertVaultCliBundleWithinBudgets(
       `entry chunk ${entryPath} ${entryBytes}B exceeds budget ${budgets.entryBytes}B`,
     );
   }
+  if (staticClosureBytes > budgets.staticClosureBytes) {
+    violations.push(
+      `static startup closure ${staticClosureBytes}B exceeds budget ${budgets.staticClosureBytes}B`,
+    );
+  }
   if (violations.length === 0) {
-    return { entryBytes, totalBytes };
+    return { entryBytes, staticClosureBytes, totalBytes };
   }
 
   // List the heaviest inputs so the failure is diagnosable from the build

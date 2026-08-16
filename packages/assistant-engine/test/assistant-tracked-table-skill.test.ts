@@ -128,23 +128,27 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('one explicit exercise selector, and `--set-order`')
     expect(skill).toContain('correct the same set rather than append a duplicate')
     expect(skill).toContain(
-      'one exact active-workout prescription the member explicitly applied to every set of one exercise',
+      'The sole carry-forward exception is one exact repetition count the member explicitly applied to every set of one exercise',
     )
     expect(skill).toContain(
       'while the same workout is active and its establishing message remains available in the current direct conversation',
     )
     expect(skill).toContain(
-      'pass the prescribed actual field instead of asking again or writing a note-only completion',
+      'pass only `--reps` with that count instead of asking again or writing a note-only completion',
     )
     expect(skill).toContain(
-      'A value stated with the completion overrides the prescription',
+      'Do not carry forward weight, duration, distance, RPE, bodyweight, assistance, added weight, or any other actual field',
     )
     expect(skill).toContain(
-      'range, AMRAP or qualitative instruction, conflicts with another value',
+      'A repetition count stated with the completion overrides the earlier count',
     )
     expect(skill).toContain(
-      'Never treat a saved-plan target, prior workout, card target, or assistant-authored suggestion as this prescription',
+      'range, AMRAP or qualitative instruction, conflicts with another count',
     )
+    expect(skill).toContain(
+      'Never treat a saved-plan target, prior workout, card target, or assistant-authored suggestion as this repetition prescription',
+    )
+    expect(skill).not.toContain('pass the prescribed actual field')
     expect(skill).toContain('Saved target values remain in the workout format')
     expect(skill).toContain('preserve every distinct exercise the member named')
     expect(skill).toContain('including closely related variations')
@@ -207,7 +211,16 @@ describe('assistant tracked workout table skill', () => {
       'any claimed planned targets cannot be verified from their matching format',
     )
     expect(skill).toContain(
-      'the bounded card contract cannot represent the workout',
+      "The card tool's validation of the actual encoded envelope is authoritative",
+    )
+    expect(skill).toContain(
+      'Never ask the member to delete, merge, or simplify canonical workout data merely to fit the presentation',
+    )
+    expect(skill).toContain(
+      "the complete card is rejected by the card tool's actual encoded-envelope validation",
+    )
+    expect(skill).toContain(
+      'Do not preempt that validation from an estimated exercise or set count',
     )
   })
 

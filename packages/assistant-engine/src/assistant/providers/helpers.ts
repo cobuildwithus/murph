@@ -17,6 +17,7 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   isCodexReservedModelProviderId,
+  resolveAssistantCodexUsageProviderName,
   resolveAssistantCodexModelProviderConfig,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -322,7 +323,9 @@ export function extractCodexAssistantProviderUsage(input: {
     rawEvents: input.rawEvents,
     turnId,
   })
-  const providerName = input.providerConfig.target.modelProvider
+  const providerName = resolveAssistantCodexUsageProviderName(
+    input.providerConfig.target.modelProvider,
+  )
   const requestedModel = input.providerConfig.target.model
   const servedModel = findAssistantCodexCurrentTurnReroutedModel({
     rawEvents: input.rawEvents,
@@ -523,6 +526,7 @@ const ASSISTANT_TURN_PROFILE_BATCH_COMMAND_PATHS = new Set([
   'meal edit',
   'meal show',
   'meal totals',
+  'meal nutrients',
 ])
 
 interface AssistantTurnProfileToolAggregate {
@@ -1155,7 +1159,7 @@ export function extractCodexSubagentUsageDrafts(input: {
         inputTokens: delta.inputTokens,
         outputTokens: delta.outputTokens,
         providerMetadataJson: null,
-        providerName: input.modelProvider,
+        providerName: resolveAssistantCodexUsageProviderName(input.modelProvider),
         providerRequestId: null,
         rawUsageJson,
         rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
@@ -1184,7 +1188,7 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
 }): AssistantUsageTokenPricingBasis {
   return resolveHostedAiUsageTokenPricingBasis({
     model: input.model,
-    providerName: input.modelProvider,
+    providerName: resolveAssistantCodexUsageProviderName(input.modelProvider),
     serviceTier: input.serviceTier ?? null,
   })
 }

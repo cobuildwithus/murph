@@ -482,45 +482,44 @@ export const nutritionDataSchema = z
   })
   .strict();
 
-// Bounded micronutrient totals keyed by the documented provider micro fields
-// (Junction meal `micros` minerals/trace-element/vitamin enums). Key suffixes
-// carry the documented unit: grams (sodium/potassium), milligrams, or
-// micrograms (`Mcg`). Biotin and vitamin E ship in the provider enum without a
-// documented unit note; they use the conventional nutrition-label units
-// (biotin mcg, vitamin E mg).
-export const MEAL_MICRONUTRIENT_KEYS = Object.freeze([
-  // minerals
-  "sodiumGrams",
-  "potassiumGrams",
-  "calciumMg",
-  "phosphorusMg",
-  "magnesiumMg",
-  "ironMg",
-  "zincMg",
-  "fluorideMg",
-  "chlorideMg",
-  // trace elements
-  "chromiumMcg",
-  "copperMg",
-  "iodineMcg",
-  "manganeseMg",
-  "molybdenumMcg",
-  "seleniumMcg",
-  // vitamins
-  "vitaminAMcg",
-  "vitaminB1Mg",
-  "riboflavinMg",
-  "niacinMg",
-  "pantothenicAcidMg",
-  "vitaminB6Mg",
-  "biotinMcg",
-  "vitaminB12Mcg",
-  "vitaminCMg",
-  "vitaminDMcg",
-  "vitaminEMg",
-  "vitaminKMcg",
-  "folicAcidMg",
+// Bounded micronutrient totals keyed by the Junction meal-summary `micros`
+// contract. Key suffixes carry the summary-unit contract used by the pinned
+// Junction SDK. The separate Junction Sense column API can expose converted
+// units and must not be used to reinterpret persisted meal-summary values.
+export const MEAL_MICRONUTRIENT_DEFINITIONS = Object.freeze([
+  { category: "mineral", key: "sodiumGrams", label: "Sodium", unit: "g" },
+  { category: "mineral", key: "potassiumGrams", label: "Potassium", unit: "g" },
+  { category: "mineral", key: "calciumMg", label: "Calcium", unit: "mg" },
+  { category: "mineral", key: "phosphorusMg", label: "Phosphorus", unit: "mg" },
+  { category: "mineral", key: "magnesiumMg", label: "Magnesium", unit: "mg" },
+  { category: "mineral", key: "ironMg", label: "Iron", unit: "mg" },
+  { category: "mineral", key: "zincMg", label: "Zinc", unit: "mg" },
+  { category: "mineral", key: "fluorideMg", label: "Fluoride", unit: "mg" },
+  { category: "mineral", key: "chlorideMg", label: "Chloride", unit: "mg" },
+  { category: "trace_element", key: "chromiumMcg", label: "Chromium", unit: "mcg" },
+  { category: "trace_element", key: "copperMg", label: "Copper", unit: "mg" },
+  { category: "trace_element", key: "iodineMcg", label: "Iodine", unit: "mcg" },
+  { category: "trace_element", key: "manganeseMg", label: "Manganese", unit: "mg" },
+  { category: "trace_element", key: "molybdenumMcg", label: "Molybdenum", unit: "mcg" },
+  { category: "trace_element", key: "seleniumMcg", label: "Selenium", unit: "mcg" },
+  { category: "vitamin", key: "vitaminAMcg", label: "Vitamin A", unit: "mcg" },
+  { category: "vitamin", key: "vitaminB1Mg", label: "Thiamin (B1)", unit: "mg" },
+  { category: "vitamin", key: "riboflavinMg", label: "Riboflavin (B2)", unit: "mg" },
+  { category: "vitamin", key: "niacinMg", label: "Niacin (B3)", unit: "mg" },
+  { category: "vitamin", key: "pantothenicAcidMg", label: "Pantothenic acid (B5)", unit: "mg" },
+  { category: "vitamin", key: "vitaminB6Mg", label: "Vitamin B6", unit: "mg" },
+  { category: "vitamin", key: "biotinMcg", label: "Biotin (B7)", unit: "mcg" },
+  { category: "vitamin", key: "vitaminB12Mcg", label: "Vitamin B12", unit: "mcg" },
+  { category: "vitamin", key: "vitaminCMg", label: "Vitamin C", unit: "mg" },
+  { category: "vitamin", key: "vitaminDMcg", label: "Vitamin D", unit: "mcg" },
+  { category: "vitamin", key: "vitaminEMg", label: "Vitamin E", unit: "mg" },
+  { category: "vitamin", key: "vitaminKMcg", label: "Vitamin K", unit: "mcg" },
+  { category: "vitamin", key: "folicAcidMg", label: "Folic acid (B9)", unit: "mg" },
 ] as const);
+
+export const MEAL_MICRONUTRIENT_KEYS = Object.freeze(
+  MEAL_MICRONUTRIENT_DEFINITIONS.map(({ key }) => key),
+);
 
 export const mealMicronutrientsSchema = z
   .object(
@@ -727,6 +726,7 @@ export const workoutSessionSchema = z
     movingTimeMinutes: numberSchema(0).optional(),
     routineId: boundedString(1, 200).optional(),
     routineName: boundedString(1, 160).optional(),
+    lastMemberActionId: z.string().length(36).uuid().optional(),
     sessionNote: boundedString(1, 4000).optional(),
     metrics: workoutSessionMetricsSchema.optional(),
     heartRateZones: z.array(workoutHeartRateZoneSchema).max(20).optional(),
@@ -1245,11 +1245,13 @@ const derivedObservationEvidenceQualifiersSchema = z
 const observationEventFieldsShape = {
   metric: patternedString(SLUG_PATTERN),
   queryVisibility: z.enum(["default"]).optional(),
+  qualifiers: z
+    .union([derivedObservationEvidenceQualifiersSchema, measurementQualifiersSchema])
+    .optional(),
   value: numberSchema(),
   visibility: z.enum(["display"]).optional(),
   canonicalFact: z.literal(true).optional(),
   observationGrain: z.enum(OBSERVATION_GRAINS).optional(),
-  qualifiers: derivedObservationEvidenceQualifiersSchema.optional(),
   unit: patternedString(UNIT_PATTERN),
 } satisfies z.ZodRawShape;
 

@@ -204,10 +204,18 @@ export type {
 export type { DailySampleSummary, SampleWindowSummaryFilter } from "./summaries.ts";
 export { summarizeDailySamples, summarizeSampleWindow } from "./summaries.ts";
 export {
+  readMealNutrientTotals,
   readMealNutritionTotals,
+  summarizeMealNutrientTotals,
   summarizeMealNutritionTotals,
 } from "./meal-nutrition.ts";
 export type {
+  MealNutrientCategory,
+  MealNutrientDayTotal,
+  MealNutrientKey,
+  MealNutrientTotal,
+  MealNutrientTotalsResult,
+  MealNutrientUnit,
   MealNutritionDayTotal,
   MealNutritionMetricTotal,
   MealNutritionTotals,

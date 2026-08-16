@@ -7579,6 +7579,147 @@ test("importDeviceBatch rejects sleep-type enrichment with other same-revision c
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
 });
 
+test("importDeviceBatch reports each immediate Junction sparse cross-day transition", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-junction-cross-day-chain");
+  await initializeVault({ vaultRoot, createdAt: "2026-04-01T00:00:00.000Z" });
+  const buildEvent = (dayKey: string, version: string) => ({
+    kind: "measurement" as const,
+    occurredAt: `${dayKey}T08:00:00.000Z`,
+    recordedAt: `${dayKey}T08:00:00.000Z`,
+    dayKey,
+    title: "Junction water intake",
+    externalRef: {
+      system: "junction",
+      resourceType: "junction-garmin-water",
+      resourceId: "water-cross-day-chain",
+      facet: "interval",
+      version,
+    },
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      sourceInstanceId: "garmin-watch-1",
+      normalizerVersion: "junction-timeseries.v1",
+    },
+    fields: {
+      measurements: [{ metric: "water", unit: "ml", value: 250 }],
+    },
+  });
+
+  const v1 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-04T09:00:00.000Z",
+    events: [buildEvent("2026-04-01", "2026-04-04T08:00:00.000Z")],
+  });
+  assert.deepEqual(v1.affectedEventDayKeys, ["2026-04-01"]);
+  assert.deepEqual(v1.affectedSparseCalendarTargets, [{
+    dayKey: "2026-04-01",
+    sourceInstanceId: "garmin-watch-1",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+  }]);
+
+  const v2 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-05T09:00:00.000Z",
+    events: [buildEvent("2026-04-02", "2026-04-05T08:00:00.000Z")],
+  });
+  assert.deepEqual(v2.affectedEventDayKeys, ["2026-04-01", "2026-04-02"]);
+  assert.deepEqual(v2.affectedSparseCalendarTargets?.map((target) => target.dayKey), [
+    "2026-04-01",
+    "2026-04-02",
+  ]);
+
+  const v3 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-06T09:00:00.000Z",
+    events: [buildEvent("2026-04-03", "2026-04-06T08:00:00.000Z")],
+  });
+  assert.deepEqual(v3.affectedEventDayKeys, ["2026-04-02", "2026-04-03"]);
+  assert.deepEqual(v3.affectedSparseCalendarTargets?.map((target) => target.dayKey), [
+    "2026-04-02",
+    "2026-04-03",
+  ]);
+
+  const delayedV2 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-07T09:00:00.000Z",
+    events: [buildEvent("2026-04-02", "2026-04-05T08:00:00.000Z")],
+  });
+  assert.equal(delayedV2.applied, false);
+  assert.equal(
+    delayedV2.affectedEventDayKeys,
+    undefined,
+    "A delayed stale revision cannot reconstruct older refresh work; the durable day jobs retain it.",
+  );
+  assert.equal(delayedV2.affectedSparseCalendarTargets, undefined);
+});
+
+test("importDeviceBatch rejects excessive Junction sparse affected-day fanout atomically", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-junction-affected-days");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+
+  const buildEvents = (startAt: string, version: string) =>
+    Array.from({ length: 33 }, (_, index) => {
+      const occurredAt = new Date(Date.parse(startAt) + index * 24 * 60 * 60_000).toISOString();
+      return {
+        kind: "measurement" as const,
+        occurredAt,
+        recordedAt: occurredAt,
+        dayKey: occurredAt.slice(0, 10),
+        title: "Junction water intake",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-water",
+          resourceId: `water-affected-day-${index}`,
+          facet: "interval",
+          version,
+        },
+        fields: {
+          measurements: [{
+            metric: "water",
+            unit: "ml",
+            value: index + 1,
+          }],
+        },
+      };
+    });
+
+  const baseline = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-10T12:00:00.000Z",
+    events: buildEvents("2026-01-01T08:00:00.000Z", "2026-04-10T10:00:00.000Z"),
+  });
+  assert.equal(baseline.affectedEventDayKeys?.length, 33);
+  const beforeRejectedCorrection = await snapshotVaultFiles(vaultRoot);
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-user-1",
+      importedAt: "2026-04-11T12:00:00.000Z",
+      events: buildEvents("2026-03-01T08:00:00.000Z", "2026-04-11T10:00:00.000Z"),
+    }),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "DEVICE_IMPORT_AFFECTED_DAY_LIMIT_EXCEEDED",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedCorrection);
+});
+
 test("importDeviceBatch keeps Junction sleep summary stages over later cycle fallback facts", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-junction-summary-over-cycle");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -8339,7 +8480,7 @@ test("importDeviceBatch scopes no-id Junction profile predecessor claims to one 
     occurredAt: string;
     sourceInstanceId: string;
     value: number;
-    version: string;
+    version?: string;
   }) => ({
     kind: "observation" as const,
     occurredAt: input.occurredAt,
@@ -8350,7 +8491,7 @@ test("importDeviceBatch scopes no-id Junction profile predecessor claims to one 
       system: "junction",
       resourceType,
       resourceId: profileResourceId(input.sourceInstanceId, input.occurredAt),
-      version: input.version,
+      ...(input.version ? { version: input.version } : {}),
       facet: "height",
     },
     dataOrigin: {
@@ -8380,7 +8521,6 @@ test("importDeviceBatch scopes no-id Junction profile predecessor claims to one 
       occurredAt: firstUpdatedAt,
       sourceInstanceId: "profile-source-a",
       value: 180,
-      version: firstUpdatedAt,
     })],
   });
   const createdAt = "2026-05-01T09:00:00.000Z";
@@ -8422,7 +8562,7 @@ test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors at
     normalizerVersion: string;
     occurredAt: string;
     value: number;
-    version: string;
+    version?: string;
   }) => ({
     kind: "observation" as const,
     occurredAt: input.occurredAt,
@@ -8433,7 +8573,7 @@ test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors at
       system: "junction",
       resourceType,
       resourceId: profileResourceId(input.occurredAt),
-      version: input.version,
+      ...(input.version ? { version: input.version } : {}),
       facet: "height",
     },
     dataOrigin: {
@@ -8464,13 +8604,11 @@ test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors at
         normalizerVersion: "junction-normalizer.v1",
         occurredAt: firstUpdatedAt,
         value: 179,
-        version: firstUpdatedAt,
       }),
       profileEvent({
         normalizerVersion: "junction-normalizer.v1",
         occurredAt: secondUpdatedAt,
         value: 180,
-        version: secondUpdatedAt,
       }),
     ],
   });

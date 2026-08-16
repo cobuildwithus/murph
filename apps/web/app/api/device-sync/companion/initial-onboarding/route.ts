@@ -70,7 +70,6 @@ export const GET = withJsonError(async (request: Request) => {
       message: INITIAL_MESSAGE,
       murphEmailAddress: contactContext.murphEmailAddress,
       murphPhoneNumber: contactContext.murphPhoneNumber,
-      userEmailAddress: contactContext.userEmailAddress,
     })[0] ?? null;
   } catch {
     // Contact-card setup is optional. Never let unavailable encrypted contact

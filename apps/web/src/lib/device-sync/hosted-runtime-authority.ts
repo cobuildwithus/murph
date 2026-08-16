@@ -58,7 +58,10 @@ import {
 } from "../hosted-execution/logging";
 import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
-import { isHostedSourceDisconnectFenced } from "./connection-source-lifecycle";
+import {
+  isHostedSourceDisconnectFenced,
+  resolveHostedJunctionConnectionSource,
+} from "./connection-source-lifecycle";
 import {
   buildHostedPublicDeviceSyncAccount,
   type HostedStaticDeviceSyncConnectionRecord,
@@ -94,6 +97,10 @@ import {
 import { normalizeNullableString } from "./shared";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
+type HostedRuntimeConnectionSourceWrite =
+  HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate & {
+    lifecycleEpoch?: number;
+  };
 
 interface HostedRuntimeFailureApplyResult {
   failureDiagnostic: HostedRuntimeLogEntry | null;
@@ -620,6 +627,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
                 ? { displayName: source.displayName ?? null }
                 : {}),
               status: source.status,
+              ...(source.lifecycleEpoch === undefined
+                ? {}
+                : { lifecycleEpoch: source.lifecycleEpoch }),
               ...(Object.prototype.hasOwnProperty.call(source, "resourceAvailabilitySummary")
                 ? { resourceAvailabilitySummary: source.resourceAvailabilitySummary ?? null }
                 : {}),
@@ -1485,12 +1495,12 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
   updates: readonly HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
 }): {
   staleCount: number;
-  toApply: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
+  toApply: HostedRuntimeConnectionSourceWrite[];
 } {
   const currentByInstanceKey = new Map(
     input.currentSources.map((source) => [source.sourceInstanceKey, source]),
   );
-  const toApply: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[] = [];
+  const toApply: HostedRuntimeConnectionSourceWrite[] = [];
   let staleCount = 0;
   const junction = input.provider.trim().toLowerCase() === "junction";
   const historicalProgressMutable =
@@ -1504,9 +1514,24 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       provider: input.provider,
       update: rawUpdate,
     });
-    const sourceInstanceKeyCanonicalized = normalized.sourceInstanceKeyCanonicalized;
+    let sourceInstanceKeyCanonicalized = normalized.sourceInstanceKeyCanonicalized;
     let update = normalized.update;
-    const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
+    const current = junction
+      ? resolveHostedJunctionConnectionSource(
+          input.currentSources,
+          update.sourceProviderSlug,
+        )
+      : currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
+    if (junction && current) {
+      update = {
+        ...update,
+        sourceInstanceKey: current.sourceInstanceKey,
+        sourceProviderSlug: current.sourceProviderSlug,
+      };
+      sourceInstanceKeyCanonicalized =
+        update.sourceInstanceKey !== rawUpdate.sourceInstanceKey
+        || update.sourceProviderSlug !== rawUpdate.sourceProviderSlug;
+    }
     const currentLastSeenAt = current?.lastSeenAt ?? null;
 
     if (
@@ -1583,7 +1608,9 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       continue;
     }
 
-    toApply.push(update);
+    toApply.push(current
+      ? { ...update, lifecycleEpoch: current.lifecycleEpoch }
+      : update);
   }
 
   return { staleCount, toApply };

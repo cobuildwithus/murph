@@ -54,6 +54,25 @@ it("renders counter and status fallbacks without starting client loads during fi
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
+it("keeps synthetic footer vitals fixed and network-free after mount", async () => {
+  const fetchMock = vi.fn(() => Promise.resolve(Response.json({})));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createElement(SiteFooterVitals, { mode: "synthetic" }),
+    { requireButton: false },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await rendered.rerender(
+    createElement(SiteFooterVitals, { mode: "synthetic" }),
+  );
+
+  expect(rendered.container.textContent).toContain("5,000+");
+  expect(rendered.container.textContent).toContain("Status");
+  expect(fetchMock).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
 it("shows Murph is online when the public summary lists nothing", async () => {
   const fetchMock = stubFetch(() =>
     Promise.resolve(

@@ -110,17 +110,6 @@ import {
 } from "@/src/lib/hosted-onboarding/member-activation";
 import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
-function expectedTelegramAssistantThreadId(input: {
-  memberId: string;
-  threadId: string;
-}): string {
-  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-    secret: input.threadId,
-    userId: input.memberId,
-  });
-  return hashHostedAssistantConversationIdentifier(identifierBlind, input.threadId);
-}
-
 function expectedLinqParticipantWelcomeRoute(input: {
   fromPhoneNumber?: string;
   memberId?: string;
@@ -577,6 +566,44 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
+  it("returns the exact existing Family activation pointer on replay", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      dedupeKey:
+        "member.activated:hosted.family.sponsorship:member_123:family-subscription:sub_family_replay",
+      id: "mailbox_family_activation_existing",
+    });
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: makeTransactionHarness({
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+        threadContainer: null,
+      }) as never,
+      sourceEventId: "family-subscription:sub_family_replay",
+    })).resolves.toEqual({
+      activated: false,
+      hostedExecutionEventId:
+        "member.activated:hosted.family.sponsorship:member_123:family-subscription:sub_family_replay",
+      hostedExecutionMailboxItemId: "mailbox_family_activation_existing",
+      memberId: "member_123",
+    });
+
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("activates verified-email-only family members without assigning a Linq home line", async () => {
     const member = makeMemberSnapshot({
       core: {
@@ -988,7 +1015,7 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
-  it("uses an inbound Telegram thread for email-linked phone-less members", async () => {
+  it("does not enqueue a proactive Telegram welcome for email-linked phone-less members", async () => {
     const member = makeMemberSnapshot({
       emailAuthorization: {
         directPublicSender: null,
@@ -1045,74 +1072,23 @@ describe("hosted onboarding member activation", () => {
           linq: false,
           telegram: true,
         },
-        signupWelcome: expect.objectContaining({
-          route: {
-            actorId: null,
-            channel: "telegram",
-            delivery: {
-              kind: "thread",
-              target: "telegram_user_123:business:biz-42:dm-topic:9",
-            },
-            identityId: null,
-            threadId: expectedTelegramAssistantThreadId({
-              memberId: "member_123",
-              threadId: "telegram_user_123:business:biz-42:dm-topic:9",
-            }),
-            threadIsDirect: true,
-          },
-        }),
+        signupWelcome: null,
       }),
       tx: expect.anything(),
     });
-    expectLegacySignupWelcomeCompatibilityWake({
-      callIndex: 2,
-      sourceEventId: "evt_email_telegram",
-      route: {
-        actorId: null,
-        channel: "telegram",
-        delivery: {
-          kind: "thread",
-          target: "telegram_user_123:business:biz-42:dm-topic:9",
-        },
-        identityId: null,
-        threadId: expectedTelegramAssistantThreadId({
-          memberId: "member_123",
-          threadId: "telegram_user_123:business:biz-42:dm-topic:9",
-        }),
-        threadIsDirect: true,
-      },
-    });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
-  it("builds a Telegram welcome route even when the member has no Linq thread yet", () => {
-    const rawTelegramThreadId = "telegram_user_456:business:biz-42:dm-topic:9";
-    const route = buildHostedMemberActivationWelcomeRoute({
+  it("does not build a proactive Telegram welcome route", () => {
+    expect(buildHostedMemberActivationWelcomeRoute({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_telegram_route",
       memberPhoneNumber: null,
       phoneLookupKey: null,
-      telegramThreadId: rawTelegramThreadId,
+      telegramThreadId: "telegram_user_456:business:biz-42:dm-topic:9",
       telegramUserId: "telegram_user_456",
-    });
-
-    expect(route).toEqual({
-      actorId: null,
-      channel: "telegram",
-      delivery: {
-        kind: "thread",
-        target: rawTelegramThreadId,
-      },
-      identityId: null,
-      threadId: expectedTelegramAssistantThreadId({
-        memberId: "member_telegram_route",
-        threadId: rawTelegramThreadId,
-      }),
-      threadIsDirect: true,
-    });
-    expect(route?.threadId).toMatch(/^hid_[0-9a-f]{32}$/u);
-    expect(route?.threadId).not.toBe(rawTelegramThreadId);
+    })).toBeNull();
   });
 
   it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -10,6 +11,10 @@ import {
 const CHANGELOG_ENTRY_PATH =
   "apps/web/changelog/entries/2026-08-09/public-referral-home.json";
 const LEGACY_CHANGELOG_PATH = "apps/web/src/lib/changelog.ts";
+const COMPLETION_WORKFLOW = readFileSync(
+  new URL("../agent-docs/operations/completion-workflow.md", import.meta.url),
+  "utf8",
+);
 
 function section(...items) {
   return `
@@ -19,6 +24,58 @@ ${items.map((item) => `<li>${item}</li>`).join("\n")}
 </ul>
 `;
 }
+
+function documentedChangelogExamples() {
+  return [...COMPLETION_WORKFLOW.matchAll(
+    /```markdown\n([\s\S]*?)\n\s*```/gu,
+  )]
+    .map((match) => match[1])
+    .filter((example) => example.trimStart().startsWith("## Changelog"));
+}
+
+function renderDocumentedChangelogExample(markdown) {
+  const [heading, ...bodyLines] = markdown
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  assert.equal(heading, "## Changelog");
+  const items = bodyLines.map((line) => {
+    assert.match(line, /^- /u);
+    return line.slice(2);
+  });
+  return section(...items);
+}
+
+test("completion workflow examples satisfy the changelog validator", () => {
+  const examples = documentedChangelogExamples();
+  assert.equal(examples.length, 2);
+  const updatedExample = examples.find((example) =>
+    example.includes("- Changelog: updated")
+  );
+  const notApplicableExample = examples.find((example) =>
+    example.includes("- Changelog: not applicable")
+  );
+  assert.ok(updatedExample);
+  assert.ok(notApplicableExample);
+
+  assert.deepEqual(
+    validatePrChangelog({
+      changedPaths: [
+        "apps/web/changelog/entries/2026-08-09/stable-item-id.json",
+      ],
+      changelogItemsById: new Map([["stable-item-id", "2026-08-09"]]),
+      prBodyHtml: renderDocumentedChangelogExample(updatedExample),
+    }),
+    [],
+  );
+  assert.deepEqual(
+    validatePrChangelog({
+      changedPaths: ["scripts/check-pr-changelog.test.mjs"],
+      prBodyHtml: renderDocumentedChangelogExample(notApplicableExample),
+    }),
+    [],
+  );
+});
 
 test("accepts an updated declaration with a stable item reference", () => {
   assert.deepEqual(

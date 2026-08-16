@@ -171,7 +171,7 @@ test("precise Junction partitions never publish temporal facts before the comple
   }
 });
 
-test("complete Junction source-day retries retract stale facets after insufficient and capped replacements", async () => {
+test("complete Junction source-day retries retract stale facets after insufficient replacements and reject over-bound days", async () => {
   const parentRoot = await mkdtemp(path.join(tmpdir(), "junction-temporal-replacement-"));
   const vaultRoot = path.join(parentRoot, "vault");
   const dayKey = "2026-04-22";
@@ -230,23 +230,18 @@ test("complete Junction source-day retries retract stale facets after insufficie
     );
     expect(await pointsFor(TEMPORAL_METRICS)).toHaveLength(3);
 
-    const cappedRows = Array.from({ length: 5_001 }, (_, index) => ({
+    const overBoundRows = Array.from({ length: 1_441 }, (_, index) => ({
       timestamp: new Date(Date.UTC(2026, 3, 22, 5) + index * 1_000).toISOString(),
       unit: "percent",
       value: index % 2 === 0 ? 88 : 95,
     }));
-    const capped = completeSnapshot(cappedRows, "2026-04-24T15:00:00.000Z");
-    await importJunction(vaultRoot, capped, {
+    const overBound = completeSnapshot(overBoundRows, "2026-04-24T15:00:00.000Z");
+    await expect(importJunction(vaultRoot, overBound, {
       dayKey,
       resources: ["blood_oxygen"],
       revisionAt: "2026-04-24T15:00:00.000Z",
-    });
-    await importJunction(vaultRoot, capped, {
-      dayKey,
-      resources: ["blood_oxygen"],
-      revisionAt: "2026-04-24T15:00:00.000Z",
-    });
-    expect(await pointsFor(TEMPORAL_METRICS)).toHaveLength(0);
+    })).rejects.toThrow(/maximum admitted is 1440/u);
+    expect(await pointsFor(TEMPORAL_METRICS)).toHaveLength(3);
     expect(await pointsFor(["spo2", "lowest-spo2"])).toHaveLength(2);
 
     await importJunction(vaultRoot, junctionSnapshot({
@@ -307,10 +302,12 @@ test("complete Junction source-day retries retract stale facets after insufficie
       revisionAt: "2026-04-24T16:00:00.000Z",
     });
     const finalPoints = await metricPoints(vaultRoot);
+    const finalTemporalPoints = finalPoints.filter((point) =>
+      TEMPORAL_METRICS.includes(point.metricKey as typeof TEMPORAL_METRICS[number])
+    );
     expect(finalPoints.some((point) => point.metricKey === "stress-level")).toBe(true);
-    expect(finalPoints.some((point) => point.metricKey.startsWith("stress-")
-      && point.metricKey !== "stress-level")).toBe(false);
-    expect(finalPoints.filter((point) => point.metricKey.startsWith("spo2-")).length).toBe(9);
+    expect(finalTemporalPoints.some((point) => point.metricKey.startsWith("stress-"))).toBe(false);
+    expect(finalTemporalPoints.filter((point) => point.metricKey.startsWith("spo2-")).length).toBe(9);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

@@ -12,6 +12,7 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqInviteSignupLiveDeliveryTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
@@ -446,12 +447,6 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     const genericEffectId =
       "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
-    const groupEffectId = buildHostedLinqInviteSignupEffectId({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:05:00.000Z",
-      sourceEventDigest: "a".repeat(32),
-    });
-    const groupSourceRef = groupEffectId;
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
       id: "hld_generic_failed",
       idempotencyKey:
@@ -460,8 +455,8 @@ describe("hosted Linq observability stores", () => {
       sourceRef: genericEffectId,
       template: "invite_signup",
     });
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
-      { sourceRef: groupSourceRef },
+    fixture.queryRaw.mockResolvedValue([
+      { anyIdentityLive: true, sameIdentityStillLive: false },
     ]);
 
     await expect(ingestHostedLinqProviderEventTx({
@@ -483,23 +478,9 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
-      select: { sourceRef: true },
-      where: {
-        sourceRef: { startsWith: genericEffectId },
-        status: {
-          in: [
-            "attempted",
-            "provider_dispatch_started",
-            "accepted",
-            "delivered",
-          ],
-        },
-        template: {
-          in: ["invite_signup", "invite_signup_fallback"],
-        },
-      },
-    });
+    expect(fixture.queryRaw.mock.calls.some(([query]) =>
+      (query as { sql?: string }).sql?.includes('AS "anyIdentityLive"')
+    )).toBe(true);
   });
 
   it("restores onboarding after a delivered invite receipt and ignores non-onboarding terminal receipts", async () => {
@@ -4811,11 +4792,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
 
   it("does not reopen the daily marker when a buffered generic failure replays after a distinct group success", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const groupEffectId = buildHostedLinqInviteSignupEffectId({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:05:00.000Z",
-      sourceEventDigest: "b".repeat(32),
-    });
     fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([{
       deliveryStatus: "failed",
       eventId: "evt_generic_failed_buffered",
@@ -4829,9 +4805,9 @@ describe("hosted Linq signup-link delivery attempts", () => {
       sourceRef: BASE_EFFECT_ID,
       template: "invite_signup",
     });
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
-      sourceRef: groupEffectId,
-    }]);
+    fixture.queryRaw.mockResolvedValue([
+      { anyIdentityLive: true, sameIdentityStillLive: false },
+    ]);
 
     await expect(markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: BASE_EFFECT_ID,
@@ -4963,23 +4939,29 @@ describe("hosted Linq signup-link delivery attempts", () => {
       });
   });
 
-  it("does not reopen daily or group context for a stale failed attempt", async () => {
+  it("checks only the five exact digest attempts before suppressing stale failure reopen", async () => {
     const fixture = createObservabilityPrismaFixture();
     const repliedAt = "2026-03-26T12:01:00.000Z";
+    const sourceEventDigest = "c".repeat(32);
+    const exactEffectId = buildHostedLinqInviteSignupEffectId({
+      memberId: "member_123",
+      occurredAt: repliedAt,
+      sourceEventDigest,
+    });
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
       id: "hld_group_stale_failed",
       idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(
-        BASE_EFFECT_ID,
+        exactEffectId,
       ),
       groupJoinOutreachId: "hgrpjoa_stale",
       groupJoinReplyOccurredAt: new Date(repliedAt),
       phoneNumberLookupKey: null,
-      sourceRef: BASE_EFFECT_ID,
+      sourceRef: exactEffectId,
       template: "invite_signup",
     });
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
-      sourceRef: `${BASE_EFFECT_ID}:a2`,
-    }]);
+    fixture.queryRaw.mockResolvedValue([
+      { anyIdentityLive: true, sameIdentityStillLive: true },
+    ]);
 
     await ingestHostedLinqProviderEventTx({
       event: requireParsedProviderEvent(buildProviderEvent({
@@ -4998,18 +4980,52 @@ describe("hosted Linq signup-link delivery attempts", () => {
 
     expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
-      select: { sourceRef: true },
-      where: {
-        sourceRef: { startsWith: BASE_EFFECT_ID },
-        status: {
-          in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
-        },
-        template: {
-          in: ["invite_signup", "invite_signup_fallback"],
-        },
-      },
-    });
+    const liveAttemptQuery = fixture.queryRaw.mock.calls
+      .map(([query]) => query as { sql?: string; values?: unknown[] })
+      .find((query) => query.sql?.includes('AS "sameIdentityStillLive"'));
+    expect(liveAttemptQuery?.sql?.match(/EXISTS \(/gu)).toHaveLength(2);
+    expect(liveAttemptQuery?.sql?.match(/LIMIT 1/gu)).toHaveLength(2);
+    expect(liveAttemptQuery?.sql).toContain(
+      '"source_ref" LIKE ?::text ESCAPE \'!\'',
+    );
+    expect(liveAttemptQuery?.sql).toContain(
+      "'^(?::a[2-5]|:e[0-9a-f]{32}(?::a[2-5])?)?$'",
+    );
+    expect(liveAttemptQuery?.values).toEqual([
+      exactEffectId,
+      `${exactEffectId}:a2`,
+      `${exactEffectId}:a3`,
+      `${exactEffectId}:a4`,
+      `${exactEffectId}:a5`,
+      "linq-invite-signup:member!_123:2026-03-26T00:00:00.000Z%",
+      BASE_EFFECT_ID,
+    ]);
+  });
+
+  it("uses one escaped prefix existence probe when only member/day liveness is needed", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{
+      anyIdentityLive: true,
+      sameIdentityStillLive: false,
+    }]);
+
+    await expect(hasHostedLinqInviteSignupLiveDeliveryTx({
+      dayUtc: "2026-03-26T00:00:00.000Z",
+      memberId: "member!_123%",
+      prisma: { $queryRaw: queryRaw } as never,
+    })).resolves.toBe(true);
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(query.sql.match(/EXISTS \(/gu)).toHaveLength(1);
+    expect(query.sql).toContain('FALSE AS "sameIdentityStillLive"');
+    expect(query.sql).toContain('"source_ref" LIKE ?::text ESCAPE \'!\'');
+    expect(query.values).toEqual([
+      "linq-invite-signup:member!!!_123!%:2026-03-26T00:00:00.000Z%",
+      "linq-invite-signup:member!_123%:2026-03-26T00:00:00.000Z",
+    ]);
   });
   it.each(["invite_signup", "invite_signup_fallback"] as const)(
     "surfaces the delivered %s chat when the accepted milestone replays a buffered receipt",
@@ -5735,6 +5751,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqProviderEventUpdateMany,
     hostedMailboxItemUpdateMany,
     prisma,
+    queryRaw,
     transaction,
   };
 }

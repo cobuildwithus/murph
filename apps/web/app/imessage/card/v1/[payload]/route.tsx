@@ -90,7 +90,7 @@ export async function GET(
   );
 }
 
-export function parseResponseCardPayload(
+function parseResponseCardPayload(
   segment: string,
 ):
   | DailyNutritionResponseCard

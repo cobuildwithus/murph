@@ -53,24 +53,24 @@ desired categories and tap **Allow** before connecting Apple Health in Murph.
 WHOOP does not document a supported settings deep link, so Murph must not
 fabricate one.
 
-### Time-boxed Messages extension proof (explicit scope exception)
+### Messages extension action bridge (explicit scope exception)
 
-The 2026-07-10 Linq iMessage mini-app proof is a deliberate, isolated
+The Messages mini-app bridge is a deliberate, isolated
 exception to the two-screen Health sync MVP above. It may add one settings
-control to the containing app and one Messages extension target, but it does
+integration to the containing app and one Messages extension target, but it does
 not make chat, polls, or mobile account state a new responsibility of the
 companion app.
 
-The proof has one question: can an installed Murph Messages extension perform
-a Murph-account action whose authority originates from the containing app's
-current Privy session? The smallest honest implementation is:
+The bridge lets an installed Murph Messages extension perform a bounded
+Murph-account action whose authority originates from the containing app's
+current Privy session. The smallest honest implementation is:
 
 1. Linq delivers a single `imessage_app` card associated with the exact signed
    Murph Messages extension Team ID and bundle ID. Linq does not host the UI or
    receive button-tap webhooks.
-2. The card URL is a capability-less first-party HTTPS locator containing only
-   a public card identifier. It never contains a Privy token, derived
-   credential, member ID, participant UUID, or health data.
+2. The card URL is a capability-less first-party HTTPS presentation snapshot.
+   It never contains a Privy token, derived credential, member ID, participant
+   UUID, canonical record ID, or write authority.
 3. The containing app, while Privy-authenticated, calls `POST
    /api/device-sync/companion/imessage-mini-app/enrollment`. The server verifies
    the bounded request body, verifies the identity token, then serializes with
@@ -84,10 +84,14 @@ current Privy session? The smallest honest implementation is:
    addressed shared Keychain access group. Privy's own access, refresh, and
    identity tokens remain in Privy's host-app-private storage.
 5. The extension calls `POST
-   /api/device-sync/companion/imessage-mini-app/proof-action` with the derived
-   bearer and a closed, versioned choice envelope. The server re-checks active
-   access and launch consent and returns the accepted choice. This spike does
-   not persist a poll or imply durable product truth.
+   /api/device-sync/companion/imessage-mini-app/member-actions` with the derived
+   bearer and a closed, bounded, versioned action envelope. The server derives
+   the member, re-checks active access and historical launch consent, and
+   appends the request to the existing encrypted mailbox before returning
+   `202 Accepted`. The runtime dispatches it directly to the existing domain
+   use case with no assistant turn. Workout is the first action family; future
+   editors extend the closed union rather than gaining arbitrary patch or tool
+   authority.
 6. Disabling the feature or signing out calls `DELETE
    /api/device-sync/companion/imessage-mini-app/enrollment` best-effort and
    always clears the local derived bearer, even if the network revoke fails.

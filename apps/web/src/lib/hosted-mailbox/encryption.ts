@@ -1,6 +1,8 @@
 import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
+  HOSTED_MAILBOX_PREPARED_PAYLOAD_AAD_SEQUENCE,
+  HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX,
   type HostedMailboxPayloadCryptoMetadata,
   type HostedMailboxPayloadStorage,
 } from "@murphai/hosted-execution/runtime-control";
@@ -106,12 +108,47 @@ export async function decryptHostedMailboxPayloadString(input: HostedMailboxPayl
   prisma?: HostedMailboxEncryptionPrismaClient;
   value: string | null | undefined;
 }): Promise<string | null> {
+  const prepared = typeof input.value === "string"
+    && input.value.startsWith(
+      HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX,
+    );
   return openHostedUserSecureBoxString({
-    aad: buildHostedMailboxPayloadSecureBoxAad(input),
+    aad: buildHostedMailboxPayloadSecureBoxAad({
+      ...input,
+      laneSeq: prepared
+        ? HOSTED_MAILBOX_PREPARED_PAYLOAD_AAD_SEQUENCE
+        : input.laneSeq,
+    }),
+    lane: "mailbox-payload",
+    prisma: input.prisma,
+    scope: buildHostedMailboxPayloadScope(input.payloadStorage),
+    userId: input.userId,
+    value: prepared
+      ? input.value?.slice(
+        HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX.length,
+      )
+      : input.value,
+  });
+}
+
+export async function encryptPreparedHostedMailboxPayloadString(
+  input: Omit<HostedMailboxPayloadCryptoMetadata, "laneSeq"> & {
+    prisma?: HostedMailboxEncryptionPrismaClient;
+    value: string | null | undefined;
+  },
+): Promise<string | null> {
+  const ciphertext = await sealHostedUserSecureBoxString({
+    aad: buildHostedMailboxPayloadSecureBoxAad({
+      ...input,
+      laneSeq: HOSTED_MAILBOX_PREPARED_PAYLOAD_AAD_SEQUENCE,
+    }),
     lane: "mailbox-payload",
     prisma: input.prisma,
     scope: buildHostedMailboxPayloadScope(input.payloadStorage),
     userId: input.userId,
     value: input.value,
   });
+  return ciphertext
+    ? `${HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX}${ciphertext}`
+    : null;
 }

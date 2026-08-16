@@ -4,7 +4,13 @@ import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { maybeParseJsonObject, stringifyJson } from "../shared.ts";
 
-import type { ConsumeOAuthStateResult, OAuthStateRecord } from "../types.ts";
+import {
+  DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+  type ConsumeOAuthStateResult,
+  type DiscardUnconsumedOAuthStateResult,
+  type OAuthStateConsumeClaim,
+  type OAuthStateRecord,
+} from "../types.ts";
 
 interface OAuthStateRow {
   state: string;
@@ -33,6 +39,18 @@ function mapOAuthStateRow(row: OAuthStateRow | undefined): OAuthStateRecord | nu
   };
 }
 
+function oauthCallbackRecoveryRequired(row: OAuthStateRow, now: string): boolean {
+  if (row.consumed_at === null) {
+    return false;
+  }
+  const processingLeaseExpiresAt = Date.parse(row.consumed_at)
+    + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS;
+  return Date.parse(now) >= Math.max(
+    Date.parse(row.expires_at),
+    processingLeaseExpiresAt,
+  );
+}
+
 export function createOAuthState(database: DatabaseSync, input: OAuthStateRecord): OAuthStateRecord {
   database.prepare(`
     insert into oauth_state (state, provider, owner_id, return_to, metadata_json, created_at, expires_at)
@@ -51,8 +69,72 @@ export function createOAuthState(database: DatabaseSync, input: OAuthStateRecord
 }
 
 export function deleteExpiredOAuthStates(database: DatabaseSync, now: string): number {
-  const result = database.prepare("delete from oauth_state where expires_at <= ?").run(now) as { changes: number };
+  const result = database.prepare(
+    "delete from oauth_state where expires_at <= ? and consumed_at is null",
+  ).run(now) as { changes: number };
   return result.changes ?? 0;
+}
+
+export function resolveOAuthStateWithoutProviderAuthority(
+  database: DatabaseSync,
+  claim: OAuthStateConsumeClaim,
+): boolean {
+  const result = database.prepare(
+    "delete from oauth_state where state = ? and consumed_at = ?",
+  ).run(claim.state, claim.consumedAt) as { changes: number };
+  return (result.changes ?? 0) === 1;
+}
+
+export function discardUnconsumedOAuthState(
+  database: DatabaseSync,
+  state: string,
+  now: string,
+  expectedProvider?: string,
+  expectedOwnerId?: string,
+): DiscardUnconsumedOAuthStateResult {
+  return withImmediateTransaction(database, () => {
+    const row = database.prepare(`
+      select state, provider, owner_id, return_to, metadata_json, created_at, expires_at, consumed_at
+      from oauth_state
+      where state = ?
+    `).get(state) as OAuthStateRow | undefined;
+
+    if (!row) {
+      return { status: "missing" };
+    }
+    if (row.consumed_at === null && Date.parse(row.expires_at) <= Date.parse(now)) {
+      database.prepare(
+        "delete from oauth_state where state = ? and consumed_at is null",
+      ).run(state);
+      return { status: "missing" };
+    }
+    if (expectedProvider && row.provider !== expectedProvider) {
+      return { status: "provider_mismatch", provider: row.provider };
+    }
+    if (expectedOwnerId && row.owner_id !== expectedOwnerId) {
+      return { status: "owner_mismatch" };
+    }
+    if (row.consumed_at !== null) {
+      return {
+        status: oauthCallbackRecoveryRequired(row, now)
+          ? "recovery_required"
+          : "replayed",
+        consumedAt: row.consumed_at,
+        record: mapOAuthStateRow(row)!,
+      };
+    }
+
+    const discarded = database.prepare(
+      "delete from oauth_state where state = ? and consumed_at is null",
+    ).run(state) as { changes: number };
+    if ((discarded.changes ?? 0) !== 1) {
+      throw new Error("OAuth state changed while discarding its unconsumed admission.");
+    }
+    return {
+      status: "discarded",
+      record: mapOAuthStateRow(row)!,
+    };
+  });
 }
 
 export function consumeOAuthState(
@@ -75,7 +157,10 @@ export function consumeOAuthState(
       };
     }
 
-    if (Date.parse(row.expires_at) <= Date.parse(now)) {
+    if (
+      row.consumed_at === null
+      && Date.parse(row.expires_at) <= Date.parse(now)
+    ) {
       database.prepare("delete from oauth_state where state = ?").run(state);
       return {
         status: "missing",
@@ -97,13 +182,16 @@ export function consumeOAuthState(
 
     if (row.consumed_at !== null) {
       return {
-        status: "replayed",
+        status: oauthCallbackRecoveryRequired(row, now)
+          ? "recovery_required"
+          : "replayed",
+        consumedAt: row.consumed_at,
         record: mapOAuthStateRow(row)!,
       };
     }
 
     // Mark instead of delete so a redelivered callback stays distinguishable
-    // from an unknown state until the row expires; duplicate or concurrent
+    // from an unknown state until exact finalization; duplicate or concurrent
     // consumers resolve to "replayed" instead of doing the work again.
     const consumeResult = database.prepare(
       "update oauth_state set consumed_at = ? where state = ? and consumed_at is null",
@@ -112,12 +200,14 @@ export function consumeOAuthState(
     if ((consumeResult.changes ?? 0) !== 1) {
       return {
         status: "replayed",
+        consumedAt: row.consumed_at ?? now,
         record: mapOAuthStateRow(row)!,
       };
     }
 
     return {
       status: "consumed",
+      consumedAt: now,
       record: mapOAuthStateRow(row)!,
     };
   });
