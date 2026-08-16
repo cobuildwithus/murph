@@ -154,7 +154,12 @@ export async function prepareDeviceProviderSnapshotImport(
     authoritativeEventSets: normalized.authoritativeEventSets,
     provenance: normalized.provenance,
   });
-  const payloadWithEvidence = ensureProviderEvidencePart(basePayload, sanitizedSnapshot);
+  // A complete-source-day import persists only adapter-produced compact
+  // evidence: the sanitized provider snapshot must never be retained for that
+  // authority class, even when the day yields zero temporal samples.
+  const payloadWithEvidence = request.completeSourceDay
+    ? basePayload
+    : ensureProviderEvidencePart(basePayload, sanitizedSnapshot);
   const payloadWithSingleEvidenceFallback = attachSingleEvidenceRole(payloadWithEvidence);
   const rawReceipt = buildWearableRawIngestReceipt({
     provider: basePayload.provider,

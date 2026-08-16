@@ -1565,14 +1565,21 @@ test("local Junction workers exclude a disconnected source from production-norma
     assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
 
     const durableResults = importerResults as Array<{
+      authoritativeEventSets?: unknown[];
       evidenceParts?: Array<{ content?: unknown }>;
       events?: Array<{
         dataOrigin?: { sourceProviderSlug?: string };
       }>;
       ingestReceipt?: Record<string, unknown>;
     }>;
+    // Complete-source-day imports never retain the provider snapshot, so a
+    // temporal day with no compact artifacts legitimately carries zero
+    // evidence parts alongside its authoritative set.
     assert.equal(
-      durableResults.every((result) => (result.evidenceParts?.length ?? 0) > 0),
+      durableResults.every((result) =>
+        (result.evidenceParts?.length ?? 0) > 0
+        || (result.authoritativeEventSets?.length ?? 0) > 0
+      ),
       true,
     );
     assert.equal(

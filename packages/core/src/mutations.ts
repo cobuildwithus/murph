@@ -3323,10 +3323,15 @@ async function reconcileDeviceEventEntriesByExternalRef(
     // reasserts a retracted facet in serialized arrival order rather than
     // treating the tombstone's identical content as an exact replay. Ordinary
     // versionless deliveries without complete-set authority never resurrect.
+    // Only provider-owned authoritative-set retractions may be reasserted.
+    // Their tombstones carry the set's explicit version marker on the external
+    // reference, while a member deletion preserves the member's unversioned
+    // reference and must stay deleted under authoritative replay.
     const reassertsUnversionedSetMember = Boolean(
       authoritativeSet
       && indexedSourceVersionComparison === null
-      && isDeletedEventSpineRecord(latest),
+      && isDeletedEventSpineRecord(latest)
+      && indexedProviderMatch?.indexedExternalRef.version !== undefined,
     );
     if (
       deviceEventContentKey(latest) === deviceEventContentKey(entry.record)
@@ -3519,6 +3524,15 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
 
     if (isDeletedEventSpineRecord(latest) && !reassertsUnversionedSetMember) {
+      // A member-authored deletion tombstone (unversioned reference) stays
+      // dead under authoritative replay: no append, no index change, so a
+      // later empty-then-populated cadence cannot launder the deletion away.
+      if (authoritativeSet && indexedSourceVersionComparison === null) {
+        skippedDuplicateCount += 1;
+        retainedPreparedIds.add(entry.record.id);
+        records.push(latest);
+        continue;
+      }
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);

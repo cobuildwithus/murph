@@ -1548,6 +1548,178 @@ test("Junction date-only complete days retract stale facets and keep ordinary fa
       "utf8",
     );
     assert.equal(ledgerAfter, ledgerBefore);
+
+    // A structurally empty complete day also persists zero evidence parts.
+    await importDay([], "2026-04-24T15:00:00.000Z", true);
+
+    // Complete-source-day imports never reach the provider-snapshot fallback:
+    // the durable integration-ingest ledger holds only compact adapter
+    // evidence and no grouped provider rows, raw timestamps, or values.
+    const ingestRecords = (await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/integration-ingests/2026/2026-04.jsonl",
+    })) as Array<{ parts?: Array<{ role?: string }> }>;
+    const completeDayParts = ingestRecords.flatMap((record) => record.parts ?? []);
+    assert.equal(
+      completeDayParts.some((part) => part.role === "provider-snapshot"),
+      false,
+    );
+    assert.equal(
+      completeDayParts.every((part) =>
+        String(part.role ?? "").startsWith("junction-timeseries-")
+      ),
+      true,
+    );
+    const ingestText = JSON.stringify(ingestRecords);
+    assert.doesNotMatch(ingestText, /"groups"/u);
+    assert.doesNotMatch(ingestText, /2026-04-22 07:00|"value":55/u);
+    assert.doesNotMatch(ingestText, /timeseries_temporal_features(?!\.v2)/u);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction complete-source-day imports bypass the provider-snapshot fallback", async () => {
+  const snapshot = {
+    accountId: "junction-account-hash-1",
+    importedAt: "2026-04-24T10:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [{ timestamp: "2026-04-22", value: 55 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  };
+  const authorized = await prepareDeviceProviderSnapshotImport({
+    completeSourceDay: {
+      connectionId: "junction-test-connection",
+      dayKey: "2026-04-22",
+      resources: ["stress_level"],
+      revisionAt: "2026-04-24T10:00:00.000Z",
+      timeZone: "UTC",
+    },
+    provider: "junction",
+    connectionId: "conn-junction-garmin",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot,
+  }, { defaultTimeZone: "UTC" });
+  // Zero temporal samples still means zero evidence parts and no request body
+  // for the complete-source-day authority class; the authoritative set alone
+  // carries the replacement.
+  assert.equal(authorized.evidenceParts?.length ?? 0, 0);
+  assert.equal((authorized.authoritativeEventSets ?? []).length, 1);
+  assert.doesNotMatch(JSON.stringify(authorized), /provider-snapshot/u);
+
+  const ordinary = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn-junction-garmin",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot,
+  }, { defaultTimeZone: "UTC" });
+  // The same rows without authority keep ordinary aggregation and its compact
+  // evidence; the generic fallback path for evidence-less ordinary imports is
+  // unchanged and covered by the shared device-provider tests.
+  assert.equal((ordinary.evidenceParts ?? []).length > 0, true);
+  assert.equal(
+    ordinary.events?.some((event) => event.fields?.metric === "stress-level"),
+    true,
+  );
+});
+
+test("Junction member deletions survive authoritative temporal replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-member-deletion-survives");
+  const clockedRows = [
+    { timestamp: "2026-04-22 07:00", value: 20 },
+    { timestamp: "2026-04-22 07:05", value: 30 },
+    { timestamp: "2026-04-22 19:00", value: 70 },
+    { timestamp: "2026-04-22 19:05", value: 80 },
+  ];
+  const importDay = (revisionAt: string) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        completeSourceDay: {
+          connectionId: "junction-test-connection",
+          dayKey: "2026-04-22",
+          resources: ["stress_level"],
+          revisionAt,
+          timeZone: "UTC",
+        },
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: revisionAt,
+          timeseries: {
+            stress_level: {
+              groups: {
+                garmin: [{ data: clockedRows, source: { provider: "garmin", type: "watch" } }],
+              },
+            },
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const seeded = await importDay("2026-04-24T12:00:00.000Z");
+    const facet = seeded.events.find((event) =>
+      event.kind === "observation"
+      && event.metric === "stress-evening-minus-morning-score"
+    );
+    assert.ok(facet);
+
+    await coreRuntime.deleteEvent({ vaultRoot, eventId: facet.id });
+
+    const ledgerBefore = await readFile(
+      join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      "utf8",
+    );
+    await importDay("2026-04-24T13:00:00.000Z");
+    const ledgerAfter = await readFile(
+      join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      "utf8",
+    );
+    // The authoritative replay appends no superseding revision over the
+    // member's deletion tombstone and resurrects nothing.
+    assert.equal(ledgerAfter, ledgerBefore);
+    const live = latestLiveRecords(
+      await coreRuntime.readJsonlRecords({
+        vaultRoot,
+        relativePath: "ledger/events/2026/2026-04.jsonl",
+      }),
+    );
+    assert.equal(
+      live.some((record) =>
+        record.kind === "observation"
+        && record.metric === "stress-evening-minus-morning-score"
+      ),
+      false,
+    );
+    // The other, undeleted facets remain live and replayable.
+    assert.equal(
+      live.filter((record) =>
+        record.kind === "observation"
+        && typeof record.metric === "string"
+        && record.metric.startsWith("stress-")
+        && record.metric !== "stress-level"
+      ).length,
+      2,
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

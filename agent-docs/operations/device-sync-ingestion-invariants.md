@@ -229,7 +229,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    date-only rows prove raw-day membership and stay ordinary daily inputs with
    zero temporal coverage, omitted seconds resolve as zero, and a supplied
    clock that cannot resolve in the retained authority timezone fails the
-   import retryably instead of fabricating an instant. The authorized result
+   import retryably instead of fabricating an instant. Complete-source-day
+   imports never reach the generic provider-snapshot evidence fallback: they
+   persist only adapter-produced compact evidence, so a day with zero temporal
+   samples carries the authoritative set with zero evidence parts and retains
+   no request body. Authoritative reassertion is scoped to provider-owned
+   retraction tombstones, which carry the set's explicit version marker; a
+   member-authored deletion preserves the member's unversioned reference and
+   survives authoritative replay permanently. The authorized result
    treats the fixed feature facets as an unversioned replacement set whose
    ordering authority is the serialized authoritative-set seam itself: a facet
    declared current with identical live content is a no-op, an omitted facet
