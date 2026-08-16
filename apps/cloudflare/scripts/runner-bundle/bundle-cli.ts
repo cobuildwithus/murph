@@ -87,12 +87,16 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // macOS after merging current main on 2026-08-14; no package entered the graph.
 // The reviewed cross-session context reply work measured 9,119,111 B after
 // normalizing the esbuild working directory on 2026-08-15; it grows the
-// existing Assistant Engine graph without adding a package. The static
+// existing Assistant Engine graph without adding a package. The current-main
+// synthetic merge measured 9,153,004 B on Linux after subsequent reviewed
+// CLI, import, provider, and assistant additions. This parity-only PR adds no
+// target-graph dependency; retain a 32,996 B allowance over that measured graph.
+// The static
 // startup closure measured 24,950 B. Keep total output inside a narrow 32 KiB
 // allowance and static startup inside an 8 KiB allowance. If a
 // violation fires, investigate the listed largest inputs first; only raise the
 // budget deliberately for understood, intended growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_152_000;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_186_000;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
