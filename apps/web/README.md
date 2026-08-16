@@ -440,6 +440,19 @@ build; a 30-second caller does not remain compatible with the 40-second web
 deadline, so do not roll Cloudflare back below 45 seconds while that web build
 is active.
 
+The encrypted phone-call result reader accepts an optional bounded completion
+policy as a consumer-first schema release. This reader-only release must deploy
+before any Web version writes that policy. Activate a writer only after the
+production alias serves this reader and every earlier Web invocation has
+drained for the platform's full configured function lifetime. The reader-only
+release continues to emit the legacy result shape during that interval. After
+writer activation, this reader becomes the permanent Web rollback floor for
+tracked, manual, and group transfers because an older strict reader rejects
+policy-bearing plaintext. A zero count of non-null result-notification-channel
+rows proves only generation-state compatibility; it cannot prove encrypted
+result compatibility. Recover below-floor incidents with a compatible forward
+deployment, not an older strict reader.
+
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
