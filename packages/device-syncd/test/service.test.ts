@@ -8878,6 +8878,181 @@ test("Junction ambiguous-timestamp rows fail a complete day closed through the r
   }
 });
 
+test("Junction fall-back floating clocks fail the day closed through the real importer", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-fall-back");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-fall-back";
+  const now = new Date("2026-11-03T12:00:00.000Z");
+  let activeRows: readonly Record<string, unknown>[] = [];
+
+  await initializeVault({ vaultRoot, timezone: "America/Chicago" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: [],
+    timeseriesResources: ["stress_level"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-fall-back",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { stress_level: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+        return createJsonResponse({
+          groups: {
+            garmin: [{ data: activeRows, source: { provider: "garmin", type: "watch" } }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction fall-back request: ${url.pathname}`);
+    },
+  });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: canonicalImporter,
+    providers: [provider],
+  });
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-10-01T00:00:00.000Z",
+    });
+    // The Chicago 2026-11-01 vault day spans 25 hours: midnight CDT through
+    // the fall-back repetition of the 01:00 hour to midnight CST.
+    const enqueueDay = (dedupeKey: string) => fixture.store.enqueueJob({
+      accountId: account.id,
+      availableAt: now.toISOString(),
+      dedupeKey,
+      kind: "resource",
+      payload: {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityTimeZone: "America/Chicago",
+        windowEnd: "2026-11-02T06:00:00.000Z",
+        windowStart: "2026-11-01T05:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const liveFacets = async () => latestLiveRecords(
+      await (await import("@murphai/core")).readJsonlRecords({
+        vaultRoot,
+        relativePath: "ledger/events/2026/2026-11.jsonl",
+      }),
+    ).filter((record) =>
+      record.kind === "observation"
+      && typeof record.metric === "string"
+      && record.metric.startsWith("stress-")
+      && record.metric !== "stress-level"
+    );
+
+    // Unambiguous floating clocks on the fall-back day still import: every
+    // seeded clock falls outside the repeated 01:00 hour.
+    activeRows = [
+      { timestamp: "2026-11-01 07:00:00", value: 20 },
+      { timestamp: "2026-11-01 07:05", value: 30 },
+      { timestamp: "2026-11-01 07:10", value: 25 },
+      { timestamp: "2026-11-01 19:00:30", value: 70 },
+      { timestamp: "2026-11-01 19:05", value: 80 },
+      { timestamp: "2026-11-01 19:59:30", value: 60 },
+    ];
+    const seedJob = enqueueDay("junction-temporal-authority:v1:fall-back-seed");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, seedJob.id);
+    assert.equal(fixture.store.getJobById(seedJob.id)?.status, "succeeded");
+    assert.equal((await liveFacets()).length, 3);
+    const ledgerBefore = await readFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-11.jsonl"),
+      "utf8",
+    );
+
+    // A floating clock inside the repeated hour maps to two real instants.
+    // The repeated-clock 88/96 pair must never collapse into one averaged
+    // sample: the ambiguous day fails retryably with zero canonical mutation.
+    activeRows = [
+      { timestamp: "2026-11-01 07:00:00", value: 20 },
+      { timestamp: "2026-11-01 01:30", value: 88 },
+      { timestamp: "2026-11-01 01:30", value: 96 },
+    ];
+    const ambiguousJob = enqueueDay("junction-temporal-authority:v1:fall-back-ambiguous");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, ambiguousJob.id);
+    assert.equal(fixture.store.getJobById(ambiguousJob.id)?.status, "queued");
+    assert.equal(
+      fixture.store.getJobById(ambiguousJob.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    );
+    assert.equal(
+      await readFile(path.join(vaultRoot, "ledger/events/2026/2026-11.jsonl"), "utf8"),
+      ledgerBefore,
+    );
+    assert.equal((await liveFacets()).length, 3);
+    fixture.store.completeJob(ambiguousJob.id, now.toISOString());
+
+    // Explicit offsets disambiguate the folds: the same 01:30 wall clock in
+    // CDT and CST stays two distinct readings, so the day imports all eight
+    // samples instead of averaging the pair away.
+    activeRows = [
+      { timestamp: "2026-11-01T01:30:00-05:00", value: 88 },
+      { timestamp: "2026-11-01T01:30:00-06:00", value: 96 },
+      { timestamp: "2026-11-01T07:00:00-06:00", value: 20 },
+      { timestamp: "2026-11-01T07:05:00-06:00", value: 30 },
+      { timestamp: "2026-11-01T07:10:00-06:00", value: 25 },
+      { timestamp: "2026-11-01T19:00:30-06:00", value: 70 },
+      { timestamp: "2026-11-01T19:05:00-06:00", value: 80 },
+      { timestamp: "2026-11-01T19:59:30-06:00", value: 60 },
+    ];
+    const foldsJob = enqueueDay("junction-temporal-authority:v1:fall-back-folds");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, foldsJob.id);
+    assert.equal(fixture.store.getJobById(foldsJob.id)?.status, "succeeded");
+    const foldFacets = await liveFacets();
+    assert.equal(foldFacets.length, 3);
+    for (const record of foldFacets) {
+      assert.equal(
+        (record.qualifiers as { sampleCount?: number } | undefined)?.sampleCount,
+        8,
+      );
+    }
+
+    // A real 65-minute cross-fold gap (01:00 CDT to 01:05 CST) never
+    // qualifies as continuity: the day succeeds with zero temporal claims.
+    activeRows = [
+      { timestamp: "2026-11-01T01:00:00-05:00", value: 60 },
+      { timestamp: "2026-11-01T01:05:00-06:00", value: 70 },
+    ];
+    const gapJob = enqueueDay("junction-temporal-authority:v1:fall-back-gap");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, gapJob.id);
+    assert.equal(fixture.store.getJobById(gapJob.id)?.status, "succeeded");
+    assert.equal((await liveFacets()).length, 0);
+  } finally {
+    fixture.close();
+  }
+});
+
 test("Junction temporal replacement identity survives a hosted cold restore", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-stable-identity");
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");

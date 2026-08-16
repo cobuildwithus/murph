@@ -4212,31 +4212,33 @@ function resolveJunctionTemporalFeatureInstant(
   ];
   const { hour, minute, second } = parsed;
   const targetPseudoMs = Date.UTC(year, month - 1, day, hour, minute, second);
-  let candidateMs = targetPseudoMs;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const parts = formatTimeZoneDateTimeParts(candidateMs, timeZone);
-    const observedPseudoMs = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second,
+  // Enumerate the bounded candidate instants implied by the zone's offsets
+  // around the target wall clock and require exactly one to display it: a
+  // spring-forward gap yields zero matches and a fall-back overlap yields
+  // two, and both fail retryably instead of silently picking one DST fold.
+  const candidateOffsets = new Set<number>();
+  for (const probeMs of [targetPseudoMs - 86_400_000, targetPseudoMs, targetPseudoMs + 86_400_000]) {
+    const parts = formatTimeZoneDateTimeParts(probeMs, timeZone);
+    candidateOffsets.add(
+      Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+        - probeMs,
     );
-    candidateMs += targetPseudoMs - observedPseudoMs;
   }
-  const resolved = formatTimeZoneDateTimeParts(candidateMs, timeZone);
-  if (
-    resolved.year !== year
-    || resolved.month !== month
-    || resolved.day !== day
-    || resolved.hour !== hour
-    || resolved.minute !== minute
-    || resolved.second !== second
-  ) {
+  const matches = [...candidateOffsets]
+    .map((offsetMs) => targetPseudoMs - offsetMs)
+    .filter((candidateMs) => {
+      const resolved = formatTimeZoneDateTimeParts(candidateMs, timeZone);
+      return resolved.year === year
+        && resolved.month === month
+        && resolved.day === day
+        && resolved.hour === hour
+        && resolved.minute === minute
+        && resolved.second === second;
+    });
+  if (matches.length !== 1 || matches[0] === undefined) {
     throw new JunctionSparseCalendarRepairNormalizationError();
   }
-  return new Date(candidateMs + parsed.millisecond).toISOString();
+  return new Date(matches[0] + parsed.millisecond).toISOString();
 }
 
 function withJunctionCompactTimeseriesMetadata(

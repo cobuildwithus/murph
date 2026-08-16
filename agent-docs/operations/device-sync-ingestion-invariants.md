@@ -238,9 +238,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    contributes the exact instant derived from its validated parts, never from
    permissive runtime date parsing. The full raw value must be consumed — a
    valid prefix with trailing unsupported text, an impossible calendar or
-   clock value, contradictory semantics, or a clock that cannot resolve in
-   the retained authority timezone fails the import retryably instead of
-   fabricating or laundering an instant. The temporal replacement
+   clock value, contradictory semantics, or a floating clock that does not
+   resolve to exactly one instant in the retained authority timezone — a
+   spring-forward gap or a fall-back repetition — fails the import retryably
+   instead of fabricating, collapsing, or laundering an instant. The temporal replacement
    domain keys on the stable Junction import identity derived from the external
    account, never the machine-local account row, so hosted cold restores retract
    and replace the same facets they seeded. Under complete-day authority the
