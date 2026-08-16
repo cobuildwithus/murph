@@ -11,7 +11,19 @@ const productionBuildScript = path.join(
   "scripts",
   "run-production-next-build.sh",
 );
-const buildCacheEpoch = "webpack-next-16.3-v1";
+const buildCacheEpoch = "webpack-next-16.3-v2-cold-webpack";
+const vercelTimeoutInvocation = [
+  "--verbose",
+  "--signal=TERM",
+  "--kill-after=30s",
+  "15m",
+  "node",
+  "--max-old-space-size=1024",
+  "/fixture/next",
+  "build",
+  "--webpack",
+  "",
+].join("\n");
 
 async function createRunnerFixture(): Promise<{
   appDir: string;
@@ -20,6 +32,7 @@ async function createRunnerFixture(): Promise<{
   cleanup: () => Promise<void>;
   removeLog: string;
   scriptPath: string;
+  timeoutLog: string;
 }> {
   const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
   if (!testTempRoot) {
@@ -32,6 +45,7 @@ async function createRunnerFixture(): Promise<{
   const scriptPath = path.join(appDir, "scripts", "run-production-next-build.sh");
   const buildLog = path.join(fixtureRoot, "build.log");
   const removeLog = path.join(fixtureRoot, "remove.log");
+  const timeoutLog = path.join(fixtureRoot, "timeout.log");
 
   await mkdir(path.dirname(scriptPath), { recursive: true });
   await mkdir(binDir, { recursive: true });
@@ -54,10 +68,28 @@ if [[ "\${1:-}" == "../../scripts/rm-paths.mjs" ]]; then
 fi
 printf 'NODE_OPTIONS=%s\\n' "\${NODE_OPTIONS:-}" > "\$MURPH_FAKE_BUILD_LOG"
 printf '%s\\n' "\$@" >> "\$MURPH_FAKE_BUILD_LOG"
+mkdir -p .next/cache/webpack
+printf 'generated\\n' > .next/cache/webpack/generated-cache-entry
 exit "\${MURPH_FAKE_BUILD_EXIT_CODE:-0}"
 `,
   );
   await chmod(fakeNodePath, 0o755);
+
+  const fakeTimeoutPath = path.join(binDir, "timeout");
+  await writeFile(
+    fakeTimeoutPath,
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "\$@" > "\$MURPH_FAKE_TIMEOUT_LOG"
+if [[ "\${MURPH_FAKE_TIMEOUT_EXIT_CODE:-0}" != "0" ]]; then
+  exit "\$MURPH_FAKE_TIMEOUT_EXIT_CODE"
+fi
+while [[ "\${1:-}" == --* ]]; do shift; done
+shift
+"\$@"
+`,
+  );
+  await chmod(fakeTimeoutPath, 0o755);
 
   return {
     appDir,
@@ -66,6 +98,7 @@ exit "\${MURPH_FAKE_BUILD_EXIT_CODE:-0}"
     cleanup: () => rm(fixtureRoot, { force: true, recursive: true }),
     removeLog,
     scriptPath,
+    timeoutLog,
   };
 }
 
@@ -76,28 +109,44 @@ function runProductionBuild(input: {
   buildLog: string;
   removeLog: string;
   scriptPath: string;
+  timeoutExitCode?: number;
+  timeoutLog: string;
+  vercel?: boolean;
+  vercelEnv?: string;
 }) {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    MURPH_FAKE_BUILD_EXIT_CODE: String(input.buildExitCode ?? 0),
+    MURPH_FAKE_BUILD_LOG: input.buildLog,
+    MURPH_FAKE_NEXT_BIN: "/fixture/next",
+    MURPH_FAKE_REMOVE_LOG: input.removeLog,
+    MURPH_FAKE_TIMEOUT_EXIT_CODE: String(input.timeoutExitCode ?? 0),
+    MURPH_FAKE_TIMEOUT_LOG: input.timeoutLog,
+    NODE_OPTIONS: "--trace-warnings --max-old-space-size=99",
+    PATH: `${input.binDir}:${process.env.PATH ?? ""}`,
+  };
+  if (input.vercel === false) {
+    delete env.VERCEL;
+    delete env.VERCEL_ENV;
+  } else {
+    env.VERCEL = "1";
+    env.VERCEL_ENV = input.vercelEnv ?? "production";
+  }
   return spawnSync("bash", [input.scriptPath], {
     cwd: input.appDir,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      MURPH_FAKE_BUILD_EXIT_CODE: String(input.buildExitCode ?? 0),
-      MURPH_FAKE_BUILD_LOG: input.buildLog,
-      MURPH_FAKE_NEXT_BIN: "/fixture/next",
-      MURPH_FAKE_REMOVE_LOG: input.removeLog,
-      NODE_OPTIONS: "--trace-warnings --max-old-space-size=99",
-      PATH: `${input.binDir}:${process.env.PATH ?? ""}`,
-    },
+    env,
   });
 }
 
-test("production Next runner owns the Webpack cache epoch transition", async () => {
+test("production Next runner owns the cold Webpack cache and Vercel watchdog", async () => {
   const fixture = await createRunnerFixture();
   const cacheDir = path.join(fixture.appDir, ".next", "cache");
   const cacheStamp = path.join(cacheDir, "murph-production-build-epoch");
   const staleCacheEntry = path.join(cacheDir, "stale-cache-entry");
-  const warmCacheEntry = path.join(cacheDir, "warm-cache-entry");
+  const restoredWebpackEntry = path.join(cacheDir, "webpack", "restored-cache-entry");
+  const generatedWebpackEntry = path.join(cacheDir, "webpack", "generated-cache-entry");
+  const retainedSwcEntry = path.join(cacheDir, "swc", "retained-cache-entry");
 
   try {
     await mkdir(cacheDir, { recursive: true });
@@ -108,10 +157,21 @@ test("production Next runner owns the Webpack cache epoch transition", async () 
     expect(coldBuild.stdout).toContain(
       `Resetting incompatible Next build cache for epoch=${buildCacheEpoch}`,
     );
-    expect(coldBuild.stdout).toContain("compiler=webpack");
+    expect(coldBuild.stdout).toContain(
+      "compiler=webpack parent_old_space_mb=1024 next_child_old_space_mb=3072 webpack_cache=cold vercel_timeout=15m",
+    );
+    expect(coldBuild.stdout).toContain(
+      "Discarding Webpack cache after successful production compile",
+    );
     await expect(readFile(staleCacheEntry, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(generatedWebpackEntry, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
-    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache\n");
+    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(
+      ".next/cache\n.next/cache/webpack\n",
+    );
+    await expect(readFile(fixture.timeoutLog, "utf8")).resolves.toBe(vercelTimeoutInvocation);
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
       "--max-old-space-size=1024",
@@ -121,26 +181,72 @@ test("production Next runner owns the Webpack cache epoch transition", async () 
       "",
     ].join("\n"));
 
-    await writeFile(warmCacheEntry, "warm\n");
+    await mkdir(path.dirname(restoredWebpackEntry), { recursive: true });
+    await writeFile(restoredWebpackEntry, "restored\n");
+    await mkdir(path.dirname(retainedSwcEntry), { recursive: true });
+    await writeFile(retainedSwcEntry, "retained\n");
     await rm(fixture.removeLog, { force: true });
+    await rm(fixture.timeoutLog, { force: true });
     const warmBuild = runProductionBuild(fixture);
     expect(warmBuild.status, warmBuild.stderr).toBe(0);
     expect(warmBuild.stdout).not.toContain("Resetting incompatible Next build cache");
-    await expect(readFile(warmCacheEntry, "utf8")).resolves.toBe("warm\n");
-    await expect(readFile(fixture.removeLog, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(warmBuild.stdout).toContain(
+      "Resetting restored Webpack cache before production compile",
+    );
+    await expect(readFile(restoredWebpackEntry, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(generatedWebpackEntry, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(retainedSwcEntry, "utf8")).resolves.toBe("retained\n");
+    await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
+    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(
+      ".next/cache/webpack\n.next/cache/webpack\n",
+    );
 
     await writeFile(cacheStamp, "turbopack-old-epoch\n");
     await writeFile(staleCacheEntry, "stale-again\n");
+    await rm(fixture.removeLog, { force: true });
     const failedBuild = runProductionBuild({ ...fixture, buildExitCode: 23 });
     expect(failedBuild.status).toBe(23);
     expect(failedBuild.stdout).toContain("Resetting incompatible Next build cache");
     await expect(readFile(staleCacheEntry, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(cacheStamp, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache\n");
 
     const recoveredBuild = runProductionBuild(fixture);
     expect(recoveredBuild.status, recoveredBuild.stderr).toBe(0);
     expect(recoveredBuild.stdout).toContain("Resetting incompatible Next build cache");
+    await expect(readFile(generatedWebpackEntry, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
+
+    await rm(fixture.timeoutLog, { force: true });
+    const localBuild = runProductionBuild({ ...fixture, vercel: false });
+    expect(localBuild.status, localBuild.stderr).toBe(0);
+    expect(localBuild.stdout).toContain("vercel_timeout=disabled");
+    await expect(readFile(fixture.timeoutLog, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    await rm(fixture.timeoutLog, { force: true });
+    const previewBuild = runProductionBuild({ ...fixture, vercelEnv: "preview" });
+    expect(previewBuild.status, previewBuild.stderr).toBe(0);
+    expect(previewBuild.stdout).toContain("vercel_timeout=disabled");
+    await expect(readFile(fixture.timeoutLog, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    await rm(fixture.timeoutLog, { force: true });
+    const timedOutBuild = runProductionBuild({ ...fixture, timeoutExitCode: 124 });
+    expect(timedOutBuild.status).toBe(124);
+    expect(timedOutBuild.stderr).toContain(
+      "Next build exceeded 15m and was terminated before Vercel's maximum build duration.",
+    );
+    await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
+    await expect(readFile(fixture.timeoutLog, "utf8")).resolves.toBe(vercelTimeoutInvocation);
   } finally {
     await fixture.cleanup();
   }

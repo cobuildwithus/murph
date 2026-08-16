@@ -391,10 +391,17 @@ supported provider credential.
   `memory.swap.max`, or `memory.oom.group`. The Vercel package build gives the
   parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
   `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.3.0
-  rebuilds its non-isolated TypeScript worker options from the parent arguments
-  followed by `NODE_OPTIONS`, while removing the flag from isolated static
-  workers. The same script owns the Vercel package build and CI memory-
-  observation invocation. The split reduces the compile-parent peak without
+  rebuilds non-isolated child options from the parent arguments followed by
+  `NODE_OPTIONS`, so the sequential Webpack compiler workers receive 3 GiB and
+  the later generated-contract TypeScript validation child inherits the same
+  limit, while isolated static workers have the flag removed. The same script
+  owns the Vercel package build and CI memory-observation invocation. The
+  production runner keeps Webpack compiles cold-cache (it clears
+  `.next/cache/webpack` before every compile and discards it after success)
+  and, on Vercel production builds only (`VERCEL_ENV=production`), bounds
+  `next build` with a 15-minute `timeout` watchdog so a wedged compile fails
+  fast instead of reaching Vercel's 45-minute ceiling. The verify lane's
+  `VERCEL=1 VERCEL_ENV=preview` build shape stays unbounded. The split reduces the compile-parent peak without
   weakening generated-contract validation, while repeated forced-cold Standard
   previews remain the real Vercel acceptance proof. A 2 GiB parent-bound
   candidate passed one forced-cold Standard preview but the next identical

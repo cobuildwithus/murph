@@ -1439,8 +1439,17 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
-    assert.match(productionNextBuildScript, /typecheck_worker_old_space_mb=3072/u);
-    assert.match(productionNextBuildScript, /build_cache_epoch=webpack-next-16\.3-v1/u);
+    assert.match(productionNextBuildScript, /next_child_old_space_mb=3072/u);
+    assert.match(productionNextBuildScript, /next_build_timeout=15m/u);
+    assert.match(
+      productionNextBuildScript,
+      /if \[\[ "\$\{VERCEL:-\}" == "1" && "\$\{VERCEL_ENV:-\}" == "production" \]\]; then\s+active_next_build_timeout="\$next_build_timeout"/u,
+    );
+    assert.match(
+      productionNextBuildScript,
+      /build_cache_epoch=webpack-next-16\.3-v2-cold-webpack/u,
+    );
+    assert.match(productionNextBuildScript, /webpack_cache_dir=\.next\/cache\/webpack/u);
     assert.match(
       productionNextBuildScript,
       /node \.\.\/\.\.\/scripts\/rm-paths\.mjs \.next\/cache/u,
@@ -1456,7 +1465,19 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
+      /next_build_command=\(\s+node\s+"--max-old-space-size=\$parent_old_space_mb"\s+"\$next_bin"\s+build\s+--webpack\s+\)/u,
+    );
+    assert.match(
+      productionNextBuildScript,
+      /timeout --verbose --signal=TERM --kill-after=30s "\$active_next_build_timeout"/u,
+    );
+    assert.match(
+      productionNextBuildScript,
+      /node \.\.\/\.\.\/scripts\/rm-paths\.mjs "\$webpack_cache_dir"/u,
+    );
+    assert.match(
+      productionNextBuildScript,
+      /Discarding Webpack cache after successful production compile/u,
     );
     assert.match(productionNextBuildScript, /compiler=webpack/u);
     assert.match(

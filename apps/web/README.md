@@ -1622,11 +1622,12 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 The production build launches the parent Next process explicitly through Node
 with `--max-old-space-size=1024` while appending
 `--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
-precedence in the parent. Next 16.3 reconstructs its non-isolated TypeScript
-worker options from the parent arguments followed by `NODE_OPTIONS`, so the
-mandatory generated-contract validation receives the 3 GiB limit. Next removes
-that option from its isolated static workers. The existing caller options are
-preserved. The shared script is used by the Vercel package build and the CI
+precedence in the parent. Next 16.3 reconstructs non-isolated child options
+from the parent arguments followed by `NODE_OPTIONS`, so the sequential Webpack
+compiler workers receive the 3 GiB limit and the later generated-contract
+TypeScript validation child inherits the same limit. Next removes that option
+from its isolated static workers. The existing caller options are preserved.
+The shared script is used by the Vercel package build and the CI
 memory-observation lane. This bounds the compile parent without starving the
 later validation worker or changing the compiled application. Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
@@ -1640,10 +1641,22 @@ from selecting the isolated build worker automatically. The hosted local-
 development wrapper remains on Turbopack and rejects an explicit Webpack flag.
 The production runner also owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
-compilation and writes the epoch only after Next succeeds. This gives the
-Turbopack-to-Webpack rollout one cold build without permanently disabling warm
-Webpack caching; bump the epoch only when a proven compiler/cache transition
-requires another invalidation.
+compilation and writes the epoch only after Next succeeds. Production Webpack
+compiles are additionally cold-cache by policy: the runner removes
+`.next/cache/webpack` before every compile and discards it again after a
+successful compile, so a READY deployment cannot seed the next build with warm
+Webpack state. Warm restored Webpack caches on Vercel's 8 GB Standard builder
+were the trigger for the August 2026 steady-state OOM kills and silent
+compile hangs; only the cold path is proven. Other cache subtrees such as SWC
+remain warm. On Vercel production builds (`VERCEL=1` with
+`VERCEL_ENV=production`) the runner also wraps `next build` in a 15-minute
+`timeout` watchdog (SIGTERM, SIGKILL after 30 more seconds) so a wedged
+compile fails the build in minutes instead of occupying the deploy queue until
+Vercel's 45-minute ceiling; exit 124 reports the timeout explicitly. Local and
+CI verify invocations set `VERCEL=1` with `VERCEL_ENV=preview` and skip the
+watchdog, which also keeps the runner off GNU `timeout` on macOS. Bump the
+epoch only when a proven compiler/cache transition requires another full
+invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions

@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-15
+Last verified: 2026-08-16
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -831,12 +831,13 @@ working directory, and stdio unchanged. In the current observe-only state it
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
 Vercel package build starts the parent Next process with a direct 1 GiB
 old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS`. Node applies
-the direct flag to the parent; Next 16.3.0 rebuilds its non-isolated TypeScript
-worker options from the parent arguments followed by `NODE_OPTIONS`, so the
-mandatory generated-contract validation receives 3 GiB. Next removes the flag
-from isolated static workers. The same script owns the Vercel package build and
-CI memory-observation invocation. This bounds the compile parent without
-weakening validation, but only repeated forced-cold Standard previews prove the
+the direct flag to the parent; Next 16.3.0 rebuilds non-isolated child options
+from the parent arguments followed by `NODE_OPTIONS`, so the sequential Webpack
+compiler workers receive 3 GiB; the later TypeScript CLI child inherits the same
+limit. Next removes the flag from isolated static workers. The same script owns
+the Vercel package build and the CI memory-observation invocation. This bounds
+the compile parent without weakening validation, but only repeated forced-cold
+Standard previews prove the
 real Vercel boundary. A 2 GiB parent-bound candidate passed one forced-cold
 preview but the next identical build was still killed by the 8 GB container
 OOM boundary. Single
@@ -859,9 +860,19 @@ Next 16.2.6. Production and Linux CI now use Next 16.3's supported Webpack
 fallback through the same shared production-build selector, with the isolated
 Webpack build worker and memory optimizations enabled. Interactive development
 and the dev-smoke lane remain on Turbopack. A cache-local compiler epoch removes
-only `.next/cache` when a restored cache predates the Webpack cutover and writes
-the epoch only after a successful Next build, so a failed cold build retries
-cold while later successful builds retain normal warm caching. The Workflow
+all of `.next/cache` when a restored cache predates the current epoch and writes
+the epoch only after a successful Next build, so a failed transition retries
+cold. Production Webpack compiles are additionally cold-cache by policy: the
+runner clears `.next/cache/webpack` before every compile and discards it after
+a successful compile, because warm restored Webpack caches were the trigger for
+the August 2026 steady-state 8 GB container OOM kills and silent compile hangs
+that followed the cutover; SWC and other cache subtrees stay warm. On Vercel
+production builds (`VERCEL=1` with `VERCEL_ENV=production`) the runner wraps
+`next build` in a 15-minute `timeout` watchdog (SIGTERM, SIGKILL 30 seconds
+later, explicit exit-124 diagnostic) so a wedged compile releases the deploy
+queue in minutes instead of at Vercel's 45-minute ceiling. The verify lane
+intentionally builds with `VERCEL=1 VERCEL_ENV=preview`, so local and CI
+verify builds skip the watchdog and macOS never needs GNU `timeout`. The Workflow
 integration runs through its native Next integration: exact-head CI proves the
 complete compile, type-validation, static-generation, and directive-discovery
 path, while focused Stripe and phone-call suites prove the existing
