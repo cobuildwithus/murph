@@ -45,9 +45,14 @@ import {
   startHostedPhoneCallReconciliationWorkflow,
 } from "@/src/lib/phone-calls/reconciliation-workflow-start";
 import { handleRetellCallAnalyzed } from "@/src/lib/phone-calls/result";
-import { reconcileHostedPhoneCallStep } from "@/src/lib/phone-calls/reconciliation-workflow-steps";
+import {
+  probeHostedPhoneCallReconciliationStep,
+  reconcileHostedPhoneCallStep,
+} from "@/src/lib/phone-calls/reconciliation-workflow-steps";
 import {
   buildHostedPhoneCallReconciliationHookToken,
+  HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK,
+  HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK,
   HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_STEP_MAX_RETRIES,
 } from "@/src/lib/phone-calls/reconciliation-workflow-types";
 import { hostedPhoneCallReconciliationWorkflow } from "@/src/lib/phone-calls/reconciliation-workflows";
@@ -229,6 +234,24 @@ describe("hosted phone-call reconciliation Workflow", () => {
     })).resolves.toBeUndefined();
   });
 
+  it("classifies a durable stored result as active after a bounded probe", async () => {
+    const analyzedAt = new Date("2026-08-16T12:00:00.000Z");
+    mocks.processHostedPhoneCallRecoveryById.mockResolvedValue("pending");
+    mocks.getPrisma.mockReturnValue({
+      hostedPhoneCall: {
+        findUnique: vi.fn().mockResolvedValue({
+          analyzedAt,
+          resultEncrypted: "encrypted-result",
+          resultJson: null,
+        }),
+      },
+    });
+
+    await expect(probeHostedPhoneCallReconciliationStep({
+      phoneCallId: "hpc_123",
+    })).resolves.toBe("active");
+  });
+
   it("keeps a bounded durable retry window", () => {
     expect(Object.getOwnPropertyDescriptor(
       reconcileHostedPhoneCallStep,
@@ -279,7 +302,72 @@ describe("hosted phone-call reconciliation Workflow", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("wakes the same dormant Workflow before a late analysis creates a tracked result", async () => {
+  it("backs an unresolved durable owner off to one exact daily probe", async () => {
+    const firstRecheck = Promise.resolve();
+    const dailyRecheck = createDeferred();
+    const dispose = vi.fn();
+    let hookAwaitCount = 0;
+    const hook = {
+      dispose,
+      then: (onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) => {
+        hookAwaitCount += 1;
+        const pending = hookAwaitCount === 1
+          ? Promise.resolve({ reason: "reconcile" })
+          : new Promise(() => undefined);
+        return pending.then(onFulfilled, onRejected);
+      },
+      token: "unused-by-mock",
+      [Symbol.asyncIterator]: () => {
+        throw new Error("async iteration is not used by this workflow");
+      },
+      [Symbol.dispose]: dispose,
+    };
+    mocks.createHook.mockReturnValue(hook);
+    mocks.sleep
+      .mockReturnValueOnce(new Promise(() => undefined))
+      .mockReturnValueOnce(firstRecheck)
+      .mockReturnValueOnce(dailyRecheck.promise);
+    mocks.processHostedPhoneCallRecoveryById
+      .mockResolvedValueOnce("pending")
+      .mockResolvedValueOnce("pending")
+      .mockResolvedValueOnce("complete");
+    mocks.getPrisma.mockReturnValue({
+      hostedPhoneCall: {
+        findUnique: vi.fn().mockResolvedValue({
+          analyzedAt: null,
+          resultEncrypted: null,
+          resultJson: null,
+        }),
+      },
+    });
+
+    const running = hostedPhoneCallReconciliationWorkflow({
+      phoneCallId: "hpc_123",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.sleep).toHaveBeenCalledWith(
+        HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK,
+      );
+    });
+    dailyRecheck.resolve();
+
+    await expect(running).resolves.toBeUndefined();
+    expect(mocks.processHostedPhoneCallRecoveryById).toHaveBeenCalledTimes(3);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      completionPolicy: undefined,
+      label: "ordinary result",
+    },
+    {
+      completionPolicy: "transfer_follow_up_required" as const,
+      label: "transferred result",
+    },
+  ])("recovers a durably accepted late $label when its wake and webhook retry are lost", async ({
+    completionPolicy,
+  }) => {
     type AnalyzedStore = NonNullable<
       Parameters<typeof handleRetellCallAnalyzed>[0]["prisma"]
     >;
@@ -317,7 +405,7 @@ describe("hosted phone-call reconciliation Workflow", () => {
       updatedAt: endedAt,
     };
     const resultCommitted = createDeferred();
-    const recoverySignal = createDeferred();
+    const durableRecheck = createDeferred();
     const phases: string[] = [];
     const dispose = vi.fn();
     let hookAwaitCount = 0;
@@ -327,7 +415,7 @@ describe("hosted phone-call reconciliation Workflow", () => {
         hookAwaitCount += 1;
         const pending = hookAwaitCount === 1
           ? Promise.resolve({ reason: "reconcile" })
-          : recoverySignal.promise.then(() => ({ reason: "reconcile" }));
+          : new Promise(() => undefined);
         return pending.then(onFulfilled, onRejected);
       },
       token: "unused-by-mock",
@@ -337,9 +425,13 @@ describe("hosted phone-call reconciliation Workflow", () => {
       [Symbol.dispose]: dispose,
     };
     mocks.createHook.mockReturnValue(hook);
+    mocks.sleep
+      .mockReturnValueOnce(new Promise(() => undefined))
+      .mockReturnValueOnce(durableRecheck.promise);
 
     let mailboxItemCount = 0;
     let telegramRequestCount = 0;
+    let encryptedResult: unknown;
     mocks.processHostedPhoneCallRecoveryById
       .mockResolvedValueOnce("pending")
       .mockImplementationOnce(async () => {
@@ -409,7 +501,10 @@ describe("hosted phone-call reconciliation Workflow", () => {
           notificationUserId: null,
         };
       },
-      encryptResult: async () => "encrypted-late-analysis-result",
+      encryptResult: async ({ value }) => {
+        encryptedResult = value;
+        return "encrypted-late-analysis-result";
+      },
     };
     const signalReconciliation = vi.fn(async (input: {
       phoneCallId: string;
@@ -418,7 +513,7 @@ describe("hosted phone-call reconciliation Workflow", () => {
       expect(input.phoneCallId).toBe("hpc_late_analysis");
       expect(input.signal.aborted).toBe(false);
       phases.push("signal");
-      recoverySignal.resolve();
+      throw new Error("workflow control plane unavailable");
     });
 
     const running = hostedPhoneCallReconciliationWorkflow({
@@ -449,12 +544,28 @@ describe("hosted phone-call reconciliation Workflow", () => {
     };
     await expect(handleRetellCallAnalyzed({
       call: analyzedCall,
+      ...(completionPolicy ? { completionPolicy } : {}),
       prisma,
       signalReconciliation,
     })).rejects.toThrow("mailbox unavailable after result commit");
+    expect(currentCall).toMatchObject({
+      analyzedAt: expect.any(Date),
+      resultDeliveryStatus: "pending",
+      resultEncrypted: "encrypted-late-analysis-result",
+      status: "failed",
+    });
+    expect(encryptedResult).toMatchObject({
+      ...(completionPolicy ? { completionPolicy } : {}),
+      outcome: "not_completed",
+      summary: "The office line was busy.",
+    });
+    durableRecheck.resolve();
     await expect(running).resolves.toBeUndefined();
 
-    expect(phases.indexOf("signal")).toBeLessThan(phases.indexOf("cas"));
+    expect(phases.indexOf("cas")).toBeLessThan(phases.indexOf("signal"));
+    expect(mocks.sleep).toHaveBeenCalledWith(
+      HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK,
+    );
     expect(currentCall).toMatchObject({
       analyzedAt: expect.any(Date),
       resultDeliveryGeneration: 1,
@@ -470,6 +581,7 @@ describe("hosted phone-call reconciliation Workflow", () => {
 
     await expect(handleRetellCallAnalyzed({
       call: analyzedCall,
+      ...(completionPolicy ? { completionPolicy } : {}),
       prisma,
       signalReconciliation,
     })).resolves.toEqual({

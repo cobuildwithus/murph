@@ -57,6 +57,9 @@ import {
 import {
   signalHostedPhoneCallReconciliation,
 } from "./reconciliation-workflow-signal";
+import {
+  HOSTED_PHONE_CALL_RECONCILIATION_SIGNAL_TIMEOUT_MS,
+} from "./reconciliation-workflow-types";
 
 interface HostedPhoneCallWebhookDatabase {
   hostedPhoneCall: {
@@ -196,15 +199,12 @@ export async function handleRetellCallAnalyzed(input: {
     }
 
     if (target.call.analyzedAt && hasStoredHostedPhoneCallResult(target.call)) {
-      await signalTrackedRetellCallReconciliation({
+      return appendRetellCallAnalyzedNotificationWithRecoveryHint({
         call: target.call,
+        prisma,
         signal: input.abortSignal ?? new AbortController().signal,
         signalReconciliation: input.signalReconciliation
           ?? signalHostedPhoneCallReconciliation,
-      });
-      return appendRetellCallAnalyzedNotification({
-        call: target.call,
-        prisma,
       });
     }
 
@@ -235,12 +235,6 @@ export async function handleRetellCallAnalyzed(input: {
       }
       throw error;
     }
-    await signalTrackedRetellCallReconciliation({
-      call: target.call,
-      signal: input.abortSignal ?? new AbortController().signal,
-      signalReconciliation: input.signalReconciliation
-        ?? signalHostedPhoneCallReconciliation,
-    });
     const analyzedAt = new Date();
     const resultDeliveryStatus = target.call.resultNotificationChannel === "telegram"
       ? "pending" as const
@@ -279,9 +273,12 @@ export async function handleRetellCallAnalyzed(input: {
         && stored.analyzedAt
         && hasStoredHostedPhoneCallResult(stored)
       ) {
-        return appendRetellCallAnalyzedNotification({
+        return appendRetellCallAnalyzedNotificationWithRecoveryHint({
           call: stored,
           prisma,
+          signal: input.abortSignal ?? new AbortController().signal,
+          signalReconciliation: input.signalReconciliation
+            ?? signalHostedPhoneCallReconciliation,
         });
       }
       throw hostedOnboardingError({
@@ -292,10 +289,10 @@ export async function handleRetellCallAnalyzed(input: {
       });
     }
 
-    // The result is durable before notification preparation and append. A
-    // mailbox failure therefore keeps the webhook retryable, and replay reads
-    // the canonical stored result before retrying the stable deduped append.
-    return appendRetellCallAnalyzedNotification({
+    // The result is durable before either operational hint. A mailbox failure
+    // keeps the webhook retryable, while this call's existing Workflow also
+    // derives the pending obligation from the row on its durable timer.
+    return appendRetellCallAnalyzedNotificationWithRecoveryHint({
       call: {
         ...target.call,
         analyzedAt,
@@ -306,6 +303,9 @@ export async function handleRetellCallAnalyzed(input: {
       },
       prisma,
       result,
+      signal: input.abortSignal ?? new AbortController().signal,
+      signalReconciliation: input.signalReconciliation
+        ?? signalHostedPhoneCallReconciliation,
     });
   });
 }
@@ -347,10 +347,32 @@ async function signalTrackedRetellCallReconciliation(input: {
   ) {
     return;
   }
-  await input.signalReconciliation({
-    phoneCallId: input.call.id,
-    signal: input.signal,
-  });
+  const timeoutSignal = AbortSignal.timeout(
+    HOSTED_PHONE_CALL_RECONCILIATION_SIGNAL_TIMEOUT_MS,
+  );
+  try {
+    await input.signalReconciliation({
+      phoneCallId: input.call.id,
+      signal: AbortSignal.any([input.signal, timeoutSignal]),
+    });
+  } catch {
+    // This is a droppable latency hint. The HostedPhoneCall row remains the
+    // durable owner and its sole Workflow also rechecks that owner on a timer.
+  }
+}
+
+async function appendRetellCallAnalyzedNotificationWithRecoveryHint(input: {
+  call: HostedPhoneCall;
+  prisma: HostedPhoneCallWebhookStore;
+  result?: HostedPhoneCallResult;
+  signal: AbortSignal;
+  signalReconciliation: typeof signalHostedPhoneCallReconciliation;
+}): Promise<RetellCallAnalyzedHandlingResult> {
+  const [, notification] = await Promise.all([
+    signalTrackedRetellCallReconciliation(input),
+    appendRetellCallAnalyzedNotification(input),
+  ]);
+  return notification;
 }
 
 export async function finalizeStoredHostedPhoneCallResult(

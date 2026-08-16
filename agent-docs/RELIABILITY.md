@@ -1931,6 +1931,16 @@ Last verified: 2026-08-16
   `transfer_follow_up_required` completion policy, so a crash after result
   persistence but before mailbox append cannot turn that obligation into a
   generic or skippable result. Legacy absence retains ordinary result semantics.
+  Authoritative analysis always commits to that call row before Web attempts
+  the deterministic per-call hook. The hook is a bounded, best-effort latency
+  hint and its rejection cannot reject or roll back accepted analysis. After an
+  active 120-attempt, 30-second retry window exhausts, the same pre-armed
+  per-call Workflow races its hook with a 30-minute durable recheck. If the row
+  still has no actionable result, later rechecks are at most once per 24 hours
+  for that exact call; a new hook or a discovered stored result re-enters the
+  bounded active window. This preserves late ordinary and transfer analysis
+  without relying on Retell webhook retries, adding another Workflow, or making
+  a mailbox, queue, scheduler, lease, or signal the durable owner.
   At the first provider fetch, the runtime
   gives Web the exact queued Telegram authority; Web revalidates that authority
   and compare-and-sets the same generation from `queued` to `sending` in the

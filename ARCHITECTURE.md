@@ -873,6 +873,12 @@ route loss observed after that generation already crossed provider entry is
 also ambiguous, never permission to resend onto a new route. One
 terminal callback re-arms one oldest member-local obligation, so retention
 expiry cannot fabricate completion and recovery adds no queue or scheduler.
+The call result commits before its deterministic hook is signaled. That hook is
+only a latency hint: after the existing bounded active retry window, the same
+pre-armed per-call Workflow uses a 30-minute first durable timer and then a
+24-hour low-frequency timer to re-read its exact call row. A dropped hook can
+therefore delay recovery but cannot erase an accepted result or create another
+Workflow.
 The encrypted result itself owns the bounded optional direct-transfer follow-up
 policy, so same-version stored recovery cannot lose that obligation. A
 reader-only Web release must accept that field before this writer activates;
@@ -1038,7 +1044,10 @@ authority on the queued notification; provider entry revalidates that authority
 so a later route removal or rebind cannot disclose the result to a stale chat.
 The existing phone-call reconciliation workflow keeps an analyzed result
 pending until its deduped mailbox notification is durable, and a restored direct
-route re-arms the newest affected call without falling back to another surface.
+route signals the newest affected call without falling back to another surface.
+Its deterministic hook is a best-effort fast path; durable timers on that same
+Workflow re-derive an accepted pending result from `HostedPhoneCall` if the
+signal is dropped.
 Group calls keep the
 channel null and continue to use their durable thread-container authority.
 Request-key replay compares the stored channel exactly, including legacy null,

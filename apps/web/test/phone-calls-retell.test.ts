@@ -1788,7 +1788,7 @@ describe("Retell phone-call result handling", () => {
     ]);
   });
 
-  it("fails before the result CAS when the exact tracked-call hook cannot acknowledge", async () => {
+  it("persists and appends the result when its recovery hint is unavailable", async () => {
     const endedAt = new Date("2026-06-25T12:00:00.000Z");
     const store = createWebhookStore({
       call: buildHostedPhoneCall({
@@ -1820,23 +1820,26 @@ describe("Retell phone-call result handling", () => {
       },
       prisma: store.prisma,
       signalReconciliation,
-    })).rejects.toThrow("exact call hook unavailable");
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_hpc_late_analysis_signal_failure",
+      notificationUserId: "member_123",
+    });
 
     expect(signalReconciliation).toHaveBeenCalledWith({
       phoneCallId: "hpc_late_analysis_signal_failure",
       signal: expect.any(AbortSignal),
     });
-    expect(store.updateManyCalls).toEqual([]);
-    expect(store.appendResultNotificationCalls).toEqual([]);
+    expect(store.updateManyCalls).toHaveLength(1);
+    expect(store.appendResultNotificationCalls).toHaveLength(1);
     expect(store.currentCall()).toMatchObject({
-      analyzedAt: null,
-      resultDeliveryStatus: null,
-      resultEncrypted: null,
+      analyzedAt: expect.any(Date),
+      resultDeliveryStatus: "pending",
+      resultEncrypted: expect.stringMatching(/^hsb-test:/u),
       status: "failed",
     });
   });
 
-  it("signals an exact nonterminal tracked-call replay before retrying its append", async () => {
+  it("retries a stored result append when its recovery hint is unavailable", async () => {
     const phases: string[] = [];
     const store = createWebhookStore({
       appendResultNotification: async () => {
@@ -1858,6 +1861,7 @@ describe("Retell phone-call result handling", () => {
     });
     const signalReconciliation = vi.fn(async () => {
       phases.push("signal");
+      throw new Error("exact call hook unavailable");
     });
 
     await expect(handleRetellCallAnalyzed({

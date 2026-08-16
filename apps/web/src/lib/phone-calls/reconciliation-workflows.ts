@@ -1,6 +1,7 @@
 import { createHook, sleep } from "workflow";
 
 import {
+  probeHostedPhoneCallReconciliationStep,
   reconcileHostedPhoneCallStep,
 } from "./reconciliation-workflow-steps";
 import type {
@@ -10,6 +11,8 @@ import type {
 import {
   buildHostedPhoneCallReconciliationHookToken,
   HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_ACTIVATION_TIMEOUT,
+  HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK,
+  HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK,
 } from "./reconciliation-workflow-types";
 
 export async function hostedPhoneCallReconciliationWorkflow(
@@ -21,23 +24,57 @@ export async function hostedPhoneCallReconciliationWorkflow(
     token: buildHostedPhoneCallReconciliationHookToken(input.phoneCallId),
   });
   try {
+    let nextHookSignal = hook.then(() => "activated" as const);
     const activation = await Promise.race([
-      hook.then(() => "activated" as const),
+      nextHookSignal,
       sleep(HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_ACTIVATION_TIMEOUT)
         .then(() => "expired" as const),
     ]);
     if (activation === "expired") {
       return;
     }
+    nextHookSignal = hook.then(() => "activated" as const);
 
     while (true) {
       try {
         await reconcileHostedPhoneCallStep(input);
         return;
       } catch {
-        // The bounded step window exhausted. Keep this same per-call Workflow
-        // dormant until an idempotent route or callback hint asks it to retry.
-        await hook;
+        // The bounded active window exhausted. A hook remains the fast path,
+        // while a durable timer makes the HostedPhoneCall row independently
+        // discoverable if that operational hint is dropped.
+        let durableRecheckAfter:
+          | typeof HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK
+          | typeof HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK =
+          HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK;
+        while (true) {
+          const wake = await Promise.race([
+            nextHookSignal,
+            sleep(durableRecheckAfter).then(() => "recheck" as const),
+          ]);
+          if (wake === "activated") {
+            nextHookSignal = hook.then(() => "activated" as const);
+            break;
+          }
+
+          let probe: Awaited<
+            ReturnType<typeof probeHostedPhoneCallReconciliationStep>
+          > = "pending";
+          try {
+            probe = await probeHostedPhoneCallReconciliationStep(input);
+          } catch {
+            // The row remains the durable owner. A probe outage cannot end its
+            // sole Workflow or manufacture another recovery owner.
+          }
+          if (probe === "complete" || probe === "missing") {
+            return;
+          }
+          if (probe === "active") {
+            break;
+          }
+          durableRecheckAfter =
+            HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK;
+        }
       }
     }
   } finally {
