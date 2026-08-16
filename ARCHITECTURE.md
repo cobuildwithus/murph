@@ -2507,8 +2507,12 @@ both hosted database-lock rechecks. A live `pending_link` or `link_returned`
 setup releases the trace and remains retryable, while an expired setup
 completes only the existing trace and terminates transport handling without
 source admission, freshness, dirty, signal, mailbox,
-wake, job, canonical-health, or setup-state effects. The proof-verified
-callback remains the only setup-completion owner. After an account reaches
+wake, job, canonical-health, or setup-state effects. After that pending-setup
+branch, both hosted lock owners use the frozen receipt only as established-event
+ordering evidence: when the current `connectedAt` is later, they complete the
+trace before provider I/O or source/dirty admission so prior-connection work
+cannot inherit replacement authority. The proof-verified callback remains the
+only setup-completion owner. After an account reaches
 `source_confirmed`, adding or retrying another Junction-backed source
 preserves that account and its established siblings. The target
 `DeviceConnectionSource` stays `disconnected`, and its webhook and pull work

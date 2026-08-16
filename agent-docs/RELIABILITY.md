@@ -1218,8 +1218,13 @@ Last verified: 2026-08-14
   Once the same persisted setup is expired, a later delivery of the same envelope
   completes only the existing webhook trace and acknowledges the event without
   dirty state, source admission, last-webhook freshness, signal, mailbox, wake,
-  job, canonical-health, or setup-state mutation. The proof-verified callback
-  remains the sole setup-completion authority. Manual reconcile, due
+  job, canonical-health, or setup-state mutation. After pending-setup
+  classification, both hosted lock owners use the frozen receipt only for
+  established-event ordering: a current `connectedAt` later than that receipt
+  completes the trace before provider I/O or source/dirty admission, preventing
+  prior-connection work from inheriting replacement authority. The
+  proof-verified callback remains the sole setup-completion authority. Manual
+  reconcile, due
   scheduling, ordinary queued jobs, and sync-success promotion apply the same
   account phase gate. After a shared account is `source_confirmed`, a new target
   source does not move the account back into a pending phase. Its

@@ -2017,6 +2017,10 @@ async function prepareHostedWebhookSourceObservation(input: {
             httpStatus: 503,
           });
         }
+        if (current.connectedAt.getTime() > Date.parse(input.now)) {
+          await completeHostedWebhookTraceTx(input, tx);
+          return { kind: "terminal" };
+        }
 
         const matchingSources = await input.store.listConnectionSourceAdmissionCandidates({
           connectionId: input.account.id,
@@ -2963,6 +2967,10 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       retryable: true,
       httpStatus: 503,
     });
+  }
+  if (current.connectedAt.getTime() > Date.parse(input.acceptedAt)) {
+    await completeHostedWebhookTraceTx(input, tx);
+    return "completed";
   }
   const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (sourceProviderSlug) {
