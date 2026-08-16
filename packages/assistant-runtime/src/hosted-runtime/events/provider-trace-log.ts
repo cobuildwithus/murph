@@ -50,6 +50,12 @@ const HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES = new Set([
   "hosted-stable-proc-cwd",
   "raw",
 ]);
+const HOSTED_ASSISTANT_REASONING_EFFORT_VALUES = new Set([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
 const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "active_experiment_context",
   "assistant_context_snapshot",
@@ -615,6 +621,15 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
       readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
     );
   }
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "reasoningEffort",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "reasoningEffort",
+      HOSTED_ASSISTANT_REASONING_EFFORT_VALUES,
+    ),
+  );
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
     "routePlanningSlowestStage",
