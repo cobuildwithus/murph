@@ -35580,24 +35580,42 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("fresh due assistant wake supersedes a stale carried device-sync wake at import reconciliation", async () => {
-    // Incident shape (2026-08-15): a workspace restores with a stale, already
-    // past device-sync.reconcile wake. A conversation turn arms a fresh due
-    // assistant wake (a just-scheduled reminder). The stale carried token must
-    // never win the import reconciliation and resurrect into a checkpoint,
-    // which previously left the workspace dormant and the reminder unfired.
+  test("fresh due assistant wake supersedes a stale carried device-sync wake under a pending checkpoint", async () => {
+    // Incident shape (2026-08-15): a workspace restores with a stale,
+    // already-past device-sync.reconcile wake. While runtime state is dirty
+    // with pending durable effects (a delivered reply's consume acks), a
+    // foreground pass arms a fresh due assistant wake (a just-scheduled
+    // reminder's canonical assistant-now). The pre-checkpoint preserve branch
+    // previously returned the stale carried token over that fresh due wake,
+    // so the checkpoint disarmed the reminder and the workspace stayed
+    // dormant until unrelated inbound activity.
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const staleDeviceWakeAt = new Date(Date.now() - 9 * 60 * 60 * 1_000).toISOString();
     const freshDueWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const foregroundAfterCheckpointGate = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_stale_supersede_001",
+        laneSeq: "1",
+      }),
+    ];
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {};
+    });
     let assistantPass = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_stale_device_wake_superseded",
+            attemptId: "attempt_synthetic_stale_supersede",
             idleCheckpointDelayMs: 25,
             leaseGeneration: "3",
             userId: TEST_USER_ID,
@@ -35610,24 +35628,36 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/stale-device-wake-superseded.bundle.json",
+                key: "users/bundles/member-synthetic/stale-supersede.bundle.json",
                 size: 512,
               }),
             };
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
-            return { status: "imported" };
+            if (item.item.id !== "mailbox_item_entrypoint_stale_supersede_001") {
+              return { status: "imported" };
+            }
+            return {
+              afterCheckpoint: async () => {
+                events.push("mailbox.afterCheckpoint:start");
+                await foregroundAfterCheckpointGate.promise;
+                events.push("mailbox.afterCheckpoint:done");
+                return {
+                  attachmentEvidenceUpdated: true,
+                  kind: "inbox_projection",
+                  projectionUpdated: true,
+                  reasonCode: null,
+                  status: "succeeded",
+                };
+              },
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [
-                createMailboxItem({
-                  id: "mailbox_item_entrypoint_stale_device_wake_001",
-                  laneSeq: "1",
-                }),
-              ],
+              items: mailboxItems,
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -35642,7 +35672,29 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase(input) {
             assistantPass += 1;
             events.push(`assistant:${assistantPass}`);
+
             if (assistantPass === 1) {
+              // The delivered-reply pass: a causal-only-style lane re-emits
+              // the restored stale device wake it carried (PR #914 lanes only
+              // tighten, so a preserved device token flows back out of the
+              // pass result) and leaves pending durable effects so runtime
+              // state stays dirty (checkpoint pending) for the next pass —
+              // the incident interleaving.
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: durableEffect,
+                  checkpointReason: "system_mailbox_receipt",
+                }),
+                checkpointReason: "system_mailbox_receipt",
+                nextWakeAt: staleDeviceWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+              };
+            }
+
+            if (assistantPass === 2) {
+              // The reminder pass: arms a fresh, already-due assistant wake
+              // while the stale device token is still the carried projection.
               return {
                 checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: freshDueWakeAt,
@@ -35650,13 +35702,40 @@ describe("hosted workspace runtime entrypoint", () => {
                 progressed: true,
               };
             }
-            // Later passes make no progress, mirroring the incident: an
-            // idle turn must not resurrect the stale device timestamp.
-            assert.notEqual(input.workspace?.nextWakeAt, staleDeviceWakeAt);
-            return { progressed: false };
+
+            // The service pass for the due assistant wake must observe the
+            // fresh value, never the resurrected stale device timestamp.
+            assert.equal(input.workspace?.nextWakeAt, freshDueWakeAt);
+            assert.equal(input.workspace?.nextWakeReason, "assistant");
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true,
+            };
           },
+          runtimeWakeSignal,
           vaultRoot,
         },
+      );
+
+      await waitUntil(() => {
+        assert.equal(events.includes("mailbox.afterCheckpoint:start"), true, events.join(","));
+      }, 10_000);
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_stale_supersede_002",
+        laneSeq: "2",
+      }));
+      runtimeWakeSignal.notify();
+      await waitUntil(() => {
+        assert.equal(events.includes("assistant:2"), true);
+      });
+      foregroundAfterCheckpointGate.resolve();
+
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
       );
 
       const persistedWakes = checkpointRequests.map((request) => [
@@ -35673,8 +35752,11 @@ describe("hosted workspace runtime entrypoint", () => {
         ),
         `fresh due assistant wake missing from checkpoints: ${JSON.stringify(persistedWakes)}`,
       );
-      assert.notEqual(result.nextWakeAt, staleDeviceWakeAt);
+      assert.equal(assistantPass, 3, events.join(","));
+      assert.equal(result.nextWakeAt, null);
     } finally {
+      foregroundAfterCheckpointGate.resolve();
+      await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
   });
