@@ -949,82 +949,71 @@ Last verified: 2026-08-14
   an application-bound row completes the trace without dirty state, wake,
   signal, or provider job. Such connections retain scheduled reconciliation
   until private-application webhook ownership is explicitly designed.
-- Member-owned provider setup is a revisioned, optimistic state machine, not an
-  assistant-memory workflow. Known-unsent, provider-owned in-progress, ambiguous
-  submission, waiting-for-user, repairable credential state, transient failure,
-  OAuth-in-progress, connected, disconnect-first, deletion-pending, and deleted
-  outcomes survive page refresh and process restart. Ambiguous creation records
-  the submission boundary before the provider call; the next missing inspection
-  fully loads and verifies the exact safe landing, clears ambiguity without
-  creating only when the persisted exact application name is absent, and only another independent
-  invocation may create. Permanent malformed or undecryptable application state
-  enters repair;
-  transient crypto, KMS, root-key, and database failures remain retryable
-  infrastructure errors. Browser acquisition is part of that state machine: a
-  newly acquired run is bound to the exact setup before navigation, an unrelated
-  reusable run is rejected, and a lost acquisition response resumes only by
-  inspecting that same owner binding. When the bound run expires, only the
-  computer owner's proven same-setup successor may replace its run id; a
-  `capturing` successor remains `capturing`, so its first inspection cannot
-  submit. A candidate run is CAS-bound to an acquisition-eligible setup before
-  Kernel provisioning, then its browser attaches under that exact binding before
-  navigation. If Cancel wins first, the unadmitted candidate is synchronously
-  retired; if binding wins first, Cancel sees and owns that exact run. A
-  browserless bound run whose remote create may be in flight moves to the
-  existing `cleanup_pending` state and leaves the setup truthfully `canceling`.
-  Delete-by-name before materialization retains that claim; a late create result
-  deletes the returned exact browser, while a lost response or client timeout
-  without an exact handle converges through the existing two-minute
-  stale-provisioning cleanup. A fresh retry remains blocked until that cleanup
-  runs. Setup reconciliation finalizes `canceled` only after one of those paths
-  proves cleanup, and navigation remains impossible because attach revalidates
-  the now-ineligible setup. For `browser_setup` or `capturing` without Cancel,
-  the originally accepted typed mailbox item remains `recording` through the
-  assistant turn. Each attempt calls Web to validate the exact setup id,
-  accepted version, and eligible phase before starting model work; stale,
-  canceled, deleted, or superseded authority consumes the item without provider
-  work, while validation failure returns it to ordinary mailbox retry. The exact
-  typed browser-provisioning result CASes that same item back to `pending` for
-  the two-minute stale boundary without another usage or consent admission.
-  The first no-handle create attempt returns that typed result as soon as its
-  exact `cleanup_pending` claim is durable, including when the immediate
-  best-effort delete-by-name fails; the claim, not that early delete, owns
-  quiescence and retry.
-  The next invocation reuses `acquireRunWithStore`, whose existing owner cleanup
-  terminalizes only the exact deterministic browser and admits at most one
-  same-setup successor. A crash while the item is `recording` revalidates and
-  retries it. `/connect` reads do not publish continuations; `capturing`
-  recovery remains submit-free, while `canceling` never starts replacement
-  work. Consent withdrawal uses the same status owners: connected or bound work
-  projects disconnection, authorized/browser setup cancels, cleanup-pending
-  cancellation stays `canceling`, and `capturing` remains the durable ambiguous
-  submit fence.
-  Both provider-setup runtime POSTs traverse the existing Cloudflare
-  `web-control.worker` policy under the current runtime write fence, bound member,
-  callback signature, and Web-control body limit. Neighboring paths and other
+- Member-owned provider setup is a revisioned optimistic state machine, not
+  assistant memory. One active row per personal member/provider owns the connect
+  coordinates, exact setup-owned browser run, encrypted application binding,
+  status, and optimistic version. `browser_setup` is the one ordinary in-progress
+  browser phase; there is no separate provider-submit or frozen-name fence.
+
+  Browser acquisition remains pre-Kernel and exact-owner fenced. A candidate run
+  must be bound to an acquisition-eligible setup before provisioning and attach
+  under that same binding before navigation. If cancellation wins first, the
+  candidate is retired. If browser provisioning may be in flight, the existing
+  computer owner retains `cleanup_pending`, deletes a late exact browser, and
+  uses its deterministic stale-provisioning boundary for a lost handle. This
+  machinery proves browser cleanup only and never infers provider application
+  submission or identity.
+
+  The assistant uses ordinary browser actions on the setup-owned run to complete
+  the provider form, choose its application name, submit, and recover from visible
+  provider errors. Sign-in, MFA, CAPTCHA, and prerequisites retain the exact
+  handoff and `/connect` return path. Setup continuation remains one idempotent
+  typed mailbox item and validates the exact setup id/version before model work.
+  `/connect` reads presentation truth and never publishes recovery work.
+
+  Credential capture is a deterministic read through provider-registered
+  coordinates. It reloads and verifies the registered credentials URL, optionally
+  clicks the registered reveal control, requires exactly one visible client-ID
+  element and one visible client-secret element, then seals both values through
+  the existing application store and scrubs the page. It returns no credentials.
+  A browser or transport failure before the application-store commit leaves
+  `browser_setup` unchanged, making capture safely retryable.
+
+  Application save rechecks the exact setup id, run id, `browser_setup` status,
+  and optimistic version in the same durable binding transaction. Cancellation
+  may race capture without another state owner: cancellation advances the setup
+  version and closes the run, so a later save using the captured version fails
+  closed. Once save commits, the exact application binding and `oauth_ready`
+  transition are durable before the setup-owned run is released. An interrupted
+  terminal release retains the exact run and binding for bounded retry and never
+  recaptures known credentials.
+
+  Consent withdrawal cancels authorized or browser-setup work through the exact
+  run owner and preserves `canceling` while browser cleanup is pending. Connected,
+  disconnect-first, or OAuth work follows existing disconnection ownership.
+  There is no ambiguous provider-submit state to preserve.
+
+  Deletion admission and OAuth callback persistence continue to serialize on the
+  hosted-member row. Trusted deletion reloads the registered credentials page,
+  compares its unambiguous on-page client ID exactly with the sealed client ID,
+  and clicks nothing on mismatch. A clean page with no client-ID element
+  converges as already absent; every ambiguous page or post-delete result remains
+  retryable with the encrypted binding intact. The provider-side effect may be
+  retried because the next attempt either sees the same exact client ID or clean
+  absence.
+
+  Successful deletion keeps the terminal setup active until the exact browser
+  run is released, then deactivates it in the run-clearing compare-and-set so a
+  fresh setup cannot overlap owned browser work. Account deletion checks
+  connection, application, setup, and run cleanup under the member lock before
+  suspension; later local cleanup cannot erase unresolved external ownership.
+  Late OAuth and disconnect projections cannot overwrite deletion ownership.
+
+  Both provider-setup runtime POSTs continue through Cloudflare's bounded
+  `web-control.worker` allowlist with the current runtime write fence, bound
+  member, callback signature, and request-body limit. Neighboring routes and
   methods remain blocked.
-  Re-entering an awaiting setup rotates or
-  reuses its latest valid handoff without repeating provider submission. Completing
-  the exact setup-owned handoff resumes that run without a conversation reply;
-  ordinary setup returns to `/connect`; suspended members and generic or foreign
-  setup runs remain rejected. Generic handoffs retain their contact return. Provider
-  prerequisite cancellation is exact-owner and fails closed unless durable state
-  proves no submission, application binding, or connection exists. Connection
-  rows and upstream revoke results are authoritative; setup projection writes after
-  callback or disconnect are idempotent best-effort repairs, and every read
-  reconciles projection from live
-  connection truth. OAuth-ready transitions commit before a usable state is
-  issued, then the exact setup-owned browser run finishes `completed` and its
-  setup binding is CAS-cleared. A finish/clear interruption retains the exact
-  application and run binding for bounded retry, never recaptures a known sealed
-  credential, and never reports cleanup failure as success. Account deletion
-  checks external cleanup under the same member lock immediately before
-  suspension, then performs only local cleanup afterward; any earlier cleanup
-  failure preserves setup, application, and run ownership for an authenticated
-  retry. Successful application deletion keeps its terminal setup active until
-  the exact browser run finishes, then deactivates it in the run-clearing CAS so
-  reconnect can create one fresh setup. Late OAuth and disconnect transitions
-  cannot overwrite deletion ownership.
+
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
   import by rereading the durable source row rather than trusting the queued

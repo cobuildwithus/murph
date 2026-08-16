@@ -149,41 +149,44 @@ first.
 
 For a provider that needs a member-owned developer application, `/connect`
 Continue is the authorization boundary. Call `murph.provider_setup` with
-`action: "begin"`, then pass its exact opaque `runId` to `computer_open` and
-`computer_act` with typed steps. Navigate from the live page and choose controls at runtime; do
-not maintain a provider-specific selector script or state machine.
+`action: "begin"`, then pass its exact opaque `runId` to ordinary
+`computer_open`, `computer_act`, and, only when Playwright cannot operate a
+verified non-credential control, `computer_os_control`. Keep the run setup-owned:
+do not call `computer_finish_run`. Navigate from the live page and choose controls
+at runtime; do not maintain a provider-specific browser program or state machine.
 
-A setup-owned `computer_act` accepts typed control steps only. It may navigate,
-fill non-secret application metadata, click reversible controls, and wait for a
-known page state, but it may not read or return DOM values, browser storage,
-network responses, screenshots, or arbitrary page text. Its result is a trusted,
-credential-redacted observation. Do not use `computer_os_control` or
-`computer_finish_run` on a setup-owned run.
-
-Never submit the developer-app form with `computer_act`. Once the exact form is
-ready, call `provider_setup` with `action: "capture"`; trusted provider
-registration owns the application-name, final-submit, client-ID, client-secret,
-and optional reveal coordinates. Do not fill the application name yourself. When
-`begin` returns no assigned name, choose
-one random two-word name using the exact neutral word sets in the tool
-description; never use member details. Web adds six cryptographically random
-digits, then the trusted operation freezes and fills that full name, submits the
-exact provider-declared creation form, reloads the trusted
-provider page, and derives the one exact-name application container before it
-reads and seals credentials in registered semantic roles. The model never assigns
-credential roles or the irreversible submit control. The operation navigates away and returns no credential
-value. Never ask for, read, copy, quote, log, screenshot, or preserve client IDs,
-client secrets, OAuth tokens, or other credentials.
+The begin result supplies the application website, category, callback URL,
+read-only scopes, credentials-page URL, and provider guidance. Complete the whole
+creation flow as ordinary browsing. Fill every field yourself, including a
+non-personal application name you choose, and submit the form. The name is an
+ordinary reversible field and carries no authority. When the provider visibly
+reports an existing application, duplicate limit, or validation error, inspect
+the page and recover as a person would.
 
 For sign-in, MFA, CAPTCHA, or a provider prerequisite, pause the same run with a
 secure handoff. The member completes only the interruption and returns to
 `/connect`; call `provider_setup begin` again to resume the exact persisted run.
+Never ask the member to provide client credentials.
+
+When the registered credentials page is available, confirm only that the client-ID
+and client-secret elements are present. Do not read, copy, quote, transcribe,
+return, log, screenshot, or preserve either value, and do not click the secret
+reveal control. Then call `provider_setup` with `action: "capture"` once. The
+trusted capture action navigates to the registered credentials URL, verifies its
+origin and path, optionally clicks the registered reveal control, requires each
+registered credential selector to resolve to exactly one visible element, seals
+both values through the KMS-backed application owner, scrubs the browser-side
+values, and returns no credentials. Capture is read-only apart from reveal and is
+safe to retry.
+
 For deletion, disconnect the provider first, call `prepare_delete`, navigate to
-the application, then use `delete` with only the delete and optional confirmation
-selectors. The trusted provider registration locates the stable client ID, and
-the trusted operation matches its digest inside one registered application
-container before confining confirmation to the dialog opened by that application.
-Blank, partial, unmatched, or ambiguous inventory retains the local binding.
+the credentials page, then call `delete` with only the delete and optional
+confirmation selectors. Trusted code reads the on-page client ID through the
+registered selector and compares it exactly with the sealed client ID before any
+delete click. It treats the application as already absent only when the registered
+credentials page loads cleanly and no client-ID element exists. Mismatch, duplicate
+elements, hidden elements, partial pages, or uncertain confirmation fail closed
+and retain the local binding.
 
 ## Act primitive
 

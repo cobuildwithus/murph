@@ -14559,7 +14559,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(prompt).toContain("Continue the exact strava setup");
     expect(prompt).toContain("murph.provider_setup");
-    expect(prompt).not.toMatch(/clientId|clientSecret|credential value/iu);
+    expect(prompt).toContain("Fill and submit the complete creation form yourself");
+    expect(prompt).toContain(
+      "confirm the client-ID and client-secret elements are present without reading their values",
+    );
+    expect(prompt).toContain("Never ask the member for credentials");
+    expect(prompt).not.toMatch(/clientId|clientSecret/iu);
     expect(prompt).not.toContain("dps_fixture");
     const executionContext = mocks.runHostedAssistantAutomationLane.mock.calls[0]?.[0]
       .executionContext;

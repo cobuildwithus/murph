@@ -885,56 +885,39 @@ describe("hosted execution coverage gaps", () => {
       code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     });
-    expect(parseHostedComputerActRequest({
-      steps: [{
-        action: "click",
-        target: {
-          kind: "selector",
-          value: 'button[data-testid="create-app"]',
-        },
-      }],
-    })).toEqual({
-      steps: [{
-        action: "click",
-        target: {
-          kind: "selector",
-          value: 'button[data-testid="create-app"]',
-        },
-      }],
-      timeoutMs: 15000,
-    });
     expect(() => parseHostedComputerActRequest({
       steps: [{
         action: "click",
         target: {
           kind: "selector",
-          value: 'body:has(input[value^="secret-prefix"]) button',
+          value: 'button[data-testid="create-app"]',
         },
       }],
     })).toThrow(/Hosted computer act request is invalid/u);
     const captureRequest = {
       action: "capture",
-      applicationName: "Cobalt Trail 482731",
       provider: "strava",
       runId: "hcr_setup",
       setupId: "dps_setup",
     } as const;
-    expect(parseHostedRuntimeProviderSetupToolRequest(captureRequest)).toMatchObject({
-      action: "capture",
-      applicationName: "Cobalt Trail 482731",
-    });
-    expect(() => parseHostedRuntimeProviderSetupToolRequest({
-      ...captureRequest,
-      applicationNameSelector: 'input[name="name"]',
-      clientIdSelector: '[data-client-id]',
-      clientSecretSelector: 'input[name="client_secret"]',
-      revealSecretSelector: null,
-      submitSelector: 'button[type="submit"]',
-    })).toThrow();
-    expect(() => parseHostedRuntimeProviderSetupToolRequest({
-      ...captureRequest,
-      applicationName: "A Member Name 123456",
-    })).toThrow();
+    expect(parseHostedRuntimeProviderSetupToolRequest(captureRequest)).toEqual(
+      captureRequest,
+    );
+    for (const extra of [
+      { applicationName: "Synthetic Application" },
+      { applicationNameSelector: 'input[name="name"]' },
+      { clientId: "client-id" },
+      { clientIdSelector: "[data-client-id]" },
+      { clientSecret: "client-secret" },
+      { clientSecretSelector: 'input[name="client_secret"]' },
+      { revealSecretSelector: null },
+      { submitSelector: 'button[type="submit"]' },
+    ]) {
+      expect(() => parseHostedRuntimeProviderSetupToolRequest({
+        ...captureRequest,
+        ...extra,
+      })).toThrow();
+    }
     const deleteRequest = {
       action: "delete",
       confirmSelector: null,
@@ -945,6 +928,15 @@ describe("hosted execution coverage gaps", () => {
     } as const;
     expect(parseHostedRuntimeProviderSetupToolRequest(deleteRequest)).toMatchObject({
       action: "delete",
+    });
+    expect(parseHostedRuntimeProviderSetupToolRequest({
+      ...deleteRequest,
+      confirmSelector: 'div[role="dialog"] button:has-text("Confirm")',
+      deleteSelector: 'main:has(form[data-owner="member"]) > form[data-owner="member"] button[value^="delete"]',
+    })).toMatchObject({
+      action: "delete",
+      confirmSelector: 'div[role="dialog"] button:has-text("Confirm")',
+      deleteSelector: 'main:has(form[data-owner="member"]) > form[data-owner="member"] button[value^="delete"]',
     });
     expect(() => parseHostedRuntimeProviderSetupToolRequest({
       ...deleteRequest,

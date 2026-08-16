@@ -4168,8 +4168,9 @@ function buildProviderSetupContinuationPrompt(
   return [
     "Private provider setup continuation accepted:",
     `- Continue the exact ${continuation.provider} setup with \`murph.provider_setup\` using provider \`${continuation.provider}\`.`,
-    "- Read the current durable setup first; resume its exact owned browser run and do not create a duplicate application.",
-    "- Credentials remain inside the trusted capture boundary and must never enter model context.",
+    "- Read the current durable setup first and resume its exact owned browser run. Follow the returned application metadata and credentials-page guidance with ordinary browsing.",
+    "- Fill and submit the complete creation form yourself. On the credentials page, confirm the client-ID and client-secret elements are present without reading their values, then call capture once.",
+    "- Never ask the member for credentials. Credential values remain inside the trusted capture boundary and must never enter model context.",
   ].join("\n");
 }
 

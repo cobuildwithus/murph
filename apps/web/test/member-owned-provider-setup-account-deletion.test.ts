@@ -18,7 +18,6 @@ const BLOCKED_SETUP_CASES: ReadonlyArray<readonly [
     providerApplicationRevision: 2,
   }],
   ["owned browser", { browserRunId: "hcr_synthetic", status: "browser_setup" }],
-  ["capture fence", { status: "capturing" }],
   ["cancellation fence", { status: "canceling" }],
   ["deletion fence", { status: "deletion_pending" }],
 ];
@@ -163,7 +162,6 @@ function buildSetup(
 ): MemberOwnedProviderSetupRecord {
   return {
     active: true,
-    applicationName: "Cobalt Trail 482731",
     browserRunId: null,
     completedAt: null,
     connectSourceId: "strava",

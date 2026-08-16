@@ -1130,68 +1130,6 @@ describe("ComputerUseService", () => {
     warningLog.mockRestore();
   });
 
-  it("classifies trusted pre-submit capture failure without sealing credentials", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel({
-      executeResult: {
-        result: { kind: "pre_submit_failed" },
-        title: "Provider application",
-        url: "https://provider.example.test/settings/application",
-      },
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store: new FakeComputerUseStore({
-        run: createRunRecord({ updatedAt: now }),
-      }),
-    });
-    const consume = vi.fn(async () => ({ applicationId: "dpa_unreachable" }));
-
-    await expect(service.captureAndSealProviderCredentials({
-      code: "return await captureProviderCredentialsInsideTrustedBoundary();",
-      consume,
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 1_000,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_PRE_SUBMIT_FAILED",
-      retryable: true,
-    });
-    expect(consume).not.toHaveBeenCalled();
-  });
-
-  it("classifies trusted recovery absence without sealing credentials", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel({
-      executeResult: {
-        result: { kind: "no_application" },
-        title: "Provider applications",
-        url: "https://provider.example.test/settings/application",
-      },
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store: new FakeComputerUseStore({
-        run: createRunRecord({ updatedAt: now }),
-      }),
-    });
-    const consume = vi.fn(async () => ({ applicationId: "dpa_unreachable" }));
-
-    await expect(service.captureAndSealProviderCredentials({
-      code: "return await inspectProviderApplicationInsideTrustedBoundary();",
-      consume,
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 1_000,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_NO_APPLICATION",
-      retryable: true,
-    });
-    expect(consume).not.toHaveBeenCalled();
-  });
-
   it("scrubs malformed provider credential execution results before rejecting them", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const malformedCredentials = {
@@ -7233,7 +7171,41 @@ describe("ComputerUseService", () => {
     expect(store.createRunInputs).toEqual([]);
   });
 
-  it("rejects generic browser actions against a setup-owned run", async () => {
+  it("runs ordinary browser actions against the exact setup-owned run", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        result: { submitted: true },
+        title: "Provider application",
+        url: "https://provider.example.test/settings/api",
+      },
+    });
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.act({
+      code: "await page.getByRole('button', { name: 'Create application', exact: true }).click(); return { submitted: true };",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 1_000,
+    })).resolves.toEqual({
+      result: { submitted: true },
+      title: "Provider application",
+      url: "https://provider.example.test/settings/api",
+    });
+
+    const code = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(code).toContain("getByRole('button', { name: 'Create application', exact: true })");
+    expect(code).toContain("__murphUserResult");
+    expect(code).not.toContain('page.route("**/*"');
+  });
+
+  it("runs ordinary OS control against the exact setup-owned run", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -7244,60 +7216,34 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel();
     const service = new ComputerUseService({ kernel, now: () => now, store });
 
-    await expect(service.act({
-      code: "return await page.title();",
+    await expect(service.osControl({
+      action: "clickMouse",
+      button: "left",
+      clickType: "click",
+      holdKeys: [],
       memberId: "member_123",
+      numClicks: 1,
       runId: "hcr_run123",
-      timeoutMs: 1_000,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_PROVIDER_SETUP_ACTION_FORBIDDEN",
-    });
-    expect(kernel.executePlaywrightCalls).toBe(0);
-  });
-
-  it("runs setup-owned browser controls through a redacted read-only observation", async () => {
-    const now = new Date("2026-06-17T12:05:00.000Z");
-    const store = new FakeComputerUseStore({
-      run: createRunRecord({
-        ownerKey: "dps_setup123",
-        ownerPurpose: "member_owned_provider_setup",
-      }),
-    });
-    const kernel = createFakeKernel({
-      executeResult: {
-        title: null,
-        url: "https://provider.example.test/",
-        visibleText: 'button "Create application"',
-      },
-    });
-    const service = new ComputerUseService({ kernel, now: () => now, store });
-
-    await expect(service.act({
-      memberId: "member_123",
-      runId: "hcr_run123",
-      steps: [{
-        action: "click",
-        target: {
-          exact: true,
-          kind: "role",
-          name: "Create application",
-          role: "button",
-        },
-      }],
-      timeoutMs: 1_000,
+      x: 120,
+      y: 240,
     })).resolves.toEqual({
-      result: { visibleText: 'button "Create application"' },
-      title: null,
-      url: "https://provider.example.test/",
+      action: "clickMouse",
+      ok: true,
+      runId: "hcr_run123",
+      status: "running",
     });
-
-    const code = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(code).toContain('page.route("**/*"');
-    expect(code).toContain('new URL("/", window.location.origin).toString()');
-    expect(code).toContain("title: null");
-    expect(code).not.toContain("document.body.innerText");
-    expect(code).not.toContain("page.title()");
-    expect(code).not.toContain("window.location.href");
+    expect(kernel.osControlInputs).toEqual([{
+      action: {
+        action: "clickMouse",
+        button: "left",
+        clickType: "click",
+        holdKeys: [],
+        numClicks: 1,
+        x: 120,
+        y: 240,
+      },
+      sessionId: "kernel-session-1",
+    }]);
   });
 
   it("finishes only the exact setup-owned run during prerequisite cancellation", async () => {
@@ -10652,6 +10598,7 @@ function createFakeKernel(input: {
   deletedSessionIds: string[];
   executePlaywrightCalls: number;
   executePlaywrightInputs: Parameters<ComputerKernelClient["executePlaywright"]>[0][];
+  osControlInputs: Parameters<ComputerKernelClient["osControl"]>[0][];
 } {
   let browserCount = 1;
   const createBrowserResults = [...(input.createBrowserResults ?? [])];
@@ -10664,6 +10611,7 @@ function createFakeKernel(input: {
     deletedSessionIds: [],
     executePlaywrightCalls: 0,
     executePlaywrightInputs: [],
+    osControlInputs: [],
     async createBrowser(browserInput) {
       this.createdBrowserInputs.push(browserInput);
       const result = createBrowserResults.shift() ?? "ok";
@@ -10731,7 +10679,9 @@ function createFakeKernel(input: {
         },
       };
     },
-    async osControl() {},
+    async osControl(osControlInput) {
+      this.osControlInputs.push(osControlInput);
+    },
   };
 }
 

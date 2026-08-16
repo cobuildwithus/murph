@@ -329,7 +329,7 @@ export async function saveDeviceProviderApplication(input: {
           provider,
           providerApplicationId: current?.id ?? null,
           providerApplicationRevision: current?.revision ?? null,
-          status: "capturing",
+          status: "browser_setup",
           version: input.setupCapture.expectedSetupVersion,
         },
       });
@@ -470,7 +470,7 @@ async function requireSetupCaptureFence(input: {
       provider: input.provider,
       providerApplicationId: input.expectedApplication?.id ?? null,
       providerApplicationRevision: input.expectedRevision,
-      status: "capturing",
+      status: "browser_setup",
       version: input.fence.expectedSetupVersion,
     },
   });

@@ -43,24 +43,22 @@ another source's launch requirements.
 - One durable setup per member/provider binds connect coordinates, a setup-owned
   hosted browser run, and the exact encrypted provider application id/revision.
   Generic active browser work cannot be reused or navigated by setup.
-- The model drives the live provider page through the ordinary computer-use
-  understanding and one provider-neutral setup tool. Setup-owned runs expose only
-  sanitized origin/control observations and typed actions; they do not accept
-  provider-specific Playwright or arbitrary browser code. Provider sign-in,
-  verification, CAPTCHA, and the current developer-subscription prerequisite pause
-  the exact run for a recoverable member handoff that returns to `/connect`.
-- Final submission and raw client credential capture cross only the narrow trusted
-  browser-result-to-sealing boundary. Trusted code locates Murph's deterministic
-  member marker first, derives one provider-declared application/form container,
-  and admits only controls belonging to that object. It immediately seals the
-  credentials, scrubs browser values and the raw result, and returns non-secret
-  application metadata. Ambiguous or unrelated applications fail closed.
-- `capturing` is the persisted irreversible-attempt fence: Cancel disappears and
-  is rejected once submission may have begun, ambiguous failure never resets the
-  fence, and exact-run recovery captures without submitting again. A fully loaded
-  exact safe landing with no marker may clear the fence without submitting; only
-  a later independent invocation may attempt creation again. `canceling` remains
-  the pre-submission cleanup fence.
+- Member-owned provider setup is authorized explicitly from `/connect` and uses an
+  exact setup-owned authenticated browser run. The assistant may navigate the
+  provider dashboard, fill and submit ordinary private-application metadata, and
+  recover from visible provider errors. It must never ask for, read, transcribe,
+  or preserve credential values.
+- Credential capture is deterministic and provider-registered: trusted code loads
+  the exact credentials URL, verifies origin and path, optionally reveals the
+  secret, requires one visible client-ID element and one visible client-secret
+  element, seals both values through the encrypted provider-application owner,
+  scrubs browser-side values, and returns no credentials.
+- External deletion is authorized only by exact comparison of the registered
+  on-page client ID with the sealed client ID. A clean page with no client-ID
+  element is already absent; any mismatch, ambiguity, authentication interruption,
+  or uncertain completion fails closed. Account deletion cannot pass its
+  pre-suspension gate until the exact-bound connection, encrypted application
+  binding, and resumable setup-owned browser work are gone.
 - Continue and setup-owned handoff Done persist one exact typed continuation in
   the existing system mailbox before the droppable runtime wake. Duplicate actions
   converge, and mailbox handoff recovery resumes work after a lost wake without a
@@ -72,8 +70,7 @@ another source's launch requirements.
   authentication and the access token in the form body. Credential values and
   authorization headers are excluded from diagnostics.
 - Account deletion requires the member to disconnect the exact connection and
-  remove the deterministically marked provider application through the ordinary
-  authenticated `/connect` flow. The member-lock transaction checks every active
+  remove the exact client-ID-matched provider application through the ordinary authenticated `/connect` flow. The member-lock transaction checks every active
   setup, application, and exact setup-owned run immediately before suspension;
   application save rejects the suspended member. Post-suspension cleanup
   is local-only and fails closed if that preflight is invalidated, so no provider
@@ -95,7 +92,7 @@ live, non-secret validation of:
 
 1. production Kernel/Managed Auth handoff through sign-in, MFA/CAPTCHA when
    presented, and the developer-subscription prerequisite;
-2. exact marked-app create and existing-app recovery using the deployed callback,
+2. ordinary application create and existing-app recovery using the deployed callback, plus registered-selector credential capture,
    without capturing a screenshot or artifact that contains a client secret;
 3. exact-revision OAuth callback, first backfill, at least one scheduled poll,
    disconnect/revoke, reconnect, and account-deletion retry behavior;

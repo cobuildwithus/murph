@@ -48,8 +48,6 @@ import {
   hostedComputerOsControlRequestSchema,
 } from '@murphai/hosted-execution/computer-use'
 import {
-  HOSTED_PROVIDER_SETUP_APPLICATION_NAME_FIRST_WORDS,
-  HOSTED_PROVIDER_SETUP_APPLICATION_NAME_SECOND_WORDS,
   hostedRuntimeProviderSetupToolRequestSchema,
 } from '@murphai/hosted-execution/provider-setup'
 import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
@@ -1257,7 +1255,7 @@ export const MURPH_PROVIDER_SETUP_TOOL = {
   namespace: 'murph',
   name: 'provider_setup',
   description:
-    `Drive an authorized private provider-app setup through the trusted browser boundary. Begin or resume the exact setup, then use computer_open/computer_act on its runId. When begin returns no name, choose a safe random FirstWord SecondWord: first word from ${HOSTED_PROVIDER_SETUP_APPLICATION_NAME_FIRST_WORDS.join(', ')}, second from ${HOSTED_PROVIDER_SETUP_APPLICATION_NAME_SECOND_WORDS.join(', ')}. Pass those words to capture but never fill or submit them yourself; Web appends six cryptographically random digits and freezes the full friendly name. Trusted provider registration owns application-name, submit, client-ID, client-secret, and optional reveal coordinates, so capture takes no runtime selectors and client credentials never enter model context. For delete, identify only the delete and optional confirmation controls; trusted provider registration locates the stable client ID without exposing its value. Never embed provider UI programs or credentials.`,
+    'Drive an authorized private provider-app setup without exposing credentials. Begin or resume the exact setup, then use ordinary computer_open/computer_act browsing on its runId. Follow the returned application website, category, callback URL, read-only scopes, credentials-page URL, and guidance. Fill the entire creation form yourself, including a non-personal application name you choose, and submit it. Recover from visible duplicate or validation failures as a person would. Pause the same run for sign-in, MFA, CAPTCHA, or provider prerequisites. On the credentials page, confirm the client-ID and client-secret elements are present without reading, copying, transcribing, or returning either value, then call capture once. Trusted capture navigates to the registered credentials URL, verifies origin and path, uses only registered credential selectors, optionally reveals the secret, seals both values, scrubs the page, and returns no credentials. For delete, provide only the delete and optional confirmation selectors; trusted code compares the registered on-page client ID exactly with the sealed client ID and fails closed on mismatch or ambiguity. Never ask the member for credentials or embed credentials in any tool call.',
   inputSchema: z.toJSONSchema(hostedRuntimeProviderSetupToolRequestSchema, {
     io: 'input',
   }) as Record<string, unknown>,
@@ -1300,16 +1298,7 @@ function buildComputerActInputSchema(): JsonSchemaObject {
   const generated = z.toJSONSchema(hostedComputerActRequestSchema, {
     io: 'input',
   }) as JsonSchemaObject
-  const variants = Array.isArray(generated.oneOf)
-    ? generated.oneOf
-    : Array.isArray(generated.anyOf)
-    ? generated.anyOf
-    : []
-
-  return {
-    oneOf: variants.map(addRunIdToActionSchema),
-    type: 'object',
-  }
+  return addRunIdToActionSchema(generated)
 }
 
 const MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA = buildComputerOsControlInputSchema()
@@ -1345,7 +1334,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'One bounded step in the run. Provider_setup accepts typed steps only and blocks code, OS control, value reads, network writes, submit, and destructive actions; use provider_setup for capture/deletion. Ordinary runs accept Playwright. Before call two, send progress if available. After failure, call computer_open.',
+    'One bounded Playwright step in the run, including a provider_setup-owned run. In provider setup, fill and submit forms yourself; never read credentials or click the secret reveal; use capture. Before call two, send progress. After failure, call computer_open.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -1353,7 +1342,7 @@ export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
   namespace: 'murph',
   name: 'computer_os_control',
   description:
-    'Fallback for ordinary runs: one bounded mouse or keyboard action when Playwright cannot operate a verified control. Forbidden for provider_setup and sensitive data. After a possible effect or failure, call computer_open before retrying.',
+    'Fallback for one bounded mouse or keyboard action when Playwright cannot operate a verified control, including an exact provider_setup-owned run. Never use it on credential fields, credential values, or a secret-reveal control. After a possible effect or failure, call computer_open before retrying.',
   inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 

@@ -280,64 +280,55 @@ it has been explicitly elevated to a cross-cutting invariant.
   inspect provider state under the same durable owner, and repeat the effect only
   after a later independent inspection proves it did not happen. Acknowledge,
   clean up, or advance progress only after terminal or durable pending evidence.
-  Member-owned provider setup additionally binds every transition to member,
-  finite supported provider, connect coordinates, exact setup-owned browser run,
-  and the exact application id/revision once created; one active setup exists per
-  member/provider, and replacement cannot overlap an active bound connection.
-  Generic member browser runs are not setup authority. Connection records are the
-  authoritative completion/disconnection truth, and projection bookkeeping after
-  an irreversible provider effect cannot turn success into a reported failure.
-  An awaiting setup may reissue only the latest capability for its exact owned
-  handoff; completing that handoff resumes only that run and returns to `/connect`
-  without conversation routing. Prerequisite cancellation is permitted only when
-  durable state proves no provider submission, application binding, or connection.
-  Once `capturing` records possible submission, ambiguous failure preserves that
-  fence and exact-run recovery cannot submit again. If that run expires, only a
-  successor already proven by the computer owner to belong to the same setup may
-  replace its run binding, without changing `capturing`. A fully loaded exact safe
-  landing with zero registered application containers and one disjoint positive
-  loaded-empty coordinate may clear that fence without submitting. Missing name
-  evidence on a partial or nonempty inventory remains fenced; only a later
-  independent invocation may attempt creation again. Application-name,
-  final-submit, client-ID, client-secret, and optional reveal semantics belong to
-  finite provider registration, never model-supplied selectors; capture must seal
-  the ID and secret only through those registered roles. Run
-  reservation is not navigation authority: a new or successor candidate
-  must CAS-bind to an acquisition-eligible exact setup before Kernel provisioning
-  and attach under that binding before navigation. A losing admission retires the
-  candidate synchronously; a winning admission makes cancellation own it. The
-  setup run and every exact successor use a deterministic persistent profile lane
-  that generic computer work cannot open. After credential sealing, deletion
-  authority is the stable client ID located through provider registration and
-  compared only as a Web-derived digest inside registered application containers,
-  not the provider's mutable display name or a model-selected locator. Missing or
-  incomplete identifiers remain fenced; absence requires zero containers plus one
-  disjoint positive loaded-empty coordinate. If
-  remote browser creation may already be in flight, cancellation persists the
-  existing cleanup claim and remains `canceling`: an early delete-by-name
-  `NotFound` is not quiescence. The returning creator deletes its exact browser,
-  or the existing stale-provisioning boundary repeats deterministic cleanup. A
-  provider-client rejection without an exact browser handle remains ambiguous,
-  and no fresh acquisition may clear its claim before that boundary;
-  only that proof may clear the claim and report `canceled`. Without Cancel,
-  the originally accepted typed mailbox item remains the retry owner. Before
-  each assistant attempt it revalidates the exact setup id, accepted version,
-  and eligible `authorized`, `browser_setup`, or `capturing` phase. A typed
-  browser-provisioning outcome returns that same item to mailbox backoff without
-  rerunning mutable admission; after the existing stale boundary the computer
-  owner alone cleans the exact deterministic browser and may admit one
-  same-setup successor. `/connect` reads do not own recovery, and `capturing`
-  recovery remains submit-free. Consent withdrawal routes established
-  connections through disconnection, cancels pre-submit browser work through
-  its exact owner, preserves `canceling` while cleanup remains ambiguous, and
-  never erases the durable `capturing` fence.
-  Successful application deletion deactivates the terminal setup only after its exact
-  browser run is released, so a fresh setup never overlaps owned browser work.
-  Continue and setup-owned handoff completion append exact typed continuation
-  work to the existing system
-  mailbox before waking the runtime. Account deletion checks setup, application,
-  and run ownership under its member suspension lock; provider application save
-  rejects suspension, and local retry ownership survives later cleanup failure.
+  Member-owned provider setup binds every durable transition to the member,
+  finite supported provider, exact connect coordinates, setup id, optimistic
+  version, and exact setup-owned browser run. One active setup exists per
+  member/provider, and an active exact-bound connection prevents application
+  replacement or deletion. Generic member browser runs are not setup authority.
+
+  `/connect` Continue is the member authorization boundary. The model may use
+  ordinary computer-use actions on the exact setup-owned run to navigate the
+  provider dashboard, fill the complete application form including an ordinary
+  non-personal name, submit, and recover from visible provider errors. Sign-in,
+  MFA, CAPTCHA, and prerequisites pause and resume that same run. The model must
+  never request, read, copy, transcribe, return, or preserve credential values.
+
+  Finite provider registration owns the credentials-page URL, client-ID
+  selector, client-secret selector, and optional secret-reveal selector.
+  Credential capture accepts no model-supplied selector or value. Trusted code
+  must verify the registered HTTPS origin and path, require each registered
+  credential selector to resolve to exactly one visible element, seal both
+  values through the encrypted application owner, scrub browser-side values,
+  and return no credentials. Capture is read-only apart from reveal and may be
+  retried after an interruption.
+
+  `browser_setup` is the simple in-progress setup state. The setup version is the
+  concurrency fence: application save must match the exact setup, run, status,
+  and version, while cancellation advances that version and closes the exact
+  run. There is no application-name authority, trusted submit, `capturing`
+  status, or provider-submit ambiguity recovery.
+
+  A browser reservation is not navigation authority. The exact run must be
+  setup-bound before Kernel provisioning and revalidated before attachment and
+  each action. Browser provisioning `cleanup_pending`, late-create cleanup, and
+  stale-provisioning convergence remain owned by the existing computer system
+  and prove browser quiescence only.
+
+  Deletion authority is the sealed client ID. Trusted deletion must navigate to
+  the registered credentials page and compare the uniquely visible registered
+  on-page client ID exactly with the sealed value before clicking live-page
+  delete or confirmation controls. A clean page with no client-ID element is the
+  only already-absent proof. Redirects, mismatches, hidden or duplicate
+  identifiers, partial pages, and uncertain completion fail closed and retain
+  the binding.
+
+  Connection records remain authoritative completion and disconnection truth.
+  Successful application deletion deactivates its terminal setup only after the
+  exact browser run is released. Continue and exact handoff completion append
+  idempotent typed continuation work to the existing system mailbox before the
+  runtime wake. Account deletion checks connection, application, setup, and run
+  ownership under the member suspension lock, and provider-application save
+  rejects suspended or stale setup authority.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate

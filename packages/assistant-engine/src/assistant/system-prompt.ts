@@ -1485,7 +1485,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
   );
   const memberOwnedGuidance = memberOwnedProviderList === "none"
     ? ""
-    : ` For ${memberOwnedProviderList}, /connect Continue authorizes. Begin \`provider_setup\` on its run. If unnamed, invent a tool-valid random friendly name; pass only to capture. Registered name/submit/credential roles make capture selector-free; reuse it. Pause for sign-in, MFA/CAPTCHA/prerequisites, then begin after return. No OS/finish; disconnect before delete.`;
+    : ` For ${memberOwnedProviderList}, /connect Continue authorizes. Begin \`provider_setup\`; use its exact run to fill and submit a private app from returned fields including its name, pausing for sign-in/MFA/CAPTCHA. At the credentials URL, confirm ID/secret elements exist without reading values, then capture once. Never ask for credentials; disconnect before delete.`;
 
   return `- Hosted wearable connection links are available for ${providerList}. Name about six examples; omit generic health apps and unsolicited unsupported caveats. If a source is absent from this list and health relay guidance, say it is unsupported and suggest a listed source or text notes. Use \`murph.device\` to list accounts, create a real link, or reconcile. Send only its returned \`connectUrl\`; never invent one or request provider credentials.${memberOwnedGuidance} End on a URL-only line, especially in iMessage.`;
 }

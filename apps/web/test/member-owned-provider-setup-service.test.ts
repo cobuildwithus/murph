@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sha256Hex } from "@/src/lib/computer-use/ids";
 import {
   DeviceProviderApplicationError,
   saveDeviceProviderApplication,
@@ -27,6 +26,7 @@ const MEMBER_ID = "member_synthetic";
 const SETUP_ID = "dps_synthetic";
 const RUN_ID = "hcr_provider_setup";
 const APPLICATION_ID = "dpa_synthetic";
+const CREDENTIALS_URL = "https://provider.example.test/settings/api";
 const CAPTURED_CREDENTIALS = Object.freeze({
   clientId: randomUUID(),
   clientSecret: randomUUID(),
@@ -57,19 +57,14 @@ const CUSTOM_REGISTRATION: MemberOwnedProviderSetupRegistration<"strava"> = {
     applicationWebsite: "https://fixture.example.test",
     developerPortalUrl: "https://provider.example.test/developer/apps",
     guidance: [
-      "Reason from the live provider UI.",
-      "Use trusted capture for final submission and credential sealing.",
+      "Use ordinary computer-use browsing to create the private application.",
+      "Confirm the registered credential elements are present without reading their values, then use trusted capture.",
     ],
-    safeLandingUrl: "https://provider.example.test/developer/apps",
     trustedAuthority: {
-      applicationContainerSelector: "form[data-owned-application]",
-      applicationIdSelector: "[data-client-id]",
-      applicationNameSelector: "[data-application-name]",
-      applicationSecretSelector: "[data-client-secret]",
-      creationFormSelector: "form[data-owned-creation]",
-      loadedEmptySelector: "[data-owned-application-empty]",
+      clientIdSelector: "[data-client-id]",
+      clientSecretSelector: "[data-client-secret]",
+      credentialsPageUrl: CREDENTIALS_URL,
       revealSecretSelector: "button.reveal-secret",
-      submitSelector: "button.create-application",
     },
   },
   coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
@@ -127,10 +122,13 @@ class MemorySetupStore {
     return this.disposition;
   }
 
-  async beginDeletion(): Promise<{
+  async beginDeletion(
+    expected: MemberOwnedProviderSetupRecord,
+  ): Promise<{
     kind: "connection_conflict" | "ready";
     setup: MemberOwnedProviderSetupRecord;
   }> {
+    expect(expected).toEqual(this.setup);
     if (this.disposition.kind !== "none") {
       return {
         kind: "connection_conflict",
@@ -171,17 +169,8 @@ class MemorySetupStore {
     this.setup = {
       ...this.setup,
       ...(input.active === undefined ? {} : { active: input.active }),
-      ...(input.applicationName === undefined
-        ? {}
-        : { applicationName: input.applicationName }),
       ...(input.browserRunId === undefined ? {} : { browserRunId: input.browserRunId }),
       ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
-      ...(input.providerApplicationId === undefined
-        ? {}
-        : { providerApplicationId: input.providerApplicationId }),
-      ...(input.providerApplicationRevision === undefined
-        ? {}
-        : { providerApplicationRevision: input.providerApplicationRevision }),
       status: input.status,
       updatedAt: new Date(this.setup.updatedAt.getTime() + 1_000),
       version: this.setup.version + 1,
@@ -228,7 +217,7 @@ class MemorySetupStore {
     const fence = input.setupCapture;
     if (
       !fence
-      || this.setup.status !== "capturing"
+      || this.setup.status !== "browser_setup"
       || this.setup.version !== fence.expectedSetupVersion
       || this.setup.id !== fence.setupId
       || this.setup.browserRunId !== fence.runId
@@ -304,7 +293,9 @@ class FakeProviderComputer implements ProviderSetupComputer {
   ) => ({
     ok: true as const,
     runId: input.runId,
-    status: "completed",
+    status: "completed" as Awaited<
+      ReturnType<ProviderSetupComputer["finishOwnedRun"]>
+    >["status"],
   }));
   readonly hasOwnedRunHandoff = vi.fn(async () => false);
   readonly issueOwnedRunHandoff = vi.fn(async () => "/computer/handoff/synthetic");
@@ -321,14 +312,12 @@ class FakeProviderComputer implements ProviderSetupComputer {
     return {
       result: { kind: "deleted" },
       title: "Provider applications",
-      url: CUSTOM_REGISTRATION.browser.safeLandingUrl,
+      url: CREDENTIALS_URL,
     };
   });
+  captureErrorOnce: Error | null = null;
   captureStarted: (() => void) | null = null;
-  ambiguousCaptureErrorOnce: Error | null = null;
-  missingApplicationCaptureOnce = false;
   releaseCapture: Promise<void> | null = null;
-
   readonly captureCodes: string[] = [];
 
   async captureAndSealProviderCredentialsInOwnedRun<T>(input: {
@@ -348,20 +337,14 @@ class FakeProviderComputer implements ProviderSetupComputer {
     if (this.releaseCapture) {
       await this.releaseCapture;
     }
-    if (this.ambiguousCaptureErrorOnce) {
-      const error = this.ambiguousCaptureErrorOnce;
-      this.ambiguousCaptureErrorOnce = null;
+    if (this.captureErrorOnce) {
+      const error = this.captureErrorOnce;
+      this.captureErrorOnce = null;
       throw error;
-    }
-    if (this.missingApplicationCaptureOnce) {
-      this.missingApplicationCaptureOnce = false;
-      throw Object.assign(new Error("trusted recovery proved no application"), {
-        code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_NO_APPLICATION",
-      });
     }
     return {
       title: "Provider applications",
-      url: CUSTOM_REGISTRATION.browser.safeLandingUrl,
+      url: CREDENTIALS_URL,
       value: await input.consume(CAPTURED_CREDENTIALS),
     };
   }
@@ -392,17 +375,17 @@ describe("member-owned provider setup service", () => {
     expect(first.contract).toMatchObject({
       application: {
         category: "Fixture category",
-        name: "Cobalt Trail 482731",
         website: "https://fixture.example.test",
       },
+      credentialsPageUrl: CREDENTIALS_URL,
       developerPortalUrl: CUSTOM_REGISTRATION.browser.developerPortalUrl,
       guidance: CUSTOM_REGISTRATION.browser.guidance,
       providerName: "Fixture provider",
-      safeLandingUrl: CUSTOM_REGISTRATION.browser.safeLandingUrl,
     });
     expect(first.contract.application.callbackUrl).toBe(
       "https://web.example.test/api/device-sync/oauth/strava/callback",
     );
+    expect(first.contract.application).not.toHaveProperty("name");
     expect(first.contract.application).not.toHaveProperty("marker");
     expect(second.run.runId).toBe(first.run.runId);
     expect(computer.acquireOwnedRun).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -449,7 +432,7 @@ describe("member-owned provider setup service", () => {
     });
   });
 
-  it("accepts only the exact authorized continuation or its own browser progression", async () => {
+  it("accepts only the exact authorized continuation or its browser progression", async () => {
     const store = new MemorySetupStore();
     const computer = new FakeProviderComputer();
     const service = createService({ computer, store });
@@ -469,17 +452,6 @@ describe("member-owned provider setup service", () => {
     })).resolves.toBe(false);
 
     await service.beginBrowserSetup(MEMBER_ID);
-    await expect(service.validateContinuation({
-      expectedSetupId: SETUP_ID,
-      expectedSetupVersion: authorizedVersion,
-      memberId: MEMBER_ID,
-    })).resolves.toBe(true);
-
-    store.setup = {
-      ...store.setup,
-      status: "capturing",
-      version: store.setup.version + 1,
-    };
     await expect(service.validateContinuation({
       expectedSetupId: SETUP_ID,
       expectedSetupVersion: authorizedVersion,
@@ -508,29 +480,6 @@ describe("member-owned provider setup service", () => {
       expectedSetupVersion: authorizedVersion,
       memberId: MEMBER_ID,
     })).resolves.toBe(false);
-  });
-
-  it("preserves the capturing fence during consent withdrawal", async () => {
-    const store = new MemorySetupStore();
-    store.setup = buildSetup({
-      browserRunId: RUN_ID,
-      status: "capturing",
-      version: 4,
-    });
-    const computer = new FakeProviderComputer();
-    const service = createService({ computer, store });
-
-    await expect(service.reconcileConsentWithdrawal(MEMBER_ID)).resolves.toMatchObject({
-      setupId: SETUP_ID,
-      status: "capturing",
-    });
-
-    expect(store.setup).toMatchObject({
-      browserRunId: RUN_ID,
-      status: "capturing",
-      version: 4,
-    });
-    expect(store.transitions).toEqual([]);
   });
 
   it("cancels an unbound browser setup during consent withdrawal", async () => {
@@ -581,7 +530,7 @@ describe("member-owned provider setup service", () => {
     expect(store.transitions).toEqual([]);
   });
 
-  it("keeps browser recovery out of presentation reads", async () => {
+  it("keeps browser cleanup reconciliation out of presentation reads", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({
       browserRunId: RUN_ID,
@@ -673,13 +622,11 @@ describe("member-owned provider setup service", () => {
       ownerPurpose: "member_owned_provider_setup",
       runId: RUN_ID,
     });
-
   });
 
   it("hands credentials directly to the sealed application owner without returning them", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({
-      applicationName: null,
       browserRunId: RUN_ID,
       status: "browser_setup",
     });
@@ -692,6 +639,7 @@ describe("member-owned provider setup service", () => {
         memberId: MEMBER_ID,
         provider: "strava",
         setupCapture: {
+          expectedSetupVersion: store.setup.version,
           runId: RUN_ID,
           setupId: SETUP_ID,
         },
@@ -710,64 +658,60 @@ describe("member-owned provider setup service", () => {
     expect(JSON.stringify(result)).not.toContain(CAPTURED_CREDENTIALS.clientId);
     expect(JSON.stringify(result)).not.toContain(CAPTURED_CREDENTIALS.clientSecret);
     expect(store.setup).toMatchObject({
-      applicationName: "Cobalt Trail 482731",
       browserRunId: null,
       providerApplicationId: APPLICATION_ID,
       providerApplicationRevision: 3,
       status: "oauth_ready",
     });
     expect(computer.captureCodes).toHaveLength(1);
-    expect(computer.captureCodes[0]).toContain("[data-application-name]");
-    expect(computer.captureCodes[0]).toContain("button.create-application");
+    expect(computer.captureCodes[0]).toContain(CREDENTIALS_URL);
     expect(computer.captureCodes[0]).toContain("[data-client-id]");
     expect(computer.captureCodes[0]).toContain("[data-client-secret]");
     expect(computer.captureCodes[0]).toContain("button.reveal-secret");
+    expect(computer.captureCodes[0]).not.toContain("data-application-name");
+    expect(computer.captureCodes[0]).not.toContain("create-application");
     expect(computer.finishOwnedRun).toHaveBeenCalledWith(expect.objectContaining({
       outcome: "completed",
       runId: RUN_ID,
     }));
   });
 
-  it("requires one friendly name and freezes it before trusted submission", async () => {
+  it("keeps capture read-only and retryable after an ambiguous browser failure", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({
-      applicationName: null,
       browserRunId: RUN_ID,
       status: "browser_setup",
+      version: 3,
     });
     const computer = new FakeProviderComputer();
-    const capture = vi.spyOn(
-      computer,
-      "captureAndSealProviderCredentialsInOwnedRun",
-    );
+    computer.captureErrorOnce = new Error("synthetic capture interruption");
     const service = createService({ computer, store });
 
-    await expect(service.captureAndSeal(MEMBER_ID, {
-      ...captureRequest(),
-      applicationName: null,
-    })).rejects.toMatchObject({
-      code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_REQUIRED",
-    });
-    expect(capture).not.toHaveBeenCalled();
-
-    store.setup = buildSetup({
-      applicationName: "Cobalt Trail 482731",
+    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).rejects.toThrow(
+      "synthetic capture interruption",
+    );
+    expect(store.setup).toMatchObject({
       browserRunId: RUN_ID,
+      providerApplicationId: null,
       status: "browser_setup",
+      version: 3,
     });
-    await expect(service.captureAndSeal(MEMBER_ID, {
-      ...captureRequest(),
-      applicationName: "Amber Summit 913579",
-    })).rejects.toMatchObject({
-      code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_CONFLICT",
+
+    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).resolves.toMatchObject({
+      applicationRevision: 3,
+      status: "oauth_ready",
     });
-    expect(store.setup.applicationName).toBe("Cobalt Trail 482731");
-    expect(capture).not.toHaveBeenCalled();
+    expect(computer.captureCodes).toHaveLength(2);
+    expect(computer.captureCodes[0]).toBe(computer.captureCodes[1]);
   });
 
-  it("keeps the irreversible capture fence after submission and rejects Cancel", async () => {
+  it("lets cancellation win a concurrent capture through the existing setup version", async () => {
     const store = new MemorySetupStore();
-    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup" });
+    store.setup = buildSetup({
+      browserRunId: RUN_ID,
+      status: "browser_setup",
+      version: 3,
+    });
     const computer = new FakeProviderComputer();
     let releaseCapture: () => void = () => undefined;
     computer.releaseCapture = new Promise<void>((resolve) => {
@@ -778,155 +722,28 @@ describe("member-owned provider setup service", () => {
       captureStarted = resolve;
     });
     computer.captureStarted = captureStarted;
-    const saveApplication = vi.fn(async (input: SaveApplicationInput) =>
-      store.bindCapturedApplication(input));
-    const service = createService({ computer, saveApplication, store });
+    const service = createService({ computer, store });
 
     const capture = service.captureAndSeal(MEMBER_ID, captureRequest());
+    const captureFailure = expect(capture).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_APPLICATION_CONFLICT",
+    });
     await captureStartedPromise;
-    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
-      code: "DEVICE_PROVIDER_SETUP_STATE_CONFLICT",
+    await expect(service.cancel(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      status: "canceled",
     });
     releaseCapture();
 
-    await expect(capture).resolves.toMatchObject({ status: "oauth_ready" });
+    await captureFailure;
     expect(store.setup).toMatchObject({
       browserRunId: null,
-      providerApplicationId: APPLICATION_ID,
-      providerApplicationRevision: 3,
-      status: "oauth_ready",
-    });
-    expect(saveApplication).toHaveBeenCalledTimes(1);
-  });
-
-  it("recovers an ambiguous submitted capture without clicking submit twice", async () => {
-    const store = new MemorySetupStore();
-    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
-    const computer = new FakeProviderComputer();
-    computer.ambiguousCaptureErrorOnce = new Error("browser result was ambiguous");
-    const service = createService({ computer, store });
-
-    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).rejects.toThrow(
-      "browser result was ambiguous",
-    );
-    expect(store.setup).toMatchObject({
-      browserRunId: RUN_ID,
-      status: "capturing",
-      version: 4,
-    });
-    expect(computer.captureCodes[0]).toContain("button.create-application");
-    await expect(service.cancel(MEMBER_ID, SETUP_ID)).rejects.toMatchObject({
-      code: "DEVICE_PROVIDER_SETUP_STATE_CONFLICT",
-    });
-
-    const result = await service.captureAndSeal(MEMBER_ID, captureRequest());
-
-    expect(result.status).toBe("oauth_ready");
-    const code = computer.captureCodes[1] ?? "";
-    expect(code).not.toContain("button.create-application");
-    expect(code).toContain("provider application ownership marker mismatch");
-  });
-
-  it("rebinds an exact successor run while keeping capture recovery submit-free", async () => {
-    const successorRunId = "hcr_provider_setup_successor";
-    const store = new MemorySetupStore();
-    store.setup = buildSetup({
-      browserRunId: RUN_ID,
-      status: "capturing",
-      version: 4,
-    });
-    const computer = new FakeProviderComputer();
-    computer.acquireOwnedRun.mockImplementationOnce(async (input) => {
-      await input.admitRun(successorRunId);
-      return {
-        awaitingReason: null,
-        reused: false,
-        runId: successorRunId,
-        status: "running",
-      };
-    });
-    computer.missingApplicationCaptureOnce = true;
-    const service = createService({ computer, store });
-
-    const resumed = await service.beginBrowserSetup(MEMBER_ID);
-
-    expect(resumed.run.runId).toBe(successorRunId);
-    expect(resumed.setup).toMatchObject({
-      setupId: SETUP_ID,
-      status: "capturing",
-    });
-    expect(store.setup).toMatchObject({
-      browserRunId: successorRunId,
-      status: "capturing",
-      version: 5,
-    });
-
-    await expect(service.captureAndSeal(MEMBER_ID, {
-      ...captureRequest(),
-      runId: successorRunId,
-    })).resolves.toMatchObject({ status: "browser_setup" });
-    expect(computer.captureCodes).toHaveLength(1);
-    expect(computer.captureCodes[0]).not.toContain("button.create-application");
-    expect(store.setup).toMatchObject({
-      browserRunId: successorRunId,
-      status: "browser_setup",
-      version: 6,
-    });
-  });
-
-  it("requires an independent registered loaded-empty proof before another submit", async () => {
-    const store = new MemorySetupStore();
-    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
-    const computer = new FakeProviderComputer();
-    computer.ambiguousCaptureErrorOnce = new Error("browser result was ambiguous");
-    const service = createService({ computer, store });
-
-    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).rejects.toThrow(
-      "browser result was ambiguous",
-    );
-    expect(store.setup).toMatchObject({ status: "capturing", version: 4 });
-
-    computer.missingApplicationCaptureOnce = true;
-    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).resolves.toMatchObject({
-      status: "browser_setup",
-    });
-    expect(store.setup).toMatchObject({ status: "browser_setup", version: 5 });
-    expect(computer.captureCodes[1]).not.toContain("button.create-application");
-    expect(computer.captureCodes[1]).toContain("[data-owned-application-empty]");
-
-    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).resolves.toMatchObject({
-      status: "oauth_ready",
-    });
-    expect(computer.captureCodes[2]).toContain("button.create-application");
-  });
-
-  it("restores browser setup after a trusted failure proven before submit", async () => {
-    const store = new MemorySetupStore();
-    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
-    const computer = new FakeProviderComputer();
-    computer.ambiguousCaptureErrorOnce = Object.assign(
-      new Error("trusted pre-submit selector failure"),
-      {
-        code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_PRE_SUBMIT_FAILED",
-      },
-    );
-    const service = createService({ computer, store });
-
-    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).rejects.toThrow(
-      "trusted pre-submit selector failure",
-    );
-    expect(store.setup).toMatchObject({
-      applicationName: null,
-      browserRunId: RUN_ID,
-      status: "browser_setup",
-      version: 5,
-    });
-    await expect(service.cancel(MEMBER_ID, SETUP_ID)).resolves.toMatchObject({
+      providerApplicationId: null,
+      providerApplicationRevision: null,
       status: "canceled",
     });
   });
 
-  it("uses the sealed client ID as trusted browser authority before exact deletion", async () => {
+  it("uses the sealed client ID as exact trusted browser deletion authority", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({
       providerApplicationId: APPLICATION_ID,
@@ -934,7 +751,9 @@ describe("member-owned provider setup service", () => {
       status: "oauth_ready",
     });
     const computer = new FakeProviderComputer();
-    const deleteApplication = vi.fn(async (input: Parameters<MemorySetupStore["deleteCapturedApplication"]>[0]) => {
+    const deleteApplication = vi.fn(async (
+      input: Parameters<MemorySetupStore["deleteCapturedApplication"]>[0],
+    ) => {
       store.deleteCapturedApplication(input);
     });
     const service = createService({ computer, deleteApplication, store });
@@ -950,9 +769,12 @@ describe("member-owned provider setup service", () => {
     });
 
     const trustedCode = computer.actOwnedRun.mock.calls[0]?.[0].code ?? "";
-    expect(trustedCode).toContain(sha256Hex(CAPTURED_CREDENTIALS.clientId));
-    expect(trustedCode).not.toContain(CAPTURED_CREDENTIALS.clientId);
-    expect(trustedCode).toContain("provider application stable authority mismatch");
+    expect(trustedCode).toContain(CAPTURED_CREDENTIALS.clientId);
+    expect(trustedCode).not.toContain(CAPTURED_CREDENTIALS.clientSecret);
+    expect(trustedCode).toContain(
+      "provider application client ID does not match deletion authority",
+    );
+    expect(trustedCode).toContain(CREDENTIALS_URL);
     expect(trustedCode).toContain("[data-client-id]");
     expect(trustedCode).toContain("button.delete-application");
     expect(deleteApplication).toHaveBeenCalledWith(expect.objectContaining({
@@ -1033,9 +855,11 @@ describe("member-owned provider setup service", () => {
       .mockResolvedValueOnce({
         result: { kind: "already_deleted" },
         title: "Provider applications",
-        url: CUSTOM_REGISTRATION.browser.safeLandingUrl,
+        url: CREDENTIALS_URL,
       });
-    const deleteApplication = vi.fn(async (input: Parameters<MemorySetupStore["deleteCapturedApplication"]>[0]) => {
+    const deleteApplication = vi.fn(async (
+      input: Parameters<MemorySetupStore["deleteCapturedApplication"]>[0],
+    ) => {
       store.deleteCapturedApplication(input);
     });
     const service = createService({ computer, deleteApplication, store });
@@ -1184,7 +1008,6 @@ function createService(input: {
     assertContinuationAllowed: input.assertContinuationAllowed
       ?? (async () => undefined),
     computer: input.computer,
-    createApplicationNameSuffix: () => "482731",
     createIngress: input.createIngress,
     deleteApplication: input.deleteApplication,
     now: () => NOW,
@@ -1200,7 +1023,6 @@ function createService(input: {
 function captureRequest() {
   return {
     action: "capture" as const,
-    applicationName: "Cobalt Trail",
     provider: "strava",
     runId: RUN_ID,
     setupId: SETUP_ID,
@@ -1212,7 +1034,6 @@ function buildSetup(
 ): MemberOwnedProviderSetupRecord {
   return {
     active: true,
-    applicationName: "Cobalt Trail 482731",
     browserRunId: null,
     completedAt: null,
     connectSourceId: "strava",

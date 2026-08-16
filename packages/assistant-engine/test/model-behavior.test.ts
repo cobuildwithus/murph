@@ -1628,12 +1628,12 @@ describe('assistant local PDF evidence guidance', () => {
       'For Strava (`strava`) and Trailbox (`trailbox`), /connect Continue authorizes',
     )
     expect(directGuidance).toContain(
-      'invent a tool-valid random friendly name; pass only to capture',
+      'use its exact run to fill and submit a private app from returned fields including its name',
     )
-    expect(directGuidance).toContain('reuse it')
     expect(directGuidance).toContain(
-      'Pause for sign-in, MFA/CAPTCHA/prerequisites, then begin after return',
+      'confirm ID/secret elements exist without reading values, then capture once',
     )
+    expect(directGuidance).toContain('Never ask for credentials')
     // The approved direct wearable line stays bounded after prerequisite disclosure.
     expect(directGuidance?.length).toBeLessThanOrEqual(900)
     expect(groupLayers.prompt).not.toContain('durable private-app setup')

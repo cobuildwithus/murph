@@ -78,25 +78,34 @@ Last verified: 2026-08-14
   `/computer/handoff/` surface. A setup-owned completed handoff resumes only its
   exact member/setup run and returns ordinary setup to authenticated `/connect`,
   without contact routing or an inbound-reply dependency. Suspended, generic,
-  foreign, and stale setup runs remain rejected. Prerequisite cancellation terminates
-  only that exact run and is rejected unless durable state proves there is no
-  provider submission, application binding, or connection. The provider-neutral
-  trusted boundary may inspect or create only the safe-format friendly application
-  name frozen on the setup before trusted submission. The finite provider
-  registration, not the model, owns the application-name, final-submit, client-ID,
-  client-secret, and optional reveal coordinates; trusted submission rejects a
-  pre-existing exact name and trusted capture preserves those semantic roles.
-  After credential sealing, deletion uses a
-  Web-derived hash of the encrypted binding's client ID inside the registered
-  container and client-ID coordinates, never mutable display text or a model-
-  selected identifier locator. Blank, partial, unmatched, or nonempty inventory
-  remains retryable. Absence converges only when there are zero registered
-  application containers and one visible, disjoint provider-registered loaded-
-  empty coordinate. Setup-owned browsers use a separate deterministic persistent
-  Kernel profile from generic model-controlled browsing. A setup may
-  navigate only a browser run durably bound to that exact setup owner key; a
-  generic active member run is never reusable for provider setup, and generic
-  computer actions reject setup-owned runs. Account deletion checks external
+  foreign, and stale setup runs remain rejected. Cancellation terminates only the exact setup-owned run and is rejected after an application binding or connection becomes durable; before successful capture, provider form submission is ordinary model-owned browsing rather than a separate trusted irreversible fence. Setup-owned browser runs remain exact member/setup lifecycle authorities but
+  use the ordinary computer-use action and observation surfaces. The model may
+  navigate, fill ordinary application metadata, choose an ordinary non-personal
+  application name, submit, and recover from visible provider errors. It must
+  never ask the member for provider credentials, inspect or transcribe client
+  credential values, or operate the registered secret-reveal control. A generic
+  active member run is never reusable as setup authority, and every action
+  revalidates the exact setup-owned run before provider entry.
+
+  The finite provider registration owns only the credentials-page URL,
+  client-ID selector, client-secret selector, and optional reveal selector.
+  Trusted capture navigates to the registered HTTPS origin and path, optionally
+  reveals the secret, requires each registered credential selector to resolve to
+  exactly one visible element, reads and seals both values inside the Kernel/Web
+  boundary, scrubs browser-side values, and returns no credentials. Capture
+  accepts no model-supplied credential selectors or values. Credential
+  plaintext must not enter browser observations intentionally produced by the
+  assistant, screenshots, prompts, tool results, logs, analytics, workspace
+  state, fixtures, UI, or durable setup state.
+
+  Deletion authority is the sealed client ID. Trusted deletion loads the
+  registered credentials page and compares the registered on-page client-ID
+  value exactly with the sealed value before clicking live-page delete and
+  confirmation controls. A clean page with no client-ID element is the only
+  already-absent result. A redirect, mismatch, duplicate or hidden identifier,
+  partial page, or uncertain completion fails closed. Application display names,
+  model-selected identifier selectors, client-ID digests, container counts, and
+  loaded-empty markers are not authority. Account deletion checks external
   application and run cleanup under the member lock immediately before
   suspension, then performs only local cleanup after suspension. Current
   Strava revocation uses the exact bound application's client authentication and

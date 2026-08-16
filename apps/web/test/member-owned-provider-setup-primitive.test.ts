@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { parseHTML } from "linkedom";
 import { describe, expect, it } from "vitest";
 
@@ -9,7 +8,6 @@ import {
   buildMemberOwnedProviderSetupBrowserContract,
   listMemberOwnedProviderSetupRegistrations,
 } from "@/src/lib/device-sync/provider-setup/registry";
-import { sha256Hex } from "@/src/lib/computer-use/ids";
 import {
   buildBlindOwnedApplicationDeleteCode,
   buildBlindProviderCredentialCaptureCode,
@@ -20,11 +18,10 @@ import {
 } from "@/src/lib/device-sync/provider-setup/types";
 
 const MEMBER_ID = "member_synthetic";
-const RIGHT_ID_HASH = sha256Hex("right-id");
+const CREDENTIALS_URL = "https://provider.example.test/settings/api";
 
 const SETUP: MemberOwnedProviderSetupRecord = {
   active: true,
-  applicationName: null,
   browserRunId: null,
   completedAt: null,
   connectSourceId: "strava",
@@ -46,7 +43,6 @@ describe("member-owned provider setup contract", () => {
     const registrations = listMemberOwnedProviderSetupRegistrations();
     const contract = buildMemberOwnedProviderSetupBrowserContract({
       env: { HOSTED_WEB_BASE_URL: "https://web.example.test" },
-      memberId: MEMBER_ID,
       provider: "strava",
     });
 
@@ -57,14 +53,10 @@ describe("member-owned provider setup contract", () => {
         applicationWebsite: "https://withmurph.ai",
         developerPortalUrl: "https://www.strava.com/settings/api",
         trustedAuthority: {
-          applicationContainerSelector: "[data-strava-application]",
-          applicationIdSelector: "[data-strava-client-id]",
-          applicationNameSelector: "[data-strava-application-name]",
-          applicationSecretSelector: "[data-strava-client-secret]",
-          creationFormSelector: "form[data-strava-application-form]",
-          loadedEmptySelector: "[data-strava-application-empty]",
+          clientIdSelector: "[data-strava-client-id]",
+          clientSecretSelector: "[data-strava-client-secret]",
+          credentialsPageUrl: "https://www.strava.com/settings/api",
           revealSecretSelector: "[data-strava-client-secret-reveal]",
-          submitSelector: "[data-strava-application-submit]",
         },
       },
       coordinates: {
@@ -80,651 +72,261 @@ describe("member-owned provider setup contract", () => {
         readOnlyScopes: ["activity:read"],
         website: "https://withmurph.ai",
       },
+      credentialsPageUrl: "https://www.strava.com/settings/api",
       developerPortalUrl: "https://www.strava.com/settings/api",
       provider: "strava",
     });
+    expect(contract.application).not.toHaveProperty("name");
     expect(contract.application).not.toHaveProperty("marker");
-    expect(contract.application.name).toBeNull();
-    expect(contract.guidance.join(" ")).toMatch(/live page/iu);
-    expect(contract.guidance.join(" ")).toMatch(/trusted browser boundary/iu);
-    expect(contract.guidance.join(" ")).not.toMatch(/input\[|button\.|data-testid|xpath/iu);
+    expect(contract.guidance.join(" ")).toMatch(/ordinary computer-use browsing/iu);
+    expect(contract.guidance.join(" ")).toMatch(/without reading, copying, or transcribing/iu);
+    expect(contract.guidance.join(" ")).toMatch(/provider_setup capture/iu);
+    expect(contract.guidance.join(" ")).not.toMatch(
+      /input\[|button\.|data-testid|xpath/iu,
+    );
   });
 
-  it("returns the friendly application name frozen on the setup", () => {
-    const named = buildMemberOwnedProviderSetupBrowserContract({
-      applicationName: "Cobalt Trail 482731",
-      env: { HOSTED_WEB_BASE_URL: "https://web.example.test" },
-      memberId: MEMBER_ID,
-      provider: "strava",
-    });
-
-    expect(named.application.name).toBe("Cobalt Trail 482731");
-    expect(named.application.name).not.toContain(MEMBER_ID);
-  });
-
-  it("keeps capture semantics registered and rejects selector or credential tool input", () => {
+  it("keeps capture selector-free and rejects names, selectors, or credential values", () => {
     const parsed = parseHostedRuntimeProviderSetupToolRequest({
       action: "capture",
-      applicationName: "Cobalt Trail 482731",
       provider: "strava",
       runId: "hcr_synthetic",
       setupId: "dps_synthetic",
     });
 
-    expect(parsed.action).toBe("capture");
-    expect(() => parseHostedRuntimeProviderSetupToolRequest({
-      ...parsed,
-      clientSecret: randomUUID(),
-    })).toThrow();
-    expect(() => parseHostedRuntimeProviderSetupToolRequest({
-      ...parsed,
-      selectorProgram: "await page.locator('provider-specific').click()",
-    })).toThrow();
-    expect(() => parseHostedRuntimeProviderSetupToolRequest({
-      ...parsed,
-      clientIdSelector: "[data-client-id]",
-    })).toThrow();
+    expect(parsed).toEqual({
+      action: "capture",
+      provider: "strava",
+      runId: "hcr_synthetic",
+      setupId: "dps_synthetic",
+    });
+    for (const extra of [
+      { applicationName: "Synthetic Application" },
+      { clientId: "client-id" },
+      { clientSecret: "client-secret" },
+      { clientIdSelector: "[data-client-id]" },
+      { selectorProgram: "await page.locator('provider-specific').click()" },
+    ]) {
+      expect(() => parseHostedRuntimeProviderSetupToolRequest({
+        ...parsed,
+        ...extra,
+      })).toThrow();
+    }
   });
 
   it("keeps final capture and deletion generic, exact, and blind", () => {
     const capture = buildBlindProviderCredentialCaptureCode({
-      applicationNameSelector: "#runtime-name",
-      applicationContainerSelector: "form[data-owned-application]",
       clientIdSelector: "#runtime-client-id",
       clientSecretSelector: "#runtime-client-secret",
-      creationFormSelector: "form[data-owned-application]",
-      loadedEmptySelector: "[data-owned-application-empty]",
-      applicationName: "Cobalt Trail 482731",
+      credentialsPageUrl: CREDENTIALS_URL,
       revealSecretSelector: "#runtime-reveal",
-      safeLandingUrl: "https://provider.example.test/apps",
-      submitSelector: "#runtime-submit",
     });
     const deletion = buildBlindOwnedApplicationDeleteCode({
-      applicationContainerSelector: "section[data-owned-application]",
-      applicationIdHash: RIGHT_ID_HASH,
-      applicationIdSelector: "#runtime-client-id",
+      clientIdSelector: "#runtime-client-id",
       confirmSelector: "#runtime-confirm",
-      loadedEmptySelector: "[data-owned-application-empty]",
+      credentialsPageUrl: CREDENTIALS_URL,
       deleteSelector: "#runtime-delete",
-      safeLandingUrl: "https://provider.example.test/apps",
+      expectedClientId: "right-id",
     });
 
-    expect(capture).toContain("return { clientId, clientSecret }");
-    expect(capture).toContain("provider application ownership marker mismatch");
-    expect(capture).toContain("https://provider.example.test/apps");
+    expect(capture).toContain("return capturedCredentials");
+    expect(capture).toContain("client ID selector");
+    expect(capture).toContain("client secret selector");
+    expect(capture).toContain(CREDENTIALS_URL);
     expect(capture).not.toMatch(/strava/iu);
-    expect(deletion).toContain("provider application stable authority mismatch");
+    expect(deletion).toContain("provider application client ID does not match deletion authority");
+    expect(deletion).toContain('return { kind: "already_deleted" }');
     expect(deletion).toContain('return { kind: "deleted" }');
     expect(deletion).not.toMatch(/strava/iu);
   });
 
-  it("uses registered credential roles regardless of their DOM order", async () => {
-    const page = createFixturePage(`
-      <form data-owned-creation>
-        <input class="application-name" value="" />
-        <button class="create" type="button">Create</button>
-      </form>
-    `);
-    const submittedNames: string[] = [];
-    await page.exposeFunction("recordSubmittedApplicationName", (name: string) => {
-      submittedNames.push(name);
-    });
-    await page.evaluate(() => {
-      document.querySelector(".create")?.addEventListener("click", () => {
-        const name = document.querySelector<HTMLInputElement>(".application-name")?.value;
-        void Reflect.get(window, "recordSubmittedApplicationName")(name ?? "");
-      });
-    });
-    page.setNavigationContent(`
-      <section data-owned-application>
-        <h3>Cobalt Trail 482731</h3>
+  it("captures the registered fields without a reveal click and scrubs the page", async () => {
+    const page = createFixturePage();
+    page.setRoute(CREDENTIALS_URL, `
+      <main>
         <output class="client-secret">right-secret</output>
         <output class="client-id">right-id</output>
-      </section>
+      </main>
     `);
-    const code = buildBlindProviderCredentialCaptureCode({
-      applicationNameSelector: ".application-name",
-      applicationContainerSelector: "section[data-owned-application]",
+    const run = buildCaptureRunner({
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
-      creationFormSelector: "form[data-owned-creation]",
-      loadedEmptySelector: "[data-owned-application-empty]",
-      applicationName: "Cobalt Trail 482731",
+      credentialsPageUrl: CREDENTIALS_URL,
       revealSecretSelector: null,
-      safeLandingUrl: "about:blank",
-      submitSelector: ".create",
     });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<{ clientId: string; clientSecret: string }>;
 
     await expect(run(page)).resolves.toEqual({
       clientId: "right-id",
       clientSecret: "right-secret",
     });
-    expect(submittedNames).toEqual(["Cobalt Trail 482731"]);
-  });
-
-  it("reports proven pre-submit failure but fences an unknown submit outcome", async () => {
-    const page = createFixturePage(`
-      <form data-owned-creation>
-        <input class="application-name" value="" />
-      </form>
-    `);
-    const code = buildBlindProviderCredentialCaptureCode({
-      applicationNameSelector: ".application-name",
-      applicationContainerSelector: "section[data-owned-application]",
-      clientIdSelector: ".client-id",
-      clientSecretSelector: ".client-secret",
-      creationFormSelector: "form[data-owned-creation]",
-      loadedEmptySelector: "[data-owned-application-empty]",
-      applicationName: "Cobalt Trail 482731",
-      revealSecretSelector: null,
-      safeLandingUrl: "about:blank",
-      submitSelector: ".create",
-    });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<unknown>;
-
-    await expect(run(page)).resolves.toEqual({ kind: "pre_submit_failed" });
     expect(page.clickSelectors).toEqual([]);
-
-    await page.setContent(`
-      <form data-owned-creation>
-        <input class="application-name" value="" />
-        <button class="create" type="button">Create</button>
-      </form>
-    `);
-    page.setClickErrorOnce(new Error("submit outcome unknown"));
-    await expect(run(page)).rejects.toThrow("submit outcome unknown");
-    expect(page.clickSelectors).toEqual([".create"]);
+    expect(page.url()).toBe("about:blank");
   });
 
-  it("rejects an exact friendly-name collision before trusted submission", async () => {
-    const page = createFixturePage(`
-      <section data-owned-application>
-        <h3>Cobalt Trail 482731</h3>
-      </section>
-      <form data-owned-creation>
-        <input class="application-name" value="" />
-        <button class="create" type="button">Create</button>
-      </form>
+  it("clicks the registered reveal control before reading the secret", async () => {
+    const page = createFixturePage();
+    page.setRoute(CREDENTIALS_URL, `
+      <main>
+        <output class="client-id">right-id</output>
+        <output class="client-secret"></output>
+        <button class="reveal" type="button">Reveal</button>
+      </main>
     `);
-    const code = buildBlindProviderCredentialCaptureCode({
-      applicationNameSelector: ".application-name",
-      applicationContainerSelector: "section[data-owned-application]",
+    page.setClickEffect(".reveal", (_element, document) => {
+      const secret = document.querySelector(".client-secret");
+      if (secret) {
+        secret.textContent = "right-secret";
+      }
+    });
+    const run = buildCaptureRunner({
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
-      creationFormSelector: "form[data-owned-creation]",
-      loadedEmptySelector: "[data-owned-application-empty]",
-      applicationName: "Cobalt Trail 482731",
-      revealSecretSelector: null,
-      safeLandingUrl: "about:blank",
-      submitSelector: ".create",
+      credentialsPageUrl: CREDENTIALS_URL,
+      revealSecretSelector: ".reveal",
     });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<unknown>;
 
-    await expect(run(page)).resolves.toEqual({ kind: "pre_submit_failed" });
+    await expect(run(page)).resolves.toEqual({
+      clientId: "right-id",
+      clientSecret: "right-secret",
+    });
+    expect(page.clickSelectors).toEqual([".reveal"]);
+  });
+
+  it.each([
+    {
+      html: `
+        <output class="client-id">first-id</output>
+        <output class="client-id">second-id</output>
+        <output class="client-secret">right-secret</output>
+      `,
+      label: "client ID selector",
+    },
+    {
+      html: `
+        <output class="client-id">right-id</output>
+        <output class="client-secret">first-secret</output>
+        <output class="client-secret">second-secret</output>
+      `,
+      label: "client secret selector",
+    },
+  ])("fails closed when the registered $label is non-unique", async ({ html, label }) => {
+    const page = createFixturePage();
+    page.setRoute(CREDENTIALS_URL, html);
+    const run = buildCaptureRunner({
+      clientIdSelector: ".client-id",
+      clientSecretSelector: ".client-secret",
+      credentialsPageUrl: CREDENTIALS_URL,
+      revealSecretSelector: null,
+    });
+
+    await expect(run(page)).rejects.toThrow(
+      `${label} must resolve to exactly one visible element`,
+    );
     expect(page.clickSelectors).toEqual([]);
   });
 
-  it("reports authoritative marker absence only from a recovery inspection", async () => {
-    const page = createFixturePage(
-      '<main data-owned-application-empty>No owned applications</main>',
-    );
-    const code = buildBlindProviderCredentialCaptureCode({
-      applicationNameSelector: null,
-      applicationContainerSelector: "section[data-owned-application]",
+  it("fails closed when capture lands on a different credentials path", async () => {
+    const page = createFixturePage();
+    page.setRoute(CREDENTIALS_URL, {
+      finalUrl: "https://provider.example.test/settings/profile",
+      html: `
+        <output class="client-id">right-id</output>
+        <output class="client-secret">right-secret</output>
+      `,
+    });
+    const run = buildCaptureRunner({
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
-      creationFormSelector: "form[data-owned-creation]",
-      loadedEmptySelector: "[data-owned-application-empty]",
-      applicationName: "Cobalt Trail 482731",
+      credentialsPageUrl: CREDENTIALS_URL,
       revealSecretSelector: null,
-      safeLandingUrl: "about:blank",
-      submitSelector: null,
     });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<unknown>;
 
-    await expect(run(page)).resolves.toEqual({ kind: "no_application" });
-    expect(page.clickSelectors).toEqual([]);
+    await expect(run(page)).rejects.toThrow("provider credentials page is unavailable");
   });
 
-  it("keeps capture recovery fenced on same-path partial and overlapping empty states", async () => {
-    const buildRun = (loadedEmptySelector: string) => {
-      const code = buildBlindProviderCredentialCaptureCode({
-        applicationNameSelector: null,
-        applicationContainerSelector: "section[data-owned-application]",
-        clientIdSelector: ".client-id",
-        clientSecretSelector: ".client-secret",
-        creationFormSelector: "form[data-owned-creation]",
-        loadedEmptySelector,
-        applicationName: "Cobalt Trail 482731",
-        revealSecretSelector: null,
-        safeLandingUrl: "about:blank",
-        submitSelector: null,
-      });
-      return new Function("page", `return (async () => {${code}})();`) as (
-        page: FixturePage,
-      ) => Promise<unknown>;
-    };
-
-    const partial = createFixturePage("<main>Temporary provider error</main>");
-    await expect(buildRun("[data-owned-application-empty]")(partial)).rejects.toThrow(
-      "loaded-empty proof is unavailable",
-    );
-
-    const overlapping = createFixturePage(`
-      <section data-owned-application data-owned-application-empty>
-        Partially rendered application
-      </section>
-    `);
-    await expect(buildRun("[data-owned-application-empty]")(overlapping)).rejects.toThrow(
-      "inventory still contains an unmatched application",
-    );
-  });
-
-  it("keeps capture recovery fenced when the authoritative landing is unavailable", async () => {
-    const page = createFixturePage("<main>Transient provider page</main>");
-    page.setNavigationErrorOnce(new Error("safe landing unavailable"));
-    const code = buildBlindProviderCredentialCaptureCode({
-      applicationNameSelector: null,
-      applicationContainerSelector: "section[data-owned-application]",
+  it("deletes only after the on-page client ID matches sealed authority", async () => {
+    let deleted = false;
+    const page = createFixturePage();
+    page.setRoute(CREDENTIALS_URL, () => deleted
+      ? "<main>Application removed</main>"
+      : `
+          <main>
+            <output class="client-id">right-id</output>
+            <button class="delete" type="button">Delete</button>
+            <button class="confirm" type="button">Confirm</button>
+          </main>
+        `);
+    page.setClickEffect(".confirm", () => {
+      deleted = true;
+    });
+    const run = buildDeleteRunner({
       clientIdSelector: ".client-id",
-      clientSecretSelector: ".client-secret",
-      creationFormSelector: "form[data-owned-creation]",
-      loadedEmptySelector: "[data-owned-application-empty]",
-      applicationName: "Cobalt Trail 482731",
-      revealSecretSelector: null,
-      safeLandingUrl: "about:blank",
-      submitSelector: null,
+      confirmSelector: ".confirm",
+      credentialsPageUrl: CREDENTIALS_URL,
+      deleteSelector: ".delete",
+      expectedClientId: "right-id",
     });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<unknown>;
 
-    await expect(run(page)).rejects.toThrow("safe landing unavailable");
-    expect(page.clickSelectors).toEqual([]);
+    await expect(run(page)).resolves.toEqual({ kind: "deleted" });
+    expect(page.clickSelectors).toEqual([".delete", ".confirm"]);
   });
 
-  it("executes trusted capture against the exact marked form and rejects cross-object selectors", async () => {
-    const page = createFixturePage(`
-        <form data-owned-application>
-          <input name="name" value="Unrelated application" />
-          <button class="cross-submit" type="button">Create</button>
-          <output class="cross-id">wrong-id</output>
-          <output class="cross-secret">wrong-secret</output>
-        </form>
-        <form data-owned-application>
-          <input name="name" value="Cobalt Trail 482731" />
-          <button class="owned-submit" type="button">Create</button>
-          <output class="owned-id">right-id</output>
-          <output class="owned-secret">right-secret</output>
-        </form>
-        <button class="global-submit" type="button">Global create</button>
-      `);
-      const code = buildBlindProviderCredentialCaptureCode({
-        applicationNameSelector: null,
-        applicationContainerSelector: "form[data-owned-application]",
-        clientIdSelector: ".owned-id",
-        clientSecretSelector: ".owned-secret",
-        creationFormSelector: "form[data-owned-application]",
-        loadedEmptySelector: "[data-owned-application-empty]",
-        applicationName: "Cobalt Trail 482731",
-        revealSecretSelector: null,
-        safeLandingUrl: "about:blank",
-        submitSelector: null,
-      });
-      const run = new Function("page", `return (async () => {${code}})();`) as (
-        page: FixturePage,
-      ) => Promise<{ clientId: string; clientSecret: string }>;
-
-      await expect(run(page)).resolves.toEqual({
-        clientId: "right-id",
-        clientSecret: "right-secret",
-      });
-
-      await page.setContent(`
-        <form data-owned-application>
-          <input name="name" value="Cobalt Trail 482731" />
-          <button class="owned-submit" type="button">Create</button>
-        </form>
-        <output class="cross-id">wrong-id</output>
-        <output class="cross-secret">wrong-secret</output>
-      `);
-      const crossObject = buildBlindProviderCredentialCaptureCode({
-        applicationNameSelector: null,
-        applicationContainerSelector: "form[data-owned-application]",
-        clientIdSelector: ".cross-id",
-        clientSecretSelector: ".cross-secret",
-        creationFormSelector: "form[data-owned-application]",
-        loadedEmptySelector: "[data-owned-application-empty]",
-        applicationName: "Cobalt Trail 482731",
-        revealSecretSelector: null,
-        safeLandingUrl: "about:blank",
-        submitSelector: null,
-      });
-      const runCrossObject = new Function(
-        "page",
-        `return (async () => {${crossObject}})();`,
-      ) as (page: FixturePage) => Promise<unknown>;
-      await expect(runCrossObject(page)).rejects.toThrow(
-        /owned-application element/u,
-      );
-  });
-
-  it("rejects duplicate persisted markers before any irreversible control", async () => {
-    const page = createFixturePage(`
-        <form data-owned-application>
-          <input name="name" value="Cobalt Trail 482731" />
-          <button class="owned-submit" type="button">Create</button>
-          <output class="owned-id">right-id</output>
-          <output class="owned-secret">right-secret</output>
-        </form>
-        <section data-owned-application>
-          <h3>Cobalt Trail 482731</h3>
-        </section>
-      `);
-      const code = buildBlindProviderCredentialCaptureCode({
-        applicationNameSelector: null,
-        applicationContainerSelector: "[data-owned-application]",
-        clientIdSelector: ".owned-id",
-        clientSecretSelector: ".owned-secret",
-        creationFormSelector: "form[data-owned-application]",
-        loadedEmptySelector: "[data-owned-application-empty]",
-        applicationName: "Cobalt Trail 482731",
-        revealSecretSelector: null,
-        safeLandingUrl: "about:blank",
-        submitSelector: null,
-      });
-      const run = new Function("page", `return (async () => {${code}})();`) as (
-        page: FixturePage,
-      ) => Promise<unknown>;
-
-      await expect(run(page)).rejects.toThrow(/marker_ambiguous/u);
-  });
-
-  it("keeps capture and deletion fenced when a reloaded page contains an unmatched application", async () => {
-    const forged = `
-      <section data-owned-application>
-        <input class="forged-name" value="Cobalt Trail 482731" />
-        <output class="owned-id">wrong-id</output>
-        <output class="owned-secret">wrong-secret</output>
-        <button class="owned-delete" type="button">Delete</button>
-      </section>
-      <form data-owned-application></form>
-    `;
-    const page = createFixturePage(forged);
-    page.setNavigationContent(`
-      <section data-owned-application>
-        <input class="forged-name" value="Unrelated application" />
-        <output class="owned-id">wrong-id</output>
-        <output class="owned-secret">wrong-secret</output>
-        <button class="owned-delete" type="button">Delete</button>
-      </section>
-      <form data-owned-application></form>
+  it("fails closed on a deletion client-ID mismatch before clicking controls", async () => {
+    const page = createFixturePage();
+    page.setRoute(CREDENTIALS_URL, `
+      <main>
+        <output class="client-id">wrong-id</output>
+        <button class="delete" type="button">Delete</button>
+      </main>
     `);
-
-    const capture = buildBlindProviderCredentialCaptureCode({
-      applicationNameSelector: null,
-      applicationContainerSelector: "section[data-owned-application]",
-      clientIdSelector: ".owned-id",
-      clientSecretSelector: ".owned-secret",
-      creationFormSelector: "form[data-owned-application]",
-      loadedEmptySelector: "[data-owned-application-empty]",
-      applicationName: "Cobalt Trail 482731",
-      revealSecretSelector: null,
-      safeLandingUrl: "about:blank",
-      submitSelector: null,
-    });
-    const runCapture = new Function(
-      "page",
-      `return (async () => {${capture}})();`,
-    ) as (page: FixturePage) => Promise<unknown>;
-    await expect(runCapture(page)).rejects.toThrow(
-      "inventory still contains an unmatched application",
-    );
-
-    await page.setContent(forged);
-    const deletion = buildBlindOwnedApplicationDeleteCode({
-      applicationContainerSelector: "section[data-owned-application]",
-      applicationIdHash: RIGHT_ID_HASH,
-      applicationIdSelector: ".owned-id",
+    const run = buildDeleteRunner({
+      clientIdSelector: ".client-id",
       confirmSelector: null,
-      loadedEmptySelector: "[data-owned-application-empty]",
-      deleteSelector: ".owned-delete",
-      safeLandingUrl: "about:blank",
+      credentialsPageUrl: CREDENTIALS_URL,
+      deleteSelector: ".delete",
+      expectedClientId: "right-id",
     });
-    const runDelete = new Function(
-      "page",
-      `return (async () => {${deletion}})();`,
-    ) as (page: FixturePage) => Promise<unknown>;
-    await expect(runDelete(page)).rejects.toThrow(
-      "stable identifier is absent from a nonempty inventory",
+
+    await expect(run(page)).rejects.toThrow(
+      "provider application client ID does not match deletion authority",
     );
+    expect(page.clickSelectors).toEqual([]);
   });
 
-  it("derives one application authority when its marker is rendered in multiple fields", async () => {
-    const page = createFixturePage(`
-        <section data-owned-application>
-          <h3>Cobalt Trail 482731</h3>
-          <input name="name" value="Cobalt Trail 482731" />
-          <output class="owned-id">right-id</output>
-          <output class="owned-secret">right-secret</output>
-        </section>
-      `);
-      const code = buildBlindProviderCredentialCaptureCode({
-        applicationNameSelector: null,
-        applicationContainerSelector: "section[data-owned-application]",
-        clientIdSelector: ".owned-id",
-        clientSecretSelector: ".owned-secret",
-        creationFormSelector: "form[data-owned-application]",
-        loadedEmptySelector: "[data-owned-application-empty]",
-        applicationName: "Cobalt Trail 482731",
-        revealSecretSelector: null,
-        safeLandingUrl: "about:blank",
-        submitSelector: null,
-      });
-      const run = new Function("page", `return (async () => {${code}})();`) as (
-        page: FixturePage,
-      ) => Promise<{ clientId: string; clientSecret: string }>;
-
-      await expect(run(page)).resolves.toEqual({
-        clientId: "right-id",
-        clientSecret: "right-secret",
-      });
-  });
-
-  it("converges only from a positive loaded-empty provider state", async () => {
-    const page = createFixturePage(`
-      <main data-owned-application-empty>No API application</main>
-    `);
-    const clicks: string[] = [];
-    await page.exposeFunction("recordAbsentDeleteClick", () => clicks.push("delete"));
-    const code = buildBlindOwnedApplicationDeleteCode({
-      applicationContainerSelector: "section[data-owned-application]",
-      applicationIdHash: RIGHT_ID_HASH,
-      applicationIdSelector: ".owned-id",
+  it("treats a clean credentials page with no client-ID element as already absent", async () => {
+    const page = createFixturePage();
+    page.setRoute(CREDENTIALS_URL, "<main>No private application</main>");
+    const run = buildDeleteRunner({
+      clientIdSelector: ".client-id",
       confirmSelector: null,
-      loadedEmptySelector: "[data-owned-application-empty]",
-      deleteSelector: ".owned-delete",
-      safeLandingUrl: "about:blank",
+      credentialsPageUrl: CREDENTIALS_URL,
+      deleteSelector: ".delete",
+      expectedClientId: "right-id",
     });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<{ kind: string }>;
 
     await expect(run(page)).resolves.toEqual({ kind: "already_deleted" });
-    expect(clicks).toEqual([]);
-  });
-
-  it("keeps deletion fenced when the authoritative landing is unavailable", async () => {
-    const page = createFixturePage(`
-      <section data-owned-application>
-        <h3>Cobalt Trail 482731</h3>
-        <button class="owned-delete" type="button">Delete</button>
-      </section>
-    `);
-    page.setNavigationErrorOnce(new Error("safe landing unavailable"));
-    const code = buildBlindOwnedApplicationDeleteCode({
-      applicationContainerSelector: "section[data-owned-application]",
-      applicationIdHash: RIGHT_ID_HASH,
-      applicationIdSelector: ".owned-id",
-      confirmSelector: null,
-      loadedEmptySelector: "[data-owned-application-empty]",
-      deleteSelector: ".owned-delete",
-      safeLandingUrl: "about:blank",
-    });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<unknown>;
-
-    await expect(run(page)).rejects.toThrow("safe landing unavailable");
     expect(page.clickSelectors).toEqual([]);
   });
 
-  it("keeps deletion retryable when the safe path renders no loaded inventory", async () => {
-    const page = createFixturePage("<main>Temporary provider error</main>");
-    const code = buildBlindOwnedApplicationDeleteCode({
-      applicationContainerSelector: "section[data-owned-application]",
-      applicationIdHash: RIGHT_ID_HASH,
-      applicationIdSelector: ".owned-id",
-      confirmSelector: null,
-      loadedEmptySelector: "[data-owned-application-empty]",
-      deleteSelector: ".owned-delete",
-      safeLandingUrl: "about:blank",
-    });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<unknown>;
-
-    await expect(run(page)).rejects.toThrow("loaded-empty proof is unavailable");
-    expect(page.clickSelectors).toEqual([]);
-  });
-
-  it("keeps deletion fenced when a registered application container has no stable identifier", async () => {
-    const page = createFixturePage(`
-      <section data-owned-application>
-        <h3>Cobalt Trail 482731</h3>
-        <button class="owned-delete" type="button">Delete</button>
-      </section>
-      <main data-owned-application-empty>Misleading empty state</main>
+  it("fails closed when deletion authority resolves ambiguously", async () => {
+    const page = createFixturePage();
+    page.setRoute(CREDENTIALS_URL, `
+      <output class="client-id">right-id</output>
+      <output class="client-id">right-id</output>
+      <button class="delete" type="button">Delete</button>
     `);
-    const code = buildBlindOwnedApplicationDeleteCode({
-      applicationContainerSelector: "section[data-owned-application]",
-      applicationIdHash: RIGHT_ID_HASH,
-      applicationIdSelector: ".owned-id",
+    const run = buildDeleteRunner({
+      clientIdSelector: ".client-id",
       confirmSelector: null,
-      loadedEmptySelector: "[data-owned-application-empty]",
-      deleteSelector: ".owned-delete",
-      safeLandingUrl: "about:blank",
+      credentialsPageUrl: CREDENTIALS_URL,
+      deleteSelector: ".delete",
+      expectedClientId: "right-id",
     });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<unknown>;
 
-    await expect(run(page)).rejects.toThrow(/inventory_incomplete/u);
+    await expect(run(page)).rejects.toThrow(
+      "client ID selector must resolve to exactly one visible element",
+    );
     expect(page.clickSelectors).toEqual([]);
-  });
-
-  it("keeps deletion fenced when multiple exact stable client IDs exist", async () => {
-    const page = createFixturePage(`
-      <section data-owned-application><output class="owned-id">right-id</output></section>
-      <section data-owned-application><output class="owned-id">right-id</output></section>
-    `);
-    const code = buildBlindOwnedApplicationDeleteCode({
-      applicationContainerSelector: "section[data-owned-application]",
-      applicationIdHash: RIGHT_ID_HASH,
-      applicationIdSelector: ".owned-id",
-      confirmSelector: null,
-      loadedEmptySelector: "[data-owned-application-empty]",
-      deleteSelector: ".owned-delete",
-      safeLandingUrl: "about:blank",
-    });
-    const run = new Function("page", `return (async () => {${code}})();`) as (
-      page: FixturePage,
-    ) => Promise<unknown>;
-
-    await expect(run(page)).rejects.toThrow(/identifier_ambiguous/u);
-  });
-
-  it("confines deletion to the stable-ID application and the dialog it opens", async () => {
-    const page = createFixturePage(`
-        <section data-owned-application id="owned-app">
-          <h3>Renamed by member</h3>
-          <output class="owned-id">right-id</output>
-          <button class="owned-delete" type="button">Delete</button>
-        </section>
-        <button class="confirm" id="global-confirm" type="button">Global confirm</button>
-        <form data-owned-application></form>
-      `);
-      const clicks: string[] = [];
-      await page.exposeFunction("recordProviderFixtureClick", (label: string) => {
-        clicks.push(label);
-      });
-      await page.evaluate(() => {
-        document.querySelector(".owned-delete")?.addEventListener("click", () => {
-          void Reflect.get(window, "recordProviderFixtureClick")("owned-delete");
-          const dialog = document.createElement("div");
-          dialog.setAttribute("role", "dialog");
-          dialog.innerHTML = '<button class="confirm" type="button">Confirm</button>';
-          dialog.querySelector(".confirm")?.addEventListener("click", () => {
-            void Reflect.get(window, "recordProviderFixtureClick")("owned-confirm");
-            document.querySelector("#owned-app")?.remove();
-            const empty = document.createElement("main");
-            empty.setAttribute("data-owned-application-empty", "");
-            empty.textContent = "No API application";
-            document.body.append(empty);
-            dialog.remove();
-          });
-          document.body.append(dialog);
-        });
-      });
-      const code = buildBlindOwnedApplicationDeleteCode({
-        applicationContainerSelector: "section[data-owned-application]",
-        applicationIdHash: RIGHT_ID_HASH,
-        applicationIdSelector: ".owned-id",
-        confirmSelector: ".confirm",
-        loadedEmptySelector: "[data-owned-application-empty]",
-        deleteSelector: ".owned-delete",
-        safeLandingUrl: "about:blank",
-      });
-      const run = new Function("page", `return (async () => {${code}})();`) as (
-        page: FixturePage,
-      ) => Promise<{ kind: string }>;
-
-      await expect(run(page)).resolves.toEqual({ kind: "deleted" });
-      expect(clicks).toEqual(["owned-delete", "owned-confirm"]);
-
-      await page.setContent(`
-        <section data-owned-application>
-          <h3>Cobalt Trail 482731</h3>
-          <output class="owned-id">right-id</output>
-        </section>
-        <button class="other-delete" type="button">Delete another app</button>
-        <form data-owned-application></form>
-      `);
-      const crossObject = buildBlindOwnedApplicationDeleteCode({
-        applicationContainerSelector: "section[data-owned-application]",
-        applicationIdHash: RIGHT_ID_HASH,
-        applicationIdSelector: ".owned-id",
-        confirmSelector: null,
-        loadedEmptySelector: "[data-owned-application-empty]",
-        deleteSelector: ".other-delete",
-        safeLandingUrl: "about:blank",
-      });
-      const runCrossObject = new Function(
-        "page",
-        `return (async () => {${crossObject}})();`,
-      ) as (page: FixturePage) => Promise<unknown>;
-      await expect(runCrossObject(page)).rejects.toThrow(
-        /owned-application element/u,
-      );
   });
 
   it("projects only member-facing actions from the reduced durable lifecycle", () => {
@@ -736,6 +338,11 @@ describe("member-owned provider setup contract", () => {
       { ...SETUP, status: "authorized" },
       STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
     ).action).toBe("none");
+    expect(toMemberOwnedProviderSetupView(
+      { ...SETUP, status: "browser_setup" },
+      STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
+      { handoffAvailable: true },
+    ).action).toBe("continue_handoff");
     expect(toMemberOwnedProviderSetupView(
       {
         ...SETUP,
@@ -749,15 +356,44 @@ describe("member-owned provider setup contract", () => {
       { ...SETUP, status: "disconnect_first" },
       STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
     ).action).toBe("disconnect_first");
-    expect(toMemberOwnedProviderSetupView(
-      { ...SETUP, status: "disconnect_first" },
-      STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
-      { handoffAvailable: true },
-    ).action).toBe("disconnect_first");
   });
 });
 
+type CaptureBuilderInput = Parameters<
+  typeof buildBlindProviderCredentialCaptureCode
+>[0];
+type DeleteBuilderInput = Parameters<
+  typeof buildBlindOwnedApplicationDeleteCode
+>[0];
+
 type FixtureWindow = Window & typeof globalThis;
+type FixtureRoute = string | {
+  finalUrl: string;
+  html: string;
+};
+type FixtureRouteFactory = () => FixtureRoute;
+type FixtureClickEffect = (
+  element: Element,
+  document: Document,
+) => void | Promise<void>;
+
+function buildCaptureRunner(input: CaptureBuilderInput): (
+  page: FixturePage,
+) => Promise<{ clientId: string; clientSecret: string }> {
+  const code = buildBlindProviderCredentialCaptureCode(input);
+  return new Function("page", `return (async () => {${code}})();`) as (
+    page: FixturePage,
+  ) => Promise<{ clientId: string; clientSecret: string }>;
+}
+
+function buildDeleteRunner(input: DeleteBuilderInput): (
+  page: FixturePage,
+) => Promise<{ kind: "already_deleted" | "deleted" }> {
+  const code = buildBlindOwnedApplicationDeleteCode(input);
+  return new Function("page", `return (async () => {${code}})();`) as (
+    page: FixturePage,
+  ) => Promise<{ kind: "already_deleted" | "deleted" }>;
+}
 
 class FixtureLocator {
   constructor(
@@ -769,19 +405,12 @@ class FixtureLocator {
 
   async click(): Promise<void> {
     const element = this.requireOne();
-    await this.page.withGlobals(() => (element as HTMLElement).click());
-    this.page.recordClick(this.selector);
-    const error = this.page.consumeClickError();
-    if (error) {
-      throw error;
+    if (!isVisibleElement(element)) {
+      throw new Error(`Fixture locator is not visible for ${this.selector}.`);
     }
-  }
-
-  async fill(value: string): Promise<void> {
-    const element = this.requireOne() as HTMLInputElement | HTMLTextAreaElement;
-    await this.page.withGlobals(() => {
-      element.value = value;
-    });
+    await this.page.withGlobals(() => (element as HTMLElement).click());
+    await this.page.runClickEffect(this.selector, element);
+    this.page.recordClick(this.selector);
   }
 
   async count(): Promise<number> {
@@ -790,13 +419,6 @@ class FixtureLocator {
 
   async evaluate<T>(callback: (element: Element) => T): Promise<T> {
     return await this.page.withGlobals(() => callback(this.requireOne()));
-  }
-
-  async evaluateAll<T, TArgument>(
-    callback: (elements: Element[], argument: TArgument) => T,
-    argument: TArgument,
-  ): Promise<T> {
-    return await this.page.withGlobals(() => callback(this.elements(), argument));
   }
 
   first(): FixtureLocator {
@@ -808,11 +430,8 @@ class FixtureLocator {
   }
 
   async isVisible(): Promise<boolean> {
-    return this.elements().length === 1;
-  }
-
-  locator(selector: string): FixtureLocator {
-    return new FixtureLocator(this.page, this.elements(), selector);
+    const elements = this.elements();
+    return elements.length === 1 && isVisibleElement(elements[0]);
   }
 
   async textContent(): Promise<string | null> {
@@ -820,18 +439,21 @@ class FixtureLocator {
   }
 
   async waitFor(): Promise<void> {
-    this.requireOne();
+    const element = this.requireOne();
+    if (!isVisibleElement(element)) {
+      throw new Error(`Fixture locator is not visible for ${this.selector}.`);
+    }
   }
 
   private elements(): Element[] {
     const matches = this.roots.flatMap((root) =>
       Array.from(root.querySelectorAll(this.selector))
     );
-    return this.index === null
-      ? matches
-      : matches[this.index]
-        ? [matches[this.index]]
-        : [];
+    if (this.index === null) {
+      return matches;
+    }
+    const match = matches[this.index];
+    return match ? [match] : [];
   }
 
   private requireOne(): Element {
@@ -845,17 +467,18 @@ class FixtureLocator {
 
 class FixturePage {
   readonly clickSelectors: string[] = [];
-  private clickErrorOnce: Error | null = null;
+  private clickEffects = new Map<string, FixtureClickEffect>();
+  private currentUrl = "about:blank";
   private document: Document;
-  private navigationContent: string | null = null;
-  private navigationErrorOnce: Error | null = null;
-  private url = "about:blank";
+  private routes = new Map<string, FixtureRoute | FixtureRouteFactory>();
   private window: FixtureWindow;
 
-  constructor(html: string) {
-    ({ document: this.document, window: this.window } = parseFixtureDocument(html));
+  constructor() {
+    ({ document: this.document, window: this.window } = parseFixtureDocument(""));
     this.installLocation();
   }
+
+  async close(): Promise<void> {}
 
   async evaluate<T, TArgument = undefined>(
     callback: (argument: TArgument) => T,
@@ -864,67 +487,42 @@ class FixturePage {
     return await this.withGlobals(() => callback(argument as TArgument));
   }
 
-  async exposeFunction<TArguments extends unknown[]>(
-    name: string,
-    callback: (...args: TArguments) => unknown,
-  ): Promise<void> {
-    Reflect.set(this.window, name, callback);
-  }
-
-  async goto(url: string): Promise<void> {
-    const navigationError = this.navigationErrorOnce;
-    this.navigationErrorOnce = null;
-    if (navigationError) {
-      throw navigationError;
-    }
-    this.url = url;
-    if (this.navigationContent !== null) {
-      ({ document: this.document, window: this.window } = parseFixtureDocument(
-        this.navigationContent,
-      ));
-    }
+  async goto(url: string): Promise<{ ok: () => boolean }> {
+    const configured = this.routes.get(url);
+    const route = typeof configured === "function" ? configured() : configured;
+    const resolved = typeof route === "string"
+      ? { finalUrl: url, html: route }
+      : route ?? { finalUrl: url, html: "" };
+    this.currentUrl = resolved.finalUrl;
+    ({ document: this.document, window: this.window } = parseFixtureDocument(
+      resolved.html,
+    ));
     this.installLocation();
+    return { ok: () => true };
   }
 
   locator(selector: string): FixtureLocator {
     return new FixtureLocator(this, [this.document.documentElement], selector);
   }
 
-  async setContent(html: string): Promise<void> {
-    ({ document: this.document, window: this.window } = parseFixtureDocument(html));
-    this.installLocation();
-  }
-
-  setClickErrorOnce(error: Error): void {
-    this.clickErrorOnce = error;
-  }
-
-  setNavigationContent(html: string): void {
-    this.navigationContent = html;
-  }
-
-  setNavigationErrorOnce(error: Error): void {
-    this.navigationErrorOnce = error;
-  }
-
-  consumeClickError(): Error | null {
-    const error = this.clickErrorOnce;
-    this.clickErrorOnce = null;
-    return error;
-  }
-
   recordClick(selector: string): void {
     this.clickSelectors.push(selector);
   }
 
-  async waitForFunction<TArgument>(
-    callback: (argument: TArgument) => boolean,
-    argument: TArgument,
-  ): Promise<void> {
-    const complete = await this.withGlobals(() => callback(argument));
-    if (!complete) {
-      throw new Error("Fixture waitForFunction predicate was not satisfied.");
-    }
+  async runClickEffect(selector: string, element: Element): Promise<void> {
+    await this.clickEffects.get(selector)?.(element, this.document);
+  }
+
+  setClickEffect(selector: string, effect: FixtureClickEffect): void {
+    this.clickEffects.set(selector, effect);
+  }
+
+  setRoute(url: string, route: FixtureRoute | FixtureRouteFactory): void {
+    this.routes.set(url, route);
+  }
+
+  url(): string {
+    return this.currentUrl;
   }
 
   async waitForLoadState(): Promise<void> {}
@@ -933,8 +531,6 @@ class FixturePage {
     const previous = new Map<string, PropertyDescriptor | undefined>();
     for (const [name, value] of Object.entries({
       document: this.document,
-      HTMLInputElement: this.window.HTMLInputElement,
-      HTMLTextAreaElement: this.window.HTMLTextAreaElement,
       window: this.window,
     })) {
       previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
@@ -960,13 +556,27 @@ class FixturePage {
   private installLocation(): void {
     Object.defineProperty(this.window, "location", {
       configurable: true,
-      value: { href: this.url },
+      value: { href: this.currentUrl },
     });
   }
 }
 
-function createFixturePage(html: string): FixturePage {
-  return new FixturePage(html);
+function createFixturePage(): FixturePage {
+  return new FixturePage();
+}
+
+function isVisibleElement(element: Element | undefined): boolean {
+  if (!element) {
+    return false;
+  }
+  const style = element.getAttribute("style")?.toLowerCase() ?? "";
+  return !element.hasAttribute("hidden")
+    && element.getAttribute("aria-hidden") !== "true"
+    && element.getAttribute("type") !== "hidden"
+    && !style.includes("display:none")
+    && !style.includes("display: none")
+    && !style.includes("visibility:hidden")
+    && !style.includes("visibility: hidden");
 }
 
 function parseFixtureDocument(html: string): {

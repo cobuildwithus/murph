@@ -986,133 +986,99 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `DeviceProviderSetup` is the durable Web owner for the member-visible setup
   journey. One active row per personal member and finite member-owned provider
   records the exact connect coordinates, setup-owned browser run, application
-  id/revision, and terminal outcome. A small exhaustive checked-in registry maps
-  each supported provider to presentation and browser-contract metadata only;
-  there is no provider-specific browser adapter, selector table, or Playwright
-  program. Adding a provider with the supported lifecycle does not change the
-  store, state machine, routes, `/connect` projection, deletion owner, shared
-  component, or browser action implementation.
+  id/revision, optimistic version, and terminal outcome. A small exhaustive
+  checked-in registry maps each supported provider to presentation, application
+  requirements, the credentials-page URL, and registered client-ID,
+  client-secret, and optional reveal selectors. There is no provider-specific
+  browser adapter, creation program, application-name owner, or browser DSL.
 
   `/connect` Continue is the explicit member authorization boundary. The
-  assistant then calls the generic `provider_setup` tool to begin or resume the
-  exact durable setup and drives the provider's live UI from registry guidance
-  plus a credential-redacted control map. A setup-owned `computer_act` accepts
-  typed navigation and control steps only: arbitrary Playwright, OS control,
-  value reads, credential-shaped fields, non-read network requests, final
-  submission, destructive actions, and value-probing selectors fail closed.
-  Model-visible observations omit page titles and expose only the origin plus
-  bounded sanitized control metadata. The existing hosted computer owner still
-  owns the persistent setup-only browser profile and human handoff. Ordinary
-  model-controlled browsing uses a different deterministic profile and cannot
-  inherit provider-dashboard auth; every model action
-  revalidates that the run is bound to the exact active setup. Sign-in, MFA,
-  CAPTCHA, and provider prerequisites pause that same run for secure member
-  takeover; `provider_setup begin` resumes the persisted run after the member
-  returns to `/connect`.
+  assistant calls the generic `provider_setup` tool to begin or resume the exact
+  durable setup and then uses ordinary computer-use browsing on that setup-owned
+  run. It fills the complete provider form, including an ordinary non-personal
+  application name, and submits it. Visible validation, existing-application,
+  and provider-prerequisite states are handled from the live page as a person
+  would handle them. Sign-in, MFA, CAPTCHA, and provider prerequisites pause the
+  same run for secure member takeover; returning to `/connect` resumes that exact
+  persisted setup.
 
-  Final submission and credential capture remain trusted Web operations. The
-  model proposes two friendly words from the tool's neutral sets. Web appends six
-  cryptographically random digits and freezes that exact full name on the setup.
-  The finite provider registration owns the application-name, final-submit,
-  client-ID, client-secret, and optional reveal coordinates, so the model assigns
-  neither credential roles nor the irreversible submit control. Trusted code
-  writes and submits the name within the one provider-declared creation form,
-  reloads the provider page, derives the one exact-name application container,
-  and reads the ID and secret through their registered semantic coordinates.
-  Before submission,
-  trusted code also rejects a name already present on the page; the safe
-  pre-submit rollback releases that choice so the model can propose another.
-  Generic model-driven actions cannot fill the name or submit the form. Trusted
-  capture reads the client id and secret inside the browser boundary,
-  seals them directly into `DeviceProviderApplication`, navigates away, scrubs
-  transient values, and returns no credential-bearing result. After sealing,
-  owned deletion hashes the encrypted binding's client ID in Web and compares
-  only that digest inside provider-declared application containers using the
-  provider-registered client-ID coordinate; a mutable or reused display name
-  cannot redirect deletion. Empty inventory converges only when zero registered
-  application containers and one disjoint provider-registered loaded-empty
-  coordinate prove the page finished rendering. `capturing` is
-  the irreversible submission fence, so it cannot be
-  canceled after an ambiguous failure and recovery of the exact run never
-  submits again. If that run expires, the computer owner's existing exact-owner
-  recovery may CAS-bind only its same-setup successor while preserving
-  `capturing`, so the successor's first inspection is also submit-free. One fully
-  loaded exact safe-landing inspection with zero application containers and one
-  disjoint positive loaded-empty coordinate may restore `browser_setup` without
-  submitting; a missing marker on a partial or nonempty page remains fenced.
-  Only a later independent
-  invocation may attempt creation again. A reserved new or successor browser run
-  is not usable authority: its setup CAS must bind the exact run before Kernel
-  provisioning, and the browser must attach under that still-eligible binding
-  before provider navigation. Losing admission terminalizes the candidate;
-  winning admission makes the run visible to the persisted `canceling` fence,
-  which owns its cleanup. If browser creation may already be in flight, the run
-  retains its deterministic `cleanup_pending` claim and the setup remains
-  `canceling`; a late creator deletes the exact returned browser, and a lost
-  response or client timeout without an exact handle reuses the existing
-  stale-provisioning delete-by-name boundary. Fresh acquisition cannot clear
-  that claim or admit a successor before the boundary. With Cancel, setup
-  reconciliation reports `canceled` only after cleanup is proven. Without
-  Cancel, the originally accepted mailbox item remains `recording` through the
-  assistant turn. Once the exact no-handle claim is durably retained, the first
-  tool attempt returns the existing typed provisioning outcome even if its
-  immediate best-effort delete-by-name fails; that outcome CASes the same item
-  back to `pending` for the two-minute boundary. Before each model attempt, the
-  runtime calls the exact signed Web validation route through Cloudflare's
-  bounded `web-control.worker` POST allowlist. At the boundary, the existing
-  computer owner deletes only the exact deterministic browser, terminalizes the
-  old run, and may admit one same-setup successor while preserving
-  `browser_setup` or `capturing`. `/connect` reads presentation truth only, and
-  a `capturing` successor remains submit-free. Once an exact application binding is
-  durable, setup finishes that exact browser run and compare-and-set clears its
-  run binding before OAuth can continue; an interrupted finish or clear remains
-  explicit and retryable. After application deletion, the same terminal-release
-  compare-and-set also deactivates the deleted setup, allowing the existing
-  member/provider uniqueness owner to admit one fresh setup without overlapping
-  browser ownership. Account deletion requires the external provider
-  application and resumable run to be removed in the member-lock transaction
-  immediately before suspension, including a setup-owned run not yet copied to
-  the setup row. Application save rechecks the suspension fence. The suspension
-  transaction then closes only the local durable setup row.
+  Setup ownership remains a lifecycle and cleanup boundary, not a restricted
+  browser-action language. Every browser or OS action revalidates that the run
+  belongs to the exact active setup. Generic computer work cannot adopt the
+  setup-only persistent profile, while setup-owned runs use the ordinary
+  computer action and observation surfaces. The model must never ask the member
+  for client credentials, read or transcribe credential values, or click the
+  registered secret-reveal control.
+
+  Credential capture is the one deterministic trusted browser action. When the
+  registered credentials page and credential elements are present, trusted code
+  navigates to the registered URL, verifies exact origin and path, optionally
+  clicks the registered reveal control, requires the registered client-ID and
+  client-secret selectors each to resolve to exactly one visible element, and
+  reads both values inside the browser boundary. It seals them directly into
+  `DeviceProviderApplication`, scrubs browser-side values, and returns no
+  credential-bearing result. Capture accepts no model-supplied credential
+  selector or value and is read-only apart from reveal, so an interrupted
+  capture can safely retry.
+
+  There is no frozen application name or irreversible provider-submit setup
+  status. `browser_setup` is the simple in-progress state, serialized by the
+  setup row's optimistic version. Cancellation before successful capture is
+  safe; if cancellation wins the setup-version race, a later credential save
+  fails its exact setup/run/version fence. The existing computer owner still
+  handles browser provisioning reservations, `cleanup_pending`, late browser
+  creation, deterministic profile cleanup, and terminal run release. Those
+  mechanisms prove browser ownership and quiescence only; they do not infer
+  whether provider form submission occurred.
+
+  After sealing, deletion uses the sealed client ID as application authority.
+  Trusted code loads the registered credentials page, requires the registered
+  client-ID selector to resolve unambiguously when present, and compares the
+  on-page value exactly with the sealed value before clicking the live-page
+  delete and optional confirmation controls. A cleanly loaded page with no
+  client-ID element means the application is already absent. Redirects,
+  duplicate or hidden identifiers, mismatches, partial pages, and uncertain
+  post-delete state fail closed and preserve the encrypted binding. Mutable
+  display names, model-selected identifier locators, container counts,
+  loaded-empty markers, and client-ID digests are not deletion authority.
+
+  A reserved browser run is not navigation authority: setup admission must bind
+  the exact run before Kernel provisioning, and browser attachment rechecks that
+  binding. Losing admission terminalizes the candidate; winning admission makes
+  the run visible to cancellation and account-deletion cleanup. Once an exact
+  application binding is durable, setup finishes that browser run and
+  compare-and-set clears its run binding before OAuth continues. Successful
+  application deletion keeps the terminal setup active until the exact run is
+  released, then deactivates it so the existing member/provider uniqueness owner
+  can admit one fresh setup without overlapping browser ownership.
 
   Continue and setup-owned handoff completion append one idempotent typed
   `runtime.provider-setup-continuation-requested` item to the existing hosted
-  system mailbox, keyed by the exact setup/version or run/handoff, before the
-  existing droppable runtime wake. Mailbox handoff recovery covers a lost wake.
-  Cloudflare admits the exact validation and tool POST paths through the existing
-  bound-member, runtime-write-fence, callback-signing, and body-limit transport.
-  The runtime supplies only provider-level continuation guidance to the next
-  background assistant turn; setup, run, and credentials remain behind their
-  existing trusted tools and never enter model context.
+  system mailbox before the existing droppable runtime wake. Mailbox recovery
+  covers a lost wake. Cloudflare admits only the exact validation and tool POST
+  paths through the existing bound-member, runtime-write-fence,
+  callback-signing, and body-limit policy. Setup ids, run ids, credentials, and
+  durable application identity remain behind trusted tools rather than entering
+  assistant workspace state.
 
-  `DeviceProviderApplication` owns encrypted credentials, while device-sync owns
-  OAuth, authoritative connection activation, initial backfill, polling, revoke,
-  and disconnect. Setup reads reconcile their visible projection from current
-  connection truth; post-callback and post-disconnect projection updates are
-  idempotent best-effort bookkeeping. The shared primitive is intentionally
-  bounded to providers where a member creates an application in a browser,
-  receives a client id and secret immediately, completes OAuth, and can remove
-  that application in the browser. Adding another provider with that lifecycle
-  extends the finite connect catalog, encrypted-application definition,
-  presentation, and declarative browser metadata; it does not add another state
-  machine, route family, handoff owner, projection owner, browser adapter, or
-  deletion orchestrator.
-  Providers with a different credential or application lifecycle require a new
-  product and ownership decision rather than being forced through this seam.
-  The reconnect projection is the exact-coordinate-deduplicated union of
-  configured routes and that finite member-owned catalog, so another registered
-  provider participates without a shared-core branch. A signed member-owned
-  connect claim may select and focus its existing source card, but cannot claim
-  durable work, acquire a browser, or start OAuth until the member has seen the
-  prerequisite disclosure and explicitly chooses Continue.
-  Strava is the first registry entry: its declarative guidance uses the
-  setup's frozen friendly application name, models the provider's
-  subscription prerequisite as a disclosed recoverable pause with explicit
-  Continue and Cancel actions, uses the checked-in callback and `activity:read`
-  scope, never falls back to global credentials, and does not enable
-  member-application webhooks. Cancellation is allowed only while exact durable
-  state proves there is no application binding or connection, and it terminates
-  only the exact setup-owned browser run.
+  `DeviceProviderApplication` remains the single encrypted application-identity
+  owner, while device-sync owns OAuth, authoritative connection activation,
+  initial backfill, polling, revoke, and disconnect. Setup reads reconcile their
+  visible projection from current connection truth; callback and disconnect
+  projection writes remain idempotent best-effort bookkeeping. Adding another
+  provider with this lifecycle extends the finite connect catalog, encrypted
+  application definition, presentation, and declarative capture metadata. It
+  does not add another setup state machine, route family, handoff owner,
+  projection owner, browser adapter, or deletion orchestrator.
+
+  Strava is the first registry entry. Its guidance supplies the checked-in
+  website, category, callback URL, and `activity:read` scope and identifies
+  `https://www.strava.com/settings/api` as the credentials page. The model
+  completes the ordinary form and handles Strava's one-application-per-account
+  behavior from the page. Strava never falls back to global credentials and does
+  not enable member-application webhooks. Cancellation is allowed while no
+  application binding or connection is durable and terminates only the exact
+  setup-owned browser run.
 
   The shared public footer may read incident.io's fixed, public, bodyless,
   queryless status summary directly from the browser. The response is display

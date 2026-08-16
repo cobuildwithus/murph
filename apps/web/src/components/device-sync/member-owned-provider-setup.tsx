@@ -147,8 +147,6 @@ function resolveStatusLabel(
       return "Authorized";
     case "browser_setup":
       return "Murph is setting up";
-    case "capturing":
-      return "Sealing credentials";
     case "canceling":
       return "Canceling safely";
     case "oauth_ready":

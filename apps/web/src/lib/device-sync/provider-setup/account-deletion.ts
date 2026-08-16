@@ -114,7 +114,6 @@ export async function assertMemberOwnedProviderSetupsReadyForAccountDeletion(inp
       || setup?.providerApplicationRevision
       || setup?.browserRunId
       || setup?.status === "browser_setup"
-      || setup?.status === "capturing"
       || setup?.status === "canceling"
       || setup?.status === "deletion_pending"
     ) {

@@ -50,10 +50,8 @@ describe("murph computer dynamic tools", () => {
     );
     const actToolSchema = JSON.stringify(actTool?.inputSchema);
     expect(actToolSchema).toContain('"code"');
-    expect(actToolSchema).toContain('"steps"');
-    expect(actToolSchema).toContain('"action"');
-    expect(actToolSchema).toContain('"goto"');
-    expect(actToolSchema).toContain('"selector"');
+    expect(actToolSchema).not.toContain('"steps"');
+    expect(actToolSchema).not.toContain('"goto"');
     expect(actToolSchema).toContain(`"maxLength":${HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH}`);
     expect(actToolSchema).toContain('"type":"integer"');
     expect(actToolSchema).toContain('"minimum":1000');
@@ -68,6 +66,7 @@ describe("murph computer dynamic tools", () => {
     expect(providerSchema).toContain('"prepare_delete"');
     expect(providerSchema).toContain('"delete"');
     expect(providerSchema).not.toContain('"confirm_missing"');
+    expect(providerSchema).not.toContain('"applicationName"');
     expect(providerSchema).not.toContain('"applicationNameSelector"');
     expect(providerSchema).not.toContain('"clientIdSelector"');
     expect(providerSchema).not.toContain('"clientSecretSelector"');
@@ -98,7 +97,7 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("awaitingMessage");
   });
 
-  it("states the secret-isolation and trusted-submit browser contract", () => {
+  it("states the secret-isolation and ordinary-browser setup contract", () => {
     const providerTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "provider_setup");
     const actTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_act");
     const openTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_open");
@@ -112,18 +111,18 @@ describe("murph computer dynamic tools", () => {
     const osControlDescription = osControlTool?.description ?? "";
     const pauseDescription = pauseTool?.description ?? "";
 
-    expect(providerDescription).toContain("never enter model context");
-    expect(providerDescription).toContain("registration owns application-name");
-    expect(providerDescription).toContain("capture takes no runtime selectors");
-    expect(providerDescription).toContain("capture");
-    expect(actDescription).toContain("typed steps only");
-    expect(actDescription).toContain("blocks code");
-    expect(actDescription).toContain("network writes");
-    expect(actDescription).toContain("provider_setup for capture/deletion");
+    expect(providerDescription).toContain("ordinary computer_open/computer_act browsing");
+    expect(providerDescription).toContain("Fill the entire creation form yourself");
+    expect(providerDescription).toContain("without reading, copying, transcribing");
+    expect(providerDescription).toContain("returns no credentials");
+    expect(providerDescription).toContain("Never ask the member for credentials");
+    expect(actDescription).toContain("including a provider_setup-owned run");
+    expect(actDescription).toContain("fill and submit forms yourself");
+    expect(actDescription).toContain("never read credentials or click the secret reveal");
     expect(openDescription).toContain("provider_setup's exact runId");
     expect(openDescription).toContain("safe page state");
-    expect(osControlDescription).toContain("Forbidden for provider_setup");
-    expect(osControlDescription).toContain("sensitive data");
+    expect(osControlDescription).toContain("including an exact provider_setup-owned run");
+    expect(osControlDescription).toContain("Never use it on credential fields");
     expect(pauseDescription).toContain("persist a checkpoint");
     expect(pauseDescription).toContain("does not prove handoff completion");
   });

@@ -2,9 +2,6 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { DeviceSyncError } from "@murphai/device-syncd/errors";
-import {
-  normalizeHostedProviderSetupApplicationName,
-} from "@murphai/hosted-execution/provider-setup";
 
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -26,7 +23,6 @@ import {
 
 export const DEVICE_PROVIDER_SETUP_SELECT = {
   active: true,
-  applicationName: true,
   browserRunId: true,
   completedAt: true,
   connectSourceId: true,
@@ -75,14 +71,11 @@ export class DeviceProviderSetupError extends DeviceSyncError {
 
 export interface DeviceProviderSetupTransitionInput {
   active?: boolean;
-  applicationName?: string | null;
   browserRunId?: string | null;
   completedAt?: Date | null;
   expectedVersion: number;
   memberId: string;
   provider: MemberOwnedDeviceProviderApplicationProvider;
-  providerApplicationId?: string | null;
-  providerApplicationRevision?: number | null;
   setupId: string;
   status: MemberOwnedProviderSetupStatus;
 }
@@ -172,25 +165,15 @@ export class PrismaDeviceProviderSetupStore {
   async transition(
     input: DeviceProviderSetupTransitionInput,
   ): Promise<MemberOwnedProviderSetupRecord> {
-    assertApplicationPair(input);
     const update = await this.prisma.deviceProviderSetup.updateMany({
       data: {
         ...(input.active === undefined ? {} : { active: input.active }),
-        ...(input.applicationName === undefined
-          ? {}
-          : { applicationName: input.applicationName }),
         ...(input.browserRunId === undefined
           ? {}
           : { browserRunId: input.browserRunId }),
         ...(input.completedAt === undefined
           ? {}
           : { completedAt: input.completedAt }),
-        ...(input.providerApplicationId === undefined
-          ? {}
-          : { providerApplicationId: input.providerApplicationId }),
-        ...(input.providerApplicationRevision === undefined
-          ? {}
-          : { providerApplicationRevision: input.providerApplicationRevision }),
         status: input.status,
         version: { increment: 1 },
       },
@@ -422,17 +405,10 @@ function mapSetup(row: DeviceProviderSetupRow): MemberOwnedProviderSetupRecord {
   if (!Number.isSafeInteger(row.version) || row.version <= 0) {
     throw new TypeError("Stored private provider setup version is invalid.");
   }
-  if (
-    row.applicationName !== null
-    && normalizeHostedProviderSetupApplicationName(row.applicationName) !== row.applicationName
-  ) {
-    throw new TypeError("Stored private provider application name is invalid.");
-  }
   const hasApplicationId = row.providerApplicationId !== null;
   const hasApplicationRevision = row.providerApplicationRevision !== null;
   if (
     hasApplicationId !== hasApplicationRevision
-    || (hasApplicationId && row.applicationName === null)
     || (hasApplicationRevision
       && (!Number.isSafeInteger(row.providerApplicationRevision)
         || (row.providerApplicationRevision ?? 0) <= 0))
@@ -463,39 +439,6 @@ function assertSetupCoordinates(
       "DEVICE_PROVIDER_SETUP_CONFLICT",
       "An active private provider setup has different connection coordinates.",
     );
-  }
-}
-
-function assertApplicationPair(input: DeviceProviderSetupTransitionInput): void {
-  if (
-    input.applicationName !== undefined
-    && input.applicationName !== null
-    && normalizeHostedProviderSetupApplicationName(input.applicationName)
-      !== input.applicationName
-  ) {
-    throw new TypeError("Private provider application name is invalid.");
-  }
-  const updatesId = input.providerApplicationId !== undefined;
-  const updatesRevision = input.providerApplicationRevision !== undefined;
-  if (updatesId !== updatesRevision) {
-    throw new TypeError("Private provider setup application binding must be updated as a pair.");
-  }
-  if (!updatesId || !updatesRevision) {
-    return;
-  }
-
-  const hasId = input.providerApplicationId !== null;
-  const hasRevision = input.providerApplicationRevision !== null;
-  if (hasId !== hasRevision) {
-    throw new TypeError("Private provider setup application binding must be updated as a pair.");
-  }
-  if (
-    hasId
-    && (input.providerApplicationId?.trim().length === 0
-      || !Number.isSafeInteger(input.providerApplicationRevision)
-      || (input.providerApplicationRevision ?? 0) <= 0)
-  ) {
-    throw new TypeError("Private provider setup application binding is invalid.");
   }
 }
 

@@ -16,7 +16,6 @@ const STUDY_STATES: readonly {
   { label: "Ready", setup: buildStudySetup("pending", "authorize") },
   { label: "Authorized", setup: buildStudySetup("authorized", "none") },
   { label: "Browser setup", setup: buildStudySetup("browser_setup", "none") },
-  { label: "Sealing credentials", setup: buildStudySetup("capturing", "none") },
   { label: "Canceling safely", setup: buildStudySetup("canceling", "none") },
   { label: "Continue OAuth", setup: buildStudySetup("oauth_ready", "continue_oauth", 3) },
   { label: "OAuth consent", setup: buildStudySetup("oauth_in_progress", "continue_oauth", 3) },

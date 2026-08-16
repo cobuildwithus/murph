@@ -1,6 +1,5 @@
 import {
   type HostedComputerActRequest,
-  type HostedComputerControlActRequest,
   type HostedComputerAwaitingReason,
   type HostedComputerDeliveryContext,
   type HostedComputerFinishOutcome,
@@ -372,7 +371,7 @@ export class ComputerUseService {
   }): Promise<ComputerOpenResult> {
     const owned = await this.requireMemberOwnedProviderSetupModelRun(input);
     const run = await this.requireRunnableRun(input);
-    const state = await this.readMemberOwnedProviderSetupBrowserState(run);
+    const state = await this.readBrowserState(run);
     const url = sanitizeComputerDisplayUrl(state.url);
     await this.store.updateRunBrowserState({
       expectedKernelSessionId: run.kernelSessionId,
@@ -785,41 +784,26 @@ export class ComputerUseService {
     runId: string;
   }): Promise<{ result: unknown; title: string | null; url: string | null }> {
     const owned = await this.store.requireOwnedRun(input);
-    if (
-      owned.ownerKey
-      && owned.ownerPurpose === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
-    ) {
+    const providerSetupOwnerKey = owned.ownerPurpose
+      === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+      ? owned.ownerKey
+      : null;
+    if (providerSetupOwnerKey) {
       await this.store.requireMemberOwnedProviderSetupRun({
         memberId: input.memberId,
-        ownerKey: owned.ownerKey,
+        ownerKey: providerSetupOwnerKey,
         ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
         runId: input.runId,
       });
-      if (!("steps" in input)) {
-        throw computerUseError({
-          code: "HOSTED_COMPUTER_PROVIDER_SETUP_ACTION_FORBIDDEN",
-          httpStatus: 400,
-          message: "Provider setup accepts structured control actions only.",
-          retryable: false,
-        });
-      }
-      const run = await this.requireRunnableRun(input);
-      return this.executeMemberOwnedProviderSetupBrowserAct(input, run);
-    }
-
-    if (!("code" in input)) {
-      throw computerUseError({
-        code: "HOSTED_COMPUTER_SCRIPT_ACTION_REQUIRED",
-        httpStatus: 400,
-        message: "Ordinary computer runs require a Playwright action.",
-        retryable: false,
+    } else {
+      await this.store.requireMemberComputerUseAvailable({
+        memberId: input.memberId,
       });
     }
-    await this.store.requireMemberComputerUseAvailable({
-      memberId: input.memberId,
-    });
     const run = await this.requireRunnableRun(input);
-    assertGenericComputerRun(run);
+    if (!providerSetupOwnerKey) {
+      assertGenericComputerRun(run);
+    }
     return this.executeBrowserAct(input, run);
   }
 
@@ -864,49 +848,6 @@ export class ComputerUseService {
       result: state.result,
       title: state.title,
       url: state.url,
-    };
-  }
-
-  private async executeMemberOwnedProviderSetupBrowserAct(
-    input: HostedComputerControlActRequest & { runId: string },
-    run: ComputerRunRecord,
-  ): Promise<{ result: unknown; title: string | null; url: string | null }> {
-    const kernel = this.requireKernel();
-    let execution: Awaited<ReturnType<ComputerKernelClient["executePlaywright"]>>;
-    try {
-      execution = await kernel.executePlaywright({
-        code: buildMemberOwnedProviderSetupComputerActCode(input),
-        sessionId: requireKernelSessionId(run),
-        timeoutMs: input.timeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS,
-      });
-    } catch (error) {
-      throw addComputerActFailureContext(error, {
-        code: "trusted-provider-setup-control-action",
-        timeoutMs: input.timeoutMs,
-      });
-    }
-    const state = readBrowserStateResult(execution.result);
-    const url = sanitizeComputerDisplayUrl(state.url);
-    if (!url) {
-      throw computerUseError({
-        code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
-        httpStatus: 502,
-        message: "Provider setup browser action finished with an invalid state.",
-        retryable: true,
-      });
-    }
-    await this.store.updateRunBrowserState({
-      expectedKernelSessionId: run.kernelSessionId,
-      lastTitle: state.title,
-      lastUrl: url,
-      runId: run.id,
-    }).catch(() => {
-      // The browser action already completed; this write is only a display cache.
-    });
-    return {
-      result: { visibleText: state.visibleText },
-      title: state.title,
-      url,
     };
   }
 
@@ -1025,18 +966,26 @@ export class ComputerUseService {
   }): Promise<ComputerOsControlResult> {
     const { memberId, runId, ...action } = input;
     const owned = await this.store.requireOwnedRun({ memberId, runId });
-    if (owned.ownerPurpose === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_PROVIDER_SETUP_OS_CONTROL_FORBIDDEN",
-        message: "Provider setup requires the credential-safe browser action surface.",
-        retryable: false,
+    const providerSetupOwnerKey = owned.ownerPurpose
+      === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+      ? owned.ownerKey
+      : null;
+    if (providerSetupOwnerKey) {
+      await this.store.requireMemberOwnedProviderSetupRun({
+        memberId,
+        ownerKey: providerSetupOwnerKey,
+        ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+        runId,
+      });
+    } else {
+      await this.store.requireMemberComputerUseAvailable({
+        memberId,
       });
     }
-    await this.store.requireMemberComputerUseAvailable({
-      memberId,
-    });
     const run = await this.requireRunnableRun({ memberId, runId });
-    assertGenericComputerRun(run);
+    if (!providerSetupOwnerKey) {
+      assertGenericComputerRun(run);
+    }
     const kernel = this.requireKernel();
     const sessionId = requireKernelSessionId(run);
     await requireNonSensitiveComputerOsTextTarget({
@@ -3194,17 +3143,6 @@ export class ComputerUseService {
     return readBrowserStateResult(response.result);
   }
 
-  private async readMemberOwnedProviderSetupBrowserState(
-    run: ComputerRunRecord,
-  ): Promise<{ title: string | null; url: string | null; visibleText: string }> {
-    const response = await this.requireKernel().executePlaywright({
-      code: buildMemberOwnedProviderSetupObservationCode(),
-      sessionId: requireKernelSessionId(run),
-      timeoutMs: COMPUTER_OBSERVE_TIMEOUT_MS,
-    });
-    return readBrowserStateResult(response.result);
-  }
-
   private async navigateKernelBrowserToUrl(input: {
     sessionId: string;
     timeoutMs: number;
@@ -4904,251 +4842,6 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
-function buildMemberOwnedProviderSetupComputerActCode(
-  input: HostedComputerControlActRequest,
-): string {
-  return `
-const __murphSteps = ${JSON.stringify(input.steps)};
-const __murphCredentialHint = /(?:client\\s*(?:id|secret)|consumer\\s*(?:key|secret)|api\\s*(?:key|secret|token)|oauth\\s*(?:key|secret|token)|access\\s*token|refresh\\s*token|private\\s*key|password|credential|bearer\\s*token)/iu;
-const __murphCommitHint = /(?:^|\\b)(?:create|register|save|submit)(?:\\b|$)/iu;
-const __murphDestructiveHint = /(?:^|\\b)(?:delete|remove|revoke|reset|rotate|destroy|disconnect)(?:\\b|$)/iu;
-const __murphBlockedRequest = async (route) => {
-  const method = route.request().method().toUpperCase();
-  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
-    await route.continue();
-    return;
-  }
-  await route.abort("blockedbyclient");
-};
-const __murphLocate = (target) => {
-  switch (target.kind) {
-    case "label":
-      return page.getByLabel(target.value, { exact: target.exact });
-    case "role":
-      return page.getByRole(target.role, {
-        exact: target.exact,
-        ...(target.name === null ? {} : { name: target.name }),
-      });
-    case "selector":
-      return page.locator(target.value);
-    case "text":
-      return page.getByText(target.value, { exact: target.exact });
-    default:
-      throw new Error("MURPH_PROVIDER_SETUP_TARGET_INVALID");
-  }
-};
-const __murphOneVisible = async (target) => {
-  const locator = __murphLocate(target);
-  await locator.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
-  const visible = [];
-  for (let index = 0; index < await locator.count(); index += 1) {
-    const candidate = locator.nth(index);
-    if (await candidate.isVisible().catch(() => false)) visible.push(candidate);
-  }
-  if (visible.length !== 1) {
-    throw new Error("MURPH_PROVIDER_SETUP_TARGET_AMBIGUOUS");
-  }
-  return visible[0];
-};
-const __murphTargetMetadata = async (locator) => await locator.evaluate((element) => {
-  const input = element instanceof HTMLInputElement ? element : null;
-  const labels = input?.labels ? Array.from(input.labels).map((label) => label.textContent || "") : [];
-  return {
-    hints: [
-      element.getAttribute("aria-label"),
-      element.getAttribute("autocomplete"),
-      element.getAttribute("id"),
-      element.getAttribute("name"),
-      element.getAttribute("placeholder"),
-      element.getAttribute("title"),
-      ...labels,
-      element.textContent,
-    ].filter(Boolean).join(" "),
-    inForm: Boolean(element.closest("form")),
-    role: element.getAttribute("role") || "",
-    tagName: element.tagName.toLowerCase(),
-    type: input?.type || (element instanceof HTMLButtonElement ? element.type : ""),
-  };
-});
-await page.route("**/*", __murphBlockedRequest);
-try {
-  for (const step of __murphSteps) {
-    switch (step.action) {
-      case "goto": {
-        const current = new URL(page.url());
-        const requested = new URL(step.url, current);
-        if (requested.protocol !== "https:" || requested.origin !== current.origin) {
-          throw new Error("MURPH_PROVIDER_SETUP_NAVIGATION_FORBIDDEN");
-        }
-        await page.goto(requested.toString(), { waitUntil: "domcontentloaded" });
-        break;
-      }
-      case "click": {
-        const target = await __murphOneVisible(step.target);
-        const metadata = await __murphTargetMetadata(target);
-        const isSubmit = metadata.type === "submit"
-          || metadata.type === "image"
-          || (metadata.tagName === "button" && metadata.inForm && !metadata.type);
-        if (
-          isSubmit
-          || __murphCredentialHint.test(metadata.hints)
-          || __murphDestructiveHint.test(metadata.hints)
-          || (metadata.tagName !== "a" && __murphCommitHint.test(metadata.hints))
-        ) {
-          throw new Error("MURPH_PROVIDER_SETUP_COMMIT_REQUIRES_TRUSTED_TOOL");
-        }
-        await target.click();
-        break;
-      }
-      case "fill": {
-        const target = await __murphOneVisible(step.target);
-        const metadata = await __murphTargetMetadata(target);
-        if (metadata.type === "password" || __murphCredentialHint.test(metadata.hints)) {
-          throw new Error("MURPH_PROVIDER_SETUP_CREDENTIAL_FIELD_FORBIDDEN");
-        }
-        await target.fill(step.value);
-        break;
-      }
-      case "select": {
-        const target = await __murphOneVisible(step.target);
-        await target.selectOption(
-          step.option.kind === "label"
-            ? { label: step.option.value }
-            : { value: step.option.value },
-        );
-        break;
-      }
-      case "set_checked": {
-        const target = await __murphOneVisible(step.target);
-        await target.setChecked(step.checked);
-        break;
-      }
-      case "wait": {
-        const target = __murphLocate(step.target);
-        if (step.state === "visible") {
-          await __murphOneVisible(step.target);
-        } else {
-          const count = await target.count();
-          if (count !== 1) throw new Error("MURPH_PROVIDER_SETUP_TARGET_AMBIGUOUS");
-          await target.first().waitFor({ state: "hidden" });
-        }
-        break;
-      }
-      default:
-        throw new Error("MURPH_PROVIDER_SETUP_ACTION_INVALID");
-    }
-  }
-${buildMemberOwnedProviderSetupObservationCode()}
-} finally {
-  await page.unroute("**/*", __murphBlockedRequest).catch(() => undefined);
-}
-`.trim();
-}
-
-function buildMemberOwnedProviderSetupObservationCode(): string {
-  return `
-const __murphSafeState = await page.evaluate(() => {
-  const credentialHint = /(?:client\\s*(?:id|secret)|consumer\\s*(?:key|secret)|api\\s*(?:key|secret|token)|oauth\\s*(?:key|secret|token)|access\\s*token|refresh\\s*token|private\\s*key|password|credential|bearer\\s*token)/iu;
-  const opaqueToken = /(?=[A-Za-z0-9_-]{8,})(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*\\d)[A-Za-z0-9_-]{8,}/gu;
-  const sanitize = (value) => {
-    const collapsed = String(value || "").replace(/\\s+/gu, " ").trim();
-    if (!collapsed) return "";
-    if (credentialHint.test(collapsed)) return "[credential hidden]";
-    return collapsed
-      .replace(/\\b\\d{4,}\\b/gu, "[opaque]")
-      .replace(opaqueToken, "[opaque]")
-      .slice(0, 180);
-  };
-  const safeUrl = new URL("/", window.location.origin).toString();
-  const isVisible = (element) => {
-    const style = window.getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return style.visibility !== "hidden"
-      && style.display !== "none"
-      && rect.width > 0
-      && rect.height > 0;
-  };
-  const readName = (element) => {
-    const labelledBy = element.getAttribute("aria-labelledby");
-    const labelled = labelledBy
-      ? labelledBy.split(/\\s+/u).map((id) => document.getElementById(id)?.textContent || "").join(" ")
-      : "";
-    const inputLabels = element instanceof HTMLInputElement && element.labels
-      ? Array.from(element.labels).map((label) => label.textContent || "").join(" ")
-      : "";
-    const placeholder = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
-      ? element.placeholder
-      : "";
-    return sanitize(
-      element.getAttribute("aria-label")
-      || labelled
-      || inputLabels
-      || placeholder
-      || element.getAttribute("title")
-      || element.textContent
-      || "",
-    );
-  };
-  const readRole = (element) => {
-    const explicit = element.getAttribute("role");
-    if (explicit) return explicit;
-    if (element instanceof HTMLAnchorElement) return "link";
-    if (element instanceof HTMLButtonElement) return "button";
-    if (element instanceof HTMLSelectElement) return "combobox";
-    if (element instanceof HTMLTextAreaElement) return "textbox";
-    if (element instanceof HTMLInputElement) {
-      if (element.type === "checkbox") return "checkbox";
-      if (element.type === "radio") return "radio";
-      if (element.type === "submit" || element.type === "button") return "button";
-      return "textbox";
-    }
-    return element.tagName.toLowerCase();
-  };
-  const candidates = Array.from(document.querySelectorAll([
-    "a[href]",
-    "button",
-    "input:not([type=hidden])",
-    "textarea",
-    "select",
-    "iframe",
-    "[role=alert]",
-    "[role=status]",
-    "h1",
-    "h2",
-    "h3",
-  ].join(",")));
-  const controls = [];
-  for (const element of candidates) {
-    if (!(element instanceof HTMLElement) || !isVisible(element)) continue;
-    const role = readRole(element);
-    const name = readName(element);
-    const optionNames = element instanceof HTMLSelectElement
-      ? Array.from(element.options).slice(0, 30).map((option) => sanitize(option.textContent || option.label))
-      : [];
-    const destination = element instanceof HTMLAnchorElement
-      ? (() => {
-          const target = new URL(element.href);
-          return target.origin === window.location.origin
-            ? sanitize(decodeURIComponent(target.pathname))
-            : "[external]";
-        })()
-      : "";
-    controls.push([role, name || "[unnamed]", optionNames.filter(Boolean), destination]);
-    if (controls.length >= 160) break;
-  }
-  return {
-    title: null,
-    url: safeUrl,
-    visibleText: controls.map(([role, name, options, destination]) => {
-      const base = role + ' "' + name + '"' + (destination ? " -> " + destination : "");
-      return options.length > 0 ? base + " options: " + options.join(" | ") : base;
-    }).join("\\n").slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT}),
-  };
-});
-return __murphSafeState;
-`.trim();
-}
-
 function buildComputerActCode(input: HostedComputerScriptActRequest): string {
   return [
     "const __murphUserResult = await (async () => {",
@@ -5191,28 +4884,6 @@ function readRequiredComputerProviderCredentials(
     });
   }
   const record = value as Record<string, unknown>;
-  if (
-    Object.keys(record).length === 1
-    && record.kind === "pre_submit_failed"
-  ) {
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_PRE_SUBMIT_FAILED",
-      httpStatus: 502,
-      message: "Provider application submission was not attempted.",
-      retryable: true,
-    });
-  }
-  if (
-    Object.keys(record).length === 1
-    && record.kind === "no_application"
-  ) {
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_NO_APPLICATION",
-      httpStatus: 409,
-      message: "Provider application recovery proved that no application exists.",
-      retryable: true,
-    });
-  }
   const keys = Object.keys(record).sort();
   if (keys.length !== 2 || keys[0] !== "clientId" || keys[1] !== "clientSecret") {
     throw computerUseError({

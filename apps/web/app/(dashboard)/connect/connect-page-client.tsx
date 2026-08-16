@@ -89,7 +89,6 @@ const MEMBER_OWNED_SETUP_ACTIVE_STATUSES = new Set([
   "authorized",
   "browser_setup",
   "canceling",
-  "capturing",
 ]);
 
 type ConnectStartOptions = {

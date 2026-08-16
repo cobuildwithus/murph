@@ -5958,18 +5958,16 @@ function sanitizeHostedProviderSetupPayload(
               application: {
                 ...readStringField(applicationSource, 'callbackUrl'),
                 ...readStringOrNullField(applicationSource, 'category'),
-                ...readStringField(applicationSource, 'marker'),
-                ...readStringField(applicationSource, 'name'),
                 ...readStringArrayField(applicationSource, 'readOnlyScopes'),
                 ...readStringField(applicationSource, 'website'),
               },
             }
           : {}),
+        ...readStringField(contractSource, 'credentialsPageUrl'),
         ...readStringField(contractSource, 'developerPortalUrl'),
         ...readStringArrayField(contractSource, 'guidance'),
         ...readStringField(contractSource, 'provider'),
         ...readStringField(contractSource, 'providerName'),
-        ...readStringField(contractSource, 'safeLandingUrl'),
       }
     : null
 

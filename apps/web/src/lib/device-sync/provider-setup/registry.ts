@@ -31,16 +31,11 @@ export interface MemberOwnedProviderSetupBrowserMetadata {
   applicationWebsite: string;
   developerPortalUrl: string;
   guidance: readonly string[];
-  safeLandingUrl: string;
   trustedAuthority: {
-    applicationContainerSelector: string;
-    applicationIdSelector: string;
-    applicationNameSelector: string;
-    applicationSecretSelector: string;
-    creationFormSelector: string;
-    loadedEmptySelector: string;
+    clientIdSelector: string;
+    clientSecretSelector: string;
+    credentialsPageUrl: string;
     revealSecretSelector: string | null;
-    submitSelector: string;
   };
 }
 
@@ -58,15 +53,14 @@ export interface MemberOwnedProviderSetupBrowserContract<
   application: {
     callbackUrl: string;
     category: string | null;
-    name: string | null;
     readOnlyScopes: readonly string[];
     website: string;
   };
+  credentialsPageUrl: string;
   developerPortalUrl: string;
   guidance: readonly string[];
   provider: TProvider;
   providerName: string;
-  safeLandingUrl: string;
 }
 
 export const STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES = {
@@ -82,21 +76,16 @@ const STRAVA_REGISTRATION = Object.freeze({
     applicationWebsite: "https://withmurph.ai",
     developerPortalUrl: "https://www.strava.com/settings/api",
     guidance: Object.freeze([
-      "Use the provider developer page to prepare one private application with the supplied website, category, callback URL, and read-only scopes. Invent a tool-valid random friendly application name unless the contract already supplies one; pass it only to provider_setup capture.",
-      "Navigate and identify reversible metadata controls from the live page. Never invent selectors for the trusted application-name, submit, client-ID, client-secret, or reveal roles, and never run a provider-specific browser program.",
-      "Fill the reversible metadata fields with computer tools, but do not fill the application name or submit with computer_act. Call provider_setup capture so the trusted browser boundary freezes, writes, and submits the chosen name before credential sealing.",
-      "For sign-in, MFA, CAPTCHA, or developer-access prerequisites, pause the same run for the member. Ask them to complete only that interruption, not to create the application or copy credentials.",
+      "Use ordinary computer-use browsing to create one private application with the supplied website, category, callback URL, and read-only scopes. Fill the entire creation form yourself, including any application name you choose, and submit it.",
+      "Strava permits one application per account. If creation reports an existing application or another on-page error, recover from the visible page as a person would and continue to the registered credentials page.",
+      "When the credentials page is available, confirm that the client ID and client secret elements are present without reading, copying, or transcribing either value, then call provider_setup capture once. The trusted capture action navigates to that page, reveals the secret if needed, seals both values, and returns no credentials.",
+      "For sign-in, MFA, CAPTCHA, or developer-access prerequisites, pause the same run for the member. Ask them to complete only that interruption; never ask them for provider credentials.",
     ]),
-    safeLandingUrl: "https://www.strava.com/settings/api",
     trustedAuthority: Object.freeze({
-      applicationContainerSelector: "[data-strava-application]",
-      applicationIdSelector: "[data-strava-client-id]",
-      applicationNameSelector: "[data-strava-application-name]",
-      applicationSecretSelector: "[data-strava-client-secret]",
-      creationFormSelector: "form[data-strava-application-form]",
-      loadedEmptySelector: "[data-strava-application-empty]",
+      clientIdSelector: "[data-strava-client-id]",
+      clientSecretSelector: "[data-strava-client-secret]",
+      credentialsPageUrl: "https://www.strava.com/settings/api",
       revealSecretSelector: "[data-strava-client-secret-reveal]",
-      submitSelector: "[data-strava-application-submit]",
     }),
   }),
   coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
@@ -156,9 +145,7 @@ export function requireMemberOwnedProviderSetupRegistration(
 }
 
 export function buildMemberOwnedProviderSetupBrowserContract(input: {
-  applicationName?: string | null;
   env?: Readonly<Record<string, string | undefined>>;
-  memberId: string;
   provider: MemberOwnedDeviceProviderApplicationProvider;
   registration?: MemberOwnedProviderSetupRegistration;
 }): MemberOwnedProviderSetupBrowserContract {
@@ -184,15 +171,15 @@ export function buildMemberOwnedProviderSetupBrowserContract(input: {
         `${publicBaseUrl.replace(/\/+$/u, "")}/`,
       ).toString(),
       category: registration.browser.applicationCategory,
-      name: input.applicationName ?? null,
       readOnlyScopes: descriptor.defaultScopes,
       website: registration.browser.applicationWebsite,
     },
+    credentialsPageUrl:
+      registration.browser.trustedAuthority.credentialsPageUrl,
     developerPortalUrl: registration.browser.developerPortalUrl,
     guidance: registration.browser.guidance,
     provider: input.provider,
     providerName: registration.presentation.providerName,
-    safeLandingUrl: registration.browser.safeLandingUrl,
   };
 }
 
@@ -205,15 +192,28 @@ function assertRegistrationsMatchConnectCatalog(): void {
   }
   for (const registration of REGISTRATIONS) {
     const coordinates = registration.coordinates;
-    const authoritySelectors = Object.values(
-      registration.browser.trustedAuthority,
-    ).filter((selector) => selector !== null);
+    const authority = registration.browser.trustedAuthority;
+    const authoritySelectors: string[] = [
+      authority.clientIdSelector,
+      authority.clientSecretSelector,
+      ...(authority.revealSecretSelector === null
+        ? []
+        : [authority.revealSecretSelector]),
+    ];
     if (
       authoritySelectors.some((selector) => selector.trim().length === 0)
       || new Set(authoritySelectors).size !== authoritySelectors.length
     ) {
       throw new TypeError(
-        `Member-owned provider setup authority for ${coordinates.provider} must use distinct nonempty coordinates.`,
+        `Member-owned provider setup authority for ${coordinates.provider} must use distinct nonempty selectors.`,
+      );
+    }
+    if (
+      !isTrustedProviderBrowserUrl(registration.browser.developerPortalUrl)
+      || !isTrustedProviderBrowserUrl(authority.credentialsPageUrl)
+    ) {
+      throw new TypeError(
+        `Member-owned provider setup URLs for ${coordinates.provider} must be absolute HTTPS URLs.`,
       );
     }
     if (!targets.some(
@@ -226,5 +226,16 @@ function assertRegistrationsMatchConnectCatalog(): void {
         `Member-owned provider setup metadata for ${coordinates.provider} does not match the device connect catalog.`,
       );
     }
+  }
+}
+
+function isTrustedProviderBrowserUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:"
+      && url.username.length === 0
+      && url.password.length === 0;
+  } catch {
+    return false;
   }
 }

@@ -42,7 +42,6 @@ const TERMINAL_COMPUTER_RUN_STATUSES = [
 const MEMBER_OWNED_PROVIDER_SETUP_RUN_ACQUISITION_STATUSES = new Set([
   "authorized",
   "browser_setup",
-  "capturing",
   "deletion_pending",
 ]);
 

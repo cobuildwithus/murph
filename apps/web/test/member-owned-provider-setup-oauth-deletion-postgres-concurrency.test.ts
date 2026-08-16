@@ -973,49 +973,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("freezes the friendly application name with the capture fence", async () => {
-      const suffix = randomUUID().replaceAll("-", "");
-      const memberId = `member_provider_name_${suffix}`;
-      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const store = new PrismaDeviceProviderSetupStore(prisma);
-
-      try {
-        await prisma.hostedMember.create({ data: { id: memberId } });
-        const setup = await store.ensureActive({
-          connectSourceId: "strava",
-          connectTarget: "strava",
-          memberId,
-          provider: "strava",
-          sourceProviderSlug: null,
-        });
-        const capturing = await store.transition({
-          applicationName: "Cobalt Trail 482731",
-          expectedVersion: setup.version,
-          memberId,
-          provider: "strava",
-          setupId: setup.id,
-          status: "capturing",
-        });
-
-        expect(capturing).toMatchObject({
-          applicationName: "Cobalt Trail 482731",
-          status: "capturing",
-          version: setup.version + 1,
-        });
-        await expect(prisma.deviceProviderSetup.findUniqueOrThrow({
-          select: { applicationName: true, status: true },
-          where: { id: setup.id },
-        })).resolves.toEqual({
-          applicationName: "Cobalt Trail 482731",
-          status: "capturing",
-        });
-      } finally {
-        await prisma.deviceProviderSetup.deleteMany({ where: { memberId } });
-        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
-        await prisma.$disconnect();
-      }
-    });
-
     it.each(["callback", "deletion"] as const)(
       "serializes the setup and connection when %s wins the member row",
       async (winner) => {

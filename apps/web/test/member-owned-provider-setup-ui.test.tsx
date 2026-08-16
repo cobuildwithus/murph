@@ -54,7 +54,7 @@ describe("member-owned provider setup UI", () => {
       expect(markup).not.toMatch(/handoff|runId|selector|playwright/iu);
       expect(markup).not.toMatch(/<input\b/iu);
     }
-    for (const status of ["capturing", "canceling"] as const) {
+    for (const status of ["canceling"] as const) {
       expect(renderSetup(setupView(status, "none"))).not.toContain("Cancel setup");
     }
   });

@@ -7,7 +7,6 @@ export const MEMBER_OWNED_PROVIDER_SETUP_STATUSES = [
   "pending",
   "authorized",
   "browser_setup",
-  "capturing",
   "canceling",
   "oauth_ready",
   "oauth_in_progress",
@@ -25,7 +24,6 @@ export interface MemberOwnedProviderSetupRecord<
   TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
 > {
   active: boolean;
-  applicationName: string | null;
   browserRunId: string | null;
   completedAt: Date | null;
   connectSourceId: string;
@@ -172,7 +170,6 @@ export function toMemberOwnedProviderSetupView<TProvider extends string>(
     action: options.handoffAvailable && (
       setup.status === "authorized"
       || setup.status === "browser_setup"
-      || setup.status === "capturing"
     )
       ? "continue_handoff"
       : resolveSetupAction(setup.status),
@@ -200,7 +197,6 @@ function resolveSetupAction(
       return "disconnect_first";
     case "authorized":
     case "browser_setup":
-    case "capturing":
     case "canceling":
     case "connected":
     case "deletion_pending":

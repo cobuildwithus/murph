@@ -30,14 +30,17 @@ Account deletion is intentionally stricter than normal settings reads. Vault exp
    and token/application references remain readable. Retell cleanup fails closed
    on ambiguous provider or local-write outcomes.
    For a member-owned provider, the exact bound connection is revoked through the
-   exact stored application revision first. The existing hosted browser profile
-   may then remove only the deterministically marked Murph application through a
-   deletion-only authority bound to the fenced setup and its exact browser run. A
-   sign-in/MFA/CAPTCHA challenge or ambiguous dashboard result aborts local
-   deletion for retry. Unrelated provider applications are preserved and never
-   adopted, modified, or deleted. Only after external cleanup succeeds are setup
-   rows, encrypted application rows, browser runs, Managed Auth artifacts, and the
-   Kernel profile deleted by their existing owners.
+   exact stored application revision first. The existing setup-owned browser then
+   loads the registered credentials page. Trusted code reads the client ID only
+   through the provider-registered selector and compares it exactly with the sealed
+   client ID before any delete or confirmation click. A cleanly loaded page with no
+   client-ID element is already absent. Redirects, mismatches, duplicate or hidden
+   identifiers, partial pages, sign-in/MFA/CAPTCHA interruptions, and uncertain
+   post-delete state abort local deletion for authenticated retry. Unrelated
+   provider applications are preserved and are never adopted, modified, or
+   deleted. Only after external cleanup succeeds are setup rows, encrypted
+   application rows, browser runs, Managed Auth artifacts, and the Kernel profile
+   deleted by their existing owners.
 10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row. That same transaction first inserts a foreign-key-free cleanup receipt whose minimal vendor/runtime identifier payload is KMS-encrypted with receipt- and environment-bound authenticated data.
 11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
 12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
@@ -126,7 +129,7 @@ The Settings vault export does not include:
 | `prisma.device_token_audit` | Live delete | Metadata/counts | Deletes token audit history. |
 | `prisma.device_sync_signal` | Live delete | Metadata/counts | Deletes pre-existing wake/sync signals. Deletion-time provider revocation does not enqueue new disconnect or wake work. |
 | `prisma.device_connect_intent` | Live delete | Metadata/counts | Deletes short-lived hosted device connect intents. Export reports safe metadata only and omits assertion/nonces and routing internals. |
-| `prisma.device_provider_setup` | Pre-suspension external cleanup gate, then local delete | Metadata/counts | Before suspension, the member must disconnect the exact-bound connection and remove the deterministically marked provider application through the authenticated `/connect` flow. Account-deletion preflight proves that no application, exact revision binding, or resumable browser run remains. After suspension, cleanup only closes the local setup record and fails closed if that preflight was invalidated. No client credential plaintext is stored or exported. |
+| `prisma.device_provider_setup` | Pre-suspension external cleanup gate, then local delete | Metadata/counts | Before suspension, the member must disconnect the exact-bound connection and remove the exact client-ID-matched provider application through the authenticated `/connect` flow. Account-deletion preflight proves that no encrypted application binding or resumable setup-owned browser run remains. A clean registered credentials page with no client-ID element may prove prior absence; every ambiguous dashboard state fails closed. After suspension, cleanup only closes the local setup row and fails closed if that preflight was invalidated. No client credential plaintext is stored or exported. |
 | `prisma.device_provider_application` | Live delete | Metadata/counts | Deletes the member's encrypted revisioned provider application after exact connection and external dashboard cleanup. Export never includes ciphertext, client id, client secret, or provider configuration. |
 | `prisma.device_oauth_session` | Live delete | Metadata/counts | Deletes pending provider OAuth state. |
 | `prisma.device_agent_session` | Live delete | Metadata/counts | Deletes local agent bearer-token hashes and agent session metadata. |

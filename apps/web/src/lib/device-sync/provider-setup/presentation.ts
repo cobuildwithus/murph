@@ -15,7 +15,6 @@ export const STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION = {
     browser_setup: "Murph is continuing this Strava setup in its secure browser. Progress survives sign-in, MFA, CAPTCHA, and provider prerequisites.",
     canceled: "Strava setup was canceled. You can authorize a new attempt.",
     canceling: "Murph is safely canceling this Strava setup.",
-    capturing: "Murph is securely capturing and sealing the private application credentials. They are never shown to the assistant.",
     connected: "Strava is connected through your private provider application.",
     deletion_pending: "Murph is removing only the private Strava application it can prove it owns.",
     deleted: "The private Strava application and local credential binding were deleted.",
