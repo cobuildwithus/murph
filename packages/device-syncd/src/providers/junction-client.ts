@@ -1714,13 +1714,14 @@ function extractStructurallyCompleteTimeseriesRecords(
   const groupedRecords = flattenGroupedTimeseries(resource, payload, {
     strict: true,
   });
-  const records = groupedRecords ?? extractCollectionRecords(payload, resource);
-  if (
-    groupedRecords === null
-    && (!payload || typeof payload !== "object")
-  ) {
+  // A structurally complete collection requires grouped proof. Generic and
+  // legacy envelopes (arrays, data/results wrappers, resource-keyed bodies,
+  // raw SDK-parse fallbacks) stay parseable for ordinary ingestion but can
+  // never certify a complete source day.
+  if (groupedRecords === null) {
     throw incompleteJunctionCalendarCollectionError();
   }
+  const records = groupedRecords;
 
   for (const record of records) {
     const entry = readPlainObject(record);

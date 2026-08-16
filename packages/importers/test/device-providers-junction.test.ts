@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -1360,6 +1360,188 @@ test("Junction complete source days reject lossy rows before the canonical write
     const repopulated = await importDay(validRows, "2026-04-24T15:00:00.000Z");
     const replaced = await liveFacets([seeded, emptied, repopulated]);
     assert.equal(replaced.length, 3);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction temporal replays converge without canonical growth and reassert through the set seam", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-temporal-replay-bounds");
+  const rowsFor = (values: readonly number[]) => values.map((value, index) => ({
+    timestamp: new Date(
+      Date.UTC(2026, 3, 22, index < 2 ? 7 : 19, (index < 2 ? index : index - 2) * 5),
+    ).toISOString(),
+    value,
+  }));
+  const importDay = (
+    rows: readonly Record<string, unknown>[],
+    revisionAt: string,
+    withAuthority = true,
+  ) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      ...(withAuthority
+        ? {
+            completeSourceDay: {
+              connectionId: "junction-test-connection",
+              dayKey: "2026-04-22",
+              resources: ["stress_level"],
+              revisionAt,
+              timeZone: "UTC",
+            },
+          }
+        : {}),
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-account-hash-1",
+        importedAt: revisionAt,
+        timeseries: {
+          stress_level: {
+            groups: {
+              garmin: [{ data: rows, source: { provider: "garmin", type: "watch" } }],
+            },
+          },
+        },
+      },
+    },
+    { corePort: coreRuntime },
+  );
+  const walkFiles = async (relative: string): Promise<string[]> => {
+    const absolute = join(vaultRoot, relative);
+    const found: string[] = [];
+    let names: Array<{ name: string; isDirectory(): boolean }>;
+    try {
+      names = await readdir(absolute, { withFileTypes: true });
+    } catch {
+      return found;
+    }
+    for (const dirent of names) {
+      const child = `${relative}/${dirent.name}`;
+      if (dirent.isDirectory()) {
+        found.push(...await walkFiles(child));
+      } else {
+        found.push(child);
+      }
+    }
+    return found.sort();
+  };
+  const facetRecords = async () => {
+    const records = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/events/2026/2026-04.jsonl",
+    });
+    return records.filter((record) => (record as {
+      externalRef?: { resourceType?: string };
+    }).externalRef?.resourceType === "junction-timeseries-temporal-day");
+  };
+  const liveFacetValues = async () => {
+    const live = latestLiveRecords(await facetRecords());
+    return live
+      .map((record) => [String((record as { metric?: unknown }).metric), storedObservationValue(record)])
+      .sort();
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const baseRows = rowsFor([20, 30, 70, 80]);
+    await importDay(baseRows, "2026-04-24T12:00:00.000Z");
+    const seededRecordCount = (await facetRecords()).length;
+    const seededFiles = await walkFiles("ledger");
+    assert.equal(seededRecordCount, 3);
+    assert.equal((await liveFacetValues()).length, 3);
+
+    // Repeated unchanged hourly cadences: zero new event-spine revisions and
+    // zero new persisted ledger artifacts of any kind.
+    for (let cadence = 1; cadence <= 3; cadence += 1) {
+      await importDay(baseRows, `2026-04-24T${12 + cadence}:00:00.000Z`);
+    }
+    assert.equal((await facetRecords()).length, seededRecordCount);
+    assert.deepEqual(await walkFiles("ledger"), seededFiles);
+
+    // A genuine value change supersedes each affected facet in arrival order.
+    await importDay(rowsFor([20, 30, 70, 90]), "2026-04-24T16:00:00.000Z");
+    const changedRecords = await facetRecords();
+    assert.equal(changedRecords.length > seededRecordCount, true);
+    const changedValues = await liveFacetValues();
+    assert.equal(changedValues.length, 3);
+    assert.notDeepEqual(changedValues, [["stress-above-daily-mean-run-count", 1], ["stress-evening-minus-morning-score", 50], ["stress-mean-absolute-successive-difference", 40]]);
+
+    // An addition (more samples) changes qualifiers and lands as revisions.
+    await importDay(rowsFor([20, 30, 70, 90, 90]), "2026-04-24T17:00:00.000Z");
+    const grownCount = (await facetRecords()).length;
+    assert.equal(grownCount > changedRecords.length, true);
+    assert.equal((await liveFacetValues()).length, 3);
+
+    // Populated -> authoritative empty retracts every facet.
+    await importDay([], "2026-04-24T18:00:00.000Z");
+    const retractedCountAll = (await facetRecords()).length;
+    assert.equal(retractedCountAll, grownCount + 3);
+    assert.equal((await liveFacetValues()).length, 0);
+
+    // An identical repopulated delivery reasserts through the set seam as the
+    // next serialized revision and is queryable again.
+    await importDay(rowsFor([20, 30, 70, 90, 90]), "2026-04-24T19:00:00.000Z");
+    const reassertedCount = (await facetRecords()).length;
+    assert.equal(reassertedCount, retractedCountAll + 3);
+    assert.equal((await liveFacetValues()).length, 3);
+
+    // Another identical replay after reassertion is a no-op.
+    await importDay(rowsFor([20, 30, 70, 90, 90]), "2026-04-24T20:00:00.000Z");
+    assert.equal((await facetRecords()).length, reassertedCount);
+    assert.equal((await liveFacetValues()).length, 3);
+
+    // An ordinary versionless delivery of identical content cannot resurrect a
+    // retracted facet: only the authoritative-set seam reasserts.
+    await importDay([], "2026-04-24T21:00:00.000Z");
+    assert.equal((await liveFacetValues()).length, 0);
+    const tombstoneLatest = latestLiveRecords(await facetRecords());
+    assert.equal(tombstoneLatest.length, 0);
+    const priorLive = (await facetRecords()).filter((record) =>
+      (record as { lifecycle?: { state?: string } }).lifecycle === undefined
+      || (record as { lifecycle?: { state?: string } }).lifecycle?.state !== "deleted"
+    );
+    const template = priorLive.at(-1) as {
+      dataOrigin?: Record<string, unknown>;
+      dayKey?: string;
+      externalRef?: Record<string, unknown>;
+      kind?: string;
+      metric?: unknown;
+      observationGrain?: unknown;
+      occurredAt?: string;
+      qualifiers?: unknown;
+      title?: string;
+      unit?: unknown;
+      value?: unknown;
+    };
+    assert.equal(typeof template.kind, "string");
+    await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-04-24T22:00:00.000Z",
+      events: [{
+        kind: template.kind,
+        occurredAt: template.occurredAt,
+        recordedAt: "2026-04-24T22:00:00.000Z",
+        dayKey: template.dayKey,
+        source: "device",
+        title: template.title,
+        fields: {
+          metric: template.metric,
+          value: template.value,
+          unit: template.unit,
+          qualifiers: template.qualifiers,
+          observationGrain: template.observationGrain,
+        },
+        externalRef: template.externalRef,
+        dataOrigin: template.dataOrigin,
+      }],
+    });
+    assert.equal((await liveFacetValues()).length, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

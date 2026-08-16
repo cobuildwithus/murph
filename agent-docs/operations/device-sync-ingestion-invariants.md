@@ -219,13 +219,21 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    feature envelopes, because its vault-local window covers only part of each
    provider calendar day and the calendar-day collection remains the sole
    writer of those ordinary identities. Authorized vault-day fetches require a
-   structurally complete provider collection, and a delivered row that cannot
-   normalize into an owned source, usable value, and the target vault day fails
-   the import retryably before any canonical write; a structurally empty
-   grouped response remains a valid authoritative empty. The authorized result
-   treats the fixed feature
-   facets as a replacement set: emitted facets use versioned canonical upserts,
-   and omitted facets use the existing canonical event retraction seam. Thus a
+   structurally complete grouped provider collection: a successful payload
+   without a grouped envelope — including generic, legacy, and raw SDK-parse
+   fallback bodies — is a retryable incomplete collection, and a delivered row
+   that cannot normalize into an owned source, usable value, and the target
+   vault day fails the import retryably before any canonical write. A
+   structurally empty grouped response remains the only valid authoritative
+   empty. The authorized result
+   treats the fixed feature facets as an unversioned replacement set whose
+   ordering authority is the serialized authoritative-set seam itself: a facet
+   declared current with identical live content is a no-op, an omitted facet
+   uses the existing canonical event retraction seam, and a facet declared
+   current over its own retraction is reasserted as the next serialized
+   event-spine revision. The import wall clock is not a facet source version,
+   so unchanged replays append nothing, and an ordinary versionless delivery
+   without complete-day authority can never resurrect a retracted facet. Thus a
    later insufficient or capped day removes stale derived facts, and retries
    converge without another queue, merge store, or lifecycle owner. Date-only
    and floating provider responses are filtered by raw calendar day only under

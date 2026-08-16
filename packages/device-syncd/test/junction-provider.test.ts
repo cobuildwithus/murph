@@ -10137,10 +10137,18 @@ test("Junction closed daily timeseries imports carry the exclusive temporal sour
 });
 
 test("Junction temporal authority fetches reject structurally incomplete responses", async () => {
-  const malformedPayloads: Record<string, unknown>[] = [
+  const malformedPayloads: unknown[] = [
     { groups: { garmin: null } },
     { groups: { garmin: [null] } },
     { groups: { garmin: [{ data: [null], source: { provider: "garmin", type: "watch" } }] } },
+    // Generic and legacy transport envelopes parse for ordinary ingestion but
+    // carry no grouped proof, so they can never certify a complete source day.
+    [],
+    { data: [] },
+    { results: [] },
+    { stress_level: [] },
+    // The SDK parse-error fallback returns the raw successful body text.
+    "[]",
   ];
   for (const malformedPayload of malformedPayloads) {
     const importedSnapshots: unknown[] = [];

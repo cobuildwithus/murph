@@ -4226,11 +4226,15 @@ function buildJunctionTemporalFeatureExternalRef(
     ?? new Set<string>();
   currentFacets.add(facet);
   context.temporalFeatureCurrentFacetsByResource.set(resource, currentFacets);
+  // Temporal facets follow the repository's unversioned complete-set
+  // reconciliation: the import wall clock is not a source version, so an
+  // unchanged replacement set collapses as a no-op on the canonical event
+  // spine while growth, change, removal, and reassertion reconcile through
+  // the serialized authoritative-set seam in arrival order.
   return {
     system: "junction",
     resourceType: "junction-timeseries-temporal-day",
     resourceId: junctionTemporalFeatureResourceId(context, resource, sourceDay.dayKey),
-    version: sourceDay.revisionAt,
     facet,
   };
 }
