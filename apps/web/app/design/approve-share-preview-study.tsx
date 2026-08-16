@@ -1,14 +1,10 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
-
 import { ApproveShareCard } from "@/app/approve/[approvalId]/approve-share-card";
 
-import "./approve-share-preview-study.css";
+import { ScaledSharePreview } from "./scaled-share-preview";
 
-const OG_WIDTH = 1200;
-const OG_HEIGHT = 630;
-const MAX_SCALE = 0.6;
+import "./share-preview-fonts.css";
 
 export function ApproveSharePreviewStudy() {
   return (
@@ -35,53 +31,9 @@ export function ApproveSharePreviewStudy() {
       {/* Only the rendered preview is inert; the explanatory prose above
           stays reachable by assistive tech and find-in-page. */}
       <div inert>
-        <ScaledSharePreview />
-      </div>
-    </div>
-  );
-}
-
-function ScaledSharePreview() {
-  const frameRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(0.3);
-
-  useLayoutEffect(() => {
-    const frame = frameRef.current;
-    if (frame === null) return;
-    const updateScale = () => {
-      const contentWidth = Math.max(0, frame.clientWidth - 2);
-      setScale(Math.min(MAX_SCALE, contentWidth / OG_WIDTH));
-    };
-    updateScale();
-    const observer = new ResizeObserver(updateScale);
-    observer.observe(frame);
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={frameRef}
-      className="relative overflow-clip rounded-xl border border-border"
-      data-share-preview-frame="approve"
-      data-render-scale={scale.toFixed(4)}
-      style={{
-        width: "100%",
-        maxWidth: OG_WIDTH * MAX_SCALE,
-        height: OG_HEIGHT * scale + 2,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: OG_WIDTH,
-          height: OG_HEIGHT,
-          transform: `scale(${scale})`,
-          transformOrigin: "top left",
-        }}
-      >
-        <ApproveShareCard logoDataUri="/logo.svg" />
+        <ScaledSharePreview frameId="approve">
+          <ApproveShareCard logoDataUri="/logo.svg" />
+        </ScaledSharePreview>
       </div>
     </div>
   );

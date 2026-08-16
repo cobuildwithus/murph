@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
@@ -87,7 +86,6 @@ import {
 } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { readHostedAiUsageActivity } from "@/src/lib/hosted-execution/usage-activity";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import {
@@ -102,10 +100,7 @@ import {
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import { resolveMurphContactOptions } from "@/src/lib/murph-contact-routing";
 
-export const metadata: Metadata = createMurphPageMetadata({
-  title: "Settings — Murph",
-  description: "Manage your Murph account settings.",
-});
+export { metadata } from "./page-metadata";
 
 type SettingsSearchParams = {
   addEmail?: string | string[] | undefined;

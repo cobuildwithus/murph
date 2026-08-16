@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import {
   DEVICE_CONNECT_SOURCES,
   isDeviceConnectSourceAvailableForConnection,
@@ -25,7 +24,6 @@ import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/setti
 import { resolveDeviceSyncVoiceMemoSources } from "@/src/lib/device-sync/device-sync-voice-memos";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI } from "./apple-health-relay-connect-sources";
 import { ConnectSourcesGrid } from "./connect-page-client";
@@ -38,10 +36,6 @@ import type {
   LogoAsset,
 } from "./connect-page-types";
 
-export const metadata: Metadata = createMurphPageMetadata({
-  title: "Connect Devices — Murph",
-  description: "Connect your wearables and health data sources.",
-});
 
 export type ConnectPageSearchParams = Record<
   string,

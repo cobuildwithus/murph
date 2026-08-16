@@ -3,12 +3,31 @@ import Link from "next/link";
 
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/src/components/ui/card";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphOgImageRef,
+  createMurphPageMetadata,
+} from "@/src/lib/site-metadata";
 
-export const metadata: Metadata = createMurphPageMetadata({
-  title: "Checkout paused — Murph",
-  description: "Return to your Murph invite when you are ready to finish checkout.",
-});
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ inviteCode: string }>;
+}): Promise<Metadata> {
+  const { inviteCode } = await params;
+  // Keep the parent invite card: createMurphPageMetadata otherwise injects
+  // the site default, which overrides the parent segment's dedicated image.
+  const ogImage = createMurphOgImageRef({
+    alt: "You’re invited to Murph.",
+    url: `/join/${encodeURIComponent(decodeURIComponent(inviteCode))}/opengraph-image`,
+  });
+
+  return createMurphPageMetadata({
+    title: "Checkout paused — Murph",
+    description: "Return to your Murph invite when you are ready to finish checkout.",
+    openGraph: { images: [ogImage] },
+    twitter: { images: [ogImage] },
+  });
+}
 
 export default async function JoinInviteCancelPage(input: {
   params: Promise<{ inviteCode: string }>;
