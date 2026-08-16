@@ -15046,9 +15046,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it.each([
     {
       dedupeKey:
-        "assistant.notification.requested:phone-call-result:phone_call_telegram",
+        "assistant.notification.requested:phone-call-result:phone_call_telegram:generation:1",
       dispatchesBeforeIdle: true,
-      label: "phone-call result",
+      label: "generation-scoped phone-call result",
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_manual_telegram",
+      dispatchesBeforeIdle: false,
+      label: "generationless manual phone-call result",
     },
     {
       dedupeKey:

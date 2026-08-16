@@ -7855,8 +7855,14 @@ describe("hosted workspace runtime entrypoint", () => {
   const externalCompletionDeliveryScenarios = [
     {
       dedupeKey:
-        "assistant.notification.requested:phone-call-result:phone_call_real_path",
-      label: "phone-call result",
+        "assistant.notification.requested:phone-call-result:phone_call_real_path:generation:1",
+      label: "generation-scoped phone-call result",
+      privateCompletion: false,
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_manual_real_path",
+      label: "generationless manual phone-call result",
       privateCompletion: false,
     },
     {
@@ -7916,7 +7922,7 @@ describe("hosted workspace runtime entrypoint", () => {
           );
       const phoneCallResultUsesForegroundDurabilityBarrier =
         transport.channel === "telegram"
-        && completion.label === "phone-call result";
+        && completion.label === "generation-scoped phone-call result";
       const requestId = `aask_req_${"a".repeat(64)}`;
       let activeVaultRoot = vaultRoot;
       let assistantPhaseCalls = 0;
@@ -7939,7 +7945,7 @@ describe("hosted workspace runtime entrypoint", () => {
         ) {
           if (
             transport.channel === "telegram"
-            && completion.label === "phone-call result"
+            && phoneCallResultUsesForegroundDurabilityBarrier
           ) {
             assert.ok(
               checkpointRequests.some((request) =>
@@ -8044,7 +8050,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 `attempt_synthetic_external_completion_real_${
                   completion.privateCompletion
                     ? "private"
-                    : completion.label === "phone-call result"
+                    : completion.label === "generation-scoped phone-call result"
                       ? "phone"
                       : "referral"
                 }_${transport.channel}`,
@@ -8106,12 +8112,16 @@ describe("hosted workspace runtime entrypoint", () => {
                     deliveryDispatchMode: "queue-only",
                     deliveryDedupeToken: deliveryKey,
                     deliveryIdempotencyKey: deliveryKey,
-                    ...(transport.channel === "linq"
+                    ...((
+                      transport.channel === "linq"
                       && !completion.privateCompletion
+                    ) || phoneCallResultUsesForegroundDurabilityBarrier
                       ? {
                           externalThreadRouteAuthority: {
-                            accountLookupKey: "linq-account-key",
-                            channel: "linq" as const,
+                            ...(transport.channel === "linq"
+                              ? { accountLookupKey: "linq-account-key" }
+                              : {}),
+                            channel: transport.channel,
                             containerMemberId: TEST_USER_ID,
                             threadId: transport.target,
                           },
@@ -8234,6 +8244,15 @@ describe("hosted workspace runtime entrypoint", () => {
                   events.push(
                     `provider.record:${request.providerThreadId ?? request.target}`,
                   );
+                },
+                async recordPhoneCallResultDeliveryOutcome(request) {
+                  assert.equal(
+                    completion.label,
+                    "generation-scoped phone-call result",
+                  );
+                  assert.equal(request.generation, 1);
+                  assert.equal(request.phoneCallId, "phone_call_real_path");
+                  events.push(`phone-result.outcome:${request.status}`);
                 },
                 async sendEmail() {},
               },
@@ -8520,6 +8539,16 @@ describe("hosted workspace runtime entrypoint", () => {
           events.join(","),
         );
         if (phoneCallResultUsesForegroundDurabilityBarrier) {
+          assert.ok(
+            requireEventIndex(events, "phone-result.outcome:sending")
+              < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, providerEvent)
+              < requireEventIndex(events, "phone-result.outcome:sent"),
+            events.join(","),
+          );
           for (const ordinal of [1, 2, 3]) {
             assert.ok(
               requireEventIndex(

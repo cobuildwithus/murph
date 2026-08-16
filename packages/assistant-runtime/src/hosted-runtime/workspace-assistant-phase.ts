@@ -26,6 +26,9 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
+  parseHostedPhoneCallResultDeliveryKey,
+} from "@murphai/hosted-execution/phone-calls";
+import {
   buildHostedVaultShareProjectionScopeKey,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -313,10 +316,8 @@ const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_ROUTE_ACTIONS = [
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_WAKE_KINDS = [
   "assistant.notification.requested",
 ] as const;
-const HOSTED_PRE_CHECKPOINT_PHONE_CALL_RESULT_DEDUPE_KEY_PREFIX =
-  "assistant.notification.requested:phone-call-result:";
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
-  HOSTED_PRE_CHECKPOINT_PHONE_CALL_RESULT_DEDUPE_KEY_PREFIX,
+  "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
   "aask_done_",
   "aask_private_",
@@ -4292,21 +4293,6 @@ function isForegroundCausalSystemMailboxPreparation(
     && preparation.item.wake.kind === "assistant.ask.completed";
 }
 
-function isPreCheckpointPhoneCallResultPreparation(
-  preparation: HostedSystemMailboxPreparation,
-): boolean {
-  return "item" in preparation
-    && (
-      preparation.status === "processed"
-      || preparation.status === "recording"
-    )
-    && preparation.item.routeAction === "dispatch-assistant-notification"
-    && preparation.item.wake.kind === "assistant.notification.requested"
-    && preparation.item.mailboxDedupeKey.startsWith(
-      HOSTED_PRE_CHECKPOINT_PHONE_CALL_RESULT_DEDUPE_KEY_PREFIX,
-    );
-}
-
 type HostedAssistantDeliveryEffects = Awaited<
   ReturnType<typeof collectHostedAssistantDeliverySideEffects>
 >;
@@ -5757,9 +5743,9 @@ async function runSystemMailboxMaintenancePhase(input: {
     phaseInput.foregroundCausalOnly === true
       ? systemMailboxDeliveryEffects.filter(
           (effect) => effect.payload.transportIdempotent === true
-            || isPreCheckpointPhoneCallResultPreparation(
-              systemMailboxPreparation,
-            ),
+            || parseHostedPhoneCallResultDeliveryKey(
+              effect.payload.idempotencyKey,
+            ) !== null,
         )
       : systemMailboxDeliveryEffects;
   const deferredSystemMailboxDeliveryWakeAt =

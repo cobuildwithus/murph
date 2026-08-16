@@ -249,3 +249,20 @@ the member's current authorized Telegram route.
   test now proves the new split directly: phone results prepare and drain behind
   `outbox_sending`, while Telegram referral rewards retain the prior idle-gated
   behavior. The focused two-case unit test passes; production code is unchanged.
+- ReviewGPT round 14 at
+  `b5eba26de76a1e39adfc41e9afd2acfb0c0ffe28` found that the foreground-send
+  exception recognized the broad phone-result mailbox prefix rather than the
+  exact generation-scoped delivery identity. That also accelerated
+  generationless manual Telegram call results and made the legacy changelog
+  promise broader than the scheduled-only behavior.
+- The remediation deletes the preparation-level prefix predicate and admits a
+  non-idempotent foreground effect only when the existing
+  `parseHostedPhoneCallResultDeliveryKey` proves its
+  `phone-call-result:<callId>:generation:<positive integer>` identity. The
+  unrelated legacy changelog edit is reverted. Production-delay proof now
+  pairs the tracked result with a generationless manual Telegram result: the
+  tracked result waits behind three fresh inputs, crosses canonical persistence
+  and `outbox_sending`, sends once before routine idle, records terminal
+  confirmation, and does not resend after restart; the manual result remains
+  idle-gated. The 10-case real mailbox/outbox matrix, the paired three-case
+  phase unit test, and Assistant Runtime typecheck pass.
