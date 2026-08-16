@@ -73,12 +73,23 @@ Updated: 2026-08-16
 
 ## Verification
 
-- Commands to run:
-  - Focused Vitest files for assistant prompt, tool catalog, dynamic execution, and turn planning.
-  - The narrow typecheck or package verification required by affected TypeScript packages.
-  - `git diff --check` and the repository merge-tree preflight.
-  - Required GitHub Actions and ReviewGPT gates on the exact PR head.
-- Expected outcomes:
-  - The generic Rich Message tool is present for authenticated Telegram group turns and rejected elsewhere.
-  - Prompt and tool descriptions express the approved preference without rigid templates or voice-specific examples.
-  - Direct Telegram behavior remains valid and no existing safety owner is weakened.
+- Focused assistant tests passed: 224 passed and 6 skipped across prompt,
+  tool-catalog, execution, skill-asset, and route-planning coverage.
+- Assistant Engine typecheck passed.
+- Web typecheck passed after its normal Prisma and generated-content setup.
+- Changelog generation passed. Changelog fragment and registry tests passed with
+  45 tests.
+- The pinned real Codex App Server provider-input capture passed for identical
+  synthetic direct and group Telegram turns in production code mode. With
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`, the normalized complete request changed
+  from 29,214 to 29,140 tokens for direct turns (-74, -0.2533%) and from 20,864
+  to 22,252 tokens for group turns (+1,388, +6.6526%). The direct byte delta was
+  -432; the group byte delta was +6,562. Volatile request item ids and temporary
+  workspace paths were normalized identically.
+- `TELEGRAM_PREVIEW_CHAT_ID` was absent, so the consent-bound live Telegram
+  preview was not available.
+- Current official OpenAI prompt guidance was checked before prompt review. The
+  final guidance uses clear high-level rules and bounded examples while leaving
+  layout choice to the model.
+- Remaining gates: exact-head ReviewGPT, required GitHub Actions, merge-tree
+  preflight, merge, and worktree retirement.
