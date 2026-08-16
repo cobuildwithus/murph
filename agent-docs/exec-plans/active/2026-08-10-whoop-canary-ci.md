@@ -64,7 +64,7 @@ Updated: 2026-08-15
 3. [x] Run focused tests, typecheck, syntax, and diff/privacy checks.
 4. [x] Complete the original workflow-fix review and PR workflow.
 5. [x] Collect protected-main evidence through WHOOP sign-in and consent.
-6. [ ] Ship the denial-safe rendered-label correction through the required PR,
+6. [x] Ship the denial-safe rendered-label correction through the required PR,
    ReviewGPT, and exact-head CI gates.
 7. [ ] Collect one protected-main green canary proving callback, persisted
    reload, disconnect, and cleanup.
@@ -134,3 +134,14 @@ Updated: 2026-08-15
   `GRANT` button, binds checks and activation to one element handle, asks
   Playwright for the current negative accessible-name set, ignores hidden
   values and Oura, and collapses ambiguous click failures to a fixed category.
+- PR #1915 merged after a valid 14-minute final ReviewGPT disclosure retry and
+  green exact-head required CI. Its protected-main canary stopped before browser
+  launch because the newly merged generalized workout CSV command surface grew
+  the existing vault CLI bundle from the documented 9,119,111-byte baseline to
+  9,152,605 bytes, 605 bytes above the old allowance. Linux CI and the local
+  macOS production-shaped assembly measured the same output, and the metafile
+  showed the existing package graph rather than a new dependency. The follow-up
+  ratchets only the total-output allowance to 9,185,500 bytes; entry and static
+  startup budgets remain unchanged. The production-shaped assembly now passes
+  at 9,152,605 bytes, with a 671-byte entry and 24,950-byte static startup
+  closure, and all six bundled-versus-unbundled CLI parity probes pass.
