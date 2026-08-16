@@ -66,7 +66,10 @@ type ReviewGptHarnessOptions = {
   closeCommandFails?: boolean
   closeCommandHangsAfterClosingAtAttempt?: number
   createCommandOmitsTargetId?: boolean
+  deepResearchConversationHrefs?: string[]
+  draftMode?: string
   draftTimeoutMs?: number
+  exposeConversationWait?: boolean
   failBrowserSocketOpen?: boolean
   failListAfterClose?: boolean
   failPageCommand?: boolean
@@ -154,8 +157,22 @@ function loadReviewGptOpenTargetHarness(
     'prepare-chatgpt-draft.js',
   )
   const requireFromDriver = createRequire(driverPath)
+  const conversationWaitExportAnchor = '\n  const autoSendDraftMessage = async () => {'
+  const installedDriverSource = readFileSync(driverPath, 'utf8')
+  if (!installedDriverSource.includes(conversationWaitExportAnchor)) {
+    throw new Error('ReviewGPT conversation-wait test anchor was not found')
+  }
   const driverSource = [
-    readFileSync(driverPath, 'utf8'),
+    installedDriverSource.replace(
+      conversationWaitExportAnchor,
+      [
+        '',
+        '  module.exports.__waitForConversationStateAfterSendTest = waitForConversationStateAfterSend;',
+        "  if (process.env.REVIEW_GPT_TEST_EXPOSE_CONVERSATION_WAIT === '1') return;",
+        '',
+        '  const autoSendDraftMessage = async () => {',
+      ].join('\n'),
+    ),
     'module.exports.__browserTransportTimeoutMsTest = browserTransportTimeoutMs;',
     'module.exports.__createWebSocketOwnerTest = createWebSocketOwner;',
     'module.exports.__pageCommandTimeoutMsTest = pageCommandTimeoutMs;',
@@ -176,6 +193,8 @@ function loadReviewGptOpenTargetHarness(
   const commands: BrowserCommand[] = []
   const idleDraftRegistrations: IdleDraftCleanupRegistration[] = []
   let closeCommandAttemptCount = 0
+  let conversationWaitActive = false
+  let conversationWaitRuntimeReadCount = 0
   let createSendAttemptCount = 0
   let createdTargetCount = 0
   let latestTargetId = ''
@@ -187,6 +206,19 @@ function loadReviewGptOpenTargetHarness(
   let versionFetchCount = 0
 
   const successfulDraftRuntimeValue = (expression: string) => {
+    if (conversationWaitActive) {
+      const hrefs = options.deepResearchConversationHrefs ?? []
+      const href = hrefs[Math.min(
+        Math.floor(conversationWaitRuntimeReadCount / 2),
+        Math.max(0, hrefs.length - 1),
+      )]
+      conversationWaitRuntimeReadCount += 1
+      return {
+        href: href ?? '',
+        inConversation: Boolean(href),
+        targetMatch: Boolean(href),
+      }
+    }
     if (!options.successfulDraft) return undefined
     if (expression.includes('/backend-api/me')) {
       return { ok: true, status: 200 }
@@ -511,6 +543,7 @@ function loadReviewGptOpenTargetHarness(
     value: {
       ...process.env,
       ORACLE_DRAFT_FILES: '',
+      ORACLE_DRAFT_MODE: options.draftMode ?? 'chat',
       ORACLE_DRAFT_MODEL: 'gpt-5.6-sol',
       ORACLE_DRAFT_PROMPT: options.prompt ?? 'Review the requested changes.',
       ORACLE_DRAFT_REMOTE_PORT: options.remotePort ?? '9999',
@@ -520,6 +553,7 @@ function loadReviewGptOpenTargetHarness(
       ORACLE_DRAFT_URL: 'https://chatgpt.com/',
       ORACLE_DRAFT_WAIT_RESPONSE: options.shouldWaitForResponse ? '1' : '0',
       REVIEW_GPT_IDLE_DRAFT_TIMEOUT_MS: String(options.idleDraftTimeoutMs ?? 0),
+      REVIEW_GPT_TEST_EXPOSE_CONVERSATION_WAIT: options.exposeConversationWait ? '1' : '0',
     },
   })
   const moduleRecord: { exports: Record<string, unknown> } = { exports: {} }
@@ -612,6 +646,7 @@ function loadReviewGptOpenTargetHarness(
       return Reflect.apply(connectTarget, undefined, [desiredUrl, socketOwner])
     },
     getCloseCommandAttemptCount: () => closeCommandAttemptCount,
+    getConversationWaitRuntimeReadCount: () => conversationWaitRuntimeReadCount,
     getCreateSendAttemptCount: () => createSendAttemptCount,
     getDraftPrompt: () => draftPrompt,
     getIdleDraftRegistrations: () => idleDraftRegistrations,
@@ -630,6 +665,30 @@ function loadReviewGptOpenTargetHarness(
     },
     mainWithRetry: async () => {
       await Reflect.apply(mainWithRetry, undefined, [])
+    },
+    waitForConversationStateAfterSend: async (
+      committedState: { href: string },
+      maxWaitMs: number,
+    ) => {
+      const waitForConversationStateAfterSend =
+        moduleRecord.exports.__waitForConversationStateAfterSendTest
+      if (typeof waitForConversationStateAfterSend !== 'function') {
+        throw new Error('ReviewGPT conversation wait was not exposed by the test harness')
+      }
+      conversationWaitRuntimeReadCount = 0
+      conversationWaitActive = true
+      try {
+        return await Reflect.apply(waitForConversationStateAfterSend, undefined, [
+          committedState,
+          maxWaitMs,
+        ]) as {
+          href: string
+          state: { href?: string }
+          status: string
+        }
+      } finally {
+        conversationWaitActive = false
+      }
     },
     markedResponseDurationFailure: (
       targetModel: string,
@@ -815,6 +874,19 @@ const reviewGptModelPickerModule = createRequire(import.meta.url)(
     summary: ReviewGptModelPickerSummary,
     target: ReviewGptModelPickerTarget,
   ) => boolean
+}
+
+const reviewGptDraftHelpersModule = createRequire(import.meta.url)(
+  path.join(
+    repoRoot,
+    'node_modules',
+    '@cobuild',
+    'review-gpt',
+    'src',
+    'prepare-chatgpt-draft-helpers.js',
+  ),
+) as {
+  buildAttachmentNameMatcher: (expectedName: string) => RegExp | null
 }
 
 const reviewGptDomSnapshotModule = createRequire(import.meta.url)(
@@ -1034,7 +1106,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
   })
 
-  it('exposes only the package-backed review-gpt runner', () => {
+  it('exposes only the package-backed review-gpt runner', async () => {
     const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const pnpmWorkspace = readFileSync(
       path.join(repoRoot, 'pnpm-workspace.yaml'),
@@ -1097,13 +1169,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.131')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.132')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.131'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.132'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1167,6 +1239,33 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain(
       'const minimumMarkedResponseMs = Number(process.env.ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS || 5 * 60 * 1000);',
     )
+    const attachmentNameMatcher = reviewGptDraftHelpersModule.buildAttachmentNameMatcher(
+      'codebase.zip',
+    )
+    expect(attachmentNameMatcher?.test('codebase 20260815 213012 zip')).toBe(true)
+    expect(attachmentNameMatcher?.test('different 20260815 213012 zip')).toBe(false)
+    const initialConversationHref = 'https://chatgpt.com/c/initial-conversation'
+    const stabilizedConversationHref = 'https://chatgpt.com/c/stabilized-conversation'
+    const deepResearchHarness = loadReviewGptOpenTargetHarness(1, undefined, {
+      deepResearchConversationHrefs: [
+        stabilizedConversationHref,
+        stabilizedConversationHref,
+      ],
+      draftMode: 'deep-research',
+      exposeConversationWait: true,
+    })
+    await deepResearchHarness.main()
+    await expect(
+      deepResearchHarness.waitForConversationStateAfterSend(
+        { href: initialConversationHref },
+        5_000,
+      ),
+    ).resolves.toMatchObject({
+      href: stabilizedConversationHref,
+      state: { href: stabilizedConversationHref },
+      status: 'ready',
+    })
+    expect(deepResearchHarness.getConversationWaitRuntimeReadCount()).toBe(4)
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
       wantsInstant: false,

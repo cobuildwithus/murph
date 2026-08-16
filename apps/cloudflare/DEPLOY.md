@@ -1219,12 +1219,16 @@ authorization; do not bypass it to recover an invalid split-host environment.
 Device-webhook burst transport requires a main Queue and DLQ named from the
 deployed Worker (`<worker>-device-webhooks` and
 `<worker>-device-webhooks-dlq`). Create both before deploying the Worker config.
-Deploy the Queue-capable Worker and the Web batch-admission callback before
-setting Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout
-gate. Start with one provider and prove Queue depth returns to zero, no DLQ rows
-appear, and Web admission stays serial before expanding. To roll back, clear the
-Web gate first, drain the main Queue through the still-deployed consumer, retain
-the encrypted DLQ for bounded recovery, and remove the consumer/bindings last.
+Keep Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout gate
+empty while deploying the callback and consumer. Deploy Web first: an old
+Worker sends callbacks of at most 25 entries, which the new Web reader accepts.
+Then deploy the Queue-capable Worker, which may send up to 100 entries; deploying
+that Worker against old Web would make callbacks above 25 fail closed and retry.
+Start with one provider and prove Queue depth returns to zero, no DLQ rows
+appear, no more than four independent account lanes run, and each account stays
+serial before expanding. To roll back, clear the Web gate first, drain the main
+Queue through the still-deployed consumer, retain the encrypted DLQ for bounded
+recovery, and remove the consumer/bindings last.
 During Cloudflare automation-key rotation, keep the prior private key as
 `decrypt_only` until Web uses the new public key and both the main Queue and
 encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ

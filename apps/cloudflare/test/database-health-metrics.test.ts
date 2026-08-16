@@ -7,6 +7,7 @@ import {
   evaluateDatabaseMetricSnapshot,
   parsePlanetScaleDatabaseMetricObservation,
   parsePlanetScaleDatabaseMetrics,
+  readMissingConnectionErrorPorts,
 } from "../src/database-health/metrics.ts";
 import { buildMetricsBody } from "./helpers/database-health.ts";
 
@@ -251,6 +252,10 @@ describe("PlanetScale database health metrics", () => {
     expect(observation.snapshot.connectionErrorCounters).toEqual({
       '["5432","us-east"]': 5,
     });
+    expect(readMissingConnectionErrorPorts(
+      observation.snapshot.connectionErrorCounters,
+    )).toEqual(["6432"]);
+    expect(readMissingConnectionErrorPorts(null)).toEqual(["5432", "6432"]);
     expect(calculateConnectionErrorDeltas(
       observation.snapshot.connectionErrorCounters ?? {},
       {
