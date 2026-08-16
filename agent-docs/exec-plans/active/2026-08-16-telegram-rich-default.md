@@ -81,6 +81,15 @@ Updated: 2026-08-16
   the persisted audience shape as a new runner rollback floor. The existing
   deployment and reliability guides now name the immediate rollout, fingerprint
   proof, quarantine signals, and forward-fix recovery rule.
+- The round 3 anomaly retrospective chose continuation without splitting or
+  redesigning the change. Direct and authenticated-group Rich Messages are one
+  approved same-conversation outcome. The 466-line remediation delta consists
+  of 77 source lines and 334 test lines for the shared audience correction and
+  its boundary proof, plus 55 documentation lines for the two accepted
+  findings. Keep that footprint: reverting or splitting restores the proven
+  delivery gap or omits approved group behavior, while a compatibility reader
+  would add a new owner for an operational rollback case already covered by
+  immediate rollout and forward-fix guidance.
 
 ## Verification
 
@@ -99,6 +108,9 @@ Updated: 2026-08-16
   workspace paths were normalized identically.
 - `TELEGRAM_PREVIEW_CHAT_ID` was absent, so the consent-bound live Telegram
   preview was not available.
+- ReviewGPT round 3 opened no ordinary finding. It required the mandatory
+  round-three anomaly retrospective, which is recorded in the PR body and this
+  plan with the explicit decision to continue.
 - Current official OpenAI prompt guidance was checked before prompt review. The
   final guidance uses clear high-level rules and bounded examples while leaving
   layout choice to the model.
