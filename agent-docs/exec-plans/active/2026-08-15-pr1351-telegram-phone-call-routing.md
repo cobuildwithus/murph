@@ -194,3 +194,25 @@ the member's current authorized Telegram route.
   provider resend. The two new regressions plus the existing stale receipt and
   ambiguity recovery cases pass together, the complete three-file outbox slice
   passes 162 tests, and Assistant Engine typecheck passes.
+- ReviewGPT round 11 at
+  `f70a8ff3c8c67fc6dded79f731a50ddb677b6ce0` required a retrospective because
+  the round 10 backoff correction threaded dispatch-start time into terminal
+  confirmation. A provider or callback deadline could consume the entire delay
+  before persistence, making the stored retry immediately due even though the
+  timestamp had advanced.
+- Retrospective decision: keep `HostedPhoneCall` as the sole durable result
+  owner and the existing outbox as the sole confirmation transport owner; keep
+  Telegram strictly no-resend after possible provider entry; and assign retry
+  time to the existing confirmation-reschedule persistence boundary after the
+  callback actually fails. Delete caller-threaded attempt timestamps instead
+  of adding a timer, lifecycle state, queue, scheduler, lease, or reconciliation
+  owner.
+- The remediation removes `attemptedAt` and `confirmationAttemptedAt` from the
+  confirmation path. The persistence boundary now captures its own current
+  time and derives both `updatedAt` and the bounded future retry from it. Exact
+  proof crosses a simulated 30-second Telegram deadline and 45-second callback
+  deadline, verifies the stored retry remains later than failure completion,
+  restarts through callback-only replay, and observes one Telegram request.
+  That proof plus repeated callback failure, stale receipt, stale ambiguity, and
+  the direct rescheduler case passes: 3 files, 5 tests. The complete three-file
+  outbox slice passes 162 tests and Assistant Engine typecheck passes.

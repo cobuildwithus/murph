@@ -835,6 +835,7 @@ describe('assistant outbox thresholds', () => {
     })
     const deliverAssistantMessageOverBinding = vi.fn(async () => {
       providerDelivered = true
+      vi.setSystemTime(new Date('2026-08-15T13:00:30.000Z'))
       return {
         delivery: createDelivery({
           idempotencyKey: deliveryIdempotencyKey,
@@ -863,7 +864,10 @@ describe('assistant outbox thresholds', () => {
       seeded.intentId,
     )
     const confirmTerminalIntent = vi.fn()
-      .mockRejectedValueOnce(new Error('terminal callback unavailable'))
+      .mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date(Date.now() + 45_000))
+        throw new Error('terminal callback deadline elapsed')
+      })
       .mockResolvedValueOnce(undefined)
     const dispatchHooks = {
       confirmTerminalIntent,
@@ -888,7 +892,7 @@ describe('assistant outbox thresholds', () => {
       status: 'retryable',
     })
     expect(Date.parse(first.intent.nextAttemptAt ?? '')).toBeGreaterThan(
-      Date.parse('2026-08-15T13:00:00.000Z'),
+      Date.parse('2026-08-15T13:01:15.000Z'),
     )
     expect(confirmTerminalIntent).toHaveBeenCalledOnce()
 

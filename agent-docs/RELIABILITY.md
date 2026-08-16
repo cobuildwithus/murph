@@ -1814,7 +1814,9 @@ Last verified: 2026-08-15
   a provider receipt on the in-memory dispatch owner before its first
   post-provider checkpoint, so a failed checkpoint fallback cannot discard the
   receipt or callback obligation. Each failed callback advances the existing
-  bounded outbox retry timestamp; it does not immediately spin or resend.
+  bounded outbox retry timestamp from the time that failure is persisted, not
+  from an upstream dispatch-start snapshot; it does not immediately spin or
+  resend.
   The intent becomes ordinarily terminal and nonselectable only after Web
   acknowledges the call-row transition and its next-obligation re-arm. If the
   process is lost while the non-idempotent Telegram intent is still `sending`,

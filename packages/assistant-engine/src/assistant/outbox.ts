@@ -851,7 +851,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
 
   if (prepared.action === 'confirm-terminal') {
     const confirmedIntent = await confirmAssistantOutboxTerminalIntent({
-      attemptedAt: now,
       dispatchHooks: input.dispatchHooks,
       intent: prepared.intent,
       intentPath: prepared.intentPath,
@@ -981,7 +980,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       const sentIntent = terminalConfirmationRequired
         ? await finalizeAssistantOutboxTerminalDelivery({
             completedAt,
-            confirmationAttemptedAt: now,
             delivery: recoveredDelivery,
             dispatchHooks: input.dispatchHooks,
             intent: prepared.intent,
@@ -1091,7 +1089,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
         error: createAssistantDeliveryConfirmationPendingError(),
         intentPath: dispatchIntentPath,
-        scheduledAt: new Date(),
         sending: dispatchIntent,
         vault: input.vault,
       })
@@ -1246,7 +1243,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       })
     const sentIntent = pendingTerminalConfirmation
       ? await confirmAssistantOutboxTerminalIntent({
-          attemptedAt: now,
           dispatchHooks: input.dispatchHooks,
           intent: durableDeliveredIntent,
           intentPath: dispatchIntentPath,
@@ -1321,7 +1317,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       })
     const confirmedIntent = pendingTerminalConfirmation
       ? await confirmAssistantOutboxTerminalIntent({
-          attemptedAt: now,
           dispatchHooks: input.dispatchHooks,
           intent: failedIntent,
           intentPath: dispatchIntentPath,
@@ -1386,7 +1381,6 @@ function readAssistantOutboxPendingTerminalConfirmation(input: {
 }
 
 async function confirmAssistantOutboxTerminalIntent(input: {
-  attemptedAt: Date
   dispatchHooks: AssistantOutboxDispatchHooks | undefined
   intent: AssistantOutboxIntent
   intentPath: string
@@ -1410,7 +1404,6 @@ async function confirmAssistantOutboxTerminalIntent(input: {
         input.intent.lastError ??
         createAssistantDeliveryConfirmationPendingError(),
       intentPath: input.intentPath,
-      scheduledAt: input.attemptedAt,
       sending: input.intent,
       vault: input.vault,
     })
@@ -1428,7 +1421,7 @@ async function confirmAssistantOutboxTerminalIntent(input: {
 
   return markAssistantOutboxIntentMirrorTerminal({
     error: input.outcome.deliveryError,
-    failedAt: input.attemptedAt,
+    failedAt: new Date(),
     intent: input.intent,
     intentPath: input.intentPath,
     onlyCurrentStatuses: ['retryable', 'sending'],
@@ -1466,7 +1459,6 @@ async function finalizeAssistantOutboxTerminalFailure(input: {
   })
   return outcome
     ? confirmAssistantOutboxTerminalIntent({
-        attemptedAt: input.failedAt,
         dispatchHooks: input.dispatchHooks,
         intent: pendingIntent,
         intentPath: input.intentPath,
@@ -1478,7 +1470,6 @@ async function finalizeAssistantOutboxTerminalFailure(input: {
 
 async function finalizeAssistantOutboxTerminalDelivery(input: {
   completedAt: string
-  confirmationAttemptedAt: Date
   delivery: AssistantChannelDelivery
   dispatchHooks: AssistantOutboxDispatchHooks | undefined
   intent: AssistantOutboxIntent
@@ -1502,7 +1493,6 @@ async function finalizeAssistantOutboxTerminalDelivery(input: {
   })
   return outcome
     ? confirmAssistantOutboxTerminalIntent({
-        attemptedAt: input.confirmationAttemptedAt,
         dispatchHooks: input.dispatchHooks,
         intent: pendingIntent,
         intentPath: input.intentPath,

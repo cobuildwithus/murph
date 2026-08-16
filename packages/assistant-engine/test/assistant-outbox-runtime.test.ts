@@ -5995,6 +5995,8 @@ describe('assistant outbox runtime', () => {
   })
 
   it('keeps stale tracked non-idempotent ambiguity callback-replayable without provider reentry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-15T13:20:00.000Z'))
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-phone-call-stale-ambiguous-confirmation-',
     )
@@ -6056,10 +6058,11 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
+    vi.setSystemTime(new Date(first.intent.nextAttemptAt!))
     const restarted = await dispatchAssistantOutboxIntent({
       dispatchHooks,
       intentId: seeded.intentId,
-      now: new Date('2026-08-15T13:21:00.000Z'),
+      now: new Date(first.intent.nextAttemptAt!),
       vault: vaultRoot,
     })
 
@@ -6070,6 +6073,8 @@ describe('assistant outbox runtime', () => {
   })
 
   it('replays a stale tracked non-idempotent receipt callback without provider reentry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-15T13:20:00.000Z'))
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-phone-call-stale-receipt-confirmation-',
     )
@@ -6140,10 +6145,11 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
+    vi.setSystemTime(new Date(first.intent.nextAttemptAt!))
     const restarted = await dispatchAssistantOutboxIntent({
       dispatchHooks,
       intentId: seeded.intentId,
-      now: new Date('2026-08-15T13:21:00.000Z'),
+      now: new Date(first.intent.nextAttemptAt!),
       vault: vaultRoot,
     })
 
@@ -6153,7 +6159,7 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
-  it('backs off repeated tracked terminal callback failures without resending the provider effect', async () => {
+  it('backs off repeated tracked terminal callback deadline failures without resending the provider effect', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-15T13:00:00.000Z'))
     const { vaultRoot } = await createAssistantVault(
@@ -6187,10 +6193,15 @@ describe('assistant outbox runtime', () => {
       ({ intent }: { intent: AssistantOutboxIntent }) =>
         intent.deliveryIdempotencyKey === deliveryIdempotencyKey,
     )
-    const confirmTerminalIntent = vi.fn()
-      .mockRejectedValueOnce(new Error('terminal callback response lost'))
-      .mockRejectedValueOnce(new Error('terminal callback remains unavailable'))
-      .mockResolvedValueOnce(undefined)
+    let remainingCallbackFailures = 2
+    const confirmTerminalIntent = vi.fn(async () => {
+      if (remainingCallbackFailures === 0) {
+        return
+      }
+      remainingCallbackFailures -= 1
+      vi.setSystemTime(new Date(Date.now() + 45_000))
+      throw new Error('terminal callback deadline elapsed')
+    })
     const dispatchHooks = {
       confirmTerminalIntent,
       requiresTerminalConfirmation,
@@ -6214,7 +6225,7 @@ describe('assistant outbox runtime', () => {
       code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
     })
     expect(Date.parse(first.intent.nextAttemptAt ?? '')).toBeGreaterThan(
-      Date.parse('2026-08-15T13:00:00.000Z'),
+      Date.parse('2026-08-15T13:00:45.000Z'),
     )
     expect(confirmTerminalIntent).toHaveBeenNthCalledWith(1, {
       intent: expect.objectContaining({
@@ -6247,7 +6258,7 @@ describe('assistant outbox runtime', () => {
       status: 'retryable',
     })
     expect(Date.parse(firstRestart.intent.nextAttemptAt ?? '')).toBeGreaterThan(
-      Date.parse(first.intent.nextAttemptAt!),
+      Date.parse(first.intent.nextAttemptAt!) + 45_000,
     )
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
     expect(confirmTerminalIntent).toHaveBeenCalledTimes(2)

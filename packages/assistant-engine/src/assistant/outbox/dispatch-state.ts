@@ -926,7 +926,6 @@ function readNonEmptyStringArray(value: unknown): string[] | null {
 export async function rescheduleAssistantOutboxConfirmationRetry(input: {
   error: AssistantDeliveryError
   intentPath: string
-  scheduledAt: Date
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
@@ -951,16 +950,16 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
       return current
     }
     const baseIntent = current ?? input.sending
-    const scheduledAt = input.scheduledAt.toISOString()
+    const scheduledAt = new Date()
     const retryIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
         deliveryConfirmationPending:
           baseIntent.deliveryConfirmationPending ||
           baseIntent.deliveryTransportIdempotent,
-        updatedAt: scheduledAt,
+        updatedAt: scheduledAt.toISOString(),
         nextAttemptAt: buildAssistantOutboxRetryTimestamp(
-          input.scheduledAt,
+          scheduledAt,
           baseIntent.attemptCount,
         ),
         status: 'retryable',
