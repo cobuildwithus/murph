@@ -290,9 +290,17 @@ describe("hosted phone-call result delivery ownership", () => {
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
   });
 
-  it("makes route loss terminally ambiguous after provider entry", async () => {
-    const store = createDeliveryStore("sending");
+  it("recovers route loss after a committed provider-entry response is lost before fetch", async () => {
+    const store = createDeliveryStore("queued");
     mocks.getPrisma.mockReturnValue(store.prisma);
+
+    // Web commits provider entry, but the runtime can lose this response before
+    // it invokes Telegram. The retry's definitive route failure therefore
+    // proves that no provider effect occurred across the complete attempt.
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("sending"),
+    })).resolves.toEqual({ recorded: true, status: "sending" });
 
     await expect(recordHostedPhoneCallResultDeliveryOutcome({
       memberId: MEMBER_ID,
@@ -300,10 +308,11 @@ describe("hosted phone-call result delivery ownership", () => {
         ...deliveryRequest("failed"),
         deliveryErrorCode: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
       },
-    })).resolves.toEqual({ recorded: true, status: "ambiguous" });
+    })).resolves.toEqual({ recorded: true, status: "pending" });
 
-    expect(store.readStatus()).toBe("ambiguous");
-    expect(store.readTerminalAt()).toBeInstanceOf(Date);
+    expect(store.readStatus()).toBe("pending");
+    expect(store.readTerminalAt()).toBeNull();
+    expect(mocks.assertRouteAuthority).toHaveBeenCalledOnce();
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
   });
 

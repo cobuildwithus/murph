@@ -1822,11 +1822,13 @@ Last verified: 2026-08-15
   process is lost while the non-idempotent Telegram intent is still `sending`,
   stale recovery makes the same no-resend decision, persists an ambiguous callback outcome on
   the existing intent, and waits for Web acknowledgement before terminalizing
-  the outbox. The call row supplies the stronger provider-entry fact: a queued
-  generation returns to `pending` and re-arms recovery, while a generation
-  already in `sending` becomes terminally ambiguous. A definitive runtime
-  failure before that provider-entry callback commits instead terminalizes the
-  queued generation as `failed`; provider success from queued remains invalid.
+  the outbox. The call row supplies the stronger generation fact: queued
+  ambiguity returns to `pending`, while sending ambiguity is terminal. A
+  definitive route failure returns either queued or sending to `pending`
+  because the runtime's cumulative outcome proves no Telegram request occurred.
+  A different definitive runtime failure before the provider-entry callback
+  commits terminalizes the queued generation as `failed`; provider success from
+  queued remains invalid.
   Callback-loss recovery treats a stored result and terminal Retell usage as
   sibling obligations in the same reconciliation pass. A ready stored result
   is finalized even while usage lookup or ledger persistence remains pending,
@@ -1841,9 +1843,9 @@ Last verified: 2026-08-15
   and retry revalidates the route before continuing the same generation.
   Provider acceptance completes delivery;
   definitive failure records non-delivery; a may-have-succeeded failure records
-  ambiguity and is never resent. Exact pre-provider Telegram route loss returns
-  a queued call to `pending`; if that generation already reported provider
-  entry, later route loss is terminally ambiguous instead. Every committed
+  ambiguity and is never resent. Exact Telegram route loss with a definitive
+  no-effect outcome returns either a queued or sending generation to `pending`;
+  a may-have-succeeded outcome remains terminally ambiguous. Every committed
   exact-route bind and each terminal callback re-arms at most one oldest member-local
   nonterminal call, so there is no second queue or fanout scheduler. Tracked
   direct results are required-send and bind the exact live Telegram route into

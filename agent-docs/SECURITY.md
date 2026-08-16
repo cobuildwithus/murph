@@ -1280,10 +1280,11 @@ Last verified: 2026-08-15
   message-provider fetch, the runtime supplies that exact authority to the
   signed outcome callback; Web revalidates it and compare-and-sets the exact
   generation to `sending` in the same callback operation. The runtime may report only the exact call
-  generation for its callback-bound member. Route loss before provider entry
-  returns a queued call to pending; route loss after recorded provider entry is
-  ambiguous. Provider ambiguity is terminal and cannot be retried as a new
-  send. Mailbox or outbox retention cannot change the call-row
+  generation for its callback-bound member. A definitive route failure returns
+  either a queued or sending generation to pending because the runtime's
+  cumulative outcome proves no Telegram request occurred; only a
+  may-have-succeeded provider outcome is ambiguous. Provider ambiguity is
+  terminal and cannot be retried as a new send. Mailbox or outbox retention cannot change the call-row
   disposition. Route restoration and terminal callbacks may re-arm only one
   oldest nonterminal call for that member, and restoration does not acknowledge
   success if that required re-arm fails. Group calls omit the enum and keep

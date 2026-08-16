@@ -224,16 +224,6 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
     if (input.currentStatus === "pending") {
       return null;
     }
-    if (input.currentStatus === "sending") {
-      // This route failure belongs to a later retry: the generation already
-      // crossed provider entry once, so its earlier outcome is unknowable and
-      // must never be replayed onto a new route.
-      return {
-        rearm: true,
-        status: "ambiguous",
-        terminal: true,
-      };
-    }
     return {
       rearm: true,
       status: "pending",
