@@ -13,10 +13,9 @@ import {
 const HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS = 25_000;
 
 export type HostedPhoneCallReconciliationProbeResult =
-  | "active"
-  | "complete"
-  | "missing"
-  | "pending";
+  | { status: "missing" }
+  | { status: "pending" }
+  | { analyzedAt: string; status: "stored-result" };
 
 export async function reconcileHostedPhoneCallStep(
   input: HostedPhoneCallReconciliationWorkflowInput,
@@ -53,14 +52,6 @@ export async function probeHostedPhoneCallReconciliationStep(
   const signal = AbortSignal.timeout(
     HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS,
   );
-  const result = await processHostedPhoneCallRecoveryById({
-    phoneCallId: input.phoneCallId,
-    signal,
-  });
-  if (result !== "pending") {
-    return result;
-  }
-
   const call = await waitForAbortableOperation(signal, () =>
     getPrisma().hostedPhoneCall.findUnique({
       select: {
@@ -71,10 +62,10 @@ export async function probeHostedPhoneCallReconciliationStep(
       where: { id: input.phoneCallId },
     }));
   if (!call) {
-    return "missing";
+    return { status: "missing" };
   }
   return call.analyzedAt
       && (call.resultEncrypted !== null || call.resultJson !== null)
-    ? "active"
-    : "pending";
+    ? { analyzedAt: call.analyzedAt.toISOString(), status: "stored-result" }
+    : { status: "pending" };
 }

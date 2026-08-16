@@ -34,6 +34,11 @@ export async function hostedPhoneCallReconciliationWorkflow(
       return;
     }
     nextHookSignal = hook.then(() => "activated" as const);
+    let durableRecheckAfter:
+      | typeof HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK
+      | typeof HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK =
+      HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK;
+    let timerActivatedResultVersion: string | null = null;
 
     while (true) {
       try {
@@ -43,10 +48,6 @@ export async function hostedPhoneCallReconciliationWorkflow(
         // The bounded active window exhausted. A hook remains the fast path,
         // while a durable timer makes the HostedPhoneCall row independently
         // discoverable if that operational hint is dropped.
-        let durableRecheckAfter:
-          | typeof HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK
-          | typeof HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK =
-          HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK;
         while (true) {
           const wake = await Promise.race([
             nextHookSignal,
@@ -59,17 +60,25 @@ export async function hostedPhoneCallReconciliationWorkflow(
 
           let probe: Awaited<
             ReturnType<typeof probeHostedPhoneCallReconciliationStep>
-          > = "pending";
+          >;
           try {
             probe = await probeHostedPhoneCallReconciliationStep(input);
           } catch {
             // The row remains the durable owner. A probe outage cannot end its
-            // sole Workflow or manufacture another recovery owner.
+            // sole Workflow, manufacture another recovery owner, or advance
+            // the first successful classification to the daily cadence.
+            continue;
           }
-          if (probe === "complete" || probe === "missing") {
+          if (probe.status === "missing") {
             return;
           }
-          if (probe === "active") {
+          if (
+            probe.status === "stored-result"
+            && probe.analyzedAt !== timerActivatedResultVersion
+          ) {
+            timerActivatedResultVersion = probe.analyzedAt;
+            durableRecheckAfter =
+              HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK;
             break;
           }
           durableRecheckAfter =

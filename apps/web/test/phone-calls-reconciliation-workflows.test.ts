@@ -234,9 +234,8 @@ describe("hosted phone-call reconciliation Workflow", () => {
     })).resolves.toBeUndefined();
   });
 
-  it("classifies a durable stored result as active after a bounded probe", async () => {
+  it("returns the immutable version of a durable stored result", async () => {
     const analyzedAt = new Date("2026-08-16T12:00:00.000Z");
-    mocks.processHostedPhoneCallRecoveryById.mockResolvedValue("pending");
     mocks.getPrisma.mockReturnValue({
       hostedPhoneCall: {
         findUnique: vi.fn().mockResolvedValue({
@@ -249,7 +248,11 @@ describe("hosted phone-call reconciliation Workflow", () => {
 
     await expect(probeHostedPhoneCallReconciliationStep({
       phoneCallId: "hpc_123",
-    })).resolves.toBe("active");
+    })).resolves.toEqual({
+      analyzedAt: analyzedAt.toISOString(),
+      status: "stored-result",
+    });
+    expect(mocks.processHostedPhoneCallRecoveryById).not.toHaveBeenCalled();
   });
 
   it("keeps a bounded durable retry window", () => {
@@ -302,9 +305,22 @@ describe("hosted phone-call reconciliation Workflow", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("backs an unresolved durable owner off to one exact daily probe", async () => {
+  it.each([
+    {
+      label: "stored Telegram result with an unavailable route",
+      resultDeliveryStatus: "pending",
+    },
+    {
+      label: "delivered result with only terminal usage pending",
+      resultDeliveryStatus: "delivered",
+    },
+  ])("keeps a $label on the daily cadence after one timer activation", async ({
+    resultDeliveryStatus,
+  }) => {
     const firstRecheck = Promise.resolve();
-    const dailyRecheck = createDeferred();
+    const firstDailyRecheck = createDeferred();
+    const secondDailyRecheck = createDeferred();
+    const recoverySignal = createDeferred();
     const dispose = vi.fn();
     let hookAwaitCount = 0;
     const hook = {
@@ -313,7 +329,7 @@ describe("hosted phone-call reconciliation Workflow", () => {
         hookAwaitCount += 1;
         const pending = hookAwaitCount === 1
           ? Promise.resolve({ reason: "reconcile" })
-          : new Promise(() => undefined);
+          : recoverySignal.promise.then(() => ({ reason: "reconcile" }));
         return pending.then(onFulfilled, onRejected);
       },
       token: "unused-by-mock",
@@ -326,18 +342,22 @@ describe("hosted phone-call reconciliation Workflow", () => {
     mocks.sleep
       .mockReturnValueOnce(new Promise(() => undefined))
       .mockReturnValueOnce(firstRecheck)
-      .mockReturnValueOnce(dailyRecheck.promise);
+      .mockReturnValueOnce(firstDailyRecheck.promise)
+      .mockReturnValueOnce(secondDailyRecheck.promise)
+      .mockReturnValue(new Promise(() => undefined));
     mocks.processHostedPhoneCallRecoveryById
       .mockResolvedValueOnce("pending")
       .mockResolvedValueOnce("pending")
       .mockResolvedValueOnce("complete");
+    const findUnique = vi.fn().mockResolvedValue({
+      analyzedAt: new Date("2026-08-16T12:00:00.000Z"),
+      resultDeliveryStatus,
+      resultEncrypted: "encrypted-result",
+      resultJson: null,
+    });
     mocks.getPrisma.mockReturnValue({
       hostedPhoneCall: {
-        findUnique: vi.fn().mockResolvedValue({
-          analyzedAt: null,
-          resultEncrypted: null,
-          resultJson: null,
-        }),
+        findUnique,
       },
     });
 
@@ -345,14 +365,90 @@ describe("hosted phone-call reconciliation Workflow", () => {
       phoneCallId: "hpc_123",
     });
     await vi.waitFor(() => {
+      expect(mocks.processHostedPhoneCallRecoveryById).toHaveBeenCalledTimes(2);
       expect(mocks.sleep).toHaveBeenCalledWith(
         HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK,
       );
     });
-    dailyRecheck.resolve();
+    firstDailyRecheck.resolve();
+    await vi.waitFor(() => {
+      expect(findUnique).toHaveBeenCalledTimes(2);
+    });
+    secondDailyRecheck.resolve();
+    await vi.waitFor(() => {
+      expect(findUnique).toHaveBeenCalledTimes(3);
+      expect(mocks.sleep.mock.calls.filter(([duration]) =>
+        duration === HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK
+      )).toHaveLength(3);
+    });
 
+    expect(mocks.processHostedPhoneCallRecoveryById).toHaveBeenCalledTimes(2);
+    recoverySignal.resolve();
     await expect(running).resolves.toBeUndefined();
     expect(mocks.processHostedPhoneCallRecoveryById).toHaveBeenCalledTimes(3);
+    expect(findUnique).toHaveBeenCalledTimes(3);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the short durable cadence until a failed probe classifies the row", async () => {
+    const firstRecheck = Promise.resolve();
+    const retryRecheck = Promise.resolve();
+    const dailyRecheck = createDeferred();
+    const recoverySignal = createDeferred();
+    const dispose = vi.fn();
+    let hookAwaitCount = 0;
+    const hook = {
+      dispose,
+      then: (onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) => {
+        hookAwaitCount += 1;
+        const pending = hookAwaitCount === 1
+          ? Promise.resolve({ reason: "reconcile" })
+          : recoverySignal.promise.then(() => ({ reason: "reconcile" }));
+        return pending.then(onFulfilled, onRejected);
+      },
+      token: "unused-by-mock",
+      [Symbol.asyncIterator]: () => {
+        throw new Error("async iteration is not used by this workflow");
+      },
+      [Symbol.dispose]: dispose,
+    };
+    mocks.createHook.mockReturnValue(hook);
+    mocks.sleep
+      .mockReturnValueOnce(new Promise(() => undefined))
+      .mockReturnValueOnce(firstRecheck)
+      .mockReturnValueOnce(retryRecheck)
+      .mockReturnValueOnce(dailyRecheck.promise);
+    mocks.processHostedPhoneCallRecoveryById
+      .mockResolvedValueOnce("pending")
+      .mockResolvedValueOnce("complete");
+    const findUnique = vi.fn()
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValueOnce({
+        analyzedAt: null,
+        resultEncrypted: null,
+        resultJson: null,
+      });
+    mocks.getPrisma.mockReturnValue({
+      hostedPhoneCall: { findUnique },
+    });
+
+    const running = hostedPhoneCallReconciliationWorkflow({
+      phoneCallId: "hpc_123",
+    });
+    await vi.waitFor(() => {
+      expect(findUnique).toHaveBeenCalledTimes(2);
+      expect(mocks.sleep).toHaveBeenCalledWith(
+        HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_DURABLE_RECHECK,
+      );
+    });
+
+    expect(mocks.sleep.mock.calls.filter(([duration]) =>
+      duration === HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_FIRST_DURABLE_RECHECK
+    )).toHaveLength(2);
+    expect(mocks.processHostedPhoneCallRecoveryById).toHaveBeenCalledOnce();
+    recoverySignal.resolve();
+    await expect(running).resolves.toBeUndefined();
+    expect(mocks.processHostedPhoneCallRecoveryById).toHaveBeenCalledTimes(2);
     expect(dispose).toHaveBeenCalledOnce();
   });
 
@@ -486,6 +582,7 @@ describe("hosted phone-call reconciliation Workflow", () => {
         return { count: 1 };
       },
     };
+    mocks.getPrisma.mockReturnValue({ hostedPhoneCall });
     let appendAttempt = 0;
     const prisma: AnalyzedStore = {
       hostedPhoneCall,

@@ -1937,10 +1937,15 @@ Last verified: 2026-08-16
   active 120-attempt, 30-second retry window exhausts, the same pre-armed
   per-call Workflow races its hook with a 30-minute durable recheck. If the row
   still has no actionable result, later rechecks are at most once per 24 hours
-  for that exact call; a new hook or a discovered stored result re-enters the
-  bounded active window. This preserves late ordinary and transfer analysis
-  without relying on Retell webhook retries, adding another Workflow, or making
-  a mailbox, queue, scheduler, lease, or signal the durable owner.
+  for that exact call. A successful probe identifies the immutable `analyzedAt`
+  result version in Workflow-local state, so only the first observation of that
+  stored result re-enters one bounded active window; later observations of the
+  same result remain on the daily cadence. A failed first probe retains the
+  30-minute cadence until the row is successfully classified, while a new hook
+  can re-enter a bounded active window immediately. This preserves late
+  ordinary and transfer analysis without relying on Retell webhook retries,
+  adding another Workflow, or making a mailbox, queue, scheduler, lease, or
+  signal the durable owner.
   At the first provider fetch, the runtime
   gives Web the exact queued Telegram authority; Web revalidates that authority
   and compare-and-sets the same generation from `queued` to `sending` in the
