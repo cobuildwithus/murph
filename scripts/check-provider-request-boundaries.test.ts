@@ -2509,6 +2509,89 @@ describe("check-provider-request-boundaries", () => {
     }
   });
 
+  it("evaluates root helper defaults with call-time chronology", () => {
+    const sourceLines = [
+      "let defaultEndpoint = '/internal';",
+      "function target(endpoint = defaultEndpoint) { return endpoint; }",
+      "defaultEndpoint = 'https://api.openai.com/v1/responses';",
+      "let internalEndpoint = '/internal';",
+      "function internalTarget(endpoint = internalEndpoint) { return endpoint; }",
+      "let shadowedEndpoint = '/internal';",
+      "function shadowedTarget(endpoint = shadowedEndpoint) { return endpoint; }",
+      "{",
+      "  let shadowedEndpoint = '/internal';",
+      "  shadowedEndpoint = 'https://api.openai.com/v1/images';",
+      "}",
+      "let lateEndpoint = '/internal';",
+      "function lateTarget(endpoint = lateEndpoint) { return endpoint; }",
+      "let definitiveEndpoint = 'https://api.openai.com/v1/audio';",
+      "function definitiveTarget(endpoint = definitiveEndpoint) { return endpoint; }",
+      "definitiveEndpoint = '/internal';",
+      "await fetch(target(), { method: 'POST' }); // violation",
+      "await fetch(internalTarget(), { method: 'POST' });",
+      "await fetch(shadowedTarget(), { method: 'POST' });",
+      "await fetch(lateTarget(), { method: 'POST' });",
+      "lateEndpoint = 'https://api.openai.com/v1/files';",
+      "await fetch(definitiveTarget(), { method: 'POST' });",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/call-time-provider-url-default.mjs",
+      "scripts/call-time-provider-url-default.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
+  it("gives static and wildcard property defaults their own call-time provenance", () => {
+    const sourceLines = [
+      "const dynamicKey = readKey();",
+      "const fallback = { endpoint: '/internal' };",
+      "function target({ route: { ['endpoint']: endpoint } = fallback } = {}) { return endpoint; }",
+      "fallback.endpoint = 'https://api.openai.com/v1/audio';",
+      "const wildcardFallback = { endpoint: '/internal' };",
+      "function wildcardTarget({ [dynamicKey]: { ['endpoint']: endpoint } = wildcardFallback } = {}) { return endpoint; }",
+      "wildcardFallback.endpoint = 'https://api.openai.com/v1/responses';",
+      "const internalFallback = { endpoint: '/internal' };",
+      "function internalTarget({ route: { endpoint } = internalFallback } = {}) { return endpoint; }",
+      "const shadowedFallback = { endpoint: '/internal' };",
+      "function shadowedTarget({ route: { endpoint } = shadowedFallback } = {}) { return endpoint; }",
+      "{",
+      "  const shadowedFallback = { endpoint: '/internal' };",
+      "  shadowedFallback.endpoint = 'https://api.openai.com/v1/images';",
+      "}",
+      "const lateFallback = { endpoint: '/internal' };",
+      "function lateTarget({ route: { endpoint } = lateFallback } = {}) { return endpoint; }",
+      "let definitiveFallback = { endpoint: 'https://api.openai.com/v1/files' };",
+      "function definitiveTarget({ route: { endpoint } = definitiveFallback } = {}) { return endpoint; }",
+      "definitiveFallback = { endpoint: '/internal' };",
+      "await fetch(target({}), { method: 'POST' }); // violation",
+      "await fetch(wildcardTarget({}), { method: 'POST' }); // violation",
+      "await fetch(internalTarget({}), { method: 'POST' });",
+      "await fetch(shadowedTarget({}), { method: 'POST' });",
+      "await fetch(lateTarget({}), { method: 'POST' });",
+      "lateFallback.endpoint = 'https://api.openai.com/v1/models';",
+      "await fetch(definitiveTarget({}), { method: 'POST' });",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/call-time-provider-property-default.mjs",
+      "scripts/call-time-provider-property-default.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
   it("resolves chronologically possible local helper callables", () => {
     const sourceLines = [
       "const arrowTarget = () => 'https://api.openai.com/v1/responses';",

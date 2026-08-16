@@ -618,9 +618,12 @@ Last verified: 2026-08-15
   computed keys retain the complete source value and every reachable nested
   default as conservative wildcard possibilities. Opaque or spread-produced
   values likewise retain the applicable default unless that step is proven
-  present and non-`undefined`; an exact internal property written after an
-  opaque spread and a later definitive internal callable reassignment remain
-  authoritative. Untyped fetch parameters retain
+  present and non-`undefined`. Root, exact-property, and wildcard-property
+  defaults enter one call-time provenance transition: the default expression
+  supplies its own reference paths and lexical position, while binding
+  chronology and property-mutation observation remain fixed at the helper call.
+  An exact internal property written after an opaque spread and a later
+  definitive internal callable reassignment remain authoritative. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest
   chronological declaration or simple assignment in the variable's lexical
   owner. Assignments reached only through conditional branches, short-circuit

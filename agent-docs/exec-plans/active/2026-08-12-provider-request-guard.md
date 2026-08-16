@@ -512,7 +512,7 @@ Updated: 2026-08-15
   reassignment are executable controls. No scanner, registry, exception,
   compatibility path, second provenance owner, or provider request was added.
 - At the user's request, the repository's package-backed ReviewGPT runner and
-  release-contract fixture were upgraded from `0.5.127` to `0.5.132`. The
+  release-contract fixture were upgraded from `0.5.131` to `0.5.132`. The
   exact minimum-release-age allowlist and lockfile now identify the same
   version, including the package's configurable marked-response trust
   threshold contract. Eragon is excluded from subsequent review routing
@@ -650,6 +650,43 @@ Updated: 2026-08-15
   doc gardening, diff integrity, and the diff-aware verifier pass. The full
   repository-tools matrix passes twice at 39 files and 768 tests.
 
+### ReviewGPT round 23 requirement-level retrospective
+
+- Exact full-snapshot head `a38c614448b0266a10afab4847e8627d114d1eb8`
+  returned `RETROSPECTIVE_REQUIRED`. Explicit arguments preserved the source
+  reference and call observation required by round 22, but default activation
+  still forked those facts: a root default replaced call-time chronology with
+  its declaration position, while a nested property default inherited the
+  preceding source's reference paths. A later provider assignment or member
+  write could therefore disappear. Both forms are the same accepted
+  helper-value provenance mechanism and are review-induced.
+- Requirement decision: default evaluation is one call-time provenance
+  transition shared by root, exact-property, and wildcard-property defaults.
+  The default expression supplies the lexical position used to select its
+  visible parameter/function/variable owner and its own reference paths.
+  Binding chronology and property-mutation observation remain fixed at the
+  helper call. Narrowing default support would reopen the registered-provider
+  raw-HTTP bypass already covered by the bounded helper grammar.
+- Redesign decision: keep the existing helper-value resolver, binding census,
+  effective-property reader, reference-path resolver, and mutation index as the
+  only owners. One local transition inside `readProviderCallPossibleValues`
+  now activates every default form. The existing variable-binding resolver
+  accepts a distinct lexical scope position while retaining its chronological
+  cutoff, so an out-of-scope call-site shadow cannot replace the binding visible
+  where the default was defined. Alias expansion moves that lexical position to
+  the initializer while property observation stays at the call. No resolver,
+  provenance table, AST walk, registry, exception, compatibility path, or
+  provider request was added.
+- Executable `.mjs` and `.mts` proofs cover a root default reassigned to a
+  provider before the call, a static nested default whose aggregate member is
+  mutated to a provider, and the same mutation through a wildcard-property
+  default. Clean controls cover unmutated defaults, out-of-scope shadow
+  mutations, mutations after the call, and definitive internal reassignments
+  for both scalar and aggregate defaults. The focused guard suite passes 139
+  tests. Repo-tools TypeScript compilation, the production provider scan, doc
+  gardening, diff integrity, and the diff-aware verifier pass. The full
+  repository-tools matrix passes twice at 39 files and 770 tests.
+
 ## Verification
 
 - `pnpm provider-requests:guard`
@@ -661,6 +698,11 @@ Updated: 2026-08-15
 
 Current evidence:
 
+- Round-23 retrospective focused provider-guard suite: 139 tests passed across
+  `.mjs` and `.mts` fixtures. Repo-tools TypeScript compilation, the production
+  provider scan, doc gardening, and `git diff --check` pass. The full
+  repository-tools matrix and the diff-aware verifier's repeated matrix each
+  pass 39 files and 770 tests.
 - Round-22 retrospective focused provider-guard suite: 137 tests passed across
   `.mjs` and `.mts` fixtures. Repo-tools TypeScript compilation, the production
   provider scan, doc gardening, and `git diff --check` pass. The full

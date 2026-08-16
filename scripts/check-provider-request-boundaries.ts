@@ -2680,12 +2680,30 @@ function readProviderCallPossibleValues(input: {
   readonly callParameterValues?: ProviderCallParameterValues;
   readonly defaultExpression: Expression | null;
   readonly defaultCallParameterValues?: ProviderCallParameterValues;
+  readonly lexicalBefore?: number;
   readonly node: Node | null;
   readonly projectionBefore?: number;
   readonly projectionReferencePaths?: readonly (readonly string[])[];
   readonly propertySteps: readonly ProviderCallPropertyStep[];
   readonly resolving: ReadonlySet<string>;
 }): ProviderCallParameterValue[] {
+  const readDefaultValues = (
+    defaultExpression: Expression,
+    observationBefore: number,
+    callParameterValues: ProviderCallParameterValues | undefined,
+    propertySteps: readonly ProviderCallPropertyStep[],
+  ): ProviderCallParameterValue[] => readProviderCallPossibleValues({
+    ...input,
+    before: observationBefore,
+    callParameterValues,
+    defaultExpression: null,
+    lexicalBefore: defaultExpression.start ?? input.lexicalBefore ?? input.before,
+    node: defaultExpression,
+    projectionBefore: observationBefore,
+    projectionReferencePaths: readPossibleReferencePaths(defaultExpression),
+    propertySteps,
+    resolving: new Set(),
+  });
   const [propertyStep, ...remainingPropertySteps] = input.propertySteps;
   if (propertyStep) {
     const values: ProviderCallParameterValue[] = [];
@@ -2700,15 +2718,12 @@ function readProviderCallPossibleValues(input: {
           if (!step.defaultExpression) {
             continue;
           }
-          values.push(...readProviderCallPossibleValues({
-            ...input,
-            before: step.defaultExpression.start ?? alternative.before,
-            callParameterValues: input.defaultCallParameterValues,
-            defaultExpression: null,
-            node: step.defaultExpression,
-            propertySteps: input.propertySteps.slice(index + 1),
-            resolving: new Set(),
-          }));
+          values.push(...readDefaultValues(
+            step.defaultExpression,
+            alternative.projectionBefore,
+            input.defaultCallParameterValues,
+            input.propertySteps.slice(index + 1),
+          ));
         }
         continue;
       }
@@ -2723,9 +2738,10 @@ function readProviderCallPossibleValues(input: {
       for (const node of projected) {
         values.push(...readProviderCallPossibleValues({
           ...input,
-          before: alternative.before,
+          before: node.start ?? alternative.before,
           callParameterValues: alternative.callParameterValues,
           defaultExpression: propertyStep.defaultExpression,
+          lexicalBefore: node.start ?? input.lexicalBefore,
           node,
           projectionBefore: alternative.projectionBefore,
           projectionReferencePaths: dedupeReferencePaths([
@@ -2753,47 +2769,42 @@ function readProviderCallPossibleValues(input: {
           })
         )
       ) {
-        values.push(...readProviderCallPossibleValues({
-          ...input,
-          before: propertyStep.defaultExpression.start ?? alternative.before,
-          callParameterValues: input.defaultCallParameterValues,
-          defaultExpression: null,
-          node: propertyStep.defaultExpression,
-          propertySteps: remainingPropertySteps,
-          resolving: new Set(),
-        }));
+        values.push(...readDefaultValues(
+          propertyStep.defaultExpression,
+          alternative.projectionBefore,
+          input.defaultCallParameterValues,
+          remainingPropertySteps,
+        ));
       }
     }
     return dedupeProviderCallValues(values);
   }
 
-  const useDefault = (): ProviderCallParameterValue[] =>
-    input.defaultExpression
-      ? [{
-        before: input.defaultExpression.start ?? input.before,
-        callParameterValues: input.defaultCallParameterValues,
-        node: input.defaultExpression,
-        projectionBefore: input.defaultExpression.start ?? input.before,
-        projectionReferencePaths: readPossibleReferencePaths(
-          input.defaultExpression,
-        ),
-      }]
-      : [];
+  const useDefault = (): ProviderCallParameterValue[] => input.defaultExpression
+    ? readDefaultValues(
+      input.defaultExpression,
+      input.projectionBefore ?? input.before,
+      input.defaultCallParameterValues,
+      [],
+    )
+    : [];
   if (!input.node) {
     return useDefault();
   }
   const expression = unwrapExpression(input.node);
+  const lexicalBefore = input.lexicalBefore ?? input.before;
   if (
     (isIdentifier(expression, { name: "undefined" }) &&
       !resolveParameterBinding(
         input.analysis.parameterBindings,
         expression.name,
-        input.before,
+        lexicalBefore,
       ) &&
       resolvePossibleBindings(
         input.bindings,
         expression.name,
         input.before,
+        lexicalBefore,
       ).length === 0) ||
     (expression.type === "UnaryExpression" && expression.operator === "void")
   ) {
@@ -2803,12 +2814,12 @@ function readProviderCallPossibleValues(input: {
     const parameter = resolveParameterBinding(
       input.analysis.parameterBindings,
       expression.name,
-      input.before,
+      lexicalBefore,
     );
     const callable = resolveFunctionBinding(
       input.analysis.functionBindings,
       expression.name,
-      input.before,
+      lexicalBefore,
     );
     const sameScopeCallables = callable
       ? input.analysis.functionBindings.get(expression.name)?.filter(
@@ -2838,6 +2849,7 @@ function readProviderCallPossibleValues(input: {
       input.bindings,
       expression.name,
       input.before,
+      lexicalBefore,
     );
     const possible = lexicalOwner
       ? possibleBindings.filter((binding) =>
@@ -2858,6 +2870,7 @@ function readProviderCallPossibleValues(input: {
           .flatMap((value) => readProviderCallPossibleValues({
             ...input,
             before: binding.start - 1,
+            lexicalBefore: value.start ?? binding.start,
             node: value,
             projectionBefore: input.projectionBefore ?? input.before,
             projectionReferencePaths: input.projectionReferencePaths ??
@@ -2892,6 +2905,7 @@ function readProviderCallPossibleValues(input: {
           ...input,
           before: value.before,
           callParameterValues: value.callParameterValues,
+          lexicalBefore: value.node.start ?? value.before,
           node: value.node,
           projectionBefore: value.projectionBefore,
           projectionReferencePaths: value.projectionReferencePaths,
@@ -7509,6 +7523,7 @@ function resolveBinding(
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
   name: string,
   before: number,
+  scopePosition = before,
 ): VariableBinding | null {
   const candidates = bindings.get(name);
   if (!candidates) {
@@ -7518,8 +7533,8 @@ function resolveBinding(
   for (const candidate of candidates) {
     if (
       candidate.start <= before &&
-      candidate.scopeStart <= before &&
-      before <= candidate.scopeEnd &&
+      candidate.scopeStart <= scopePosition &&
+      scopePosition <= candidate.scopeEnd &&
       (
         !resolved ||
         candidate.scopeStart > resolved.scopeStart ||
@@ -7539,11 +7554,12 @@ function resolvePossibleBindings(
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
   name: string,
   before: number,
+  scopePosition = before,
 ): VariableBinding[] {
   const possible: VariableBinding[] = [];
   let position = before;
   while (true) {
-    const binding = resolveBinding(bindings, name, position);
+    const binding = resolveBinding(bindings, name, position, scopePosition);
     if (!binding || possible.some((candidate) => candidate.start === binding.start)) {
       return possible;
     }
