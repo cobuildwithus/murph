@@ -1,7 +1,7 @@
 # Phone-call result policy reader prerequisite
 
-Status: active
-Updated: 2026-08-15
+Status: completed
+Updated: 2026-08-16
 
 ## Goal
 
@@ -173,7 +173,8 @@ Current evidence:
   webhook invocations; round 4 accepted the consumer implementation but found
   that admitted start routes could remain invisible through the first
   provider/Workflow zero proof. The start-route drain and final zero re-proof
-  are now explicit. A later PASS is still required;
+  are now explicit; round 5 returned `ROUND_OUTCOME: PASS` on the exact pushed
+  head with verified GPT-5.6 Pro model evidence and no qualifying findings;
 - the rollout-contract remediation completed the diff-scoped Web verification:
   821 files / 10,951 tests passed, Web typecheck passed, ESLint completed with
   only pre-existing warnings, dev smoke passed, and the production Next build
@@ -183,7 +184,10 @@ Current evidence:
   `@murphai/contracts/zod-runtime` public entrypoint and its 3 cases pass. The
   standalone boundary guard no longer reports this PR and remains nonzero only
   for four pre-existing violations in unrelated CLI, device-sync, and hosted
-  crypto tests.
+  crypto tests; and
+- all substantive required GitHub Actions passed on the reviewed head. The
+  protected-environment Native iOS status remains unrelated to this Web-only
+  prerequisite and is not a required merge gate.
 
 ## Deployment
 
@@ -200,3 +204,4 @@ reader-plus-writer release is current. #1351 becomes the operational post-write
 floor. This release remains a compatible consumer but cannot safely produce new
 transfer results after that activation. A zero tracked-result-channel count
 cannot authorize an older strict reader or prove producer safety.
+Completed: 2026-08-16
