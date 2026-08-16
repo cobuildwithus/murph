@@ -3,8 +3,13 @@ import { access, chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import { build, type Metafile } from "esbuild";
+import {
+  memoryDocumentSnapshotSchema,
+  type MemoryDocumentSnapshot,
+} from "@murphai/contracts";
 import {
   MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
 } from "@murphai/health-commons/runtime";
@@ -397,13 +402,27 @@ async function assertVaultCliBundleParity(input: {
         unbundledEntryPath: input.entryPath,
         vaultRoot: fixtureCase.vaultRoot,
       });
-      for (const entryKind of ["unbundled", "bundled"] as const) {
-        assertVaultCliMemoryShowResult({
-          expectedExists: fixtureCase.expectedExists,
-          expectedRecords: fixtureCase.expectedRecords,
-          expectedVaultRoot: fixtureCase.vaultRoot,
-          label: `${entryKind} ${fixtureCase.label} memory`,
-          result: results[entryKind],
+      const unbundledMemory = assertVaultCliMemoryShowResult({
+        expectedExists: fixtureCase.expectedExists,
+        expectedRecords: fixtureCase.expectedRecords,
+        expectedVaultRoot: fixtureCase.vaultRoot,
+        label: `unbundled ${fixtureCase.label} memory`,
+        result: results.unbundled,
+      });
+      const bundledMemory = assertVaultCliMemoryShowResult({
+        expectedExists: fixtureCase.expectedExists,
+        expectedRecords: fixtureCase.expectedRecords,
+        expectedVaultRoot: fixtureCase.vaultRoot,
+        label: `bundled ${fixtureCase.label} memory`,
+        result: results.bundled,
+      });
+      if (!fixtureCase.expectedExists) {
+        assertVaultCliMissingMemoryParity({
+          bundled: bundledMemory,
+          bundledResult: results.bundled,
+          label,
+          unbundled: unbundledMemory,
+          unbundledResult: results.unbundled,
         });
       }
       assertVaultCliParityMatch({
@@ -494,7 +513,7 @@ function assertVaultCliMemoryShowResult(input: {
   expectedVaultRoot: string;
   label: string;
   result: VaultCliParityResult;
-}): void {
+}): VaultCliMemoryShowResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(input.result.stdout);
@@ -507,28 +526,72 @@ function assertVaultCliMemoryShowResult(input: {
   }
   const root = parsed as Record<string, unknown>;
   const documentValue = root.document;
-  if (
-    !documentValue ||
-    typeof documentValue !== "object" ||
-    Array.isArray(documentValue)
-  ) {
+  const documentRead = memoryDocumentSnapshotSchema.safeParse(documentValue);
+  if (!documentRead.success) {
     throwVaultCliMemoryShowFailure(input.label, input.result);
   }
-  const document = documentValue as Record<string, unknown>;
+  const document = documentRead.data;
   const records = document.records;
   if (
     input.result.status !== 0 ||
     input.result.stderr.length !== 0 ||
+    !isDeepStrictEqual(Object.keys(root).sort(), ["document", "memory", "vault"]) ||
     root.vault !== input.expectedVaultRoot ||
     document.exists !== input.expectedExists ||
-    !Array.isArray(records) ||
     (input.expectedRecords === "empty"
       ? records.length !== 0
       : records.length === 0) ||
+    (!input.expectedExists && document.updatedAt !== null) ||
     root.memory !== null
   ) {
     throwVaultCliMemoryShowFailure(input.label, input.result);
   }
+
+  return {
+    document,
+    memory: null,
+    vault: root.vault,
+  };
+}
+
+function assertVaultCliMissingMemoryParity(input: {
+  bundled: VaultCliMemoryShowResult;
+  bundledResult: VaultCliParityResult;
+  label: string;
+  unbundled: VaultCliMemoryShowResult;
+  unbundledResult: VaultCliParityResult;
+}): void {
+  if (
+    !isDeepStrictEqual(
+      normalizeVaultCliMissingMemoryResult(input.unbundled),
+      normalizeVaultCliMissingMemoryResult(input.bundled),
+    )
+  ) {
+    throwVaultCliParityMismatch({
+      bundled: input.bundledResult,
+      label: input.label,
+      unbundled: input.unbundledResult,
+    });
+  }
+}
+
+function normalizeVaultCliMissingMemoryResult(
+  input: VaultCliMemoryShowResult,
+): VaultCliMemoryShowResult {
+  const readTime = input.document.frontmatter.updatedAt;
+  const frontmatter = {
+    ...input.document.frontmatter,
+    updatedAt: "<read-time>",
+  };
+  return {
+    document: {
+      ...input.document,
+      frontmatter,
+      markdown: input.document.markdown.replaceAll(readTime, "<read-time>"),
+    },
+    memory: null,
+    vault: input.vault,
+  };
 }
 
 function throwVaultCliMemoryShowFailure(
@@ -558,6 +621,12 @@ interface VaultCliParityResult {
   status: number;
   stderr: string;
   stdout: string;
+}
+
+interface VaultCliMemoryShowResult {
+  document: MemoryDocumentSnapshot;
+  memory: null;
+  vault: string;
 }
 
 function runVaultCliParityProbe(input: {

@@ -77,41 +77,86 @@ function buildMemoryAwareFakeCliSource(
   ].join("\n");
 }
 
+function buildCanonicalMemoryShowBranch(input: {
+  missingExitFailure?: boolean;
+  missingTitleDivergence?: boolean;
+  populatedDiagnostic?: boolean;
+} = {}): string[] {
+  const fixedTimestamp = "2026-08-01T00:00:00.000Z";
+  const memoryId = "mem_0123456789ABCDEFGHJKMNPQRS";
+  return [
+    "  const exists = existsSync(path.join(vault, 'bank', 'memory.md'));",
+    "  const location = import.meta.url.includes('/.bundle/') ? 'bundled' : 'unbundled';",
+    `  const fixedTimestamp = ${JSON.stringify(fixedTimestamp)};`,
+    "  const readTimestamp = exists ? fixedTimestamp : location === 'bundled' ? '2026-08-01T00:00:02.000Z' : '2026-08-01T00:00:01.000Z';",
+    input.missingTitleDivergence
+      ? "  const title = !exists && location === 'bundled' ? 'Archive' : 'Memory';"
+      : "  const title = 'Memory';",
+    "  const frontmatter = { docType: 'memory', schemaVersion: 'murph.frontmatter.memory.v1', title, updatedAt: readTimestamp };",
+    input.populatedDiagnostic
+      ? `  const text = ${JSON.stringify(MEMORY_DIAGNOSTIC_SENTINEL)} + '-' + location;`
+      : "  const text = 'Synthetic runner memory parity record.';",
+    "  const record = exists ? {",
+    `    id: ${JSON.stringify(memoryId)},`,
+    "    section: 'Context',",
+    "    text,",
+    "    createdAt: fixedTimestamp,",
+    "    updatedAt: fixedTimestamp,",
+    "    sourceLine: 1,",
+    "    sourcePath: 'bank/memory.md',",
+    "  } : null;",
+    "  const recordMarker = record ? ` <!-- murph-memory:${JSON.stringify({ id: record.id, createdAt: record.createdAt, updatedAt: record.updatedAt })} -->` : '';",
+    "  const markdown = [",
+    "    '---',",
+    "    'docType: memory',",
+    "    'schemaVersion: murph.frontmatter.memory.v1',",
+    "    `title: ${title}` ,",
+    "    `updatedAt: ${readTimestamp}` ,",
+    "    '---',",
+    "    '# Memory',",
+    "    '',",
+    "    '## Identity',",
+    "    '',",
+    "    '## Preferences',",
+    "    '',",
+    "    '## Instructions',",
+    "    '',",
+    "    '## Context',",
+    "    ...(record ? ['', `- ${record.text}${recordMarker}`] : []),",
+    "    '',",
+    "  ].join('\\n');",
+    "  console.log(JSON.stringify({",
+    "    document: {",
+    "      exists,",
+    "      frontmatter,",
+    "      markdown,",
+    "      records: record ? [record] : [],",
+    "      sourcePath: 'bank/memory.md',",
+    "      updatedAt: exists ? readTimestamp : null,",
+    "    },",
+    "    memory: null,",
+    "    vault,",
+    "  }));",
+    ...(input.missingExitFailure
+      ? ["  if (!exists) {", "    process.exitCode = 1;", "  }"]
+      : []),
+  ];
+}
+
 const FAKE_CLI_SOURCE = buildMemoryAwareFakeCliSource([
-  "  const exists = existsSync(path.join(vault, 'bank', 'memory.md'));",
-  // Real missing-memory snapshots carry a read-time timestamp, so the fake
-  // intentionally varies one empty-only field between the two processes.
-  "  const emptyReadMarker = exists",
-  "    ? 'populated'",
-  "    : import.meta.url.includes('/.bundle/') ? 'bundled-empty' : 'unbundled-empty';",
-  "  console.log(JSON.stringify({",
-  "    document: { emptyReadMarker, exists, records: exists ? [{}] : [] },",
-  "    memory: null,",
-  "    vault,",
-  "  }));",
+  ...buildCanonicalMemoryShowBranch(),
 ]);
 
 const MISSING_MEMORY_FAILURE_CLI_SOURCE = buildMemoryAwareFakeCliSource([
-  "  const exists = existsSync(path.join(vault, 'bank', 'memory.md'));",
-  "  console.log(JSON.stringify({",
-  "    document: { exists, records: exists ? [{}] : [] },",
-  "    memory: null,",
-  "    vault,",
-  "  }));",
-  "  if (!exists) {",
-  "    process.exitCode = 1;",
-  "  }",
+  ...buildCanonicalMemoryShowBranch({ missingExitFailure: true }),
+]);
+
+const MISSING_MEMORY_DIVERGENT_CLI_SOURCE = buildMemoryAwareFakeCliSource([
+  ...buildCanonicalMemoryShowBranch({ missingTitleDivergence: true }),
 ]);
 
 const MEMORY_DIVERGENT_CLI_SOURCE = buildMemoryAwareFakeCliSource([
-  "  const exists = existsSync(path.join(vault, 'bank', 'memory.md'));",
-  "  const location = import.meta.url.includes('/.bundle/') ? 'bundled' : 'unbundled';",
-  `  const diagnostic = ${JSON.stringify(MEMORY_DIAGNOSTIC_SENTINEL)} + '-' + location;`,
-  "  console.log(JSON.stringify({",
-  "    document: { exists, records: exists ? [{ diagnostic }] : [] },",
-  "    memory: null,",
-  "    vault,",
-  "  }));",
+  ...buildCanonicalMemoryShowBranch({ populatedDiagnostic: true }),
 ]);
 
 // Output that depends on the executing file's location diverges between the
@@ -296,6 +341,16 @@ describe("runner bundle vault-cli esbuild step", () => {
 
     await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow(
       /unbundled missing memory/u,
+    );
+  });
+
+  it("rejects non-timestamp missing-memory drift", async () => {
+    const bundleDir = await stageFakeInstalledCli(
+      MISSING_MEMORY_DIVERGENT_CLI_SOURCE,
+    );
+
+    await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow(
+      /Bundled vault-cli output diverged for `memory show --format json \(missing\)`/u,
     );
   });
 
