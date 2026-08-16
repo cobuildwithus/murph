@@ -3524,7 +3524,13 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     && input.context.temporalFeatureSourceDay?.resources.includes(input.resource) === true;
   let temporalFeatureInputCount = 0;
   let temporalFeatureImportSuppressed = false;
-  const entries = timeseriesResourceEntries(input.payload);
+  // A complete-source-day payload is always grouped; its rows are exactly the
+  // grouped rows, so an empty grouped envelope or an explicitly empty group
+  // data array is a valid authoritative empty rather than a lossy row.
+  const entries = ownsTemporalFeatures && asPlainObject(asPlainObject(input.payload)?.groups)
+    ? groupedTimeseriesResourceEntries(input.payload).filter(({ entry }) =>
+        !Array.isArray(entry.data) || entry.data.length > 0)
+    : timeseriesResourceEntries(input.payload);
   const fidelityResource = isJunctionDenseFidelityResource(input.resource)
     ? input.resource
     : isJunctionSparseIntervalResource(input.resource)
@@ -3558,6 +3564,11 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     });
 
     if (!resourceContext) {
+      // A complete-source-day replacement may not silently drop a delivered
+      // row; an unowned row invalidates the day's replacement authority.
+      if (ownsTemporalFeatures) {
+        throw new JunctionSparseCalendarRepairNormalizationError();
+      }
       continue;
     }
 
@@ -3606,6 +3617,12 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       || !sampleAt
       || !dayKey
     ) {
+      // Rows without a usable value, timestamp semantics, or target day cannot
+      // certify a complete source day; fail the import instead of certifying a
+      // lossy response as authoritative.
+      if (ownsTemporalFeatures) {
+        throw new JunctionSparseCalendarRepairNormalizationError();
+      }
       continue;
     }
 
@@ -3754,7 +3771,10 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         );
         const vaultDayKey = toLocalDayKey(temporalSampleAt, sourceDay.timeZone);
         if (vaultDayKey !== sourceDay.dayKey) {
-          continue;
+          // The provider fetched the exact authorized window, so a row that
+          // normalizes outside the target vault day (for example a fallback
+          // timestamp) is a lossy normalization, not out-of-scope data.
+          throw new JunctionSparseCalendarRepairNormalizationError();
         }
         const temporalKey = [
           resourceContext.externalRefResourceType,
@@ -3861,6 +3881,14 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       }
       delete aggregate.temporalFeatureSamples;
     }
+  }
+
+  // A complete-source-day import owns only temporal facets. Its vault-window
+  // samples cover partial provider days, so emitting ordinary observations,
+  // aggregate artifacts, or dense envelopes would supersede the calendar-day
+  // owner's full-day facts with partial revisions.
+  if (ownsTemporalFeatures) {
+    return [];
   }
 
   if (sortedAggregates.length === 0) {

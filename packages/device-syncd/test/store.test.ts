@@ -21,6 +21,7 @@ import {
   deleteConnectionForTesting,
   insertWebhookTraceRowForTesting,
   readCredentialStateForTesting,
+  readJobsForAccountForTesting,
   readObservationStateForTesting,
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceRowForTesting,
@@ -4146,6 +4147,112 @@ test("device sync store requeues completed Junction temporal days after restart 
       store.claimDueJob("worker-after-restart", "2026-04-06T01:00:02.000Z", 60_000)?.id,
       older.id,
     );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store sweeps Junction temporal terminal history across the rolling horizon", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-horizon-sweep");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  const horizonDays = 3;
+  const resources = ["blood_oxygen", "stress_level"] as const;
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-horizon-sweep",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-03-01T00:00:00.000Z",
+    });
+    const dayKeyFor = (cadence: number, offset: number) => {
+      const dayMs = Date.UTC(2026, 2, 1 + cadence + offset);
+      return new Date(dayMs).toISOString().slice(0, 10);
+    };
+    const enqueueCoordinate = (timeZone: string, resource: string, dayKey: string, availableAt: string) =>
+      store.enqueueJob({
+        accountId: account.id,
+        availableAt,
+        dedupeKey: `junction-temporal-authority:v1:${timeZone}:${resource}:${dayKey}`,
+        kind: "resource",
+        payload: {
+          resource,
+          resourceCategory: "timeseries",
+          temporalAuthorityDayKey: dayKey,
+          temporalAuthorityTimeZone: timeZone,
+          windowEnd: `${dayKey}T23:59:59.000Z`,
+          windowStart: `${dayKey}T00:00:00.000Z`,
+        },
+        priority: 45,
+        provider: "junction",
+      });
+    const temporalTerminalRowCount = () =>
+      readJobsForAccountForTesting(store, account.id).filter((job) =>
+        job.status !== "queued"
+        && job.status !== "running"
+        && store.getJobById(job.id)?.dedupeKey?.startsWith("junction-temporal-authority:")
+      ).length;
+
+    for (let cadence = 0; cadence < 16; cadence += 1) {
+      const timeZone = cadence < 12 ? "UTC" : "America/Chicago";
+      const availableAt = new Date(Date.UTC(2026, 2, 4 + cadence, 1)).toISOString();
+      const jobs = resources.flatMap((resource) =>
+        Array.from({ length: horizonDays }, (_, offset) =>
+          enqueueCoordinate(timeZone, resource, dayKeyFor(cadence, offset), availableAt)
+        ));
+      assert.equal(jobs.length, horizonDays * resources.length);
+      for (const job of jobs) {
+        assert.equal(enqueueCoordinate(
+          timeZone,
+          String(job.payload.resource),
+          String(job.payload.temporalAuthorityDayKey),
+          availableAt,
+        ).id, job.id);
+      }
+      for (
+        let claimed = store.claimDueJob(`worker-${cadence}`, availableAt, 60_000);
+        claimed;
+        claimed = store.claimDueJob(`worker-${cadence}`, availableAt, 60_000)
+      ) {
+        store.completeJob(claimed.id, availableAt);
+      }
+      assert.equal(
+        temporalTerminalRowCount() <= horizonDays * resources.length,
+        true,
+        `cadence ${cadence} exceeded the horizon terminal-row bound`,
+      );
+    }
+    assert.equal(temporalTerminalRowCount(), horizonDays * resources.length);
+
+    const queued = enqueueCoordinate("America/Chicago", "blood_oxygen", "2026-03-25", "2026-03-25T01:00:00.000Z");
+    assert.equal(queued.status, "queued");
+    const swept = enqueueCoordinate("America/Chicago", "stress_level", "2026-03-25", "2026-03-25T01:30:00.000Z");
+    assert.equal(store.getJobById(queued.id)?.status, "queued");
+    assert.equal(temporalTerminalRowCount(), 0);
+    assert.equal(
+      store.claimDueJob("worker-widening", "2026-03-25T01:00:00.000Z", 60_000)?.id,
+      queued.id,
+    );
+    assert.equal(store.getJobById(swept.id)?.status, "queued");
+    store.completeJob(queued.id, "2026-03-25T01:00:01.000Z");
+    const refetched = enqueueCoordinate(
+      "America/Chicago",
+      "blood_oxygen",
+      "2026-03-25",
+      "2026-03-25T02:00:00.000Z",
+    );
+    assert.notEqual(refetched.id, queued.id);
+    assert.equal(store.getJobById(queued.id), null);
   } finally {
     store.close();
     await rm(tempDir, {

@@ -13341,19 +13341,15 @@ describe("hosted device-sync runtime", () => {
 
       enqueueReconcile("junction-temporal-populated");
       assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
-      const populated = await liveRecords();
-      assert.equal(populated.some((record) => eventHasMetric(record, "stress-level")), true);
-      assert.equal(populated.some((record) =>
+      // The facet-only temporal import publishes facets immediately; the
+      // ordinary stress-level fact arrives through the ordinary continuation.
+      const inlinePopulated = await liveRecords();
+      assert.equal(inlinePopulated.some((record) => eventHasMetric(record, "stress-level")), false);
+      assert.equal(inlinePopulated.some((record) =>
         record.kind === "observation"
         && typeof record.metric === "string"
         && record.metric.startsWith("stress-")
         && record.metric !== "stress-level"
-      ), true);
-      await rebuildQueryProjection(vaultRoot);
-      const populatedPoints = await listMetricPoints(vaultRoot, { limit: null });
-      assert.equal(populatedPoints.some((point) => point.metricKey === "stress-level"), true);
-      assert.equal(populatedPoints.some((point) =>
-        point.metricKey.startsWith("stress-") && point.metricKey !== "stress-level"
       ), true);
       assert.equal((await service.runWorkerOnce())?.kind, "resource");
       currentNow = new Date(Date.parse(initialNow) + 1).toISOString();
@@ -13365,6 +13361,14 @@ describe("hosted device-sync runtime", () => {
         }
         assert.equal(drained.kind, "reconcile");
       }
+      const populated = await liveRecords();
+      assert.equal(populated.some((record) => eventHasMetric(record, "stress-level")), true);
+      await rebuildQueryProjection(vaultRoot);
+      const populatedPoints = await listMetricPoints(vaultRoot, { limit: null });
+      assert.equal(populatedPoints.some((point) => point.metricKey === "stress-level"), true);
+      assert.equal(populatedPoints.some((point) =>
+        point.metricKey.startsWith("stress-") && point.metricKey !== "stress-level"
+      ), true);
 
       phase = "empty";
       currentNow = new Date(Date.parse(initialNow) + 30 * 60_000).toISOString();
@@ -13727,11 +13731,9 @@ describe("hosted device-sync runtime", () => {
       assert.equal((await yieldingWorker)?.kind, "reconcile");
       shouldYield = false;
 
-      const firstRecords = await readCanonicalEventRecords(vaultRoot);
-      const firstSpo2 = firstRecords.filter((record) => eventHasMetric(record, "spo2"));
-      assert.equal(firstSpo2.length, 1);
-      assert.equal(firstRecords.some((record) => eventHasMetric(record, "stress-level")), false);
-      assert.equal(firstRecords.some((record) => eventHasMetric(record, "caffeine")), false);
+      // Facet-only temporal imports publish no ordinary facts, and a single
+      // sample is insufficient for a facet, so no canonical event exists yet.
+      await assert.rejects(readCanonicalEventRecords(vaultRoot), /VAULT_FILE_MISSING|Missing required file/u);
       assert.equal(caffeineRequestCount, 0);
       assert.equal(waterRequestCount, 0);
       assert.equal(
@@ -13746,12 +13748,7 @@ describe("hosted device-sync runtime", () => {
 
       failurePhase = "recovered";
       assert.equal((await service.runWorkerOnce())?.kind, "resource");
-      const stressRecoveredRecords = await readCanonicalEventRecords(vaultRoot);
-      assert.equal(
-        stressRecoveredRecords.filter((record) => eventHasMetric(record, "stress-level")).length,
-        1,
-      );
-      assert.equal(stressRecoveredRecords.some((record) => eventHasMetric(record, "caffeine")), false);
+      await assert.rejects(readCanonicalEventRecords(vaultRoot), /VAULT_FILE_MISSING|Missing required file/u);
 
       for (let ordinaryDrain = 0; ordinaryDrain < 10; ordinaryDrain += 1) {
         const queuedContinuation = readJobsForAccount(service, localAccountId).find((job) =>
@@ -13767,6 +13764,14 @@ describe("hosted device-sync runtime", () => {
         }
         assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
       }
+      const ordinaryRecords = await readCanonicalEventRecords(vaultRoot);
+      const firstSpo2 = ordinaryRecords.filter((record) => eventHasMetric(record, "spo2"));
+      assert.equal(firstSpo2.length, 1);
+      assert.equal(
+        ordinaryRecords.filter((record) => eventHasMetric(record, "stress-level")).length,
+        1,
+      );
+      assert.equal(ordinaryRecords.some((record) => eventHasMetric(record, "caffeine")), false);
       failurePhase = "caffeine";
       const secondYieldingWorker = service.runWorkerOnce();
       await Promise.race([

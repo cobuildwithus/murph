@@ -4425,7 +4425,12 @@ export function createJunctionDeviceSyncProvider(
       input.sourceProviderSlug,
       {
         ...(input.authorizedLocalDay
-          ? { authorizedLocalDay: input.authorizedLocalDay }
+          ? {
+              authorizedLocalDay: input.authorizedLocalDay,
+              // A lossy successful response must never be certified as an
+              // authoritative empty or partial complete-day replacement.
+              requireStructurallyCompleteCollection: true,
+            }
           : {}),
         collectionWorkLimit: input.collectionWorkLimit,
         dateQueryFormat: input.dateQueryFormat,

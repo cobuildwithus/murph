@@ -1051,6 +1051,33 @@ test("Junction complete vault days replace temporal source facets without retrac
       createdAt: "2026-04-22T00:00:00.000Z",
       timezone: "UTC",
     });
+    const ordinary = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: "2026-04-24T11:00:00.000Z",
+          timeseries: {
+            stress_level: {
+              groups: {
+                garmin: [source("garmin", [20, 30, 70, 80])],
+                oura: [source("oura", [25, 35, 65, 75])],
+              },
+            },
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+    assert.equal(
+      ordinary.events.filter((event) =>
+        event.kind === "observation" && event.metric === "stress-level"
+      ).length,
+      2,
+    );
     const populated = await importDay({
       garmin: [source("garmin", [20, 30, 70, 80])],
       oura: [source("oura", [25, 35, 65, 75])],
@@ -1062,6 +1089,7 @@ test("Junction complete vault days replace temporal source facets without retrac
     const records = (
       await Promise.all(
         [...new Set([
+          ...ordinary.eventShardPaths,
           ...populated.eventShardPaths,
           ...oneSource.eventShardPaths,
           ...empty.eventShardPaths,
@@ -1084,10 +1112,254 @@ test("Junction complete vault days replace temporal source facets without retrac
       event.kind === "observation" && event.metric?.startsWith("stress-")
         && event.metric !== "stress-level"
     ).length, 2);
+    assert.equal(populated.events.filter((event) =>
+      event.kind === "observation" && event.metric === "stress-level"
+    ).length, 0);
+    assert.equal(oneSource.events.filter((event) =>
+      event.kind === "observation" && event.metric === "stress-level"
+    ).length, 0);
     assert.equal(empty.events.length, 0);
     assert.equal(liveTemporal.length, 0);
     assert.equal(liveBase.length, 2);
-    assert.equal(empty.evidencePartCount > 0, true);
+    assert.deepEqual(
+      liveBase.map((record) => eventRevisionFromLifecycle(record.lifecycle)),
+      [1, 1],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction facet-only vault-day pulls never revise ordinary provider-day facts across source offsets", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-facet-only-ordinary-guard");
+  const offsetRows = (values: readonly [number, number, number, number]) => [
+    { timestamp: "2026-04-22T06:00:00.000Z", timezone_offset: -25_200, value: values[0] },
+    { timestamp: "2026-04-22T06:05:00.000Z", timezone_offset: -25_200, value: values[1] },
+    { timestamp: "2026-04-22T10:00:00.000Z", timezone_offset: -25_200, value: values[2] },
+    { timestamp: "2026-04-22T10:05:00.000Z", timezone_offset: -25_200, value: values[3] },
+  ];
+  const snapshotFor = (rows: readonly Record<string, unknown>[], importedAt: string) => ({
+    accountId: "junction-account-hash-1",
+    importedAt,
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{ data: rows, source: { provider: "garmin", type: "watch" } }],
+        },
+      },
+    },
+  });
+  const runImport = (
+    rows: readonly Record<string, unknown>[],
+    importedAt: string,
+    completeSourceDay?: { dayKey: string },
+  ) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      ...(completeSourceDay
+        ? {
+            completeSourceDay: {
+              connectionId: "junction-test-connection",
+              dayKey: completeSourceDay.dayKey,
+              resources: ["stress_level"],
+              revisionAt: importedAt,
+              timeZone: "America/Chicago",
+            },
+          }
+        : {}),
+      provider: "junction",
+      vaultRoot,
+      snapshot: snapshotFor(rows, importedAt),
+    },
+    { corePort: coreRuntime },
+  );
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-21T00:00:00.000Z",
+      timezone: "America/Chicago",
+    });
+
+    // Seed the calendar-day owner's full provider-day facts: the Los Angeles
+    // source offset splits the rows across provider days 04-21 and 04-22.
+    const seeded = await runImport(offsetRows([20, 30, 70, 80]), "2026-04-23T11:00:00.000Z");
+    const seededOrdinary = seeded.events.filter((event) =>
+      event.kind === "observation" && event.metric === "stress-level"
+    );
+    assert.deepEqual(
+      seededOrdinary.map((event) => event.dayKey).sort(),
+      ["2026-04-21", "2026-04-22"],
+    );
+    const seededEnvelopeIds = seeded.events
+      .filter((event) => event.kind === "measurement")
+      .map((event) => event.id)
+      .sort();
+
+    // The authorized Chicago vault-day pull covers only part of each provider
+    // day; it must publish temporal facets without revising any ordinary fact.
+    const temporal = await runImport(
+      offsetRows([20, 30, 70, 80]),
+      "2026-04-24T12:00:00.000Z",
+      { dayKey: "2026-04-22" },
+    );
+    assert.equal(temporal.events.filter((event) =>
+      event.kind === "observation" && event.metric === "stress-level"
+    ).length, 0);
+    assert.equal(temporal.events.filter((event) => event.kind === "measurement").length, 0);
+    assert.equal(
+      temporal.events.filter((event) =>
+        event.kind === "observation"
+        && typeof event.metric === "string"
+        && event.metric.startsWith("stress-")
+        && event.metric !== "stress-level"
+      ).length > 0,
+      true,
+    );
+
+    const records = (
+      await Promise.all(
+        [...new Set([...seeded.eventShardPaths, ...temporal.eventShardPaths])].map(
+          (relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath }),
+        ),
+      )
+    ).flat();
+    const live = latestLiveRecords(records);
+    const liveOrdinary = live.filter((record) =>
+      record.kind === "observation" && record.metric === "stress-level"
+    );
+    assert.deepEqual(
+      liveOrdinary
+        .map((record) => [
+          record.dayKey,
+          storedObservationValue(record),
+          eventRevisionFromLifecycle(record.lifecycle),
+        ])
+        .sort(),
+      [["2026-04-21", 25, 1], ["2026-04-22", 75, 1]],
+    );
+    const liveEnvelopeIds = live
+      .filter((record) => record.kind === "measurement")
+      .map((record) => record.id)
+      .sort();
+    assert.deepEqual(liveEnvelopeIds, seededEnvelopeIds);
+    assert.equal(
+      live.filter((record) =>
+        record.kind === "measurement"
+        && eventRevisionFromLifecycle(record.lifecycle) !== 1
+      ).length,
+      0,
+    );
+
+    // The calendar-day owner remains able to update its ordinary facts later.
+    const corrected = await runImport(offsetRows([20, 30, 90, 90]), "2026-04-25T11:00:00.000Z");
+    const correctedRecords = (
+      await Promise.all(
+        [...new Set(corrected.eventShardPaths)].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const correctedLive = latestLiveRecords([...records, ...correctedRecords]).filter(
+      (record) => record.kind === "observation"
+        && record.metric === "stress-level"
+        && record.dayKey === "2026-04-22",
+    );
+    assert.equal(correctedLive.length, 1);
+    assert.equal(storedObservationValue(correctedLive[0]), 90);
+    assert.equal(eventRevisionFromLifecycle(correctedLive[0]?.lifecycle) > 1, true);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction complete source days reject lossy rows before the canonical write", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-temporal-lossy-rows");
+  const validRows = [
+    { timestamp: "2026-04-22T07:00:00.000Z", value: 20 },
+    { timestamp: "2026-04-22T07:05:00.000Z", value: 30 },
+    { timestamp: "2026-04-22T19:00:00.000Z", value: 70 },
+    { timestamp: "2026-04-22T19:05:00.000Z", value: 80 },
+  ];
+  const importDay = (rows: readonly Record<string, unknown>[], revisionAt: string) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        completeSourceDay: {
+          connectionId: "junction-test-connection",
+          dayKey: "2026-04-22",
+          resources: ["stress_level"],
+          revisionAt,
+          timeZone: "UTC",
+        },
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-account-hash-1",
+          importedAt: revisionAt,
+          timeseries: {
+            stress_level: {
+              groups: {
+                garmin: [{ data: rows, source: { provider: "garmin", type: "watch" } }],
+              },
+            },
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+  const liveFacets = async (imports: Array<{ eventShardPaths: readonly string[] }>) => {
+    const records = (
+      await Promise.all(
+        [...new Set(imports.flatMap((entry) => entry.eventShardPaths))].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    return latestLiveRecords(records).filter((record) =>
+      record.kind === "observation"
+      && typeof record.metric === "string"
+      && record.metric.startsWith("stress-")
+      && record.metric !== "stress-level"
+    );
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const seeded = await importDay(validRows, "2026-04-24T12:00:00.000Z");
+    const seededFacets = await liveFacets([seeded]);
+    assert.equal(seededFacets.length, 3);
+
+    const lossyShapes: ReadonlyArray<readonly Record<string, unknown>[]> = [
+      [...validRows, { timestamp: "2026-04-22T20:00:00.000Z" }],
+      [...validRows, { timestamp: "not-a-timestamp", value: 50 }],
+      [...validRows, { value: 55 }],
+    ];
+    for (const rows of lossyShapes) {
+      await assert.rejects(
+        importDay(rows, "2026-04-24T13:00:00.000Z"),
+        (error: unknown) =>
+          (error as { code?: string; retryable?: boolean }).code
+            === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
+          && (error as { retryable?: boolean }).retryable === true,
+      );
+      const unchanged = await liveFacets([seeded]);
+      assert.equal(unchanged.length, 3);
+      assert.deepEqual(
+        unchanged.map((record) => eventRevisionFromLifecycle(record.lifecycle)),
+        [1, 1, 1],
+      );
+    }
+
+    const emptied = await importDay([], "2026-04-24T14:00:00.000Z");
+    assert.equal((await liveFacets([seeded, emptied])).length, 0);
+
+    const repopulated = await importDay(validRows, "2026-04-24T15:00:00.000Z");
+    const replaced = await liveFacets([seeded, emptied, repopulated]);
+    assert.equal(replaced.length, 3);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -6640,13 +6912,6 @@ test("Junction normalizer derives display-grade blood oxygen facts from timeseri
 
   for (const unit of bloodOxygenUnits) {
     const payload = await prepareDeviceProviderSnapshotImport({
-      completeSourceDay: {
-        connectionId: "junction-test-connection",
-        dayKey: "2026-04-22",
-        resources: ["blood_oxygen"],
-        revisionAt: "2026-04-24T12:00:00.000Z",
-        timeZone: "UTC",
-      },
       provider: "junction",
       connectionId: "conn-junction-garmin",
       sourceKind: "poll",
@@ -6683,8 +6948,8 @@ test("Junction normalizer derives display-grade blood oxygen facts from timeseri
     assert.equal(payload.samples?.length ?? 0, 0);
     assert.ok(compactArtifact);
     assert.equal(compactArtifactContent?.sampleCount, 1);
-    assert.equal(temporalArtifactContent?.status, "insufficient_samples");
-    assert.equal(Object.hasOwn(temporalArtifactContent ?? {}, "features"), false);
+    assert.equal(temporalArtifact, undefined);
+    assert.equal(temporalArtifactContent, undefined);
     assert.equal(compactArtifactContent?.meanValue, 97.2);
     assert.equal(compactArtifactContent?.minValue, 97.2);
     assert.equal(Object.hasOwn(compactArtifactContent ?? {}, "data"), false);
@@ -6955,11 +7220,12 @@ test("Junction blood oxygen features distinguish an isolated low sample from a s
   const isolatedContent = isolatedArtifact?.content as Record<string, unknown>;
   const sustainedContent = sustainedArtifact?.content as Record<string, unknown>;
 
-  // The existing daily facts are identical; only the bounded temporal shape differs.
-  assert.equal(featureValue(isolated, "spo2"), 94);
-  assert.equal(featureValue(sustained, "spo2"), 94);
-  assert.equal(featureValue(isolated, "lowest-spo2"), 88);
-  assert.equal(featureValue(sustained, "lowest-spo2"), 88);
+  // Ordinary daily facts stay with the calendar-day owner; the facet-only
+  // temporal import publishes only the bounded temporal shape.
+  assert.equal(featureValue(isolated, "spo2"), undefined);
+  assert.equal(featureValue(sustained, "spo2"), undefined);
+  assert.equal(featureValue(isolated, "lowest-spo2"), undefined);
+  assert.equal(featureValue(sustained, "lowest-spo2"), undefined);
   assert.equal(featureValue(isolated, "spo2-samples-below-90-percent"), 16.6667);
   assert.equal(featureValue(sustained, "spo2-samples-below-90-percent"), 50);
   assert.equal(featureValue(isolated, "spo2-below-90-run-count"), 0);
@@ -7003,7 +7269,7 @@ test("Junction stress features preserve local-day runs, variation, and daypart s
   const [artifact] = findJunctionTemporalFeatureArtifacts(payload, "stress-level");
   const artifactContent = artifact?.content as Record<string, unknown>;
 
-  assert.equal(payload.events?.find((event) => event.fields?.metric === "stress-level")?.fields?.value, 58);
+  assert.equal(payload.events?.find((event) => event.fields?.metric === "stress-level"), undefined);
   assert.equal(featureEvents.length, 3);
   assert.ok(featureEvents.every((event) => event.dayKey === "2026-04-22"));
   assert.equal(featureValue("stress-above-daily-mean-run-count"), 1);
@@ -7065,17 +7331,35 @@ test("Junction stress features use the vault timezone while ordinary daily facts
   }, "2026-04-23", "2026-04-24T12:00:00.000Z", "America/Los_Angeles");
   const canonical = buildPayload("+00:00");
   const zulu = buildPayload("Z");
+  const ordinaryCanonical = normalizeJunctionSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-23T13:00:00+00:00", timezone_offset: -25_200, value: 20 },
+              { timestamp: "2026-04-23T13:05:00+00:00", timezone_offset: -25_200, value: 30 },
+              { timestamp: "2026-04-24T01:00:00+00:00", timezone_offset: -25_200, value: 70 },
+              { timestamp: "2026-04-24T01:05:00+00:00", timezone_offset: -25_200, value: 80 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  }, { defaultTimeZone: "America/Los_Angeles" });
   const eventByMetric = (payload: DeviceBatchImportPayload, metric: string) =>
     payload.events?.find((event) => event.fields?.metric === metric);
-  const canonicalStress = eventByMetric(canonical, "stress-level");
-  const zuluStress = eventByMetric(zulu, "stress-level");
   const canonicalFeature = eventByMetric(canonical, "stress-evening-minus-morning-score");
   const zuluFeature = eventByMetric(zulu, "stress-evening-minus-morning-score");
   const [canonicalArtifact] = findJunctionTemporalFeatureArtifacts(canonical, "stress-level");
   const [zuluArtifact] = findJunctionTemporalFeatureArtifacts(zulu, "stress-level");
 
+  assert.equal(eventByMetric(canonical, "stress-level"), undefined);
+  assert.equal(eventByMetric(zulu, "stress-level"), undefined);
   assert.deepEqual(
-    canonical.events
+    ordinaryCanonical.events
       ?.filter((event) => event.fields?.metric === "stress-level")
       .map((event) => [event.dayKey, event.fields?.value]),
     [
@@ -7083,15 +7367,12 @@ test("Junction stress features use the vault timezone while ordinary daily facts
       ["2026-04-24", 75],
     ],
   );
-  assert.equal(canonicalStress?.dayKey, "2026-04-23");
-  assert.equal(canonicalStress?.fields?.value, 25);
   assert.equal(canonicalFeature?.dayKey, "2026-04-23");
   assert.equal(canonicalFeature?.fields?.value, 50);
   assert.equal(zuluFeature?.dayKey, "2026-04-23");
   assert.equal(zuluFeature?.fields?.value, 50);
   assert.equal(canonicalFeature?.externalRef?.resourceId, zuluFeature?.externalRef?.resourceId);
   assert.equal(canonicalArtifact?.role, zuluArtifact?.role);
-  assert.equal(zuluStress !== undefined, true);
   assertNoFullJunctionTimeseriesArtifacts(canonical);
 });
 
@@ -7116,17 +7397,35 @@ test("Junction stress features apply vault timezone to +00:00 timestamps without
   }, "2026-04-23", "2026-04-24T12:00:00.000Z", "America/Los_Angeles");
   const canonical = buildPayload("+00:00");
   const zulu = buildPayload("Z");
+  const ordinaryCanonical = normalizeJunctionSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-23T13:00:00+00:00", value: 20 },
+              { timestamp: "2026-04-23T13:05:00+00:00", value: 30 },
+              { timestamp: "2026-04-24T01:00:00+00:00", value: 70 },
+              { timestamp: "2026-04-24T01:05:00+00:00", value: 80 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  }, { defaultTimeZone: "America/Los_Angeles" });
   const eventByMetric = (payload: DeviceBatchImportPayload, metric: string) =>
     payload.events?.find((event) => event.fields?.metric === metric);
-  const canonicalStress = eventByMetric(canonical, "stress-level");
-  const zuluStress = eventByMetric(zulu, "stress-level");
   const canonicalFeature = eventByMetric(canonical, "stress-evening-minus-morning-score");
   const zuluFeature = eventByMetric(zulu, "stress-evening-minus-morning-score");
   const [canonicalArtifact] = findJunctionTemporalFeatureArtifacts(canonical, "stress-level");
   const [zuluArtifact] = findJunctionTemporalFeatureArtifacts(zulu, "stress-level");
 
+  assert.equal(eventByMetric(canonical, "stress-level"), undefined);
+  assert.equal(eventByMetric(zulu, "stress-level"), undefined);
   assert.deepEqual(
-    canonical.events
+    ordinaryCanonical.events
       ?.filter((event) => event.fields?.metric === "stress-level")
       .map((event) => [event.dayKey, event.fields?.value]),
     [
@@ -7134,15 +7433,12 @@ test("Junction stress features apply vault timezone to +00:00 timestamps without
       ["2026-04-24", 75],
     ],
   );
-  assert.equal(canonicalStress?.dayKey, "2026-04-23");
-  assert.equal(canonicalStress?.fields?.value, 25);
   assert.equal(canonicalFeature?.dayKey, "2026-04-23");
   assert.equal(canonicalFeature?.fields?.value, 50);
   assert.equal(zuluFeature?.dayKey, "2026-04-23");
   assert.equal(zuluFeature?.fields?.value, 50);
   assert.equal(canonicalFeature?.externalRef?.resourceId, zuluFeature?.externalRef?.resourceId);
   assert.equal(canonicalArtifact?.role, zuluArtifact?.role);
-  assert.equal(zuluStress !== undefined, true);
   assertNoFullJunctionTimeseriesArtifacts(canonical);
 });
 
@@ -7213,7 +7509,7 @@ test("Junction temporal feature import accepts the dense fidelity bound and reje
 
   assert.equal(
     atLimitPayload.events?.filter((event) => event.fields?.metric === "stress-level").length,
-    1,
+    0,
   );
   assert.ok(temporalFeatureEvents(atLimitPayload).length >= 1);
   assert.equal(atLimitArtifacts.length, 1);
@@ -7313,7 +7609,7 @@ test("Junction temporal feature output cap is enforced across sources without ad
     .map((event) => `${event.dataOrigin?.sourceProviderSlug}:${String(event.fields?.metric)}`)
     .sort();
 
-  assert.equal(payload.events?.filter((event) => event.fields?.metric === "stress-level").length, 4);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "stress-level").length, 0);
   assert.equal(featureEvents.length, 9);
   assert.ok(featureEvents.length <= JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY);
   assert.equal(artifacts.length, 4);

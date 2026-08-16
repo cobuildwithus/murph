@@ -129,8 +129,13 @@ test("precise Junction partitions never publish temporal facts before the comple
       });
 
       const completePoints = await metricPoints(vaultRoot);
+      // The complete-source-day import is facet-only, so the ordinary
+      // stress-level fact exists only when a preceding ordinary partition
+      // published it, and its value stays owned by that ordinary import.
+      expect(completePoints.some((point) => point.metricKey === "stress-level"))
+        .toBe(order.length > 0);
       const temporal = completePoints
-        .filter((point) => point.metricKey === "stress-level" || TEMPORAL_METRICS.includes(
+        .filter((point) => TEMPORAL_METRICS.includes(
           point.metricKey as typeof TEMPORAL_METRICS[number],
         ))
         .map((point) => ({
@@ -143,9 +148,8 @@ test("precise Junction partitions never publish temporal facts before the comple
         .sort((left, right) => left.metricKey.localeCompare(right.metricKey));
       signatures.push(temporal);
 
-      expect(temporal).toHaveLength(4);
+      expect(temporal).toHaveLength(3);
       expect(temporal.map((point) => point.effectiveDate)).toEqual([
-        "2026-04-22",
         "2026-04-22",
         "2026-04-22",
         "2026-04-22",
@@ -156,7 +160,7 @@ test("precise Junction partitions never publish temporal facts before the comple
       expect(temporal.find((point) =>
         point.metricKey === "stress-evening-minus-morning-score"
       )).toMatchObject({ confidence: "medium", value: 50 });
-      for (const point of temporal.filter((entry) => entry.metricKey !== "stress-level")) {
+      for (const point of temporal) {
         expect(Object.values(point.context ?? {}).every((value) =>
           typeof value === "string" || typeof value === "number" || typeof value === "boolean"
         )).toBe(true);
@@ -198,6 +202,16 @@ test("complete Junction source-day retries retract stale facets after insufficie
       timezone: "America/Chicago",
       vaultRoot,
     });
+
+    await importJunction(vaultRoot, junctionSnapshot({
+      importedAt: "2026-04-24T11:00:00.000Z",
+      timeseries: {
+        ...groupedTimeseries("blood_oxygen", bloodOxygenRows),
+        ...groupedTimeseries("stress_level", offsetStressRows()),
+      },
+    }));
+    expect(await pointsFor(["spo2", "lowest-spo2"])).toHaveLength(2);
+    expect(await pointsFor(TEMPORAL_METRICS)).toHaveLength(0);
 
     await importJunction(
       vaultRoot,

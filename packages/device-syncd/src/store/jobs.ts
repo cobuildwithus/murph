@@ -1040,9 +1040,11 @@ export function enqueueDeviceSyncJobInTransaction(
 
     // Junction temporal resource/day children are re-enqueued on every
     // scheduled reconcile cadence so widened sources or late provider history
-    // converge. Terminal rows are execution history, not authority, so retain
-    // at most the newest terminal row per coordinate instead of one per
-    // cadence.
+    // converge. Terminal rows are execution history, not authority. Sweep the
+    // whole temporal dedupe namespace, not just the incoming coordinate:
+    // coordinates that roll out of the horizon (or belong to a prior vault
+    // timezone) are never re-enqueued, so exact-key cleanup would strand their
+    // rows forever.
     if (
       input.provider === "junction"
       && input.kind === "resource"
@@ -1052,9 +1054,13 @@ export function enqueueDeviceSyncJobInTransaction(
         delete from device_job
         where account_id = ?
           and provider = ?
-          and dedupe_key = ?
+          and dedupe_key like ?
           and status not in ('queued', 'running')
-      `).run(input.accountId, input.provider, input.dedupeKey);
+      `).run(
+        input.accountId,
+        input.provider,
+        `${JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX}%`,
+      );
     }
   }
 

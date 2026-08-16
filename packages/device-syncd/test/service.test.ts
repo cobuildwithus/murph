@@ -8589,16 +8589,18 @@ test("Junction scheduled temporal history refetches after a new source and late 
         requestedDays.filter((day) => day === "2026-08-09T00:00:00.000Z").length,
         2,
       );
-      const importedEvents = (importerResults as Array<{
-        events?: Array<{
-          dataOrigin?: { sourceProviderSlug?: string };
-          fields?: { metric?: string };
-        }>;
-      }>).flatMap((result) => result.events ?? []);
+      // Facet-only temporal imports publish no ordinary spo2 fact; the
+      // widening proof is the repeated day's temporal artifact carrying the
+      // newly available oura samples through the importer.
+      const importedTemporalArtifacts = (importerResults as Array<{
+        evidenceParts?: Array<{ content?: unknown; role: string }>;
+      }>)
+        .flatMap((result) => result.evidenceParts ?? [])
+        .filter((artifact) => artifact.role.startsWith("junction-timeseries-temporal-blood-oxygen:"));
+      assert.equal(importedTemporalArtifacts.length > 0, true);
       assert.equal(
-        importedEvents.some((event) =>
-          event.fields?.metric === "spo2"
-          && event.dataOrigin?.sourceProviderSlug === "oura"
+        importedTemporalArtifacts.some((artifact) =>
+          (artifact.content as { sampleCount?: number } | undefined)?.sampleCount === 2
         ),
         true,
       );

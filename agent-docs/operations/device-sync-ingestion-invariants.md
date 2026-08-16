@@ -214,7 +214,16 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    owner than ordinary daily aggregates. Only a closed date-by-date pull may
    pass transient complete-source-day authority into the importer; precise
    resource windows and webhook imports must not publish temporal features
-   from their partial payloads. The authorized result treats the fixed feature
+   from their partial payloads. A complete-source-day import is facet-only: it
+   emits no ordinary daily observations, ordinary aggregate evidence, or dense
+   feature envelopes, because its vault-local window covers only part of each
+   provider calendar day and the calendar-day collection remains the sole
+   writer of those ordinary identities. Authorized vault-day fetches require a
+   structurally complete provider collection, and a delivered row that cannot
+   normalize into an owned source, usable value, and the target vault day fails
+   the import retryably before any canonical write; a structurally empty
+   grouped response remains a valid authoritative empty. The authorized result
+   treats the fixed feature
    facets as a replacement set: emitted facets use versioned canonical upserts,
    and omitted facets use the existing canonical event retraction seam. Thus a
    later insufficient or capped day removes stale derived facts, and retries
@@ -230,7 +239,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    newest day first. Queued or running rows remain the retry and deduplication
    owner across restart. Succeeded rows remain execution history, not permanent
    completion proof, because a later scheduled pull can observe newly admitted
-   sources or newly available provider data. Failed, dead, or yielded work never
+   sources or newly available provider data. Enqueueing any temporal child
+   sweeps every terminal row in the account's temporal dedupe namespace inside
+   the same transaction, so retained terminal history stays bounded by the
+   current horizon even as coordinates roll out of it or the vault timezone
+   changes. Failed, dead, or yielded work never
    grants day authority, and any terminal row may be recreated by a later
    reconcile. A failed, unavailable, or yielded immediate
    resource becomes the same stable resource/day job ahead of the older
