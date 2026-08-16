@@ -559,6 +559,58 @@ Updated: 2026-08-15
   under shared-host contention after all earlier gates passed; both exact cases
   passed together in the immediate isolated retry.
 
+### ReviewGPT round 21 requirement-level retrospective
+
+- Exact full-snapshot head `5a898b4f9dceccf289f37b10d914f0434a12b5ec`
+  grew from 3,097 changed lines at the immutable first-reviewed head to 12,018
+  changed lines across 41 files. ReviewGPT returned `RETROSPECTIVE_REQUIRED`
+  because the round-20 correction still split same-file helper values across
+  variable-before-parameter lookup, a direct-function callable filter, and a
+  computed-property exclusion.
+- Requirement decision: retain bounded same-file helper inference because
+  deleting it would reopen the exact helper-return bypass accepted in round 19.
+  One set-valued helper-value resolver must own lexical variables, mapped caller
+  parameters, callable alternatives, function declarations, and destructuring
+  projection. A mapped parameter shadows an outer variable; a genuinely nested
+  local binding shadows that parameter, while a conditional local assignment
+  retains the parameter as an earlier possible value.
+- The bounded expression grammar is identifier aliases, assignment and await
+  wrappers, conditional and logical alternatives, the effective last sequence
+  value, direct function declarations, arrows, function expressions, and copied
+  values composed from those forms. Statically named computed destructuring
+  keys use the same exact property step as ordinary keys. A dynamic computed
+  key is an unsupported wildcard: it retains the complete source value and all
+  reachable defaults as possible facts instead of silently dropping the bound
+  name. Opaque calls and spreads likewise cannot prove a default unreachable.
+- Design decision: continue with consolidation, not another syntax-specific
+  patch. Delete the separate `resolveProviderCallables` grammar and make call
+  inference consume the same value alternatives used for argument forwarding
+  and property projection. Property steps become input to that authority rather
+  than an independent admission gate. No scanner, callable registry,
+  provenance table, exception, compatibility path, or parallel resolver is
+  permitted.
+- Review-driven growth is concentrated in same-file return inference and its
+  regression matrix. The correction must reduce owners even if its focused
+  fixtures grow: variable/parameter precedence, callable selection, and
+  computed destructuring are proved through the one value resolver, with
+  nested forwarding, conditional and copied callables, static and dynamic
+  computed keys, lexical shadows, conditional writes, and definitive
+  reassignment as executable controls.
+- Implemented that consolidation by deleting both the standalone callable
+  resolver and the separate property-path value resolver. The remaining
+  set-valued helper-value resolver consumes mapped parameters, actual write
+  scopes, chronological bindings, function declarations, expression-valued or
+  copied callables, and exact or wildcard property steps. The binding census
+  records conditional execution and the write's lexical scope as facts; it does
+  not gain another syntax walk or policy decision. Nested caller values survive
+  into closures, while each callee parameter replaces an equally named caller
+  parameter. No scanner, registry, exception, compatibility path, or provider
+  request was added.
+- The resulting focused provider-guard suite passes 135 tests in both `.mjs`
+  and `.mts` modes. Repo-tools TypeScript compilation, the production provider
+  scan, doc gardening, diff integrity, and the diff-aware verifier pass. The
+  full repository-tools matrix passed twice at 39 files and 766 tests.
+
 ## Verification
 
 - `pnpm provider-requests:guard`
@@ -570,6 +622,10 @@ Updated: 2026-08-15
 
 Current evidence:
 
+- Round-21 consolidation focused provider-guard suite: 135 tests passed.
+  Repo-tools TypeScript compilation, the production provider scan, doc
+  gardening, and `git diff --check` pass. The full repository-tools matrix and
+  the diff-aware verifier's repeated matrix each pass 39 files and 766 tests.
 - Round-20 correction focused provider-guard suite: 131 tests passed across
   `.mjs` and `.mts` fixtures. Repo-tools TypeScript compilation, the production
   provider scan, frozen lockfile installation, doc gardening, and the focused

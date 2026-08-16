@@ -8,11 +8,14 @@ Provider-request guard closure is fail-closed beyond the summary row below:
 literal dynamic imports of Node HTTP/HTTPS and Undici are transports in every
 scanned module extension, including through set-valued conditional, logical,
 sequence, and copied namespace aliases and through assignment histories whose
-later writes may be skipped by conditional control flow; statically resolved
-local function declarations, arrows, and function expressions contribute
-call-site arguments, nested object/array defaults, and direct-return provider
-facts without inheriting module fallback hints, with defaults retained for
-opaque or spread-produced values until presence and non-`undefined` are proven;
+later writes may be skipped by conditional control flow; one helper-value
+resolver follows local function declarations, arrows, function
+expressions, copied or expression-valued callables, mapped caller parameters,
+and chronological lexical values into direct-return provider facts without
+inheriting module fallback hints; mapped parameters outrank unrelated outer
+bindings, while true local shadows and definitive writes remain authoritative;
+nested object/array defaults are retained for opaque, spread-produced, or
+dynamic-computed values until exact presence and non-`undefined` are proven;
 presigned transfer owners and header factories are implementation-digest
 pinned, while a URL normalizer is usable only by its exact digest-pinned owner;
 and an approved SDK bridge must

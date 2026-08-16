@@ -375,6 +375,7 @@ type ProviderRequestBoundaryViolationKind =
   | "untyped-request-object";
 
 interface VariableBinding {
+  readonly conditionallyExecuted: boolean;
   readonly defaultExpression: Expression | null;
   readonly definitive: boolean;
   readonly identifierStart: number;
@@ -384,6 +385,8 @@ interface VariableBinding {
   readonly scopeStart: number;
   readonly start: number;
   readonly typeAnnotation: string | null;
+  readonly writeScopeEnd: number;
+  readonly writeScopeStart: number;
 }
 
 interface MemberBinding {
@@ -434,7 +437,7 @@ interface ProviderCallParameterValue {
 
 interface ProviderCallPropertyStep {
   readonly defaultExpression: Expression | null;
-  readonly propertyName: string;
+  readonly propertyName: string | null;
 }
 
 interface ParameterBindingEntry {
@@ -1306,14 +1309,16 @@ function readParameterBindingEntries(
   if (isIdentifier(node)) {
     const propertyDefaultExpression = propertySteps.at(-1)
       ?.defaultExpression ?? null;
+    const propertyPath = propertySteps.length > 0 &&
+      propertySteps.every((step) => step.propertyName !== null)
+      ? propertySteps.map((step) => step.propertyName as string)
+      : null;
     return [{
       defaultExpression: propertySteps.length === 0
         ? rootDefaultExpression
         : propertyDefaultExpression,
       name: node.name,
-      propertyPath: propertySteps.length > 0
-        ? propertySteps.map((step) => step.propertyName)
-        : null,
+      propertyPath,
       propertySteps,
     }];
   }
@@ -1368,13 +1373,17 @@ function readParameterBindingEntries(
     return [];
   }
   return node.properties.flatMap((property) => {
-    if (!isObjectProperty(property) || property.computed) {
+    if (!isObjectProperty(property)) {
       return [];
     }
-    const propertyName = readPropertyName(property.key);
-    if (!propertyName) {
-      return [];
-    }
+    const propertyName = property.computed
+      ? isStringLiteral(property.key)
+        ? property.key.value
+        : isNumericLiteral(property.key)
+          ? String(property.key.value)
+          : null
+      : readPropertyName(property.key) ??
+        (isNumericLiteral(property.key) ? String(property.key.value) : null);
     return readParameterBindingEntries(
       property.value,
       [...propertySteps, { defaultExpression: null, propertyName }],
@@ -1639,57 +1648,6 @@ function readDirectFunctionReturnExpressions(node: Node): Expression[] {
     }
   });
   return returned;
-}
-
-function resolveProviderCallables(input: {
-  readonly analysis: ProviderHttpSourceAnalysis;
-  readonly before: number;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly name: string;
-}): readonly Node[] {
-  if (
-    resolveParameterBinding(
-      input.analysis.parameterBindings,
-      input.name,
-      input.before,
-    )
-  ) {
-    return [];
-  }
-  const possibleVariableBindings = resolvePossibleBindings(
-    input.bindings,
-    input.name,
-    input.before,
-  );
-  if (possibleVariableBindings.length > 0) {
-    const callables = possibleVariableBindings.flatMap((binding) =>
-      readVariableBindingPossibleValues(
-        binding,
-        input.bindings,
-        input.analysis.sourceFile,
-      ).filter((value) => isFunction(value))
-    );
-    return callables.filter((callable, index) =>
-      callables.findIndex((candidate) =>
-        candidate.type === callable.type &&
-        candidate.start === callable.start &&
-        candidate.end === callable.end
-      ) === index
-    );
-  }
-  const callable = resolveFunctionBinding(
-    input.analysis.functionBindings,
-    input.name,
-    input.before,
-  );
-  const sameScopeBindings = callable
-    ? input.analysis.functionBindings.get(input.name)?.filter(
-      (binding) =>
-        binding.scopeStart === callable.scopeStart &&
-        binding.scopeEnd === callable.scopeEnd,
-    ) ?? []
-    : [];
-  return callable && sameScopeBindings.length === 1 ? [callable.node] : [];
 }
 
 function collectFileProviderIds(
@@ -2649,13 +2607,18 @@ function collectHandwrittenProviderTransportViolations(input: {
 }
 
 function readProviderCallParameterValues(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly call: CallExpression | OptionalCallExpression;
   readonly callerParameterValues?: ProviderCallParameterValues;
   readonly callable: Node;
-  readonly sourceFile: Node;
 }): ProviderCallParameterValues {
-  const valuesByName = new Map<string, ProviderCallParameterValue[]>();
+  const valuesByName = new Map<string, ProviderCallParameterValue[]>(
+    [...(input.callerParameterValues ?? [])].map(([name, values]) => [
+      name,
+      [...values],
+    ]),
+  );
   if (!isFunction(input.callable)) {
     return valuesByName;
   }
@@ -2667,6 +2630,7 @@ function readProviderCallParameterValues(input: {
     const argument = input.call.arguments[index];
     const parameterDefault = readParameterDefaultExpression(parameter);
     const roots = readProviderCallPossibleValues({
+      analysis: input.analysis,
       before: argument?.start ?? input.call.start ?? 0,
       bindings: input.bindings,
       callParameterValues: input.callerParameterValues,
@@ -2680,18 +2644,23 @@ function readProviderCallParameterValues(input: {
           isExpression(argument)
         ? argument
         : null,
+      propertySteps: [],
       resolving: new Set(),
     });
 
     for (const entry of readParameterBindingEntries(parameter)) {
-      const values = valuesByName.get(entry.name) ?? [];
+      const values: ProviderCallParameterValue[] = [];
       for (const root of roots) {
-        values.push(...readProviderCallPropertyPathValues({
+        values.push(...readProviderCallPossibleValues({
+          analysis: input.analysis,
+          before: root.before,
           bindings: input.bindings,
+          callParameterValues: root.callParameterValues,
+          defaultExpression: null,
           defaultCallParameterValues: valuesByName,
+          node: root.node,
           propertySteps: entry.propertySteps,
-          sourceFile: input.sourceFile,
-          value: root,
+          resolving: new Set(),
         }));
       }
       valuesByName.set(entry.name, dedupeProviderCallValues(values));
@@ -2701,14 +2670,88 @@ function readProviderCallParameterValues(input: {
 }
 
 function readProviderCallPossibleValues(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
   readonly before: number;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly callParameterValues?: ProviderCallParameterValues;
   readonly defaultExpression: Expression | null;
   readonly defaultCallParameterValues?: ProviderCallParameterValues;
   readonly node: Node | null;
+  readonly propertySteps: readonly ProviderCallPropertyStep[];
   readonly resolving: ReadonlySet<string>;
 }): ProviderCallParameterValue[] {
+  const [propertyStep, ...remainingPropertySteps] = input.propertySteps;
+  if (propertyStep) {
+    const values: ProviderCallParameterValue[] = [];
+    const alternatives = readProviderCallPossibleValues({
+      ...input,
+      propertySteps: [],
+    });
+    for (const alternative of alternatives) {
+      if (propertyStep.propertyName === null) {
+        values.push(alternative);
+        for (const [index, step] of input.propertySteps.entries()) {
+          if (!step.defaultExpression) {
+            continue;
+          }
+          values.push(...readProviderCallPossibleValues({
+            ...input,
+            before: step.defaultExpression.start ?? alternative.before,
+            callParameterValues: input.defaultCallParameterValues,
+            defaultExpression: null,
+            node: step.defaultExpression,
+            propertySteps: input.propertySteps.slice(index + 1),
+            resolving: new Set(),
+          }));
+        }
+        continue;
+      }
+      const projected = readEffectiveStaticPropertyPathValues(
+        alternative.node,
+        [propertyStep.propertyName],
+        input.bindings,
+        alternative.before,
+        input.analysis.sourceFile,
+      );
+      for (const node of projected) {
+        values.push(...readProviderCallPossibleValues({
+          ...input,
+          before: alternative.before,
+          callParameterValues: alternative.callParameterValues,
+          defaultExpression: propertyStep.defaultExpression,
+          node,
+          propertySteps: remainingPropertySteps,
+          resolving: new Set(),
+        }));
+      }
+      if (
+        propertyStep.defaultExpression &&
+        (
+          projected.length === 0 ||
+          !isProviderCallStaticPropertyDefinitelyDefined({
+            analysis: input.analysis,
+            before: alternative.before,
+            bindings: input.bindings,
+            callParameterValues: alternative.callParameterValues,
+            node: alternative.node,
+            propertyName: propertyStep.propertyName,
+          })
+        )
+      ) {
+        values.push(...readProviderCallPossibleValues({
+          ...input,
+          before: propertyStep.defaultExpression.start ?? alternative.before,
+          callParameterValues: input.defaultCallParameterValues,
+          defaultExpression: null,
+          node: propertyStep.defaultExpression,
+          propertySteps: remainingPropertySteps,
+          resolving: new Set(),
+        }));
+      }
+    }
+    return dedupeProviderCallValues(values);
+  }
+
   const useDefault = (): ProviderCallParameterValue[] =>
     input.defaultExpression
       ? [{
@@ -2723,6 +2766,11 @@ function readProviderCallPossibleValues(input: {
   const expression = unwrapExpression(input.node);
   if (
     (isIdentifier(expression, { name: "undefined" }) &&
+      !resolveParameterBinding(
+        input.analysis.parameterBindings,
+        expression.name,
+        input.before,
+      ) &&
       resolvePossibleBindings(
         input.bindings,
         expression.name,
@@ -2733,13 +2781,25 @@ function readProviderCallPossibleValues(input: {
     return useDefault();
   }
   if (isIdentifier(expression)) {
-    const possible = resolvePossibleBindings(
+    const parameter = resolveParameterBinding(
+      input.analysis.parameterBindings,
+      expression.name,
+      input.before,
+    );
+    const possibleBindings = resolvePossibleBindings(
       input.bindings,
       expression.name,
       input.before,
     );
+    const possible = parameter
+      ? possibleBindings.filter((binding) =>
+        binding.writeScopeStart > parameter.scopeStart &&
+        binding.writeScopeEnd <= parameter.scopeEnd
+      )
+      : possibleBindings;
+    const resolved: ProviderCallParameterValue[] = [];
     if (possible.length > 0) {
-      return dedupeProviderCallValues(possible.flatMap((binding) => {
+      resolved.push(...possible.flatMap((binding) => {
         const key = `provider-call-value:${expression.name}:${binding.start}`;
         if (input.resolving.has(key)) {
           return [];
@@ -2751,6 +2811,7 @@ function readProviderCallPossibleValues(input: {
             ...input,
             before: binding.start - 1,
             node: value,
+            propertySteps: [],
             resolving,
         }));
       }));
@@ -2758,8 +2819,18 @@ function readProviderCallPossibleValues(input: {
     const callParameterValues = input.callParameterValues?.get(
       expression.name,
     ) ?? [];
-    if (callParameterValues.length > 0) {
-      return dedupeProviderCallValues(callParameterValues.flatMap((value) => {
+    if (
+      parameter &&
+      callParameterValues.length > 0 &&
+      (
+        possible.length === 0 ||
+        (
+          possible.at(-1)?.definitive === false &&
+          possible.at(-1)?.conditionallyExecuted === true
+        )
+      )
+    ) {
+      resolved.push(...callParameterValues.flatMap((value) => {
         const key =
           `provider-call-parameter:${expression.name}:${value.node.start}:${value.before}`;
         if (input.resolving.has(key)) {
@@ -2772,9 +2843,34 @@ function readProviderCallPossibleValues(input: {
           before: value.before,
           callParameterValues: value.callParameterValues,
           node: value.node,
+          propertySteps: [],
           resolving,
         });
       }));
+    }
+    if (possible.length > 0 || resolved.length > 0) {
+      return dedupeProviderCallValues(resolved);
+    }
+    if (!parameter) {
+      const callable = resolveFunctionBinding(
+        input.analysis.functionBindings,
+        expression.name,
+        input.before,
+      );
+      const sameScopeBindings = callable
+        ? input.analysis.functionBindings.get(expression.name)?.filter(
+          (binding) =>
+            binding.scopeStart === callable.scopeStart &&
+            binding.scopeEnd === callable.scopeEnd,
+        ) ?? []
+        : [];
+      if (callable && sameScopeBindings.length === 1) {
+        return [{
+          before: input.before,
+          callParameterValues: input.callParameterValues,
+          node: callable.node,
+        }];
+      }
     }
   }
   if (
@@ -2785,20 +2881,33 @@ function readProviderCallPossibleValues(input: {
       ? [expression.consequent, expression.alternate]
       : [expression.left, expression.right];
     return dedupeProviderCallValues(branches.flatMap((branch) =>
-      readProviderCallPossibleValues({ ...input, node: branch })
+      readProviderCallPossibleValues({
+        ...input,
+        node: branch,
+        propertySteps: [],
+      })
     ));
   }
   if (expression.type === "SequenceExpression") {
     return readProviderCallPossibleValues({
       ...input,
       node: expression.expressions.at(-1) ?? null,
+      propertySteps: [],
     });
   }
   if (expression.type === "AssignmentExpression") {
-    return readProviderCallPossibleValues({ ...input, node: expression.right });
+    return readProviderCallPossibleValues({
+      ...input,
+      node: expression.right,
+      propertySteps: [],
+    });
   }
   if (expression.type === "AwaitExpression") {
-    return readProviderCallPossibleValues({ ...input, node: expression.argument });
+    return readProviderCallPossibleValues({
+      ...input,
+      node: expression.argument,
+      propertySteps: [],
+    });
   }
   const direct = [{
     before: input.before,
@@ -2810,77 +2919,8 @@ function readProviderCallPossibleValues(input: {
     : dedupeProviderCallValues([...direct, ...useDefault()]);
 }
 
-function readProviderCallPropertyPathValues(input: {
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly defaultCallParameterValues: ProviderCallParameterValues;
-  readonly propertySteps: readonly ProviderCallPropertyStep[];
-  readonly sourceFile: Node;
-  readonly value: ProviderCallParameterValue;
-}): ProviderCallParameterValue[] {
-  const [step, ...remaining] = input.propertySteps;
-  if (!step) {
-    return [input.value];
-  }
-  const values: ProviderCallParameterValue[] = [];
-  const alternatives = readProviderCallPossibleValues({
-    before: input.value.before,
-    bindings: input.bindings,
-    callParameterValues: input.value.callParameterValues,
-    defaultExpression: null,
-    defaultCallParameterValues: undefined,
-    node: input.value.node,
-    resolving: new Set(),
-  });
-  for (const alternative of alternatives) {
-    const projected = readEffectiveStaticPropertyPathValues(
-      alternative.node,
-      [step.propertyName],
-      input.bindings,
-      alternative.before,
-      input.sourceFile,
-    );
-    const possibleProjected = projected.flatMap((node) =>
-      readProviderCallPossibleValues({
-        before: alternative.before,
-        bindings: input.bindings,
-        callParameterValues: alternative.callParameterValues,
-        defaultExpression: step.defaultExpression,
-        defaultCallParameterValues: input.defaultCallParameterValues,
-        node,
-        resolving: new Set(),
-      })
-    );
-    if (
-      step.defaultExpression &&
-      (
-        projected.length === 0 ||
-        !isProviderCallStaticPropertyDefinitelyDefined({
-          before: alternative.before,
-          bindings: input.bindings,
-          callParameterValues: alternative.callParameterValues,
-          node: alternative.node,
-          propertyName: step.propertyName,
-        })
-      )
-    ) {
-      possibleProjected.push({
-        before: step.defaultExpression.start ?? alternative.before,
-        callParameterValues: input.defaultCallParameterValues,
-        node: step.defaultExpression,
-      });
-    }
-    for (const value of dedupeProviderCallValues(possibleProjected)) {
-      values.push(...readProviderCallPropertyPathValues({
-        ...input,
-        propertySteps: remaining,
-        value,
-      }));
-    }
-  }
-  return dedupeProviderCallValues(values);
-}
-
 function isProviderCallStaticPropertyDefinitelyDefined(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
   readonly before: number;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly callParameterValues?: ProviderCallParameterValues;
@@ -2897,12 +2937,14 @@ function isProviderCallStaticPropertyDefinitelyDefined(input: {
       }
       if (
         property.computed &&
-        !isStringLiteral(property.key)
+        !isStringLiteral(property.key) &&
+        !isNumericLiteral(property.key)
       ) {
         propertyValue = "unknown";
         continue;
       }
-      const propertyName = readPropertyName(property.key);
+      const propertyName = readPropertyName(property.key) ??
+        (isNumericLiteral(property.key) ? String(property.key.value) : null);
       if (propertyName !== input.propertyName) {
         continue;
       }
@@ -2933,12 +2975,14 @@ function isProviderCallStaticPropertyDefinitelyDefined(input: {
     return false;
   }
   const possibleValues = readProviderCallPossibleValues({
+    analysis: input.analysis,
     before: input.before,
     bindings: input.bindings,
     callParameterValues: input.callParameterValues,
     defaultExpression: null,
     defaultCallParameterValues: undefined,
     node: propertyValue,
+    propertySteps: [],
     resolving: new Set(),
   });
   return possibleValues.length > 0 && possibleValues.every((value) =>
@@ -3241,12 +3285,25 @@ function inferProviderExpressionFacts(input: {
     }
     const callee = unwrapExpression(node.callee);
     if (isIdentifier(callee)) {
-      for (const callable of resolveProviderCallables({
+      const callableValues = readProviderCallPossibleValues({
         analysis: input.analysis,
         before: input.before,
         bindings: input.bindings,
-        name: callee.name,
-      })) {
+        callParameterValues: input.callParameterValues,
+        defaultCallParameterValues: undefined,
+        defaultExpression: null,
+        node: callee,
+        propertySteps: [],
+        resolving: input.resolving,
+      });
+      for (const callableValue of callableValues) {
+        const callable = callableValue.node;
+        const returnedExpressions = readDirectFunctionReturnExpressions(
+          callable,
+        );
+        if (returnedExpressions.length === 0) {
+          continue;
+        }
         const callableStart = callable.start ?? 0;
         const bindingKey =
           `provider-function:${callee.name}:${callableStart}`;
@@ -3256,15 +3313,13 @@ function inferProviderExpressionFacts(input: {
         const resolving = new Set(input.resolving);
         resolving.add(bindingKey);
         const callParameterValues = readProviderCallParameterValues({
+          analysis: input.analysis,
           bindings: input.bindings,
           call: node,
           callerParameterValues: input.callParameterValues,
           callable,
-          sourceFile: input.analysis.sourceFile,
         });
-        for (const returned of readDirectFunctionReturnExpressions(
-          callable,
-        )) {
+        for (const returned of returnedExpressions) {
           mergeProviderExpressionFacts(
             facts,
             inferProviderExpressionFacts({
@@ -6974,6 +7029,7 @@ function collectVariableBindings(
         input.node.start ?? 0,
       );
       current.push({
+        conditionallyExecuted: !input.definitive,
         defaultExpression: entry.defaultExpression,
         definitive:
           input.definitive &&
@@ -6996,6 +7052,8 @@ function collectVariableBindings(
         start: input.node.start ?? 0,
         typeAnnotation: entry.typeAnnotation ??
           (input.assignment ? previous?.typeAnnotation ?? null : null),
+        writeScopeEnd: lexicalScope.end,
+        writeScopeStart: lexicalScope.start,
       });
       bindings.set(entry.name, current);
     }

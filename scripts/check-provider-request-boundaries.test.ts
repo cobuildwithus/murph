@@ -2340,6 +2340,80 @@ describe("check-provider-request-boundaries", () => {
     }
   });
 
+  it("keeps mapped helper parameters ahead of unrelated outer bindings", () => {
+    const sourceLines = [
+      "const options = { endpoint: '/internal' };",
+      "function inner({ endpoint = 'https://api.openai.com/v1/responses' } = {}) {",
+      "  return endpoint;",
+      "}",
+      "function outer(options) {",
+      "  return inner(options);",
+      "}",
+      "function conditionalOverride(options) {",
+      "  if (Date.now() > 0) options = { endpoint: '/internal' };",
+      "  return inner(options);",
+      "}",
+      "function definitiveOverride(options) {",
+      "  options = { endpoint: '/internal' };",
+      "  return inner(options);",
+      "}",
+      "function sameNameInner(options = 'https://api.openai.com/v1/audio') {",
+      "  return options;",
+      "}",
+      "function sameNameOuter(options) {",
+      "  return sameNameInner('/internal');",
+      "}",
+      "await fetch(outer(loadOptions()), { method: 'POST' }); // violation",
+      "await fetch(conditionalOverride(loadOptions()), { method: 'POST' }); // violation",
+      "await fetch(definitiveOverride(loadOptions()), { method: 'POST' });",
+      "await fetch(sameNameOuter(loadOptions()), { method: 'POST' });",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/nested-provider-url-parameters.mjs",
+      "scripts/nested-provider-url-parameters.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
+  it("projects static and dynamic computed helper parameters conservatively", () => {
+    const sourceLines = [
+      "const dynamicKey = readKey();",
+      "function staticComputed({ ['endpoint']: endpoint = 'https://api.openai.com/v1/responses' } = {}) {",
+      "  return endpoint;",
+      "}",
+      "function dynamicComputed({ [dynamicKey]: endpoint = 'https://api.openai.com/v1/images' } = {}) {",
+      "  return endpoint;",
+      "}",
+      "function dynamicValue({ [dynamicKey]: endpoint }) {",
+      "  return endpoint;",
+      "}",
+      "await fetch(staticComputed({}), { method: 'POST' }); // violation",
+      "await fetch(staticComputed({ endpoint: '/internal' }), { method: 'POST' });",
+      "await fetch(dynamicComputed({ endpoint: '/internal' }), { method: 'POST' }); // violation",
+      "await fetch(dynamicValue({ selected: 'https://api.openai.com/v1/audio' }), { method: 'POST' }); // violation",
+      "await fetch(dynamicValue({ selected: '/internal' }), { method: 'POST' });",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/computed-provider-url-parameters.mjs",
+      "scripts/computed-provider-url-parameters.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
   it("resolves chronologically possible local helper callables", () => {
     const sourceLines = [
       "const arrowTarget = () => 'https://api.openai.com/v1/responses';",
@@ -2371,6 +2445,39 @@ describe("check-provider-request-boundaries", () => {
     for (const relativePath of [
       "scripts/local-provider-url-callables.mjs",
       "scripts/local-provider-url-callables.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual(expectedLines);
+    }
+  });
+
+  it("resolves expression-valued and copied local helper callables", () => {
+    const sourceLines = [
+      "const conditionalTarget = useProvider",
+      "  ? () => 'https://api.openai.com/v1/responses'",
+      "  : () => '/internal';",
+      "const copiedTarget = conditionalTarget;",
+      "const logicalTarget = loadTarget() || (() => 'https://api.openai.com/v1/images');",
+      "const sequenceTarget = (() => '/internal', () => 'https://api.openai.com/v1/audio');",
+      "const internalTarget = useProvider ? () => '/internal' : () => '/health';",
+      "function forwardTarget(target) {",
+      "  return target();",
+      "}",
+      "await fetch(conditionalTarget(), { method: 'POST' }); // violation",
+      "await fetch(copiedTarget(), { method: 'POST' }); // violation",
+      "await fetch(logicalTarget(), { method: 'POST' }); // violation",
+      "await fetch(sequenceTarget(), { method: 'POST' }); // violation",
+      "await fetch(forwardTarget(copiedTarget), { method: 'POST' }); // violation",
+      "await fetch(internalTarget(), { method: 'POST' });",
+    ];
+    const source = sourceLines.join("\n");
+    const expectedLines = sourceLines.flatMap((line, index) =>
+      line.endsWith("// violation") ? [index + 1] : []
+    );
+
+    for (const relativePath of [
+      "scripts/expression-provider-url-callables.mjs",
+      "scripts/expression-provider-url-callables.mts",
     ]) {
       const matches = violationsOfKind("raw-provider-http", source, relativePath);
       expect(matches.map((match) => match.line)).toEqual(expectedLines);
