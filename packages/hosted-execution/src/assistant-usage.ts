@@ -129,8 +129,7 @@ export function buildAssistantTurnProfileToolIdentityLabel(input: {
     return genericLabel;
   }
 
-  const contextPrefix = input.kind === "mcp_tool" ? "s" : "n";
-  const label = `${contextPrefix}0_t${input.tool.length}_${input.tool}`;
+  const label = `t_${input.tool}`;
   return label.length <= ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
     ? label
     : genericLabel;
@@ -149,58 +148,8 @@ function isAssistantTurnProfileToolIdentityLabel(
     return true;
   }
 
-  const prefix = kind === "mcp_tool" ? "s" : "n";
-  if (!label.startsWith(prefix)) {
-    return false;
-  }
-  const contextLengthEnd = label.indexOf("_", prefix.length);
-  if (contextLengthEnd < 0) {
-    return false;
-  }
-  const contextLengthText = label.slice(prefix.length, contextLengthEnd);
-  const contextLength = readCanonicalTurnProfileLength(contextLengthText);
-  if (
-    contextLength === null
-    || contextLength !== 0
-  ) {
-    return false;
-  }
-  const contextStart = contextLengthEnd + 1;
-  const contextEnd = contextStart + contextLength;
-  const context = label.slice(contextStart, contextEnd);
-  if (
-    context.length !== contextLength
-    || (context.length > 0 && !isAssistantTurnProfileIdentifierComponent(context))
-    || label[contextEnd] !== "t"
-  ) {
-    return false;
-  }
-
-  const toolLengthStart = contextEnd + 1;
-  const toolLengthEnd = label.indexOf("_", toolLengthStart);
-  if (toolLengthEnd < 0) {
-    return false;
-  }
-  const toolLengthText = label.slice(toolLengthStart, toolLengthEnd);
-  const toolLength = readCanonicalTurnProfileLength(toolLengthText);
-  if (
-    toolLength === null
-    || toolLength === 0
-    || toolLength > ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_MAX_LENGTH
-  ) {
-    return false;
-  }
-  const tool = label.slice(toolLengthEnd + 1);
-  return tool.length === toolLength
-    && isAssistantTurnProfileIdentifierComponent(tool);
-}
-
-function readCanonicalTurnProfileLength(value: string): number | null {
-  if (!/^(?:0|[1-9][0-9]*)$/u.test(value)) {
-    return null;
-  }
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+  return label.startsWith("t_")
+    && isAssistantTurnProfileIdentifierComponent(label.slice(2));
 }
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";

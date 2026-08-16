@@ -506,6 +506,60 @@ test('batch inserts inherited defaults before child argv terminator', async () =
   }
 })
 
+test('batch admission still runs an allowed child behind root options', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-allowed-admission-'))
+  const vault = path.join(parent, 'vault')
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+    await runCli([
+      'memory',
+      'upsert',
+      'Prefers concise answers.',
+      '--section',
+      'Preferences',
+      '--vault',
+      vault,
+      '--format',
+      'json',
+    ])
+
+    const raw = await runCli([
+      'batch',
+      '--vault',
+      vault,
+      '--command',
+      '["--filter-output","--once","memory","show"]',
+      '--format',
+      'json',
+    ])
+    const result = JSON.parse(raw) as {
+      failed: number
+      commands: Array<{
+        argv: string[]
+        error?: {
+          message: string
+        }
+        ok: boolean
+      }>
+    }
+
+    assert.equal(result.failed, 0, result.commands[0]?.error?.message)
+    assert.equal(result.commands[0]?.ok, true)
+    assert.deepEqual(result.commands[0]?.argv.slice(0, 4), [
+      '--filter-output',
+      '--once',
+      'memory',
+      'show',
+    ])
+  } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
 test('batch rejects child MCP server mode', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-mcp-'))
   const vault = path.join(parent, 'vault')

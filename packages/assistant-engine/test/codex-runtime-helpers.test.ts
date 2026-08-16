@@ -121,6 +121,8 @@ function completeTestCodexProtocolEvents(
   events: readonly unknown[],
   turnId: string | null,
 ): unknown[] {
+  // Codex includes threadId and turnId on production notifications; keep
+  // compact fixtures production-shaped before they reach the exact readers.
   return events.map((event) => {
     const record = readTestRecord(event)
     const params = readTestRecord(record?.params)
@@ -926,7 +928,7 @@ describe('Codex assistant registry helpers', () => {
           durationMs: 900,
           failedCalls: 0,
           kind: 'mcp_tool',
-          label: 's0_t8_generate',
+          label: 't_generate',
           outputBytesMax: 40,
           outputBytesTotal: 40,
         },
@@ -1042,7 +1044,7 @@ describe('Codex assistant registry helpers', () => {
         durationMs: 0,
         failedCalls: 0,
         kind: 'dynamic_tool',
-        label: 'n0_t6_search',
+        label: 't_search',
         outputBytesMax: 2,
         outputBytesTotal: 2,
       },
@@ -1099,7 +1101,7 @@ describe('Codex assistant registry helpers', () => {
       expect.objectContaining({
         calls: 2,
         kind: 'dynamic_tool',
-        label: 'n0_t6_search',
+        label: 't_search',
       }),
       expect.objectContaining({
         calls: 1,
@@ -1109,7 +1111,7 @@ describe('Codex assistant registry helpers', () => {
       expect.objectContaining({
         calls: 2,
         kind: 'mcp_tool',
-        label: 's0_t8_generate',
+        label: 't_generate',
       }),
     ]))
     const persisted = parseAssistantUsageRecord({
@@ -1916,8 +1918,8 @@ describe('Codex assistant registry helpers', () => {
     expect(requests[31]).toEqual({ cachedInput: 0, input: 34, output: 1 })
     const tools = profile?.tools as Array<{ label: string }>
     expect(tools).toHaveLength(16)
-    expect(tools[0]).toMatchObject({ label: 'n0_t7_tool-18', outputBytesTotal: 18 })
-    expect(tools[15]).toMatchObject({ label: 'n0_t6_tool-3', outputBytesTotal: 3 })
+    expect(tools[0]).toMatchObject({ label: 't_tool-18', outputBytesTotal: 18 })
+    expect(tools[15]).toMatchObject({ label: 't_tool-3', outputBytesTotal: 3 })
     const labels = tools.map((tool) => tool.label)
     expect(labels).not.toContain('replayed-binary')
     expect(labels).not.toContain('tool-1')
