@@ -21,6 +21,7 @@ import {
   isHostedOnboardingError,
 } from "./errors";
 import {
+  assertNoHostedDirectSubscriptionStripeEffectTx,
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
   type HostedMemberStripeBillingRefSnapshot,
@@ -249,11 +250,17 @@ async function readHostedBillingPlanUpgradeOwner(input: {
         ...member,
         billingRef,
       });
-      return buildHostedBillingPlanUpgradeOwnerSnapshot({
+      const owner = buildHostedBillingPlanUpgradeOwnerSnapshot({
         billingRef,
         expectedCurrentPlanCode: input.expectedCurrentPlanCode,
         targetPlanCode: input.targetPlanCode,
       });
+      await assertNoHostedDirectSubscriptionStripeEffectTx({
+        memberId: input.memberId,
+        stripeSubscriptionId: owner.stripeSubscriptionId,
+        tx,
+      });
+      return owner;
     },
   });
 }

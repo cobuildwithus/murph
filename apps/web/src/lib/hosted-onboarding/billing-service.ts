@@ -21,10 +21,13 @@ import {
 } from "./entitlement";
 import {
   hostedOnboardingError,
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+  HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
   isHostedOnboardingError,
   type HostedOnboardingError,
 } from "./errors";
 import {
+  assertNoHostedMemberStripeEffectTx,
   bindHostedMemberStripeCheckoutSessionTx,
   clearHostedMemberStripeCheckoutAttemptTx,
   prepareHostedMemberStripeCheckoutSession,
@@ -329,6 +332,10 @@ async function prepareHostedBillingCheckoutAttempt(input: {
       message: "Your hosted member record was not found.",
     });
   }
+  await assertNoHostedMemberStripeEffectTx({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
   if (isHostedMemberSuspended(member.suspendedAt)) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
@@ -684,6 +691,7 @@ async function revalidateHostedBillingCheckoutAttemptTx(input: {
         select: {
           currentBillingPhase: true,
           currentCheckoutOffer: true,
+          stripeEffectClaimId: true,
           stripeSubscriptionLookupKey: true,
         },
       },
@@ -699,6 +707,24 @@ async function revalidateHostedBillingCheckoutAttemptTx(input: {
         httpStatus: 403,
         message:
           "This hosted account is suspended. Contact support to restore access.",
+      }),
+      kind: "blocked",
+    };
+  }
+  if (member.billingRef?.stripeEffectClaimId != null) {
+    await clearHostedMemberStripeCheckoutAttemptTx({
+      attemptId: input.attempt.attemptId,
+      expectedSessionId: input.attempt.stripeCheckoutSessionId,
+      intentHash: input.attempt.intentHash,
+      memberId: input.memberId,
+      tx: input.tx,
+    });
+    return {
+      error: hostedOnboardingError({
+        code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+        httpStatus: 409,
+        message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+        retryable: true,
       }),
       kind: "blocked",
     };
@@ -807,6 +833,14 @@ function buildHostedBillingCheckoutIntentHash(input: {
 function buildHostedFamilyBillingClaimCheckoutError(
   claim: HostedMemberFamilyBillingClaim,
 ) {
+  if (claim.kind === "stripe_effect") {
+    return hostedOnboardingError({
+      code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+      httpStatus: 409,
+      message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+      retryable: true,
+    });
+  }
   return hostedOnboardingError({
     code: claim.kind === "active_sponsorship"
       ? "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED"

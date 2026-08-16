@@ -451,27 +451,48 @@ build; a 30-second caller does not remain compatible with the 40-second web
 deadline, so do not roll Cloudflare back below 45 seconds while that web build
 is active.
 
-The direct result-channel rollout is consumer-first: apply the additive
-`result_notification_channel` migration, deploy Web, then deploy the hosted
-assistant runner with immediate container rollout. An old runner omits the
-optional field and remains compatible with new Web. A new runner against old
-strict Web is rejected before Retell dispatch. Pause tracked admission and drain
-every nonterminal tracked call before rolling the runner below callback support.
-For tracked result delivery, the runner keeps the existing outbox intent
-retryable after any provider-terminal outcome until Web acknowledges the signed
-terminal callback. Callback retry derives from the persisted provider receipt or
-failure, never re-enters Telegram, and repeats Web's idempotent next-result re-arm
-when the first response is lost.
+The direct result-channel and durable completion-policy rollout is
+consumer-first. The reader-only completion-policy release must be current before
+this change can activate any writer. To activate the first reader-plus-writer
+release, pause all new phone-call admission and wait the platform's full
+configured start-route lifetime so every previously admitted request either
+exits or exposes its durable call and Workflow. Keep analyzed-result webhook
+ingress live while every result-capable provider call and every phone-call
+reconciliation Workflow pinned to a pre-writer deployment settles. Then freeze
+that result ingress, wait its full configured route lifetime, and re-prove zero
+provider calls, pre-writer Workflows, or other legacy-producer executions before
+the writer activates. Vercel Workflow runs retain the deployment that started
+them, so elapsed route lifetime alone is not Workflow drain proof. Apply the
+additive `result_notification_channel` migration and deploy Web before rolling
+out the hosted assistant runner with immediate container rollout. Resume result
+ingress and phone-call admission only after the reader-plus-writer Web release is
+current. No execution capable of invoking a legacy result producer may survive
+the first policy write.
+
+An old runner omits the optional result channel and remains compatible with new
+Web. A new runner against old strict Web is rejected before Retell dispatch.
+Tracked and generationless manual direct transfers share the durable
+completion-policy writer; group normalization disables transfer authority and
+is outside this policy evolution. For tracked result delivery, the runner keeps
+the existing outbox intent retryable after any provider-terminal outcome until
+Web acknowledges the signed terminal callback. Callback retry derives from the
+persisted provider receipt or failure, never re-enters Telegram, and repeats
+Web's idempotent next-result re-arm when the first response is lost.
+
 Web keeps its generation boundary stronger than the runtime's generic outbox
 state: queued ambiguity returns to pending, sending ambiguity is terminal, and
 an exact route failure with cumulative no-effect proof returns either queued or
 sending to pending. A different definitive runtime failure terminalizes a
 queued generation as failed, and provider success from queued is rejected.
-Generation-aware Web is a hard rollback floor after the first call stores a
-non-null result channel: terminal rows still suppress duplicate analyzed
-webhooks under generation-scoped keys, while older Web uses a different key and
-channel-agnostic routing. Before any attempted rollback below that Web floor,
-the following operator query must return zero:
+After the first durable policy write, this reader-plus-writer Web release is the
+operational rollback floor even when no tracked row has a result channel. A
+lower reader may accept an existing policy-bearing result, but it must not
+produce a new transfer result. Generation-aware Web is an additional rollback
+floor while any call stores a non-null result channel: terminal rows still
+suppress duplicate analyzed webhooks under generation-scoped keys, while older
+Web uses a different key and channel-agnostic routing. The following query
+proves only whether generation state exists; a zero count does not prove
+encrypted-result compatibility:
 
 ```sql
 SELECT count(*) AS tracked_phone_call_rows
@@ -479,14 +500,17 @@ FROM hosted_phone_call
 WHERE result_notification_channel IS NOT NULL;
 ```
 
-A nonzero result requires continued compatible Web or a separately reviewed
-forward migration. Terminal delivery is not authority to delete the row or to
-declare older Web safe. For an emergency older-Web rollback, first disable
-tracked phone-call operation and analyzed-webhook ingress, then prove through a
-reviewed migration that no tracked row capable of replay remains. Post-deploy
-proof should cover one direct Telegram
-scheduled call, same-channel result delivery, a route-loss retry, and unchanged
-group behavior.
+A nonzero result requires continued generation-compatible Web or a separately
+reviewed forward migration. Terminal delivery is not authority to delete the
+row or declare older Web safe. For an emergency rollback below either floor,
+pause all new phone-call admission and drain the full configured start-route
+lifetime. Keep analyzed-result webhook ingress live while every result-capable
+provider call and deployment-pinned reconciliation run settles. Then freeze and
+drain result ingress, re-prove zero legacy-producer execution, and transition.
+Prefer a compatible forward deployment. Before rolling the runner below
+callback support, also drain every nonterminal tracked call. Post-deploy proof
+must cover one consented private Telegram scheduled call, same-channel result
+delivery, a route-loss retry, and unchanged group behavior.
 
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable

@@ -162,6 +162,7 @@ describe("Retell phone-call result lifecycle", () => {
       outcome: "needs_user",
       summary: expect.stringContaining("post-handoff outcome is unknown"),
     });
+    expect(mapped).not.toHaveProperty("completionPolicy");
     expect(mapped.summary).toContain(
       "Before the handoff, the automated call reported: A Monday morning option was available",
     );

@@ -1457,10 +1457,14 @@ function createAssistantResponseCardJsonSchema() {
       {
         oneOf: [
           {
+            properties: { workout: false },
             required: ['rowHeader', 'columns', 'rows'],
           },
           {
             properties: {
+              columns: false,
+              rowHeader: false,
+              rows: false,
               subtitle: { type: 'null' },
               tracking: { type: 'object' },
             },

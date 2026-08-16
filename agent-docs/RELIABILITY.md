@@ -481,23 +481,45 @@ Last verified: 2026-08-15
   region so their counters cannot collide. Missing either expected port leaves
   the family unknown. An observed port can still produce a positive
   non-replayable condition; when every available signal is safe and only this
-  family is incomplete, the monitor uses that same bounded retry as a
-  confirmation scrape. Every available confirmation signal is evaluated;
+  family is incomplete, the monitor waits one second before one confirmation
+  scrape. PlanetScale's documented example 30-second Prometheus scrape
+  configuration is not a freshness guarantee, so it does not justify a longer
+  delay or another provider call. Every available confirmation signal is
+  evaluated;
   complementary observed ports can be composed with the original complete
-  gauge evidence, while a failed or still-incomplete confirmation retains the
-  original partial observation. Each observed port replaces and advances only
-  its own usable series baseline, an omitted port retains its prior baseline,
+  gauge evidence, while a failed confirmation retains the original partial
+  observation. A safe still-incomplete confirmation contributes its observed
+  counters to the original complete gauge evidence so a port first observed by
+  confirmation advances its baseline. Each observed port replaces and advances
+  only its own usable series baseline, an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed. This makes
   transient counter-family omission less noisy without converting unknown to
   zero, replaying an old delta, or weakening the two-check telemetry fallback.
+  The confirmation retains the existing two-observation/four-request ceiling.
+  Including two sequential ten-second fetch timeouts per observation, its
+  41-second worst-case wall time remains below the persisted two-minute run
+  lease and the platform's 15-minute scheduled runtime. Structured failure
+  warnings include the actual parsed-observation count and per-port omission
+  counts, without raw provider payloads or signed scrape values.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
-  consecutive runs before paging the monitoring condition. Crossing that
-  threshold persists one bounded telemetry-page obligation in the existing
-  incident row. The represented first two-check window counts incomplete versus
-  unavailable observations, unions only canonical missing families observed on
-  partial checks, and uses the threshold time as its window end. One bounded
-  evidence value on each existing sample preserves that aggregate provenance
-  across restart. The obligation survives an occupied pending-message slot,
+  consecutive runs before paging the monitoring condition. A failed check never
+  erases a successfully parsed observation: even an all-family-
+  missing parse remains an incomplete observation if its retry later fails,
+  while `unavailable` means that the check produced no parsed observation.
+  Crossing the threshold persists one bounded telemetry-page obligation in the
+  existing incident row. The represented first two-check window counts
+  incomplete versus unavailable observations, unions only canonical missing
+  families, and sums parsed observations plus exact 5432/6432 omission counts
+  from partial checks.
+  It uses the threshold time as its window end. One bounded evidence value on
+  each existing sample
+  preserves that aggregate provenance across restart. Legacy evidence without
+  port detail remains readable; any window containing it reports unavailable
+  port detail rather than presenting the detailed portion as an exact ratio.
+  Each failed check also retains the connection-error family whenever any of its
+  parsed observations omitted an expected port, keeping strict persistence
+  validation aligned with the operator diagnosis. The obligation survives an
+  occupied pending-message slot,
   restart, recovery, and connection-error-only prioritization; only
   acknowledgment of a pending body that includes the monitoring condition
   clears it. Recovery and another threshold before acknowledgment deliberately
@@ -667,6 +689,33 @@ Last verified: 2026-08-15
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
+- Short-lived connected-app, sensitive-action, device-connect, device OAuth,
+  Clinical Records connect, and Clinical Records OAuth rows never trigger a
+  global expiry sweep from foreground creation or provider admission. Exact
+  reads and consumes fail closed when the addressed row is expired; exact OAuth
+  consumers lock their addressed state row before replay classification and
+  consume, so retention skips a live consumer instead of fabricating replay
+  evidence. The hourly retention owner owns backlog deletion. Started
+  connected-app, device-connect, and Clinical Records intents retain their
+  exact completion row for one bounded 30-minute grace past link expiry.
+  Consumed device OAuth claims remain with exact callback finalization and
+  recovery; consumed Clinical OAuth claims remain while an incomplete linked
+  connect intent exists. Clinical bearer claims stay
+  non-redeemable after public expiry; a connected-app provider callback that
+  already owns its started row may finalize until the shared owner cutoff.
+  Connected-app retention, callback completion, and account deletion all derive
+  that cutoff from one owning helper and one frozen operation time. Account
+  deletion reads at most 21 deterministically ordered incomplete intents to
+  admit a maximum of 20 provider-cleanup owners, fails closed before provider
+  fan-out on overflow, and ignores an owner-dead physical row while hourly
+  retention reclaims it. This covers provider setup and valid callback
+  finalization without creating another worker or lease table. Retention
+  deletes only owner-dead eligible expiry-indexed rows
+  serially in expiry-and-primary-key order under the smaller control-artifact
+  batch and max-batch ceilings, with `FOR UPDATE SKIP LOCKED`. The unbound
+  sensitive-action lane has a partial expiry-and-token index so durable
+  approval history cannot enlarge its transient claim scan. Approval-backed
+  rows remain with their approval owner.
 - Account deletion must not discard its only external-cleanup owner. The
   canonical account transaction persists the KMS-encrypted, foreign-key-free
   receipt before deleting the member. The existing hourly retention sweep
@@ -727,6 +776,33 @@ Last verified: 2026-08-15
   one-invoice/one-payment refund; partial refunds, balance credit, credit notes,
   pagination, or multiple allocations remain support-required rather than
   guessed.
+- Stripe short-database effect owners use an expand-first compatibility
+  cutover. The expand release adds nullable scalar claim state and only reads
+  it under the existing member-row authority locks; legacy direct, Family,
+  sponsorship, and account-deletion writers reject a present opaque claim
+  before provider work or relationship mutation. Linq and direct Telegram
+  Family acceptance classify that exact retryable rejection into their existing
+  visible-secondary reply owner; a failed reply keeps the webhook retryable.
+  Account deletion keeps its confirmation dialog and typed phrase in place for
+  the same exact rejection instead of reloading away the recovery action.
+  Direct Checkout treats a claim-only owner group as Family billing authority,
+  and direct Subscription admissions reject an exact owner-group conversion
+  claim. Claim-only Family drafts are billing authority rather than removable
+  setup, and account deletion locks every implicated Family owner before its
+  beneficiary. Customer Portal admissions perform the same claim-aware owner
+  check before and after session creation; the Family check reads only the
+  owner group and its billing scalars while locked, then decrypts the one
+  required Customer id after the database transaction. Generic Stripe webhook
+  reconciliation distinguishes that transient claim from settled Family
+  authority and leaves its existing accepted receipt failed and non-poisoning
+  until the claim clears; the same receipt then replays normally. Before any
+  later owner writes a claim, its claim-disabled phase must stop issuing
+  mutation-capable Portal sessions, preserve cancellation through the
+  replacement owner, and drain or provider-invalidate previously issued
+  sessions. Once the first claim exists, the cutover is the rollback floor. The
+  exact release and removal sequence
+  lives in
+  `agent-docs/operations/stripe-effect-compatibility-cutover.md`.
 - A never-paid Family owner draft is recoverable without a repair queue or new
   status. Invite acceptance may treat only an exact inert owner-only group as
   removable, then claim the invite, write the destination membership, and
@@ -1139,13 +1215,14 @@ Last verified: 2026-08-15
   and payload bytes do not enter Queue state. The prepared event enters one
   Cloudflare Queue consumer configured for batches of 100, five-second
   collection, concurrency one, ten retries, and an encrypted DLQ. The consumer
-  decrypts outside Postgres and sends sequential Web subbatches of at most 25;
-  Web admits each prepared entry through the existing canonical ingress in an
-  explicit serial loop and never reruns a provider verifier whose secret,
-  parser, or replay window may have rotated. The original receipt instant
-  remains the signature and audit instant, while the trace-processing lease
-  starts when Web admits the queued delivery. Only `accepted` and `duplicate`
-  results ack one Queue
+  decrypts outside Postgres and partitions Web callbacks by exact UTF-8 size at
+  or below the 2 MiB callback ceiling and by at most 100 entries. Web admits the
+  prepared entries through the existing canonical ingress with at most four
+  independent provider-account lanes, one serial event attempt per account
+  lane, and no trace-processing lease until that exact event starts. It never
+  reruns a provider verifier whose secret, parser, or replay window may have
+  rotated. The original receipt instant remains the signature and audit
+  instant. Only `accepted` and `duplicate` results ack one Queue
   message; all failed, missing, malformed, tampered, ambiguous, or unavailable
   results retain only that encrypted message for retry and DLQ recovery.
   Current provider registration, connection epoch/status, consent, source
@@ -1181,17 +1258,29 @@ Last verified: 2026-08-15
   pending state; an incident closes only after the pending page is cleared and
   both Queue observations are healthy. The monitor persists no
   webhook ciphertext, provider identity, member identity, or Queue message id.
-- Junction Link setup remains retryable but inert before proof-verified callback
-  completion. Webhooks for an active `pending_link` or `link_returned` account
-  release their trace claim and return a retryable not-ready response; they do
-  not persist dirty state or wake work. Manual reconcile, due scheduling,
-  ordinary queued jobs, and sync-success promotion apply the same account phase
-  gate. After a shared account is `source_confirmed`, a new target source does
+- Junction Link setup remains retryable and inert until either a proof-verified
+  browser callback completes or hosted Web verifies the exact prepared source
+  against Junction's current provider list after an authenticated,
+  source-attributed webhook. The webhook is only a reconciliation trigger. It
+  cannot confirm setup by itself. Hosted recovery rechecks consent, shared-app
+  binding, connection epoch, credential epoch, source epoch, and disconnect
+  fences before it commits `source_confirmed`, source admission,
+  callback-equivalent source-scoped initial work, its mandatory mailbox
+  handoff, dirty state, and trace completion in one locked transaction. The
+  initial handoff is required even when dirty state already exists. If its
+  post-commit Temporal signal fails, the existing scheduled mailbox-handoff
+  sweep selects one exact unconsumed `device-sync.wake` pointer per user and
+  retries from mailbox truth without scanning dirty rows. A pending webhook
+  without that exact provider proof releases its trace claim and returns a retryable
+  not-ready response. Manual reconcile, due scheduling, ordinary queued jobs,
+  and sync-success promotion apply the same account phase gate. After a shared
+  account is `source_confirmed`, a new target source does
   not move the account back into a pending phase. Its `DeviceConnectionSource`
   remains `disconnected`, and source-attributed webhooks, dirty-state commit
   races, and provider pulls fail or exit without admitting target data until
-  callback completion reaches the sole runtime connection-established admission
-  boundary. Shared ingress marks every account persistence request with the
+  callback completion or the same provider-verified hosted webhook admission
+  reaches the runtime-owned admission boundary. Shared ingress marks every
+  account persistence request with the
   closed `replace` or `preserve_established` policy; hosted Prisma and local
   SQLite apply the same shared predicate inside their persistence transactions,
   so neither adapter may reinterpret a source addition as an account reconnect.

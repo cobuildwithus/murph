@@ -170,12 +170,24 @@ describe("default phone-call result notification store", () => {
       return await rootPhase.run();
     });
     mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input: {
-      envelope: { eventId: string };
+      envelope: {
+        eventId: string;
+        notification: {
+          instructions: string;
+          responsePolicy: { kind: string };
+        };
+      };
       tx: unknown;
     }) => {
       expect(transactionOpen).toBe(true);
       expect(input.tx).toBe(transactionClient);
       expect(input.envelope.eventId).toBe(TRACKED_NOTIFICATION_DEDUPE_KEY);
+      expect(input.envelope.notification.responsePolicy).toEqual({
+        kind: "require_send",
+      });
+      expect(input.envelope.notification.instructions).not.toContain(
+        "Ask the user what happened after the handoff",
+      );
       phases.push("mailbox-append");
       return {
         item: {

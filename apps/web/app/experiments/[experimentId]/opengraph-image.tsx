@@ -7,7 +7,7 @@ import {
   MurphHeroOg,
   OG_CONTENT_TYPE,
   OG_SIZE,
-} from "../../../_og/og-shared";
+} from "../../_og/og-shared";
 
 export const alt = "A Murph experiment.";
 export const size = OG_SIZE;
