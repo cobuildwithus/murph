@@ -233,6 +233,7 @@ const mocks = vi.hoisted(() => {
         throw new Error("Expected a hosted mailbox append eventId.");
       }
       return {
+        duplicate: false,
         item: {
           dedupeKey: eventId,
           id: `mailbox_${eventId}`,
@@ -351,7 +352,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
-  rearmHostedPhoneCallResultNotificationRecovery:
+  signalHostedPhoneCallResultNotificationRecovery:
     mocks.rearmHostedPhoneCallResultNotificationRecovery,
 }));
 
@@ -770,14 +771,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     ).toHaveBeenCalledTimes(2);
   });
 
-  it("does not add recovery for 100 unchanged messages when one call workflow is already armed", async () => {
+  it("coalesces 100 unique unchanged messages but retries a failed route-restoration signal on exact replay", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    let reconciliationWorkflowStarts = 1;
+    let reconciliationHookSignals = 0;
     mocks.rearmHostedPhoneCallResultNotificationRecovery.mockImplementation(
       async () => {
-        reconciliationWorkflowStarts += 1;
+        reconciliationHookSignals += 1;
         return true;
       },
     );
@@ -833,7 +834,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(
       mocks.rearmHostedPhoneCallResultNotificationRecovery,
     ).not.toHaveBeenCalled();
-    expect(reconciliationWorkflowStarts).toBe(1);
+    expect(reconciliationHookSignals).toBe(0);
 
     const buildRestoredRouteWebhook = (updateId: number) => JSON.stringify({
       message: {
@@ -853,17 +854,27 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       update_id: updateId,
     });
 
+    const routeSignalError = new Error("route signal unavailable");
+    mocks.rearmHostedPhoneCallResultNotificationRecovery
+      .mockRejectedValueOnce(routeSignalError);
     await expect(handleHostedOnboardingTelegramWebhook({
       prisma,
       rawBody: buildRestoredRouteWebhook(800_100),
       secretToken: "telegram-secret",
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
+    })).rejects.toBe(routeSignalError);
+
+    const defaultAppend = mocks.appendHostedMailboxEnvelopeTx
+      .getMockImplementation();
+    if (!defaultAppend) {
+      throw new Error("Expected the Telegram mailbox append mock.");
+    }
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementationOnce(async (input) => ({
+      ...(await defaultAppend(input)),
+      duplicate: true,
+    }));
     await expect(handleHostedOnboardingTelegramWebhook({
       prisma,
-      rawBody: buildRestoredRouteWebhook(800_101),
+      rawBody: buildRestoredRouteWebhook(800_100),
       secretToken: "telegram-secret",
     })).resolves.toMatchObject({
       ok: true,
@@ -873,8 +884,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(102);
     expect(
       mocks.rearmHostedPhoneCallResultNotificationRecovery,
-    ).toHaveBeenCalledOnce();
-    expect(reconciliationWorkflowStarts).toBe(2);
+    ).toHaveBeenCalledTimes(2);
+    expect(reconciliationHookSignals).toBe(1);
     expect(
       mocks.rearmHostedPhoneCallResultNotificationRecovery,
     ).toHaveBeenCalledWith({

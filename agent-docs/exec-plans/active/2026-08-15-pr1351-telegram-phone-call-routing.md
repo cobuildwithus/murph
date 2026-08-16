@@ -352,3 +352,67 @@ the member's current authorized Telegram route.
   changes one structured changelog item but no component, screen, or renderer.
   The repository's changelog validation and Frontend Design Proof are green;
   adding a repository screenshot would create audit-only product source.
+- ReviewGPT round 18 at
+  `3c3bf15dc8e227fb9d0fd46d58b546fda8d343b6` proved that transition-only
+  Workflow starts changed the fanout symptom without closing the recovery
+  admission boundary. A committed route change followed by a failed start can
+  be lost forever because the identical webhook retry observes no transition,
+  while settings, authentication, and terminal callbacks can still start
+  overlapping independent Workflows.
+
+## Round 18 anomaly retrospective
+
+- Original requirement: one canonical private Telegram scheduled occurrence
+  places at most one phone call and returns its asynchronous result once through
+  the member's current authorized Telegram route, including recovery after a
+  temporary route loss without another inbound message being required.
+- First reviewed shape at
+  `b178d4dacd580d20038f0c4377fc85998bcf7089` was 30 files and 817 additions / 21
+  deletions. The round-18 candidate is 75 files and 6,239 additions / 469
+  deletions, including 1,793 source additions / 234 deletions. Most growth came
+  from review-required provider-entry evidence, callback replay, crash-safe
+  no-resend ownership, transfer-policy compatibility, and their production-path
+  tests; rounds 17 and 18 repeated one unresolved mechanism: route hints were
+  still modeled as permission to create another polling Workflow.
+- Decision: redesign that mechanism at the existing Workflow owner boundary.
+  The pre-armed per-call reconciliation Workflow remains the sole poller and
+  owns one deterministic reusable hook keyed by the opaque call id. Its existing
+  120-attempt step window remains bounded; after exhaustion the same Workflow
+  waits on the hook and can run another bounded window when signaled. Route,
+  settings, authentication, and callback paths become retryable hints to that
+  hook, never Workflow creators. The oldest-member lookup and terminal callback
+  retain sequential one-candidate handoff, avoiding collection fanout.
+- This continuation deletes transition-only start admission and avoids a run
+  registry, lease, new database state, queue, scheduler, lifecycle enum, or
+  second reconciliation owner. Deterministic hook-token conflict is the native
+  admission boundary for ambiguous duplicate starts, so at most one per-call
+  Workflow can poll even if an exact call-start replay races.
+- Required proof before the next review: route commit plus definite signal
+  failure plus identical webhook retry; an ambiguous duplicate start at the
+  deterministic hook; 100 unchanged direct messages; repeated settings and
+  authentication sync; concurrent route restoration; terminal callback replay;
+  and eventual delivery after the first bounded retry window with at most one
+  active poller for the call.
+- The explicit request to get ReviewGPT green and land this PR authorizes
+  continuation beyond the seven-round process cap. The immutable first-reviewed
+  head remains unchanged, and a later exact-head `ROUND_OUTCOME: PASS` is still
+  required.
+
+## Round 18 remediation proof
+
+- Each call-start path still creates one pre-armed reconciliation Workflow, but
+  the Workflow now registers its deterministic hook before polling. The start
+  acknowledgement waits for that hook registration; an ambiguously duplicated
+  run conflicts at the hook before it can execute the polling step.
+- The sole Workflow keeps its original bounded 120-attempt step window. If that
+  window exhausts, it waits dormant on the same reusable hook and repeats a
+  bounded window only after a recovery hint. Tracked Telegram calls remain
+  pending through provider completion until result delivery is terminal.
+- Route restoration, exact webhook retry, settings sync, authentication, and
+  terminal callback paths now signal the existing hook. None of them starts a
+  Workflow. The member-local selector signals only the oldest pending result and
+  does not pass an older queued or sending provider-owned delivery.
+- Focused proof is green: 203 tests across phone-call reconciliation, service,
+  result delivery, Telegram dispatch, Telegram settings sync, and Privy
+  authentication; the five-case PostgreSQL concurrent Telegram-routing suite;
+  the hosted Web typecheck; scoped ESLint; and `git diff --check`.

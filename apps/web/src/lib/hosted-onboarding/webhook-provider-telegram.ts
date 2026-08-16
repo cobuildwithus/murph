@@ -453,7 +453,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   if (!accessDecision.allowed) {
     return {
       ...buildIgnoredTelegramWebhookPlan("inactive-member"),
-      ...(directTelegramRouteChanged
+      ...(summary.isDirect
         ? {
             postCommitPhoneCallResultRecoveryMemberIds: [existingMember.id],
           }
@@ -673,7 +673,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ? { postCommitUsageReferralIds: qualificationCandidateReferralIds }
       : {}),
     postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
-    ...(directTelegramRouteChanged
+    ...(directTelegramRouteChanged || mailboxAppend.duplicate
       ? {
           postCommitPhoneCallResultRecoveryMemberIds: [existingMember.id],
         }

@@ -202,10 +202,31 @@ export async function processHostedPhoneCallRecoveryById(input: {
   if (usagePending || resultPending) {
     return "pending";
   }
+  if (isHostedPhoneCallTrackedResultOutstanding(call)) {
+    return "pending";
+  }
   if (providerCallId && resolveTerminalUsage && recordTerminalUsage) {
     return "complete";
   }
-  return hasPhoneCallAdvancedBeyondStart(call) ? "complete" : "pending";
+  return hasPhoneCallAdvancedBeyondStart(call)
+    ? "complete"
+    : "pending";
+}
+
+function isHostedPhoneCallTrackedResultOutstanding(
+  call: HostedPhoneCall,
+): boolean {
+  if (call.resultNotificationChannel !== "telegram") {
+    return false;
+  }
+  if (call.resultDeliveryStatus !== null) {
+    return ![
+      "ambiguous",
+      "delivered",
+      "failed",
+    ].includes(call.resultDeliveryStatus);
+  }
+  return call.status === "calling" || call.status === "ended";
 }
 
 function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {

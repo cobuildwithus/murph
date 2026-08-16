@@ -44,7 +44,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
-  rearmHostedPhoneCallResultNotificationRecovery:
+  signalHostedPhoneCallResultNotificationRecovery:
     mocks.rearmHostedPhoneCallResultNotificationRecovery,
 }));
 

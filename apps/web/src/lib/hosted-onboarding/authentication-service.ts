@@ -6,7 +6,7 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
-  rearmHostedPhoneCallResultNotificationRecovery,
+  signalHostedPhoneCallResultNotificationRecovery,
 } from "../phone-calls/reconciliation-workflow-start";
 import {
   runWithFreshHostedDomainRootUnwrapCache,
@@ -135,7 +135,7 @@ export async function completeHostedPrivyVerification(input: {
 
     assertHostedMemberNotSuspended(member);
     if (memberResolution.identity.telegram?.telegramUserId) {
-      await rearmHostedPhoneCallResultNotificationRecovery({
+      await signalHostedPhoneCallResultNotificationRecovery({
         memberId: member.id,
         prisma,
       });

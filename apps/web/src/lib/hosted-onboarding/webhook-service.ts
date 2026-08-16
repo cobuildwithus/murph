@@ -138,7 +138,7 @@ import {
   startHostedRuntimeShellPrewarmBestEffort,
 } from "../hosted-execution/direct-runtime-wake";
 import {
-  rearmHostedPhoneCallResultNotificationRecovery,
+  signalHostedPhoneCallResultNotificationRecovery,
 } from "../phone-calls/reconciliation-workflow-start";
 import {
   assertHostedThreadRouteEgressAuthority,
@@ -2024,7 +2024,7 @@ async function rearmHostedPhoneCallResultRecoveriesAfterCommitRequired(input: {
 }): Promise<void> {
   const memberIds = [...new Set(input.memberIds)];
   for (const memberId of memberIds) {
-    await rearmHostedPhoneCallResultNotificationRecovery({
+    await signalHostedPhoneCallResultNotificationRecovery({
       memberId,
       prisma: input.prisma,
     });

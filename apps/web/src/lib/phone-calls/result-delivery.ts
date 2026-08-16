@@ -15,7 +15,7 @@ import {
 } from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
 import {
-  rearmHostedPhoneCallResultNotificationRecovery,
+  signalHostedPhoneCallResultNotificationRecovery,
 } from "./reconciliation-workflow-start";
 
 const HOSTED_PHONE_CALL_RESULT_DELIVERY_TERMINAL_STATUSES = new Set<
@@ -35,12 +35,12 @@ export async function recordHostedPhoneCallResultDeliveryOutcome(input: {
   memberId: string;
   prisma?: PrismaClient;
   request: HostedPhoneCallResultDeliveryOutcomeRequest;
-  rearmRecovery?: typeof rearmHostedPhoneCallResultNotificationRecovery;
+  rearmRecovery?: typeof signalHostedPhoneCallResultNotificationRecovery;
   signal?: AbortSignal;
 }): Promise<HostedPhoneCallResultDeliveryOutcomeResult> {
   const prisma = input.prisma ?? getPrisma();
   const rearmRecovery = input.rearmRecovery
-    ?? rearmHostedPhoneCallResultNotificationRecovery;
+    ?? signalHostedPhoneCallResultNotificationRecovery;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const current = await prisma.hostedPhoneCall.findFirst({

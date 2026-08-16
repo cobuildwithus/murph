@@ -14,7 +14,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
-  rearmHostedPhoneCallResultNotificationRecovery: mocks.rearmRecovery,
+  signalHostedPhoneCallResultNotificationRecovery: mocks.rearmRecovery,
 }));
 
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({

@@ -17,7 +17,7 @@ import {
 } from "@/src/lib/hosted-onboarding/shared";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 import {
-  rearmHostedPhoneCallResultNotificationRecovery,
+  signalHostedPhoneCallResultNotificationRecovery,
 } from "@/src/lib/phone-calls/reconciliation-workflow-start";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -77,7 +77,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  await rearmHostedPhoneCallResultNotificationRecovery({
+  await signalHostedPhoneCallResultNotificationRecovery({
     memberId: auth.member.id,
     prisma,
     signal: request.signal,
