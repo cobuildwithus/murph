@@ -95,7 +95,6 @@ interface HostedPhoneCallWebhookStore extends HostedPhoneCallWebhookDatabase {
   appendResultNotification(
     call: HostedPhoneCall,
     result?: HostedPhoneCallResult,
-    requiresTransferFollowUp?: boolean,
   ): Promise<HostedPhoneCallResultNotificationAppend>;
   encryptResult(input: {
     callId: string;
@@ -167,14 +166,20 @@ export async function handleRetellCallEnded(input: {
 
 export async function handleRetellCallAnalyzed(input: {
   call: RetellCallPayload;
+  completionPolicy?: HostedPhoneCallResult["completionPolicy"];
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedPhoneCallWebhookStore;
-  requiresTransferFollowUp?: boolean;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   assertRetellStorageMode(input.call);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const prisma = resolveHostedPhoneCallWebhookStore(input.prisma, crypto);
-  const result = mapRetellCallAnalysis(input.call);
+  const mappedResult = mapRetellCallAnalysis(input.call);
+  const result: HostedPhoneCallResult = input.completionPolicy
+    ? {
+        ...mappedResult,
+        completionPolicy: input.completionPolicy,
+      }
+    : mappedResult;
 
   return runWithHostedDomainRootUnwrapCache(async () => {
     const target = await readRetellWebhookCallTarget({
@@ -189,7 +194,6 @@ export async function handleRetellCallAnalyzed(input: {
       return appendRetellCallAnalyzedNotification({
         call: target.call,
         prisma,
-        requiresTransferFollowUp: input.requiresTransferFollowUp === true,
       });
     }
 
@@ -261,7 +265,6 @@ export async function handleRetellCallAnalyzed(input: {
         return appendRetellCallAnalyzedNotification({
           call: stored,
           prisma,
-          requiresTransferFollowUp: input.requiresTransferFollowUp === true,
         });
       }
       throw hostedOnboardingError({
@@ -285,7 +288,6 @@ export async function handleRetellCallAnalyzed(input: {
         status: mapPhoneCallStatus(result.outcome),
       },
       prisma,
-      requiresTransferFollowUp: input.requiresTransferFollowUp === true,
       result,
     });
   });
@@ -301,8 +303,8 @@ export async function finalizePreparedRetellCallResult(
 ): Promise<void> {
   const result = await handleRetellCallAnalyzed({
     call: prepared.call,
-    ...(prepared.requiresTransferFollowUp
-      ? { requiresTransferFollowUp: true }
+    ...(prepared.completionPolicy
+      ? { completionPolicy: prepared.completionPolicy }
       : {}),
     ...(options.prisma ? { prisma: options.prisma } : {}),
   });
@@ -331,7 +333,6 @@ export async function finalizeStoredHostedPhoneCallResult(
   const result = await appendRetellCallAnalyzedNotification({
     call,
     prisma,
-    requiresTransferFollowUp: false,
   });
   if (!result.notificationMailboxItemId) {
     return await readHostedPhoneCallResultDeliveryCompletion({
@@ -386,14 +387,12 @@ function requireHostedPhoneCallResultDeliveryGeneration(
 async function appendRetellCallAnalyzedNotification(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallWebhookStore;
-  requiresTransferFollowUp: boolean;
   result?: HostedPhoneCallResult;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   try {
     return await input.prisma.appendResultNotification(
       input.call,
       input.result,
-      input.requiresTransferFollowUp,
     );
   } catch (error) {
     // Account deletion can cascade the call away during route resolution or
@@ -413,7 +412,6 @@ async function appendPhoneCallResultNotification(input: {
   casAttempt?: number;
   call: HostedPhoneCall;
   prisma: PrismaClient;
-  requiresTransferFollowUp?: boolean;
   result?: HostedPhoneCallResult;
 }): Promise<HostedPhoneCallResultNotificationAppend> {
   const call = input.call;
@@ -504,7 +502,6 @@ async function appendPhoneCallResultNotification(input: {
     destination,
     memberId: call.memberId,
     ...(deliveryGeneration ? { resultDeliveryGeneration: deliveryGeneration } : {}),
-    requiresTransferFollowUp: input.requiresTransferFollowUp === true,
     result,
   });
 
@@ -601,7 +598,6 @@ export function buildPhoneCallResultNotificationWake(input: {
   destination: HostedAssistantNotificationDestination;
   memberId: string;
   resultDeliveryGeneration?: number;
-  requiresTransferFollowUp?: boolean;
   result: HostedPhoneCallResult;
 }) {
   const notificationKey = buildPhoneCallResultNotificationKey(
@@ -609,8 +605,10 @@ export function buildPhoneCallResultNotificationWake(input: {
     input.resultDeliveryGeneration ?? null,
   );
   const trackedDirectResult = input.resultDeliveryGeneration !== undefined;
+  const requiresTransferFollowUp =
+    input.result.completionPolicy === "transfer_follow_up_required";
   const requireSend = trackedDirectResult
-    || input.requiresTransferFollowUp === true
+    || requiresTransferFollowUp
     || isHostedThreadContainerNotificationDestination(input.destination);
   const boundDestination = trackedDirectResult
     || isHostedThreadContainerNotificationDestination(input.destination)
@@ -642,7 +640,6 @@ export function buildPhoneCallResultNotificationWake(input: {
       instructions: buildPhoneCallResultNotificationInstructions({
         brief: input.brief,
         requireSend,
-        requiresTransferFollowUp: input.requiresTransferFollowUp === true,
         result: input.result,
       }),
       // A room must always hear how its call ended. A successful direct
@@ -713,11 +710,10 @@ function resolveHostedPhoneCallWebhookStore(
     $transaction: (callback) => prisma.$transaction((tx) =>
       callback(buildHostedPhoneCallWebhookDatabase(tx))
     ),
-    appendResultNotification: (call, result, requiresTransferFollowUp) =>
+    appendResultNotification: (call, result) =>
       appendPhoneCallResultNotification({
         call,
         prisma,
-        requiresTransferFollowUp,
         result,
       }),
     encryptResult: (input) => crypto.encryptResult({
@@ -789,11 +785,10 @@ export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallR
 export function buildPhoneCallResultNotificationInstructions(input: {
   brief: HostedPhoneCallBrief;
   requireSend?: boolean;
-  requiresTransferFollowUp?: boolean;
   result: HostedPhoneCallResult;
 }): string {
   const target = input.brief.to.label?.trim() || "the requested phone number";
-  const lines = input.requiresTransferFollowUp
+  const lines = input.result.completionPolicy === "transfer_follow_up_required"
     ? [
         "The Murph phone call successfully transferred the user to the call recipient, and that human conversation has now ended.",
         "Always send one concise follow-up. State that Murph completed the handoff and left the conversation, and that what happened afterward is unknown.",

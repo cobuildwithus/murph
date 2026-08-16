@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHostedPhoneCallResultDeliveryKey,
+  hostedPhoneCallResultSchema,
   hostedPhoneCallStartRequestSchema,
   isHostedPhoneCallResultPreProviderRouteFailureCode,
   parseHostedPhoneCallResultDeliveryKey,
@@ -43,6 +44,23 @@ describe("hosted phone-call result notification channels", () => {
   it("keeps legacy calls without a stored channel compatible", () => {
     expect(parseHostedPhoneCallResultNotificationChannel(null)).toBeNull();
     expect(parseHostedPhoneCallResultNotificationChannel(undefined)).toBeNull();
+  });
+
+  it("keeps the transfer follow-up policy bounded and legacy-compatible", () => {
+    expect(hostedPhoneCallResultSchema.parse({
+      outcome: "needs_user",
+      summary: "The human conversation ended after Murph completed the handoff.",
+    })).not.toHaveProperty("completionPolicy");
+    expect(hostedPhoneCallResultSchema.parse({
+      completionPolicy: "transfer_follow_up_required",
+      outcome: "needs_user",
+      summary: "The human conversation ended after Murph completed the handoff.",
+    }).completionPolicy).toBe("transfer_follow_up_required");
+    expect(() => hostedPhoneCallResultSchema.parse({
+      completionPolicy: "provider_decides",
+      outcome: "needs_user",
+      summary: "The human conversation ended after Murph completed the handoff.",
+    })).toThrow();
   });
 
   it("round-trips only generation-scoped delivery keys", () => {

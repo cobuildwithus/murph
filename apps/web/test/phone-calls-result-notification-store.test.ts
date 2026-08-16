@@ -58,6 +58,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
 }));
 
 import {
+  finalizeStoredHostedPhoneCallResult,
   handleRetellCallAnalyzed,
 } from "@/src/lib/phone-calls/result";
 
@@ -266,6 +267,115 @@ describe("default phone-call result notification store", () => {
     expect(mocks.requireHostedAssistantNotificationDestination).not.toHaveBeenCalled();
     expect(mocks.unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      expectedDedupeKey: TRACKED_NOTIFICATION_DEDUPE_KEY,
+      expectedPolicy: "require_send",
+      label: "tracked transfer",
+      result: {
+        completionPolicy: "transfer_follow_up_required",
+        outcome: "needs_user",
+        summary: "The human conversation ended after Murph completed the handoff.",
+      } satisfies HostedPhoneCallResult,
+      tracked: true,
+    },
+    {
+      expectedDedupeKey: LEGACY_NOTIFICATION_DEDUPE_KEY,
+      expectedPolicy: "require_send",
+      label: "generationless manual transfer",
+      result: {
+        completionPolicy: "transfer_follow_up_required",
+        outcome: "needs_user",
+        summary: "The human conversation ended after Murph completed the handoff.",
+      } satisfies HostedPhoneCallResult,
+      tracked: false,
+    },
+    {
+      expectedDedupeKey: LEGACY_NOTIFICATION_DEDUPE_KEY,
+      expectedPolicy: "allow_send_or_skip",
+      label: "legacy ordinary result",
+      result: RESULT,
+      tracked: false,
+    },
+  ] as const)("recovers a stored $label with its durable completion policy", async ({
+    expectedDedupeKey,
+    expectedPolicy,
+    result,
+    tracked,
+  }) => {
+    const storedCall = buildStoredAnalyzedCall(tracked
+      ? {
+          resultDeliveryStatus: "pending",
+          resultNotificationChannel: "telegram",
+        }
+      : {});
+    const prisma = buildPrisma({
+      call: storedCall,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    let durableItem: { id: string; userId: string } | null = null;
+    mocks.readHostedMailboxItemByDedupeKey.mockImplementation(async () =>
+      durableItem
+    );
+    mocks.readHostedPhoneCallResult.mockResolvedValue(result);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      TELEGRAM_DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_transfer_recovery" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async () => {
+      durableItem = {
+        id: "mailbox_transfer_recovery",
+        userId: MEMBER_ID,
+      };
+      return { item: durableItem };
+    });
+
+    const signalRuntime = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: `hosted-user-runtime:${MEMBER_ID}`,
+    }));
+    await expect(finalizeStoredHostedPhoneCallResult(storedCall, {
+      signalRuntime,
+    })).resolves.toBe(tracked ? "pending" : "complete");
+
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
+      ?.envelope;
+    expect(envelope?.eventId).toBe(expectedDedupeKey);
+    expect(envelope?.notification.responsePolicy).toEqual({
+      kind: expectedPolicy,
+    });
+    if (result.completionPolicy === "transfer_follow_up_required") {
+      expect(envelope?.notification.instructions).toContain(
+        "Ask the user what happened after the handoff",
+      );
+      expect(envelope?.notification.instructions).not.toContain(
+        "you may skip sending a message",
+      );
+    } else {
+      expect(envelope?.notification.instructions).toContain(
+        "you may skip sending a message",
+      );
+    }
+    expect(signalRuntime).toHaveBeenCalledWith({
+      abortSignal: undefined,
+      expectedUserId: MEMBER_ID,
+      mailboxItemId: "mailbox_transfer_recovery",
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: buildAnalyzedRetellCallPayload(),
+      completionPolicy: "transfer_follow_up_required",
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_transfer_recovery",
+      notificationUserId: MEMBER_ID,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
   it("converges concurrent webhook and reconciliation appends on one mailbox item", async () => {

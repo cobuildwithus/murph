@@ -1838,7 +1838,10 @@ Last verified: 2026-08-15
   and the workflow completes only after every applicable obligation settles.
   When Retell reports a terminal transfer, its transfer-specific result
   finalizer remains the result obligation and runs independently of usage
-  persistence.
+  persistence. The existing encrypted result owns one bounded optional
+  `transfer_follow_up_required` completion policy, so a crash after result
+  persistence but before mailbox append cannot turn that obligation into a
+  generic or skippable result. Legacy absence retains ordinary result semantics.
   At the first provider fetch, the runtime
   gives Web the exact queued Telegram authority; Web revalidates that authority
   and compare-and-sets the same generation from `queued` to `sending` in the

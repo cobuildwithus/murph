@@ -846,7 +846,7 @@ describe("createHostedPhoneCall", () => {
         end_timestamp: transferEndedAt.toISOString(),
         transfer_end_timestamp: transferEndedAt.toISOString(),
       }),
-      requiresTransferFollowUp: true,
+      completionPolicy: "transfer_follow_up_required",
     }, {
       abortSignal: signal,
     });

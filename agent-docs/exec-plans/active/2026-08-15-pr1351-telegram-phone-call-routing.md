@@ -270,3 +270,22 @@ the member's current authorized Telegram route.
   still attributed the reverted legacy entry to PR #1351. The expectation now
   preserves that entry's original PR ownership; the structured scheduled-call
   item remains the sole changelog evidence for this PR.
+- ReviewGPT round 15 at
+  `3df29426a83ae49d048d7c3411c0b80f0c8c8f28` found that R9's independent
+  stored-result recovery lost the mandatory post-transfer follow-up when a
+  transfer result became durable before mailbox append but terminal usage was
+  still pending or unavailable. The generic recovery path hard-coded the
+  transfer requirement to false, and the deterministic notification could not
+  later be repaired.
+- The remediation persists one bounded optional
+  `transfer_follow_up_required` completion policy inside the existing encrypted
+  result. Legacy absence remains ordinary. Notification response policy and
+  instructions now derive from the decrypted result in both immediate and
+  stored recovery, and the downstream parallel boolean plumbing is deleted.
+  Fault-injection proof fails mailbox append after the result compare-and-set,
+  then recovers from the stored ciphertext. Default-store proof covers exact
+  tracked generation, generationless manual transfer, ordinary legacy absence,
+  terminal follow-up instructions, required-send policy, and deterministic
+  replay without replacement. Five focused Web files pass 149 tests, the
+  Hosted Execution schema proof passes 8 tests, and both affected typechecks
+  pass.
