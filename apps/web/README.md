@@ -442,16 +442,27 @@ is active.
 
 The encrypted phone-call result reader accepts an optional bounded completion
 policy as a consumer-first schema release. This reader-only release must deploy
-before any Web version writes that policy. Activate a writer only after the
-production alias serves this reader and every earlier Web invocation has
-drained for the platform's full configured function lifetime. The reader-only
-release continues to emit the legacy result shape during that interval. After
-writer activation, this reader becomes the permanent Web rollback floor for
-tracked, manual, and group transfers because an older strict reader rejects
-policy-bearing plaintext. A zero count of non-null result-notification-channel
-rows proves only generation-state compatibility; it cannot prove encrypted
-result compatibility. Recover below-floor incidents with a compatible forward
-deployment, not an older strict reader.
+before any Web version writes that policy. The reader-only release continues to
+emit the legacy result shape; it is a compatible consumer prerequisite, not a
+safe active producer after writer activation. Activate the writer only after
+the production alias serves this reader, every earlier Web route invocation has
+drained for the platform's full configured function lifetime, and the Workflow
+inspector proves no pending or running phone-call reconciliation run remains
+pinned to a pre-reader deployment. Vercel Workflow runs retain the deployment
+that started them, so a function-lifetime wait alone does not drain them.
+Tracked and generationless manual direct transfers share the later writer;
+group normalization disables transfer authority and is outside this policy
+evolution. After writer activation, the first release that both reads and
+writes the durable policy is the operational rollback floor. A lower release
+may consume existing policy-bearing results, but must not produce new transfer
+results. An emergency below-floor rollback must pause new phone-call admission
+while the current writer and analyzed-webhook ingress drain every
+result-capable provider call and deployment-pinned reconciliation run. Freeze
+analyzed-webhook ingress only at the lower-release transition, after proving no
+result-producing work remains. A zero count of non-null
+result-notification-channel rows proves only
+generation-state compatibility; it cannot prove encrypted-result compatibility.
+Prefer a compatible forward deployment.
 
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
