@@ -1,6 +1,6 @@
 # General Workout CSV Import
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-15
 
@@ -166,3 +166,11 @@ Updated: 2026-08-15
 - Complexity collapse: reuse the existing hosted scratch namespace, snapshot exclusion, and canonical recovery owners. Add no durable receipt, registry, cleanup service, lifecycle state, or dependency.
 - Proof: the real App Server journeys now create and consume the helper within the same private attempt, clean the directory across success, exact-source replay, pre-commit retry, lost apply receipt, daylight-saving clarification, deleted source, and damaged source evidence, and inspect a real hosted snapshot after each. A simulated interrupted attempt retains private scratch files on disk while the hosted bundle proves that no `.runtime/tmp/workout-csv-import/**` path is included.
 - Focused verification: the success/replay plus pre-commit group passes (2 tests), the lost-receipt case passes (1 test), the clarification/deleted/damaged-source group passes (5 tests), `@murphai/assistant-engine` typecheck passes, and `git diff --check` passes. One earlier combined local run saturated the warm App Server after a timed-out two-cell scripted sequence; collapsing each journey to one bounded skill-read-plus-import cell removed that harness contention, and the final focused groups pass with the production behavior unchanged.
+
+## Completion
+
+- Final ReviewGPT round 15 passed the full exact-head audit at `a5afda49260dd6301b0c89c7e97a87870776179a` with ReviewGPT 0.5.132, valid model verification, and no qualifying findings.
+- Every repository-required exact-head check passed: both CLI hosts, release build/typecheck, package and fixture coverage, app verification, design proof, repository hygiene, billing boundary, viewport proof, Vercel, and the umbrella release gate.
+- The current-main native iOS hosted E2E workflow emitted an additional non-required failure before build or test because its GitHub App client id was unavailable in the workflow context. The active main ruleset requires only the two CLI hosts, release checks, and hosted Stripe boundary; no required check was bypassed.
+- Current-base `git merge-tree --write-tree` proof is clean, the PR description records the final scratch correction and exact change shape, and the PR is ready for the authorized merge boundary.
+Completed: 2026-08-15
