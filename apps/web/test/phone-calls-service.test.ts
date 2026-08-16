@@ -923,6 +923,161 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
+  it("starts terminal usage and stored-result recovery as independent siblings", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: "hpc_concurrent_recovery",
+      providerCallId: "retell_concurrent_recovery",
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "pending",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const usageResolution = createDeferred<{ state: "pending" }>();
+    const resultResolution = createDeferred<"complete">();
+    const resolveTerminalUsage = vi.fn(() => usageResolution.promise);
+    const finalizeStoredResult = vi.fn(() => resultResolution.promise);
+    const recovery = processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage: vi.fn(async () => undefined),
+      },
+      runtime: {
+        ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+        resolveTerminalUsage,
+      },
+      signal: new AbortController().signal,
+    });
+
+    await vi.waitFor(() => {
+      expect(resolveTerminalUsage).toHaveBeenCalledOnce();
+      expect(finalizeStoredResult).toHaveBeenCalledOnce();
+    });
+
+    resultResolution.resolve("complete");
+    usageResolution.resolve({ state: "pending" });
+    await expect(recovery).resolves.toBe("pending");
+  });
+
+  it("drains both recovery siblings before propagating an abort", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: "hpc_abort_drain",
+      providerCallId: "retell_abort_drain",
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "pending",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const usageResolution = createDeferred<{ state: "pending" }>();
+    const resultResolution = createDeferred<"pending">();
+    const resolveTerminalUsage = vi.fn(() => usageResolution.promise);
+    const finalizeStoredResult = vi.fn(() => resultResolution.promise);
+    const controller = new AbortController();
+    const recovery = processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage: vi.fn(async () => undefined),
+      },
+      runtime: {
+        ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+        resolveTerminalUsage,
+      },
+      signal: controller.signal,
+    });
+    let settled = false;
+    void recovery.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(resolveTerminalUsage).toHaveBeenCalledOnce();
+      expect(finalizeStoredResult).toHaveBeenCalledOnce();
+    });
+    controller.abort();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    usageResolution.resolve({ state: "pending" });
+    resultResolution.resolve("pending");
+    await expect(recovery).rejects.toMatchObject({ name: "AbortError" });
+    expect(settled).toBe(true);
+  });
+
+  it("keeps a stored result authoritative over a synthesized transfer result", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: "hpc_stored_transfer_result",
+      providerCallId: "retell_stored_transfer_result",
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "delivered",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const finalizeResult = vi.fn(async () => undefined);
+    const finalizeStoredResult = vi.fn(async () => "complete" as const);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeResult,
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage: vi.fn(async () => undefined),
+      },
+      runtime: {
+        ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+        resolveTerminalUsage: vi.fn(async () => ({
+          state: "ready" as const,
+          terminalTransfer: {
+            endedAt: analyzedAt,
+            providerCallId: existing.providerCallId!,
+          },
+          usage: {
+            combinedCostUsdMicros: 125_000,
+            occurredAt: analyzedAt,
+            providerCallId: existing.providerCallId!,
+          },
+        })),
+      },
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(finalizeStoredResult).toHaveBeenCalledOnce();
+    expect(finalizeResult).not.toHaveBeenCalled();
+  });
+
   it("retries callback-loss recovery until a terminal transfer result is finalized", async () => {
     const existing = buildHostedPhoneCall({
       id: "hpc_transfer_recovery",
@@ -969,10 +1124,12 @@ describe("createHostedPhoneCall", () => {
       ...store.prisma,
       recordTerminalUsage,
     };
+    const finalizeStoredResult = vi.fn(async () => "complete" as const);
     const signal = new AbortController().signal;
 
     await expect(processHostedPhoneCallRecoveryById({
       finalizeResult,
+      finalizeStoredResult,
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -980,6 +1137,7 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toBe("pending");
     await expect(processHostedPhoneCallRecoveryById({
       finalizeResult,
+      finalizeStoredResult,
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -987,6 +1145,7 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toBe("complete");
     await expect(processHostedPhoneCallRecoveryById({
       finalizeResult,
+      finalizeStoredResult,
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -994,7 +1153,7 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toBe("complete");
 
     expect(recordTerminalUsage).toHaveBeenCalledTimes(3);
-    expect(finalizeResult).toHaveBeenCalledTimes(3);
+    expect(finalizeResult).toHaveBeenCalledOnce();
     expect(finalizeResult).toHaveBeenCalledWith({
       call: expect.objectContaining({
         call_id: "retell_transfer_recovery",
@@ -1007,6 +1166,7 @@ describe("createHostedPhoneCall", () => {
     }, {
       abortSignal: signal,
     });
+    expect(finalizeStoredResult).toHaveBeenCalledTimes(2);
     expect(store.currentCall()).toMatchObject({
       analyzedAt: transferEndedAt,
       status: "needs_user",
@@ -2890,4 +3050,18 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     updatedAt: now,
     ...overrides,
   };
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  reject(error: unknown): void;
+  resolve(value: T | PromiseLike<T>): void;
+} {
+  let reject!: (error: unknown) => void;
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
 }

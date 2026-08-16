@@ -101,10 +101,12 @@ interface HostedPhoneCallWebhookStore extends HostedPhoneCallWebhookDatabase {
   appendResultNotification(
     call: HostedPhoneCall,
     result?: HostedPhoneCallResult,
+    options?: { signal?: AbortSignal },
   ): Promise<HostedPhoneCallResultNotificationAppend>;
   encryptResult(input: {
     callId: string;
     memberId: string;
+    signal?: AbortSignal;
     value: HostedPhoneCallResult;
   }): Promise<string>;
 }
@@ -224,6 +226,7 @@ export async function handleRetellCallAnalyzed(input: {
       resultEncrypted = await prisma.encryptResult({
         callId: target.call.id,
         memberId: target.call.memberId,
+        ...(input.abortSignal ? { signal: input.abortSignal } : {}),
         value: result,
       });
     } catch (error) {
@@ -390,11 +393,13 @@ export async function finalizeStoredHostedPhoneCallResult(
   const result = await appendRetellCallAnalyzedNotification({
     call,
     prisma,
+    ...(options.abortSignal ? { signal: options.abortSignal } : {}),
   });
   if (!result.notificationMailboxItemId) {
     return await readHostedPhoneCallResultDeliveryCompletion({
       callId: call.id,
       prisma,
+      ...(options.abortSignal ? { signal: options.abortSignal } : {}),
     });
   }
   await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
@@ -402,19 +407,24 @@ export async function finalizeStoredHostedPhoneCallResult(
     expectedUserId: result.notificationUserId,
     mailboxItemId: result.notificationMailboxItemId,
   });
+  options.abortSignal?.throwIfAborted();
   return await readHostedPhoneCallResultDeliveryCompletion({
     callId: call.id,
     prisma,
+    ...(options.abortSignal ? { signal: options.abortSignal } : {}),
   });
 }
 
 async function readHostedPhoneCallResultDeliveryCompletion(input: {
   callId: string;
   prisma: HostedPhoneCallWebhookStore;
+  signal?: AbortSignal;
 }): Promise<"complete" | "pending"> {
+  input.signal?.throwIfAborted();
   const current = await input.prisma.hostedPhoneCall.findUnique({
     where: { id: input.callId },
   });
+  input.signal?.throwIfAborted();
   if (!current || current.resultNotificationChannel === null) {
     return "complete";
   }
@@ -445,13 +455,16 @@ async function appendRetellCallAnalyzedNotification(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallWebhookStore;
   result?: HostedPhoneCallResult;
+  signal?: AbortSignal;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   try {
     return await input.prisma.appendResultNotification(
       input.call,
       input.result,
+      input.signal ? { signal: input.signal } : undefined,
     );
   } catch (error) {
+    input.signal?.throwIfAborted();
     // Account deletion can cascade the call away during route resolution or
     // mailbox append. Confirm that exact terminal race before suppressing the
     // failure; every failure for a surviving call remains retryable.
@@ -470,7 +483,9 @@ async function appendPhoneCallResultNotification(input: {
   call: HostedPhoneCall;
   prisma: PrismaClient;
   result?: HostedPhoneCallResult;
+  signal?: AbortSignal;
 }): Promise<HostedPhoneCallResultNotificationAppend> {
+  input.signal?.throwIfAborted();
   const call = input.call;
   const trackedTelegramResult = call.resultNotificationChannel === "telegram";
   if (
@@ -480,11 +495,13 @@ async function appendPhoneCallResultNotification(input: {
     return emptyRetellCallAnalyzedHandlingResult();
   }
   if (trackedTelegramResult && call.resultDeliveryStatus === "sending") {
-    return await readExistingPhoneCallResultNotification({
+    const existing = await readExistingPhoneCallResultNotification({
       call,
       generation: requireHostedPhoneCallResultDeliveryGeneration(call),
       prisma: input.prisma,
     });
+    input.signal?.throwIfAborted();
+    return existing;
   }
 
   const deliveryGeneration = trackedTelegramResult
@@ -503,6 +520,7 @@ async function appendPhoneCallResultNotification(input: {
     generation: deliveryGeneration,
     prisma: input.prisma,
   });
+  input.signal?.throwIfAborted();
   if (existing.notificationMailboxItemId) {
     return existing;
   }
@@ -513,8 +531,10 @@ async function appendPhoneCallResultNotification(input: {
       result = await readHostedPhoneCallResult({
         call,
         prisma: input.prisma,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
     } catch {
+      input.signal?.throwIfAborted();
       throw hostedPhoneCallResultNotificationError(
         "HOSTED_PHONE_CALL_RESULT_INVALID",
         "Hosted phone call result notification requires a valid stored result.",
@@ -533,8 +553,10 @@ async function appendPhoneCallResultNotification(input: {
     brief = await readHostedPhoneCallBrief({
       call,
       prisma: input.prisma,
+      ...(input.signal ? { signal: input.signal } : {}),
     });
   } catch {
+    input.signal?.throwIfAborted();
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_BRIEF_INVALID",
       "Hosted phone call result notification requires a valid stored brief.",
@@ -552,6 +574,7 @@ async function appendPhoneCallResultNotification(input: {
     memberId: call.memberId,
     prisma: input.prisma,
   });
+  input.signal?.throwIfAborted();
 
   const envelope = buildPhoneCallResultNotificationWake({
     brief,
@@ -570,6 +593,7 @@ async function appendPhoneCallResultNotification(input: {
     domain: getHostedCryptoDomainForLane("mailbox-payload"),
     prisma: input.prisma,
     retainFailureInScopedCache: true,
+    ...(input.signal ? { signal: input.signal } : {}),
     userId: call.memberId,
   });
   mailboxRoot.rootKey.fill(0);
@@ -603,6 +627,7 @@ async function appendPhoneCallResultNotification(input: {
     }
     return await appendHostedMailboxEnvelopeTx({ envelope, tx });
   });
+  input.signal?.throwIfAborted();
   if (!appended) {
     if ((input.casAttempt ?? 0) >= 2) {
       throw hostedPhoneCallResultNotificationError(
@@ -613,6 +638,7 @@ async function appendPhoneCallResultNotification(input: {
     const current = await input.prisma.hostedPhoneCall.findUnique({
       where: { id: call.id },
     });
+    input.signal?.throwIfAborted();
     if (!current) {
       return emptyRetellCallAnalyzedHandlingResult();
     }
@@ -767,11 +793,12 @@ function resolveHostedPhoneCallWebhookStore(
     $transaction: (callback) => prisma.$transaction((tx) =>
       callback(buildHostedPhoneCallWebhookDatabase(tx))
     ),
-    appendResultNotification: (call, result) =>
+    appendResultNotification: (call, result, options) =>
       appendPhoneCallResultNotification({
         call,
         prisma,
         result,
+        ...(options?.signal ? { signal: options.signal } : {}),
       }),
     encryptResult: (input) => crypto.encryptResult({
       ...input,

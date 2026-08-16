@@ -258,6 +258,7 @@ describe("default phone-call result notification store", () => {
       domain: expect.any(String),
       prisma,
       retainFailureInScopedCache: true,
+      signal: expect.any(AbortSignal),
       userId: MEMBER_ID,
     });
     expect(

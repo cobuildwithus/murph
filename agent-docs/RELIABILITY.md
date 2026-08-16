@@ -1922,12 +1922,18 @@ Last verified: 2026-08-16
   commits terminalizes the queued generation as `failed`; provider success from
   queued remains invalid.
   Callback-loss recovery treats a stored result and terminal Retell usage as
-  sibling obligations in the same reconciliation pass. A ready stored result
-  is finalized even while usage lookup or ledger persistence remains pending,
-  and the workflow completes only after every applicable obligation settles.
-  When Retell reports a terminal transfer, its transfer-specific result
-  finalizer remains the result obligation and runs independently of usage
-  persistence. The existing encrypted result owns one bounded optional
+  sibling obligations in the same reconciliation pass. After the exact row and
+  provider-authority reconciliation, those two branches start together and one
+  bounded `allSettled` drain waits for both, so either branch can make progress
+  without consuming the other's deadline and an abort never leaves started work
+  detached. This bounds each pass to two concurrent obligation branches. A
+  ready stored result is finalized even while usage lookup or ledger persistence
+  remains pending, and the workflow completes only after every applicable
+  obligation settles. When Retell reports a terminal transfer and no stored
+  result exists, its transfer-specific finalizer is synthesized inside the
+  usage branch and runs independently of usage persistence. An existing stored
+  result remains authoritative and suppresses that synthesis. The existing
+  encrypted result owns one bounded optional
   `transfer_follow_up_required` completion policy, so a crash after result
   persistence but before mailbox append cannot turn that obligation into a
   generic or skippable result. Legacy absence retains ordinary result semantics.
