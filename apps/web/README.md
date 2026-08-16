@@ -444,12 +444,18 @@ The encrypted phone-call result reader accepts an optional bounded completion
 policy as a consumer-first schema release. This reader-only release must deploy
 before any Web version writes that policy. The reader-only release continues to
 emit the legacy result shape; it is a compatible consumer prerequisite, not a
-safe active producer after writer activation. Activate the writer only after
-the production alias serves this reader, every earlier Web route invocation has
-drained for the platform's full configured function lifetime, and the Workflow
-inspector proves no pending or running phone-call reconciliation run remains
-pinned to a pre-reader deployment. Vercel Workflow runs retain the deployment
-that started them, so a function-lifetime wait alone does not drain them.
+safe active producer after writer activation. After the production alias serves
+this reader, the first writer cutover must pause new phone-call admission while
+analyzed-webhook ingress remains live. Wait until every result-capable provider
+call and every phone-call reconciliation Workflow pinned to any pre-writer
+deployment, including this reader-only release, has settled. Then freeze
+analyzed-webhook ingress and wait the platform's full configured function
+lifetime so every previously admitted route invocation finishes before the
+writer activates. Resume ingress and admission only after that reader-plus-writer
+release is current. Vercel Workflow runs retain the deployment that started
+them, so elapsed function lifetime alone is not Workflow drain proof. No
+execution capable of invoking a legacy result producer may survive the first
+policy write.
 Tracked and generationless manual direct transfers share the later writer;
 group normalization disables transfer authority and is outside this policy
 evolution. After writer activation, the first release that both reads and
