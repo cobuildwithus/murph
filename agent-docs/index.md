@@ -135,10 +135,10 @@ nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL
 concurrency proof are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, and `agent-docs/references/testing-ci-map.md`.
 
-Telegram rich routine-card authority, catalog-position image provenance,
-single-message fallback ownership, and valid-envelope retry classification
-across all Telegram send operations are specified by `ARCHITECTURE.md` and
-`agent-docs/RELIABILITY.md`.
+Telegram direct and authenticated-group Rich Message authority, optional
+catalog-position image provenance, single-message fallback ownership, and
+valid-envelope retry classification across all Telegram send operations are
+specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
 
 Linq signup-delivery failure suppression uses member-serialized, indexed
 existence reads for the exact five-attempt identity and the member/day live set.
