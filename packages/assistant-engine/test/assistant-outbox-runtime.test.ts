@@ -165,6 +165,37 @@ const CHALLENGE_STANDINGS_RESPONSE_CARD: AssistantResponseCard = {
   footer: null,
 }
 
+const EXERCISE_ROUTINE_RESPONSE_CARD: AssistantResponseCard = {
+  exercises: [{
+    dose: '8 repetitions',
+    estimatedSeconds: 45,
+    images: [],
+    instructions: ['Move slowly.'],
+    name: 'Shoulder circles',
+  }],
+  footer: null,
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain increases.',
+  subtitle: null,
+  title: 'Short reset',
+  totalSeconds: 60,
+  transitionSeconds: 15,
+  version: 1,
+}
+
+const TELEGRAM_RICH_CONTENT_RESPONSE_CARD: AssistantResponseCard = {
+  html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol>',
+  kind: 'telegram_rich_content',
+  version: 1,
+}
+
 const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
   kind: 'compact_table',
   version: 1,
@@ -1283,7 +1314,7 @@ describe('assistant outbox runtime', () => {
 
     await expect(createAssistantOutboxIntent({
       card: NUTRITION_RESPONSE_CARD,
-      channel: 'linq',
+      channel: 'telegram',
       message: rendered,
       sessionId: 'session-response-card-group-conflict',
       threadId: 'thread-response-card-group',
@@ -1293,6 +1324,63 @@ describe('assistant outbox runtime', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
     })
+  })
+
+  it('persists and dispatches presentation cards for Telegram groups', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-telegram-group-card-',
+    )
+
+    for (const [index, card] of [
+      EXERCISE_ROUTINE_RESPONSE_CARD,
+      TELEGRAM_RICH_CONTENT_RESPONSE_CARD,
+    ].entries()) {
+      const rendered = renderAssistantResponseCardText(card)
+      const intent = await createAssistantOutboxIntent({
+        card,
+        channel: 'telegram',
+        dedupeToken: `stable-telegram-group-card-${index}`,
+        message: 'model-authored text must not become the durable card message',
+        sessionId: `session-telegram-group-card-${index}`,
+        threadId: 'thread-telegram-group-card',
+        threadIsDirect: false,
+        turnId: `turn-telegram-group-card-${index}`,
+        vault: vaultRoot,
+      })
+
+      expect(intent.card).toEqual(card)
+      expect(intent.message).toBe(rendered)
+      expect(intent.threadIsDirect).toBe(false)
+
+      mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+        delivery: createDelivery({
+          channel: 'telegram',
+          providerMessageId: `telegram-group-card-${index}`,
+          target: 'thread-telegram-group-card',
+          targetKind: 'thread',
+        }),
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: true,
+        outboxIntentId: null,
+        session: undefined,
+      })
+
+      const dispatched = await dispatchAssistantOutboxIntent({
+        force: true,
+        intentId: intent.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(dispatched.intent.status).toBe('sent')
+      expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          card,
+          media: [],
+          message: rendered,
+        }),
+        expect.any(Object),
+      )
+    }
   })
 
   it('persists and dispatches challenge standings cards for Linq groups only', async () => {

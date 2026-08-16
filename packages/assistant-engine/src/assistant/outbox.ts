@@ -15,6 +15,7 @@ import {
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
   renderAssistantResponseCardText,
   type AssistantResponseCard,
@@ -342,13 +343,13 @@ export async function createAssistantOutboxIntent(
       ...input,
       replyToMessageId,
     })
-    if (
-      card?.kind === 'challenge_standings' &&
-      !(
-        persistedTarget.threadIsDirect === false &&
-        persistedTarget.channel?.trim().toLowerCase() === 'linq'
-      )
-    ) {
+    if (card?.kind === 'challenge_standings' && !(
+      assistantResponseCardMatchesConversationAudience({
+        card,
+        channel: persistedTarget.channel,
+        threadIsDirect: persistedTarget.threadIsDirect,
+      })
+    )) {
       throw new VaultCliError(
         'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
         'A challenge standings response card requires an authenticated Linq group conversation.',
@@ -357,7 +358,11 @@ export async function createAssistantOutboxIntent(
     if (
       card !== null &&
       card.kind !== 'challenge_standings' &&
-      persistedTarget.threadIsDirect !== true
+      !assistantResponseCardMatchesConversationAudience({
+        card,
+        channel: persistedTarget.channel,
+        threadIsDirect: persistedTarget.threadIsDirect,
+      })
     ) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',

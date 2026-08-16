@@ -105,6 +105,12 @@ const ROUTINE_CARD: AssistantResponseCard = {
   version: 1,
 }
 
+const TELEGRAM_RICH_CONTENT_CARD: AssistantResponseCard = {
+  kind: 'telegram_rich_content',
+  version: 1,
+  html: '<h2>Mobility session</h2><ol><li>Move through a comfortable range.</li></ol><blockquote>Stop if pain increases.</blockquote>',
+}
+
 const CHALLENGE_CARD: AssistantResponseCard = {
   kind: 'challenge_standings',
   version: 1,
@@ -261,6 +267,7 @@ function executeCardTool(input: {
   groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
   knowledgePageReadTextFile?: (filePath: string) => Promise<string>
   privateDirectResponseCardAllowed?: boolean | null
+  telegramPresentationResponseCardAllowed?: boolean | null
   request?: Parameters<typeof executeMurphDynamicToolRequest>[0]['request']
   vaultRoot?: string | null
 }) {
@@ -276,6 +283,8 @@ function executeCardTool(input: {
     nextUsageOrdinal: () => 0,
     privateDirectResponseCardAllowed:
       input.privateDirectResponseCardAllowed ?? true,
+    telegramPresentationResponseCardAllowed:
+      input.telegramPresentationResponseCardAllowed ?? false,
     progressDelivery: null,
     request: input.request ?? {
       card: CARD,
@@ -757,21 +766,21 @@ describe('murph.attach_response_card', () => {
     expect(groupTool!.description).toContain('Collective cards have no row cap')
   })
 
-  it('describes the private on-demand canonical-read contract', () => {
+  it('describes Telegram cards as flexible presentation options', () => {
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
-      'Never use this tool to derive or present nutrition totals or targets, tracked-workout state, a compact table that attach_response_card can represent, or a catalog-backed movement routine',
+      'direct or group Telegram conversation',
     )
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
-      'If the owning semantic card cannot be attached, use ordinary text instead of this tool',
+      'Normal conversation can remain ordinary text, even when it needs several paragraphs',
     )
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
-      'These three approved cards remain routing examples',
+      'useful presentation examples, not exclusive content owners',
     )
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
-      'They are not HTML templates',
+      'custom or mixed layout is clearer',
     )
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
-      'Keep short answers, one-paragraph advice, confirmations, urgent single actions, and casual chat as ordinary text',
+      'Do not use presentation to invent or bypass canonical reads, writes, or safety workflows',
     )
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
       'keep safety limits and stop conditions visible',
@@ -783,19 +792,19 @@ describe('murph.attach_response_card', () => {
       'Do not repeat the same facts in a summary, table, and details',
     )
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
-      '<details><summary>Why this helps</summary>',
+      '<details><summary>Exercise notes</summary>',
     )
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
-      'repeat, resend, or improve the presentation of a movement routine already present in the committed conversation',
+      'a request to repeat or improve an earlier routine',
     )
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
-      'not styled plain text',
+      'one useful presentation option, not the only valid rich layout',
     )
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
-      'By default, include at least one useful returned catalog image for every exercise that has one.',
+      'images are recommended, not required',
     )
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
-      'Omit exercise images only when the user explicitly asks for a routine without them.',
+      'Use attach_telegram_rich_content when a custom or mixed layout is clearer.',
     )
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
       'Never promise images for an exercise that has none.',
@@ -1084,20 +1093,15 @@ describe('murph.attach_response_card', () => {
     )).toMatchObject({
       kind: 'invalid-response-card-arguments',
     })
-    const telegramRichContent = {
-      kind: 'telegram_rich_content',
-      version: 1,
-      html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol><blockquote>Keep the passport with you.</blockquote>',
-    } satisfies AssistantResponseCard
     expect(readCardToolRequest(
-      { card: telegramRichContent },
+      { card: TELEGRAM_RICH_CONTENT_CARD },
       'attach_telegram_rich_content',
     )).toEqual({
-      card: telegramRichContent,
+      card: TELEGRAM_RICH_CONTENT_CARD,
       kind: 'attach-response-card',
     })
     expect(readCardToolRequest(
-      { card: telegramRichContent },
+      { card: TELEGRAM_RICH_CONTENT_CARD },
       'attach_response_card',
     )).toMatchObject({
       kind: 'invalid-response-card-arguments',
@@ -1105,7 +1109,7 @@ describe('murph.attach_response_card', () => {
     expect(readCardToolRequest(
       {
         card: {
-          ...telegramRichContent,
+          ...TELEGRAM_RICH_CONTENT_CARD,
           html: '<h2>Travel prep</h2><img src="https://example.test/a.png">',
         },
       },
@@ -1246,6 +1250,7 @@ describe('murph.attach_response_card', () => {
   it('enforces audience-specific card kinds without weakening duplicate checks', async () => {
     const groupNutrition = await executeCardTool({
       privateDirectResponseCardAllowed: false,
+      telegramPresentationResponseCardAllowed: true,
     })
     expect(groupNutrition.rpcResult).toEqual({
       contentItems: [{
@@ -1253,6 +1258,32 @@ describe('murph.attach_response_card', () => {
         type: 'inputText',
       }],
       success: false,
+    })
+
+    const groupRoutine = await executeCardTool({
+      privateDirectResponseCardAllowed: false,
+      request: {
+        card: ROUTINE_CARD,
+        kind: 'attach-response-card',
+      },
+      telegramPresentationResponseCardAllowed: true,
+    })
+    expect(groupRoutine).toMatchObject({
+      responseCardPatch: { card: ROUTINE_CARD },
+      rpcResult: { success: true },
+    })
+
+    const groupRichContent = await executeCardTool({
+      privateDirectResponseCardAllowed: false,
+      request: {
+        card: TELEGRAM_RICH_CONTENT_CARD,
+        kind: 'attach-response-card',
+      },
+      telegramPresentationResponseCardAllowed: true,
+    })
+    expect(groupRichContent).toMatchObject({
+      responseCardPatch: { card: TELEGRAM_RICH_CONTENT_CARD },
+      rpcResult: { success: true },
     })
 
     const privateChallenge = await executeCardTool({

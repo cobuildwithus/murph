@@ -1495,42 +1495,57 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           sandbox: 'workspace-write' as const,
           workingDirectory,
         }
-        const voiceRoutine = await executeRealCodexAppServerTurn({
+        const structuredTrainingGuide = await executeRealCodexAppServerTurn({
           ...common,
-          prompt: 'Give me a brief vocal warm-up before a presentation. Organize preparation, sound, and recovery as ordered steps. Keep any limits visible. Make it easy to scan on Telegram.',
+          prompt: 'Create a short at-home training note with a warm-up checklist, a bodyweight strength circuit, and a cooldown. Use a clear custom layout, not a compact table. Keep the safety limit visible and do not use images.',
         })
-        const voiceActions = readCapabilityRoutingActions(
-          voiceRoutine.jsonEvents,
+        const trainingActions = readCapabilityRoutingActions(
+          structuredTrainingGuide.jsonEvents,
         )
         expect(
-          voiceActions.filter((action) =>
+          trainingActions.filter((action) =>
             action.kind === 'dynamic'
             && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
           ),
         ).toHaveLength(1)
-        expect(voiceRoutine.responseCard).toMatchObject({
+        expect(structuredTrainingGuide.responseCard).toMatchObject({
           kind: 'telegram_rich_content',
           version: 1,
           html: expect.stringMatching(/<h2>[\s\S]*<ol>[\s\S]*<blockquote>/iu),
         })
-        expect(voiceRoutine.finalMessage.trim()).toBe('')
-        expect(voiceRoutine.responseMedia).toEqual([])
+        expect(structuredTrainingGuide.finalMessage.trim()).toBe('')
+        expect(structuredTrainingGuide.responseMedia).toEqual([])
 
         const compactSchedule = await executeRealCodexAppServerTurn({
           ...common,
           prompt: 'Make a compact two-column Telegram table for Monday and Wednesday focus sessions. Use 20 minutes on both days. The table alone is the complete answer.',
         })
-        const compactActions = readCapabilityRoutingActions(
-          compactSchedule.jsonEvents,
+        expect(['compact_table', 'telegram_rich_content']).toContain(
+          compactSchedule.responseCard?.kind,
         )
-        expect(compactActions.some((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
-        )).toBe(false)
-        expect(compactSchedule.responseCard).toMatchObject({
-          kind: 'compact_table',
-        })
         expect(compactSchedule.finalMessage.trim()).toBe('')
+
+        const conversationalReply = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: [
+            'Reply as a normal conversation in three short paragraphs.',
+            'Explain why building a new habit can feel uneven, acknowledge that',
+            'one difficult day does not erase progress, and end with an',
+            'encouraging thought. Do not make a plan, checklist, schedule, or list.',
+          ].join(' '),
+        })
+        const conversationalActions = readCapabilityRoutingActions(
+          conversationalReply.jsonEvents,
+        )
+        expect(conversationalActions.some((action) =>
+          action.kind === 'dynamic'
+          && (
+            action.tool === MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name
+            || action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+          )
+        )).toBe(false)
+        expect(conversationalReply.responseCard).toBeNull()
+        expect(conversationalReply.finalMessage.trim()).not.toBe('')
 
         const shortReply = await executeRealCodexAppServerTurn({
           ...common,
