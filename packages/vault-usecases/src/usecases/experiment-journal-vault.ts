@@ -1618,9 +1618,7 @@ type ExperimentSessionRecordInput = {
 }
 
 type ExperimentReminderOccurrenceProof = {
-  automationId: string
   plannedOccurrenceAt: string
-  scheduledOccurrenceAt: string
 }
 
 const EXPERIMENT_REMINDER_EXTERNAL_REF_SYSTEM = 'murph-assistant'
@@ -1705,8 +1703,7 @@ export async function logExperimentSessionRecord(input: ExperimentSessionRecordI
           EXPERIMENT_REMINDER_EXTERNAL_REF_SYSTEM,
           EXPERIMENT_REMINDER_EXTERNAL_REF_RESOURCE_TYPE,
           frontmatter.experimentId,
-          reminderProof.automationId,
-          reminderProof.scheduledOccurrenceAt,
+          reminderProof.plannedOccurrenceAt,
         ]),
       )
   const note = normalizeOptionalText(input.note) ?? undefined
@@ -1730,8 +1727,8 @@ export async function logExperimentSessionRecord(input: ExperimentSessionRecordI
       : {
           system: EXPERIMENT_REMINDER_EXTERNAL_REF_SYSTEM,
           resourceType: EXPERIMENT_REMINDER_EXTERNAL_REF_RESOURCE_TYPE,
-          resourceId: reminderProof.automationId,
-          version: reminderProof.scheduledOccurrenceAt,
+          resourceId: frontmatter.experimentId,
+          version: reminderProof.plannedOccurrenceAt,
         },
     interventionType,
     durationMinutes: input.durationMinutes,
@@ -1862,9 +1859,7 @@ async function resolveExperimentReminderOccurrenceProof(input: {
   }
 
   return {
-    automationId: authority.automationId,
     plannedOccurrenceAt: intent.plannedOccurrenceAt,
-    scheduledOccurrenceAt: intent.scheduledOccurrenceAt,
   }
 }
 
@@ -1881,8 +1876,8 @@ async function writeExperimentReminderSessionEvent(input: {
       vaultRoot: input.vault,
       system: EXPERIMENT_REMINDER_EXTERNAL_REF_SYSTEM,
       resourceType: EXPERIMENT_REMINDER_EXTERNAL_REF_RESOURCE_TYPE,
-      resourceId: input.proof.automationId,
-      version: input.proof.scheduledOccurrenceAt,
+      resourceId: input.experimentId,
+      version: input.proof.plannedOccurrenceAt,
     })
     if (existing !== null) {
       if (

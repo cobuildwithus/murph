@@ -5477,7 +5477,9 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
         ? []
         : [`- scheduledOccurrenceAt: ${delivery.scheduledOccurrenceAt}`]),
       ...(delivery.plannedOccurrenceAt === null
-        ? []
+        ? [
+            '- plannedOccurrenceAt: unavailable; treat this reminder as context only and use ordinary session resolution',
+          ]
         : [`- plannedOccurrenceAt: ${delivery.plannedOccurrenceAt}`]),
       'Text:',
       delivery.message,

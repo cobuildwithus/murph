@@ -3326,6 +3326,50 @@ describe('assistant auto-reply event-first path', () => {
     expect(editedTurnContext).not.toContain('Canonical experiment reminder context:')
   })
 
+  it('marks legacy reminder context without planned chronology as context only', async () => {
+    const vault = await createTempVault()
+    const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM41WC'
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationAuthority: {
+          automationId: 'automation_01JQ8PWXP5A68SQM1W0GYM41WB',
+          expectedUpdatedAt: '2026-04-08T00:04:00.000Z',
+          supportSeriesId: `experiment:${experimentId}`,
+        },
+        intentId: 'intent-legacy-experiment-reminder',
+        message: 'Legacy reminder: reply when complete.',
+        plannedOccurrenceAt: null,
+        scheduledOccurrenceAt: '2026-04-08T00:03:00.000Z',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createAssistantInputCandidate({
+        occurredAt: '2026-04-08T00:10:00.000Z',
+        optionalInboxCaptureId: null,
+        source: 'email',
+        text: 'Done',
+        threadIsDirect: true,
+      })),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const turnContext = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+      .turnContext ?? ''
+    expect(turnContext).toContain('Legacy reminder: reply when complete.')
+    expect(turnContext).toContain(
+      '- plannedOccurrenceAt: unavailable; treat this reminder as context only and use ordinary session resolution',
+    )
+  })
+
   it('records the selected cross-session intent in receipt metadata so subsequent turns can suppress it', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({

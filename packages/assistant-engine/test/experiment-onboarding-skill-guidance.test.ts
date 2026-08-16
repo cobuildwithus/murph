@@ -547,6 +547,21 @@ describe('experiment onboarding skill guidance', () => {
       'the canonical writer validates delivery, owner, occurrence, and deterministic retry identity, then returns canonical progress',
     )
     expect(raw).toContain(
+      'a second accepted reminder for that same planned occurrence returns the existing event',
+    )
+    expect(raw).toContain(
+      'A trusted legacy reminder with no `plannedOccurrenceAt` is conversational context only, not reminder-write provenance.',
+    )
+    expect(raw).toContain(
+      'Never pass its intent id to `--reminder-intent-id`, and never substitute its notification time for session chronology.',
+    )
+    expect(raw).toContain(
+      'only when the canonical plan identifies exactly one applicable uncompleted occurrence',
+    )
+    expect(raw).toContain(
+      'ask one narrow question about which session was completed and write nothing',
+    )
+    expect(raw).toContain(
       'A later change, archival, or deletion of the automation does not rewrite the historical message the member received.',
     )
     expect(raw).toContain(

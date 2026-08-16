@@ -78,6 +78,7 @@ async function withExperiment(
 }
 
 async function writeReminderIntent(input: {
+  automationId?: string
   experimentId: string
   intentId: string
   plannedOccurrenceAt?: string | null
@@ -116,7 +117,7 @@ async function writeReminderIntent(input: {
     bindingDelivery: null,
     deliverySource: null,
     automationAuthority: {
-      automationId,
+      automationId: input.automationId ?? automationId,
       supportSeriesId:
         input.supportSeriesId ?? `experiment:${input.experimentId}`,
       expectedUpdatedAt: scheduledOccurrenceAt,
@@ -158,13 +159,19 @@ async function writeReminderIntent(input: {
 test('delivered reminder provenance owns one deterministic experiment occurrence without a current automation read', async () => {
   await withExperiment(async ({ experimentId, vaultRoot }) => {
     await writeReminderIntent({
+      automationId: 'automation_first_session_prep',
       experimentId,
       intentId: firstIntentId,
+      plannedOccurrenceAt,
+      scheduledOccurrenceAt: crossingReminderAt,
       vaultRoot,
     })
     await writeReminderIntent({
+      automationId: 'automation_planned_session_support',
       experimentId,
       intentId: retryIntentId,
+      plannedOccurrenceAt,
+      scheduledOccurrenceAt: plannedOccurrenceAt,
       vaultRoot,
     })
 
@@ -180,16 +187,32 @@ test('delivered reminder provenance owns one deterministic experiment occurrence
         reminderIntentId: retryIntentId,
       }),
     ])
+    const sequentialReplay = await logExperimentSessionRecord({
+      vault: vaultRoot,
+      lookup: experimentId,
+      reminderIntentId: retryIntentId,
+    })
 
     assert.equal([first, replay].filter((result) => result.created).length, 1)
     assert.equal(replay.eventId, first.eventId)
-    if (!('progress' in first) || !('progress' in replay)) {
+    assert.equal(sequentialReplay.created, false)
+    assert.equal(sequentialReplay.eventId, first.eventId)
+    if (
+      !('progress' in first)
+      || !('progress' in replay)
+      || !('progress' in sequentialReplay)
+    ) {
       assert.fail('reminder-backed writes must return canonical progress readback')
     }
     assert.equal(first.progress?.adherence.completedSessions, 1)
     assert.deepEqual(first.progress?.adherence.sessionEventIds, [first.eventId])
     assert.equal(replay.progress?.adherence.completedSessions, 1)
     assert.deepEqual(replay.progress?.adherence.sessionEventIds, [first.eventId])
+    assert.equal(sequentialReplay.progress?.adherence.completedSessions, 1)
+    assert.deepEqual(
+      sequentialReplay.progress?.adherence.sessionEventIds,
+      [first.eventId],
+    )
     assert.equal(
       await countEventIdInLedger({
         eventId: first.eventId,
@@ -197,6 +220,53 @@ test('delivered reminder provenance owns one deterministic experiment occurrence
         vaultRoot,
       }),
       1,
+    )
+  })
+})
+
+test('distinct planned occurrences retain distinct canonical session effects', async () => {
+  await withExperiment(async ({ experimentId, vaultRoot }) => {
+    const laterOccurrenceAt = new Date(
+      Date.parse(occurrenceAt) + 60 * 60 * 1000,
+    ).toISOString()
+    await writeReminderIntent({
+      automationId: 'automation_session_one',
+      experimentId,
+      intentId: firstIntentId,
+      plannedOccurrenceAt: occurrenceAt,
+      scheduledOccurrenceAt: occurrenceAt,
+      vaultRoot,
+    })
+    await writeReminderIntent({
+      automationId: 'automation_session_two',
+      experimentId,
+      intentId: retryIntentId,
+      plannedOccurrenceAt: laterOccurrenceAt,
+      scheduledOccurrenceAt: laterOccurrenceAt,
+      vaultRoot,
+    })
+
+    const first = await logExperimentSessionRecord({
+      vault: vaultRoot,
+      lookup: experimentId,
+      reminderIntentId: firstIntentId,
+    })
+    const second = await logExperimentSessionRecord({
+      vault: vaultRoot,
+      lookup: experimentId,
+      reminderIntentId: retryIntentId,
+    })
+
+    assert.notEqual(second.eventId, first.eventId)
+    assert.equal(first.created, true)
+    assert.equal(second.created, true)
+    if (!('progress' in second)) {
+      assert.fail('reminder-backed writes must return canonical progress readback')
+    }
+    assert.equal(second.progress?.adherence.completedSessions, 2)
+    assert.deepEqual(
+      second.progress?.adherence.sessionEventIds,
+      [first.eventId, second.eventId],
     )
   })
 })
