@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-15
+Last verified: 2026-08-16
 ## Local Frog Autofix
 
 Murph's optional local Frog repair loop is an operator-owned macOS process, not
@@ -873,6 +873,12 @@ route loss observed after that generation already crossed provider entry is
 also ambiguous, never permission to resend onto a new route. One
 terminal callback re-arms one oldest member-local obligation, so retention
 expiry cannot fabricate completion and recovery adds no queue or scheduler.
+The encrypted result itself owns the bounded optional direct-transfer follow-up
+policy, so same-version stored recovery cannot lose that obligation. A
+reader-only Web release must accept that field before this writer activates;
+after the first policy write, reader-plus-writer Web is the operational rollback
+floor independently of generation state. Group transfer authority is disabled
+at both normalization boundaries and is outside this policy evolution.
 
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 

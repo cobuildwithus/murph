@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-15
+Last verified: 2026-08-16
 
 ## Local Frog autofix authority
 

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-15
-Updated: 2026-08-15
+Updated: 2026-08-16
 
 ## Goal
 
@@ -289,3 +289,25 @@ the member's current authorized Telegram route.
   replay without replacement. Five focused Web files pass 149 tests, the
   Hosted Execution schema proof passes 8 tests, and both affected typechecks
   pass.
+- ReviewGPT round 16 at
+  `fcb5cd99435c7c3922d8d293d63e56283bc3647d` found that the new strict result
+  writer was not backward-readable by the prior strict Web schema. The mismatch
+  affected tracked and generationless direct transfers even when
+  `result_notification_channel` was null, so the documented tracked-row count
+  could not prove a safe rollback.
+- The correction was split into consumer-first PR #1923. That release accepts
+  the optional bounded completion policy, continues to emit the legacy result
+  shape, proves the previous strict-reader fixture rejects policy-bearing data,
+  and disables transfer authority for group calls at both normalization
+  boundaries. PR #1923 passed ReviewGPT and required CI, merged to `main` at
+  `9330b2476d81bff977dacb3c1978fa6a20c82fc7`, and is the required production
+  reader prerequisite for this writer.
+- Current `main` is merged into this branch at `334ac78860`. The conflict
+  resolution preserves generation-scoped tracked delivery, derives mandatory
+  transfer follow-up exclusively from the durable result policy, removes a
+  redundant recovery test, and documents two independent floors: the first
+  reader-plus-writer release after any policy write, plus generation-aware Web
+  while non-null result-channel rows exist.
+- ReviewGPT `0.5.133` is now the repository version. The frozen install and
+  installed CLI version are proved locally; the next sensitive full-snapshot
+  round will use that version.

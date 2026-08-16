@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-15
+Last verified: 2026-08-16
 ## Local Frog autofix scheduling
 
 - One macOS user-session LaunchAgent owns the optional local schedule with
@@ -1949,20 +1949,36 @@ Last verified: 2026-08-15
   handling first hands off its foreground wake, then returns a retryable error
   when re-arm fails so an idempotent retry repeats the lookup and start.
   Request-key replay still requires exact stored-channel
-  equality, including legacy null, before provider work. Group calls keep null
-  and their existing thread-container delivery behavior. Deploy the additive
-  schema and Web callback before the runner producer, then roll the runner out
-  immediately. A rollback must first stop new tracked scheduled-call admission
-  and keep a callback-capable runner until every nonterminal tracked call
-  drains; only then may the runner roll below callback support. Generation-aware
-  Web is a hard rollback floor after the first non-null result channel is
-  stored. Terminal tracked rows remain replay-suppression authority because old
-  Web uses the legacy result key and channel-agnostic routing; the floor cannot
-  be crossed until an operator query proves zero non-null result-channel rows.
-  A nonzero result requires continued compatible Web or a separately reviewed
-  forward migration. Emergency older-Web rollback additionally requires
-  disabling tracked phone calls and analyzed-webhook ingress before proving no
-  replay-capable tracked row remains.
+  equality, including legacy null, before provider work. Tracked and
+  generationless manual direct transfers write the same bounded completion
+  policy. Group calls keep null and their existing thread-container delivery
+  behavior, and group normalization removes transfer authority at both
+  boundaries so groups are outside this policy evolution.
+  The completion-policy rollout is consumer-first. Its reader-only Web release
+  accepts the optional policy but emits only the legacy shape. Before the first
+  reader-plus-writer Web activates, pause all new phone-call admission and wait
+  the full configured start-route lifetime so every prior request exits or
+  exposes its durable call and deployment-pinned reconciliation Workflow. Keep
+  analyzed-result ingress live until every result-capable provider call and
+  every pre-writer Workflow settles. Then freeze that ingress, wait its full
+  route lifetime, and re-prove zero provider calls, pre-writer Workflows, or
+  other legacy-producer executions. Vercel Workflow runs retain their starting
+  deployment, so elapsed route lifetime is not Workflow drain proof. Apply the
+  additive result-channel schema and deploy the reader-plus-writer Web before
+  the runner producer, then roll the runner out immediately. Resume ingress and
+  admission only after compatible Web is current.
+  After the first durable policy write, reader-plus-writer Web is the
+  operational rollback floor even when no result channel is stored. A lower
+  reader may accept existing policy-bearing ciphertext but must not produce new
+  transfer results. Generation-aware Web is an additional rollback floor while
+  any non-null result-channel row exists. Terminal tracked rows remain
+  replay-suppression authority because old Web uses the legacy result key and
+  channel-agnostic routing. A zero non-null result-channel count proves only
+  generation-state compatibility and cannot prove encrypted-result
+  compatibility. Emergency rollback below either floor repeats the full
+  admission, provider/Workflow, and result-ingress drain; prefer a compatible
+  forward deployment. A runner rollback additionally keeps the callback-capable
+  runner until every nonterminal tracked call drains.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution
