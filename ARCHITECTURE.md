@@ -2148,9 +2148,11 @@ effect, Telegram projection, provider entry, and outbox lifecycle. Group access
 uses the existing authenticated Telegram room route and exposes only the
 presentation-only Telegram tools, not private semantic cards. One shared
 audience predicate admits those two card kinds at outbox creation, persisted
-intent parsing, and hosted delivery parsing. A defensive Linq path renders
-deterministic text and never attempts a Messages card. No new delivery or
-persistence owner exists.
+intent parsing, and hosted delivery parsing. After the first group presentation
+card is persisted, this audience-capable runner bundle is the rollback floor
+because the preceding strict readers reject the non-direct card. A defensive
+Linq path renders deterministic text and never attempts a Messages card. No new
+delivery or persistence owner exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a

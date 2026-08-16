@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-15
+Last verified: 2026-08-16
 
 ## Purpose
 
@@ -64,10 +64,11 @@ specified by
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
-Private Telegram model-authored rich-content admission, exclusive semantic-card
-ownership, closed HTML, disabled automatic Telegram entities, trusted text
-fallback derivation, and runner rollback ownership are jointly specified by
-`ARCHITECTURE.md`, `agent-docs/PRODUCT_SENSE.md`, `agent-docs/SECURITY.md`, and
+Direct and authenticated-group Telegram model-authored rich-content admission,
+optional semantic-card selection, closed HTML, disabled automatic Telegram
+entities, trusted text fallback derivation, and the group-audience runner
+rollback floor are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/PRODUCT_SENSE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/RELIABILITY.md`.
 
 Local setup and assistant delivery no longer own an operational email provider:

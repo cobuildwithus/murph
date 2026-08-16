@@ -28,6 +28,7 @@ Updated: 2026-08-16
   - The shared card-audience rule at outbox and hosted delivery boundaries.
   - Exercise catalog presentation guidance.
   - Focused tests and durable product, architecture, and reliability documentation.
+  - Existing Cloudflare rollout guidance for the new persisted audience shape.
   - A member-facing changelog entry.
 - Out of scope:
   - Card schemas, renderers, Telegram transport, retry, or provider changes.
@@ -54,6 +55,8 @@ Updated: 2026-08-16
    Mitigation: Keep those domain rules explicit while removing presentation exclusivity.
 3. Risk: The model could over-format casual conversation.
    Mitigation: Tie the preference to content structure and state that normal conversation can remain plain text.
+4. Risk: A persisted Telegram group card cannot be read by the preceding strict runner.
+   Mitigation: Use immediate container rollout, prove the exact runner fingerprint, and treat the compatible bundle as the rollback floor after the first group-card write.
 
 ## Tasks
 
@@ -74,6 +77,10 @@ Updated: 2026-08-16
 - The accepted review finding showed that group cards reached the tool layer but
   failed at the outbox. One shared pure predicate now keeps the outbox,
   persisted-intent parser, and hosted parser aligned without a new delivery path.
+- ReviewGPT round 2 confirmed that delivery finding is resolved. It identified
+  the persisted audience shape as a new runner rollback floor. The existing
+  deployment and reliability guides now name the immediate rollout, fingerprint
+  proof, quarantine signals, and forward-fix recovery rule.
 
 ## Verification
 
