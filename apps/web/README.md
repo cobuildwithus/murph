@@ -1641,8 +1641,9 @@ from selecting the isolated build worker automatically. The hosted local-
 development wrapper remains on Turbopack and rejects an explicit Webpack flag.
 The production runner also owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
-compilation and writes the epoch only after Next succeeds. Production Webpack
-compiles are additionally cold-cache by policy: the runner removes
+compilation and writes the epoch only after Next succeeds and the post-success
+Webpack-cache discard completes. Production Webpack compiles are additionally
+cold-cache by policy: the runner removes
 `.next/cache/webpack` before every compile and discards it again after a
 successful compile, so a READY deployment cannot seed the next build with warm
 Webpack state. Warm restored Webpack caches on Vercel's 8 GB Standard builder

@@ -861,8 +861,8 @@ fallback through the same shared production-build selector, with the isolated
 Webpack build worker and memory optimizations enabled. Interactive development
 and the dev-smoke lane remain on Turbopack. A cache-local compiler epoch removes
 all of `.next/cache` when a restored cache predates the current epoch and writes
-the epoch only after a successful Next build, so a failed transition retries
-cold. Production Webpack compiles are additionally cold-cache by policy: the
+the epoch only after a successful Next build and a successful post-success
+Webpack-cache discard, so a failed transition retries cold. Production Webpack compiles are additionally cold-cache by policy: the
 runner clears `.next/cache/webpack` before every compile and discards it after
 a successful compile, because warm restored Webpack caches were the trigger for
 the August 2026 steady-state 8 GB container OOM kills and silent compile hangs

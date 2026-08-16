@@ -14,6 +14,7 @@ const productionBuildScript = path.join(
 const buildCacheEpoch = "webpack-next-16.3-v2-cold-webpack";
 const vercelTimeoutInvocation = [
   "--verbose",
+  "--foreground",
   "--signal=TERM",
   "--kill-after=30s",
   "15m",
@@ -63,6 +64,9 @@ if [[ "\${1:-}" == "-p" ]]; then
 fi
 if [[ "\${1:-}" == "../../scripts/rm-paths.mjs" ]]; then
   printf '%s\\n' "\${2:-}" >> "\$MURPH_FAKE_REMOVE_LOG"
+  if [[ -n "\${MURPH_FAKE_REMOVE_FAIL_AFTER_BUILD:-}" && -f "\$MURPH_FAKE_BUILD_LOG" ]]; then
+    exit 31
+  fi
   rm -rf "\${2:-}"
   exit 0
 fi
@@ -109,6 +113,7 @@ function runProductionBuild(input: {
   buildLog: string;
   removeLog: string;
   scriptPath: string;
+  removeFailAfterBuild?: boolean;
   timeoutExitCode?: number;
   timeoutLog: string;
   vercel?: boolean;
@@ -125,6 +130,9 @@ function runProductionBuild(input: {
     NODE_OPTIONS: "--trace-warnings --max-old-space-size=99",
     PATH: `${input.binDir}:${process.env.PATH ?? ""}`,
   };
+  if (input.removeFailAfterBuild) {
+    env.MURPH_FAKE_REMOVE_FAIL_AFTER_BUILD = "1";
+  }
   if (input.vercel === false) {
     delete env.VERCEL;
     delete env.VERCEL_ENV;
@@ -138,6 +146,40 @@ function runProductionBuild(input: {
     env,
   });
 }
+
+const gnuTimeoutAvailable = (() => {
+  const probe = spawnSync("timeout", ["--version"], { encoding: "utf8" });
+  return probe.status === 0 && probe.stdout.includes("GNU coreutils");
+})();
+
+test.skipIf(!gnuTimeoutAvailable)(
+  "GNU timeout --foreground keeps the compile in the caller's process group and still escalates to KILL",
+  () => {
+    const stubborn = spawnSync(
+      "timeout",
+      [
+        "--verbose",
+        "--foreground",
+        "--signal=TERM",
+        "--kill-after=1s",
+        "1s",
+        "bash",
+        "-c",
+        'trap "" TERM; ps -o pgid= -p $$; sleep 30',
+      ],
+      { encoding: "utf8" },
+    );
+    const ownPgid = spawnSync("ps", ["-o", "pgid=", "-p", String(process.pid)], {
+      encoding: "utf8",
+    }).stdout.trim();
+    // --foreground keeps the timed command inside the caller's process group,
+    // so the package-build owner's group-directed cancellation still covers it.
+    expect(stubborn.stdout.trim()).toBe(ownPgid);
+    // A TERM-ignoring compile is force-killed at the kill-after boundary.
+    expect(stubborn.status).toBe(137);
+    expect(stubborn.stderr).toContain("sending signal KILL");
+  },
+);
 
 test("production Next runner owns the cold Webpack cache and Vercel watchdog", async () => {
   const fixture = await createRunnerFixture();
@@ -247,6 +289,23 @@ test("production Next runner owns the cold Webpack cache and Vercel watchdog", a
     );
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
     await expect(readFile(fixture.timeoutLog, "utf8")).resolves.toBe(vercelTimeoutInvocation);
+
+    await writeFile(cacheStamp, "turbopack-old-epoch\n");
+    await rm(fixture.removeLog, { force: true });
+    await rm(fixture.buildLog, { force: true });
+    const discardFailedBuild = runProductionBuild({ ...fixture, removeFailAfterBuild: true });
+    expect(discardFailedBuild.status).toBe(31);
+    await expect(readFile(cacheStamp, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(
+      ".next/cache\n.next/cache/webpack\n",
+    );
+
+    const recoveredAfterDiscardFailure = runProductionBuild(fixture);
+    expect(recoveredAfterDiscardFailure.status, recoveredAfterDiscardFailure.stderr).toBe(0);
+    expect(recoveredAfterDiscardFailure.stdout).toContain(
+      "Resetting incompatible Next build cache",
+    );
+    await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
   } finally {
     await fixture.cleanup();
   }

@@ -398,10 +398,12 @@ supported provider credential.
   owns the Vercel package build and CI memory-observation invocation. The
   production runner keeps Webpack compiles cold-cache (it clears
   `.next/cache/webpack` before every compile and discards it after success)
-  and, on Vercel production builds only (`VERCEL_ENV=production`), bounds
-  `next build` with a 15-minute `timeout` watchdog so a wedged compile fails
-  fast instead of reaching Vercel's 45-minute ceiling. The verify lane's
-  `VERCEL=1 VERCEL_ENV=preview` build shape stays unbounded. The split reduces the compile-parent peak without
+  and, on Vercel production builds only (`VERCEL=1` with
+  `VERCEL_ENV=production`), bounds `next build` with a 15-minute `timeout`
+  watchdog so a wedged compile fails fast instead of reaching Vercel's
+  45-minute ceiling. The verify lane's `VERCEL=1 VERCEL_ENV=preview` build
+  shape stays unbounded. The cache epoch is stamped only after both the
+  successful compile and the post-success Webpack-cache discard. The split reduces the compile-parent peak without
   weakening generated-contract validation, while repeated forced-cold Standard
   previews remain the real Vercel acceptance proof. A 2 GiB parent-bound
   candidate passed one forced-cold Standard preview but the next identical

@@ -53,7 +53,11 @@ next_build_command=(
 
 next_build_status=0
 if [[ "$active_next_build_timeout" != disabled ]]; then
-  timeout --verbose --signal=TERM --kill-after=30s "$active_next_build_timeout" \
+  # --foreground keeps timeout and Next inside the caller's process group so
+  # the package-build process owner's cancellation signals still reach the
+  # compile; without it GNU timeout detaches into its own group and a canceled
+  # build could orphan the compiler.
+  timeout --verbose --foreground --signal=TERM --kill-after=30s "$active_next_build_timeout" \
     "${next_build_command[@]}" || next_build_status=$?
 else
   "${next_build_command[@]}" || next_build_status=$?

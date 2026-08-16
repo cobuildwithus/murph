@@ -1469,7 +1469,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /timeout --verbose --signal=TERM --kill-after=30s "\$active_next_build_timeout"/u,
+      /timeout --verbose --foreground --signal=TERM --kill-after=30s "\$active_next_build_timeout"/u,
     );
     assert.match(
       productionNextBuildScript,
