@@ -1258,17 +1258,29 @@ Last verified: 2026-08-15
   pending state; an incident closes only after the pending page is cleared and
   both Queue observations are healthy. The monitor persists no
   webhook ciphertext, provider identity, member identity, or Queue message id.
-- Junction Link setup remains retryable but inert before proof-verified callback
-  completion. Webhooks for an active `pending_link` or `link_returned` account
-  release their trace claim and return a retryable not-ready response; they do
-  not persist dirty state or wake work. Manual reconcile, due scheduling,
-  ordinary queued jobs, and sync-success promotion apply the same account phase
-  gate. After a shared account is `source_confirmed`, a new target source does
+- Junction Link setup remains retryable and inert until either a proof-verified
+  browser callback completes or hosted Web verifies the exact prepared source
+  against Junction's current provider list after an authenticated,
+  source-attributed webhook. The webhook is only a reconciliation trigger. It
+  cannot confirm setup by itself. Hosted recovery rechecks consent, shared-app
+  binding, connection epoch, credential epoch, source epoch, and disconnect
+  fences before it commits `source_confirmed`, source admission,
+  callback-equivalent source-scoped initial work, its mandatory mailbox
+  handoff, dirty state, and trace completion in one locked transaction. The
+  initial handoff is required even when dirty state already exists. If its
+  post-commit Temporal signal fails, the existing scheduled mailbox-handoff
+  sweep selects one exact unconsumed `device-sync.wake` pointer per user and
+  retries from mailbox truth without scanning dirty rows. A pending webhook
+  without that exact provider proof releases its trace claim and returns a retryable
+  not-ready response. Manual reconcile, due scheduling, ordinary queued jobs,
+  and sync-success promotion apply the same account phase gate. After a shared
+  account is `source_confirmed`, a new target source does
   not move the account back into a pending phase. Its `DeviceConnectionSource`
   remains `disconnected`, and source-attributed webhooks, dirty-state commit
   races, and provider pulls fail or exit without admitting target data until
-  callback completion reaches the sole runtime connection-established admission
-  boundary. Shared ingress marks every account persistence request with the
+  callback completion or the same provider-verified hosted webhook admission
+  reaches the runtime-owned admission boundary. Shared ingress marks every
+  account persistence request with the
   closed `replace` or `preserve_established` policy; hosted Prisma and local
   SQLite apply the same shared predicate inside their persistence transactions,
   so neither adapter may reinterpret a source addition as an account reconnect.
