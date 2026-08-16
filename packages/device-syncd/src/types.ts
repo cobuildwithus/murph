@@ -30,6 +30,9 @@ export type { DeviceConnectionSourceRecord } from "./client.ts";
 export type { DeviceSyncJobRecord } from "./client.ts";
 
 export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
+// Shared between the Junction provider's temporal resource/day dedupe keys and
+// the store's bounded terminal-history retention for those coordinates.
+export const JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX = "junction-temporal-authority:";
 export const DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED = {
   webhookTraceCompleted: true,
 } as const;

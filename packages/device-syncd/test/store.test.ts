@@ -3848,6 +3848,91 @@ test("device sync store requeues completed Junction temporal days after restart 
   }
 });
 
+test("device sync store bounds Junction temporal terminal history to one row per coordinate", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-history-bound");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-history-bound",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const enqueueCoordinate = (availableAt: string) => store.enqueueJob({
+      accountId: account.id,
+      availableAt,
+      dedupeKey: "junction-temporal-authority:bounded-day",
+      kind: "resource",
+      payload: {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+
+    let previousTerminalId: string | undefined;
+    for (let cadence = 0; cadence < 5; cadence += 1) {
+      const availableAt = `2026-04-06T0${cadence}:00:00.000Z`;
+      const job = enqueueCoordinate(availableAt);
+      if (previousTerminalId !== undefined) {
+        assert.notEqual(job.id, previousTerminalId);
+        assert.equal(store.getJobById(previousTerminalId), null);
+      }
+      assert.equal(enqueueCoordinate(availableAt).id, job.id);
+      assert.equal(store.claimDueJob(`worker-${cadence}`, availableAt, 60_000)?.id, job.id);
+      assert.equal(enqueueCoordinate(availableAt).id, job.id);
+      store.completeJob(job.id, availableAt);
+      assert.equal(store.getJobById(job.id)?.status, "succeeded");
+      previousTerminalId = job.id;
+    }
+    assert.equal(
+      previousTerminalId !== undefined && store.getJobById(previousTerminalId)?.status,
+      "succeeded",
+    );
+
+    const ordinary = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T06:00:00.000Z",
+      dedupeKey: "junction-webhook:ordinary-history",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+    assert.equal(store.claimDueJob("worker-ordinary", "2026-04-06T06:00:00.000Z", 60_000)?.id, ordinary.id);
+    store.completeJob(ordinary.id, "2026-04-06T06:00:01.000Z");
+    const ordinaryRepeat = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T07:00:00.000Z",
+      dedupeKey: "junction-webhook:ordinary-history",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+    assert.notEqual(ordinaryRepeat.id, ordinary.id);
+    assert.equal(store.getJobById(ordinary.id)?.status, "succeeded");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store bootstraps current tables even when stale legacy tables remain and consumes missing or expired OAuth state safely", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-legacy");
   const legacyDatabasePath = path.join(tempDir, "legacy.sqlite");

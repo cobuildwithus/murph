@@ -3013,15 +3013,12 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     }
 
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths), entry);
-    const resolvedTimestamp = resolveRecordTimestamp(
+    const timestamp = resolveRecordTimestamp(
       entry,
       input.context,
       resourceContext.sourceProviderSlug,
       JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS,
     );
-    const timestamp = temporalFeatureResource
-      ? resolveJunctionTemporalFeatureTimestamp(entry, resolvedTimestamp)
-      : resolvedTimestamp;
     const sampleAt = resolveJunctionDailyAggregateSampleAt(
       timestamp,
       input.requireExplicitTimestamp,

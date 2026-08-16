@@ -19,6 +19,7 @@ import {
   type DeviceSyncCredentialIndependentImportJobClassifier,
 } from "../hosted-runtime.ts";
 import type { DeviceSyncJobInput, DeviceSyncJobRecord } from "../types.ts";
+import { JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX } from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
   provider: string;
@@ -967,6 +968,25 @@ export function enqueueDeviceSyncJobInTransaction(
 
     if (existing) {
       return mapJobRow(existing)!;
+    }
+
+    // Junction temporal resource/day children are re-enqueued on every
+    // scheduled reconcile cadence so widened sources or late provider history
+    // converge. Terminal rows are execution history, not authority, so retain
+    // at most the newest terminal row per coordinate instead of one per
+    // cadence.
+    if (
+      input.provider === "junction"
+      && input.kind === "resource"
+      && input.dedupeKey.startsWith(JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX)
+    ) {
+      database.prepare(`
+        delete from device_job
+        where account_id = ?
+          and provider = ?
+          and dedupe_key = ?
+          and status not in ('queued', 'running')
+      `).run(input.accountId, input.provider, input.dedupeKey);
     }
   }
 

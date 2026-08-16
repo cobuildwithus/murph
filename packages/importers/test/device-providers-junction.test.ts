@@ -5195,7 +5195,7 @@ test("Junction stress features preserve local-day runs, variation, and daypart s
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
-test("Junction stress features use the vault timezone instead of provider offsets", () => {
+test("Junction stress features use the vault timezone while ordinary daily facts keep provider-calendar identity", () => {
   const buildPayload = (utcSuffix: "Z" | "+00:00") => normalizeCompleteTemporalSourceDay({
     importedAt: "2026-04-24T12:00:00.000Z",
     timeseries: {
@@ -5241,31 +5241,28 @@ test("Junction stress features use the vault timezone instead of provider offset
   const [canonicalArtifact] = findJunctionTemporalFeatureArtifacts(canonical, "stress-level");
   const [zuluArtifact] = findJunctionTemporalFeatureArtifacts(zulu, "stress-level");
 
-  assert.equal(
-    canonical.events?.filter((event) => event.fields?.metric === "stress-level").length,
-    1,
+  assert.deepEqual(
+    canonical.events
+      ?.filter((event) => event.fields?.metric === "stress-level")
+      .map((event) => [event.dayKey, event.fields?.value]),
+    [
+      ["2026-04-23", 25],
+      ["2026-04-24", 75],
+    ],
   );
   assert.equal(canonicalStress?.dayKey, "2026-04-23");
-  assert.equal(canonicalStress?.fields?.value, 50);
-  assert.equal(canonicalStress?.dataOrigin?.timestampSemantics, "utc");
+  assert.equal(canonicalStress?.fields?.value, 25);
   assert.equal(canonicalFeature?.dayKey, "2026-04-23");
   assert.equal(canonicalFeature?.fields?.value, 50);
-  assert.equal(canonicalStress?.externalRef?.resourceId, zuluStress?.externalRef?.resourceId);
+  assert.equal(zuluFeature?.dayKey, "2026-04-23");
+  assert.equal(zuluFeature?.fields?.value, 50);
   assert.equal(canonicalFeature?.externalRef?.resourceId, zuluFeature?.externalRef?.resourceId);
   assert.equal(canonicalArtifact?.role, zuluArtifact?.role);
-  assert.ok(canonicalStress?.legacyExternalRefs?.some((reference) =>
-    reference.resourceId === junctionDailyTimeseriesResourceId({
-      dayKey: "2026-04-24",
-      resource: "stress_level",
-      resourceSlug: "stress-level",
-      sourceProviderSlug: "garmin",
-      sourceType: "watch",
-    })
-  ));
+  assert.equal(zuluStress !== undefined, true);
   assertNoFullJunctionTimeseriesArtifacts(canonical);
 });
 
-test("Junction stress features apply vault timezone to canonical +00:00 UTC timestamps", () => {
+test("Junction stress features apply vault timezone to +00:00 timestamps without migrating ordinary identity", () => {
   const buildPayload = (utcSuffix: "Z" | "+00:00") => normalizeCompleteTemporalSourceDay({
     importedAt: "2026-04-24T12:00:00.000Z",
     timeseries: {
@@ -5295,18 +5292,24 @@ test("Junction stress features apply vault timezone to canonical +00:00 UTC time
   const [canonicalArtifact] = findJunctionTemporalFeatureArtifacts(canonical, "stress-level");
   const [zuluArtifact] = findJunctionTemporalFeatureArtifacts(zulu, "stress-level");
 
-  assert.equal(
-    canonical.events?.filter((event) => event.fields?.metric === "stress-level").length,
-    1,
+  assert.deepEqual(
+    canonical.events
+      ?.filter((event) => event.fields?.metric === "stress-level")
+      .map((event) => [event.dayKey, event.fields?.value]),
+    [
+      ["2026-04-23", 25],
+      ["2026-04-24", 75],
+    ],
   );
   assert.equal(canonicalStress?.dayKey, "2026-04-23");
-  assert.equal(canonicalStress?.fields?.value, 50);
-  assert.equal(canonicalStress?.dataOrigin?.timestampSemantics, "utc");
+  assert.equal(canonicalStress?.fields?.value, 25);
   assert.equal(canonicalFeature?.dayKey, "2026-04-23");
   assert.equal(canonicalFeature?.fields?.value, 50);
-  assert.equal(canonicalStress?.externalRef?.resourceId, zuluStress?.externalRef?.resourceId);
+  assert.equal(zuluFeature?.dayKey, "2026-04-23");
+  assert.equal(zuluFeature?.fields?.value, 50);
   assert.equal(canonicalFeature?.externalRef?.resourceId, zuluFeature?.externalRef?.resourceId);
   assert.equal(canonicalArtifact?.role, zuluArtifact?.role);
+  assert.equal(zuluStress !== undefined, true);
   assertNoFullJunctionTimeseriesArtifacts(canonical);
 });
 

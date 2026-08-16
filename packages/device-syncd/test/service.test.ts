@@ -1549,8 +1549,15 @@ test("local Junction workers exclude a disconnected source from production-norma
     );
     const temporalCatchUp = await service.runWorkerOnce();
     assert.equal(temporalCatchUp?.kind, "resource");
+    const ordinaryContinuation = await service.runWorkerOnce();
+    assert.equal(ordinaryContinuation?.kind, "reconcile");
+    assert.equal(
+      (ordinaryContinuation?.payload as { timeseriesResourceCursor?: string })
+        ?.timeseriesResourceCursor,
+      "blood_oxygen",
+    );
     assert.equal(await service.runWorkerOnce(), null);
-    assert.equal(importerInputs.length, 3);
+    assert.equal(importerInputs.length, 4);
     const durableInput = JSON.stringify(importerInputs);
     assert.match(durableInput, /garmin-activity-1|garmin-blood-oxygen-1/u);
     assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
@@ -7819,7 +7826,7 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
     assert.notEqual(reconcileFollowUp.dedupeKey, parent.dedupeKey);
     assert.deepEqual(reconcileFollowUp.payload, {
       timeseriesCursor: "2026-08-10T00:00:00.000Z",
-      timeseriesResourceCursor: "hrv",
+      timeseriesResourceCursor: "blood_oxygen",
       windowEnd: "2026-08-12T00:00:00.000Z",
       windowStart: "2026-08-10T00:00:00.000Z",
     });
@@ -7842,6 +7849,11 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
       const processedFollowUp = await restarted.service.runWorkerOnce();
       assert.equal(processedFollowUp?.id, reconcileFollowUp.id);
       assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      for (let continuationRun = 0; continuationRun < 4; continuationRun += 1) {
+        const continued = await restarted.service.runWorkerOnce();
+        assert.equal(continued?.kind, "reconcile");
+        assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      }
       const terminalFollowUp = await restarted.service.runWorkerOnce();
       assert.equal(terminalFollowUp?.kind, "reconcile");
       assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
@@ -7856,11 +7868,11 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
       );
       assert.equal(
         requestedWindows.filter(({ resource }) => resource === "blood_oxygen").length,
-        2,
+        4,
       );
       assert.equal(
         requestedWindows.filter(({ resource }) => resource === "stress_level").length,
-        2,
+        4,
       );
       assert.equal(
         readJobsForAccountForTesting(restarted.store, account.id)
@@ -8009,6 +8021,9 @@ test("Junction scheduled temporal history refetches after a new source and late 
       requestedDays.filter((day) => day === "2026-08-09T00:00:00.000Z").length,
       1,
     );
+    for (let ordinaryRun = 0; ordinaryRun < 2; ordinaryRun += 1) {
+      assert.equal((await fixture.service.runWorkerOnce(account.id))?.kind, "reconcile");
+    }
 
     fixture.close();
     fixtureClosed = true;
@@ -8055,6 +8070,151 @@ test("Junction scheduled temporal history refetches after a new source and late 
     if (!fixtureClosed) {
       fixture.close();
     }
+  }
+});
+
+test("Junction default reconcile keeps ordinary blood-oxygen coverage ahead of temporal closure", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-ordinary-owner");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-ordinary-owner";
+  const now = new Date("2026-08-15T12:00:00.000Z");
+  const requestedWindows: Array<[string | null, string | null]> = [];
+  const importerResults: unknown[] = [];
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_oxygen"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-ordinary-owner",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              blood_oxygen: true,
+            },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/summary/activity/${externalAccountId}`) {
+        return createJsonResponse({ data: [] });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`) {
+        const start = url.searchParams.get("start_date");
+        requestedWindows.push([start, url.searchParams.get("end_date")]);
+        const sampleDay = start?.slice(0, 10) ?? "2026-08-14";
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                timestamp: `${sampleDay}T10:00:00.000Z`,
+                unit: "%",
+                value: 97,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction ordinary-owner request: ${url.pathname}`);
+    },
+  });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importerResults.push(await prepareDeviceProviderSnapshotImport(input, {
+          defaultTimeZone: "UTC",
+        }));
+        return canonicalImporter.importDeviceProviderSnapshot(input);
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+      nextReconcileAt: now.toISOString(),
+    });
+
+    const scheduledJobs = await fixture.service.runSchedulerOnce(account.id);
+    assert.equal(scheduledJobs.some((job) => job.kind === "reconcile"), true);
+    for (let workerRun = 0; workerRun < 40; workerRun += 1) {
+      if (await fixture.service.runWorkerOnce(account.id) === null) {
+        break;
+      }
+    }
+
+    const ordinaryDays = requestedWindows
+      .filter(([start, end]) => start !== null && start === end && start.length === 10)
+      .map(([start]) => start)
+      .sort();
+    const temporalWindows = requestedWindows.filter(([start, end]) =>
+      start !== null
+      && end !== null
+      && start !== end
+      && Date.parse(end) - Date.parse(start) === 24 * 60 * 60_000
+    );
+    const initialBackfillDays = Array.from({ length: 14 }, (_, index) =>
+      `2026-07-${String(18 + index).padStart(2, "0")}`);
+    assert.deepEqual(ordinaryDays, [
+      ...initialBackfillDays,
+      "2026-08-08",
+      "2026-08-09",
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+    ]);
+    const newestTemporalDay = temporalWindows
+      .map(([start]) => start?.slice(0, 10) ?? "")
+      .sort()
+      .at(-1);
+    assert.equal(newestTemporalDay, "2026-08-13");
+
+    const importedEvents = (importerResults as Array<{
+      events?: Array<{ dayKey?: string; fields?: { metric?: string } }>;
+    }>).flatMap((result) => result.events ?? []);
+    const ordinarySpo2Days = new Set(
+      importedEvents
+        .filter((event) => event.fields?.metric === "spo2")
+        .map((event) => event.dayKey),
+    );
+    assert.equal(ordinarySpo2Days.has("2026-08-14"), true);
+    assert.equal(ordinarySpo2Days.has("2026-08-08"), true);
+  } finally {
+    fixture.close();
   }
 });
 

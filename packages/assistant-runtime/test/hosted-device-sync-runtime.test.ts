@@ -12792,6 +12792,13 @@ describe("hosted device-sync runtime", () => {
       assert.equal((await service.runWorkerOnce())?.kind, "resource");
       currentNow = new Date(Date.parse(initialNow) + 1).toISOString();
       assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      for (let ordinaryDrain = 0; ordinaryDrain < 10; ordinaryDrain += 1) {
+        const drained = await service.runWorkerOnce();
+        if (drained === null) {
+          break;
+        }
+        assert.equal(drained.kind, "reconcile");
+      }
 
       phase = "empty";
       currentNow = new Date(Date.parse(initialNow) + 30 * 60_000).toISOString();
@@ -12811,12 +12818,17 @@ describe("hosted device-sync runtime", () => {
       assert.equal(replacedPoints.some((point) =>
         point.metricKey.startsWith("stress-") && point.metricKey !== "stress-level"
       ), false);
-      assert.equal(requestedWindows.length, 7);
-      assert.equal(requestedWindows.filter(([start, end]) =>
+      const windowedRequests = requestedWindows.filter(([start, end]) => start !== end);
+      const ordinaryProviderDateRequests = requestedWindows.filter(([start, end]) =>
+        start !== null && start === end
+      );
+      assert.equal(windowedRequests.length, 7);
+      assert.equal(windowedRequests.filter(([start, end]) =>
         start === dayStart && end === dayEnd
       ).length, 3);
-      assert.deepEqual(requestedWindows[0], [dayStart, dayEnd]);
-      assert.deepEqual(requestedWindows.at(-1), [dayStart, dayEnd]);
+      assert.deepEqual(windowedRequests[0], [dayStart, dayEnd]);
+      assert.deepEqual(windowedRequests.at(-1), [dayStart, dayEnd]);
+      assert.equal(ordinaryProviderDateRequests.length, 4);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -13160,6 +13172,8 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal(stressRecoveredRecords.some((record) => eventHasMetric(record, "caffeine")), false);
 
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
       failurePhase = "caffeine";
       const secondYieldingWorker = service.runWorkerOnce();
       await Promise.race([
@@ -13206,7 +13220,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(recoveredRecords.filter((record) => eventHasMetric(record, "water")).length, 1);
       // The retained-lease checkpoint prevents the already-terminal stress
       // resource from replaying after the later caffeine request is aborted.
-      assert.equal(stressRequestCount, 2);
+      assert.equal(stressRequestCount, 3);
       assert.equal(caffeineRequestCount, 2);
       assert.equal(waterRequestCount, 1);
     } finally {

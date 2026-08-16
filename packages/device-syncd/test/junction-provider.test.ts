@@ -3935,7 +3935,7 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     provider,
   });
   assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
-  assert.equal(importedSnapshots.length, 7);
+  assert.equal(importedSnapshots.length, 8);
   const timeseriesSnapshot = importedSnapshots.find((snapshot) =>
     ((snapshot as { timeseries?: { blood_oxygen?: unknown[] } }).timeseries?.blood_oxygen?.length ?? 0) > 0
   ) as { summaries?: Record<string, unknown[]>; timeseries?: Record<string, unknown[]> };
@@ -8568,9 +8568,15 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
     ["stress_level", "2026-04-04T00:00:00.000Z", "2026-04-05T00:00:00.000Z"],
   ]);
   const catchUpJobs = result.scheduledJobs ?? [];
-  assert.equal(catchUpJobs.length, 4);
+  assert.equal(catchUpJobs.length, 5);
+  const ordinaryContinuation = requireValue(
+    catchUpJobs.at(-1),
+    "Expected the ordinary timeseries continuation after temporal catch-up jobs.",
+  );
+  assert.equal(ordinaryContinuation.payload?.temporalAuthorityDayKey, undefined);
+  assert.equal(ordinaryContinuation.payload?.timeseriesResourceCursor, "blood_oxygen");
   assert.deepEqual(
-    catchUpJobs.map((job) => ({
+    catchUpJobs.slice(0, 4).map((job) => ({
       availableAt: job.availableAt,
       dayKey: job.payload?.temporalAuthorityDayKey,
       priority: job.priority,
@@ -8613,7 +8619,7 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
       },
     ],
   );
-  assert.equal(new Set(catchUpJobs.map((job) => job.dedupeKey)).size, 4);
+  assert.equal(new Set(catchUpJobs.map((job) => job.dedupeKey)).size, 5);
 
   const firstCatchUp = requireValue(catchUpJobs[0], "Expected the newest blood-oxygen catch-up job.");
   const firstCatchUpPayload = requireValue(
@@ -8716,9 +8722,10 @@ test("Junction reconcile preserves healthy temporal work and the older backlog w
       ["2026-04-03", "stress_level"],
       ["2026-04-02", "blood_oxygen"],
       ["2026-04-02", "stress_level"],
+      [undefined, undefined],
     ],
   );
-  assert.equal(new Set((result.scheduledJobs ?? []).map((job) => job.dedupeKey)).size, 5);
+  assert.equal(new Set((result.scheduledJobs ?? []).map((job) => job.dedupeKey)).size, 6);
 });
 
 test("Junction reconcile durably schedules yielded temporal work and the older backlog", async () => {
@@ -8858,7 +8865,7 @@ test("Junction reconcile keeps provider-date and vault-local daily windows separ
         requestedWindows
           .filter(({ resource }) => resource === "stress_level")
           .map(({ end, start }) => [start, end]),
-        [expectedTemporalWindow],
+        [expectedTemporalWindow, ...expectedProviderDates.map((date) => [date, date])],
       );
     }
   }
@@ -8894,14 +8901,14 @@ test("Junction temporal recovery clamps its composed horizon to fourteen days", 
   );
 
   assert.equal(temporalRequests, 2);
-  assert.equal(result.scheduledJobs?.length, 26);
+  assert.equal(result.scheduledJobs?.length, 27);
   assert.deepEqual(
     result.scheduledJobs?.slice(0, 2).map((job) => job.payload?.temporalAuthorityDayKey),
     ["2026-04-17", "2026-04-17"],
   );
   assert.deepEqual(
-    result.scheduledJobs?.slice(-2).map((job) => job.payload?.temporalAuthorityDayKey),
-    ["2026-04-05", "2026-04-05"],
+    result.scheduledJobs?.slice(-3).map((job) => job.payload?.temporalAuthorityDayKey),
+    ["2026-04-05", "2026-04-05", undefined],
   );
 });
 
@@ -9395,7 +9402,7 @@ test("Junction daily timeseries continues healthy peers and queues a failed temp
     }
     throw new Error(`Unexpected request: ${url}`);
   }, {
-    timeseriesResources: ["water", "blood_oxygen", "hrv"],
+    timeseriesResources: ["water", "hrv", "blood_oxygen"],
   });
 
   const context = createJunctionJobContext({
@@ -9413,11 +9420,14 @@ test("Junction daily timeseries continues healthy peers and queues a failed temp
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
-  await executeFullJobTimeseriesContinuations({
-    context,
-    initialResult: result,
-    provider,
-  });
+  await assert.rejects(
+    executeFullJobTimeseriesContinuations({
+      context,
+      initialResult: result,
+      provider,
+    }),
+    /junction_timeseries_collection/u,
+  );
 
   assert.equal(requests.some((url) => url.includes("/blood_oxygen/grouped")), true);
   assert.equal(requests.some((url) => url.includes("/water/grouped")), true);
@@ -11661,7 +11671,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(requests.filter((url) => url.includes("/v2/summary/")).length, 2);
   assert.equal(requests.some((url) => url.includes("next_cursor=page-2")), true);
   const timeseriesRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
-  assert.equal(timeseriesRequests.length, 14);
+  assert.equal(timeseriesRequests.length, 18);
   assert.equal(timeseriesRequests.every((url) => url.includes("/grouped?")), true);
   assert.equal(timeseriesRequests.some((url) => url.includes("/heartrate?")), false);
   assert.equal(
@@ -12204,7 +12214,7 @@ test("Junction polling skips optional unavailable resource collections", async (
     {},
   );
   assert.deepEqual(Object.keys(timeseries), ["blood_oxygen"]);
-  assert.equal(timeseries.blood_oxygen?.length, 1);
+  assert.equal(timeseries.blood_oxygen?.length, 2);
   assert.equal(timeseries.stress_level, undefined);
   assert.deepEqual(
     warnings.map((warning) => ({
@@ -12229,15 +12239,22 @@ test("Junction polling skips optional unavailable resource collections", async (
         resourceCategory: "timeseries",
         responseStatus: 422,
       },
+      {
+        accountId: undefined,
+        reason: "unsupported",
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        responseStatus: 422,
+      },
     ],
   );
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
     junctionProfileSummaryNormalizationRevision: 1,
-    junctionSkippedResourceTotal: 12,
+    junctionSkippedResourceTotal: 13,
     junctionSkippedSummaryTotal: 5,
-    junctionSkippedTimeseriesTotal: 7,
-    junctionSkippedResourceJobCount: 2,
+    junctionSkippedTimeseriesTotal: 8,
+    junctionSkippedResourceJobCount: 1,
     junctionSkippedResourceLastAt: "2026-04-04T00:00:00.000Z",
     junctionSkippedResourceLast: "timeseries.stress_level.422.unsupported",
     junctionSkippedResourceLastDetail: null,
@@ -16619,7 +16636,7 @@ test("Junction full backfills keep configured sparse and dense resources in boun
   const timeseriesRequests = requests
     .filter((url) => url.includes("/v2/timeseries/"))
     .map((url) => new URL(url));
-  assert.equal(timeseriesRequests.length, 182);
+  assert.equal(timeseriesRequests.length, 196);
 
   for (const resource of sparseResources) {
     const apiResource = resource === "fat" ? "body_fat" : resource;
@@ -16637,14 +16654,20 @@ test("Junction full backfills keep configured sparse and dense resources in boun
   const denseRequests = timeseriesRequests.filter((url) =>
     url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped"
   );
-  assert.equal(denseRequests.length, 14);
-  assert.ok(denseRequests.every((url) => {
+  assert.equal(denseRequests.length, 28);
+  const denseTemporalRequests = denseRequests.filter((url) => {
     const start = url.searchParams.get("start_date");
     const end = url.searchParams.get("end_date");
     return start !== null
       && end !== null
       && Date.parse(end) - Date.parse(start) === 24 * 60 * 60_000;
-  }));
+  });
+  assert.equal(denseTemporalRequests.length, 14);
+  const denseOrdinaryRequests = denseRequests.filter((url) => {
+    const start = url.searchParams.get("start_date");
+    return start !== null && start === url.searchParams.get("end_date");
+  });
+  assert.equal(denseOrdinaryRequests.length, 14);
 });
 
 test("Junction direct-Link body data activates the existing extended-history owner", async () => {
@@ -16973,7 +16996,7 @@ test("Junction mixed temporal and sparse backfills keep separate day owners", as
   assert.deepEqual(continuation.payload, {
     emptyBackfillAttempts: 1,
     timeseriesCursor: ownerWindowStart,
-    timeseriesResourceCursor: "fat",
+    timeseriesResourceCursor: "blood_oxygen",
     windowEnd: ownerWindowEnd,
     windowStart: ownerWindowStart,
   });
@@ -16999,7 +17022,7 @@ test("Junction mixed temporal and sparse backfills keep separate day owners", as
   assert.equal(secondTimeseriesRequests.length, 1);
   assert.equal(
     secondTimeseriesRequests[0]?.pathname,
-    "/v2/timeseries/junction-user-1/body_fat/grouped",
+    "/v2/timeseries/junction-user-1/blood_oxygen/grouped",
   );
   assertJunctionWindowQuery(
     requireValue(secondTimeseriesRequests[0]?.toString(), "first dense day"),

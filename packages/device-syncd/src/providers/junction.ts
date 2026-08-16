@@ -146,7 +146,10 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
-import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
+import {
+  classifyDeviceSyncWebhookAcceptanceMode,
+  JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX,
+} from "../types.ts";
 import { evaluatePushPrimarySourceStaleness } from "../source-staleness.ts";
 import {
   JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND,
@@ -1567,17 +1570,14 @@ export function createJunctionDeviceSyncProvider(
       context.now,
       addMilliseconds(context.now, reconcileIntervalMs),
     );
-    const fullJobTimeseriesResources = timeseriesResources.filter((resource) =>
-      !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
-    );
-    const shouldScheduleTimeseries = fullJobTimeseriesResources.length > 0;
+    const shouldScheduleTimeseries = timeseriesResources.length > 0;
     const timeseriesContinuation = shouldScheduleTimeseries
       ? buildFullJobTimeseriesContinuationJob({
           deferredEmptyBackfillAttempts:
             readDeferredEmptyBackfillAttempts(backfillFollowUp),
           job,
           timeseriesCursor: baseTimeseriesWindowStart,
-          timeseriesResourceCursor: fullJobTimeseriesResources[0] ?? null,
+          timeseriesResourceCursor: timeseriesResources[0] ?? null,
           timeseriesWindowHours: 24,
           window,
           workoutStreamCursor: null,
@@ -3776,10 +3776,7 @@ export function createJunctionDeviceSyncProvider(
           subtractDays(window.windowEnd, timeseriesBackfillDays),
         )
       : window.windowStart;
-    const fullJobTimeseriesResources = timeseriesResources.filter((resource) =>
-      !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
-    );
-    const resource = readFullJobTimeseriesResourceCursor(job, fullJobTimeseriesResources);
+    const resource = readFullJobTimeseriesResourceCursor(job, timeseriesResources);
     const timeseriesCursor = readFullJobTimeseriesCursor(job, {
       windowEnd: window.windowEnd,
       windowStart: baseTimeseriesWindowStart,
@@ -3897,7 +3894,7 @@ export function createJunctionDeviceSyncProvider(
         baseTimeseriesWindowStart,
         executionWindowEnd,
         resource,
-        resources: fullJobTimeseriesResources,
+        resources: timeseriesResources,
         timeseriesWindowHours,
         windowEnd: window.windowEnd,
       }),
@@ -7277,7 +7274,7 @@ function buildJunctionTemporalAuthorityJobs(input: {
         // day a stable millisecond tier so restarts drain the newest missing day
         // first without outranking webhook work or introducing another cursor.
         availableAt: addMilliseconds(input.now, windowIndex),
-        dedupeKey: `junction-temporal-authority:v${JUNCTION_TEMPORAL_AUTHORITY_JOB_VERSION}:${sha256Text(
+        dedupeKey: `${JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX}v${JUNCTION_TEMPORAL_AUTHORITY_JOB_VERSION}:${sha256Text(
           JSON.stringify([input.timeZone, resource, window.dayKey]),
         )}`,
         kind: "resource",
