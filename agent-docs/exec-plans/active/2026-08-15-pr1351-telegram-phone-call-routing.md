@@ -244,3 +244,8 @@ the member's current authorized Telegram route.
   ordinary Telegram messages ahead of the result, observes one provider call
   before any routine idle snapshot, receives terminal confirmation, and starts
   a fresh runtime invocation without resending.
+- Exact-head package coverage then exposed one stale unit assertion that still
+  expected phone results to remain behind the idle-gated outbox. The coverage
+  test now proves the new split directly: phone results prepare and drain behind
+  `outbox_sending`, while Telegram referral rewards retain the prior idle-gated
+  behavior. The focused two-case unit test passes; production code is unchanged.

@@ -15047,15 +15047,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_telegram",
+      dispatchesBeforeIdle: true,
       label: "phone-call result",
     },
     {
       dedupeKey:
         "assistant.notification.requested:usage-referral-reward:referral_telegram",
+      dispatchesBeforeIdle: false,
       label: "usage-referral reward",
     },
-  ])("defers an exact Telegram $label to the checkpoint-gated outbox", async ({
+  ])("routes an exact Telegram $label through its durability boundary", async ({
     dedupeKey,
+    dispatchesBeforeIdle,
   }) => {
     const now = "2026-04-27T00:03:00.000Z";
     const completionItem = createExternalCompletionSystemMailboxItem({
@@ -15098,7 +15101,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
     ]);
-    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(now);
+    if (dispatchesBeforeIdle) {
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+        preparedDispatches: [],
+      });
+    } else {
+      mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(now);
+    }
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [],
@@ -15115,30 +15124,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preferredIntentIds: [deliveryIntentId],
       vaultRoot: "/tmp/murph-vault",
     });
-    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledWith({
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(
-      mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
-    ).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "system_mailbox_receipt",
-      nextWakeAt: now,
-      progressed: true,
-      redactedStatus: expect.objectContaining({
-        hostedOutboxPendingDeliveryEffects: 1,
-      }),
-    }));
-    expect(result.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
+    if (dispatchesBeforeIdle) {
+      expect(mocks.resolveHostedAssistantOutboxNextWakeAt).not.toHaveBeenCalled();
+      expect(
+        mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+      ).toHaveBeenCalledWith({
+        assistantDeliveryEffects: [deliveryEffect],
+        vaultRoot: "/tmp/murph-vault",
+      });
+      expect(result).toEqual(expect.objectContaining({
+        afterCheckpointKeepsForegroundImportLoop: true,
+        checkpointReason: "outbox_sending",
+        progressed: true,
+      }));
+    } else {
+      expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledWith({
+        vaultRoot: "/tmp/murph-vault",
+      });
+      expect(
+        mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+      ).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "system_mailbox_receipt",
+        nextWakeAt: now,
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxPendingDeliveryEffects: 1,
+        }),
+      }));
+      expect(result.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
+    }
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "system_mailbox_receipt",
-      nextWakeAt: now,
-      nextWakeReason: "assistant",
-    }));
+    if (dispatchesBeforeIdle) {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+      }));
+    } else {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "system_mailbox_receipt",
+        nextWakeAt: now,
+        nextWakeReason: "assistant",
+      }));
+    }
   });
 
   it("keeps managed setup out of a causal-only exact delivery pass", async () => {
