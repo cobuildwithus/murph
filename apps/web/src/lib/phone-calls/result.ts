@@ -54,6 +54,9 @@ import { isHostedPhoneCallProviderCleanupPending } from "./authority";
 import {
   readRetellWebhookCallTarget,
 } from "./webhook-target";
+import {
+  signalHostedPhoneCallReconciliation,
+} from "./reconciliation-workflow-signal";
 
 interface HostedPhoneCallWebhookDatabase {
   hostedPhoneCall: {
@@ -165,10 +168,12 @@ export async function handleRetellCallEnded(input: {
 }
 
 export async function handleRetellCallAnalyzed(input: {
+  abortSignal?: AbortSignal;
   call: RetellCallPayload;
   completionPolicy?: HostedPhoneCallResult["completionPolicy"];
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedPhoneCallWebhookStore;
+  signalReconciliation?: typeof signalHostedPhoneCallReconciliation;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   assertRetellStorageMode(input.call);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
@@ -191,6 +196,12 @@ export async function handleRetellCallAnalyzed(input: {
     }
 
     if (target.call.analyzedAt && hasStoredHostedPhoneCallResult(target.call)) {
+      await signalTrackedRetellCallReconciliation({
+        call: target.call,
+        signal: input.abortSignal ?? new AbortController().signal,
+        signalReconciliation: input.signalReconciliation
+          ?? signalHostedPhoneCallReconciliation,
+      });
       return appendRetellCallAnalyzedNotification({
         call: target.call,
         prisma,
@@ -224,6 +235,12 @@ export async function handleRetellCallAnalyzed(input: {
       }
       throw error;
     }
+    await signalTrackedRetellCallReconciliation({
+      call: target.call,
+      signal: input.abortSignal ?? new AbortController().signal,
+      signalReconciliation: input.signalReconciliation
+        ?? signalHostedPhoneCallReconciliation,
+    });
     const analyzedAt = new Date();
     const resultDeliveryStatus = target.call.resultNotificationChannel === "telegram"
       ? "pending" as const
@@ -302,6 +319,7 @@ export async function finalizePreparedRetellCallResult(
   } = {},
 ): Promise<void> {
   const result = await handleRetellCallAnalyzed({
+    ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
     call: prepared.call,
     ...(prepared.completionPolicy
       ? { completionPolicy: prepared.completionPolicy }
@@ -315,6 +333,23 @@ export async function finalizePreparedRetellCallResult(
     abortSignal: options.abortSignal,
     expectedUserId: result.notificationUserId,
     mailboxItemId: result.notificationMailboxItemId,
+  });
+}
+
+async function signalTrackedRetellCallReconciliation(input: {
+  call: HostedPhoneCall;
+  signal: AbortSignal;
+  signalReconciliation: typeof signalHostedPhoneCallReconciliation;
+}): Promise<void> {
+  if (
+    input.call.resultNotificationChannel !== "telegram"
+    || isHostedPhoneCallResultDeliveryTerminal(input.call.resultDeliveryStatus)
+  ) {
+    return;
+  }
+  await input.signalReconciliation({
+    phoneCallId: input.call.id,
+    signal: input.signal,
   });
 }
 

@@ -1,3 +1,4 @@
+import { Prisma, type HostedPhoneCall } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HookConflictError, HookNotFoundError } from "workflow/errors";
 import { RetryableError } from "workflow";
@@ -43,6 +44,7 @@ import {
   signalHostedPhoneCallResultNotificationRecovery,
   startHostedPhoneCallReconciliationWorkflow,
 } from "@/src/lib/phone-calls/reconciliation-workflow-start";
+import { handleRetellCallAnalyzed } from "@/src/lib/phone-calls/result";
 import { reconcileHostedPhoneCallStep } from "@/src/lib/phone-calls/reconciliation-workflow-steps";
 import {
   buildHostedPhoneCallReconciliationHookToken,
@@ -277,6 +279,209 @@ describe("hosted phone-call reconciliation Workflow", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it("wakes the same dormant Workflow before a late analysis creates a tracked result", async () => {
+    type AnalyzedStore = NonNullable<
+      Parameters<typeof handleRetellCallAnalyzed>[0]["prisma"]
+    >;
+    const endedAt = new Date("2026-08-16T12:00:00.000Z");
+    let currentCall: HostedPhoneCall | null = {
+      analyzedAt: null,
+      briefEncrypted: null,
+      briefJson: {
+        allowTransferToUser: false,
+        goal: "Confirm the office schedule.",
+        instructions: [],
+        shareableFacts: {},
+        successCriteria: "The office confirms its schedule.",
+        timeZone: "America/Chicago",
+        to: {
+          label: "the office",
+          phoneNumber: "+15550102020",
+        },
+      },
+      createdAt: endedAt,
+      endedAt,
+      id: "hpc_late_analysis",
+      memberId: "member_late_analysis",
+      originSessionId: null,
+      provider: "retell",
+      providerCallId: "retell_late_analysis",
+      requestKey: "phone_call_late_analysis",
+      resultDeliveryGeneration: 0,
+      resultDeliveryStatus: null,
+      resultDeliveryTerminalAt: null,
+      resultEncrypted: null,
+      resultJson: null,
+      resultNotificationChannel: "telegram",
+      status: "failed",
+      updatedAt: endedAt,
+    };
+    const resultCommitted = createDeferred();
+    const recoverySignal = createDeferred();
+    const phases: string[] = [];
+    const dispose = vi.fn();
+    let hookAwaitCount = 0;
+    const hook = {
+      dispose,
+      then: (onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) => {
+        hookAwaitCount += 1;
+        const pending = hookAwaitCount === 1
+          ? Promise.resolve({ reason: "reconcile" })
+          : recoverySignal.promise.then(() => ({ reason: "reconcile" }));
+        return pending.then(onFulfilled, onRejected);
+      },
+      token: "unused-by-mock",
+      [Symbol.asyncIterator]: () => {
+        throw new Error("async iteration is not used by this workflow");
+      },
+      [Symbol.dispose]: dispose,
+    };
+    mocks.createHook.mockReturnValue(hook);
+
+    let mailboxItemCount = 0;
+    let telegramRequestCount = 0;
+    mocks.processHostedPhoneCallRecoveryById
+      .mockResolvedValueOnce("pending")
+      .mockImplementationOnce(async () => {
+        await resultCommitted.promise;
+        if (!currentCall?.analyzedAt || currentCall.resultDeliveryStatus !== "pending") {
+          return "pending";
+        }
+        mailboxItemCount += 1;
+        telegramRequestCount += 1;
+        currentCall = {
+          ...currentCall,
+          resultDeliveryGeneration: 1,
+          resultDeliveryStatus: "delivered",
+          resultDeliveryTerminalAt: new Date("2026-08-16T12:01:00.000Z"),
+        };
+        return "complete";
+      });
+
+    const hostedPhoneCall: AnalyzedStore["hostedPhoneCall"] = {
+      findUnique: async ({ where }) => {
+        if (!currentCall) {
+          return null;
+        }
+        return "id" in where
+          ? currentCall.id === where.id ? currentCall : null
+          : currentCall.providerCallId === where.providerCallId ? currentCall : null;
+      },
+      updateMany: async (args) => {
+        phases.push("cas");
+        if (
+          !currentCall
+          || currentCall.id !== args.where.id
+          || currentCall.provider !== args.where.provider
+          || currentCall.analyzedAt !== null
+        ) {
+          return { count: 0 };
+        }
+        currentCall = {
+          ...currentCall,
+          analyzedAt: args.data.analyzedAt ?? currentCall.analyzedAt,
+          endedAt: args.data.endedAt ?? currentCall.endedAt,
+          providerCallId: args.data.providerCallId ?? currentCall.providerCallId,
+          resultDeliveryStatus:
+            args.data.resultDeliveryStatus ?? currentCall.resultDeliveryStatus,
+          resultEncrypted: args.data.resultEncrypted ?? currentCall.resultEncrypted,
+          resultJson: args.data.resultJson === Prisma.DbNull
+            ? null
+            : currentCall.resultJson,
+          status: args.data.status,
+        };
+        resultCommitted.resolve();
+        return { count: 1 };
+      },
+    };
+    let appendAttempt = 0;
+    const prisma: AnalyzedStore = {
+      hostedPhoneCall,
+      $transaction: async (callback) => callback({ hostedPhoneCall }),
+      appendResultNotification: async (call) => {
+        appendAttempt += 1;
+        phases.push("append");
+        if (call.resultDeliveryStatus === "pending") {
+          throw new Error("mailbox unavailable after result commit");
+        }
+        return {
+          notificationMailboxItemId: null,
+          notificationUserId: null,
+        };
+      },
+      encryptResult: async () => "encrypted-late-analysis-result",
+    };
+    const signalReconciliation = vi.fn(async (input: {
+      phoneCallId: string;
+      signal: AbortSignal;
+    }) => {
+      expect(input.phoneCallId).toBe("hpc_late_analysis");
+      expect(input.signal.aborted).toBe(false);
+      phases.push("signal");
+      recoverySignal.resolve();
+    });
+
+    const running = hostedPhoneCallReconciliationWorkflow({
+      phoneCallId: "hpc_late_analysis",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.processHostedPhoneCallRecoveryById).toHaveBeenCalledOnce();
+      expect(hookAwaitCount).toBe(2);
+    });
+    expect(Object.getOwnPropertyDescriptor(
+      reconcileHostedPhoneCallStep,
+      "maxRetries",
+    )?.value).toBe(120);
+
+    const analyzedCall = {
+      call_analysis: {
+        custom_analysis_data: {
+          outcome: "not_completed",
+          result: "The office line was busy.",
+        },
+      },
+      call_id: "retell_late_analysis",
+      data_storage_setting: "basic_attributes_only" as const,
+      end_timestamp: endedAt.toISOString(),
+      metadata: {
+        murph_phone_call_id: "hpc_late_analysis",
+      },
+    };
+    await expect(handleRetellCallAnalyzed({
+      call: analyzedCall,
+      prisma,
+      signalReconciliation,
+    })).rejects.toThrow("mailbox unavailable after result commit");
+    await expect(running).resolves.toBeUndefined();
+
+    expect(phases.indexOf("signal")).toBeLessThan(phases.indexOf("cas"));
+    expect(currentCall).toMatchObject({
+      analyzedAt: expect.any(Date),
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "delivered",
+      resultEncrypted: "encrypted-late-analysis-result",
+      status: "failed",
+    });
+    expect(mailboxItemCount).toBe(1);
+    expect(telegramRequestCount).toBe(1);
+    expect(signalReconciliation).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(mocks.start).not.toHaveBeenCalled();
+
+    await expect(handleRetellCallAnalyzed({
+      call: analyzedCall,
+      prisma,
+      signalReconciliation,
+    })).resolves.toEqual({
+      notificationMailboxItemId: null,
+      notificationUserId: null,
+    });
+    expect(signalReconciliation).toHaveBeenCalledOnce();
+    expect(appendAttempt).toBe(2);
+    expect(mailboxItemCount).toBe(1);
+    expect(telegramRequestCount).toBe(1);
+  });
+
   it("rejects a duplicate run at the deterministic hook before it can poll", async () => {
     const dispose = vi.fn();
     const conflict = new HookConflictError(
@@ -302,3 +507,17 @@ describe("hosted phone-call reconciliation Workflow", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 });
+
+function createDeferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolvePromise!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
+  };
+}

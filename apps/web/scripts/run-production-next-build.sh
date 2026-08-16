@@ -2,9 +2,15 @@
 set -euo pipefail
 
 parent_old_space_mb=1024
-typecheck_worker_old_space_mb=3584
+build_worker_old_space_mb=3072
+typecheck_old_space_mb=3584
 build_cache_epoch=webpack-next-16.3-v1
 build_cache_stamp=.next/cache/murph-production-build-epoch
+prepared_typecheck_env=MURPH_HOSTED_WEB_PREPARED_TYPECHECK
+
+# Never trust an inherited bypass. This runner earns the build-only flag again
+# after its own route-aware TypeScript check succeeds.
+unset "$prepared_typecheck_env"
 
 strip_inherited_old_space_flags() {
   printf '%s\n' "${NODE_OPTIONS:-}" \
@@ -15,13 +21,18 @@ inherited_node_options="$(strip_inherited_old_space_flags)"
 inherited_node_options="${inherited_node_options#"${inherited_node_options%%[![:space:]]*}"}"
 inherited_node_options="${inherited_node_options%"${inherited_node_options##*[![:space:]]}"}"
 
-if [[ -n "$inherited_node_options" ]]; then
-  export NODE_OPTIONS="$inherited_node_options --max-old-space-size=$typecheck_worker_old_space_mb"
-else
-  export NODE_OPTIONS="--max-old-space-size=$typecheck_worker_old_space_mb"
-fi
+set_node_old_space() {
+  local old_space_mb="$1"
+
+  if [[ -n "$inherited_node_options" ]]; then
+    export NODE_OPTIONS="$inherited_node_options --max-old-space-size=$old_space_mb"
+  else
+    export NODE_OPTIONS="--max-old-space-size=$old_space_mb"
+  fi
+}
 
 next_bin="$(node -p 'require.resolve("next/dist/bin/next")')"
+typescript_bin="$(node -p 'require.resolve("typescript/bin/tsc")')"
 cache_reset=0
 if [[ ! -f "$build_cache_stamp" ]] || [[ "$(< "$build_cache_stamp")" != "$build_cache_epoch" ]]; then
   printf '[apps/web build] Resetting incompatible Next build cache for epoch=%s\n' \
@@ -30,9 +41,26 @@ if [[ ! -f "$build_cache_stamp" ]] || [[ "$(< "$build_cache_stamp")" != "$build_
   cache_reset=1
 fi
 
-printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s typecheck_worker_old_space_mb=%s\n' \
+printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s build_worker_old_space_mb=%s typecheck_old_space_mb=%s\n' \
   "$parent_old_space_mb" \
-  "$typecheck_worker_old_space_mb"
+  "$build_worker_old_space_mb" \
+  "$typecheck_old_space_mb"
+
+# Generate the route declarations before running Next's app-local TypeScript 5
+# compatibility check. Keeping that check separate prevents the Webpack worker
+# from inheriting the larger heap without replacing the route/page contract
+# proof with the repository's TypeScript 7 source check.
+set_node_old_space "$build_worker_old_space_mb"
+node "--max-old-space-size=$parent_old_space_mb" "$next_bin" typegen
+
+set_node_old_space "$typecheck_old_space_mb"
+node "--max-old-space-size=$typecheck_old_space_mb" \
+  "$typescript_bin" \
+  -p tsconfig.next.json \
+  --pretty false
+
+export MURPH_HOSTED_WEB_PREPARED_TYPECHECK=complete
+set_node_old_space "$build_worker_old_space_mb"
 node "--max-old-space-size=$parent_old_space_mb" "$next_bin" build --webpack
 
 if [[ "$cache_reset" == 1 ]]; then

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   readHostedPhoneCallBrief: vi.fn(),
   readHostedPhoneCallResult: vi.fn(),
   requireHostedAssistantNotificationDestination: vi.fn(),
+  signalHostedPhoneCallReconciliation: vi.fn(),
   unwrapHostedDomainRootForWeb: vi.fn(),
 }));
 
@@ -56,6 +57,20 @@ vi.mock(
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
 }));
+
+vi.mock(
+  "@/src/lib/phone-calls/reconciliation-workflow-signal",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/lib/phone-calls/reconciliation-workflow-signal")
+    >();
+    return {
+      ...actual,
+      signalHostedPhoneCallReconciliation:
+        mocks.signalHostedPhoneCallReconciliation,
+    };
+  },
+);
 
 import {
   finalizeStoredHostedPhoneCallResult,
@@ -107,6 +122,7 @@ const TELEGRAM_DESTINATION: HostedAssistantNotificationDestination = {
 describe("default phone-call result notification store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.signalHostedPhoneCallReconciliation.mockResolvedValue(undefined);
   });
 
   it("finishes every preparation phase before one mailbox-only transaction", async () => {

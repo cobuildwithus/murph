@@ -1,27 +1,17 @@
 import type { PrismaClient } from "@prisma/client";
-import { HookNotFoundError } from "workflow/errors";
-import { resumeHook } from "workflow/api";
 
-import { waitForAbortableSettlement } from "../hosted-onboarding/abortable-settlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { startHostedPointerWorkflow } from "../hosted-onboarding/workflow-start";
 import { getPrisma } from "../prisma";
 import type {
-  HostedPhoneCallReconciliationHookPayload,
   HostedPhoneCallReconciliationWorkflowInput,
   HostedPhoneCallReconciliationWorkflowStartResult,
 } from "./reconciliation-workflow-types";
-import {
-  buildHostedPhoneCallReconciliationHookToken,
-  HOSTED_PHONE_CALL_RECONCILIATION_HOOK_REGISTRATION_TIMEOUT_MS,
-  HOSTED_PHONE_CALL_RECONCILIATION_HOOK_RETRY_MS,
-} from "./reconciliation-workflow-types";
+import type {
+  HostedPhoneCallReconciliationHookResumer,
+} from "./reconciliation-workflow-signal";
+import { signalHostedPhoneCallReconciliation } from "./reconciliation-workflow-signal";
 import { hostedPhoneCallReconciliationWorkflow } from "./reconciliation-workflows";
-
-type HostedPhoneCallReconciliationHookResumer = (
-  token: string,
-  payload: HostedPhoneCallReconciliationHookPayload,
-) => Promise<unknown>;
 
 export async function startHostedPhoneCallReconciliationWorkflow(
   input: HostedPhoneCallReconciliationWorkflowInput,
@@ -91,43 +81,4 @@ export async function signalHostedPhoneCallResultNotificationRecovery(input: {
     signal: input.signal ?? new AbortController().signal,
   });
   return true;
-}
-
-async function signalHostedPhoneCallReconciliation(input: {
-  hookResumer?: HostedPhoneCallReconciliationHookResumer;
-  phoneCallId: string;
-  signal: AbortSignal;
-  waitForRegistration?: boolean;
-}): Promise<void> {
-  const hookResumer = input.hookResumer ?? resumeHook<
-    HostedPhoneCallReconciliationHookPayload
-  >;
-  const token = buildHostedPhoneCallReconciliationHookToken(input.phoneCallId);
-  const registrationDeadline = Date.now()
-    + HOSTED_PHONE_CALL_RECONCILIATION_HOOK_REGISTRATION_TIMEOUT_MS;
-
-  while (true) {
-    input.signal.throwIfAborted();
-    try {
-      await waitForAbortableSettlement(
-        hookResumer(token, { reason: "reconcile" }),
-        input.signal,
-      );
-      return;
-    } catch (error) {
-      if (
-        !input.waitForRegistration
-        || !HookNotFoundError.is(error)
-        || Date.now() >= registrationDeadline
-      ) {
-        throw error;
-      }
-      await waitForAbortableSettlement(
-        new Promise<void>((resolve) => {
-          setTimeout(resolve, HOSTED_PHONE_CALL_RECONCILIATION_HOOK_RETRY_MS);
-        }),
-        input.signal,
-      );
-    }
-  }
 }

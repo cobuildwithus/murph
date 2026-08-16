@@ -1788,6 +1788,98 @@ describe("Retell phone-call result handling", () => {
     ]);
   });
 
+  it("fails before the result CAS when the exact tracked-call hook cannot acknowledge", async () => {
+    const endedAt = new Date("2026-06-25T12:00:00.000Z");
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        endedAt,
+        id: "hpc_late_analysis_signal_failure",
+        providerCallId: "retell_late_analysis_signal_failure",
+        resultNotificationChannel: "telegram",
+        status: "failed",
+      }),
+    });
+    const signalReconciliation = vi.fn().mockRejectedValue(
+      new Error("exact call hook unavailable"),
+    );
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "not_completed",
+            result: "The office line was busy.",
+          },
+        },
+        call_id: "retell_late_analysis_signal_failure",
+        data_storage_setting: "basic_attributes_only",
+        end_timestamp: endedAt.toISOString(),
+        metadata: {
+          murph_phone_call_id: "hpc_late_analysis_signal_failure",
+        },
+      },
+      prisma: store.prisma,
+      signalReconciliation,
+    })).rejects.toThrow("exact call hook unavailable");
+
+    expect(signalReconciliation).toHaveBeenCalledWith({
+      phoneCallId: "hpc_late_analysis_signal_failure",
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.appendResultNotificationCalls).toEqual([]);
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      resultDeliveryStatus: null,
+      resultEncrypted: null,
+      status: "failed",
+    });
+  });
+
+  it("signals an exact nonterminal tracked-call replay before retrying its append", async () => {
+    const phases: string[] = [];
+    const store = createWebhookStore({
+      appendResultNotification: async () => {
+        phases.push("append");
+      },
+      call: buildHostedPhoneCall({
+        analyzedAt: new Date("2026-06-25T12:00:00.000Z"),
+        endedAt: new Date("2026-06-25T12:00:00.000Z"),
+        id: "hpc_late_analysis_replay",
+        providerCallId: "retell_late_analysis_replay",
+        resultDeliveryStatus: "pending",
+        resultJson: {
+          outcome: "not_completed",
+          summary: "The office line was busy.",
+        },
+        resultNotificationChannel: "telegram",
+        status: "failed",
+      }),
+    });
+    const signalReconciliation = vi.fn(async () => {
+      phases.push("signal");
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_id: "retell_late_analysis_replay",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+      signalReconciliation,
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_hpc_late_analysis_replay",
+      notificationUserId: "member_123",
+    });
+
+    expect(phases).toEqual(["signal", "append"]);
+    expect(signalReconciliation).toHaveBeenCalledWith({
+      phoneCallId: "hpc_late_analysis_replay",
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.updateManyCalls).toEqual([]);
+  });
+
   it("requires retry when call_ended changes authority during result encryption", async () => {
     const endedAt = new Date("2026-06-25T12:34:56.000Z");
     const onEncryptResult = vi
@@ -2171,6 +2263,9 @@ function createWebhookStore(input: {
           providerCallId: "providerCallId" in args.data
             ? args.data.providerCallId ?? currentCall.providerCallId
             : currentCall.providerCallId,
+          resultDeliveryStatus: "resultDeliveryStatus" in args.data
+            ? args.data.resultDeliveryStatus ?? currentCall.resultDeliveryStatus
+            : currentCall.resultDeliveryStatus,
           resultEncrypted: "resultEncrypted" in args.data
             ? args.data.resultEncrypted ?? currentCall.resultEncrypted
             : currentCall.resultEncrypted,
