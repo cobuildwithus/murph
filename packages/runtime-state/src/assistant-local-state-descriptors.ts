@@ -197,7 +197,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/indexes.json",
-    "Legacy assistant aggregate routing projection retained only when an older runtime rebuilds it during rollback.",
+    "Legacy assistant aggregate routing projection accepted only for one-way migration from a pre-projection runtime.",
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/journals",

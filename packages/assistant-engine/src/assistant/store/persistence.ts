@@ -1086,8 +1086,8 @@ async function rebuildAssistantSessionRoutingDatabase(
 
     await removeAssistantSessionRoutingDatabaseSidecars(databasePath)
     await rename(rebuildPath, databasePath)
-    // Legacy readers rebuild this absent v1 aggregate from canonical sessions.
-    // A later new reader treats that recreated file as a migration signal.
+    // A legacy aggregate is one-way migration input. Publishing this projection
+    // establishes the runtime rollback floor before the aggregate is removed.
     await rm(paths.indexesPath, { force: true })
   } catch (error) {
     rebuilt?.close()

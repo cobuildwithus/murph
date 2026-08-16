@@ -1,5 +1,6 @@
 import {
   access,
+  copyFile,
   mkdir,
   readFile,
   readdir,
@@ -947,6 +948,81 @@ describe('assistant store persistence seams', () => {
       'telegram:user-1:thread-shared',
     )).toBe(selected.sessionId)
     await expect(access(paths.indexesPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('keeps complete migrated route winners across above-floor restore when timestamps favor another claimant', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-routing-floor-source-',
+    )
+    await ensureAssistantState(paths)
+    const selected = createSession({
+      alias: 'work',
+      conversationKey: 'telegram:user-1:thread-shared',
+      lastTurnAt: '2026-04-08T00:01:00.000Z',
+      sessionId: 'session-selected',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:05:00.000Z',
+    })
+    const timestampWinner = createSession({
+      alias: 'work',
+      conversationKey: 'telegram:user-1:thread-shared',
+      lastTurnAt: '2026-04-08T00:04:00.000Z',
+      sessionId: 'session-timestamp-winner',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:04:00.000Z',
+    })
+    expect(Date.parse(selected.lastTurnAt ?? '')).toBeLessThan(
+      Date.parse(timestampWinner.lastTurnAt ?? ''),
+    )
+    await writeAssistantSession(paths, selected)
+    await writeAssistantSession(paths, timestampWinner)
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {
+        work: selected.sessionId,
+      },
+      conversationKeys: {
+        'telegram:user-1:thread-shared': selected.sessionId,
+      },
+      recentSessions: {
+        [selected.sessionId]: selected.updatedAt,
+        [timestampWinner.sessionId]: timestampWinner.updatedAt,
+      },
+    }), 'utf8')
+
+    await expect(readAssistantSessionRouting(paths, {
+      alias: 'work',
+      conversationKeys: ['telegram:user-1:thread-shared'],
+    })).resolves.toMatchObject({
+      aliasSessionId: selected.sessionId,
+      conversationKeySessionIds: new Map([
+        ['telegram:user-1:thread-shared', selected.sessionId],
+      ]),
+    })
+
+    const restoredPaths = await createAssistantPaths(
+      'assistant-store-persistence-routing-floor-restored-',
+    )
+    await ensureAssistantState(restoredPaths)
+    await writeAssistantSession(restoredPaths, selected)
+    await writeAssistantSession(restoredPaths, timestampWinner)
+    await copyFile(
+      resolveAssistantSessionRoutingDatabasePath(paths),
+      resolveAssistantSessionRoutingDatabasePath(restoredPaths),
+    )
+
+    await expect(readAssistantSessionRouting(restoredPaths, {
+      alias: 'work',
+      conversationKeys: ['telegram:user-1:thread-shared'],
+    })).resolves.toMatchObject({
+      aliasSessionId: selected.sessionId,
+      conversationKeySessionIds: new Map([
+        ['telegram:user-1:thread-shared', selected.sessionId],
+      ]),
+    })
+    await expect(access(restoredPaths.indexesPath)).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })

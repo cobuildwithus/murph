@@ -1233,6 +1233,18 @@ dependency. A rollback to the prior bundle is safe only before the first
 is the hard rollback floor because a workspace, checkpoint, or retained outbox
 intent may contain the marker. Do not try to prove an incident-time drain;
 forward-fix instead of adding a compatibility reader or dual writer.
+Session routing's SQLite projection follows the same runtime-only hard-cut
+discipline. Deploy Cloudflare and the projection-capable runner together with
+`container_rollout=immediate`, require managed-container smoke to report the
+exact new runner-bundle fingerprint and assistant CLI surface, and let all old
+runners drain before any assistant turn can publish `session-routing.sqlite`.
+The first publication makes that runner bundle the hard rollback floor for the
+workspace. A pre-projection workspace may still migrate its complete valid
+`indexes.json` forward, but a migrated hosted workspace must forward-fix rather
+than reopen below the floor; local downgrades below the projection-capable
+release are unsupported after migration. The existing runner health gate
+replaces a below-floor warm shell before workspace invocation, so this contract
+needs no aggregate dual-write, compatibility marker, or reconciliation owner.
 Native iMessage response cards follow the same runtime-only hard-cut rule.
 Deploy Cloudflare and the runner bundle together with
 `container_rollout=immediate`, then require managed-container smoke to report

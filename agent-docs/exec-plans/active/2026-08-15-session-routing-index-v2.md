@@ -49,7 +49,8 @@ Updated: 2026-08-15
 
 1. Risk: a migration or interrupted write leaves routing partially converted.
    Mitigation: build a temporary SQLite projection, publish it with one atomic
-   rename, and treat a rollback-created legacy aggregate as a rebuild signal.
+   rename, accept a legacy aggregate only as one-way migration input, and make
+   first projection publication the runner rollback floor.
 2. Risk: a stale route silently rebinds a canonical session.
    Mitigation: validate the expected alias or conversation key against the
    loaded session before applying any binding patch.
@@ -99,6 +100,23 @@ Updated: 2026-08-15
   recovery. The parent audit's `0600` correction similarly reuses the existing
   secure assistant-file adoption primitive. Neither correction adds an owner,
   state machine, dependency, compatibility marker, or reconciliation pass.
+- ReviewGPT round 3 accepted one rollback-contract finding: once the SQLite
+  projection contains the only persisted effective winner, a pre-projection
+  reader can reconstruct a different winner from ambiguous durable claims and
+  make it survive roll-forward. Establish projection publication as the hard
+  runner rollback floor using the existing immediate-rollout, exact-bundle
+  smoke, and stale-runner replacement mechanisms; do not add dual-write,
+  markers, reconciliation, or another routing owner.
+- Round-4 retrospective: narrow the rollback requirement rather than build a
+  second compatibility system. The accepted round-3 scenario proves that
+  arbitrary pre-projection rollback cannot preserve the effective winner after
+  projection publication without dual-writing the aggregate, persisting a
+  compatibility marker, reconciling duplicate canonical claims, or adding a
+  new owner. Those options contradict the single-projection direction and the
+  task's complexity priority. The existing immediate container rollout, exact
+  bundle smoke, and stale warm-runner replacement already implement the needed
+  deployment floor. The correction changes the contract and focused proof but
+  adds no production state, branch, dependency, or runtime mechanism.
 
 ## Verification
 
@@ -121,6 +139,9 @@ Updated: 2026-08-15
   original-patch finding for loss of the effective route winner during valid v1
   migration. The response exceeded the trust floor and carried the configured
   Pro model evidence and completion marker.
+- ReviewGPT substantive round 3: the prior forward-migration mechanism is
+  resolved; one accepted original-patch finding for the advertised
+  pre-projection rollback path losing its effective winner.
 - Corrected implementation: one 4.1 MB SQLite projection after a measured cold
   rebuild from 10,000 durable sessions in 48.9 seconds; the requested route
   resolved and the state directory contained exactly one file.
@@ -131,3 +152,6 @@ Updated: 2026-08-15
 - Corrected-head local verification: assistant persistence 25/25, runtime-state
   coverage 212/212, runtime-state and assistant-engine typechecks, scenario
   integrity for 206 scenarios, and `git diff --check` all pass.
+- Round-3 rollback correction verification: assistant persistence 26/26,
+  focused Cloudflare rollout/runner tests 209/209, and assistant-engine,
+  runtime-state, and Cloudflare typechecks all pass.

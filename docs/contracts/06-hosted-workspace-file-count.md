@@ -289,9 +289,11 @@ landing; record the chosen posture here so the decision is reviewable.
   existing assistant runtime write lock. The store uses `DELETE`
   journaling and closes each handle before hosted checkpointing, so its steady
   state is one database file with no WAL/SHM family. The legacy aggregate
-  `assistant/indexes.json` is deleted only after migration publishes; an older
-  rollback may recreate it from canonical sessions, and its presence tells a
-  later new reader to migrate and remove it again.
+  `assistant/indexes.json` is one-way input for a workspace that has not yet
+  published the SQLite projection and is deleted only after migration
+  publishes. That first publication establishes the projection-capable runner
+  as the hard rollback floor; a pre-projection runtime must not reopen the
+  workspace.
 
 - `bank/habitat/*.md` (`murph.frontmatter.habitat.v1`) is canonical product
   truth included in hosted workspace snapshots. It stores one optional Markdown
