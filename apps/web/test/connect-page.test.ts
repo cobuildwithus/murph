@@ -163,8 +163,11 @@ afterEach(() => {
 });
 
 test("ConnectPage renders source search, source names, and logo marks", async () => {
-  const { default: ConnectPage, metadata } = await import(
+  const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
+  );
+  const { metadata } = await import(
+    "../app/(dashboard)/connect/connect-page-metadata"
   );
   const markup = renderToStaticMarkup(await ConnectPage());
 
