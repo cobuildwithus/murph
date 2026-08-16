@@ -166,12 +166,17 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
-  const { metadata } = await import(
-    "../app/(dashboard)/connect/connect-page-metadata"
-  );
+  // Read metadata through the page module so the route-owner re-export is
+  // proven, not just the helper module.
+  const { metadata } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(metadata.title, "Connect Devices — Murph");
+  const ogImages = metadata.openGraph?.images;
+  assert.ok(Array.isArray(ogImages));
+  const [ogImage] = ogImages;
+  assert.ok(typeof ogImage === "object" && ogImage !== null && "url" in ogImage);
+  assert.equal(String(ogImage.url), "/connect/opengraph-image");
   assert.match(markup, /Sync your biomarkers/);
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);

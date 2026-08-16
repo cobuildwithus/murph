@@ -38,7 +38,8 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-success-client", () => (
 
 function expectDedicatedImage(
   metadata: Metadata,
-  expected: { alt: string; url: string },
+  // alt accepts an asymmetric matcher for subject-specific parent wording.
+  expected: { alt: unknown; url: string },
 ) {
   const image = expect.objectContaining({
     alt: expected.alt,
@@ -96,7 +97,7 @@ describe("share preview metadata", () => {
 
     expect(metadata.title).toBe("Sponsor Murph in this chat");
     expectDedicatedImage(metadata, {
-      alt: "Sponsor Murph for your group. How groups keep Murph running.",
+      alt: "Murph group sponsorship. How groups keep Murph running.",
       url: "/groups/fund/join-code/opengraph-image",
     });
     expectRouteFile("../app/groups/fund/[joinCode]/opengraph-image.tsx");
@@ -110,8 +111,9 @@ describe("share preview metadata", () => {
       params: Promise.resolve({ biomarkerId: "deep-sleep-minutes" }),
     });
 
+    // Alt mirrors the parent route's subject-specific wording.
     expectDedicatedImage(metadata, {
-      alt: "A Murph biomarker.",
+      alt: expect.stringMatching(/^.+, a Murph biomarker\.$/),
       url: "/biomarkers/deep-sleep-minutes/opengraph-image",
     });
   });
@@ -125,7 +127,7 @@ describe("share preview metadata", () => {
     });
 
     expectDedicatedImage(metadata, {
-      alt: "A Murph experiment.",
+      alt: expect.stringMatching(/^.+, a Murph experiment\.$/),
       url: "/experiments/cold-plunge/opengraph-image",
     });
   });
@@ -139,7 +141,7 @@ describe("share preview metadata", () => {
     });
 
     expectDedicatedImage(metadata, {
-      alt: "A Murph experiment.",
+      alt: expect.stringMatching(/^.+, a Murph experiment\.$/),
       url: "/experiments/cold-plunge/opengraph-image",
     });
   });

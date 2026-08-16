@@ -25,7 +25,7 @@ export async function generateMetadata({
   // otherwise injects the site default, which overrides the parent segment's
   // file-convention image and unfurls the homepage card here.
   const ogImage = createMurphOgImageRef({
-    alt: "A Murph biomarker.",
+    alt: `${biomarker.title}, a Murph biomarker.`,
     url: `/biomarkers/${encodeURIComponent(biomarkerId)}/opengraph-image`,
   });
 

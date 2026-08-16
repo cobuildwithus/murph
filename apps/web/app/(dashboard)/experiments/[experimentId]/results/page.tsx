@@ -33,7 +33,7 @@ export async function generateMetadata({
   // otherwise injects the site default, which overrides the parent segment's
   // file-convention image and unfurls the homepage card here.
   const ogImage = createMurphOgImageRef({
-    alt: "A Murph experiment.",
+    alt: `${shell.title}, a Murph experiment.`,
     url: `/experiments/${encodeURIComponent(experimentId)}/opengraph-image`,
   });
 

@@ -44,9 +44,9 @@ const PREVIEWS = [
     frameId: "group-fund",
     route: "/groups/fund/[joinCode]",
     note:
-      "Dropped into group chats next to the group join card, so it keeps the "
-      + "same group eyebrow. Capability-neutral copy: it describes what "
-      + "sponsoring is rather than promising this link is live.",
+      "Dropped into group chats next to the group join card. Descriptive, "
+      + "non-imperative copy: it names what the route is about rather than "
+      + "promising this specific link is live.",
     alt: GROUP_FUND_OG_ALT,
     card: <GroupFundShareCard logoDataUri="/logo.svg" />,
   },
