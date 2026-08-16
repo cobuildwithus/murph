@@ -2908,7 +2908,7 @@ export async function executeMurphDynamicToolRequest(input: {
       if (!stop || !userActionScope || userActionScope.acceptedInputIds.length === 0) {
         return toolTextResult(
           false,
-          'phone-call termination requires a current private user request and hosted control transport',
+          'phone-call termination requires a current authorized conversation request and hosted control transport',
         )
       }
 
@@ -2928,7 +2928,7 @@ export async function executeMurphDynamicToolRequest(input: {
                 ? 'The call was already terminal; do not claim this request stopped an active call.'
                 : result.state === 'start_pending'
                   ? 'The termination request is durable but not yet confirmed. Do not claim the call stopped; an asynchronous resolution will follow and status remains inspectable.'
-                  : 'No call with that id was found for the authenticated member.',
+                  : 'No call with that id was found for the authenticated conversation owner.',
           }),
         )
       } catch {

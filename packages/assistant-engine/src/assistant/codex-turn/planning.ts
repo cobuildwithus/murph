@@ -880,6 +880,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       threadId: currentAudienceDeliveryFields.threadId,
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })
+  const interactivePhoneCallAudience =
+    privateInteractiveAudience ||
+    (hostedGroupRuntime && messageTargetingAvailable)
   const productFeedbackAuthorized =
     resolveAssistantProductFeedbackAcceptedInputIds(
       input.acceptedInputItems ?? [],
@@ -979,21 +982,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
             scheduledPhoneCallScope !== null ||
             (
               userActionAcceptedInputIds.length > 0 &&
-              (
-                privateInteractiveAudience ||
-                (
-                  hostedGroupRuntime &&
-                  messageTargetingAvailable
-                )
-              )
+              interactivePhoneCallAudience
             )
           ),
         phoneCallStatusAvailable:
-          privateInteractiveAudience &&
+          interactivePhoneCallAudience &&
           userActionAcceptedInputIds.length > 0 &&
           typeof input.hostedToolContext?.phoneCalls?.status === 'function',
         phoneCallStopAvailable:
-          privateInteractiveAudience &&
+          interactivePhoneCallAudience &&
           userActionAcceptedInputIds.length > 0 &&
           typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,

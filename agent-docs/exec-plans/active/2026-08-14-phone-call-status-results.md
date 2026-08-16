@@ -304,6 +304,26 @@ Updated: 2026-08-15
   two explicit-project groups after the project-unspecified aggregate runner
   stalled without a test result; Web typecheck, focused ESLint, docs drift,
   privacy inspection, and `git diff --check` pass.
+- A third exact-head round-12 full audit found two original-PR gaps that the
+  parent independently confirmed. Mandatory direct thread results and stop
+  settlements resolved the current route but did not carry the existing
+  provider-entry route authority, so a later Telegram binding change could
+  leave the queued private result deliverable to the stale target. Both wake
+  builders now bind the existing destination before persistence; direct Linq
+  keeps its explicit bound semantics, direct Telegram carries live authority,
+  and participant/group routes retain their existing shapes. The same audit
+  found that a targeted group turn could create a group-owned call but could
+  not expose status or stop afterward on any reachable owner. Status and stop
+  now reuse the existing current-input plus message-targeting predicate and the
+  already-bound group-container port, with no participant-owned state or new
+  authorization seam. The Vonneumann response ran 26 minutes 13 seconds with
+  the exact ZIP and completion markers, but again reported
+  `MODEL_CONFIRMATION: UNKNOWN` and `gpt-5-6-pro`, so it does not satisfy the
+  Sol gate; shorter Phlebas and Mountain attempts were also invalid tooling
+  responses. Focused proof passes 61 Web result tests, 125 assistant-engine
+  phone/planning tests, and 255 assistant-runtime callback tests. All 14
+  phone-call Web files pass 245 tests, and Web, assistant-engine, and
+  assistant-runtime typechecks pass.
 - Corrected-head product-experience revalidation finds the implementation is
   again the smallest complete experience for the incident: status is durable,
   stop state is truthful, fallback outcomes are canonical, and an exact result

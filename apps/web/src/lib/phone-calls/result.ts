@@ -26,6 +26,7 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
+  bindHostedAssistantNotificationDestination,
   isHostedThreadContainerNotificationDestination,
   requireHostedAssistantNotificationDestination,
   type HostedAssistantNotificationDestination,
@@ -691,6 +692,10 @@ export function buildPhoneCallResultNotificationWake(input: {
 }) {
   const notificationKey = buildPhoneCallResultNotificationKey(input.callId);
   const isGroup = isHostedThreadContainerNotificationDestination(input.destination);
+  const destination = bindHostedAssistantNotificationDestination({
+    destination: input.destination,
+    memberId: input.memberId,
+  });
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: buildPhoneCallResultNotificationEventId(input.callId),
     memberId: input.memberId,
@@ -698,10 +703,10 @@ export function buildPhoneCallResultNotificationWake(input: {
       deliveryDedupeToken: notificationKey,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: notificationKey,
-      ...(input.destination.externalThreadRouteAuthority
+      ...(destination.externalThreadRouteAuthority
         ? {
             externalThreadRouteAuthority:
-              input.destination.externalThreadRouteAuthority,
+              destination.externalThreadRouteAuthority,
           }
         : {}),
       instructions: buildPhoneCallResultNotificationInstructions({
@@ -714,7 +719,7 @@ export function buildPhoneCallResultNotificationWake(input: {
       // group requester must hear how it ended; omission recreates the exact
       // uncertainty the result notification exists to resolve.
       responsePolicy: { kind: "require_send" },
-      route: input.destination.route,
+      route: destination.route,
     },
     occurredAt: new Date().toISOString(),
   });
@@ -732,6 +737,10 @@ export function buildPhoneCallStopSettlementNotificationWake(input: {
   const isGroup = isHostedThreadContainerNotificationDestination(
     input.destination,
   );
+  const destination = bindHostedAssistantNotificationDestination({
+    destination: input.destination,
+    memberId: input.memberId,
+  });
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: buildPhoneCallStopSettlementNotificationEventId(input.callId),
     memberId: input.memberId,
@@ -739,10 +748,10 @@ export function buildPhoneCallStopSettlementNotificationWake(input: {
       deliveryDedupeToken: notificationKey,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: notificationKey,
-      ...(input.destination.externalThreadRouteAuthority
+      ...(destination.externalThreadRouteAuthority
         ? {
             externalThreadRouteAuthority:
-              input.destination.externalThreadRouteAuthority,
+              destination.externalThreadRouteAuthority,
           }
         : {}),
       instructions: [
@@ -756,7 +765,7 @@ export function buildPhoneCallStopSettlementNotificationWake(input: {
         "Do not make another call, perform follow-up outreach, invoke tools, or stay silent. A separate final call result may arrive later if provider analysis exists.",
       ].join("\n\n"),
       responsePolicy: { kind: "require_send" },
-      route: input.destination.route,
+      route: destination.route,
     },
     occurredAt: new Date().toISOString(),
   });

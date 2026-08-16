@@ -577,6 +577,88 @@ describe("assistant phone calls", () => {
     );
   });
 
+  it("reads and stops a group-owned call under the current group request", async () => {
+    const status = vi.fn(async () => ({
+      calls: [{
+        analyzedAt: null,
+        createdAt: "2026-09-01T15:00:00.000Z",
+        endedAt: null,
+        phoneCallId: "hpc_group_control",
+        result: null,
+        status: "calling" as const,
+        stopRequestedAt: null,
+        updatedAt: "2026-09-01T15:00:10.000Z",
+      }],
+    }));
+    const stop = vi.fn(async () => ({
+      phoneCallId: "hpc_group_control",
+      state: "start_pending" as const,
+      status: "calling" as const,
+    }));
+    const hostedToolContext = createHostedToolContext({
+      currentUserActionScope: () => ({
+        ...BASE_SCOPE,
+        acceptedInputIds: [GROUP_REQUEST_REF],
+        conversationScope: "group",
+        originSessionId: "session_group_phone_call",
+      }),
+      phoneCalls: {
+        start: vi.fn(),
+        status,
+        stop,
+      },
+    });
+    const statusRequest = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: { phone_call_id: "hpc_group_control" },
+      tool: MURPH_GET_PHONE_CALL_STATUS_TOOL.name,
+    }));
+    const stopRequest = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: { phone_call_id: "hpc_group_control" },
+      tool: MURPH_STOP_PHONE_CALL_TOOL.name,
+    }));
+    if (
+      !statusRequest
+      || statusRequest.kind !== "get-phone-call-status"
+      || !stopRequest
+      || stopRequest.kind !== "stop-phone-call"
+    ) {
+      throw new Error("Expected group phone-call control requests.");
+    }
+
+    const statusResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: statusRequest,
+    });
+    const stopResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery: null,
+      request: stopRequest,
+    });
+
+    expect(status).toHaveBeenCalledWith({
+      phoneCallId: "hpc_group_control",
+    }, {
+      signal: null,
+    });
+    expect(statusResult.rpcResult.success).toBe(true);
+    expect(stop).toHaveBeenCalledWith({
+      phoneCallId: "hpc_group_control",
+    }, {
+      signal: null,
+    });
+    expect(stopResult.rpcResult.success).toBe(false);
+    expect(stopResult.rpcResult.contentItems[0]?.text).toContain(
+      "termination request is durable but not yet confirmed",
+    );
+  });
+
   it("does not turn start-pending termination into a success claim", async () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: { phone_call_id: "hpc_stop_pending" },

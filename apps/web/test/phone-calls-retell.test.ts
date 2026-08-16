@@ -907,6 +907,43 @@ describe("Retell phone-call result handling", () => {
     );
   });
 
+  it("binds a direct Linq thread result to provider-entry route authority", () => {
+    const wake = buildPhoneCallResultNotificationWake({
+      brief: VALID_BRIEF,
+      callId: "hpc_direct_linq",
+      destination: {
+        conversationShape: "direct-member",
+        externalThreadRouteAuthority: null,
+        route: {
+          actorId: "+12125550111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-direct-chat",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq-direct-thread",
+          threadIsDirect: true,
+        },
+      },
+      memberId: "member_123",
+      result: {
+        outcome: "completed",
+        summary: "The office confirmed the appointment.",
+      },
+    });
+
+    expect(wake.notification.externalThreadRouteAuthority).toEqual({
+      channel: "linq",
+      containerMemberId: "member_123",
+      threadId: "linq-direct-chat",
+    });
+    expect(wake.notification.route.delivery).toEqual({
+      kind: "explicit",
+      target: "linq-direct-chat",
+    });
+  });
+
   it("requires an idempotent confirmation after an asynchronous stop settles", () => {
     const wake = buildPhoneCallStopSettlementNotificationWake({
       callId: "hpc_stop_settled",
@@ -936,6 +973,11 @@ describe("Retell phone-call result handling", () => {
     expect(wake.notification.deliveryIdempotencyKey).toBe(
       "phone-call-result:hpc_stop_settled:stop-settled",
     );
+    expect(wake.notification.externalThreadRouteAuthority).toEqual({
+      channel: "telegram",
+      containerMemberId: "member_123",
+      threadId: "telegram-direct-chat",
+    });
     expect(wake.notification.route.channel).toBe("telegram");
     expect(wake.notification.instructions).toContain("no longer active");
     expect(wake.notification.instructions).toContain(

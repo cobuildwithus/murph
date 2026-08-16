@@ -8775,6 +8775,59 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
   });
 
+  it("blocks a direct Telegram phone result when its live route authority is unavailable", async () => {
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_direct_123",
+    };
+    const idempotencyKey = "phone-call-result:hpc_revoked_direct";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: routeAuthority.threadId,
+      idempotencyKey,
+      threadId: "hid_telegram_direct_123",
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendTelegram({
+        idempotencyKey,
+        message: "Private phone-call result.",
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      });
+      throw new Error("unreachable without live route authority");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+      context: expect.objectContaining({ retryable: true }),
+    });
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
   it("revalidates the exact Telegram group route immediately before provider entry", async () => {
     const routeAuthority = {
       channel: "telegram" as const,
