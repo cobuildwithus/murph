@@ -239,6 +239,7 @@ import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
+  resolveHostedRuntimeWakeProjection,
   type HostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
 import {
@@ -4681,16 +4682,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             false,
           );
           // Importing mailbox state never services an already-selected wake.
-          pendingWake = selectEarliestHostedRuntimeWake([
+          const importWakeProjection = resolveHostedRuntimeWakeProjection([
             {
               at: previousPendingWake.nextWakeAt,
               reason: previousPendingWake.nextWakeReason,
+              source: "carry",
             },
             {
               at: pendingWake.nextWakeAt,
               reason: pendingWake.nextWakeReason,
+              source: "fresh",
             },
-          ]);
+          ], baseRunnerInput.now?.() ?? new Date().toISOString());
+          pendingWake = {
+            nextWakeAt: importWakeProjection.at,
+            nextWakeReason: importWakeProjection.reason,
+          };
           if (pendingWake.nextWakeAt !== null && invocationStatus !== "budget_exhausted") {
             invocationStatus = "scheduled";
           }

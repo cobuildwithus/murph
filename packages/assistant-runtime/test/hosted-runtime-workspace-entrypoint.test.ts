@@ -35580,6 +35580,196 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("fresh due assistant wake supersedes a stale carried device-sync wake at import reconciliation", async () => {
+    // Incident shape (2026-08-15): a workspace restores with a stale, already
+    // past device-sync.reconcile wake. A conversation turn arms a fresh due
+    // assistant wake (a just-scheduled reminder). The stale carried token must
+    // never win the import reconciliation and resurrect into a checkpoint,
+    // which previously left the workspace dormant and the reminder unfired.
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const staleDeviceWakeAt = new Date(Date.now() - 9 * 60 * 60 * 1_000).toISOString();
+    const freshDueWakeAt = new Date(Date.now() - 1_000).toISOString();
+    let assistantPass = 0;
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_stale_device_wake_superseded",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "3",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/stale-device-wake-superseded.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_stale_device_wake_001",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleDeviceWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPass += 1;
+            events.push(`assistant:${assistantPass}`);
+            if (assistantPass === 1) {
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: freshDueWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+            // Later passes make no progress, mirroring the incident: an
+            // idle turn must not resurrect the stale device timestamp.
+            assert.notEqual(input.workspace?.nextWakeAt, staleDeviceWakeAt);
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      const persistedWakes = checkpointRequests.map((request) => [
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]);
+      assert.ok(
+        persistedWakes.every(([wakeAt]) => wakeAt !== staleDeviceWakeAt),
+        `stale device wake resurrected into a checkpoint: ${JSON.stringify(persistedWakes)}`,
+      );
+      assert.ok(
+        persistedWakes.some(([wakeAt, reason]) =>
+          wakeAt === freshDueWakeAt && reason === "assistant"
+        ),
+        `fresh due assistant wake missing from checkpoints: ${JSON.stringify(persistedWakes)}`,
+      );
+      assert.notEqual(result.nextWakeAt, staleDeviceWakeAt);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("carried due device-sync wake is preserved verbatim when the pass observes no due work", async () => {
+    // Without a fresh due observation, the carried due token keeps its exact
+    // timestamp and reason so checkpoint-gate identity stays stable and the
+    // orchestrator's device-sync branch still owns servicing it.
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const staleDeviceWakeAt = new Date(Date.now() - 9 * 60 * 60 * 1_000).toISOString();
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_stale_device_wake_preserved",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "3",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/stale-device-wake-preserved.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_stale_device_wake_002",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleDeviceWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      // Depending on whether the idle checkpoint or the import reconciliation
+      // lands first, the carried token is either preserved or replaced by the
+      // pass's own (null) authority. The invariant: a surviving carried due
+      // token keeps its exact timestamp and reason — never re-stamped to a
+      // fresh clock reading, never re-labelled to another reason.
+      const observedWakes = [
+        ...checkpointRequests.map((request) => [
+          request.nextWakeAt ?? null,
+          request.nextWakeReason ?? null,
+        ]),
+        [result.nextWakeAt, result.nextWakeAt === null ? null : "device-sync.reconcile"],
+      ];
+      for (const [wakeAt, reason] of observedWakes) {
+        assert.ok(
+          wakeAt === null
+            || (wakeAt === staleDeviceWakeAt && reason === "device-sync.reconcile"),
+          `carried due token was re-stamped or re-labelled: ${wakeAt}:${reason}`,
+        );
+      }
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not dirty-checkpoint a consumed alarm wake when the assistant phase ends idle", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
