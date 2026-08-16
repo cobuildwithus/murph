@@ -1002,10 +1002,69 @@ describe("hosted detached assistant ask controller", () => {
       await removeVaultRoot(vaultRoot);
     }
   });
+
+  test("dequeues an expired current-sender replay and advances the next ask", async () => {
+    const vaultRoot = await createVaultRoot();
+    const executeAsk = vi.fn(async () => ({
+      answer: "second answer",
+      outcome: "answered" as const,
+    }));
+    const preparedRequestIds: string[] = [];
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({
+          currentSender: true,
+          eventId: "ask_event_expired_replay",
+          itemId: "item_expired_replay",
+        }),
+        createPendingAsk({ eventId: "ask_event_after_replay", itemId: "item_after_replay" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              return { action: "complete", status: "completed" };
+            }
+            preparedRequestIds.push(request.requestId);
+            return request.requestId === "ask_event_expired_replay"
+              ? { action: "prepare", status: "already_completed" }
+              : {
+                  action: "prepare",
+                  question: "second question",
+                  status: "ready",
+                  targetLabel: "100 Club",
+                };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+
+      assert.deepEqual(preparedRequestIds, [
+        "ask_event_expired_replay",
+        "ask_event_after_replay",
+      ]);
+      assert.equal(executeAsk.mock.calls.length, 1);
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
 });
 
 function createPendingAsk(input: {
   consented?: boolean;
+  currentSender?: boolean;
   eventId: string;
   itemId: string;
 }): HostedSystemMailboxPendingItem {
@@ -1024,7 +1083,23 @@ function createPendingAsk(input: {
     routeAction: "run-assistant-ask",
     status: "pending",
     wake: {
-      ask: input.consented
+      ask: input.currentSender
+        ? {
+            expiresAt: "2026-07-15T12:10:00.000Z",
+            origin: {
+              assistantInputId: `ain_${"b".repeat(32)}`,
+              kind: "accepted_input" as const,
+              sessionId: "session_current_sender",
+            },
+            question: "current sender question",
+            resultDestination: { kind: "origin_context" as const },
+            target: {
+              groupRuntimeMemberId: "member_synthetic_group_runtime",
+              kind: "current_sender_personal" as const,
+              permissionDigest: "e".repeat(64),
+            },
+          }
+        : input.consented
         ? {
             expiresAt: "2026-07-15T12:10:00.000Z",
             origin: {

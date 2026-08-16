@@ -10,8 +10,12 @@ import {
 } from '../src/assistant/provider-config.ts'
 import {
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_CONFIG,
+  resolveAssistantCodexUsageProviderName,
   resolveAssistantCodexLocalOnboardingProviderConfig,
   resolveAssistantCodexModelProviderConfig,
 } from '../src/assistant/target-runtime.ts'
@@ -21,6 +25,16 @@ function continuityFingerprint(input: AssistantProviderConfigInput): string {
 }
 
 describe('assistant provider config', () => {
+  it('keeps local transport identities out of OpenAI usage evidence', () => {
+    expect(resolveAssistantCodexUsageProviderName(
+      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+    )).toBe(HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID)
+    expect(resolveAssistantCodexUsageProviderName(
+      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+    )).toBe(HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID)
+    expect(resolveAssistantCodexUsageProviderName(null)).toBeNull()
+  })
+
   it('keeps Codex continuity stable across ordinary model and reasoning changes', () => {
     const first = continuityFingerprint({
       approvalPolicy: 'never',

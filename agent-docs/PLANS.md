@@ -18,6 +18,7 @@ owner document prevails and the completed snapshot remains unchanged.
 ## Lifecycle Scripts
 
 - Create a plan: `bash scripts/open-exec-plan.sh <slug> "<title>"`
+- Inspect plan-helper usage without creating a plan: `bash scripts/open-exec-plan.sh --help` or `pnpm run plan:open -- --help`
 - Complete a plan: `bash scripts/close-exec-plan.sh <active-plan-path>`
 - Finish a plan-bearing task and commit it: `bash scripts/finish-task <active-plan-path> "brief summary" <path> [path ...]`
 - After its PR is merged or closed, retire the task worktree from another checkout: `scripts/retire-worktree <path>`

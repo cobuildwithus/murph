@@ -19,6 +19,19 @@ import {
 const HOSTED_DEVICE_SYNC_DEFAULT_HEADERS = {
   "Cache-Control": "no-store",
 } as const;
+const DEVICE_WEBHOOK_QUEUE_DIAGNOSTIC_TYPES = new Set([
+  "enqueue_failed",
+  "invalid_request",
+  "persistence_failure_unclassified",
+  "persistence_key_unavailable",
+  "persistence_reseal_failed",
+  "queue_unavailable",
+  "transport_context_mismatch",
+  "transport_metadata_invalid",
+  "transport_payload_open_failed",
+  "transport_recipient_key_unavailable",
+  "transport_root_key_unwrap_failed",
+]);
 
 export {
   InvalidRouteParamEncodingError,
@@ -95,11 +108,33 @@ function matchDeviceSyncError(error: unknown): JsonErrorMapping | null {
     return null;
   }
 
+  const queueDiagnosticType = readDeviceWebhookQueueDiagnosticType(error);
   return {
     error: buildPublicDeviceSyncErrorPayload(error).error,
-    ...(error.retryable ? { log: { level: "warn" } } : {}),
+    ...(error.retryable || queueDiagnosticType
+      ? {
+          log: {
+            ...(error.retryable ? { level: "warn" as const } : {}),
+            ...(queueDiagnosticType
+              ? { details: { deviceWebhookQueueFailureType: queueDiagnosticType } }
+              : {}),
+          },
+        }
+      : {}),
     status: error.httpStatus,
   };
+}
+
+function readDeviceWebhookQueueDiagnosticType(
+  error: DeviceSyncError,
+): string | null {
+  if (error.code !== "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED") {
+    return null;
+  }
+  const type = error.details?.type;
+  return typeof type === "string" && DEVICE_WEBHOOK_QUEUE_DIAGNOSTIC_TYPES.has(type)
+    ? type
+    : "enqueue_failed";
 }
 
 // Prisma reports every transaction-API fault as P2028, covering both a

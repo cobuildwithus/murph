@@ -41,11 +41,11 @@ import {
   type BrowserVaultMetricRow,
   type BrowserVaultReplica,
   type BrowserVaultReplicaPolicy,
-  type BrowserVaultSearchRow,
   type BrowserVaultSourceHealthRow,
   type BrowserVaultTimelineRow,
   type CreateBrowserVaultReplicaInput,
 } from "./shared.ts";
+import { projectBrowserVaultSearchRow } from "./search-row.ts";
 import {
   createBrowserVaultMetricSelectionRows,
   toBrowserVaultMetricRows,
@@ -53,6 +53,8 @@ import {
 } from "./metric-points.ts";
 import { toBrowserVaultLabResultRows } from "./lab-results.ts";
 import { projectBrowserTrainingSession } from "./training.ts";
+import { buildBrowserVaultExperimentRunCards } from "./experiment-run-cards.ts";
+import { createBrowserVaultProjectionQueryClient } from "./query.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -105,8 +107,14 @@ export async function createBrowserVaultReplica(
     experimentOutcomes: (input.experimentOutcomes ?? []).map((outcome) =>
       experimentOutcomeSchema.parse(outcome)
     ),
+    experimentRunCards: [],
     generatedAt,
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+    hasLabBiomarkers: metricRows.some((row) =>
+      row.sourceKind === "test-result" &&
+      row.biomarkerKey !== null &&
+      row.value !== null
+    ),
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
@@ -119,7 +127,7 @@ export async function createBrowserVaultReplica(
     ),
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
-    searchRows: entities.map(projectSearchRow),
+    searchRows: entities.map(projectBrowserVaultSearchRow),
     source: {
       dataVersion: "pending",
       sourceBundleHash: requireString(input.sourceBundleHash, "Browser vault replica sourceBundleHash"),
@@ -128,12 +136,18 @@ export async function createBrowserVaultReplica(
     timelineRows,
     weeklySampleSummaries,
   };
-  const dataVersion = await hashBrowserVaultReplicaData(replicaWithoutVersion);
+  const replicaWithDerivedCards: BrowserVaultReplica = {
+    ...replicaWithoutVersion,
+    experimentRunCards: await buildBrowserVaultExperimentRunCards(
+      createBrowserVaultProjectionQueryClient(replicaWithoutVersion),
+    ),
+  };
+  const dataVersion = await hashBrowserVaultReplicaData(replicaWithDerivedCards);
 
   return {
-    ...replicaWithoutVersion,
+    ...replicaWithDerivedCards,
     source: {
-      ...replicaWithoutVersion.source,
+      ...replicaWithDerivedCards.source,
       dataVersion,
     },
   };
@@ -586,22 +600,6 @@ function projectTimelineTitle(entry: TimelineEntry): string {
     default:
       return "Event";
   }
-}
-
-function projectSearchRow(entity: BrowserVaultEntity): BrowserVaultSearchRow {
-  return {
-    date: entity.date,
-    entityId: entity.id,
-    family: entity.family,
-    id: entity.id,
-    kind: entity.kind,
-    occurredAt: entity.occurredAt,
-    tags: entity.tags.slice(),
-    text: [entity.title, entity.bodyPreview, entity.kind, entity.status, entity.stream, entity.tags.join(" ")]
-      .filter((value): value is string => typeof value === "string" && value.length > 0)
-      .join("\n"),
-    title: entity.title,
-  };
 }
 
 function projectWeeklySampleSummaries(vault: VaultReadModel, generatedAt: string): OverviewWeeklySampleSummary[] {

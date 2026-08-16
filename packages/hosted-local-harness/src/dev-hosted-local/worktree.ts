@@ -679,7 +679,10 @@ function buildHostedLocalWorktreeEnv(input: {
     MURPH_DEV_MINIO_PORT: String(input.ports.minio),
     MURPH_DEV_REUSE_EXISTING_WORKER: "0",
     MURPH_DEV_SKIP_STRIPE_LISTEN: input.baseEnv.MURPH_DEV_SKIP_STRIPE_LISTEN ?? "1",
-    MURPH_DEV_TEMPORAL: "managed",
+    MURPH_DEV_TEMPORAL:
+      input.baseEnv.MURPH_DEV_TEMPORAL?.trim().toLowerCase() === "disabled"
+        ? "disabled"
+        : "managed",
     MURPH_DEV_TEMPORAL_HOST: "127.0.0.1",
     MURPH_DEV_TEMPORAL_PORT: String(input.ports.temporal),
     MURPH_DEV_WEB_HOST: input.webHost,

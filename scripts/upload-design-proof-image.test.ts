@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmod,
   mkdtemp,
@@ -20,6 +20,7 @@ import {
   ensureDesignProofVariant,
   loadCloudflareImagesConfig,
   main,
+  normalizePackageManagerArgs,
   parseCliArgs,
   uploadDesignProofImage,
 } from "./upload-design-proof-image.ts";
@@ -53,6 +54,23 @@ async function makeTempDirectory(prefix: string): Promise<string> {
   const directory = await mkdtemp(path.join(root, prefix));
   tempDirectories.push(directory);
   return directory;
+}
+
+async function makePoisonGitEnvironment(
+  prefix: string,
+): Promise<NodeJS.ProcessEnv> {
+  const directory = await makeTempDirectory(prefix);
+  const bin = path.join(directory, "bin");
+  const poisonGit = path.join(bin, "git");
+  await mkdir(bin);
+  await writeFile(poisonGit, "#!/bin/sh\nexit 86\n");
+  await chmod(poisonGit, 0o755);
+
+  const env = { ...process.env };
+  delete env.CLOUDFLARE_IMAGES_ACCOUNT_ID;
+  delete env.CLOUDFLARE_IMAGES_API_KEY;
+  env.PATH = `${bin}${path.delimiter}${env.PATH ?? ""}`;
+  return env;
 }
 
 async function writePng(
@@ -668,22 +686,153 @@ describe("design-proof CLI execution", () => {
 });
 
 describe("design-proof CLI arguments", () => {
-  it("accepts multiple files and a positional-only separator", () => {
-    expect(parseCliArgs(["one.png", "two.png"])).toEqual({
-      help: false,
-      files: ["one.png", "two.png"],
-    });
-    expect(parseCliArgs(["--", "-proof.png"])).toEqual({
-      help: false,
-      files: ["-proof.png"],
-    });
+  const pnpmPackageEnvironment = {
+    npm_config_user_agent: "pnpm/10.0.0",
+    npm_lifecycle_event: "design-proof:upload",
+  };
+  const directEnvironment = {};
+  const escapedFiles = ["-proof.png", "--", "--help"];
+
+  it.each([
+    {
+      args: ["--", "--help"],
+      env: pnpmPackageEnvironment,
+      expected: { help: true, files: [] },
+      route: "pnpm package",
+    },
+    {
+      args: ["--help"],
+      env: directEnvironment,
+      expected: { help: true, files: [] },
+      route: "direct",
+    },
+    {
+      args: ["--", "proof.png", "--help"],
+      env: pnpmPackageEnvironment,
+      expected: { help: true, files: [] },
+      route: "pnpm package with help after a filename",
+    },
+    {
+      args: ["proof.png", "--help"],
+      env: directEnvironment,
+      expected: { help: true, files: [] },
+      route: "direct with help after a filename",
+    },
+    {
+      args: ["--", "--", ...escapedFiles],
+      env: pnpmPackageEnvironment,
+      expected: { help: false, files: escapedFiles },
+      route: "pnpm package positional escape",
+    },
+    {
+      args: ["--", ...escapedFiles],
+      env: directEnvironment,
+      expected: { help: false, files: escapedFiles },
+      route: "direct positional escape",
+    },
+  ])("normalizes and parses the $route shape", ({ args, env, expected }) => {
+    expect(
+      parseCliArgs(normalizePackageManagerArgs(args, env)),
+    ).toEqual(expected);
   });
 
-  it("returns help and rejects empty or unknown arguments", () => {
-    expect(parseCliArgs(["--help"])).toEqual({ help: true, files: [] });
-    expect(() => parseCliArgs([])).toThrow("at least one");
-    expect(() => parseCliArgs(["--unknown"])).toThrow("Unknown option");
+  it.each([
+    {
+      args: ["--", "--unknown"],
+      env: pnpmPackageEnvironment,
+      route: "pnpm package",
+    },
+    {
+      args: ["--unknown"],
+      env: directEnvironment,
+      route: "direct",
+    },
+  ])("rejects an unknown option for the $route shape", ({ args, env }) => {
+    expect(() =>
+      parseCliArgs(normalizePackageManagerArgs(args, env))
+    ).toThrow("Unknown option");
   });
+
+  it("rejects empty arguments", () => {
+    expect(() => parseCliArgs([])).toThrow("at least one");
+    expect(() => parseCliArgs(["--"])).toThrow("at least one");
+  });
+
+  it.each([
+    {
+      args: ["design-proof:upload", "--", "--help"],
+      executable: "pnpm",
+      route: "pnpm package",
+    },
+    {
+      args: ["run", "design-proof:upload", "--", "--help"],
+      executable: "npm",
+      route: "npm package",
+    },
+    {
+      args: [
+        "--tsconfig",
+        "tsconfig.base.json",
+        "scripts/upload-design-proof-image.ts",
+        "--help",
+      ],
+      executable: path.resolve(
+        import.meta.dirname,
+        "../node_modules/.bin/tsx",
+      ),
+      route: "direct",
+    },
+  ])("shows help for the $route command before config discovery", async ({
+    args,
+    executable,
+  }) => {
+    const env = await makePoisonGitEnvironment("design-proof-help-");
+    const output = execFileSync(
+      executable,
+      args,
+      {
+        cwd: path.resolve(import.meta.dirname, ".."),
+        encoding: "utf8",
+        env,
+        maxBuffer: 64 * 1024,
+        timeout: 30_000,
+      },
+    );
+
+    expect(output).toContain("Usage:\n  pnpm design-proof:upload -- <screenshot>");
+  }, 35_000);
+
+  it(
+    "keeps a literal --help filename positional across both npm forwarding boundaries",
+    async () => {
+      const env = await makePoisonGitEnvironment(
+        "design-proof-npm-positionals-",
+      );
+      const result = spawnSync(
+        "npm",
+        // npm's forwarding boundary, the pnpm-owned forwarding normalization,
+        // and the uploader parser each consume one separator before the literal
+        // filename reaches file handling.
+        ["run", "design-proof:upload", "--", "--", "--", "--help"],
+        {
+          cwd: path.resolve(import.meta.dirname, ".."),
+          encoding: "utf8",
+          env,
+          maxBuffer: 64 * 1024,
+          timeout: 30_000,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}${result.stderr}`).toContain(
+        "Could not discover the repository checkout through Git.",
+      );
+      expect(`${result.stdout}${result.stderr}`).not.toContain(
+        "Usage:\n  pnpm design-proof:upload -- <screenshot>",
+      );
+    },
+    35_000,
+  );
 });
 
 function restoreProcessEnv(key: string, value: string | undefined): void {

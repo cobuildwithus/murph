@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
   assistantResponseCardSchema,
+  buildTelegramRichMessage,
   renderAssistantResponseCardText,
+  renderAssistantWorkoutResponseCardText,
   type AssistantResponseCard,
+  type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
@@ -45,6 +48,49 @@ const NUTRITION_CARD: AssistantResponseCard = {
 
 const NUTRITION_CARD_TEXT = renderAssistantResponseCardText(NUTRITION_CARD)
 
+const EXPANDED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
+  footer: 'Reply with the exercise, set, and result.',
+  kind: 'compact_table',
+  subtitle: null,
+  title: 'Full strength session',
+  tracking: {
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    kind: 'workout',
+    snapshotAt: '2026-08-11T10:00:00.000Z',
+  },
+  version: 1,
+  workout: {
+    exercises: Array.from({ length: 11 }, (_, exerciseIndex) => ({
+      name: `Expanded exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 3 }, (_, setIndex) => ({
+        actual: null,
+        status: 'pending',
+        target: `Set ${setIndex + 1}`,
+      })),
+    })),
+    state: 'active',
+    version: 1,
+  },
+}
+
+const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
+  ...EXPANDED_WORKOUT_CARD,
+  workout: {
+    ...EXPANDED_WORKOUT_CARD.workout,
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        actual: null,
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+      })),
+    })),
+  },
+}
+
+const OVERSIZED_WORKOUT_TEXT =
+  renderAssistantWorkoutResponseCardText(OVERSIZED_WORKOUT_CARD)
+
 const ROUTINE_CARD: AssistantResponseCard = {
   exercises: [{
     dose: '8 repetitions',
@@ -71,6 +117,16 @@ const ROUTINE_CARD: AssistantResponseCard = {
 }
 
 const ROUTINE_CARD_TEXT = renderAssistantResponseCardText(ROUTINE_CARD)
+
+const TELEGRAM_RICH_CONTENT_CARD: AssistantResponseCard = {
+  kind: 'telegram_rich_content',
+  version: 1,
+  html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol><blockquote>Keep the passport with you.</blockquote>',
+}
+
+const TELEGRAM_RICH_CONTENT_CARD_TEXT = renderAssistantResponseCardText(
+  TELEGRAM_RICH_CONTENT_CARD,
+)
 
 const LONG_ROUTINE_CARD = assistantResponseCardSchema.parse({
   ...ROUTINE_CARD,
@@ -1006,6 +1062,37 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('forwards disabled automatic entities for generic Telegram rich content', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 2502 },
+      }),
+    ])
+
+    await sendTelegramRichMessage({
+      fallbackMessage: TELEGRAM_RICH_CONTENT_CARD_TEXT,
+      idempotencyKey: 'generic-rich-content',
+      replyToMessageId: null,
+      richMessage: buildTelegramRichMessage(TELEGRAM_RICH_CONTENT_CARD),
+      target: '123',
+    }, {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    })
+
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toEqual({
+      chat_id: '123',
+      rich_message: {
+        html: TELEGRAM_RICH_CONTENT_CARD.html,
+        skip_entity_detection: true,
+      },
+    })
+  })
+
   it('falls back to text only after a definitive rich-message rejection', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1048,6 +1135,67 @@ describe('assistant channels runtime seam', () => {
     expect(LONG_ROUTINE_CARD_TEXT.length).toBeLessThanOrEqual(4_096)
   })
 
+  it('keeps automatic entities disabled in the generic rich-content fallback', async () => {
+    const fallbackMessage = [
+      'https://example.test example.test help@example.test',
+      '@helper #topic /start +48 123 456 789',
+      '[support](https://support.example.test)',
+      'call(**kwargs, **options)',
+    ].join('\n')
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'Bad Request: rich messages are not supported',
+        error_code: 400,
+        ok: false,
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 2503 },
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage,
+        replyToMessageId: '42',
+        richMessage: {
+          html: '<h2>Contact options</h2>',
+          skip_entity_detection: true,
+        },
+        target: '123:topic:9',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).resolves.toMatchObject({
+      providerMessageId: '2503',
+      target: '123:topic:9',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    const fallbackPayload = readJsonBody(
+      fetchImplementation.mock.calls[1]?.[1]?.body,
+    )
+    if (typeof fallbackPayload.text !== 'string') {
+      throw new Error('Expected the Telegram fallback payload to contain text.')
+    }
+    expect(fallbackPayload).toEqual({
+      chat_id: '123',
+      entities: [{
+        length: fallbackPayload.text.length,
+        offset: 0,
+        type: 'pre',
+      }],
+      message_thread_id: 9,
+      reply_to_message_id: 42,
+      text: fallbackMessage,
+    })
+  })
+
   it('keeps an ambiguous definitive-rejection fallback terminal and single-attempt', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1062,8 +1210,11 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendTelegramRichMessage(
       {
-        fallbackMessage: LONG_ROUTINE_CARD_TEXT,
-        richMessage: { html: '<h2>Routine</h2>' },
+        fallbackMessage: 'Contact https://example.test or @helper',
+        richMessage: {
+          html: '<h2>Contact options</h2>',
+          skip_entity_detection: true,
+        },
         target: '123',
       },
       {
@@ -1080,6 +1231,12 @@ describe('assistant channels runtime seam', () => {
     })
 
     expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
+      entities: [{
+        offset: 0,
+        type: 'pre',
+      }],
+    })
   })
 
   it('rejects a multi-message rich fallback before provider entry', async () => {
@@ -1343,12 +1500,12 @@ describe('assistant channels runtime seam', () => {
     await expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
       actorId: null,
       bindingDelivery: createAssistantBindingDelivery('thread', '123'),
-      card: NUTRITION_CARD,
+      card: TELEGRAM_RICH_CONTENT_CARD,
       explicitTarget: null,
       idempotencyKey: 'rich-card-idempotency',
       identityId: null,
       media: [],
-      message: NUTRITION_CARD_TEXT,
+      message: TELEGRAM_RICH_CONTENT_CARD_TEXT,
       replyToMessageId: '42',
       threadIsDirect: true,
     }, {
@@ -1361,15 +1518,95 @@ describe('assistant channels runtime seam', () => {
     })
 
     expect(sendTelegramRich).toHaveBeenCalledWith(expect.objectContaining({
-      fallbackMessage: NUTRITION_CARD_TEXT,
+      fallbackMessage: TELEGRAM_RICH_CONTENT_CARD_TEXT,
       idempotencyKey: 'rich-card-idempotency',
       replyToMessageId: '42',
       richMessage: expect.objectContaining({
-        html: expect.stringContaining('<table bordered striped>'),
+        html: TELEGRAM_RICH_CONTENT_CARD.html,
+        skip_entity_detection: true,
       }),
       target: '123',
     }))
     expect(sendTelegram).not.toHaveBeenCalled()
+  })
+
+  it('projects every exercise in an expanded workout through Telegram rich messages', async () => {
+    const sendTelegramRich = vi.fn().mockResolvedValue({
+      providerMessageId: 'expanded-workout-1',
+      target: '123',
+    })
+    const sendTelegram = vi.fn()
+
+    await expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
+      actorId: null,
+      bindingDelivery: createAssistantBindingDelivery('thread', '123'),
+      card: EXPANDED_WORKOUT_CARD,
+      explicitTarget: null,
+      idempotencyKey: 'expanded-workout-idempotency',
+      identityId: null,
+      media: [],
+      message: renderAssistantResponseCardText(EXPANDED_WORKOUT_CARD),
+      replyToMessageId: '42',
+      threadIsDirect: true,
+    }, {
+      sendTelegram,
+      sendTelegramRich,
+    })).resolves.toMatchObject({
+      channel: 'telegram',
+      providerMessageId: 'expanded-workout-1',
+      target: '123',
+    })
+
+    expect(sendTelegramRich).toHaveBeenCalledTimes(1)
+    const richMessage = sendTelegramRich.mock.calls[0]?.[0]?.richMessage
+    expect(richMessage?.html).toContain('Expanded exercise 1')
+    expect(richMessage?.html).toContain('Expanded exercise 11')
+    expect(richMessage?.html).toContain('Set 3')
+    expect(sendTelegram).not.toHaveBeenCalled()
+  })
+
+  it('uses complete chunkable text for a Telegram workout envelope overflow', async () => {
+    const sendTelegramRich = vi.fn()
+    const sendTelegram = vi.fn().mockResolvedValue({
+      providerMessageId: 'oversized-workout-1',
+      target: '123',
+    })
+
+    expect(
+      assistantResponseCardSchema.safeParse(OVERSIZED_WORKOUT_CARD).success,
+    ).toBe(false)
+
+    await expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
+      actorId: null,
+      bindingDelivery: createAssistantBindingDelivery('thread', '123'),
+      card: null,
+      explicitTarget: null,
+      idempotencyKey: 'oversized-workout-idempotency',
+      identityId: null,
+      media: [],
+      message: OVERSIZED_WORKOUT_TEXT,
+      replyToMessageId: '42',
+      threadIsDirect: true,
+    }, {
+      sendTelegram,
+      sendTelegramRich,
+    })).resolves.toMatchObject({
+      channel: 'telegram',
+      providerMessageId: 'oversized-workout-1',
+      target: '123',
+    })
+
+    expect(OVERSIZED_WORKOUT_TEXT).toContain('Capacity exercise 1:')
+    expect(OVERSIZED_WORKOUT_TEXT).toContain('Capacity exercise 16:')
+    expect(OVERSIZED_WORKOUT_TEXT).toContain(
+      `set 16: pending; target Exercise 16 set 16 target ${'x'.repeat(12)}`,
+    )
+    expect(OVERSIZED_WORKOUT_TEXT).not.toContain('evt_')
+    expect(sendTelegram).toHaveBeenCalledTimes(1)
+    expect(sendTelegram).toHaveBeenCalledWith(expect.objectContaining({
+      message: OVERSIZED_WORKOUT_TEXT,
+    }))
+    expect(sendTelegramRich).not.toHaveBeenCalled()
   })
 
   it('sends Telegram image response media through sendPhoto with a caption', async () => {
@@ -2250,6 +2487,35 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('uses deterministic text if Telegram-only rich content reaches Linq', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'telegram-rich-text-message-1' },
+    })
+
+    await expect(sendLinqMessage({
+      card: TELEGRAM_RICH_CONTENT_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'telegram-rich-card-delivery-1',
+      message: TELEGRAM_RICH_CONTENT_CARD_TEXT,
+      target: 'private-thread-telegram-rich',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: 'telegram-rich-text-message-1',
+      target: 'private-thread-telegram-rich',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'telegram-rich-card-delivery-1',
+    })
+  })
+
   it('falls back to deterministic ordinary text when Linq card capability is unavailable', async () => {
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
     runtimeMocks.sendLinqChatMessage.mockResolvedValue({
@@ -2707,7 +2973,7 @@ describe('assistant channels runtime seam', () => {
       },
       operation: 'create_chat',
     },
-  ])('rejects oversized final Linq text before private media work for $operation', async ({
+  ])('rejects more than 100 final Linq parts before private media work for $operation', async ({
     input,
     operation,
   }) => {
@@ -2716,16 +2982,17 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendLinqMessage({
       ...input,
-      media: [{
-        alt: 'x'.repeat(9_998),
+      message: 'x'.repeat(600_001),
+      media: Array.from({ length: 40 }, (_, index) => ({
+        alt: null,
         contentType: 'image/png',
-        filename: 'oversized.png',
+        filename: `oversized-${index}.png`,
         kind: 'vault_image',
-        ref: 'raw/captures/oversized.png',
-        sha256: 'a'.repeat(64),
+        ref: `raw/captures/oversized-${index}.png`,
+        sha256: index.toString(16).padStart(64, '0'),
         sizeBytes: bytes.byteLength,
         source: 'gpt-image-2',
-      }],
+      })),
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
       loadVaultImage,
@@ -2733,10 +3000,12 @@ describe('assistant channels runtime seam', () => {
       code: 'LINQ_INVALID_INPUT',
       context: {
         operation,
-        requestAttachmentMediaPartCount: 1,
-        requestMediaPartCount: 1,
-        requestMessageLength: 10_001,
+        requestAttachmentMediaPartCount: 40,
+        requestMediaPartCount: 40,
+        requestMessageLength: 600_001,
+        requestMessagePartCount: 101,
         requestPublicUrlMediaPartCount: 0,
+        requestTextPartCount: 61,
         retryable: false,
       },
       deliveryMayHaveSucceeded: false,

@@ -275,7 +275,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'music-generation',
     name: 'music-generation',
     triggerHint:
-      'Read before calling the generate_song tool or writing any music prompt, including reminder songs, group-challenge hype tracks, jingles, celebration anthems, and any generated song or instrumental. Owns how to write the ElevenLabs music prompt (genre, instrumentation, tempo, key, vocals, lyrics, structure, instrumental-only, and duration), the copyright-safe style rules, and the reggae house-style default. Use behavior-followthrough and groupchat-comedy to decide when to send a song; use this to decide what prompt to send.',
+      'Read before calling generate_song when an explicit current request or a complete independently authorized owning-flow contract indicates generated music is required. This registry entry routes to the active music-generation skill but never authorizes a call. The active skill may shape selection and prompt craft only after the authorization signal.',
   },
 ] as const
 

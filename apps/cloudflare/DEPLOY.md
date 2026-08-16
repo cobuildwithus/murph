@@ -28,6 +28,55 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Browser Vault Shard Rollout
+
+Deploy the Web dual reader first. It advertises fixed `core`, `metrics-index`,
+and `labs` demand plus explicit metric-bucket IDs only when the browser supports
+gzip decompression, accepts the legacy encrypted monolith, and retries that
+legacy transport when an older Web deployment ignores a missing-shard request.
+Next deploy the Worker and runner bundle together with
+`container_rollout=immediate`; the generation-10 runner rebuilds the replica
+while the Worker atomically publishes the legacy monolith, the three fixed
+children, and all 32 deterministic metric buckets. Each child independently
+uses identity or gzip encoding before encryption, whichever is smaller. Old Web
+and old browser clients omit the capability and continue to receive the
+monolith.
+
+Do not roll the Worker or runner below this release after the first
+generation-10 bucketed ref is written. That write establishes the bucket-aware
+Worker and producer as a hard rollback floor: an older cleanup alarm can consume
+the sole top-level orphan candidate without deleting its child objects, leaving
+those encrypted objects with no durable cleanup owner. The safe recovery is a
+forward fix on this Worker/runner bundle or newer. New Web still accepts an
+older Worker legacy response during the pre-write deploy window, but sharded
+responses always require an exact ref and authenticated child AAD match.
+
+Browser Vault orphan cleanup records only the top-level object candidate. An
+older Worker therefore cannot mistake a current child for an orphan. Current
+cleanup deletes the deterministic `.core`, `.metrics-index`, `.labs`, and 32
+metric-bucket siblings when their noncurrent top-level candidate becomes
+eligible. Because an older cleanup implementation cannot later rediscover
+those siblings after consuming the candidate, it is not an eligible rollback
+after bucketed publication. If an older Web restore is required, first stop
+generation-10 replica production, wait for every admitted Browser Vault direct
+PUT to drain, and keep the bucket-aware Worker/runner at or above the hard floor
+while the Web restore serves the retained legacy monolith. Keep producing that
+monolith until the dual-reader Web release has remained the production and
+rollback floor for at least 30 days, matching
+`HOSTED_APP_SESSION_MAX_AGE_SECONDS` in Web. After that authenticated
+open-browser window has drained and rollback artifacts below the reader floor
+are retired, a separate release may remove the legacy producer/ref/reader
+together.
+
+Browser Vault publication also participates in account-deletion draining. The
+UserRunner admits each publication under the exact runtime write fence, all 36
+bounded-concurrency object writes settle before that admission is released, and
+deletion stops the runner before inspecting the durable admission. If the
+publishing request died without releasing it, deletion establishes a 60-second
+post-stop drain before its final prefix sweep; this is longer than the Workers
+30-second post-disconnect extension window and prevents a late encrypted object
+from recreating member data after deletion completes.
+
 ## Vault-Share Delivery Contract Rollout
 
 Deploy the Cloudflare Worker and runner bundle first with
@@ -272,8 +321,16 @@ Observability.
 Deploy the first native response-card release as one Cloudflare Worker and
 runner bundle update with `container_rollout=immediate`. Before allowing card
 traffic, require managed-container smoke to report the exact new runner-bundle
-fingerprint and prove the updated assistant CLI surface. There is no Web
-deployment dependency.
+fingerprint and prove the updated assistant CLI surface.
+
+An expansion of an existing strict card version has a reader floor even when
+its discriminator is unchanged. For the V4 workout expansion above eight
+exercises or eight sets per exercise, release the native reader first, deploy
+the shared Web parser/static image route second, then deploy the Worker and
+runner together with `container_rollout=immediate`. Before expanded authoring,
+require the exact runner fingerprint and a successful fetch of an expanded V4
+static image from the deployed Web artifact. Keep that Web version available
+while any expanded immutable image URL can still be fetched.
 
 Ordinary outbox records and hosted delivery side effects omit the optional
 `card` field. A new Worker with an old runner is therefore safe for ordinary
@@ -285,6 +342,14 @@ The prior bundle remains a safe rollback only before the first card-bearing
 value exists. After that point, the new bundle is the hard rollback floor for
 workspaces, checkpoints, retained outbox intents, and side effects. Forward-fix
 on that bundle or newer rather than restoring an older reader.
+
+For the within-V4 bound expansion, the prior Web and runner bundles remain safe
+only before the first expanded V4 card is sent or persisted. After that point,
+do not roll either reader below the expanded bound. Forward-fix, and if an old
+local runner already quarantined an expanded intent, explicitly restore that
+intent only after the compatible bundle is live. Monitor for
+`outbox.intent.quarantined`, strict response-card parse failures, stale runner
+fingerprints, and failed expanded static-image fetches.
 
 ## Exercise Routine Response-Card Rollout
 
@@ -301,6 +366,20 @@ that workspace because an older strict reader can quarantine the retained
 intent. Forward-fix on this bundle or newer. Monitor Workers Observability for
 `outbox.intent.quarantined`, strict outbox parse failures, and stale runner
 fingerprints after rollout.
+
+## Model-Authored Telegram Rich-Content Rollout
+
+The `telegram_rich_content` discriminator extends the same strict assistant
+outbox card union. The Worker already allows `sendRichMessage`, so this release
+needs no new provider operation or Worker egress rule. Deploy the new runner
+bundle with `container_rollout=immediate`, and require managed-container smoke
+to report its exact fingerprint before the model can attach this card.
+
+The prior runner remains safe only before the first rich-content card intent is
+written. After that write, the new runner bundle is a hard rollback floor for
+that workspace because an older strict reader can quarantine the retained
+intent. Forward-fix on this bundle or newer. Monitor `outbox.intent.quarantined`,
+strict outbox parse failures, and stale runner fingerprints after rollout.
 
 Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
@@ -1140,12 +1219,16 @@ authorization; do not bypass it to recover an invalid split-host environment.
 Device-webhook burst transport requires a main Queue and DLQ named from the
 deployed Worker (`<worker>-device-webhooks` and
 `<worker>-device-webhooks-dlq`). Create both before deploying the Worker config.
-Deploy the Queue-capable Worker and the Web batch-admission callback before
-setting Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout
-gate. Start with one provider and prove Queue depth returns to zero, no DLQ rows
-appear, and Web admission stays serial before expanding. To roll back, clear the
-Web gate first, drain the main Queue through the still-deployed consumer, retain
-the encrypted DLQ for bounded recovery, and remove the consumer/bindings last.
+Keep Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout gate
+empty while deploying the callback and consumer. Deploy Web first: an old
+Worker sends callbacks of at most 25 entries, which the new Web reader accepts.
+Then deploy the Queue-capable Worker, which may send up to 100 entries; deploying
+that Worker against old Web would make callbacks above 25 fail closed and retry.
+Start with one provider and prove Queue depth returns to zero, no DLQ rows
+appear, no more than four independent account lanes run, and each account stays
+serial before expanding. To roll back, clear the Web gate first, drain the main
+Queue through the still-deployed consumer, retain the encrypted DLQ for bounded
+recovery, and remove the consumer/bindings last.
 During Cloudflare automation-key rotation, keep the prior private key as
 `decrypt_only` until Web uses the new public key and both the main Queue and
 encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ
@@ -1562,6 +1645,46 @@ additive source field, but conversation and exact participant authorization
 remain available. After convergence, smoke one profile-name label, one
 unverified owner-contact label, and one participant-scoped action selected by
 an opaque accepted-message ref.
+
+Member-reported daily metrics add the
+`health.daily-metric.reported` Web producer to that existing exact-participant
+path. An old runtime quarantines this kind and can stop its ordered system lane,
+so this release is consumer-first:
+
+1. Deploy Cloudflare and the runner with `container_rollout=immediate`. Do not
+   deploy Web until managed-container smoke reports the exact new runner-bundle
+   fingerprint and the immediate rollout has converged across eligible runtime
+   targets.
+2. Deploy Web, then run one synthetic granted `steps-days.v0` correction. The
+   action must return `accepted`; the member's system-lane consumed counter and
+   workspace checkpoint must advance; a later exact-scope `read_shared` must
+   retain the device record and add one `Manual` record. Confirm aggregate
+   runtime evidence contains no `unsupported_kind` route and no unconsumed
+   `health.daily-metric.reported` item behind its system-lane counter.
+3. The first Web producer enablement or imported report makes this exact
+   contracts/query/runner bundle a hard rollback floor. The canonical
+   observation permanently retains the strict `qualifiers` field and its
+   mailbox causal sequence after the transient mailbox item drains. Web may
+   roll back first to stop new reports, but never roll the runner below this
+   floor afterward; forward-fix on this bundle or newer. A pre-floor runner can
+   reject the persisted event while scanning the vault and cannot preserve the
+   report ordering during projection rebuild.
+
+If the post-commit signal fails, keep the accepted mailbox write and let the
+existing scheduled `/api/internal/device-sync/recovery-sweep` handoff select and
+signal the exact pending item. For a bounded manual repair, keep or redeploy the
+compatible runner, roll Web back to stop new production, invoke that existing
+recovery sweep once, and verify the system-lane counter advances before
+redeploying Web. Do not delete the item, edit a mailbox counter, send an
+unrelated member message, or add another repair queue.
+
+After a Web rollback, keep the exact compatible runner fingerprint and prove
+one existing meal-photo import, one ordinary conversation, and one projection
+rebuild against a vault containing a consumed report. The Manual correction
+must remain authoritative, existing canonical imports must still scan the
+strict event ledger, and restoring compatible Web must require no event rewrite
+or migration. Mailbox drain is progress evidence only; it never relaxes this
+persisted-state rollback floor.
 
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare

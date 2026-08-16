@@ -669,7 +669,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     ]);
     expect(findMany).toHaveBeenCalledOnce();
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 1,
+      take: 3,
       where: {
         connectionId: "dsc_parent",
         sourceProviderSlug: { in: ["oura"] },
@@ -703,7 +703,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     ]);
     expect(findMany).toHaveBeenCalledOnce();
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 1,
+      take: 3,
       where: {
         connectionId: "dsc_parent",
         sourceProviderSlug: { in: ["oura"] },
@@ -754,7 +754,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     ]);
     expect(findMany).toHaveBeenCalledOnce();
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 3,
+      take: 5,
       where: {
         connectionId,
         sourceProviderSlug: {
@@ -766,6 +766,53 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
         },
       },
     }));
+  });
+
+  it("projects one bounded semantic admission across established and deterministic rows", async () => {
+    const connectionId = "dsc_semantic_admission";
+    const canonicalKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: "apple_health_kit",
+    });
+    if (!canonicalKey) {
+      throw new Error("Expected a canonical Apple Health source key.");
+    }
+    const { findMany, store } = createSourceStore([
+      createSourceRecord({
+        connectionId,
+        firstSeenAt: new Date("2026-03-24T00:00:00.000Z"),
+        id: "dcs_established_opaque",
+        lastSeenAt: new Date("2026-03-25T01:00:00.000Z"),
+        lifecycleEpoch: 1,
+        sourceInstanceKey: "opaque-established-apple-health",
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }),
+      createSourceRecord({
+        connectionId,
+        firstSeenAt: new Date("2026-03-25T00:00:00.000Z"),
+        id: "dcs_deterministic_newer",
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        lastSeenAt: new Date("2026-03-25T03:00:00.000Z"),
+        lifecycleEpoch: 2,
+        sourceInstanceKey: canonicalKey,
+        sourceProviderSlug: "apple_health_kit",
+        status: "disconnected",
+      }),
+    ]);
+
+    await expect(store.listConnectionSourceAdmissionCandidates({
+      connectionId,
+      sourceProviderSlug: "apple_healthkit",
+    })).resolves.toEqual([expect.objectContaining({
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      lastSeenAt: new Date("2026-03-25T03:00:00.000Z"),
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "opaque-established-apple-health",
+      sourceProviderSlug: "apple_health_kit",
+      status: "disconnected",
+    })]);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 5 }));
   });
 
   it("marks all non-disconnected sources for one parent connection disconnected", async () => {

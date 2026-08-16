@@ -4,18 +4,26 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
+  ClearPublicDeviceSyncOAuthCredentialInput,
+  DeviceSyncAccount,
   ConsumeOAuthStateResult,
+  DiscardUnconsumedOAuthStateResult,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
+  GetPublicDeviceSyncOAuthCleanupAccountInput,
   ListDeviceConnectionSourcesInput,
   MarkPublicDeviceSyncConnectionSetupFailedInput,
   MarkPublicDeviceSyncConnectionSetupFailedResult,
   OAuthStateRecord,
+  OAuthStateConsumeClaim,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
   UpsertPublicDeviceSyncConnectionResult,
 } from "@murphai/device-syncd/types";
-import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+import {
+  lockHostedMemberRow,
+  readHostedMemberSuspensionAfterLockTx,
+} from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
@@ -169,7 +177,7 @@ export class PrismaDeviceSyncControlPlaneStore
     this.tokenAudits = new PrismaHostedTokenAuditStore(this.prisma);
   }
 
-  async deleteExpiredOAuthStates(now: string): Promise<number> {
+  async deleteExpiredOAuthStates(now?: string): Promise<number> {
     return this.oauthSessions.deleteExpiredOAuthStates(now);
   }
 
@@ -202,6 +210,26 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.oauthSessions.consumeOAuthState(state, now, expectedProvider, expectedOwnerId);
   }
 
+  async resolveOAuthStateWithoutProviderAuthority(
+    claim: OAuthStateConsumeClaim,
+  ): Promise<boolean> {
+    return this.oauthSessions.resolveOAuthStateWithoutProviderAuthority(claim);
+  }
+
+  async discardUnconsumedOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): Promise<DiscardUnconsumedOAuthStateResult> {
+    return this.oauthSessions.discardUnconsumedOAuthState(
+      state,
+      now,
+      expectedProvider,
+      expectedOwnerId,
+    );
+  }
+
   async consumeOAuthStateWithProviderApplication(
     state: string,
     now: string,
@@ -210,6 +238,22 @@ export class PrismaDeviceSyncControlPlaneStore
     expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
     return this.oauthSessions.consumeOAuthStateWithProviderApplication(
+      state,
+      now,
+      binding,
+      expectedProvider,
+      expectedOwnerId,
+    );
+  }
+
+  async discardUnconsumedOAuthStateWithProviderApplication(
+    state: string,
+    now: string,
+    binding: DeviceProviderApplicationBinding,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): Promise<DiscardUnconsumedOAuthStateResult> {
+    return this.oauthSessions.discardUnconsumedOAuthStateWithProviderApplication(
       state,
       now,
       binding,
@@ -239,6 +283,18 @@ export class PrismaDeviceSyncControlPlaneStore
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
   ): Promise<MarkPublicDeviceSyncConnectionSetupFailedResult> {
     return this.connections.markConnectionSetupFailed(input);
+  }
+
+  async clearOAuthCredentialAfterConfirmedRevoke(
+    input: ClearPublicDeviceSyncOAuthCredentialInput,
+  ): Promise<boolean> {
+    return this.connections.clearOAuthCredentialAfterConfirmedRevoke(input);
+  }
+
+  async getOAuthCleanupAccount(
+    input: GetPublicDeviceSyncOAuthCleanupAccountInput,
+  ): Promise<DeviceSyncAccount | null> {
+    return this.connections.getOAuthCleanupAccount(input);
   }
 
   async getConnectionByExternalAccount(
@@ -279,6 +335,12 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
     return this.connections.listConnectionsForUser(userId);
+  }
+
+  async listConnectionsRequiringCleanupForUser(
+    userId: string,
+  ): Promise<PublicDeviceSyncAccount[]> {
+    return this.connections.listConnectionsRequiringCleanupForUser(userId);
   }
 
   async listMemberConnectionStatuses(input: {
@@ -388,6 +450,7 @@ export class PrismaDeviceSyncControlPlaneStore
   }
 
   async persistStoredConnectionTokenBundle(input: {
+    clearCredential?: boolean;
     clearExternalAccountId?: boolean;
     connectionId: string;
     externalAccountId?: string | null;
@@ -435,6 +498,14 @@ export class PrismaDeviceSyncControlPlaneStore
     tx?: HostedPrismaTransactionClient;
   }): Promise<boolean> {
     return this.connections.clearConnectionRefreshLease(input);
+  }
+
+  async clearStaleConnectionRefreshLease(input: {
+    connectionId: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    return this.connections.clearStaleConnectionRefreshLease(input);
   }
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
@@ -689,6 +760,12 @@ export class PrismaDeviceSyncControlPlaneStore
        * ingestion, scheduled wakes) keep the full transaction budget.
        */
       memberRowLockTimeoutMs?: number;
+      /**
+       * Require the locked member lifetime to remain active before taking the
+       * connection advisory lock. Refresh-lease admission uses this to
+       * serialize with account-deletion suspension before provider work.
+       */
+      requireActiveMember?: boolean;
     } = {},
   ): Promise<TResult> {
     return this.prisma.$transaction(async (tx) => {
@@ -701,6 +778,28 @@ export class PrismaDeviceSyncControlPlaneStore
           ? { timeoutMs: options.memberRowLockTimeoutMs }
           : {},
       );
+      if (options.requireActiveMember) {
+        const ownerStatus = await readHostedMemberSuspensionAfterLockTx(
+          tx,
+          userId,
+        );
+        if (ownerStatus === "missing") {
+          throw deviceSyncError({
+            code: "CONNECTION_OWNER_REQUIRED",
+            message: "Hosted device-sync connection owner no longer exists.",
+            retryable: false,
+            httpStatus: 404,
+          });
+        }
+        if (ownerStatus === "suspended") {
+          throw deviceSyncError({
+            code: "CONNECTION_OWNER_SUSPENDED",
+            message: "Device connections cannot refresh while account deletion is active.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
+      }
       if (await readHostedHealthDataConsentState({
         memberId: userId,
         prisma: tx,

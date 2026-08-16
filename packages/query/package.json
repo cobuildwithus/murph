@@ -42,6 +42,16 @@
       "import": "./dist/browser-overview.js",
       "default": "./dist/browser-overview.js"
     },
+    "./browser-replica": {
+      "types": "./dist/browser-replica.d.ts",
+      "import": "./dist/browser-replica.js",
+      "default": "./dist/browser-replica.js"
+    },
+    "./browser-replica-server": {
+      "types": "./dist/browser-replica-server.d.ts",
+      "import": "./dist/browser-replica-server.js",
+      "default": "./dist/browser-replica-server.js"
+    },
     "./browser-replica-client": {
       "types": "./dist/browser-replica-client.d.ts",
       "import": "./dist/browser-replica-client.js",

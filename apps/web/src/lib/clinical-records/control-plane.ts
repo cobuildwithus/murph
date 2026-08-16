@@ -95,25 +95,22 @@ export async function startClinicalRecordConnection(input: {
       value: pkce.verifier,
     });
 
-    await prisma.$transaction(async (tx) => {
-      await tx.clinicalRecordOauthSession.deleteMany({ where: { expiresAt: { lte: now } } });
-      await tx.clinicalRecordOauthSession.create({
-        data: {
-          clientId,
-          codeVerifierEncrypted,
-          connectIntentClaimHash: intent.claimHash,
-          createdAt: now,
-          expiresAt,
-          fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
-          memberId: auth.member.id,
-          providerDirectoryEntryId: provider.id,
-          redirectUri,
-          requestedScopesJson: toClinicalJsonArray(smart.requestedScopes),
-          stateHash: state.stateHash,
-          tokenEndpoint: smart.tokenEndpoint,
-          webSessionId: auth.sessionId,
-        },
-      });
+    await prisma.clinicalRecordOauthSession.create({
+      data: {
+        clientId,
+        codeVerifierEncrypted,
+        connectIntentClaimHash: intent.claimHash,
+        createdAt: now,
+        expiresAt,
+        fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
+        memberId: auth.member.id,
+        providerDirectoryEntryId: provider.id,
+        redirectUri,
+        requestedScopesJson: toClinicalJsonArray(smart.requestedScopes),
+        stateHash: state.stateHash,
+        tokenEndpoint: smart.tokenEndpoint,
+        webSessionId: auth.sessionId,
+      },
     });
 
     return {
@@ -223,6 +220,15 @@ async function consumeClinicalOauthSession(input: {
   if (!stateHash) throw invalidOauthStateError();
 
   return getPrisma().$transaction(async (tx) => {
+    // Retention uses SKIP LOCKED. Acquire the exact callback owner before the
+    // replay decision so cleanup either wins first and leaves this missing, or
+    // skips a live consumer until its consume mark commits.
+    await tx.$queryRaw<Array<{ stateHash: string }>>`
+      SELECT oauth_session."state_hash" AS "stateHash"
+      FROM "clinical_record_oauth_session" AS oauth_session
+      WHERE oauth_session."state_hash" = ${stateHash}
+      FOR UPDATE OF oauth_session
+    `;
     const session = await tx.clinicalRecordOauthSession.findUnique({ where: { stateHash } });
     if (!session) throw invalidOauthStateError();
     if (
@@ -230,7 +236,6 @@ async function consumeClinicalOauthSession(input: {
       || session.webSessionId !== input.auth.sessionId
     ) throw invalidOauthStateError();
     if (session.expiresAt.getTime() <= now.getTime()) {
-      await tx.clinicalRecordOauthSession.deleteMany({ where: { stateHash, expiresAt: { lte: now } } });
       throw clinicalRecordsError({
         code: "CLINICAL_RECORD_OAUTH_STATE_EXPIRED",
         httpStatus: 410,

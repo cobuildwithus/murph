@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 100,
+  "item": {
+    "id": "personalized-next-trials",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "More useful next steps for recurring health problems",
+    "summary": "When a private health problem keeps returning, Murph now uses the relevant history to recommend one practical, bounded trial instead of a list of generic wellness ideas.",
+    "details": "Urgent and clinician-led needs still take priority, and starting a tracked experiment, reminder, or check-in still requires the member's authorization.",
+    "relevanceTags": ["assistant", "experiments", "personalization", "follow-through"],
+    "sourcePullRequests": [1846]
+  }
+}

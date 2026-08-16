@@ -178,6 +178,18 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
             lockDepth--;
           }
         },
+        async withHealthDataAdmissionLock<TResult>(
+          _userId: string,
+          _connectionId: string,
+          callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+        ): Promise<TResult> {
+          lockDepth++;
+          try {
+            return await callback(transactionClient);
+          } finally {
+            lockDepth--;
+          }
+        },
         touchAgentSession,
       },
     );
@@ -239,7 +251,13 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
     expect(persistStoredConnectionTokenBundle).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: "conn-1",
       refreshLeaseOwner: expect.stringMatching(/^agent-refresh:/u),
-      tokenBundle: null,
+      tokenBundle: {
+        accessToken: "access-token",
+        accessTokenExpiresAt: new Date("2026-04-01T00:30:00.000Z"),
+        keyVersion: "v1",
+        refreshToken: "refresh-token",
+        tokenVersion: 2,
+      },
     }));
     expect(touchAgentSession).not.toHaveBeenCalled();
   });
@@ -351,6 +369,60 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         userId: "user-1",
       });
       expect(claimConnectionRefreshLease).not.toHaveBeenCalled();
+      expect(harness.getRefreshLease()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a suspended owner before claiming a refresh lease or calling the provider", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const bearerToken = "hbds_agent_suspended_owner";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "unexpected-access-token",
+      }));
+      const admissionError = deviceSyncError({
+        code: "CONNECTION_OWNER_SUSPENDED",
+        httpStatus: 409,
+        message: "Device connections cannot refresh while account deletion is active.",
+        retryable: false,
+      });
+      const admission = vi.spyOn(
+        harness.store,
+        "withHealthDataAdmissionLock",
+      ).mockRejectedValue(admissionError);
+      const claim = vi.spyOn(
+        harness.store,
+        "claimConnectionRefreshLease",
+      );
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest(
+          "https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle",
+          bearerToken,
+        ),
+        store: harness.store,
+        registry: createDeviceSyncRegistry([
+          createWhoopProvider({ refreshTokens }),
+        ]),
+      });
+
+      await expect(service.refreshTokenBundle(
+        SESSION,
+        "conn-1",
+        { force: true },
+      )).rejects.toBe(admissionError);
+
+      expect(admission).toHaveBeenCalledWith(
+        "user-1",
+        "conn-1",
+        expect.any(Function),
+        { requireActiveMember: true },
+      );
+      expect(claim).not.toHaveBeenCalled();
+      expect(refreshTokens).not.toHaveBeenCalled();
       expect(harness.getRefreshLease()).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -649,7 +721,12 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
 
       expect(harness.audits).toHaveLength(0);
-      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toBeNull();
+      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toMatchObject({
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        tokenVersion: 2,
+      });
+      expect(harness.getRefreshLease()).toBeNull();
       expect(harness.signals).toHaveLength(1);
       expect(harness.getPublicConnection()).toMatchObject({
         lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
@@ -1152,7 +1229,12 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
 
       expect(refreshTokens).not.toHaveBeenCalled();
-      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toBeNull();
+      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toMatchObject({
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        tokenVersion: 2,
+      });
+      expect(harness.getRefreshLease()).toBeNull();
       expect(harness.signals).toHaveLength(1);
       expect(harness.signals[0]).toMatchObject({
         kind: "reauthorization_required",
@@ -1208,13 +1290,18 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     }
   });
 
-  it("fails closed when provider refresh returns an unclassified error after lease claim", async () => {
+  it("fails closed when provider refresh returns an incomplete rotated generation", async () => {
     vi.useFakeTimers();
     try {
       const bearerToken = "hbds_agent_original";
       const harness = createRetrySafeStoreHarness(bearerToken);
       const refreshTokens = vi.fn(async () => {
-        throw new Error("provider request timed out");
+        throw deviceSyncError({
+          accountStatus: "reauthorization_required",
+          code: "TOKEN_REFRESH_STATE_UNKNOWN",
+          message: "Device sync token refresh state is unknown. Reconnect this source before syncing again.",
+          retryable: false,
+        });
       });
       const registry = createDeviceSyncRegistry([createWhoopProvider({
         refreshTokens,
@@ -1553,6 +1640,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           : null;
       },
       async persistStoredConnectionTokenBundle(input: {
+        clearRefreshLease?: boolean;
         connectionId: string;
         externalAccountId: string;
         provider: string;
@@ -1566,6 +1654,10 @@ function createRetrySafeStoreHarness(bearerToken: string): {
       }) {
         if (input.connectionId !== connection.id) {
           return;
+        }
+
+        if (input.clearRefreshLease === true) {
+          refreshLease = null;
         }
 
         if (!input.tokenBundle) {
@@ -1633,6 +1725,14 @@ function createRetrySafeStoreHarness(bearerToken: string): {
         refreshLease = null;
         return true;
       },
+      async clearStaleConnectionRefreshLease() {
+        if (!refreshLease) {
+          return false;
+        }
+
+        refreshLease = null;
+        return true;
+      },
       async syncDurableConnectionState(account: typeof publicConnection) {
         publicConnection = {
           ...publicConnection,
@@ -1644,6 +1744,30 @@ function createRetrySafeStoreHarness(bearerToken: string): {
         };
       },
       async withConnectionMutationLock<TResult>(
+        _connectionId: string,
+        callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+      ): Promise<TResult> {
+        const transactionClient: HostedPrismaTransactionClient = Object.assign(
+          Object.create(null),
+          {
+            deviceConnection: {
+              findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+                where.id === connection.id && where.userId === SESSION.userId
+                  ? {
+                      id: connection.id,
+                      refreshLeaseExpiresAt: refreshLease ? new Date(refreshLease.leaseExpiresAt) : null,
+                      refreshLeaseOwner: refreshLease?.leaseOwner ?? null,
+                      refreshLeaseTokenVersion: refreshLease?.tokenVersion ?? null,
+                    }
+                  : null,
+            },
+          },
+        );
+
+        return callback(transactionClient);
+      },
+      async withHealthDataAdmissionLock<TResult>(
+        _userId: string,
         _connectionId: string,
         callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
       ): Promise<TResult> {
