@@ -4,7 +4,10 @@ import {
 import type {
   SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
-import type { DeviceSyncJobFailureDiagnostic } from "@murphai/device-syncd/types";
+import type {
+  DeviceSyncJobFailureDiagnostic,
+  DeviceSyncJobFailureEventOrigin,
+} from "@murphai/device-syncd/types";
 import {
   resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
@@ -1227,12 +1230,21 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
 
   return {
     failureCode: toHostedRuntimeLogCode(input.failureDiagnostic.code),
-    failureDisposition: input.failureDiagnostic.retryable ? "retry" : "drop",
+    failureEventOrigin: "worker_attempt" satisfies DeviceSyncJobFailureEventOrigin,
+    ...(input.failureDiagnostic.jobDisposition
+      ? { failureDisposition: input.failureDiagnostic.jobDisposition }
+      : {}),
     ...(typeof input.failureDiagnostic.attempts === "number"
       ? { failureJobAttempts: input.failureDiagnostic.attempts }
       : {}),
     ...(input.failureDiagnostic.jobKind
       ? { failureJobKind: toHostedRuntimeLogCode(input.failureDiagnostic.jobKind) }
+      : {}),
+    ...(typeof input.failureDiagnostic.maxAttempts === "number"
+      ? { failureJobMaxAttempts: input.failureDiagnostic.maxAttempts }
+      : {}),
+    ...(typeof input.failureDiagnostic.remainingAttempts === "number"
+      ? { failureJobRemainingAttempts: input.failureDiagnostic.remainingAttempts }
       : {}),
     ...(input.failureDiagnostic.resource
       ? { failureResource: toHostedRuntimeLogCode(input.failureDiagnostic.resource) }
@@ -1282,6 +1294,7 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
   "providerRequestAuthPlacement",
   "providerRequestBodyFieldNames",
   "providerRequestBodyKind",
+  "providerRequestCandidateAliasSource",
   "providerRequestContentType",
   "providerRequestEndpointKind",
   "providerRequestMethod",
@@ -1311,6 +1324,8 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
 const DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
   "providerHttpStatus",
   "providerRequestBodyFieldCount",
+  "providerRequestCandidateCount",
+  "providerRequestCandidateOrdinal",
   "providerRequestQueryParameterCount",
   "providerOAuthRequestDuplicateParameterCount",
   "providerOAuthRequestParameterCount",

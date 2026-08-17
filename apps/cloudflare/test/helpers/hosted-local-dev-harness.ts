@@ -39,6 +39,10 @@ const hostedLocalShutdownCheckpointControlTimeoutMs = 120_000;
 const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 
 export interface HostedLocalDevHarness {
+  ageActiveRuntimeFenceForTest(
+    userId: string,
+    startedAgoMs: number,
+  ): Promise<{ attemptId: string; ok: true; startedAt: string }>;
   assertNoInterventions(): void;
   assertStripeListenerAlive(): void;
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
@@ -95,6 +99,7 @@ export interface HostedLocalDevHarness {
   runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string, input?: {
+    sameWorkerVersion?: boolean;
     startedAgoMs?: number;
   }): Promise<{
     attemptId: string;
@@ -240,6 +245,24 @@ export async function startHostedLocalDevHarness(input: {
     }
 
     return {
+      ageActiveRuntimeFenceForTest: async (
+        userId: string,
+        startedAgoMs: number,
+      ): Promise<{ attemptId: string; ok: true; startedAt: string }> => {
+        assertHostedLocalTestControlsAvailable("ageActiveRuntimeFenceForTest");
+        return await requestJsonForRuntime<{
+          attemptId: string;
+          ok: true;
+          startedAt: string;
+        }>(
+          `/__test/users/${encodeURIComponent(userId)}`
+            + `/active-runtime-fence/age?startedAgoMs=${encodeURIComponent(String(startedAgoMs))}`,
+          {
+            headers: statusHeaders(userId),
+            method: "POST",
+          },
+        );
+      },
       assertNoInterventions: (): void => {
         if (interventionCount === 0) {
           return;
@@ -309,6 +332,7 @@ export async function startHostedLocalDevHarness(input: {
       startStuckInvocationForTest: async (
         userId: string,
         stuckInput?: {
+          sameWorkerVersion?: boolean;
           startedAgoMs?: number;
         },
       ): Promise<{
@@ -320,6 +344,9 @@ export async function startHostedLocalDevHarness(input: {
         const searchParams = new URLSearchParams();
         if (typeof stuckInput?.startedAgoMs === "number") {
           searchParams.set("startedAgoMs", String(stuckInput.startedAgoMs));
+        }
+        if (stuckInput?.sameWorkerVersion === true) {
+          searchParams.set("sameWorkerVersion", "1");
         }
         const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : "";
         return await requestJsonForRuntime<{

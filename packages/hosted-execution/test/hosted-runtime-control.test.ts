@@ -1528,6 +1528,9 @@ describe("hosted runtime control contracts", () => {
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
         directEnsureOrchestrationAttemptId:
           "web-ingress-123e4567-e89b-42d3-a456-426614174000",
+        directEnsureResultKind: "runtime_processing_accepted",
+        directEnsureAction: "woken",
+        directEnsureRuntimeAttemptId: "runtime-attempt-direct",
         runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
         runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
@@ -1783,12 +1786,22 @@ describe("hosted runtime control contracts", () => {
     }
 
     // Orchestration diagnostics are the same metadata-only boundary: epoch-ms
-    // numbers, explicit booleans, and two exact UUID-shaped correlation ids.
+    // numbers, explicit booleans, bounded outcome metadata, and exact
+    // UUID-shaped correlation ids.
     for (const unsafeOrchestration of [
       { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
       { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
       { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
       { directEnsureOrchestrationAttemptId: "web-ingress-not-a-uuid" }, // correlation id must be bounded
+      { directEnsureResultKind: "failed", rawError: "secret" }, // result values and arbitrary error metadata are forbidden
+      { directEnsureResultKind: "retry_later", directEnsureRetryReason: "container_rpc_timeout" }, // retry reasons remain in structured logs only
+      { directEnsureResultKind: "retry_later", directEnsureAction: "woken" }, // accepted metadata must match the result
+      { directEnsureResultKind: "runtime_processing_accepted", directEnsureAction: "woken" }, // accepted results require a runtime id
+      {
+        directEnsureResultKind: "runtime_processing_accepted",
+        directEnsureAction: "woken",
+        directEnsureRuntimeAttemptId: "runtime/attempt/with/path",
+      }, // runtime ids stay bounded opaque identifiers
       { runtimeInvocationOrchestrationAttemptId: "attempt_1" }, // arbitrary attempt ids are forbidden
       { runtimeControlAuthStartedAtEpochMs: "1777000000015" }, // CF-side string leaf
       { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
@@ -2089,6 +2102,9 @@ describe("hosted runtime control contracts", () => {
       activeWakeStartedAtEpochMs: 1_777_000_000_100,
       directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
       directEnsureResponseReceivedAtEpochMs: 1_777_000_000_132,
+      directEnsureResultKind: "runtime_processing_accepted",
+      directEnsureAction: "woken",
+      directEnsureRuntimeAttemptId: "runtime-attempt-direct",
       extraLeaf: 1,
       freshStartRequestedAtEpochMs: -1,
       replacedStaleFence: "true",
@@ -2108,6 +2124,9 @@ describe("hosted runtime control contracts", () => {
       activeWakeStartedAtEpochMs: 1_777_000_000_100,
       directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
       directEnsureResponseReceivedAtEpochMs: 1_777_000_000_132,
+      directEnsureResultKind: "runtime_processing_accepted",
+      directEnsureAction: "woken",
+      directEnsureRuntimeAttemptId: "runtime-attempt-direct",
       runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
       runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
       runtimeInvocationPreparationElapsedMs: 120,
@@ -2120,6 +2139,13 @@ describe("hosted runtime control contracts", () => {
     expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
       activeWakeAccepted: "true",
       freshStartRequestedAtEpochMs: -1,
+    })).toBeNull();
+
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      directEnsureResultKind: "retry_later",
+      directEnsureAction: "woken",
+      directEnsureRuntimeAttemptId: "runtime-attempt-direct",
+      directEnsureRetryReason: "container_rpc_timeout",
     })).toBeNull();
   });
 

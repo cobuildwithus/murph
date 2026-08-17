@@ -40,9 +40,9 @@ required_files=(
   "agent-docs/references/testing-ci-map.md"
   "agent-docs/operations/verification-and-runtime.md"
   "agent-docs/operations/completion-workflow.md"
+  "agent-docs/operations/product-ux.md"
   "agent-docs/prompts/coverage-write.md"
   "agent-docs/prompts/prompt-review.md"
-  "agent-docs/prompts/product-experience-review.md"
   "agent-docs/generated/README.md"
   "agent-docs/generated/doc-gardening-report.md"
   "agent-docs/exec-plans/active/README.md"
@@ -126,6 +126,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "agent-docs/operations/agent-workflow-routing.md" \
   "agent-docs/operations/verification-and-runtime.md" \
   "agent-docs/operations/completion-workflow.md" \
+  "agent-docs/operations/product-ux.md" \
   "agent-docs/operations/imessage-deliverability.md" \
   "agent-docs/operations/pr-reviewgpt-loop.md" \
   "package.json" \

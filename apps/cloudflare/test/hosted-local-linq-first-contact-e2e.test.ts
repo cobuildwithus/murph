@@ -1,10 +1,15 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createServer, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  queryHostedRuntimeWorkflowForTest,
+  readHostedIngressLatencyTraceForTest,
   readHostedMailboxItemForTest,
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
@@ -14,6 +19,9 @@ import {
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+} from "@murphai/hosted-execution/orchestration-control";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
@@ -62,6 +70,8 @@ import {
 
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
+const directRetryRecoveryUserId =
+  `member_local_linq_direct_retry_recovery_${Date.now()}`;
 const richLinkLostAckUserId = `member_local_linq_link_lost_ack_${Date.now()}`;
 const richLinkRetryRecoveryUserId = `member_local_linq_link_retry_recovery_${Date.now()}`;
 const richLinkFallbackUserId = `member_local_linq_link_fallback_${Date.now()}`;
@@ -80,15 +90,25 @@ const checkpointReplayReplyText = "Yes - I can help with that.";
 const progressToolAttemptText = "Checking the current iMessage thread now.";
 const progressToolFinalReplyText = "I checked that and can keep helping from here.";
 const typingLoopReplyText = "I saw that and can help from here.";
+const directRetryRecoveryReplyText =
+  "The delayed runtime recovered from the original message.";
 const richLinkLostAckUrl = "https://example.test/continue/lost-ack";
 const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
+const directWakeRetryBarrierPreloadPath = fileURLToPath(new URL(
+  "../../web/test/support/hosted-local-direct-wake-retry-barrier-preload.ts",
+  import.meta.url,
+));
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
 const testControlsEnabled = process.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS === "1";
+const directWakeRetrySetupTimeoutMs =
+  process.env.MURPH_HOSTED_LOCAL_E2E_EXTENDED_SETUP_TIMEOUT === "1"
+    ? 900_000
+    : 300_000;
 const productionDescribe = testControlsEnabled ? describe.skip : describe;
 const testControlsDescribe = testControlsEnabled ? describe : describe.skip;
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -101,7 +121,15 @@ const itCheckpointReplayRepro =
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
+let directWakeRetryBarrier: HostedLocalDirectWakeRetryBarrier | null = null;
 const cleanupPaths: string[] = [];
+
+interface HostedLocalDirectWakeRetryBarrier {
+  release(): void;
+  stop(): Promise<void>;
+  url: string;
+  waitForBlockedRetry(): Promise<void>;
+}
 
 function buildHostedAssistantProgressAttemptResponses(input: {
   progressText: string;
@@ -116,22 +144,90 @@ function buildHostedAssistantProgressAttemptResponses(input: {
 }
 
 afterAll(async () => {
-  await scenario?.stop();
+  const cleanupErrors: unknown[] = [];
+  const captureCleanup = async (cleanup: () => Promise<void>): Promise<void> => {
+    try {
+      await cleanup();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  };
+  const barrierToStop = directWakeRetryBarrier;
+  directWakeRetryBarrier = null;
+  const scenarioToStop = scenario;
   scenario = null;
-  await linqStub?.stop();
+  const linqStubToStop = linqStub;
   linqStub = null;
-  await Promise.all(cleanupPaths.splice(0).map((target) =>
-    rm(target, {
-      force: true,
-      recursive: true,
-    })
-  ));
+  await captureCleanup(async () => {
+    await barrierToStop?.stop();
+  });
+  await captureCleanup(async () => {
+    await scenarioToStop?.stop();
+  });
+  await captureCleanup(async () => {
+    await linqStubToStop?.stop();
+  });
+  await captureCleanup(async () => {
+    await Promise.all(cleanupPaths.splice(0).map((target) =>
+      rm(target, {
+        force: true,
+        recursive: true,
+      })
+    ));
+  });
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Hosted-local Linq cleanup failed.");
+  }
 }, 120_000);
 
 it("derives stable numeric suffixes from the full Linq user id", () => {
   expect(buildStableNumericSuffix("member_local_linq_first_contact_20260408", 7)).not.toBe(
     buildStableNumericSuffix("member_local_linq_direct_reply_20260408", 7),
   );
+});
+
+it("extracts only the first retry_later direct-wake correlation", () => {
+  const orchestrationAttemptId =
+    "web-ingress-11111111-2222-4333-8444-555555555555";
+  expect(readFirstDirectRetryOrchestrationAttemptId([
+    "Hosted direct ensure wake completed.",
+    "{",
+    "  attemptNumber: 1,",
+    "  kind: 'retry_later',",
+    `  orchestrationAttemptId: '${orchestrationAttemptId}',`,
+    "}",
+  ].join("\n"))).toBe(orchestrationAttemptId);
+  expect(readFirstDirectRetryOrchestrationAttemptId([
+    "Hosted direct ensure wake completed.",
+    "{",
+    "  attemptNumber: 2,",
+    "  kind: 'runtime_processing_accepted',",
+    `  orchestrationAttemptId: '${orchestrationAttemptId}',`,
+    "}",
+  ].join("\n"))).toBeNull();
+});
+
+it("summarizes direct-wake diagnostics without correlation identifiers", () => {
+  expect(summarizeDirectWakeCompletions([
+    "Hosted direct ensure wake completed.",
+    "{ attemptNumber: 1, kind: 'retry_later' }",
+    "Hosted direct ensure wake completed.",
+    "{ attemptNumber: 2, kind: 'runtime_processing_accepted' }",
+  ].join("\n"))).toBe("1:retry_later,2:runtime_processing_accepted");
+});
+
+it("releases a blocked direct-wake retry during barrier teardown", async () => {
+  const barrier = await startHostedLocalDirectWakeRetryBarrier();
+  try {
+    const blockedRequest = fetch(barrier.url, { method: "POST" });
+    await barrier.waitForBlockedRetry();
+
+    await barrier.stop();
+
+    await expect(blockedRequest).resolves.toMatchObject({ status: 204 });
+  } finally {
+    await barrier.stop();
+  }
 });
 
 productionDescribe("hosted local Linq first-contact e2e", () => {
@@ -1234,6 +1330,169 @@ testControlsDescribe("hosted local Linq checkpoint replay e2e", () => {
   );
 });
 
+testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
+  beforeAll(async () => {
+    directWakeRetryBarrier = await startHostedLocalDirectWakeRetryBarrier();
+    await restartLinqScenario({
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+    }, {
+      faultInjection: true,
+      webProcessEnvOverrides: {
+        MURPH_HOSTED_LOCAL_DIRECT_WAKE_RETRY_BARRIER_URL:
+          directWakeRetryBarrier.url,
+        MURPH_HOSTED_LOCAL_DIRECT_WAKE_RETRY_BARRIER_USER_ID:
+          directRetryRecoveryUserId,
+        NODE_OPTIONS: appendNodeRequireOption(
+          process.env.NODE_OPTIONS,
+          directWakeRetryBarrierPreloadPath,
+        ),
+      },
+    });
+  }, directWakeRetrySetupTimeoutMs);
+
+  itOutsideFastDeployGate(
+    "recovers one inbound through a direct retry without duplicate provider or Linq work",
+    async () => {
+      const activeScenario = requireScenario();
+      const activeLinqStub = requireLinqStub();
+      const chatId = `chat_local_linq_direct_retry_${Date.now()}`;
+      const eventId = `evt_direct_retry_${directRetryRecoveryUserId}`;
+      const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+      const replyMatcher = (request: ObservedLinqRequest): boolean =>
+        activeLinqStub.readObservedMessageText(request)
+          === directRetryRecoveryReplyText;
+
+      await activeScenario.seedActiveHostedLinqMember({
+        homePhone: buildLinqHomePhoneNumber(directRetryRecoveryUserId),
+        memberId: directRetryRecoveryUserId,
+        memberPhone: buildLinqRecipientPhoneNumber(directRetryRecoveryUserId),
+      });
+      await activeScenario.runWake(
+        buildActivationWake(directRetryRecoveryUserId),
+        directRetryRecoveryUserId,
+      );
+      await activeScenario.waitForHostedCompletion(directRetryRecoveryUserId);
+      await activeScenario.bindActiveHostedLinqHomeChat({
+        chatId,
+        memberId: directRetryRecoveryUserId,
+        recipientPhone: buildLinqRecipientPhoneNumber(directRetryRecoveryUserId),
+      });
+
+      // A fresh same-version fence with no child makes the first direct ensure
+      // return retry_later. Age it only after that exact response is observed,
+      // while a Web-process test barrier holds attempt two before its outbound
+      // fetch. Release only after the same fence crosses startup grace.
+      const stuckFence = await activeScenario.harness.startStuckInvocationForTest(
+        directRetryRecoveryUserId,
+        { sameWorkerVersion: true },
+      );
+      const providerBaseline = countAssistantProviderResponsesApiRequests();
+      const acceptedReplyBaseline = activeLinqStub.countAcceptedSends(
+        replyPath,
+        replyMatcher,
+      );
+      const observedChatSendBaseline = activeLinqStub.countObservedSends(replyPath);
+      activeScenario.queueAssistantResponses([directRetryRecoveryReplyText], {
+        matchInputContains: "Recover this delayed message",
+      });
+
+      const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        directRetryRecoveryUserId,
+        chatId,
+        {
+          eventId,
+          messageId: `msg_${eventId}`,
+          text: "Recover this delayed message",
+        },
+      ));
+      expect(webhookResponse.status).toBe(202);
+      await expect(webhookResponse.json()).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+
+      const pendingWake = activeScenario.waitForLatestPendingWake(
+        directRetryRecoveryUserId,
+      );
+      const directOrchestrationAttemptId =
+        await waitForFirstDirectRetryLog();
+      const retryBarrier = requireDirectWakeRetryBarrier();
+      await retryBarrier.waitForBlockedRetry();
+      try {
+        const agedFence =
+          await activeScenario.harness.ageActiveRuntimeFenceForTest(
+            directRetryRecoveryUserId,
+            31_000,
+          );
+        expect(agedFence.attemptId).toBe(stuckFence.attemptId);
+      } finally {
+        retryBarrier.release();
+      }
+
+      await pendingWake;
+      const completion = activeScenario.waitForHostedCompletion(
+        directRetryRecoveryUserId,
+      );
+      const acceptedReplies =
+        await activeLinqStub.waitForMatchingAcceptedSendCount({
+          expectedCount: acceptedReplyBaseline + 1,
+          expectedPath: replyPath,
+          matchRequest: replyMatcher,
+          scenario: activeScenario,
+          userId: directRetryRecoveryUserId,
+        });
+      const finalStatus = await completion;
+      expect(finalStatus.lastErrorCode ?? null).toBeNull();
+      expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+      expect(acceptedReplies).toHaveLength(acceptedReplyBaseline + 1);
+
+      const trace = await waitForDirectRetryLatencyTrace({
+        mailboxDedupeKey: eventId,
+        userId: directRetryRecoveryUserId,
+      });
+      const orchestration = trace.phaseBreakdown?.orchestration;
+      expect(orchestration?.directEnsureOrchestrationAttemptId).toBe(
+        directOrchestrationAttemptId,
+      );
+      expect(orchestration).toMatchObject({
+        directEnsureResultKind: "runtime_processing_accepted",
+        directEnsureRuntimeAttemptId: trace.runtimeAttemptId,
+      });
+      expect([
+        "started",
+        "replaced",
+        "woken",
+        "already_running",
+      ]).toContain(orchestration?.directEnsureAction);
+      expect(trace.temporalSignalAcceptedAt).not.toBeNull();
+      expect(
+        orchestration!.directEnsureRequestStartedAtEpochMs!
+          - Date.parse(trace.temporalSignalAcceptedAt!),
+      ).toBeGreaterThanOrEqual(2_500);
+
+      await waitForTemporalRuntimeProcessingAcceptance({
+        executionNotBefore: new Date(trace.temporalSignalAcceptedAt!),
+        userId: directRetryRecoveryUserId,
+      });
+      await activeScenario.waitForHostedIdle(directRetryRecoveryUserId);
+      await waitForCorrelatedDirectRetryLogs(
+        directOrchestrationAttemptId,
+      );
+      await sleep(500);
+      expect(activeLinqStub.countAcceptedSends(replyPath, replyMatcher)).toBe(
+        acceptedReplyBaseline + 1,
+      );
+      expect(activeLinqStub.countObservedSends(replyPath)).toBe(
+        observedChatSendBaseline + 1,
+      );
+      expect(countAssistantProviderResponsesApiRequests()).toBe(
+        providerBaseline + 1,
+      );
+    },
+    360_000,
+  );
+});
+
 testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
   beforeAll(async () => {
     await restartLinqScenario({
@@ -1463,6 +1722,135 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
+function requireDirectWakeRetryBarrier(): HostedLocalDirectWakeRetryBarrier {
+  if (!directWakeRetryBarrier) {
+    throw new Error("Hosted-local direct-wake retry barrier was not initialized.");
+  }
+  return directWakeRetryBarrier;
+}
+
+async function startHostedLocalDirectWakeRetryBarrier(): Promise<
+  HostedLocalDirectWakeRetryBarrier
+> {
+  const token = randomUUID();
+  let released = false;
+  let stopPromise: Promise<void> | null = null;
+  let arrivalResolved = false;
+  let resolveArrival!: () => void;
+  const arrival = new Promise<void>((resolve) => {
+    resolveArrival = resolve;
+  });
+  const pendingResponses = new Set<ServerResponse>();
+  const server = createServer((request, response) => {
+    if (
+      request.method !== "POST"
+      || request.url !== `/direct-wake-retry/${token}`
+    ) {
+      response.writeHead(404).end();
+      return;
+    }
+
+    if (!arrivalResolved) {
+      arrivalResolved = true;
+      resolveArrival();
+    }
+    if (released) {
+      response.writeHead(204).end();
+      return;
+    }
+
+    pendingResponses.add(response);
+    response.once("close", () => {
+      pendingResponses.delete(response);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo | null;
+  if (!address) {
+    await closeHttpServer(server);
+    throw new Error("Hosted-local direct-wake retry barrier did not bind.");
+  }
+
+  const release = (): void => {
+    if (released) {
+      return;
+    }
+    released = true;
+    for (const response of pendingResponses) {
+      response.writeHead(204).end();
+    }
+    pendingResponses.clear();
+  };
+
+  return {
+    release,
+    async stop(): Promise<void> {
+      release();
+      stopPromise ??= closeHttpServer(server);
+      await stopPromise;
+    },
+    url: `http://127.0.0.1:${address.port}/direct-wake-retry/${token}`,
+    async waitForBlockedRetry(): Promise<void> {
+      await waitForPromiseWithTimeout(
+        arrival,
+        30_000,
+        "Timed out waiting for Web's second direct wake at the test barrier.",
+      );
+    },
+  };
+}
+
+async function closeHttpServer(
+  server: ReturnType<typeof createServer>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+async function waitForPromiseWithTimeout(
+  promise: Promise<void>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function appendNodeRequireOption(
+  existingNodeOptions: string | undefined,
+  requirePath: string,
+): string {
+  const existing = existingNodeOptions?.trim();
+  const requireOption = `--require=${JSON.stringify(requirePath)}`;
+  return existing
+    ? `${existing} ${requireOption}`
+    : requireOption;
+}
+
 function readObservedLinqIdempotencyKey(request: ObservedLinqRequest): string | null {
   const parsed: unknown = JSON.parse(request.body);
   const message = readObjectProperty(parsed, "message");
@@ -1574,6 +1962,7 @@ async function startLinqScenario(
   additionalEnv: NodeJS.ProcessEnv = {},
   options: {
     faultInjection?: boolean;
+    webProcessEnvOverrides?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<void> {
   linqStub = await startHostedLocalLinqStub({
@@ -1601,6 +1990,7 @@ async function startLinqScenario(
     requiredRunnerEnvProfile: "linq",
     scenarioLabel: "Local hosted Linq e2e",
     streamLogs: streamDevLogs,
+    webProcessEnvOverrides: options.webProcessEnvOverrides,
   });
 }
 
@@ -1618,6 +2008,7 @@ async function restartLinqScenario(
   additionalEnv: NodeJS.ProcessEnv = {},
   options: {
     faultInjection?: boolean;
+    webProcessEnvOverrides?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<void> {
   await scenario?.stop();
@@ -1632,6 +2023,7 @@ async function restartLinqScenario(
 function buildLinqFirstContactLocalInboundAllowlist(): string {
   return [
     directReplyUserId,
+    directRetryRecoveryUserId,
     richLinkLostAckUserId,
     richLinkRetryRecoveryUserId,
     richLinkFallbackUserId,
@@ -1642,6 +2034,228 @@ function buildLinqFirstContactLocalInboundAllowlist(): string {
     checkpointReplayUserId,
     typingLoopUserId,
   ].map(buildLinqRecipientPhoneNumber).join(",");
+}
+
+async function waitForDirectRetryLatencyTrace(input: {
+  mailboxDedupeKey: string;
+  userId: string;
+}) {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+  let lastObservation = "none";
+  while (Date.now() - startedAt < 30_000) {
+    try {
+      const mailboxItem = await readHostedMailboxItemForTest({
+        dedupeKey: input.mailboxDedupeKey,
+        environment: requireScenario().runtimeEnv,
+        userId: input.userId,
+      });
+      const trace = await readHostedIngressLatencyTraceForTest({
+        environment: requireScenario().runtimeEnv,
+        mailboxItemId: mailboxItem.id,
+        userId: input.userId,
+      });
+      const orchestration = trace.phaseBreakdown?.orchestration;
+      lastObservation = [
+        `directRequest=${orchestration?.directEnsureRequestStartedAtEpochMs
+          ? "present"
+          : "missing"}`,
+        `directResult=${orchestration?.directEnsureResultKind ?? "missing"}`,
+        `runtimeAttempt=${trace.runtimeAttemptId ? "present" : "missing"}`,
+        `temporalSignal=${trace.temporalSignalAcceptedAt ? "present" : "missing"}`,
+      ].join(",");
+      if (
+        trace.temporalSignalAcceptedAt
+        && trace.runtimeAttemptId
+        && orchestration?.directEnsureRequestStartedAtEpochMs
+        && orchestration.directEnsureResultKind ===
+          "runtime_processing_accepted"
+      ) {
+        return trace;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(100);
+  }
+
+  const latestOutput = requireScenario().harness.stdoutTail(2_000_000);
+  const lastErrorKind = lastError instanceof Error
+    ? lastError.name
+    : typeof lastError;
+  throw new Error(
+    "Timed out waiting for the direct-retry latency trace. "
+      + `Observation: ${lastObservation}. `
+      + `Direct wake completions: ${summarizeDirectWakeCompletions(latestOutput)}. `
+      + `Last read error kind: ${lastErrorKind}.`,
+  );
+}
+
+async function waitForFirstDirectRetryLog(): Promise<string> {
+  const startedAt = Date.now();
+  let latestOutput = "";
+  while (Date.now() - startedAt < 30_000) {
+    latestOutput = requireScenario().harness.stdoutTail(2_000_000);
+    const orchestrationAttemptId =
+      readFirstDirectRetryOrchestrationAttemptId(latestOutput);
+    if (orchestrationAttemptId) {
+      return orchestrationAttemptId;
+    }
+    await sleep(25);
+  }
+
+  throw new Error(
+    "Timed out waiting for the first direct retry_later log. "
+      + `Observed direct wake completions: ${summarizeDirectWakeCompletions(latestOutput)}.`,
+  );
+}
+
+function summarizeDirectWakeCompletions(output: string): string {
+  const message = "Hosted direct ensure wake completed.";
+  const completions: string[] = [];
+  let cursor = 0;
+  while (cursor < output.length) {
+    const messageIndex = output.indexOf(message, cursor);
+    if (messageIndex < 0) {
+      break;
+    }
+    const block = output.slice(messageIndex, messageIndex + 2_000);
+    const attemptNumber = block.match(
+      /attemptNumber[^0-9]{0,24}([0-9]+)/u,
+    )?.[1] ?? "unknown";
+    const kind = block.match(
+      /kind[^A-Za-z_]{0,24}([a-z_]+)/u,
+    )?.[1] ?? "unknown";
+    completions.push(`${attemptNumber}:${kind}`);
+    cursor = messageIndex + message.length;
+  }
+  return completions.slice(-10).join(",") || "none";
+}
+
+function readFirstDirectRetryOrchestrationAttemptId(
+  output: string,
+): string | null {
+  const message = "Hosted direct ensure wake completed.";
+  let cursor = 0;
+  while (cursor < output.length) {
+    const messageIndex = output.indexOf(message, cursor);
+    if (messageIndex < 0) {
+      return null;
+    }
+    const block = output.slice(messageIndex, messageIndex + 2_000);
+    const orchestrationAttemptId = block.match(
+      /orchestrationAttemptId[^A-Za-z0-9-]{0,24}(web-ingress-[0-9a-f-]{36})/u,
+    )?.[1];
+    if (
+      orchestrationAttemptId
+      && /attemptNumber[^0-9]{0,24}1(?:[^0-9]|$)/u.test(block)
+      && /kind[^A-Za-z_]{0,24}retry_later/u.test(block)
+    ) {
+      return orchestrationAttemptId;
+    }
+    cursor = messageIndex + message.length;
+  }
+  return null;
+}
+
+async function waitForTemporalRuntimeProcessingAcceptance(input: {
+  executionNotBefore: Date;
+  userId: string;
+}): Promise<void> {
+  const deadlineAt = Date.now() + 180_000;
+  let latestState: unknown = null;
+  let latestError: unknown = null;
+  while (Date.now() < deadlineAt) {
+    try {
+      latestState = await queryHostedRuntimeWorkflowForTest({
+        environment: requireScenario().runtimeEnv,
+        queryName: HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+        workflowId: `hosted-user-runtime:${input.userId}`,
+      });
+      if (
+        latestState
+        && typeof latestState === "object"
+        && !Array.isArray(latestState)
+        && Reflect.get(latestState, "lastExecutionKind")
+          === "runtime_processing_accepted"
+      ) {
+        const lastExecutionAt = Reflect.get(latestState, "lastExecutionAt");
+        if (
+          typeof lastExecutionAt === "string"
+          && Date.parse(lastExecutionAt) >= input.executionNotBefore.getTime()
+        ) {
+          return;
+        }
+      }
+    } catch (error) {
+      latestError = error;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(
+    "Timed out waiting for the accepted Temporal signal to execute an accepted "
+      + `runtime activity: ${JSON.stringify(latestState)}; ${String(latestError)}`,
+  );
+}
+
+async function waitForCorrelatedDirectRetryLogs(
+  orchestrationAttemptId: string,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 30_000) {
+    const output = requireScenario().harness.stdoutTail(2_000_000);
+    if (
+      hasCorrelatedDirectWakeCompletion(output, {
+        attemptNumber: 1,
+        kind: "retry_later",
+        orchestrationAttemptId,
+      })
+      && hasCorrelatedDirectWakeCompletion(output, {
+        attemptNumber: 2,
+        kind: "runtime_processing_accepted",
+        orchestrationAttemptId,
+      })
+    ) {
+      return;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(
+    "Timed out waiting for correlated first-retry and second-accept direct wake logs.",
+  );
+}
+
+function hasCorrelatedDirectWakeCompletion(
+  output: string,
+  input: {
+    attemptNumber: number;
+    kind: "retry_later" | "runtime_processing_accepted";
+    orchestrationAttemptId: string;
+  },
+): boolean {
+  const message = "Hosted direct ensure wake completed.";
+  let cursor = 0;
+  while (cursor < output.length) {
+    const messageIndex = output.indexOf(message, cursor);
+    if (messageIndex < 0) {
+      return false;
+    }
+    const block = output.slice(messageIndex, messageIndex + 2_000);
+    if (
+      block.includes(input.orchestrationAttemptId)
+      && new RegExp(
+        `attemptNumber[^0-9]{0,24}${input.attemptNumber}(?:[^0-9]|$)`,
+        "u",
+      ).test(block)
+      && new RegExp(`kind[^A-Za-z_]{0,24}${input.kind}`, "u").test(block)
+    ) {
+      return true;
+    }
+    cursor = messageIndex + message.length;
+  }
+  return false;
 }
 
 async function seedStaleWorkspaceWakeFromCurrentCheckpoint(userId: string): Promise<void> {

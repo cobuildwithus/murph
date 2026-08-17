@@ -1125,6 +1125,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260812120000_hosted_runtime_latency_candidate_indexes",
       "20260812150000_stripe_effect_compatibility_cutover",
       "20260813120000_group_current_sender_clarification",
+      "20260815120000_hosted_phone_call_result_notification_channel",
+      "20260815190000_outbound_message_volume_receipts",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
