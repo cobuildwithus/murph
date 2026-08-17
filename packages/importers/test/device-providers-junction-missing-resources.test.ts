@@ -457,7 +457,7 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
       insulin_injection: grouped("freestyle_libre", "cgm", "libre-1", [{
         end: input.end,
         id: "insulin-canonical-time",
-        start: "2026-01-15T09:00:00+00:00",
+        start: "2026-03-08T01:58:00+00:00",
         type: "rapid_acting",
         unit: "unit",
         value: input.insulinAmount,
@@ -504,23 +504,23 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
       timezone: "America/New_York",
     });
     const first = selectMetabolicEvents(await importSnapshot(buildSnapshot({
-      end: "2026-01-15T09:05:00+00:00",
-      importedAt: "2026-02-01T00:00:00.000Z",
+      end: "2026-03-08T03:03:00+00:00",
+      importedAt: "2026-03-09T00:00:00.000Z",
       insulinAmount: 4,
     })));
 
     assert.equal(first.carbohydrate?.occurredAt, "2026-01-15T13:00:00.000Z");
     assert.equal(first.carbohydrate?.timeZone, "America/New_York");
-    assert.equal(first.insulin?.occurredAt, "2026-01-15T14:00:00.000Z");
+    assert.equal(first.insulin?.occurredAt, "2026-03-08T06:58:00.000Z");
     assert.equal(first.insulin?.timeZone, "America/New_York");
 
     await coreRuntime.updateVaultSummary({
       vaultRoot,
-      timezone: "America/Chicago",
+      timezone: "America/Phoenix",
     });
     const replayResult = await importSnapshot(buildSnapshot({
-      end: "2026-01-15T09:05:00+00:00",
-      importedAt: "2026-02-02T00:00:00.000Z",
+      end: "2026-03-08T03:03:00+00:00",
+      importedAt: "2026-03-10T00:00:00.000Z",
       insulinAmount: 4,
     }));
     const replay = {
@@ -536,11 +536,16 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
     assert.equal(replay.insulin?.occurredAt, first.insulin?.occurredAt);
     assert.equal(replay.insulin?.timeZone, first.insulin?.timeZone);
     assert.equal(replay.insulin?.lifecycle, undefined);
+    if (replay.insulin?.kind !== "intervention_session") {
+      assert.fail("expected replayed Libre insulin event");
+    }
+    assert.equal(replay.insulin.fields?.["start-at"], "2026-03-08T06:58:00.000Z");
+    assert.equal(replay.insulin.fields?.["end-at"], "2026-03-08T07:03:00.000Z");
 
     const corrected = selectMetabolicEvents(await importSnapshot(buildSnapshot({
-      end: "2026-01-15T09:20:00+00:00",
-      importedAt: "2026-02-03T00:00:00.000Z",
-      insulinAmount: 5,
+      end: "2026-03-08T03:08:00+00:00",
+      importedAt: "2026-03-11T00:00:00.000Z",
+      insulinAmount: 4,
     })));
 
     assert.equal(corrected.insulin?.id, first.insulin?.id);
@@ -550,9 +555,27 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
     if (corrected.insulin?.kind !== "intervention_session") {
       assert.fail("expected corrected Libre insulin event");
     }
-    assert.equal(corrected.insulin.fields?.["dose-amount"], 5);
-    assert.equal(corrected.insulin.fields?.["start-at"], "2026-01-15T14:00:00.000Z");
-    assert.equal(corrected.insulin.fields?.["end-at"], "2026-01-15T14:20:00.000Z");
+    assert.equal(corrected.insulin.fields?.["dose-amount"], 4);
+    assert.equal(corrected.insulin.fields?.["start-at"], "2026-03-08T06:58:00.000Z");
+    assert.equal(corrected.insulin.fields?.["end-at"], "2026-03-08T07:08:00.000Z");
+
+    await assert.rejects(
+      importSnapshot(buildSnapshot({
+        end: "2026-03-08T02:30:00+00:00",
+        importedAt: "2026-03-12T00:00:00.000Z",
+        insulinAmount: 4,
+      })),
+      /cannot be interpreted unambiguously in its accepted timezone/u,
+    );
+    const afterRejectedCorrection = await readCanonicalEvent(first.insulin);
+    assert.equal(afterRejectedCorrection?.lifecycle?.revision, 2);
+    if (afterRejectedCorrection?.kind !== "intervention_session") {
+      assert.fail("expected retained Libre insulin event");
+    }
+    assert.equal(
+      afterRejectedCorrection.fields?.["end-at"],
+      "2026-03-08T07:08:00.000Z",
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

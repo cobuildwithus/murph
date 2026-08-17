@@ -5,8 +5,26 @@ const ISO_DATE_TIME_PATTERN =
 export const WRITABLE_ISO_DATE_TIME_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.(\d+))?([Zz]|([+-])(\d{2}):(\d{2}))$/u;
 const DAILY_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/u;
+const FLOATING_ISO_DATE_TIME_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:z|[+-]00:?00)?$/iu;
 
 const TIME_ZONE_PARTS_CACHE = new Map<string, Intl.DateTimeFormat>();
+
+interface FloatingIsoDateTimeParts {
+  day: number;
+  dayKey: string;
+  hour: number;
+  millisecond: number;
+  minute: number;
+  month: number;
+  second: number;
+  year: number;
+}
+
+export interface ResolvedFloatingIsoTimestamp {
+  dayKey: string;
+  timestamp: string;
+}
 
 export interface TimeZoneDateTimeParts {
   year: number;
@@ -259,6 +277,45 @@ export function formatTimeZoneDateTimeParts(
   };
 }
 
+export function resolveFloatingIsoTimestampInTimeZone(
+  value: string,
+  timeZone: string,
+): ResolvedFloatingIsoTimestamp | null {
+  const parsed = parseFloatingIsoTimestamp(value);
+  return parsed ? resolveFloatingDateTimePartsInTimeZone(parsed, timeZone) : null;
+}
+
+export function reinterpretIsoTimestampInTimeZone(
+  value: string,
+  sourceTimeZone: string,
+  targetTimeZone: string,
+): ResolvedFloatingIsoTimestamp | null {
+  const normalizedTimestamp = normalizeStrictIsoTimestamp(value);
+  const normalizedSourceTimeZone = normalizeIanaTimeZone(sourceTimeZone);
+  if (!normalizedTimestamp || !normalizedSourceTimeZone) {
+    return null;
+  }
+
+  try {
+    const localParts = formatTimeZoneDateTimeParts(
+      normalizedTimestamp,
+      normalizedSourceTimeZone,
+    );
+    return resolveFloatingDateTimePartsInTimeZone({
+      day: localParts.day,
+      dayKey: localParts.dayKey,
+      hour: localParts.hour,
+      millisecond: new Date(normalizedTimestamp).getUTCMilliseconds(),
+      minute: localParts.minute,
+      month: localParts.month,
+      second: localParts.second,
+      year: localParts.year,
+    }, targetTimeZone);
+  } catch {
+    return null;
+  }
+}
+
 export function toLocalDayKey(
   value: string | number | Date,
   timeZone: string,
@@ -288,6 +345,116 @@ function parseIsoDate(
   }
 
   return { year, month, day };
+}
+
+function parseFloatingIsoTimestamp(value: string): FloatingIsoDateTimeParts | null {
+  const match = FLOATING_ISO_DATE_TIME_PATTERN.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6] ?? "0");
+  const millisecond = Number(`${match[7] ?? ""}000`.slice(0, 3));
+  const validationMs = utcMillisecondsFromParts(
+    year,
+    month - 1,
+    day,
+    hour,
+    minute,
+    second,
+    millisecond,
+  );
+  const validation = new Date(validationMs);
+  if (
+    validation.getUTCFullYear() !== year
+    || validation.getUTCMonth() !== month - 1
+    || validation.getUTCDate() !== day
+    || validation.getUTCHours() !== hour
+    || validation.getUTCMinutes() !== minute
+    || validation.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+
+  return {
+    day,
+    dayKey: `${match[1]}-${match[2]}-${match[3]}`,
+    hour,
+    millisecond,
+    minute,
+    month,
+    second,
+    year,
+  };
+}
+
+function resolveFloatingDateTimePartsInTimeZone(
+  parts: FloatingIsoDateTimeParts,
+  timeZone: string,
+): ResolvedFloatingIsoTimestamp | null {
+  const normalizedTimeZone = normalizeIanaTimeZone(timeZone);
+  if (!normalizedTimeZone) {
+    return null;
+  }
+
+  const targetLocalMs = utcMillisecondsFromParts(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+    parts.millisecond,
+  );
+  try {
+    const candidateInstants = new Set<number>();
+    for (const probeDeltaMs of [
+      -7 * 24 * 60 * 60_000,
+      -2 * 24 * 60 * 60_000,
+      0,
+      2 * 24 * 60 * 60_000,
+      7 * 24 * 60 * 60_000,
+    ]) {
+      const probeMs = targetLocalMs + probeDeltaMs;
+      const probeParts = formatTimeZoneDateTimeParts(probeMs, normalizedTimeZone);
+      const offsetMs = utcMillisecondsFromParts(
+        probeParts.year,
+        probeParts.month - 1,
+        probeParts.day,
+        probeParts.hour,
+        probeParts.minute,
+        probeParts.second,
+        parts.millisecond,
+      ) - probeMs;
+      const candidateMs = targetLocalMs - offsetMs;
+      const candidateParts = formatTimeZoneDateTimeParts(candidateMs, normalizedTimeZone);
+      if (
+        candidateParts.year === parts.year
+        && candidateParts.month === parts.month
+        && candidateParts.day === parts.day
+        && candidateParts.hour === parts.hour
+        && candidateParts.minute === parts.minute
+        && candidateParts.second === parts.second
+      ) {
+        candidateInstants.add(candidateMs);
+      }
+    }
+
+    if (candidateInstants.size !== 1) {
+      return null;
+    }
+    const [candidateMs] = candidateInstants;
+    return candidateMs === undefined
+      ? null
+      : { dayKey: parts.dayKey, timestamp: new Date(candidateMs).toISOString() };
+  } catch {
+    return null;
+  }
 }
 
 function parseIsoDateTime(

@@ -32,6 +32,7 @@ import {
   eventRecordSchema,
   eventImportDecisionSchema,
   isWritableIsoDateTime,
+  reinterpretIsoTimestampInTimeZone,
   safeParseContract,
   sampleRecordSchema,
 } from "@murphai/contracts";
@@ -2325,14 +2326,6 @@ const JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE =
 const JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION =
   "junction-sparse-timeseries.floating-fallback.v2";
 
-function shiftIsoTimestamp(value: unknown, deltaMs: number): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const timestampMs = Date.parse(value);
-  return Number.isFinite(timestampMs) ? new Date(timestampMs + deltaMs).toISOString() : undefined;
-}
-
 function preserveJunctionFloatingFallbackTime(
   existing: EventRecord,
   incoming: EventRecord,
@@ -2351,27 +2344,52 @@ function preserveJunctionFloatingFallbackTime(
     return incoming;
   }
 
-  const deltaMs = Date.parse(existing.occurredAt) - Date.parse(incoming.occurredAt);
-  if (!Number.isFinite(deltaMs)) {
+  if (!existing.timeZone || !incoming.timeZone) {
     return incoming;
   }
 
   // Junction documents Libre's +00:00 values as wall clocks, not instants.
   // Once the event spine accepts a vault-zone interpretation, that existing
   // canonical owner must not move merely because the member changes their
-  // current profile timezone. Shift corrected interval fields by the same
-  // delta so provider duration changes still supersede normally.
-  const shiftedStartAt = incoming.kind === "intervention_session"
-    ? shiftIsoTimestamp(incoming.fields?.["start-at"], deltaMs)
+  // current profile timezone. Reinterpret interval endpoints independently:
+  // they can carry different offsets when the provider interval crosses a DST
+  // transition, so one start-derived shift cannot preserve the accepted wall
+  // clock meaning.
+  const reinterpretedStartAt = incoming.kind === "intervention_session"
+    && typeof incoming.fields?.["start-at"] === "string"
+    ? reinterpretIsoTimestampInTimeZone(
+        incoming.fields["start-at"],
+        incoming.timeZone,
+        existing.timeZone,
+      )?.timestamp
     : undefined;
-  const shiftedEndAt = incoming.kind === "intervention_session"
-    ? shiftIsoTimestamp(incoming.fields?.["end-at"], deltaMs)
+  const reinterpretedEndAt = incoming.kind === "intervention_session"
+    && typeof incoming.fields?.["end-at"] === "string"
+    ? reinterpretIsoTimestampInTimeZone(
+        incoming.fields["end-at"],
+        incoming.timeZone,
+        existing.timeZone,
+      )?.timestamp
     : undefined;
-  const shiftedInterventionFields = incoming.kind === "intervention_session" && incoming.fields
+  if (
+    incoming.kind === "intervention_session"
+    && (
+      !reinterpretedStartAt
+      || !reinterpretedEndAt
+      || Date.parse(reinterpretedEndAt) < Date.parse(reinterpretedStartAt)
+    )
+  ) {
+    throw new VaultError(
+      "EVENT_FLOATING_TIME_REINTERPRETATION_FAILED",
+      "Junction floating interval cannot be interpreted unambiguously in its accepted timezone.",
+    );
+  }
+  const reinterpretedInterventionFields = incoming.kind === "intervention_session"
+    && incoming.fields
     ? {
         ...incoming.fields,
-        ...(shiftedStartAt ? { "start-at": shiftedStartAt } : {}),
-        ...(shiftedEndAt ? { "end-at": shiftedEndAt } : {}),
+        ...(reinterpretedStartAt ? { "start-at": reinterpretedStartAt } : {}),
+        ...(reinterpretedEndAt ? { "end-at": reinterpretedEndAt } : {}),
       }
     : undefined;
   const { timeZone: _incomingTimeZone, ...incomingWithoutTimeZone } = incoming;
@@ -2381,8 +2399,8 @@ function preserveJunctionFloatingFallbackTime(
     recordedAt: existing.recordedAt,
     dayKey: existing.dayKey,
     ...(existing.timeZone ? { timeZone: existing.timeZone } : {}),
-    ...(incoming.kind === "intervention_session" && shiftedInterventionFields
-      ? { fields: shiftedInterventionFields }
+    ...(incoming.kind === "intervention_session" && reinterpretedInterventionFields
+      ? { fields: reinterpretedInterventionFields }
       : {}),
   };
 }

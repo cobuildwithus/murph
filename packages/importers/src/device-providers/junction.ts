@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import {
   extractIsoDatePrefix,
-  formatTimeZoneDateTimeParts,
   ID_PREFIXES,
   isStrictIsoDate,
   JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
@@ -11,6 +10,7 @@ import {
   normalizeIanaTimeZone,
   parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
+  resolveFloatingIsoTimestampInTimeZone,
   serializeCompanionHrvRmssdObservation,
   type CompanionHrvRmssdAdmissionId,
   toLocalDayKey,
@@ -2550,10 +2550,10 @@ function resolveJunctionSparseTimeseriesTimestamp(input: {
       input.context.defaultTimeZone,
     );
     const floatingStart = startRaw && startIsFloating && timeZone
-      ? resolveJunctionFloatingTimestamp(startRaw, timeZone)
+      ? resolveFloatingIsoTimestampInTimeZone(startRaw, timeZone)
       : null;
     const floatingEnd = endRaw && endIsFloating && timeZone
-      ? resolveJunctionFloatingTimestamp(endRaw, timeZone)
+      ? resolveFloatingIsoTimestampInTimeZone(endRaw, timeZone)
       : null;
     const startAt = startIsFloating
       ? floatingStart?.timestamp
@@ -8125,17 +8125,6 @@ function normalizeTimestamp(value: unknown): string | undefined {
   return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
 }
 
-interface JunctionFloatingTimestampParts {
-  day: number;
-  dayKey: string;
-  hour: number;
-  millisecond: number;
-  minute: number;
-  month: number;
-  second: number;
-  year: number;
-}
-
 function resolveJunctionFloatingTimestampTimeZone(
   entry: PlainObject,
   defaultTimeZone: string | undefined,
@@ -8143,110 +8132,6 @@ function resolveJunctionFloatingTimestampTimeZone(
   return normalizeIanaTimeZone(
     firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
   ) ?? normalizeIanaTimeZone(defaultTimeZone) ?? undefined;
-}
-
-function resolveJunctionFloatingTimestamp(
-  value: string,
-  timeZone: string,
-): { dayKey: string; timestamp: string } | null {
-  const parsed = parseJunctionFloatingTimestamp(value);
-  const normalizedTimeZone = normalizeIanaTimeZone(timeZone);
-  if (!parsed || !normalizedTimeZone) {
-    return null;
-  }
-
-  const targetLocalMs = Date.UTC(
-    parsed.year,
-    parsed.month - 1,
-    parsed.day,
-    parsed.hour,
-    parsed.minute,
-    parsed.second,
-    parsed.millisecond,
-  );
-  try {
-    const candidateInstants = new Set<number>();
-    for (const probeDeltaMs of [
-      -7 * 24 * 60 * 60_000,
-      -2 * 24 * 60 * 60_000,
-      0,
-      2 * 24 * 60 * 60_000,
-      7 * 24 * 60 * 60_000,
-    ]) {
-      const probeMs = targetLocalMs + probeDeltaMs;
-      const probeParts = formatTimeZoneDateTimeParts(probeMs, normalizedTimeZone);
-      const offsetMs = Date.UTC(
-        probeParts.year,
-        probeParts.month - 1,
-        probeParts.day,
-        probeParts.hour,
-        probeParts.minute,
-        probeParts.second,
-        parsed.millisecond,
-      ) - probeMs;
-      const candidateMs = targetLocalMs - offsetMs;
-      const candidateParts = formatTimeZoneDateTimeParts(candidateMs, normalizedTimeZone);
-      if (
-        candidateParts.year === parsed.year
-        && candidateParts.month === parsed.month
-        && candidateParts.day === parsed.day
-        && candidateParts.hour === parsed.hour
-        && candidateParts.minute === parsed.minute
-        && candidateParts.second === parsed.second
-      ) {
-        candidateInstants.add(candidateMs);
-      }
-    }
-
-    if (candidateInstants.size !== 1) {
-      return null;
-    }
-    const [candidateMs] = candidateInstants;
-    return candidateMs === undefined
-      ? null
-      : { dayKey: parsed.dayKey, timestamp: new Date(candidateMs).toISOString() };
-  } catch {
-    return null;
-  }
-}
-
-function parseJunctionFloatingTimestamp(value: string): JunctionFloatingTimestampParts | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:z|[+-]00:?00)?$/iu.exec(
-    value.trim(),
-  );
-  if (!match) {
-    return null;
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  const second = Number(match[6] ?? "0");
-  const millisecond = Number(`${match[7] ?? ""}000`.slice(0, 3));
-  const validation = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond));
-  if (
-    validation.getUTCFullYear() !== year
-    || validation.getUTCMonth() !== month - 1
-    || validation.getUTCDate() !== day
-    || validation.getUTCHours() !== hour
-    || validation.getUTCMinutes() !== minute
-    || validation.getUTCSeconds() !== second
-  ) {
-    return null;
-  }
-
-  return {
-    day,
-    dayKey: `${match[1]}-${match[2]}-${match[3]}`,
-    hour,
-    millisecond,
-    minute,
-    month,
-    second,
-    year,
-  };
 }
 
 function resolveSafeTimestamp(value: unknown, sourceProviderSlug?: string): string | undefined {
