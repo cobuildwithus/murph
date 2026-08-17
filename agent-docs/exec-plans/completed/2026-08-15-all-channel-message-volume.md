@@ -1,6 +1,6 @@
 # Count all hosted message channels in public volume
 
-Status: active
+Status: completed
 Created: 2026-08-15
 Updated: 2026-08-17
 
@@ -83,8 +83,10 @@ Updated: 2026-08-17
    floor and outbox wake owner; final correction review passed.
 5. [x] Resolve the preliminary specialist findings with truthful sent-message
    copy, a real-vault recovery test, and a real-PostgreSQL concurrency proof.
-6. [ ] Push the specialist corrections, reach exact-head green, complete the
-   merge-tree/base-update boundary, merge, and retire the task worktree.
+6. [x] Push the specialist corrections, reach exact-head green, and prove a
+   clean merge tree against the current base.
+7. After plan closure, satisfy the strict-base merge gate, merge, and retire
+   the task worktree.
 
 ## Decisions
 
@@ -113,9 +115,17 @@ Updated: 2026-08-17
   guarded real-PostgreSQL concurrent-upsert proof passes (1 test).
 - Changelog generation and focused changelog tests pass (46 tests).
 - Assistant Runtime and Web typechecks pass after the specialist corrections.
+- Exact-head GitHub Actions pass, including both CLI host matrices, release app
+  verification, release build/typecheck, package and fixture coverage, billing
+  boundaries, frontend design proof, and marketing-page overflow proof.
+- The refreshed changelog card renders the corrected "successfully sent" copy
+  without clipping at desktop and mobile widths.
+- The candidate produces a clean merge tree against the fetched current
+  `origin/main`.
 - Earlier focused suites pass for Assistant Engine (22 tests), Assistant
   Runtime delivery/callback/workspace behavior (549 tests), Cloudflare runner
   behavior (2,547 passed, 2 skipped), Web receipt/migration/growth behavior
   (56 tests), and the changelog page (8 tests).
-- Pending the specialist-correction push, exact-head required CI, merge-tree
-  proof, merge, and guarded worktree retirement.
+- After plan closure, only the strict-base merge gate, merge confirmation, and
+  guarded worktree retirement remain.
+Completed: 2026-08-17
