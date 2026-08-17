@@ -12,6 +12,11 @@ const faults = vi.hoisted(() => ({
   failAfterScheduledStart: false,
 }))
 
+const setsWorkoutEndedAt = (entry: string): boolean => entry.startsWith('workout.endedAt=')
+const setsWorkoutExercises = (entry: string): boolean => entry.startsWith('workout.exercises=')
+const setsWorkoutLastMemberActionId = (entry: string): boolean =>
+  entry.startsWith('workout.lastMemberActionId=')
+
 vi.mock('../src/usecases/workout.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/usecases/workout.js')>()
   return {
@@ -32,16 +37,16 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
       const result = await actual.editWorkoutRecord(input)
       if (
         faults.failAfterPreviousClose &&
-        input.set?.some((entry) => entry.startsWith('workout.endedAt=')) &&
-        input.set.some((entry) => entry.startsWith('workout.lastMemberActionId='))
+        input.set?.some(setsWorkoutEndedAt) &&
+        input.set.some(setsWorkoutLastMemberActionId)
       ) {
         faults.failAfterPreviousClose = false
         throw new Error('injected failure after prior workout close')
       }
       if (
         faults.failAfterScheduledLog &&
-        input.set?.some((entry) => entry.startsWith('workout.exercises=')) &&
-        input.set.some((entry) => entry.startsWith('workout.lastMemberActionId='))
+        input.set?.some(setsWorkoutExercises) &&
+        input.set.some(setsWorkoutLastMemberActionId)
       ) {
         faults.failAfterScheduledLog = false
         throw new Error('injected failure after scheduled set log')
