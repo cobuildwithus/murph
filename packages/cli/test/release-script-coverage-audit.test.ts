@@ -1719,7 +1719,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('This is neither an automatic merge rejection')
     expect(prDeepReviewPrompt).toContain('do not emit a standalone Invariant Violation')
     expect(prDeepReviewPrompt).toMatch(
-      /A contract mismatch, undisclosed surface,\s+or theoretical concern is evidence, not a finding/u,
+      /For this category, only report a finding when merging the PR would\s+cause concrete, realistically reachable, material production harm/u,
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /A contract\s+mismatch or theoretical concern is evidence, not a finding, unless it\s+establishes that harm/u,
     )
     expect(prDeepReviewPrompt).toContain('current scale, event volume,')
     expect(prDeepReviewPrompt).toContain('never assume hypothetical future or internet')
