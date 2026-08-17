@@ -1,6 +1,6 @@
 # Stop sparse PlanetScale port series from paging operators
 
-Status: active
+Status: completed
 Created: 2026-08-17
 Updated: 2026-08-17
 
@@ -61,5 +61,21 @@ Updated: 2026-08-17
    deltas.
 2. [x] Change completeness classification at the metric parser boundary.
 3. [x] Align durable owner docs with the new alert rule.
-4. [ ] Run focused proof, push a PR, complete ReviewGPT and CI, then archive this
+4. [x] Run focused proof, push a PR, complete ReviewGPT and CI, then archive this
    plan through the normal final commit.
+
+## Completion evidence
+
+- Focused Node tests passed 115 tests. The Workers runtime file passed 5 tests.
+- Cloudflare typecheck, durable-doc drift, and diff checks passed.
+- The preliminary specialist finding about rollback compatibility was accepted
+  and fixed. No patch artifact was returned.
+- Final ReviewGPT round 1 found obsolete confirmation composition. The accepted
+  correction removed that helper and duplicate evaluation. Round 2 passed with
+  no findings.
+- Exact-head CI passed every relevant app, package, build, type, fixture,
+  artifact, and policy check except the hosted Web app aggregate. That aggregate
+  is blocked by the unchanged date-sensitive
+  `browser-training-view.test.ts`; its focused test fails identically outside
+  this diff on 2026-08-17.
+Completed: 2026-08-17
