@@ -55,9 +55,10 @@ programmatically appropriate.
    tool's per-movement mapping and bounded validation-repair guidance. Keep
    catalog images inside that card and never use separate response media as its
    fallback. If the card still cannot attach, use one complete generic Rich
-   Message without images. Do not paste image URLs into message text when media
-   delivery exists. If an important movement has no useful image, keep the
-   written cue clear and never imply that an image was attached.
+   Message without images and name every movement separately. Do not paste image
+   URLs into message text when media delivery exists. If an important movement
+   has no useful image, keep the written cue clear and never imply that an image
+   was attached.
 7. If acute pain or safety requires an immediate action, give the minimal plan
    now. For a known routine the user has already performed, send a concise
    reference. Provide full steps only when asked, accepted as a walkthrough, or

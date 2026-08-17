@@ -1606,7 +1606,7 @@ describe('assistant skill assets', () => {
       'Keep catalog images inside that card and never use separate response media as its fallback.',
     )
     expect(compactCatalog).toContain(
-      'If the card still cannot attach, use one complete generic Rich Message without images.',
+      'If the card still cannot attach, use one complete generic Rich Message without images and name every movement separately.',
     )
     expect(compactCatalog).toContain(
       'never imply that an image was attached.',

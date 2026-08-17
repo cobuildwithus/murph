@@ -35,7 +35,7 @@ describe('exercise catalog runtime guidance', () => {
       'Keep catalog images inside that card and never use separate response media as its fallback.',
     )
     expect(compact).toContain(
-      'If the card still cannot attach, use one complete generic Rich Message without images.',
+      'If the card still cannot attach, use one complete generic Rich Message without images and name every movement separately.',
     )
     expect(compact).toContain(
       'If an important movement has no useful image, keep the written cue clear and never imply that an image was attached.',
