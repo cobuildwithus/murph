@@ -1,7 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { parse } from "@babel/parser";
-import { getOuterBindingIdentifiers, isReferenced } from "@babel/types";
 
 const DESIGN_CATALOG_PATHS = new Set([
   "apps/web/app/design/components-content.tsx",
@@ -10,21 +8,9 @@ const DESIGN_CATALOG_PATHS = new Set([
 ]);
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
 const GITHUB_MARKDOWN_URL = "https://api.github.com/markdown";
-const NON_RENDERED_ROUTE_EXPORTS = new Set([
-  "generateMetadata",
-  "generateViewport",
-  "metadata",
-  "viewport",
-]);
-const AST_LOCATION_KEYS = new Set([
-  "end",
-  "extra",
-  "innerComments",
-  "leadingComments",
-  "loc",
-  "start",
-  "trailingComments",
-]);
+const IMPORT_PATTERN = /^[\t ]*import\b/gmu;
+const METADATA_EXPORT_PATTERN = /^[\t ]*export[\t ]+(?:async[\t ]+)?(?:function|const|let|var)[\t ]+(?:generateMetadata|generateViewport|metadata|viewport)\b/gmu;
+const ROUTE_HELPER_PATTERN = /^[\t ]*(?:(?:const|let|var)[\t ]+([A-Za-z_$][\w$]*)|(?:async[\t ]+)?function[\t ]+([A-Za-z_$][\w$]*))\b/gmu;
 
 function isFrontendUiPath(filePath) {
   if (filePath.startsWith("apps/web/app/design/")) {
@@ -55,161 +41,169 @@ function isFrontendUiPath(filePath) {
 }
 
 function renderedRouteSignature(source) {
-  const sourceFile = parse(source, {
-    plugins: ["jsx", "typescript"],
-    sourceType: "module",
-  });
-  const routeStatements = sourceFile.program.body.filter(
-    (statement) => statement.type !== "ImportDeclaration",
+  const withoutMetadata = stripSpans(
+    source,
+    findDeclarationSpans(source, METADATA_EXPORT_PATTERN),
   );
-  const metadataStatements = routeStatements.filter(isNonRenderedRouteExport);
-  const candidateStatements = routeStatements.filter(
-    (statement) => !isNonRenderedRouteExport(statement),
+  const importSpans = findDeclarationSpans(withoutMetadata, IMPORT_PATTERN);
+  const renderedBody = stripUnusedMetadataHelpers(
+    stripSpans(withoutMetadata, importSpans),
   );
-  const bindingOwners = collectBindingOwners(candidateStatements);
-  const metadataDependencies = collectStatementDependencies(
-    metadataStatements,
-    bindingOwners,
-  );
-  const renderedRoots = candidateStatements.filter(
-    (statement) => !metadataDependencies.has(statement),
-  );
-  const renderedDependencies = collectStatementDependencies(
-    renderedRoots,
-    bindingOwners,
-  );
-  const renderedStatements = candidateStatements.filter(
-    (statement) => !metadataDependencies.has(statement)
-      || renderedDependencies.has(statement),
-  );
-  const renderedIdentifiers = collectReferencedIdentifiers(renderedStatements);
-  const imports = sourceFile.program.body
-    .filter((statement) => statement.type === "ImportDeclaration")
-    .map((statement) => importSignature(statement, renderedIdentifiers))
-    .filter(Boolean);
-  return JSON.stringify({ imports, statements: normalizeAst(renderedStatements) });
+  const imports = importSpans
+    .map(({ end, start }) => withoutMetadata.slice(start, end))
+    .filter((statement) => importAffectsRenderedBody(statement, renderedBody))
+    .map((statement) => statement.replace(/\s+/gu, " ").trim());
+  const body = renderedBody
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0)
+    .join("\n");
+  return JSON.stringify({ body, imports });
 }
 
-function isNonRenderedRouteExport(statement) {
-  if (statement.type !== "ExportNamedDeclaration") {
-    return false;
-  }
-  const declaration = statement.declaration;
-  if (declaration?.type === "FunctionDeclaration") {
-    return declaration.id
-      ? NON_RENDERED_ROUTE_EXPORTS.has(declaration.id.name)
-      : false;
-  }
-  if (declaration?.type === "VariableDeclaration") {
-    return declaration.declarations.every((variable) =>
-      variable.id.type === "Identifier"
-        && NON_RENDERED_ROUTE_EXPORTS.has(variable.id.name)
-    );
-  }
-  return statement.specifiers.length > 0 && statement.specifiers.every(
-    (specifier) => specifier.exported.type === "Identifier"
-      && NON_RENDERED_ROUTE_EXPORTS.has(specifier.exported.name),
-  );
-}
-
-function collectBindingOwners(statements) {
-  const owners = new Map();
-  for (const statement of statements) {
-    for (const name of Object.keys(getOuterBindingIdentifiers(statement))) {
-      owners.set(name, statement);
+function stripUnusedMetadataHelpers(source) {
+  let output = source;
+  while (true) {
+    const unusedSpans = findDeclarationSpans(output, ROUTE_HELPER_PATTERN)
+      .filter(({ end, name, start }) =>
+        name?.toLowerCase().includes("metadata")
+          && !usesIdentifier(output.slice(0, start) + output.slice(end), name)
+      );
+    if (unusedSpans.length === 0) {
+      return output;
     }
+    output = stripSpans(output, unusedSpans);
   }
-  return owners;
 }
 
-function collectStatementDependencies(seedStatements, bindingOwners) {
-  const dependencies = new Set();
-  const pendingNames = [...collectReferencedIdentifiers(seedStatements)];
-  while (pendingNames.length > 0) {
-    const owner = bindingOwners.get(pendingNames.pop());
-    if (!owner || dependencies.has(owner)) {
+function importAffectsRenderedBody(statement, body) {
+  if (/^[\t ]*import[\t ]*["']/u.test(statement)) {
+    return true;
+  }
+  const clause = /^[\t ]*import[\t ]+(?:type[\t ]+)?([\s\S]*?)[\t ]+from[\t ]+["']/u
+    .exec(statement)?.[1];
+  if (!clause) {
+    return true;
+  }
+  const names = clause.match(/[A-Za-z_$][\w$]*/gu) ?? [];
+  return names.some((name) => !["as", "type"].includes(name) && usesIdentifier(body, name));
+}
+
+function usesIdentifier(source, identifier) {
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`, "u").test(source);
+}
+
+function findDeclarationSpans(source, pattern) {
+  const spans = [];
+  pattern.lastIndex = 0;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    const isFunction = /\bfunction\b/u.test(match[0]);
+    const end = isFunction
+      ? findFunctionEnd(source, pattern.lastIndex)
+      : findStatementEnd(source, pattern.lastIndex);
+    if (end === null) {
       continue;
     }
-    dependencies.add(owner);
-    pendingNames.push(...collectReferencedIdentifiers([owner]));
+    spans.push({ end, name: match[1] ?? match[2] ?? null, start: match.index });
+    pattern.lastIndex = end;
   }
-  return dependencies;
+  return spans;
 }
 
-function collectReferencedIdentifiers(nodes) {
-  const identifiers = new Set();
-  const visit = (node, parent = null, grandparent = null) => {
-    if (!node || typeof node !== "object") {
-      return;
+function findFunctionEnd(source, start) {
+  let parentheses = 0;
+  for (let index = start; index < source.length; index += 1) {
+    const skippedTo = skipNonCode(source, index);
+    if (skippedTo !== index) {
+      index = skippedTo - 1;
+      continue;
     }
-    if (
-      (node.type === "Identifier" || node.type === "JSXIdentifier")
-      && parent
-      && isReferenced(node, parent, grandparent)
-    ) {
-      identifiers.add(node.name);
+    if (source[index] === "(") {
+      parentheses += 1;
+    } else if (source[index] === ")") {
+      parentheses -= 1;
+    } else if (source[index] === "{" && parentheses === 0) {
+      return findClosingBrace(source, index);
     }
-    for (const value of Object.values(node)) {
-      if (Array.isArray(value)) {
-        value.forEach((entry) => visit(entry, node, parent));
-      } else {
-        visit(value, node, parent);
+  }
+  return null;
+}
+
+function findClosingBrace(source, start) {
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    const skippedTo = skipNonCode(source, index);
+    if (skippedTo !== index) {
+      index = skippedTo - 1;
+      continue;
+    }
+    if (source[index] === "{") {
+      depth += 1;
+    } else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
       }
     }
-  };
-  for (const node of nodes) {
-    visit(node);
   }
-  return identifiers;
+  return null;
 }
 
-function importSignature(statement, usedIdentifiers) {
-  const moduleName = statement.source.value;
-  if (statement.specifiers.length === 0) {
-    return { moduleName, sideEffect: true };
-  }
-  let defaultImport = null;
-  let namespaceImport = null;
-  const namedImports = [];
-  for (const specifier of statement.specifiers) {
-    if (!usedIdentifiers.has(specifier.local.name)) {
+function findStatementEnd(source, start) {
+  const depth = { "(": 0, "[": 0, "{": 0 };
+  const opening = new Set(Object.keys(depth));
+  const closing = { ")": "(", "]": "[", "}": "{" };
+  for (let index = start; index < source.length; index += 1) {
+    const skippedTo = skipNonCode(source, index);
+    if (skippedTo !== index) {
+      index = skippedTo - 1;
       continue;
     }
-    if (specifier.type === "ImportDefaultSpecifier") {
-      defaultImport = specifier.local.name;
-    } else if (specifier.type === "ImportNamespaceSpecifier") {
-      namespaceImport = specifier.local.name;
-    } else {
-      namedImports.push({
-        imported: specifier.imported.name ?? specifier.imported.value,
-        local: specifier.local.name,
-        typeOnly: specifier.importKind === "type",
-      });
+    const character = source[index];
+    if (opening.has(character)) {
+      depth[character] += 1;
+    } else if (closing[character]) {
+      depth[closing[character]] -= 1;
+    } else if (character === ";" && Object.values(depth).every((value) => value === 0)) {
+      return index + 1;
     }
   }
-  if (!defaultImport && !namespaceImport && namedImports.length === 0) {
-    return null;
-  }
-  return {
-    defaultImport,
-    moduleName,
-    namedImports,
-    namespaceImport,
-  };
+  return null;
 }
 
-function normalizeAst(value) {
-  if (Array.isArray(value)) {
-    return value.map(normalizeAst);
+function skipNonCode(source, start) {
+  const character = source[start];
+  if (character === "/" && source[start + 1] === "/") {
+    const end = source.indexOf("\n", start + 2);
+    return end === -1 ? source.length : end;
   }
-  if (!value || typeof value !== "object") {
-    return value;
+  if (character === "/" && source[start + 1] === "*") {
+    const end = source.indexOf("*/", start + 2);
+    return end === -1 ? source.length : end + 2;
   }
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => !AST_LOCATION_KEYS.has(key))
-      .map(([key, entry]) => [key, normalizeAst(entry)]),
-  );
+  if (!["'", '"', "`"].includes(character)) {
+    return start;
+  }
+  for (let index = start + 1; index < source.length; index += 1) {
+    if (source[index] === "\\") {
+      index += 1;
+    } else if (source[index] === character) {
+      return index + 1;
+    }
+  }
+  return source.length;
+}
+
+function stripSpans(source, spans) {
+  let cursor = 0;
+  let output = "";
+  for (const { end, start } of spans) {
+    output += source.slice(cursor, start);
+    cursor = end;
+  }
+  return output + source.slice(cursor);
 }
 
 function validateFrontendDesignProof({

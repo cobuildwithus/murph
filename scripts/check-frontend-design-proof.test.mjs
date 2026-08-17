@@ -96,6 +96,10 @@ export default function Page() {
     'label="Settings"',
     'label="Account settings"',
   );
+  const renderedImportChangeSource = metadataOnlySource.replace(
+    "@/src/components/panel",
+    "@/src/components/account-panel",
+  );
 
   assert.equal(
     renderedRouteSignature(baseSource),
@@ -105,6 +109,10 @@ export default function Page() {
     renderedRouteSignature(baseSource),
     renderedRouteSignature(renderedChangeSource),
   );
+  assert.notEqual(
+    renderedRouteSignature(metadataOnlySource),
+    renderedRouteSignature(renderedImportChangeSource),
+  );
 });
 
 test("ignores helpers reached only from route metadata", () => {
@@ -112,8 +120,8 @@ test("ignores helpers reached only from route metadata", () => {
 import { PageShell } from "@/src/components/page-shell";
 import { createMetadata } from "@/src/lib/site-metadata";
 
-const DEFAULT_HOST = "https://example.test";
-const metadataBase = new URL(DEFAULT_HOST);
+const DEFAULT_METADATA_HOST = "https://example.test";
+const metadataBase = new URL(DEFAULT_METADATA_HOST);
 const defaultMetadata = createMetadata({ title: "Example" });
 
 export const metadata = { ...defaultMetadata, metadataBase };

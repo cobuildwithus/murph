@@ -46,7 +46,7 @@ Updated: 2026-08-17
 - Treat the supplied archive as aggregate evidence only because it contains issue counts but no affected URL list.
 - Keep workflow/private pages crawlable enough for their `noindex` metadata to be observed; do not use `robots.txt` as an indexing substitute.
 - Accept the preliminary coverage finding and strengthen test oracles only; the production ownership and route policy remain unchanged.
-- Treat metadata-only route-module edits as non-visual in the design-proof gate by comparing parsed rendered-module signatures; keep the catalog and screenshot requirement for any remaining UI change.
+- Treat metadata-only route-module edits as non-visual in the design-proof gate by comparing dependency-free rendered-route signatures; keep the catalog and screenshot requirement for any remaining UI change.
 
 ## Verification
 
