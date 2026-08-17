@@ -24,7 +24,7 @@ Updated: 2026-08-17
 ## Scope
 
 - In scope: the exercise-card tool description, exercise catalog presentation
-  guidance, focused prompt tests, and one public changelog item.
+  guidance, and focused prompt tests.
 - Out of scope: card schemas, Telegram transport, media rendering, retries in
   runtime code, or changes to movement selection and safety.
 
@@ -40,7 +40,7 @@ Updated: 2026-08-17
 1. [completed] Prove the current validation and media-fallback behavior.
 2. [completed] Add the smallest prompt correction and focused regressions.
 3. [completed] Run focused verification and inspect the final diff.
-4. [in_progress] Push, open the PR, add the changelog item, and run specialist review.
+4. [in_progress] Push, open the PR, and run specialist review.
 5. [pending] Resolve findings, require green CI, close the plan, and prove
    current-base mergeability.
 
