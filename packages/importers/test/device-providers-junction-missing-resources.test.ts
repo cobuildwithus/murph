@@ -440,8 +440,10 @@ test("Junction id-less Libre metabolic identity ignores mutable vault timezone",
 test("Junction Libre replays retain the canonical fallback-zone interpretation", async () => {
   const vaultRoot = await mkdtemp(join(tmpdir(), "murph-junction-libre-canonical-time-"));
   const buildSnapshot = (input: {
+    carbohydrateStart?: string;
     end: string;
     importedAt: string;
+    insulinStart?: string;
     insulinAmount: number;
   }) => ({
     accountId: "junction-account-libre-canonical-time",
@@ -450,14 +452,14 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
       carbohydrates: grouped("freestyle_libre", "cgm", "libre-1", [{
         end: "2026-01-15T08:05:00+00:00",
         id: "carbohydrate-canonical-time",
-        start: "2026-01-15T08:00:00+00:00",
+        start: input.carbohydrateStart ?? "2026-01-15T08:00:00+00:00",
         unit: "g",
         value: 30,
       }]),
       insulin_injection: grouped("freestyle_libre", "cgm", "libre-1", [{
         end: input.end,
         id: "insulin-canonical-time",
-        start: "2026-03-08T01:58:00+00:00",
+        start: input.insulinStart ?? "2026-03-08T01:58:00+00:00",
         type: "rapid_acting",
         unit: "unit",
         value: input.insulinAmount,
@@ -542,33 +544,77 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
     assert.equal(replay.insulin.fields?.["start-at"], "2026-03-08T06:58:00.000Z");
     assert.equal(replay.insulin.fields?.["end-at"], "2026-03-08T07:03:00.000Z");
 
-    const corrected = selectMetabolicEvents(await importSnapshot(buildSnapshot({
-      end: "2026-03-08T03:08:00+00:00",
+    const startCorrected = selectMetabolicEvents(await importSnapshot(buildSnapshot({
+      carbohydrateStart: "2026-01-15T08:02:00+00:00",
+      end: "2026-03-08T03:03:00+00:00",
       importedAt: "2026-03-11T00:00:00.000Z",
+      insulinStart: "2026-03-08T01:55:00+00:00",
       insulinAmount: 4,
     })));
 
-    assert.equal(corrected.insulin?.id, first.insulin?.id);
-    assert.equal(corrected.insulin?.occurredAt, first.insulin?.occurredAt);
-    assert.equal(corrected.insulin?.timeZone, first.insulin?.timeZone);
-    assert.equal(corrected.insulin?.lifecycle?.revision, 2);
-    if (corrected.insulin?.kind !== "intervention_session") {
+    assert.equal(startCorrected.carbohydrate?.id, first.carbohydrate?.id);
+    assert.equal(startCorrected.carbohydrate?.occurredAt, "2026-01-15T13:02:00.000Z");
+    assert.equal(startCorrected.carbohydrate?.dayKey, "2026-01-15");
+    assert.equal(startCorrected.carbohydrate?.timeZone, "America/New_York");
+    assert.equal(startCorrected.carbohydrate?.lifecycle?.revision, 2);
+    assert.equal(startCorrected.insulin?.id, first.insulin?.id);
+    assert.equal(startCorrected.insulin?.occurredAt, "2026-03-08T06:55:00.000Z");
+    assert.equal(startCorrected.insulin?.dayKey, "2026-03-08");
+    assert.equal(startCorrected.insulin?.timeZone, "America/New_York");
+    assert.equal(startCorrected.insulin?.lifecycle?.revision, 2);
+    if (startCorrected.insulin?.kind !== "intervention_session") {
       assert.fail("expected corrected Libre insulin event");
     }
-    assert.equal(corrected.insulin.fields?.["dose-amount"], 4);
-    assert.equal(corrected.insulin.fields?.["start-at"], "2026-03-08T06:58:00.000Z");
-    assert.equal(corrected.insulin.fields?.["end-at"], "2026-03-08T07:08:00.000Z");
+    assert.equal(startCorrected.insulin.fields?.["dose-amount"], 4);
+    assert.equal(startCorrected.insulin.fields?.["start-at"], "2026-03-08T06:55:00.000Z");
+    assert.equal(startCorrected.insulin.fields?.["end-at"], "2026-03-08T07:03:00.000Z");
+
+    const endCorrected = selectMetabolicEvents(await importSnapshot(buildSnapshot({
+      carbohydrateStart: "2026-01-15T08:02:00+00:00",
+      end: "2026-03-08T03:08:00+00:00",
+      importedAt: "2026-03-12T00:00:00.000Z",
+      insulinStart: "2026-03-08T01:55:00+00:00",
+      insulinAmount: 4,
+    })));
+    assert.equal(endCorrected.insulin?.lifecycle?.revision, 3);
+    if (endCorrected.insulin?.kind !== "intervention_session") {
+      assert.fail("expected end-corrected Libre insulin event");
+    }
+    assert.equal(endCorrected.insulin.fields?.["start-at"], "2026-03-08T06:55:00.000Z");
+    assert.equal(endCorrected.insulin.fields?.["end-at"], "2026-03-08T07:08:00.000Z");
 
     await assert.rejects(
       importSnapshot(buildSnapshot({
+        carbohydrateStart: "2026-01-15T08:02:00+00:00",
         end: "2026-03-08T02:30:00+00:00",
-        importedAt: "2026-03-12T00:00:00.000Z",
+        importedAt: "2026-03-13T00:00:00.000Z",
+        insulinStart: "2026-03-08T01:55:00+00:00",
+        insulinAmount: 4,
+      })),
+      /cannot be interpreted unambiguously in its accepted timezone/u,
+    );
+    await assert.rejects(
+      importSnapshot(buildSnapshot({
+        carbohydrateStart: "2026-01-15T08:02:00+00:00",
+        end: "2026-03-08T03:08:00+00:00",
+        importedAt: "2026-03-14T00:00:00.000Z",
+        insulinStart: "2026-03-08T02:30:00+00:00",
+        insulinAmount: 4,
+      })),
+      /cannot be interpreted unambiguously in its accepted timezone/u,
+    );
+    await assert.rejects(
+      importSnapshot(buildSnapshot({
+        carbohydrateStart: "2026-01-15T08:02:00+00:00",
+        end: "2026-11-01T02:00:00+00:00",
+        importedAt: "2026-03-15T00:00:00.000Z",
+        insulinStart: "2026-11-01T01:30:00+00:00",
         insulinAmount: 4,
       })),
       /cannot be interpreted unambiguously in its accepted timezone/u,
     );
     const afterRejectedCorrection = await readCanonicalEvent(first.insulin);
-    assert.equal(afterRejectedCorrection?.lifecycle?.revision, 2);
+    assert.equal(afterRejectedCorrection?.lifecycle?.revision, 3);
     if (afterRejectedCorrection?.kind !== "intervention_session") {
       assert.fail("expected retained Libre insulin event");
     }

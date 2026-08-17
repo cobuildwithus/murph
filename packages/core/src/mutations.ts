@@ -2337,8 +2337,6 @@ function preserveJunctionFloatingFallbackTime(
       !== JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
     || existing.dataOrigin?.timestampSemantics !== "floating"
     || incoming.dataOrigin.timestampSemantics !== "floating"
-    || existing.dataOrigin.observedAtRaw === undefined
-    || existing.dataOrigin.observedAtRaw !== incoming.dataOrigin.observedAtRaw
     || !deviceDataOriginSourceMatches(existing.dataOrigin, incoming.dataOrigin)
   ) {
     return incoming;
@@ -2351,18 +2349,24 @@ function preserveJunctionFloatingFallbackTime(
   // Junction documents Libre's +00:00 values as wall clocks, not instants.
   // Once the event spine accepts a vault-zone interpretation, that existing
   // canonical owner must not move merely because the member changes their
-  // current profile timezone. Reinterpret interval endpoints independently:
-  // they can carry different offsets when the provider interval crosses a DST
-  // transition, so one start-derived shift cannot preserve the accepted wall
-  // clock meaning.
-  const reinterpretedStartAt = incoming.kind === "intervention_session"
+  // current profile timezone. Reinterpret every corrected occurrence and
+  // interval endpoint independently: they can carry different offsets when the
+  // provider interval crosses a DST transition, so one start-derived shift
+  // cannot preserve the accepted wall-clock meaning.
+  const reinterpretedOccurrence = reinterpretIsoTimestampInTimeZone(
+    incoming.occurredAt,
+    incoming.timeZone,
+    existing.timeZone,
+  );
+  const reinterpretedStart = incoming.kind === "intervention_session"
     && typeof incoming.fields?.["start-at"] === "string"
     ? reinterpretIsoTimestampInTimeZone(
         incoming.fields["start-at"],
         incoming.timeZone,
         existing.timeZone,
-      )?.timestamp
+      )
     : undefined;
+  const reinterpretedStartAt = reinterpretedStart?.timestamp;
   const reinterpretedEndAt = incoming.kind === "intervention_session"
     && typeof incoming.fields?.["end-at"] === "string"
     ? reinterpretIsoTimestampInTimeZone(
@@ -2372,11 +2376,14 @@ function preserveJunctionFloatingFallbackTime(
       )?.timestamp
     : undefined;
   if (
-    incoming.kind === "intervention_session"
-    && (
-      !reinterpretedStartAt
-      || !reinterpretedEndAt
-      || Date.parse(reinterpretedEndAt) < Date.parse(reinterpretedStartAt)
+    !reinterpretedOccurrence
+    || (
+      incoming.kind === "intervention_session"
+      && (
+        !reinterpretedStartAt
+        || !reinterpretedEndAt
+        || Date.parse(reinterpretedEndAt) < Date.parse(reinterpretedStartAt)
+      )
     )
   ) {
     throw new VaultError(
@@ -2393,11 +2400,19 @@ function preserveJunctionFloatingFallbackTime(
       }
     : undefined;
   const { timeZone: _incomingTimeZone, ...incomingWithoutTimeZone } = incoming;
+  const canonicalOccurrence = incoming.kind === "intervention_session"
+    && reinterpretedStartAt
+    ? reinterpretedStartAt
+    : reinterpretedOccurrence.timestamp;
+  const canonicalDayKey = incoming.kind === "intervention_session"
+    && reinterpretedStart
+    ? reinterpretedStart.dayKey
+    : reinterpretedOccurrence.dayKey;
   return {
     ...incomingWithoutTimeZone,
-    occurredAt: existing.occurredAt,
+    occurredAt: canonicalOccurrence,
     recordedAt: existing.recordedAt,
-    dayKey: existing.dayKey,
+    dayKey: canonicalDayKey,
     ...(existing.timeZone ? { timeZone: existing.timeZone } : {}),
     ...(incoming.kind === "intervention_session" && reinterpretedInterventionFields
       ? { fields: reinterpretedInterventionFields }
