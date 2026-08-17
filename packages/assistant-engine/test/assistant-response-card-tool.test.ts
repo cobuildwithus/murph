@@ -839,6 +839,9 @@ describe('murph.attach_response_card', () => {
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
       'After either card tool succeeds, stop and send no final text.',
     )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap.',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent',
     )

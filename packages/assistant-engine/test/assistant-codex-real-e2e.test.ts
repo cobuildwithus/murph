@@ -1490,14 +1490,17 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
+          configOverrides: ['allow_login_shell=false'],
           developerInstructions: [
             buildRoutinePresentationDeveloperInstructions({
               channel: 'telegram' as const,
             }),
             exerciseGuidance,
+            'Test harness tool result contract: when calling a Murph tool inside functions.exec, pass its returned value directly to text(). Do not read a content property from the result.',
           ].join('\n\n'),
           env: {
             ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
           excludeResumeTurns: true,
