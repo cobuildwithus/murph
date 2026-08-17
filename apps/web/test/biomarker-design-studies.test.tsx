@@ -207,8 +207,8 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("76% used");
   expect(sectionsMarkup).toContain("24% remaining");
   expect(sectionsMarkup).toContain("0% used");
-  expect(sectionsMarkup).toContain("Fulfilled top-up with refreshed usage");
-  expect(sectionsMarkup).toContain("Preview fulfilled top-up");
+  expect(sectionsMarkup).toContain("Successful top-up return");
+  expect(sectionsMarkup).toContain("Preview quiet refresh");
   expect(sectionsMarkup).toContain("Add usage to continue");
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
