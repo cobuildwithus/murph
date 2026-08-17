@@ -8146,6 +8146,7 @@ function buildHostedAssistantAutomationDetailRedactedJson(
 function isAnchorHostedAssistantAutomationDetailKey(key: string): boolean {
   return key === "errorCode"
     || key === "providerTraceKind"
+    || key === "reasoningEffort"
     || key === "safeDetails"
     || key === "safeErrorLength"
     || key === "safeErrorMessage"

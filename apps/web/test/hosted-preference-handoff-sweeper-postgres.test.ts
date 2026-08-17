@@ -244,6 +244,61 @@ describe.skipIf(!runPostgresProof)(
         `handoff:${liveMember.memberId}`,
       ]);
     });
+
+    it("selects an unconsumed device-sync wake for scheduled handoff recovery", async () => {
+      const client = requirePrisma(prisma);
+      const now = new Date();
+      const memberId = createId("member_handoff_device_sync");
+      const mailboxItemId = createId("mailbox_handoff_device_sync");
+      memberIds.push(memberId);
+
+      await client.hostedMember.create({
+        data: {
+          billingStatus: "active",
+          id: memberId,
+        },
+      });
+      await client.hostedMailboxItem.create({
+        data: mailboxItem({
+          createdAt: new Date(now.getTime() - 60_000),
+          id: mailboxItemId,
+          kind: "device-sync.wake",
+          userId: memberId,
+        }),
+      });
+      const order: string[] = [];
+      const hasActiveAccess = vi.fn(async (userId: string) => {
+        order.push(`access:${userId}`);
+        const active = await hasHostedRuntimeActiveAccess(userId, {
+          prisma: client,
+        });
+        order.push(`access-complete:${userId}`);
+        return active;
+      });
+      const requestHandoff = buildRequestHandoff(order);
+
+      await expect(runHostedPreferenceHandoffSweeper({
+        hasActiveAccess,
+        logger: buildLogger(),
+        now,
+        requestHandoff,
+      })).resolves.toMatchObject({
+        candidateUsers: 1,
+        handoffAccepted: 1,
+        handoffAttempted: 1,
+      });
+
+      expect(requestHandoff).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: memberId,
+        mailboxItemId,
+      });
+      expect(order).toEqual([
+        `access:${memberId}`,
+        `access-complete:${memberId}`,
+        `handoff:${memberId}`,
+      ]);
+    });
   },
 );
 

@@ -4,7 +4,10 @@ import { notFound, redirect } from "next/navigation";
 import { BiomarkerResearch } from "@/src/components/biomarkers/biomarker-detail/biomarker-research";
 import { resolveHealthCommonsBiomarkerResearch } from "@/src/lib/health-commons/biomarker-projections";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphOgImageRef,
+  createMurphPageMetadata,
+} from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
   params,
@@ -18,11 +21,21 @@ export async function generateMetadata({
     return {};
   }
 
+  // Pass the parent biomarker card through explicitly: createMurphPageMetadata
+  // otherwise injects the site default, which overrides the parent segment's
+  // file-convention image and unfurls the homepage card here.
+  const ogImage = createMurphOgImageRef({
+    alt: `${biomarker.title}, a Murph biomarker.`,
+    url: `/biomarkers/${encodeURIComponent(biomarkerId)}/opengraph-image`,
+  });
+
   return createMurphPageMetadata({
     description: `Evidence and Commons memo for ${biomarker.title}.`,
     openGraph: {
       type: "article",
+      images: [ogImage],
     },
+    twitter: { images: [ogImage] },
     title: `${biomarker.title} research | Murph Biomarkers`,
   });
 }

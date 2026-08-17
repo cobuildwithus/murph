@@ -82,6 +82,7 @@ import {
   type AssistantStyleTurnSettingsOverlay,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import type {
+  VoiceMemoPhaseTiming,
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 import {
@@ -236,6 +237,10 @@ const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE =
   'assistant.codex.transport_diagnostics'
+const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA =
+  'murph.assistant-codex-generated-audio-phase-timing.v1'
+const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE =
+  'assistant.codex.generated_audio_phase_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 // Bound on distinct subagent threads whose token usage is tracked per parent
 // turn. Far above any sane spawn fan-out; threads past the cap are ignored.
@@ -4245,6 +4250,11 @@ async function runCodexAppServerTurnOnProcess(
         automationRelativeDateReferenceWindows[
           dynamicToolRequestDeliveryContextOrdinal
         ] ?? null,
+      responseCardAudience: input.groupConversation === true
+        ? 'group'
+        : input.groupConversation === false
+          ? 'private'
+          : null,
     })
     if (!dynamicToolRequest) {
       denyUnsupportedCodexServerRequest({
@@ -4646,6 +4656,14 @@ async function runCodexAppServerTurnOnProcess(
             ),
           groupSharedReadTurnState,
           privateDirectResponseCardAllowed: input.groupConversation === false,
+          telegramPresentationResponseCardAllowed:
+            input.dynamicTools.some((tool) =>
+              tool.namespace === 'murph' &&
+              (
+                tool.name === 'attach_exercise_routine_card' ||
+                tool.name === 'attach_telegram_rich_content'
+              )
+            ),
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           onboardingFirstReadCompletionTransitionAvailable:
@@ -4662,6 +4680,18 @@ async function runCodexAppServerTurnOnProcess(
           requireHostedPrivateImageDelivery:
             input.requireHostedPrivateImageDelivery ?? false,
           vaultRoot: input.vaultRoot ?? null,
+          voiceMemoPhaseTimingRecorder:
+            (dynamicToolRequest.kind === 'generate-voice-memo' ||
+              dynamicToolRequest.kind === 'generate-song') &&
+            input.onTraceEvent
+              ? (timing) => {
+                  emitCodexGeneratedAudioPhaseTimingTrace({
+                    codexThreadId,
+                    onTraceEvent: input.onTraceEvent,
+                    timing,
+                  })
+                }
+              : null,
           voiceMemoRuntime:
             dynamicToolRequest.kind === 'generate-voice-memo' ||
             dynamicToolRequest.kind === 'generate-song'
@@ -6054,6 +6084,42 @@ function emitCodexSuppressedFinalMessageTrace(input: {
     })
   } catch {
     // Diagnostic-only.
+  }
+}
+
+function emitCodexGeneratedAudioPhaseTimingTrace(input: {
+  codexThreadId: string | null
+  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
+  timing: VoiceMemoPhaseTiming
+}): void {
+  if (!input.onTraceEvent) {
+    return
+  }
+
+  try {
+    input.onTraceEvent({
+      codexThreadId: input.codexThreadId,
+      rawEvent: {
+        schema: CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA,
+        type: CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE,
+        generatedAudioDeliveryMode: input.timing.deliveryMode,
+        ...(input.timing.generationDurationMs === undefined
+          ? {}
+          : {
+              generatedAudioGenerationDurationMs:
+                input.timing.generationDurationMs,
+            }),
+        generatedAudioKind: input.timing.mediaKind,
+        generatedAudioOutcome: input.timing.outcome,
+        generatedAudioTerminalPhase: input.timing.terminalPhase,
+        ...(input.timing.uploadDurationMs === undefined
+          ? {}
+          : { generatedAudioUploadDurationMs: input.timing.uploadDurationMs }),
+      },
+      updates: [],
+    })
+  } catch {
+    // Phase timing is diagnostic-only and must not block assistant turns.
   }
 }
 

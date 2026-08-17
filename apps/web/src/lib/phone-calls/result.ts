@@ -422,7 +422,9 @@ export function buildPhoneCallResultNotificationWake(input: {
   result: HostedPhoneCallResult;
 }) {
   const notificationKey = buildPhoneCallResultNotificationKey(input.callId);
-  const requireSend = input.requiresTransferFollowUp === true
+  const requiresTransferFollowUp = input.requiresTransferFollowUp === true
+    || input.result.completionPolicy === "transfer_follow_up_required";
+  const requireSend = requiresTransferFollowUp
     || isHostedThreadContainerNotificationDestination(input.destination);
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: buildPhoneCallResultNotificationEventId(input.callId),
@@ -440,7 +442,7 @@ export function buildPhoneCallResultNotificationWake(input: {
       instructions: buildPhoneCallResultNotificationInstructions({
         brief: input.brief,
         requireSend,
-        requiresTransferFollowUp: input.requiresTransferFollowUp === true,
+        requiresTransferFollowUp,
         result: input.result,
       }),
       // A room must always hear how its call ended. A successful direct

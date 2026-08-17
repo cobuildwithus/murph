@@ -897,7 +897,7 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
 
   const auditRecords = await readJsonlRecords({
     vaultRoot,
-    relativePath: imported.auditPath,
+    relativePath: imported.auditPath!,
   });
   const latestAuditRecord = expectRecord<AuditRecord | undefined>(auditRecords.at(-1));
 

@@ -1,6 +1,6 @@
 # iMessage Deliverability and Reply Safety
 
-Last verified: 2026-08-09
+Last verified: 2026-08-12
 
 ## Purpose
 
@@ -96,7 +96,7 @@ body in these diagnostics.
 
 ## Assistant response cards
 
-Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The general attachment tool serves explicit current private-direct requests, exact private-direct scheduled turns whose saved instructions explicitly request a card, and the managed meal closeout; it remains unavailable in groups. Occurrence authority alone is not card intent. A card replaces the whole final response, so it is eligible only when that card alone completely satisfies the current request. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.
+Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The general semantic attachment tool serves explicit current private-direct requests, exact private-direct scheduled turns whose saved instructions explicitly request a card, and the managed meal closeout; it remains unavailable in groups. Telegram-only presentation tools may be available in authenticated direct and group Telegram turns, but Linq group behavior stays unchanged. Occurrence authority alone is not card intent. A card replaces the whole final response, so it is eligible only when that card alone completely satisfies the current request. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.
 
 Exercise routines use a dedicated attachment tool only to keep both Codex tool
 schemas below the provider compaction limit. It creates the same outbox card
@@ -298,6 +298,17 @@ Design messaging flows to earn genuine replies early, then keep letting current 
   blinded chat identifier. Webhooks are the fast path; bounded inventory
   reconciliation repairs missed or silence-driven changes without calling Linq
   from a routing transaction.
+- Chat-health reconciliation must finish its provider pagination before opening
+  database transactions, reject inventories above 5,000 records, and project
+  at most 250 records per short transaction. Each chunk prepares blinded keys
+  and encrypted line material first, freezes one provider-ordered winner per
+  logical chat across the complete inventory while retaining every line
+  observation, then acquires every current and legacy chat/line read-candidate
+  lock in canonical order under a tight local lock timeout before the set-based
+  projection. Chunks commit independently so a later failure can replay prior
+  chunks idempotently without holding one connection across the full inventory;
+  the full read-candidate lock set keeps the conflict token stable across a
+  current privacy-key-version flip.
 - Existing routes remain sticky on `AT_RISK`; new assignments avoid those
   lines. Scheduled turns may receive only a closed cautious/recovery posture,
   while the existing Web egress authority rechecks hard blocks immediately
