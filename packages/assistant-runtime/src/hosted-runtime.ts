@@ -7314,21 +7314,6 @@ function createAbortGuardedHostedRuntimePlatform(
           },
         }
       : {}),
-    ...(platform.mailboxPort
-      ? {
-          mailboxPort: {
-            fetch: (request, context) =>
-              platform.mailboxPort!.fetch(request, context),
-            fetchPayload: (request) => platform.mailboxPort!.fetchPayload(request),
-            ...(platform.mailboxPort.recordMemberActionOutcome
-              ? {
-                  recordMemberActionOutcome: (outcome, context) =>
-                    platform.mailboxPort!.recordMemberActionOutcome!(outcome, context),
-                }
-              : {}),
-          },
-        }
-      : {}),
     ...(platform.publicInternetFetch
       ? {
           publicInternetFetch: (async (request, init) =>
