@@ -79,3 +79,13 @@ disposition after each failed attempt.
   attempts are reported as `queued`, lease loss produces no fabricated
   transition, retained accepted work still extends its existing attempt fence,
   and raw workout/request/payload identifiers do not enter runtime telemetry.
+- Final ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` with no qualifying
+  production-code, architecture, privacy, or purpose finding. It identified
+  two overbroad coverage claims that matched the preliminary specialist pass.
+- The preliminary specialist pass found missing executable proof for the
+  runner-to-Web candidate-field projection boundary and the `checkpoint` and
+  `device_activity_automation` failure origins. The accepted remediation adds
+  only focused regression tests; production code and runtime architecture are
+  unchanged.
+- The two directly affected assistant-runtime test files pass all 396 tests,
+  and the assistant-runtime owner typecheck remains green after remediation.

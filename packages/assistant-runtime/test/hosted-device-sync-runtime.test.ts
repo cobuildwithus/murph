@@ -3540,7 +3540,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation includes provider failure diagnostics when sync failure advances", async () => {
+  test("reconciliation strips worker-only workout candidate context from Web diagnostics", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -3558,37 +3558,17 @@ describe("hosted device-sync runtime", () => {
           jobExecutor: {
             async executeJob() {
               throw deviceSyncError({
-                accountStatus: "disconnected",
-                code: "TOKEN_REQUEST_FAILED",
+                code: "JUNCTION_API_REQUEST_FAILED",
                 details: {
-                  httpStatusText: "Bad Request",
-                  oauthErrorCode: "invalid_grant",
-                  oauthErrorDescription: "Refresh token expired. Reconnect provider.",
-                  oauthGrantType: "refresh_token",
-                  oauthRequestBodyBuilderKind: "url_search_params_record",
-                  oauthRequestClientAuthPlacement: "body_parameters",
-                  oauthRequestClientCredentialPresent: true,
-                  oauthRequestClientIdPresent: true,
-                  oauthRequestContentType: "application_x_www_form_urlencoded",
-                  oauthRequestDuplicateParameterCount: 0,
-                  oauthRequestEncodingKind: "form_urlencoded",
-                  oauthRequestHasDuplicateParameters: false,
-                  oauthRequestMethod: "POST",
-                  oauthRequestOfflineScopePresent: true,
-                  oauthRequestParameterCount: 5,
-                  oauthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-                  oauthRequestRefreshCredentialPresent: true,
-                  oauthRequestScopeCount: 1,
-                  oauthRequestScopePresent: true,
-                  oauthRequestScopeValue: "offline",
-                  oauthRequestTokenEndpointKind: "whoop_oauth_token",
-                  oauthResponseErrorDescriptionFieldPresent: true,
-                  oauthResponseErrorFieldPresent: true,
-                  oauthResponseShapeKind: "json_object",
+                  requestCandidateAliasSource: "id",
+                  requestCandidateCount: 8,
+                  requestCandidateOrdinal: 3,
+                  requestEndpointKind: "junction_workout_stream",
+                  requestMethod: "GET",
                 },
-                httpStatus: 400,
-                message: "Provider token request failed.",
-                retryable: false,
+                httpStatus: 500,
+                message: "Junction workout stream request failed.",
+                retryable: true,
               });
             },
           },
@@ -3650,8 +3630,8 @@ describe("hosted device-sync runtime", () => {
 
       const failed = getStore(service).getAccountById(localAccountId);
       assert.ok(failed);
-      assert.equal(failed.lastErrorCode, "TOKEN_REQUEST_FAILED");
-      assert.equal(failed.status, "disconnected");
+      assert.equal(failed.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(failed.status, "active");
       assert.ok(failed.lastSyncErrorAt);
 
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -3667,40 +3647,23 @@ describe("hosted device-sync runtime", () => {
       assert.equal(request.updates.length, 1);
       assert.equal(request.updates[0]?.connectionId, "hosted_conn_failure_diagnostic");
       assert.deepEqual(request.updates[0]?.failureDiagnostic, {
-        accountStatus: "disconnected",
-        code: "TOKEN_REQUEST_FAILED",
+        accountStatus: null,
+        code: "JUNCTION_API_REQUEST_FAILED",
         details: {
-          providerHttpStatus: 400,
-          providerHttpStatusText: "Bad Request",
-          providerOAuthErrorCode: "invalid_grant",
-          providerOAuthErrorDescription: "Refresh token expired. Reconnect provider.",
-          providerOAuthGrantType: "refresh_token",
-          providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-          providerOAuthRequestClientAuthPlacement: "body_parameters",
-          providerOAuthRequestClientCredentialPresent: true,
-          providerOAuthRequestClientIdPresent: true,
-          providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-          providerOAuthRequestDuplicateParameterCount: 0,
-          providerOAuthRequestEncodingKind: "form_urlencoded",
-          providerOAuthRequestHasDuplicateParameters: false,
-          providerOAuthRequestMethod: "POST",
-          providerOAuthRequestOfflineScopePresent: true,
-          providerOAuthRequestParameterCount: 5,
-          providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-          providerOAuthRequestRefreshCredentialPresent: true,
-          providerOAuthRequestScopeCount: 1,
-          providerOAuthRequestScopePresent: true,
-          providerOAuthRequestScopeValue: "offline",
-          providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-          providerOAuthResponseErrorDescriptionFieldPresent: true,
-          providerOAuthResponseErrorFieldPresent: true,
-          providerOAuthResponseShapeKind: "json_object",
+          providerHttpStatus: 500,
+          providerRequestEndpointKind: "junction_workout_stream",
+          providerRequestMethod: "GET",
         },
-        retryable: false,
+        retryable: true,
       });
+      const failureDetails = request.updates[0]?.failureDiagnostic?.details;
+      assert.ok(failureDetails);
+      assert.equal("providerRequestCandidateAliasSource" in failureDetails, false);
+      assert.equal("providerRequestCandidateCount" in failureDetails, false);
+      assert.equal("providerRequestCandidateOrdinal" in failureDetails, false);
       assert.equal(
         request.updates[0]?.localState?.lastErrorMessage,
-        "Provider token request failed. Provider reason: Refresh token expired. Reconnect provider.",
+        "Junction workout stream request failed.",
       );
       assert.equal(request.updates[0]?.localState?.lastSyncErrorAt, failed.lastSyncErrorAt);
       assert.equal(request.updates[0]?.observedUpdatedAt, "2026-04-06T09:15:00.000Z");
