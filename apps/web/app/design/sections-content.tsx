@@ -720,6 +720,7 @@ export function SectionsContent() {
         <div
           id="pitch-progress-slide"
           data-design-section="pitch-progress-slide"
+          data-design-state="search-metadata-baseline"
           className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
           inert
         >

@@ -8,9 +8,6 @@ const DESIGN_CATALOG_PATHS = new Set([
 ]);
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
 const GITHUB_MARKDOWN_URL = "https://api.github.com/markdown";
-const IMPORT_PATTERN = /^[\t ]*import\b/gmu;
-const METADATA_EXPORT_PATTERN = /^[\t ]*export[\t ]+(?:async[\t ]+)?(?:function|const|let|var)[\t ]+(generateMetadata|metadata)\b/gmu;
-const ROUTE_HELPER_PATTERN = /^[\t ]*(?:(?:const|let|var)[\t ]+([A-Za-z_$][\w$]*)|(?:async[\t ]+)?function[\t ]+([A-Za-z_$][\w$]*))\b/gmu;
 
 function isFrontendUiPath(filePath) {
   if (filePath.startsWith("apps/web/app/design/")) {
@@ -40,214 +37,8 @@ function isFrontendUiPath(filePath) {
   );
 }
 
-function renderedRouteSignature(source) {
-  const importSpans = findDeclarationSpans(source, IMPORT_PATTERN);
-  const withoutImports = stripSpans(source, importSpans);
-  const removableMetadataSpans = findDeclarationSpans(
-    withoutImports,
-    METADATA_EXPORT_PATTERN,
-  ).filter(({ end, isFunction, name, start }) =>
-    name
-      && (isFunction || !hasTopLevelComma(withoutImports, start, end))
-      && !usesIdentifier(
-        withoutImports.slice(0, start) + withoutImports.slice(end),
-        name,
-      )
-  );
-  const renderedBody = stripUnusedMetadataHelpers(
-    stripSpans(withoutImports, removableMetadataSpans),
-  );
-  const imports = importSpans
-    .map(({ end, start }) => source.slice(start, end))
-    .filter((statement) => importAffectsRenderedBody(statement, renderedBody))
-    .map((statement) => statement.replace(/\s+/gu, " ").trim());
-  const body = renderedBody
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length > 0)
-    .join("\n");
-  return JSON.stringify({ body, imports });
-}
-
-function stripUnusedMetadataHelpers(source) {
-  let output = source;
-  while (true) {
-    const unusedSpans = findDeclarationSpans(output, ROUTE_HELPER_PATTERN)
-      .filter(({ end, name, start }) =>
-        name?.toLowerCase().includes("metadata")
-          && !usesIdentifier(output.slice(0, start) + output.slice(end), name)
-      );
-    if (unusedSpans.length === 0) {
-      return output;
-    }
-    output = stripSpans(output, unusedSpans);
-  }
-}
-
-function importAffectsRenderedBody(statement, body) {
-  if (/^[\t ]*import[\t ]*["']/u.test(statement)) {
-    return true;
-  }
-  const clause = /^[\t ]*import[\t ]+(?:type[\t ]+)?([\s\S]*?)[\t ]+from[\t ]+["']/u
-    .exec(statement)?.[1];
-  if (!clause) {
-    return true;
-  }
-  const names = clause.match(/[A-Za-z_$][\w$]*/gu) ?? [];
-  return names.some((name) => !["as", "type"].includes(name) && usesIdentifier(body, name));
-}
-
-function usesIdentifier(source, identifier) {
-  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`, "u").test(source);
-}
-
-function findDeclarationSpans(source, pattern) {
-  const spans = [];
-  pattern.lastIndex = 0;
-  let match;
-  while ((match = pattern.exec(source)) !== null) {
-    const isFunction = /\bfunction\b/u.test(match[0]);
-    const end = isFunction
-      ? findFunctionEnd(source, pattern.lastIndex)
-      : findStatementEnd(source, pattern.lastIndex);
-    if (end === null) {
-      continue;
-    }
-    spans.push({
-      end,
-      isFunction,
-      name: match[1] ?? match[2] ?? null,
-      start: match.index,
-    });
-    pattern.lastIndex = end;
-  }
-  return spans;
-}
-
-function hasTopLevelComma(source, start, end) {
-  const depth = { "(": 0, "[": 0, "{": 0 };
-  const closing = { ")": "(", "]": "[", "}": "{" };
-  for (let index = start; index < end; index += 1) {
-    const skippedTo = skipNonCode(source, index);
-    if (skippedTo !== index) {
-      index = skippedTo - 1;
-      continue;
-    }
-    const character = source[index];
-    if (Object.hasOwn(depth, character)) {
-      depth[character] += 1;
-    } else if (closing[character]) {
-      depth[closing[character]] -= 1;
-    } else if (
-      character === ","
-      && Object.values(depth).every((value) => value === 0)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function findFunctionEnd(source, start) {
-  let parentheses = 0;
-  for (let index = start; index < source.length; index += 1) {
-    const skippedTo = skipNonCode(source, index);
-    if (skippedTo !== index) {
-      index = skippedTo - 1;
-      continue;
-    }
-    if (source[index] === "(") {
-      parentheses += 1;
-    } else if (source[index] === ")") {
-      parentheses -= 1;
-    } else if (source[index] === "{" && parentheses === 0) {
-      return findClosingBrace(source, index);
-    }
-  }
-  return null;
-}
-
-function findClosingBrace(source, start) {
-  let depth = 0;
-  for (let index = start; index < source.length; index += 1) {
-    const skippedTo = skipNonCode(source, index);
-    if (skippedTo !== index) {
-      index = skippedTo - 1;
-      continue;
-    }
-    if (source[index] === "{") {
-      depth += 1;
-    } else if (source[index] === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return index + 1;
-      }
-    }
-  }
-  return null;
-}
-
-function findStatementEnd(source, start) {
-  const depth = { "(": 0, "[": 0, "{": 0 };
-  const opening = new Set(Object.keys(depth));
-  const closing = { ")": "(", "]": "[", "}": "{" };
-  for (let index = start; index < source.length; index += 1) {
-    const skippedTo = skipNonCode(source, index);
-    if (skippedTo !== index) {
-      index = skippedTo - 1;
-      continue;
-    }
-    const character = source[index];
-    if (opening.has(character)) {
-      depth[character] += 1;
-    } else if (closing[character]) {
-      depth[closing[character]] -= 1;
-    } else if (character === ";" && Object.values(depth).every((value) => value === 0)) {
-      return index + 1;
-    }
-  }
-  return null;
-}
-
-function skipNonCode(source, start) {
-  const character = source[start];
-  if (character === "/" && source[start + 1] === "/") {
-    const end = source.indexOf("\n", start + 2);
-    return end === -1 ? source.length : end;
-  }
-  if (character === "/" && source[start + 1] === "*") {
-    const end = source.indexOf("*/", start + 2);
-    return end === -1 ? source.length : end + 2;
-  }
-  if (!["'", '"', "`"].includes(character)) {
-    return start;
-  }
-  for (let index = start + 1; index < source.length; index += 1) {
-    if (source[index] === "\\") {
-      index += 1;
-    } else if (source[index] === character) {
-      return index + 1;
-    }
-  }
-  return source.length;
-}
-
-function stripSpans(source, spans) {
-  let cursor = 0;
-  let output = "";
-  for (const { end, start } of spans) {
-    output += source.slice(cursor, start);
-    cursor = end;
-  }
-  return output + source.slice(cursor);
-}
-
-function validateFrontendDesignProof({
-  changedPaths,
-  prBodyHtml,
-  uiPaths = changedPaths.filter(isFrontendUiPath),
-}) {
+function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
+  const uiPaths = changedPaths.filter(isFrontendUiPath);
   if (uiPaths.length === 0) {
     return { required: false };
   }
@@ -412,34 +203,6 @@ function readChangedPaths(baseSha, headSha) {
     .filter(Boolean);
 }
 
-function readFrontendUiPaths(baseSha, headSha, changedPaths) {
-  return changedPaths.filter((filePath) => {
-    if (!isFrontendUiPath(filePath)) {
-      return false;
-    }
-    if (!filePath.startsWith("apps/web/app/") || !filePath.endsWith(".tsx")) {
-      return true;
-    }
-    const baseSource = readRevisionFile(baseSha, filePath);
-    const headSource = readRevisionFile(headSha, filePath);
-    if (baseSource === null || headSource === null) {
-      return true;
-    }
-    return renderedRouteSignature(baseSource) !== renderedRouteSignature(headSource);
-  });
-}
-
-function readRevisionFile(revision, filePath) {
-  try {
-    return execFileSync("git", ["show", `${revision}:${filePath}`], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return null;
-  }
-}
-
 async function main() {
   const baseSha = process.env.MURPH_PR_BASE_SHA?.trim();
   const headSha = process.env.MURPH_PR_HEAD_SHA?.trim();
@@ -451,15 +214,13 @@ async function main() {
   }
 
   const changedPaths = readChangedPaths(baseSha, headSha);
-  const uiPaths = readFrontendUiPaths(baseSha, headSha, changedPaths);
-  if (uiPaths.length === 0) {
+  if (!changedPaths.some(isFrontendUiPath)) {
     console.log("No user-facing hosted Web UI changes detected.");
     return;
   }
   const result = validateFrontendDesignProof({
     changedPaths,
     prBodyHtml: await renderPrBody(prBody),
-    uiPaths,
   });
   if (result.errors.length > 0) {
     console.error("Frontend design proof is incomplete:");
@@ -490,10 +251,8 @@ export {
   findRenderedListItem,
   isFrontendUiPath,
   readChangedPaths,
-  readFrontendUiPaths,
   readRenderedSection,
   renderPrBody,
-  renderedRouteSignature,
   renderedText,
   validateFrontendDesignProof,
 };

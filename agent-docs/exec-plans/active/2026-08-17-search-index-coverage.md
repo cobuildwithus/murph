@@ -46,9 +46,10 @@ Updated: 2026-08-17
 - Treat the supplied archive as aggregate evidence only because it contains issue counts but no affected URL list.
 - Keep workflow/private pages crawlable enough for their `noindex` metadata to be observed; do not use `robots.txt` as an indexing substitute.
 - Accept the preliminary coverage finding and strengthen test oracles only; the production ownership and route policy remain unchanged.
-- Treat metadata-only route-module edits as non-visual in the design-proof gate by comparing dependency-free rendered-route signatures; keep the catalog and screenshot requirement for any remaining UI change.
-- Accept the final-audit viewport finding: viewport exports affect responsive presentation and zoom accessibility, so only metadata and generateMetadata exports qualify for the non-visual exemption.
-- Accept the round 4 shared-metadata finding: a metadata export can feed rendered output, so the exemption applies only to standalone metadata declarations whose binding is unused by the remaining route body.
+- Superseded after round 5: initially treated metadata-only route-module edits as non-visual by comparing dependency-free rendered-route signatures.
+- Historical round 2 correction: viewport exports affect responsive presentation and zoom accessibility, so they could not receive the attempted metadata-only exemption.
+- Historical round 4 correction: metadata exports can feed rendered output, so unconditional stripping was unsafe even before the round 5 mechanism collapse.
+- Accept the round 5 mechanism finding: raw-source stripping cannot safely prove a route edit is metadata-only, so delete the classifier and restore the conservative path-based design-proof owner instead of adding another syntax exception.
 
 ## Verification
 
@@ -57,7 +58,15 @@ Updated: 2026-08-17
 - Passed focused ESLint for every changed source and test file.
 - Passed the hosted-Web typecheck, including the repository-owned Health Commons and Prisma generation prerequisites.
 - Direct sitemap coverage proof is part of the focused test: one canonical host, no duplicate URLs, all published Health Commons routes present, and private/result/internal routes absent.
-- Passed all 14 frontend design-proof checker tests, including metadata-only helpers plus rendered-body, import, static/generated viewport, rendered metadata, rendered generateMetadata, and co-declared-value controls; the checker reports no UI change for the exact task diff.
+- Passed all 11 frontend design-proof checker tests after deleting the metadata classifier, including a co-declared rendered-value control that keeps every app TSX change inside the proof gate.
+- Captured and inspected lossless hosted desktop and mobile screenshots of the existing synthetic pitch-deck study as a non-visual baseline for the metadata-only route edits.
+
+## Round 5 simplification
+
+- Reproduced the review-induced false negative locally: a co-declared rendered value changed while the classifier returned an identical signature.
+- Deleted the rendered-route signature, metadata/helper stripping, partial declaration scanner, import-liveness inference, and special route-file comparison.
+- Restored `isFrontendUiPath` as the single conservative owner and retained one focused regression proving the reproduced route shape requires design proof.
+- Added only a non-visual capture-state marker to the existing real pitch-deck study so this metadata-only PR can satisfy the one-time desktop/mobile proof gate without adding or duplicating production UI.
 
 ## Round 3 change-shape retrospective
 

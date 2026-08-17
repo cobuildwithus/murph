@@ -10,7 +10,6 @@ import { promisify } from "node:util";
 
 import {
   isFrontendUiPath,
-  renderedRouteSignature,
   validateFrontendDesignProof,
 } from "./check-frontend-design-proof.mjs";
 
@@ -63,158 +62,17 @@ test("detects user-facing app and shared component UI paths", () => {
   );
 });
 
-test("ignores route metadata edits without hiding rendered UI edits", () => {
+test("conservatively requires proof for every app TSX change", () => {
+  const routePath = "apps/web/app/settings/page.tsx";
   const baseSource = `
-import type { Metadata } from "next";
-import { Panel } from "@/src/components/panel";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
-
-export const metadata: Metadata = createMurphPageMetadata({ title: "Settings" });
-
-export default function Page() {
-  return <Panel label="Settings" />;
-}
-`;
-  const metadataOnlySource = `
-import type { Metadata } from "next";
-import { Panel } from "@/src/components/panel";
-import {
-  createMurphPageMetadata,
-  MURPH_NOINDEX_PAGE_ROBOTS,
-} from "@/src/lib/site-metadata";
-
-export const metadata: Metadata = createMurphPageMetadata({
-  robots: MURPH_NOINDEX_PAGE_ROBOTS,
-  title: "Settings",
-});
-
-export default function Page() {
-  return <Panel label="Settings" />;
-}
-`;
-  const renderedChangeSource = metadataOnlySource.replace(
-    'label="Settings"',
-    'label="Account settings"',
-  );
-  const renderedImportChangeSource = metadataOnlySource.replace(
-    "@/src/components/panel",
-    "@/src/components/account-panel",
-  );
-
-  assert.equal(
-    renderedRouteSignature(baseSource),
-    renderedRouteSignature(metadataOnlySource),
-  );
-  assert.notEqual(
-    renderedRouteSignature(baseSource),
-    renderedRouteSignature(renderedChangeSource),
-  );
-  assert.notEqual(
-    renderedRouteSignature(metadataOnlySource),
-    renderedRouteSignature(renderedImportChangeSource),
-  );
-});
-
-test("ignores helpers reached only from route metadata", () => {
-  const baseSource = `
-import { PageShell } from "@/src/components/page-shell";
-import { createMetadata } from "@/src/lib/site-metadata";
-
-const DEFAULT_METADATA_HOST = "https://example.test";
-const metadataBase = new URL(DEFAULT_METADATA_HOST);
-const defaultMetadata = createMetadata({ title: "Example" });
-
-export const metadata = { ...defaultMetadata, metadataBase };
-export default function Page() { return <PageShell />; }
-`;
-  const consolidatedSource = `
-import { PageShell } from "@/src/components/page-shell";
-import { createMetadata, PUBLIC_HOST } from "@/src/lib/site-metadata";
-
-export const metadata = {
-  ...createMetadata({ title: "Example" }),
-  metadataBase: new URL(PUBLIC_HOST),
-};
-export default function Page() { return <PageShell />; }
-`;
-
-  assert.equal(
-    renderedRouteSignature(baseSource),
-    renderedRouteSignature(consolidatedSource),
-  );
-});
-
-test("treats static and generated viewport changes as frontend changes", () => {
-  const page = "export default function Page() { return null; }";
-  const flexibleViewport = `
-export const viewport = {
-  initialScale: 1,
-  userScalable: true,
-  width: "device-width",
-};
-${page}
-`;
-  const fixedViewport = `
-export const viewport = {
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  width: 1280,
-};
-${page}
-`;
-  const generatedFlexibleViewport = `
-export function generateViewport() {
-  return { userScalable: true, width: "device-width" };
-}
-${page}
-`;
-  const generatedFixedViewport = `
-export function generateViewport() {
-  return { userScalable: false, width: 1280 };
-}
-${page}
-`;
-
-  assert.notEqual(
-    renderedRouteSignature(flexibleViewport),
-    renderedRouteSignature(fixedViewport),
-  );
-  assert.notEqual(
-    renderedRouteSignature(generatedFlexibleViewport),
-    renderedRouteSignature(generatedFixedViewport),
-  );
-});
-
-test("keeps metadata declarations that feed rendered output", () => {
-  const staticBase = `
-export const metadata = { title: "Settings" };
-export default function Page() { return <h1>{metadata.title}</h1>; }
-`;
-  const staticHead = staticBase.replace("Settings", "Account");
-  const generatedBase = `
-export function generateMetadata() { return { title: "Settings" }; }
-export default function Page() { return <h1>{generateMetadata().title}</h1>; }
-`;
-  const generatedHead = generatedBase.replace("Settings", "Account");
-  const coDeclaredBase = `
-export const metadata = { title: "Settings" }, heading = "Settings";
+const metadataTitle = "Settings", heading = "Settings";
+export const metadata = { title: metadataTitle };
 export default function Page() { return <h1>{heading}</h1>; }
 `;
-  const coDeclaredHead = coDeclaredBase.replaceAll("Settings", "Account");
+  const headSource = baseSource.replaceAll("Settings", "Account");
 
-  assert.notEqual(
-    renderedRouteSignature(staticBase),
-    renderedRouteSignature(staticHead),
-  );
-  assert.notEqual(
-    renderedRouteSignature(generatedBase),
-    renderedRouteSignature(generatedHead),
-  );
-  assert.notEqual(
-    renderedRouteSignature(coDeclaredBase),
-    renderedRouteSignature(coDeclaredHead),
-  );
+  assert.notEqual(baseSource, headSource);
+  assert.equal(isFrontendUiPath(routePath), true);
 });
 
 test("passes rendered design-page proof with both hosted viewports", () => {
