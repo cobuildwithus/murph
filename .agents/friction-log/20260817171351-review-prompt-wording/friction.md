@@ -5,15 +5,15 @@ severity: 'minor'
 
 ## Expected Behavior
 
-The release coverage test should stay aligned with the checked-in ReviewGPT prompt and loop documentation when either is intentionally reworded.
+The release coverage test should stay aligned with the checked-in ReviewGPT workflow documentation when wording or requirement ownership changes.
 
 ## Current Behavior
 
-The prompt now requires disclosure in the applicable risk notes, while the coverage test still requires an older exact sentence containing `also disclosed`. The loop documentation also uses singular `non-obvious surface` wording while the test requires the old plural phrase. These deterministic mismatches fail the required release aggregate for unrelated pull requests.
+Recent workflow simplification reworded ReviewGPT requirements and moved Product UX requirements to their current owners, while the coverage test retained several old exact phrases and owner assumptions. These deterministic mismatches fail the required release aggregate for unrelated pull requests.
 
 ## Possible Solution
 
-Assert the current stable requirement phrases, and update ReviewGPT text plus its coverage assertions in the same change when those requirements are reworded.
+Assert stable requirement phrases against their current owning documents, and update ReviewGPT text plus its coverage assertions in the same change when wording or ownership changes.
 
 ## Minimal Reproducible Example
 
