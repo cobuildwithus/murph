@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-17",
+  "order": 100,
+  "item": {
+    "id": "scheduled-workout-rollover",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Scheduled workout replies can start the next session",
+    "summary": "When a scheduled workout reminder follows a fully logged live workout, Murph can close the previous session and record the reported set in the planned routine.",
+    "details": "Murph only does this for a fresh direct reply to the exact reminder with a member-stated set result. Pending, stale, or ambiguous workouts still ask before changing workout history.",
+    "relevanceTags": ["assistant", "workouts", "messaging", "reliability"],
+    "sourcePullRequests": [1942]
+  }
+}
