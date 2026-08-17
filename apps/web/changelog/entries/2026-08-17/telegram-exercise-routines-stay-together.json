@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-17",
+  "order": 100,
+  "item": {
+    "id": "telegram-exercise-routines-stay-together",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Telegram exercise routines stay together",
+    "summary": "Exercise routines keep every named movement and its helpful images inside one Rich Message.",
+    "details": "If a routine card needs correction, Murph retries it once. It then keeps the answer in one image-free Rich Message instead of sending separate pictures.",
+    "relevanceTags": ["assistant", "messaging", "telegram", "exercise"],
+    "sourcePullRequests": [1934]
+  }
+}
