@@ -3,12 +3,60 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  wearablesActivityListResultSchema,
   wearablesDayResultSchema,
   wearablesDriftResultSchema,
   wearablesLatestResultSchema,
   wearablesMetricLatestResultSchema,
   wearablesMetricTrendResultSchema,
 } from "../src/commands/wearables.ts";
+
+test("wearables activity schema preserves bounded workout features", () => {
+  const parsed = wearablesActivityListResultSchema.parse({
+    filters: {
+      date: "2026-04-03",
+      from: null,
+      limit: 10,
+      providers: ["garmin"],
+      to: null,
+    },
+    items: [{
+      date: "2026-04-03",
+      providers: ["garmin"],
+      summaryConfidence: {
+        level: "high",
+        selectedProviders: ["garmin"],
+      },
+      workoutFeatures: [{
+        activityType: "cycling",
+        averageCadence: 90,
+        averageHeartRate: 145,
+        averagePowerWatts: 220,
+        averageSpeedMps: 5,
+        cadenceUnit: "rpm",
+        provider: "garmin",
+        splits: [],
+        startedAt: "2026-04-03T18:00:00.000Z",
+      }],
+    }],
+    count: 1,
+    vault: "/tmp/example-vault",
+  });
+
+  assert.deepEqual(parsed.items[0]?.workoutFeatures?.[0]?.splits, []);
+  assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.cadenceUnit, "rpm");
+  assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.averagePowerWatts, 220);
+  assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.averageSpeedMps, 5);
+  assert.equal(
+    Object.hasOwn(parsed.items[0]?.workoutFeatures?.[0] ?? {}, "averagePower"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(parsed.items[0]?.workoutFeatures?.[0] ?? {}, "averageSpeed"),
+    false,
+  );
+  assert.equal("vault" in parsed, false);
+});
 
 test("wearables day schema preserves compact fallback metadata", () => {
   const parsed = wearablesDayResultSchema.parse({

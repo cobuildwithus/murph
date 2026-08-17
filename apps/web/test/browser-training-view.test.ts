@@ -591,6 +591,10 @@ test("Training uses the canonical local date for week buckets and progress label
   });
   const view = selectBrowserVaultTraining(
     createBrowserVaultQueryClient(replica),
+    {
+      now: new Date("2026-08-10T12:00:00.000Z"),
+      timeZone: "America/Los_Angeles",
+    },
   );
 
   assert.equal(view.weeks.at(-1)?.count, 0);

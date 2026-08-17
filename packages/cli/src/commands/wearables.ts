@@ -14,6 +14,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeRepeatableEnumFlagOption } from '@murphai/vault-usecases'
 import {
+  isoTimestampSchema,
   localDateSchema,
   timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
@@ -120,6 +121,37 @@ const wearableSourceHealthSummarySchema = z.object({
   stalenessVsNewestDays: z.number().int().nonnegative().nullable().optional(),
 })
 
+const wearableWorkoutSplitFeatureSchema = z.object({
+  averageCadence: z.number().nonnegative().optional(),
+  averageHeartRate: z.number().nonnegative().optional(),
+  averagePowerWatts: z.number().nonnegative().optional(),
+  cadenceUnit: z.string().min(1).optional(),
+  distanceMeters: z.number().nonnegative().optional(),
+  durationSeconds: z.number().nonnegative().optional(),
+  endedAt: isoTimestampSchema,
+  index: z.number().int().nonnegative(),
+})
+
+const wearableWorkoutFeatureSchema = z.object({
+  activityType: z.string().min(1).optional(),
+  averageCadence: z.number().nonnegative().optional(),
+  averageHeartRate: z.number().nonnegative().optional(),
+  averagePowerWatts: z.number().nonnegative().optional(),
+  averageSpeedMps: z.number().nonnegative().optional(),
+  cadenceUnit: z.string().min(1).optional(),
+  distanceKm: z.number().nonnegative().optional(),
+  durationMinutes: z.number().nonnegative().optional(),
+  firstHalfAverageHeartRate: z.number().nonnegative().optional(),
+  maxCadence: z.number().nonnegative().optional(),
+  maxHeartRate: z.number().nonnegative().optional(),
+  maxPowerWatts: z.number().nonnegative().optional(),
+  maxSpeedMps: z.number().nonnegative().optional(),
+  provider: z.string().min(1),
+  secondHalfAverageHeartRate: z.number().nonnegative().optional(),
+  splits: z.array(wearableWorkoutSplitFeatureSchema).max(64),
+  startedAt: isoTimestampSchema,
+})
+
 const wearableActivitySummarySchema = z.object({
   activityScore: wearableResolvedMetricSchema.optional(),
   activeCalories: wearableResolvedMetricSchema.optional(),
@@ -153,6 +185,7 @@ const wearableActivitySummarySchema = z.object({
   totalCalories: wearableResolvedMetricSchema.optional(),
   totalElevationGainMeters: wearableResolvedMetricSchema.optional(),
   walkingAverageHeartRate: wearableResolvedMetricSchema.optional(),
+  workoutFeatures: z.array(wearableWorkoutFeatureSchema).max(32).optional(),
   workoutStrain: wearableResolvedMetricSchema.optional(),
 })
 

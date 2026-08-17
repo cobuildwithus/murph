@@ -14,20 +14,29 @@ import {
   resolveJunctionBoundedFeatureRecords,
 } from "../src/device-providers/junction-bounded-features.ts";
 
-function assertNoSampleSizedValue(value: unknown): void {
+function assertNoSampleSizedValue(value: unknown, splitArray = false): void {
   if (Array.isArray(value)) {
-    assert.fail("bounded Junction evidence must not contain arrays");
+    assert.equal(splitArray, true, "bounded Junction evidence retained a raw array");
+    assert.equal(value.length <= 64, true);
+    for (const entry of value) {
+      assertNoSampleSizedValue(entry);
+    }
+    return;
   }
   if (!value || typeof value !== "object") {
     return;
   }
   for (const [key, nested] of Object.entries(value)) {
     assert.equal(
-      ["data", "points", "samples", "stream", "timestamps", "heartrate"].includes(key),
+      [
+        "data", "points", "samples", "stream", "timestamps", "heartrate",
+        "heart_rate", "distance", "cadence", "power", "velocity_smooth",
+        "lat", "latitude", "lng", "longitude",
+      ].includes(key),
       false,
       `bounded Junction evidence retained ${key}`,
     );
-    assertNoSampleSizedValue(nested);
+    assertNoSampleSizedValue(nested, key === "splits");
   }
 }
 
@@ -86,6 +95,8 @@ function workoutFeature(overrides: Record<string, unknown> = {}): Record<string,
     averageHeartRate: 130,
     maxHeartRate: 170,
     sampleCount: 1_000,
+    splits: [],
+    version: "2026-07-01T13:00:00.000Z",
     ...overrides,
   }).filter(([, value]) => value !== undefined));
 }
@@ -189,7 +200,10 @@ test("workout stream reduction is bounded by admitted samples and never preserve
     stream: {
       time: Array.from({ length: sampleCount }, (_, index) => 1_783_000_000 + index),
       heartrate: Array.from({ length: sampleCount }, (_, index) => 80 + index % 101),
+      cadence: Array.from({ length: sampleCount }, (_, index) => 160 + index % 21),
       distance: Array.from({ length: sampleCount }, (_, index) => index / 4),
+      power: Array.from({ length: sampleCount }, (_, index) => 150 + index % 101),
+      velocity_smooth: Array.from({ length: sampleCount }, (_, index) => 2 + index % 3),
     },
   });
 
@@ -197,6 +211,11 @@ test("workout stream reduction is bounded by admitted samples and never preserve
   assert.equal(feature.schema, JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA);
   assert.equal(feature.sampleCount, sampleCount);
   assert.equal(feature.maxHeartRate, 180);
+  assert.equal(feature.maxCadence, 180);
+  assert.equal(feature.cadenceUnit, "steps-per-minute");
+  assert.equal(feature.maxPower, 250);
+  assert.equal(feature.maxSpeed, 4);
+  assert.equal((feature.splits as unknown[]).length, 4);
   assert.equal(feature.startAt, "2026-07-01T12:00:00.000Z");
   assert.equal(feature.endAt, "2026-07-01T12:30:00.000Z");
   assertNoSampleSizedValue(feature);
@@ -214,6 +233,218 @@ test("workout stream reduction is bounded by admitted samples and never preserve
       heartrate: [100, 100],
     },
   }), /1-1 timestamps/u);
+});
+
+test("workout stream reduction preserves heart-rate halves and cycling cadence semantics", () => {
+  const feature = reduceJunctionWorkoutStreamPayload({
+    maxSamples: 4,
+    summary: {
+      id: "ride-1",
+      sourceProviderSlug: "garmin",
+      sport: "road_cycling",
+      updated_at: "2026-07-01T13:00:00.000Z",
+    },
+    stream: {
+      time: [1_783_000_000, 1_783_000_010, 1_783_000_070, 1_783_000_100],
+      heart_rate: [100, 120, 160, 180],
+      cadence: [80, 90, 100, 110],
+      power: [200, 220, 260, 300],
+      velocity_smooth: [5, 6, 7, 8],
+    },
+  });
+  assert.ok(feature);
+
+  assert.equal(feature.averageHeartRate, 140);
+  assert.equal(feature.maxHeartRate, 180);
+  assert.equal(feature.firstHalfAverageHeartRate, 110);
+  assert.equal(feature.secondHalfAverageHeartRate, 170);
+  assert.equal(feature.averageCadence, 95);
+  assert.equal(feature.maxCadence, 110);
+  assert.equal(feature.cadenceUnit, "rpm");
+  assert.equal(feature.averagePower, 245);
+  assert.equal(feature.maxPower, 300);
+  assert.equal(feature.averageSpeed, 6.5);
+  assert.equal(feature.maxSpeed, 8);
+});
+
+test("workout stream splits interpolate fixed boundaries and omit partial starts", () => {
+  const run = reduceJunctionWorkoutStreamPayload({
+    maxSamples: 10,
+    summary: {
+      id: "run-1",
+      sourceProviderSlug: "garmin",
+      sport: "running",
+      updated_at: "2026-07-01T13:00:00.000Z",
+    },
+    stream: {
+      time: [1_783_000_000, 1_783_000_100, 1_783_000_200, 1_783_000_300],
+      distance: [200, 900, 1_100, 2_100],
+      heartrate: [100, 120, 140, 160],
+      cadence: [160, 170, 180, 190],
+      power: [200, 220, 240, 260],
+      lat: [41.88, 41.8805, 41.881, 41.8815],
+      lng: [-87.63, -87.6295, -87.629, -87.6285],
+    },
+  });
+  assert.ok(run);
+  const runSplits = run.splits as Array<Record<string, unknown>>;
+
+  assert.equal(runSplits.length, 1);
+  assert.equal(runSplits[0]?.index, 2);
+  assert.equal(runSplits[0]?.distanceMeters, 1_000);
+  assert.equal(runSplits[0]?.durationSeconds, 140);
+  assert.equal(runSplits[0]?.averageHeartRate, 140);
+  assert.equal(runSplits[0]?.averageCadence, 180);
+  assert.equal(runSplits[0]?.cadenceUnit, "steps-per-minute");
+  assert.equal(runSplits[0]?.averagePower, 240);
+  assertNoSampleSizedValue(run);
+
+  const swim = reduceJunctionWorkoutStreamPayload({
+    maxSamples: 4,
+    summary: {
+      id: "swim-1",
+      sourceProviderSlug: "garmin",
+      sport: "pool_swimming",
+      updated_at: "2026-07-01T14:00:00.000Z",
+    },
+    stream: {
+      time: [1_783_000_000, 1_783_000_060, 1_783_000_120],
+      distance: [0, 100, 200],
+      heartrate: [100, 110, 120],
+    },
+  });
+  assert.ok(swim);
+  assert.deepEqual(
+    (swim.splits as Array<Record<string, unknown>>).map((split) => [
+      split.index,
+      split.distanceMeters,
+      split.durationSeconds,
+    ]),
+    [[1, 100, 60], [2, 100, 60]],
+  );
+
+  const capped = reduceJunctionWorkoutStreamPayload({
+    maxSamples: 66,
+    summary: {
+      id: "long-run-1",
+      sourceProviderSlug: "garmin",
+      sport: "running",
+      updated_at: "2026-07-01T15:00:00.000Z",
+    },
+    stream: {
+      time: Array.from({ length: 66 }, (_, index) => 1_783_000_000 + index * 300),
+      distance: Array.from({ length: 66 }, (_, index) => index * 1_000),
+      heartrate: Array.from({ length: 66 }, () => 130),
+    },
+  });
+  assert.ok(capped);
+  assert.equal((capped.splits as unknown[]).length, 64);
+  assertNoSampleSizedValue(capped);
+});
+
+test("workout features normalize rich compact metrics and split measurements", () => {
+  const normalized = normalizeJunctionSnapshot({
+    importedAt: "2026-07-02T00:00:00.000Z",
+    timeseries: {
+      workout_stream: [workoutFeature({
+        firstHalfAverageHeartRate: 125,
+        secondHalfAverageHeartRate: 135,
+        averageCadence: 174,
+        maxCadence: 188,
+        cadenceUnit: "steps-per-minute",
+        averagePower: 220,
+        maxPower: 310,
+        averageSpeed: 3.2,
+        maxSpeed: 4.7,
+        splits: [{
+          index: 1,
+          distanceMeters: 1_000,
+          durationSeconds: 300,
+          endedAt: "2026-07-01T12:05:00.000Z",
+          averageHeartRate: 128,
+          averageCadence: 172,
+          cadenceUnit: "steps-per-minute",
+          averagePower: 215,
+        }],
+      })],
+    },
+  });
+
+  assert.deepEqual(normalized.events?.[0]?.fields?.measurements, [
+    { metric: "workout-minutes", unit: "minutes", value: 30 },
+    { metric: "workout-distance-km", unit: "km", value: 5 },
+    { metric: "average-heart-rate", unit: "bpm", value: 130 },
+    { metric: "max-heart-rate", unit: "bpm", value: 170 },
+    { metric: "first-half-average-workout-heart-rate", unit: "bpm", value: 125 },
+    { metric: "second-half-average-workout-heart-rate", unit: "bpm", value: 135 },
+    {
+      metric: "average-workout-cadence",
+      unit: "steps-per-minute",
+      value: 174,
+    },
+    { metric: "max-workout-cadence", unit: "steps-per-minute", value: 188 },
+    { metric: "average-workout-power", unit: "watt", value: 220 },
+    { metric: "max-workout-power", unit: "watt", value: 310 },
+    { metric: "average-workout-speed", unit: "mps", value: 3.2 },
+    { metric: "max-workout-speed", unit: "mps", value: 4.7 },
+  ]);
+  assert.deepEqual(normalized.events?.[1]?.fields?.measurements, [
+    { metric: "workout-split-duration", unit: "seconds", value: 300 },
+    { metric: "workout-split-distance", unit: "meter", value: 1_000 },
+    { metric: "average-workout-split-heart-rate", unit: "bpm", value: 128 },
+    {
+      metric: "average-workout-split-cadence",
+      unit: "steps-per-minute",
+      value: 172,
+    },
+    { metric: "average-workout-split-power", unit: "watt", value: 215 },
+  ]);
+  assertNoSampleSizedValue(normalized.evidenceParts?.[0]?.content);
+});
+
+test("newer workout features authoritatively withdraw omitted split facets", () => {
+  const split = {
+    index: 1,
+    distanceMeters: 1_000,
+    durationSeconds: 300,
+    endedAt: "2026-07-01T12:05:00.000Z",
+    averageHeartRate: 130,
+    averageCadence: 174,
+    cadenceUnit: "steps-per-minute",
+    averagePower: 220,
+  };
+  const first = normalizeJunctionSnapshot({
+    importedAt: "2026-07-02T00:00:00.000Z",
+    timeseries: { workout_stream: [workoutFeature({ splits: [split] })] },
+  });
+  const correction = normalizeJunctionSnapshot({
+    importedAt: "2026-07-02T01:00:00.000Z",
+    timeseries: {
+      workout_stream: [workoutFeature({
+        splits: [],
+        version: "2026-07-01T14:00:00.000Z",
+      })],
+    },
+  });
+
+  assert.equal(first.events?.length, 2);
+  assert.equal(first.events?.[1]?.externalRef?.facet, "workout-stream-split-1");
+  assert.deepEqual(first.authoritativeEventSets?.[0]?.facetPrefixes, [
+    "workout-stream-feature",
+    "workout-stream-split",
+  ]);
+  assert.deepEqual(first.authoritativeEventSets?.[0]?.currentFacets, [
+    "workout-stream-feature",
+    "workout-stream-split-1",
+  ]);
+  assert.deepEqual(correction.authoritativeEventSets?.[0]?.currentFacets, [
+    "workout-stream-feature",
+  ]);
+  assert.equal(
+    first.authoritativeEventSets?.[0]?.resourceId,
+    correction.authoritativeEventSets?.[0]?.resourceId,
+  );
+  assert.equal(correction.authoritativeEventSets?.[0]?.version, "2026-07-01T14:00:00.000Z");
 });
 
 test("workout stream reduction skips a record when any present metric has invalid cardinality", () => {
