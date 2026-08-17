@@ -7,6 +7,7 @@ import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/
 import {
   createMurphOgImageRef,
   createMurphPageMetadata,
+  MURPH_INDEXABLE_PAGE_ROBOTS,
 } from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
@@ -30,6 +31,9 @@ export async function generateMetadata({
   });
 
   return createMurphPageMetadata({
+    alternates: {
+      canonical: `/biomarkers/${encodeURIComponent(biomarker.routeId)}/research`,
+    },
     description: `Evidence and Commons memo for ${biomarker.title}.`,
     openGraph: {
       type: "article",
@@ -37,6 +41,7 @@ export async function generateMetadata({
     },
     twitter: { images: [ogImage] },
     title: `${biomarker.title} research | Murph Biomarkers`,
+    robots: MURPH_INDEXABLE_PAGE_ROBOTS,
   });
 }
 
