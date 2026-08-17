@@ -6453,18 +6453,28 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   const schedulerJob = findScheduledHistoryJob("2026-04-03T00:00:00.000Z");
   assert.deepEqual(schedulerJob.payload, {
     historicalBackfill: true,
-    historicalWindowStart: "2026-03-18T00:00:00.000Z",
+    historicalWindowStart: "2025-09-21T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
     sourceLifecycleEpoch: 1,
     sourceProviderSlug: "garmin",
     windowEnd: "2026-03-20T00:00:00.000Z",
-    windowStart: "2026-03-18T00:00:00.000Z",
+    windowStart: "2025-09-21T00:00:00.000Z",
   });
   assert.equal(
     findScheduledHistoryJob("2026-04-04T00:00:00.000Z").dedupeKey,
     schedulerJob.dedupeKey,
   );
+  // Keep this webhook/lifecycle execution proof intentionally small; the raw
+  // scheduler payload above independently proves the fixed 180-day horizon.
+  const twoDayExecutionJob = {
+    ...schedulerJob,
+    payload: {
+      ...schedulerJob.payload,
+      historicalWindowStart: "2026-03-18T00:00:00.000Z",
+      windowStart: "2026-03-18T00:00:00.000Z",
+    },
+  };
 
   const updateCases = [
     {
@@ -6511,8 +6521,8 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       }),
     }),
     {
-      ...createJob("resource", schedulerJob.payload ?? {}),
-      dedupeKey: schedulerJob.dedupeKey ?? null,
+      ...createJob("resource", twoDayExecutionJob.payload ?? {}),
+      dedupeKey: twoDayExecutionJob.dedupeKey ?? null,
     },
   );
   const scheduledFollowUp = scheduledResult.scheduledJobs?.find((job) =>
@@ -10368,8 +10378,6 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
     }
     throw new Error(`Unexpected request: ${url.toString()}`);
   }, {
-    summaryBackfillDays: 2,
-    timeseriesBackfillDays: 2,
     timeseriesResources: ["caffeine"],
   });
   const sourceRecord = createConnectionSource({
@@ -10401,6 +10409,17 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
     ),
     "Junction should schedule extended caffeine history.",
   );
+  // Keep this continuation proof intentionally small; the scheduler's fixed
+  // 180-day extended horizon is covered independently in the owner-policy test.
+  const twoDayInitialJob = {
+    ...initialJob,
+    payload: {
+      ...initialJob.payload,
+      historicalWindowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    },
+  };
   const acceptedDays: string[] = [];
   const context = createJunctionJobContext({
     account: createAccount({ sources: [source] }),
@@ -10428,7 +10447,7 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
   const firstResult = await executeJunctionJob(
     provider,
     context,
-    createJobFromInput(initialJob),
+    createJobFromInput(twoDayInitialJob),
   );
   const preciseContinuation = requireValue(
     firstResult.scheduledJobs?.find((job) =>

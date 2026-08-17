@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-14
+Updated: 2026-08-17
 
 ## Goal
 
@@ -119,6 +119,12 @@ Updated: 2026-08-14
 - Preserve the current `m1` 13-slot layout and current pagination by default.
 - Completion coverage is monotonic initial-obligation evidence, not a claim of
   permanent provider completeness.
+- Every resource classified by the package-owned Junction timeseries policy as
+  extended uses a fixed 180-day initial window. The policy's resource set is
+  unchanged; `timeseriesBackfillDays` remains the public generic bound for
+  dense/default resources, ECG voltage, workout streams, and full-timeseries
+  collection; `summaryBackfillDays` continues to own summary history and does not
+  set the extended horizon.
 - The final pre-import lifecycle read prevents known-stale imports but is not an
   atomic importer-write fence. A reconnect racing after that read can overlap an
   import; the post-import read still prevents stale continuation or certification.

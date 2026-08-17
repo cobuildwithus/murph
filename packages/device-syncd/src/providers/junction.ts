@@ -394,6 +394,7 @@ const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
 ]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
+const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_DAYS = 180;
 const JUNCTION_NOTE_HISTORY_BACKFILL_VERSION = 2;
 
 interface JunctionBoundedTimeseriesBackfillPolicy {
@@ -603,8 +604,6 @@ export function createJunctionDeviceSyncProvider(
   } = runtimeConfig;
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
-  const extendedTimeseriesBackfillDays =
-    config.timeseriesBackfillDays ?? summaryBackfillDays;
   const extendedBackfillTimeseriesResources = timeseriesResources.filter(
     (resource) => resolveJunctionExtendedTimeseriesBackfillPolicy(resource) !== null,
   );
@@ -963,7 +962,7 @@ export function createJunctionDeviceSyncProvider(
         // sparse resources catch up the current extended-history window once.
         const window = buildExtendedTimeseriesBackfillWindow({
           anchorAt: policy.anchor === "source_first_seen" ? source.firstSeenAt : now,
-          days: extendedTimeseriesBackfillDays,
+          days: JUNCTION_EXTENDED_TIMESERIES_BACKFILL_DAYS,
         });
         return {
           anchor: policy.anchor,
