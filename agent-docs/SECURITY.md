@@ -1393,7 +1393,7 @@ Last verified: 2026-08-16
 - The protected native iOS PR E2E lane may share a Junction sandbox only through
   an explicit non-empty `JUNCTION_CLIENT_USER_ID_NAMESPACE` whose default is
   absent everywhere else. The dedicated Vercel custom environment is the sole
-  namespace value owner: the controller reads that exact plain variable by its
+  namespace value owner: the controller reads that exact non-sensitive variable by its
   configured Vercel environment-variable id and validates its custom-environment
   scope before any cleanup, deployment retirement, deployment, or native
   dispatch. Cleanup must completely enumerate and validate the configured team,

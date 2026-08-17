@@ -34,10 +34,9 @@ export function inspectVercelJunctionNamespaceVariable(
   const targets = Array.isArray(raw.target) ? raw.target : [raw.target];
   if (raw.id !== environmentVariableId
       || raw.key !== JUNCTION_NAMESPACE_ENV_KEY
-      || raw.type !== "plain"
+      || raw.type !== "encrypted"
       || raw.decrypted !== true
-      || targets.length !== 1
-      || targets[0] !== "preview"
+      || targets.length !== 0
       || !Array.isArray(raw.customEnvironmentIds)
       || raw.customEnvironmentIds.length !== 1
       || raw.customEnvironmentIds[0] !== customEnvironmentId) {
