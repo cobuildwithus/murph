@@ -39,6 +39,18 @@ const EXPECTED_DEFAULTS = [
 
 const EXPECTED_NEW_SPARSE_OPT_INS = [
   "body_mass_index",
+  "fat",
+  "lean_body_mass",
+  "waist_circumference",
+];
+
+const EXPECTED_METABOLIC_DEFAULTS = [
+  "carbohydrates",
+  "insulin_injection",
+];
+
+const EXPECTED_WIDE_CHUNK_IN_POLICY_ORDER = [
+  "body_mass_index",
   "carbohydrates",
   "fat",
   "insulin_injection",
@@ -119,21 +131,24 @@ const EXPECTED_ALLOWED_IN_PARENT_ORDER = [
   ...EXPECTED_DENSE_FEATURE_OPT_INS,
 ];
 
+const EXPECTED_DEFAULTS_IN_POLICY_ORDER = EXPECTED_ALLOWED_IN_PARENT_ORDER.filter(
+  (resource) => !EXPECTED_OPT_IN.includes(resource),
+);
+
 describe("Junction timeseries resource policy", () => {
   it("derives unique exact known/default/opt-in/allowed projections", () => {
     const names = JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((entry) => entry.resource);
     expect(new Set(names).size).toBe(names.length);
     expect(JUNCTION_KNOWN_TIMESERIES_RESOURCES).toEqual(names);
-    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toEqual([
-      ...EXPECTED_DEFAULTS,
-      ...EXPECTED_SPARSE_CLINICAL_DEFAULTS,
-    ]);
+    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toEqual(EXPECTED_DEFAULTS_IN_POLICY_ORDER);
     expect(JUNCTION_OPT_IN_TIMESERIES_RESOURCES).toEqual(EXPECTED_OPT_IN);
     expect(JUNCTION_ALLOWED_TIMESERIES_RESOURCES).toEqual(EXPECTED_ALLOWED_IN_PARENT_ORDER);
   });
 
-  it("keeps the remaining sparse slice off by default with extended bounded history", () => {
-    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual(EXPECTED_NEW_SPARSE_OPT_INS);
+  it("keeps sparse policy explicit and bounded", () => {
+    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual(
+      EXPECTED_WIDE_CHUNK_IN_POLICY_ORDER,
+    );
     for (const resource of EXPECTED_NEW_SPARSE_OPT_INS) {
       expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).not.toContain(resource);
       expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
@@ -152,6 +167,17 @@ describe("Junction timeseries resource policy", () => {
         historyWindow: "summary_history",
         maxCanonicalRecordsPerWindow: 100,
         maxSamplesPerWindow: 128,
+      });
+    }
+    for (const resource of EXPECTED_METABOLIC_DEFAULTS) {
+      expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toContain(resource);
+      expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
+      expect(resolveJunctionTimeseriesResourcePolicy(resource)).toMatchObject({
+        enabledByDefault: true,
+        fetchChunkDays: 30,
+        historyWindow: "summary_history",
+        maxCanonicalRecordsPerWindow: 3_000,
+        maxSamplesPerWindow: 3_840,
       });
     }
     expect(resolveJunctionTimeseriesResourcePolicy("blood_oxygen")).toMatchObject({

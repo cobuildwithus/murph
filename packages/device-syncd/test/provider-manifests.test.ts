@@ -122,10 +122,10 @@ describe("deviceSyncProviderManifests", () => {
     expect(junctionConfig.timeseriesResources)
       .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
     expect([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].slice(-7)).toEqual([
-      "forced_expiratory_volume_1",
       "forced_vital_capacity",
       "heart_rate_alert",
       "inhaler_usage",
+      "insulin_injection",
       "peak_expiratory_flow_rate",
       "sleep_apnea_alert",
       "fall",
@@ -149,9 +149,7 @@ describe("deviceSyncProviderManifests", () => {
 
     expect([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]).toEqual([
       "body_mass_index",
-      "carbohydrates",
       "fat",
-      "insulin_injection",
       "lean_body_mass",
       "waist_circumference",
       "calories_basal",
