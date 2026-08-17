@@ -90,6 +90,7 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     totalCalories: makeMetric("totalCalories", 530),
     totalElevationGainMeters: makeMetric("totalElevationGainMeters", 42),
     walkingAverageHeartRate: makeMetric("walkingAverageHeartRate", 101),
+    workoutFeatures: [],
     workoutStrain: makeMetric("workoutStrain", 11.1),
   };
 }
@@ -152,6 +153,7 @@ function makeDataset(overrides: Partial<WearableDataset>): WearableDataset {
     provenanceDiagnostics: overrides.provenanceDiagnostics ?? [],
     rawMetricCandidates: overrides.rawMetricCandidates ?? [],
     sleepWindows: overrides.sleepWindows ?? [],
+    workoutFeatures: overrides.workoutFeatures ?? [],
   };
 }
 

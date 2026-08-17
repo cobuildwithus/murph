@@ -1,7 +1,12 @@
-import { HostedStripeEventStatus, type PrismaClient } from "@prisma/client";
+import {
+  HostedStripeEventStatus,
+  Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
+import { HOSTED_FAMILY_MAX_SEATS } from "./billing-plans";
 import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
@@ -115,6 +120,7 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
 
     if (refreshedEvent.status === HostedStripeEventStatus.completed) {
       return await resolveCompletedHostedStripeWebhookActivationResult({
+        activationResultJson: refreshedEvent.activationResultJson ?? null,
         eventId: input.eventId,
         eventType: refreshedEvent.type,
         prisma,
@@ -150,7 +156,8 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
     eventId: reconciled.eventId,
     eventType: storedEvent.type,
     hostedExecutionEventId: reconciled.hostedExecutionEventId ?? null,
-    hostedExecutionMailboxItemId: null,
+    hostedExecutionMailboxItemId:
+      reconciled.hostedExecutionMailboxItemId ?? null,
   };
 }
 
@@ -305,6 +312,7 @@ async function readHostedStripeWebhookEventReceipt(
       status: true,
       type: true,
       updatedAt: true,
+      activationResultJson: true,
     },
     where: {
       eventId,
@@ -359,11 +367,20 @@ function buildHostedStripeWebhookInlineRetryReset(
 }
 
 async function resolveCompletedHostedStripeWebhookActivationResult(input: {
+  activationResultJson: Prisma.JsonValue | null;
   eventId: string;
   eventType: string;
   prisma: PrismaClient;
 }): Promise<HostedStripeWebhookReconciliationResult> {
-  const activations = await readHostedStripeActivationMailboxItemsForCompletedEvent(input);
+  const storedActivationPointers = parseHostedStripeActivationResultJson(
+    input.activationResultJson,
+  );
+  const activations = storedActivationPointers
+    ? await readStoredHostedStripeActivationMailboxItems({
+        mailboxItemIds: storedActivationPointers,
+        prisma: input.prisma,
+      })
+    : await readLegacyHostedStripeActivationMailboxItemsForCompletedEvent(input);
   const firstActivation = activations[0] ?? null;
 
   return firstActivation
@@ -388,43 +405,112 @@ async function resolveCompletedHostedStripeWebhookActivationResult(input: {
     };
 }
 
-async function readHostedStripeActivationMailboxItemsForCompletedEvent(input: {
+async function readLegacyHostedStripeActivationMailboxItemsForCompletedEvent(input: {
   eventId: string;
   eventType: string;
   prisma: PrismaClient;
 }): Promise<Array<{ dedupeKey: string; id: string; userId: string }>> {
   const activations = new Map<string, { dedupeKey: string; id: string; userId: string }>();
+  const stripeSourceType = normalizeHostedStripeDispatchSourceType(input.eventType);
+  // Legacy Pulse trial conversion preserves the raw Stripe event id but
+  // intentionally replaces its source type. Completed receipts written before
+  // activationResultJson need both exact identities.
+  const legacyTrialSourceType =
+    input.eventType === "checkout.session.completed" ||
+    input.eventType.startsWith("customer.subscription.")
+      ? "hosted.legacy_trial.converted_to_starter"
+      : null;
 
   for (const sourceEventId of await resolveHostedStripeActivationSourceEventIds(input.eventId)) {
-    const sourceType = sourceEventId.startsWith("family-subscription:")
-      ? "hosted.family.sponsorship"
-      : normalizeHostedStripeDispatchSourceType(input.eventType);
-    const sourceActivations = await input.prisma.hostedMailboxItem.findMany({
-      orderBy: {
-        createdAt: "desc",
-      },
-      select: {
-        dedupeKey: true,
-        id: true,
-        userId: true,
-      },
-      where: {
-        dedupeKey: {
-          endsWith: `:${sourceEventId}`,
-          startsWith: `member.activated:${sourceType}:`,
-        },
-        kind: "member.activated",
-      },
-    });
+    const sourceTypes = sourceEventId.startsWith("family-subscription:")
+      ? ["hosted.family.sponsorship"]
+      : sourceEventId === input.eventId && legacyTrialSourceType
+        ? [stripeSourceType, legacyTrialSourceType]
+        : [stripeSourceType];
 
-    for (const activation of sourceActivations) {
-      if (!activations.has(activation.dedupeKey)) {
-        activations.set(activation.dedupeKey, activation);
+    for (const sourceType of sourceTypes) {
+      const sourceActivations = await input.prisma.hostedMailboxItem.findMany({
+        orderBy: {
+          createdAt: "desc",
+        },
+        select: {
+          dedupeKey: true,
+          id: true,
+          userId: true,
+        },
+        where: {
+          dedupeKey: {
+            endsWith: `:${sourceEventId}`,
+            startsWith: `member.activated:${sourceType}:`,
+          },
+          kind: "member.activated",
+        },
+      });
+
+      for (const activation of sourceActivations) {
+        if (!activations.has(activation.dedupeKey)) {
+          activations.set(activation.dedupeKey, activation);
+        }
       }
     }
   }
 
   return [...activations.values()];
+}
+
+function parseHostedStripeActivationResultJson(
+  value: Prisma.JsonValue | null,
+): string[] | null {
+  if (value === null) {
+    return null;
+  }
+  if (
+    typeof value !== "object"
+    || Array.isArray(value)
+    || value.schema !== "hosted.stripe.activation-result.v1"
+    || !Array.isArray(value.activationMailboxItemIds)
+  ) {
+    throw new Error("Stored Stripe activation result has an unsupported schema.");
+  }
+
+  if (value.activationMailboxItemIds.length > HOSTED_FAMILY_MAX_SEATS) {
+    throw new Error("Stored Stripe activation result exceeds the Family seat limit.");
+  }
+
+  const mailboxItemIds = value.activationMailboxItemIds.map((mailboxItemId) => {
+    if (typeof mailboxItemId !== "string" || mailboxItemId.length === 0) {
+      throw new Error("Stored Stripe activation result is malformed.");
+    }
+    return mailboxItemId;
+  });
+  if (new Set(mailboxItemIds).size !== mailboxItemIds.length) {
+    throw new Error("Stored Stripe activation result contains duplicate pointers.");
+  }
+  return mailboxItemIds;
+}
+
+async function readStoredHostedStripeActivationMailboxItems(input: {
+  mailboxItemIds: string[];
+  prisma: PrismaClient;
+}): Promise<Array<{ dedupeKey: string; id: string; userId: string }>> {
+  if (input.mailboxItemIds.length === 0) {
+    return [];
+  }
+  const rows = await input.prisma.hostedMailboxItem.findMany({
+    select: { dedupeKey: true, id: true, userId: true },
+    where: {
+      id: { in: input.mailboxItemIds },
+      kind: "member.activated",
+    },
+  });
+  const rowsById = new Map(rows.map((row) => [row.id, row] as const));
+  // Account deletion can cascade a pointed-to mailbox row while the
+  // member-agnostic Stripe receipt remains. Preserve the completed outcome and
+  // wake only pointers that still have a durable owner.
+  return input.mailboxItemIds.flatMap((mailboxItemId) => {
+    const row = rowsById.get(mailboxItemId);
+    return row ? [row] : [];
+  });
 }
 
 async function resolveHostedStripeActivationSourceEventIds(eventId: string): Promise<string[]> {

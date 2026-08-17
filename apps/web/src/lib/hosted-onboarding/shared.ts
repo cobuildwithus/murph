@@ -22,6 +22,22 @@ export async function lockHostedMemberRow(
   await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }
 
+export async function readHostedMemberSuspensionAfterLockTx(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  memberId: string,
+): Promise<"active" | "missing" | "suspended"> {
+  const rows = await tx.$queryRaw<Array<{ suspendedAt: Date | null }>>`
+    SELECT suspended_at AS "suspendedAt"
+    FROM hosted_member
+    WHERE id = ${memberId}
+  `;
+  const owner = rows[0];
+  if (!owner) {
+    return "missing";
+  }
+  return owner.suspendedAt ? "suspended" : "active";
+}
+
 export async function lockHostedMemberSponsoredAccessRows(
   tx: Pick<Prisma.TransactionClient, "$queryRaw">,
   memberId: string,

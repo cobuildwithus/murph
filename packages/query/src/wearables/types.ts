@@ -113,7 +113,44 @@ export interface WearableActivityDay {
   totalCalories: WearableResolvedMetric;
   totalElevationGainMeters: WearableResolvedMetric;
   walkingAverageHeartRate: WearableResolvedMetric;
+  workoutFeatures: WearableWorkoutFeature[];
   workoutStrain: WearableResolvedMetric;
+}
+
+export interface WearableWorkoutSplitFeature {
+  averageCadence?: number;
+  averageHeartRate?: number;
+  averagePowerWatts?: number;
+  cadenceUnit?: string;
+  distanceMeters?: number;
+  durationSeconds?: number;
+  endedAt: string;
+  index: number;
+}
+
+export interface WearableWorkoutFeature {
+  activityType?: string;
+  averageCadence?: number;
+  averageHeartRate?: number;
+  averagePowerWatts?: number;
+  averageSpeedMps?: number;
+  cadenceUnit?: string;
+  distanceKm?: number;
+  durationMinutes?: number;
+  firstHalfAverageHeartRate?: number;
+  maxCadence?: number;
+  maxHeartRate?: number;
+  maxPowerWatts?: number;
+  maxSpeedMps?: number;
+  provider: string;
+  secondHalfAverageHeartRate?: number;
+  splits: WearableWorkoutSplitFeature[];
+  startedAt: string;
+}
+
+export interface WearableWorkoutFeatureCandidate {
+  date: string;
+  feature: WearableWorkoutFeature;
 }
 
 /**
@@ -648,6 +685,7 @@ export interface WearableDataset {
   provenanceDiagnostics: readonly WearableProvenanceDiagnostic[];
   rawMetricCandidates: readonly WearableMetricCandidate[];
   sleepWindows: readonly WearableSleepWindowCandidate[];
+  workoutFeatures: readonly WearableWorkoutFeatureCandidate[];
 }
 
 export interface WearableMetricSuppressionEvidence {

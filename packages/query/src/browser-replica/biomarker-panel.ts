@@ -9,7 +9,7 @@ import {
 import type {
   BrowserVaultMetricRow,
   BrowserVaultMetricSelectionRow,
-  BrowserVaultQueryClient,
+  BrowserVaultMetricSeriesCapableQueryClient as BrowserVaultMetricsCapableQueryClient,
 } from "./shared.ts";
 import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
 
@@ -51,7 +51,7 @@ export interface BrowserVaultBiomarkerTrendDefaults {
 
 export interface SelectBrowserVaultBiomarkerPanelInput {
   biomarkerKey: string;
-  client: BrowserVaultQueryClient | null;
+  client: BrowserVaultMetricsCapableQueryClient | null;
   generatedAt?: string;
   label: string;
   metricKey?: string;

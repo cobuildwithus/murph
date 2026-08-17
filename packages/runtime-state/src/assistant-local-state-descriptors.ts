@@ -99,7 +99,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/auto-reply",
-    "Assistant auto-reply terminal handling evidence that must move with hosted reply replay and cleanup continuity.",
+    "Assistant auto-reply terminal evidence plus exact-route consumption watermark and pending-claim state that must move with hosted reply replay, restore, and cleanup continuity.",
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/hosted-provider-cleanup.json",

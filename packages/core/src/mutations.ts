@@ -335,6 +335,8 @@ interface ImportDeviceBatchInput {
 }
 
 interface ImportDeviceBatchResultBase {
+  affectedEventDayKeys?: string[];
+  affectedSparseCalendarTargets?: JunctionSparseCalendarTarget[];
   applied: boolean;
   ingestId: string | null;
   ingestShardPath: string | null;
@@ -1589,17 +1591,21 @@ function normalizeDeviceAuthoritativeEventSets(
 
   for (const set of sets) {
     for (const facet of set.currentFacets) {
+      // Unversioned members follow complete-set reconciliation: the set's
+      // version orders only retraction tombstones, while member events collapse
+      // by semantic content and reassert through the serialized set seam.
       const hasCurrentEvent = events.some(({ seed }) =>
         seed.externalRef?.system === set.system
         && seed.externalRef.resourceType === set.resourceType
         && seed.externalRef.resourceId === set.resourceId
-        && seed.externalRef.version === set.version
+        && (seed.externalRef.version === set.version
+          || seed.externalRef.version === undefined)
         && seed.externalRef.facet === facet
       );
       if (!hasCurrentEvent) {
         throw new VaultError(
           "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
-          `Device authoritative event set current facet "${facet}" has no matching versioned event.`,
+          `Device authoritative event set current facet "${facet}" has no matching current event.`,
         );
       }
     }
@@ -1820,7 +1826,112 @@ function compareIncomingExternalRefVersion(
   return compareIsoTimestampsAscending(incomingVersion, existingVersion);
 }
 
-// Event-content equality ignores per-import identity (id, lifecycle,
+const JUNCTION_SPARSE_INTERVAL_RESOURCE_TYPE_SUFFIXES = [
+  "-caffeine",
+  "-mindfulness-minutes",
+  "-water",
+] as const;
+const MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS = 64;
+
+interface JunctionSparseCalendarTarget {
+  dayKey: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
+}
+
+function isJunctionSparseIntervalExternalRef(externalRef: ExternalRef): boolean {
+  return externalRef.system === "junction"
+    && externalRef.facet === "interval"
+    && JUNCTION_SPARSE_INTERVAL_RESOURCE_TYPE_SUFFIXES.some((suffix) =>
+      externalRef.resourceType.endsWith(suffix)
+    );
+}
+
+function junctionSparseAffectedCalendarTargets(
+  events: readonly EventRecord[],
+  index: EventExternalRefIndex,
+): JunctionSparseCalendarTarget[] {
+  const targets = new Map<string, JunctionSparseCalendarTarget>();
+  for (const event of events) {
+    if (!event.externalRef || !isJunctionSparseIntervalExternalRef(event.externalRef)) {
+      continue;
+    }
+    const sourceProviderSlug = event.dataOrigin?.sourceProviderSlug;
+    const externalRefSourceProviderSlug = JUNCTION_SPARSE_INTERVAL_RESOURCE_TYPE_SUFFIXES
+      .find((suffix) => event.externalRef?.resourceType.endsWith(suffix));
+    const resolvedSourceProviderSlug = sourceProviderSlug ?? (
+      externalRefSourceProviderSlug
+        ? event.externalRef.resourceType.slice(
+            "junction-".length,
+            -externalRefSourceProviderSlug.length,
+          )
+        : ""
+    );
+    if (!resolvedSourceProviderSlug) {
+      continue;
+    }
+    const addTarget = (dayKey: string) => {
+      const target: JunctionSparseCalendarTarget = {
+        dayKey,
+        sourceProviderSlug: resolvedSourceProviderSlug,
+        ...(event.dataOrigin?.sourceInstanceId === undefined
+          ? {}
+          : { sourceInstanceId: event.dataOrigin.sourceInstanceId }),
+        ...(event.dataOrigin?.sourceType
+          ? { sourceType: event.dataOrigin.sourceType }
+          : {}),
+      };
+      targets.set(stableStringify(target), target);
+    };
+    addTarget(event.dayKey);
+    // Include the immediately displaced provider day so the caller can persist
+    // one calendar-refresh job for each side of this accepted transition.
+    const previousRevision = eventSpineRevision(event) - 1;
+    if (previousRevision < 1) {
+      continue;
+    }
+    const dayHistory = index.junctionSparseDayHistoryById.get(event.id);
+    const previousDayKey = dayHistory?.latest.revision === previousRevision
+      ? dayHistory.latest.dayKey
+      : dayHistory?.previous?.revision === previousRevision
+        ? dayHistory.previous.dayKey
+        : undefined;
+    if (previousDayKey) {
+      addTarget(previousDayKey);
+    }
+  }
+  const affectedTargets = [...targets.values()].sort((left, right) =>
+    left.dayKey.localeCompare(right.dayKey)
+    || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    || (left.sourceType ?? "").localeCompare(right.sourceType ?? "")
+    || (left.sourceInstanceId ?? "").localeCompare(right.sourceInstanceId ?? "")
+  );
+  const affectedDayKeys = new Set(affectedTargets.map((target) => target.dayKey));
+  if (
+    affectedDayKeys.size > MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS
+    || affectedTargets.length > MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS
+  ) {
+    throw new VaultError(
+      "DEVICE_IMPORT_AFFECTED_DAY_LIMIT_EXCEEDED",
+      "Junction sparse import exceeded the affected provider-day limit; nothing was imported.",
+      {
+        affectedDayCount: affectedDayKeys.size,
+        affectedTargetCount: affectedTargets.length,
+        maxAllowed: MAX_JUNCTION_SPARSE_AFFECTED_DAY_KEYS,
+      },
+    );
+  }
+  return affectedTargets;
+}
+
+function junctionSparseAffectedDayKeys(
+  targets: readonly JunctionSparseCalendarTarget[],
+): string[] {
+  return [...new Set(targets.map((target) => target.dayKey))].sort();
+}
+
+// Device-sync content equality ignores per-import identity (id, lifecycle,
 // recordedAt) AND rawRefs, because device imports mint fresh raw-artifact
 // paths on every sync run. Member-edit comparison additionally excludes the
 // immutable provider attribution fields while retaining every public edit.
@@ -2029,9 +2140,17 @@ function orderEventImportDecisionsBySourceVersion(
 }
 
 interface EventExternalRefIndex {
+  junctionSparseDayHistoryById: Map<string, {
+    latest: { dayKey: string; revision: number };
+    previous?: { dayKey: string; revision: number };
+  }>;
   deviceOwnerRevisionsByRefKeyAndFingerprint: Map<
     string,
     Map<string, Map<string, Set<number>>>
+  >;
+  junctionNoIdProfilePredecessorsByScope: Map<
+    string,
+    IndexedEventExternalRefMatch[]
   >;
   latestByRefKey: Map<string, IndexedEventExternalRefMatch>;
   latestById: Map<string, EventRecord>;
@@ -2061,6 +2180,8 @@ async function indexLatestEventsByExternalRef(
     string,
     Map<string, Map<string, Set<number>>>
   >();
+  const junctionSparseDayHistoryById: EventExternalRefIndex["junctionSparseDayHistoryById"] =
+    new Map();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
   const latestById = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
@@ -2092,8 +2213,30 @@ async function indexLatestEventsByExternalRef(
           Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
         );
         const revisions = revisionsById.get(entry.record.id) ?? new Set<number>();
-        revisions.add(eventSpineRevision(entry.record));
+        const revision = eventSpineRevision(entry.record);
+        revisions.add(revision);
         revisionsById.set(entry.record.id, revisions);
+        if (
+          entry.record.externalRef
+          && isJunctionSparseIntervalExternalRef(entry.record.externalRef)
+        ) {
+          const candidate = { dayKey: entry.record.dayKey, revision };
+          const history = junctionSparseDayHistoryById.get(entry.record.id);
+          if (!history || revision > history.latest.revision) {
+            junctionSparseDayHistoryById.set(entry.record.id, {
+              latest: candidate,
+              ...(history ? { previous: history.latest } : {}),
+            });
+          } else if (
+            revision < history.latest.revision
+            && (!history.previous || revision > history.previous.revision)
+          ) {
+            junctionSparseDayHistoryById.set(entry.record.id, {
+              latest: history.latest,
+              previous: candidate,
+            });
+          }
+        }
 
         const state = entriesById.get(entry.record.id);
         const latestDeviceExternalRefEntryByRefKey =
@@ -2174,8 +2317,13 @@ async function indexLatestEventsByExternalRef(
     }
   }
 
+  const junctionNoIdProfilePredecessorsByScope =
+    indexJunctionNoIdProfilePredecessors(latestByRefKey.values());
+
   return {
     deviceOwnerRevisionsByRefKeyAndFingerprint,
+    junctionNoIdProfilePredecessorsByScope,
+    junctionSparseDayHistoryById,
     latestByRefKey,
     latestById,
     maxRevisionById,
@@ -2206,6 +2354,7 @@ const JUNCTION_SLEEP_STAGE_METRIC_FACETS = new Set([
 ]);
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
 const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
+const JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION = "junction-no-id-profile.v1";
 
 function deviceDataOriginSourceMatches(
   existing: DeviceDataOrigin | undefined,
@@ -2231,6 +2380,99 @@ function deviceDataOriginSourceMatches(
   }
 
   return compared;
+}
+
+function junctionNoIdProfileScopeKey(
+  externalRef: ExternalRef | undefined,
+  origin: DeviceDataOrigin | undefined,
+): string | null {
+  if (
+    externalRef?.system !== "junction"
+    || !externalRef.resourceType.endsWith("-profile")
+    || typeof externalRef.facet !== "string"
+    || !/^profile-[a-f0-9]{16}$/u.test(externalRef.resourceId)
+    || origin?.sourceProviderSlug === undefined
+  ) {
+    return null;
+  }
+
+  return stableStringify({
+    resourceType: externalRef.resourceType,
+    facet: externalRef.facet,
+    aggregatorProvider: origin.aggregatorProvider,
+    sourceProviderSlug: origin.sourceProviderSlug,
+    sourceType: origin.sourceType,
+    sourceInstanceId: origin.sourceInstanceId,
+  });
+}
+
+function junctionNoIdProfilePredecessorRevision(
+  match: IndexedEventExternalRefMatch,
+): string | null {
+  const externalRef = match.indexedExternalRef;
+  const providerRecord = match.indexedRecord;
+  const origin = providerRecord.dataOrigin;
+  const persistedRevision = externalRef.version ?? providerRecord.occurredAt;
+  if (
+    !junctionNoIdProfileScopeKey(externalRef, origin)
+    || !isWritableIsoDateTime(persistedRevision)
+    || providerRecord.occurredAt !== persistedRevision
+    || origin?.observedAtRaw !== persistedRevision
+    || (
+      externalRef.version === undefined
+      && origin.normalizerVersion !== "junction-normalizer.v1"
+    )
+    || isDeletedEventSpineRecord(match.record)
+  ) {
+    return null;
+  }
+
+  const expectedResourceId = `profile-${createHash("sha256")
+    .update(JSON.stringify([
+      "profile",
+      origin.sourceProviderSlug,
+      origin.sourceType,
+      origin.sourceInstanceId,
+      providerRecord.occurredAt,
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
+  return externalRef.resourceId === expectedResourceId ? persistedRevision : null;
+}
+
+function isJunctionNoIdProfilePredecessor(
+  match: IndexedEventExternalRefMatch,
+): boolean {
+  return junctionNoIdProfilePredecessorRevision(match) !== null;
+}
+
+function indexJunctionNoIdProfilePredecessors(
+  matches: Iterable<IndexedEventExternalRefMatch>,
+): Map<string, IndexedEventExternalRefMatch[]> {
+  const byScope = new Map<string, IndexedEventExternalRefMatch[]>();
+  for (const match of matches) {
+    if (!isJunctionNoIdProfilePredecessor(match)) {
+      continue;
+    }
+
+    const scopeKey = junctionNoIdProfileScopeKey(
+      match.indexedExternalRef,
+      match.indexedRecord.dataOrigin,
+    );
+    if (!scopeKey) {
+      continue;
+    }
+
+    const scopedMatches = byScope.get(scopeKey) ?? [];
+    scopedMatches.push(match);
+    byScope.set(scopeKey, scopedMatches);
+  }
+  return byScope;
+}
+
+function isIncomingJunctionNoIdProfile(record: EventRecord): boolean {
+  return record.dataOrigin?.normalizerVersion === JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION
+    && junctionNoIdProfileScopeKey(record.externalRef, record.dataOrigin) !== null;
 }
 
 function isDateLikeWhoopBodyMeasurementResourceId(resourceId: string): boolean {
@@ -2531,33 +2773,9 @@ function isCompatibleLegacyExternalRefMatch(
     return hasStableJunctionSleepStageSummaryLegacyProof(existing, incoming);
   }
 
-  if (isJunctionNoIdProfileLegacyRef(existing, incoming, legacyExternalRef)) {
-    return true;
-  }
-
   return existing.record.dayKey === incoming.dayKey ||
     (isSameObservationFacet(existing.record, incoming) &&
       hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef));
-}
-
-function isJunctionNoIdProfileLegacyRef(
-  existing: IndexedEventExternalRefMatch,
-  incoming: EventRecord,
-  legacyExternalRef: ExternalRef,
-): boolean {
-  const primaryRef = incoming.externalRef;
-  const existingOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
-  return legacyExternalRef.system === "junction"
-    && legacyExternalRef.resourceType.endsWith("-profile")
-    && /^profile-[a-f0-9]{16}$/u.test(legacyExternalRef.resourceId)
-    && /^profile-[a-f0-9]{16}$/u.test(primaryRef?.resourceId ?? "")
-    && legacyExternalRef.resourceId !== primaryRef?.resourceId
-    && primaryRef?.version !== undefined
-    && existing.indexedRecord.occurredAt === primaryRef.version
-    && existingOrigin?.sourceProviderSlug !== undefined
-    && existingOrigin.sourceProviderSlug === incoming.dataOrigin?.sourceProviderSlug
-    && existingOrigin.sourceInstanceId === incoming.dataOrigin?.sourceInstanceId
-    && deviceDataOriginSourceMatches(existingOrigin, incoming.dataOrigin);
 }
 
 function selectLatestIndexedEventExternalRefMatch(
@@ -2669,6 +2887,25 @@ function buildLegacyExternalRefReservations(
 ): Map<string, LegacyExternalRefReservation> {
   const reservations = new Map<string, LegacyExternalRefReservation>();
 
+  const reserve = (
+    entry: PreparedDeviceEventEntry,
+    refKey: string,
+    indexedMatch: IndexedEventExternalRefMatch,
+  ): void => {
+    const existing = reservations.get(refKey);
+    if (existing && existing.entry !== entry) {
+      const externalRef = indexedMatch.indexedExternalRef;
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Event legacy externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+          `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+          "matched multiple incoming device events; ambiguous legacy cleanup must be repaired explicitly.",
+      );
+    }
+
+    reservations.set(refKey, { entry, indexedMatch });
+  };
+
   for (const entry of entries) {
     const externalRef = entry.record.externalRef;
     if (!externalRef) {
@@ -2687,17 +2924,37 @@ function buildLegacyExternalRefReservations(
         continue;
       }
 
-      const existing = reservations.get(legacyRefKey);
-      if (existing && existing.entry !== entry) {
-        throw new VaultError(
-          "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-          `Event legacy externalRef "${legacyExternalRef.system}/${legacyExternalRef.resourceType}/` +
-            `${legacyExternalRef.resourceId}${legacyExternalRef.facet ? `#${legacyExternalRef.facet}` : ""}" ` +
-            "matched multiple incoming device events; ambiguous legacy cleanup must be repaired explicitly.",
-        );
-      }
+      reserve(entry, legacyRefKey, indexedMatch);
+    }
 
-      reservations.set(legacyRefKey, { entry, indexedMatch });
+    if (!isIncomingJunctionNoIdProfile(entry.record)) {
+      continue;
+    }
+
+    const scopeKey = junctionNoIdProfileScopeKey(externalRef, entry.record.dataOrigin);
+    const predecessorMatches = scopeKey
+      ? (index.junctionNoIdProfilePredecessorsByScope.get(scopeKey) ?? []).filter((match) => {
+          const predecessorRefKey = eventExternalRefKey(match.indexedExternalRef);
+          const predecessorRevision = junctionNoIdProfilePredecessorRevision(match);
+          const incomingRevision = externalRef.version;
+          return predecessorRefKey !== primaryRefKey
+            && predecessorRevision !== null
+            && incomingRevision !== undefined
+            && isWritableIsoDateTime(incomingRevision)
+            && compareIsoTimestampsAscending(incomingRevision, predecessorRevision) > 0;
+        })
+      : [];
+    if (predecessorMatches.length > 1) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Junction profile externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+          `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+          "matched multiple persisted predecessor identities; nothing was imported.",
+      );
+    }
+    const predecessor = predecessorMatches[0];
+    if (predecessor) {
+      reserve(entry, eventExternalRefKey(predecessor.indexedExternalRef), predecessor);
     }
   }
 
@@ -2713,6 +2970,8 @@ async function buildDeviceEventIdentityContext(
     return {
       index: {
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+        junctionNoIdProfilePredecessorsByScope: new Map(),
+        junctionSparseDayHistoryById: new Map(),
         latestByRefKey: new Map(),
         latestById: new Map(),
         maxRevisionById: new Map(),
@@ -2738,6 +2997,9 @@ function cloneDeviceEventIdentityContext(
     index: {
       deviceOwnerRevisionsByRefKeyAndFingerprint:
         context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
+      junctionNoIdProfilePredecessorsByScope:
+        context.index.junctionNoIdProfilePredecessorsByScope,
+      junctionSparseDayHistoryById: context.index.junctionSparseDayHistoryById,
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
       maxRevisionById: new Map(context.index.maxRevisionById),
@@ -2752,6 +3014,8 @@ function buildEmptyDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
     deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+    junctionNoIdProfilePredecessorsByScope: new Map(),
+    junctionSparseDayHistoryById: new Map(),
     latestByRefKey: new Map(),
     latestById: new Map(),
     maxRevisionById: new Map(),
@@ -2833,6 +3097,9 @@ function resolveDeviceEventIdentity(
   const primaryMatch = reservedForLegacyClaim && reservedForLegacyClaim.entry !== entry
     ? undefined
     : index.latestByRefKey.get(refKey);
+  const explicitLegacyRefKeys = new Set(
+    entry.legacyExternalRefs.map((legacyExternalRef) => eventExternalRefKey(legacyExternalRef)),
+  );
   const legacyMatchedEntries = entry.legacyExternalRefs
     .map((legacyExternalRef) => ({
       legacyExternalRef,
@@ -2861,9 +3128,20 @@ function resolveDeviceEventIdentity(
       return (!reservation || reservation.entry === entry)
         && isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
     });
+  const implicitReservedEntries = [...legacyReservations.entries()]
+    .filter(([reservedRefKey, reservation]) =>
+      reservation.entry === entry
+      && reservedRefKey !== refKey
+      && !explicitLegacyRefKeys.has(reservedRefKey)
+    )
+    .map(([reservedRefKey, reservation]) => ({
+      refKey: reservedRefKey,
+      indexedMatch: reservation.indexedMatch,
+    }));
   const matchedEntries = [
     ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
     ...legacyMatchedEntries,
+    ...implicitReservedEntries,
   ];
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
@@ -3089,6 +3367,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
     const { matchedEntries, refKey } = resolved;
     let latest = resolved.latest;
+    const migratesJunctionNoIdProfileIdentity = isIncomingJunctionNoIdProfile(entry.record)
+      && matchedEntries.some((match) => match.refKey !== refKey);
 
     if (!latest) {
       const canonicalRecordId = preferredCanonicalIdByPreparedId.get(entry.record.id)
@@ -3165,9 +3445,25 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     }
 
+    // An unversioned member declared current by this batch's authoritative set
+    // reasserts a retracted facet in serialized arrival order rather than
+    // treating the tombstone's identical content as an exact replay. Ordinary
+    // versionless deliveries without complete-set authority never resurrect.
+    // Only provider-owned authoritative-set retractions may be reasserted.
+    // Their tombstones carry the set's explicit version marker on the external
+    // reference, while a member deletion preserves the member's unversioned
+    // reference and must stay deleted under authoritative replay.
+    const reassertsUnversionedSetMember = Boolean(
+      authoritativeSet
+      && indexedSourceVersionComparison === null
+      && isDeletedEventSpineRecord(latest)
+      && latest.source === "device"
+      && latest.externalRef?.version !== undefined,
+    );
     if (
       deviceEventContentKey(latest) === deviceEventContentKey(entry.record)
       && (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0)
+      && !reassertsUnversionedSetMember
     ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
@@ -3175,7 +3471,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    if (matchesIndexedProviderContent) {
+    if (matchesIndexedProviderContent && !reassertsUnversionedSetMember) {
       const historicalUserEditMatch = matchedEntries.find((match) =>
         hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
       );
@@ -3195,6 +3491,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
         };
         const retainedMemberRevision: EventRecord = {
           ...latest,
+          ...(migratesJunctionNoIdProfileIdentity
+            ? { externalRef, dataOrigin: entry.record.dataOrigin }
+            : {}),
           lifecycle: buildEventSpineLifecycle(providerRevision + 1),
         };
         const retainedMemberPath = historicalUserEditMatch.indexedMatch.relativePath
@@ -3240,6 +3539,48 @@ async function reconcileDeviceEventEntriesByExternalRef(
         "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
         "Immutable device event externalRef already exists with different content; nothing was imported.",
       );
+    }
+
+    if (
+      indexedProviderMatch
+      && isJunctionSparseIntervalExternalRef(indexedProviderMatch.indexedExternalRef)
+      && isJunctionSparseIntervalExternalRef(externalRef)
+      && (
+        indexedProviderMatch.indexedExternalRef.version !== undefined
+        || externalRef.version !== undefined
+      )
+    ) {
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        indexedProviderMatch.indexedExternalRef,
+        externalRef,
+      );
+      if (sourceVersionComparison === null) {
+        const incomingVersion = externalRef.version;
+        const existingVersion = indexedProviderMatch.indexedExternalRef.version;
+        const replacesUnorderedBaseline = incomingVersion !== undefined
+          && isWritableIsoDateTime(incomingVersion)
+          && (existingVersion === undefined || !isWritableIsoDateTime(existingVersion));
+        if (!replacesUnorderedBaseline) {
+          throw new VaultError(
+            "EVENT_SOURCE_REVISION_UNORDERED",
+            "Changed Junction sparse intervals require comparable explicit provider revisions; nothing was imported.",
+          );
+        }
+      }
+      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
+        skippedDuplicateCount += 1;
+        if (eventSpineRevisionsAreComplete(index, latest.id)) {
+          retainedPreparedIds.add(entry.record.id);
+        }
+        records.push(latest);
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          "Junction sparse interval content conflicts at the same provider revision; nothing was imported.",
+        );
+      }
     }
 
     if (
@@ -3309,13 +3650,25 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    if (isDeletedEventSpineRecord(latest)) {
+    if (isDeletedEventSpineRecord(latest) && !reassertsUnversionedSetMember) {
+      // A member-authored deletion tombstone (unversioned reference) stays
+      // dead under authoritative replay: no append, no index change, so a
+      // later empty-then-populated cadence cannot launder the deletion away.
+      if (authoritativeSet && indexedSourceVersionComparison === null) {
+        skippedDuplicateCount += 1;
+        retainedPreparedIds.add(entry.record.id);
+        records.push(latest);
+        continue;
+      }
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
+    // A member declared current by this batch's authoritative set falls
+    // through to the superseding append below, so the reassertion lands as
+    // the next serialized event-spine revision over the retraction tombstone.
 
     if (shouldKeepExistingJunctionSleepStageSummaryObservation(latest, entry.record)) {
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
@@ -3341,6 +3694,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const retainedMemberRevision = historicalUserEditMatch
       ? {
           ...latest,
+          ...(migratesJunctionNoIdProfileIdentity
+            ? { externalRef, dataOrigin: entry.record.dataOrigin }
+            : {}),
           lifecycle: buildEventSpineLifecycle(revision + 1),
         }
       : null;
@@ -5327,8 +5683,8 @@ export async function importDeviceBatch({
   };
   const buildExactNoopResult = (
     storedDelivery: IntegrationIngestRecord,
-  ): NoopDeviceBatchImportResult =>
-    buildStoredDeviceDeliveryNoopResult({
+  ): NoopDeviceBatchImportResult => {
+    const result = buildStoredDeviceDeliveryNoopResult({
       associationEvidenceRolesByPreparedRecordId,
       currentEventOwners,
       deviceBatchPlan,
@@ -5337,6 +5693,15 @@ export async function importDeviceBatch({
       sampleRecords,
       storedDelivery,
     });
+    const affectedSparseCalendarTargets = junctionSparseAffectedCalendarTargets(
+      result.events,
+      eventIdentityContext.index,
+    );
+    const affectedEventDayKeys = junctionSparseAffectedDayKeys(affectedSparseCalendarTargets);
+    return affectedSparseCalendarTargets.length > 0
+      ? { ...result, affectedEventDayKeys, affectedSparseCalendarTargets }
+      : result;
+  };
   let fullInspectionAttempted = false;
   const ensureFullInspection = async (): Promise<void> => {
     if (fullInspectionAttempted || (ingestIdInspection.historyComplete && !ingestIdInspection.unsafe)) {
@@ -5714,6 +6079,11 @@ export async function importDeviceBatch({
       const preparedId = deviceBatchPlan.preparedEvents[index]?.record.id;
       return preparedId !== undefined && associablePreparedEventIds.has(preparedId);
     });
+    const affectedSparseCalendarTargets = junctionSparseAffectedCalendarTargets(
+      canonicalEventRecords,
+      eventIdentityContext.index,
+    );
+    const affectedEventDayKeys = junctionSparseAffectedDayKeys(affectedSparseCalendarTargets);
     const persistenceEvidenceRolesByPreparedRecordId = new Map(
       deviceBatchPlan.preparedEvents
         .filter((entry) =>
@@ -5804,6 +6174,9 @@ export async function importDeviceBatch({
       retainedEvidenceRolesByPreparedRecordId,
     );
     const buildNoopResult = (): NoopDeviceBatchImportResult => ({
+      ...(affectedEventDayKeys.length > 0
+        ? { affectedEventDayKeys, affectedSparseCalendarTargets }
+        : {}),
       applied: false,
       ingestId: null,
       ingestShardPath: null,
@@ -5819,6 +6192,8 @@ export async function importDeviceBatch({
       auditPath: null,
     });
     return {
+      affectedEventDayKeys,
+      affectedSparseCalendarTargets,
       buildNoopResult,
       eventAppendPlan,
       eventOutputs,
@@ -5875,6 +6250,8 @@ export async function importDeviceBatch({
   }
 
   const {
+    affectedEventDayKeys,
+    affectedSparseCalendarTargets,
     buildNoopResult,
     eventAppendPlan,
     eventOutputs,
@@ -5968,6 +6345,9 @@ export async function importDeviceBatch({
       });
 
       return {
+        ...(affectedEventDayKeys.length > 0
+          ? { affectedEventDayKeys, affectedSparseCalendarTargets }
+          : {}),
         applied: true,
         ingestId: persistedImportId,
         ingestShardPath,

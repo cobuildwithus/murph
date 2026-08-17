@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   extractIsoDatePrefix,
+  formatTimeZoneDateTimeParts,
   ID_PREFIXES,
   isStrictIsoDate,
   JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
@@ -89,6 +90,20 @@ import {
   type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
 import {
+  assertJunctionTimeseriesResponseBound,
+  assertJunctionTimeseriesSourceDayBound,
+  assertJunctionTimeseriesOutputBounds,
+  deriveJunctionTimeseriesFeatureEnvelope,
+  getJunctionDenseFidelityPolicy,
+  getJunctionSparseIntervalPolicy,
+  isJunctionDenseFidelityResource,
+  isJunctionSparseIntervalResource,
+  type JunctionDenseFidelityResource,
+  type JunctionFidelityResource,
+  type JunctionSparseIntervalResource,
+  type JunctionTimeseriesFidelityPoint,
+} from "./junction-timeseries-fidelity.ts";
+import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
   buildJunctionBoundedFeatureIdentity,
@@ -103,6 +118,16 @@ import {
   resolveJunctionOrigin,
   type JunctionOriginFallback,
 } from "./junction-origin.ts";
+import {
+  buildJunctionTemporalFeatures,
+  isJunctionTemporalFeatureResource,
+  JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY,
+  JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY,
+  JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT,
+  type JunctionTemporalFeatureObservationQualifiers,
+  type JunctionTemporalFeatureResult,
+  type JunctionTemporalFeatureSample,
+} from "./junction-timeseries-features.ts";
 
 import type {
   DeviceAuthoritativeEventSetPayload,
@@ -119,6 +144,10 @@ import type {
   NormalizedDeviceBatch,
 } from "./types.ts";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
+
+export {
+  JUNCTION_DENSE_FIDELITY_RESOURCES,
+} from "./junction-timeseries-fidelity.ts";
 
 export {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -153,10 +182,22 @@ export interface JunctionSnapshotInput {
   importedAt?: string | number | Date;
   windowStart?: string | number | Date;
   windowEnd?: string | number | Date;
+  timeseriesWindowKind?: JunctionTimeseriesWindowKind;
+  strictSparseCalendarRepair?: JunctionSparseCalendarRepairExpectation;
   connections?: unknown[];
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
+}
+
+export type JunctionTimeseriesWindowKind = "calendar_day" | "precise";
+
+export interface JunctionSparseCalendarRepairExpectation {
+  dayKey: string;
+  resource: JunctionSparseIntervalResource;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string | null;
 }
 
 export type JunctionSummaryResource =
@@ -175,6 +216,14 @@ export interface JunctionSummaryNormalizationEvidenceWindow {
 export interface JunctionBloodPressureProviderRecordIdentityEvidence {
   readonly providerRecordCount: number;
   readonly repairStableExternalRefResourceIds: readonly (string | null)[];
+}
+
+export interface JunctionDailyTimeseriesAggregateIdentity {
+  dayKey: string;
+  resource: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string | null;
 }
 
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
@@ -200,10 +249,15 @@ interface NormalizationContext {
   importedAt?: string;
   windowStart?: string;
   windowEnd?: string;
+  timeseriesWindowKind?: JunctionTimeseriesWindowKind;
+  strictSparseCalendarRepair?: JunctionSparseCalendarRepairExpectation;
   connectionsByKey: ReadonlyMap<string, PlainObject>;
   evidenceParts: DeviceEvidencePartPayload[];
   events: DeviceEventPayload[];
   samples: DeviceSamplePayload[];
+  temporalFeatureCurrentFacetsByResource: Map<string, Set<string>>;
+  temporalFeatureObservationCountsByDay: Map<string, number>;
+  temporalFeatureSourceDay?: NonNullable<DeviceProviderNormalizationContext["completeSourceDay"]>;
   authoritativeEventSets: DeviceAuthoritativeEventSetPayload[];
 }
 
@@ -234,6 +288,14 @@ const junctionSnapshotSchema = z.object({
   importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
   windowStart: z.union([z.string(), z.number(), z.date()]).optional(),
   windowEnd: z.union([z.string(), z.number(), z.date()]).optional(),
+  timeseriesWindowKind: z.enum(["calendar_day", "precise"]).optional(),
+  strictSparseCalendarRepair: z.object({
+    dayKey: z.string(),
+    resource: z.enum(["caffeine", "water", "mindfulness_minutes"]),
+    sourceInstanceId: z.string().nullable().optional(),
+    sourceProviderSlug: z.string(),
+    sourceType: z.string().nullable().optional(),
+  }).strict().optional(),
   connections: z.array(z.unknown()).optional(),
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
@@ -480,6 +542,38 @@ const JUNCTION_RECORD_INTERVAL_START_TIMESTAMP_PATHS = [
   "time_start",
   "bedtimeStart",
   "bedtime_start",
+] as const;
+const JUNCTION_TIMESERIES_RECORD_ID_PATHS = [
+  "id",
+  "resourceId",
+  "resource_id",
+  "externalId",
+  "external_id",
+  "providerId",
+  "provider_id",
+  "recordId",
+  "record_id",
+  "sampleId",
+  "sample_id",
+] as const;
+const JUNCTION_INTERVAL_START_TIMESTAMP_PATHS = [
+  "start",
+  "startAt",
+  "start_at",
+  "timeStart",
+  "time_start",
+] as const;
+const JUNCTION_INTERVAL_END_TIMESTAMP_PATHS = [
+  "end",
+  "endAt",
+  "end_at",
+  "timeEnd",
+  "time_end",
+] as const;
+const JUNCTION_INTERVAL_UNIT_PATHS = [
+  "unit",
+  "valueUnit",
+  "value_unit",
 ] as const;
 const JUNCTION_RECORD_TIMESTAMP_PATHS = [
   ...JUNCTION_RECORD_POINT_TIMESTAMP_PATHS,
@@ -920,12 +1014,16 @@ const SLEEP_ASLEEP_STAGE_METRIC_NAMES = new Set([
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
 const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
 const JUNCTION_SLEEP_UNSPECIFIED_TOTAL_NORMALIZER_VERSION = "junction-sleep-unspecified-total.v1";
+const JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION = "junction-no-id-profile.v1";
 
 type JunctionSleepStage = Exclude<JunctionSleepStageValue, "asleep_unspecified">;
 
 interface JunctionDailyTimeseriesAggregate {
+  authoritativeEmptyCalendarSet: boolean;
   dayKey: string;
+  duplicateSampleCount: number;
   entry: PlainObject;
+  fidelitySamples: JunctionTimeseriesFidelityPoint[];
   firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
@@ -938,7 +1036,30 @@ interface JunctionDailyTimeseriesAggregate {
   sum: number;
   sumSquares: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  temporalFeatureInputSuppressed?: boolean;
+  temporalFeatureResult?: JunctionTemporalFeatureResult;
+  temporalFeatureSamples?: JunctionTemporalFeatureSample[];
   timeZone?: string;
+}
+
+interface JunctionSparseIntervalReading {
+  contentFingerprint: string;
+  dayKey: string;
+  durationSeconds: number;
+  endAt: string;
+  externalIdentityHash: string;
+  providerUnit?: string;
+  providerValue: number;
+  recordedAt?: string;
+  resourceContext: ResourceContext;
+  startAt: string;
+  sourceVersion?: string;
+  stableIdentity: boolean;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+  value: number;
+  entry: PlainObject;
+  fidelityRecordKey: string;
 }
 
 interface JunctionFeatureTimeseriesAggregate {
@@ -1068,6 +1189,7 @@ export function normalizeJunctionSnapshot(
   const windowStart = normalizeTimestamp(snapshot.windowStart);
   const windowEnd = normalizeTimestamp(snapshot.windowEnd);
   const evidenceParts: DeviceEvidencePartPayload[] = [];
+  const accountId = stringId(snapshot.accountId);
   const events: DeviceEventPayload[] = [];
   const samples: DeviceSamplePayload[] = [];
   const companionHrvRmssd = snapshot.companionHrvRmssd === undefined
@@ -1082,20 +1204,30 @@ export function normalizeJunctionSnapshot(
     importedAt,
     windowStart,
     windowEnd,
+    timeseriesWindowKind: snapshot.timeseriesWindowKind,
+    strictSparseCalendarRepair: snapshot.strictSparseCalendarRepair,
     connectionsByKey: buildConnectionsByKey(connections),
     evidenceParts,
     events,
     samples,
+    temporalFeatureCurrentFacetsByResource: new Map(),
+    temporalFeatureObservationCountsByDay: new Map(),
+    temporalFeatureSourceDay: providerContext.completeSourceDay,
     authoritativeEventSets: [],
   };
 
   normalizeSummaries(snapshot.summaries, context);
   normalizeTimeseries(snapshot.timeseries, context);
   normalizeCompanionHrvRmssd(companionHrvRmssd, context);
+  finalizeJunctionTemporalAuthoritativeSets(context);
+  assertJunctionTimeseriesOutputBounds({
+    eventCount: events.length,
+    evidencePartCount: evidenceParts.length,
+  });
 
   return makeNormalizedDeviceBatch({
     provider: "junction",
-    accountId: stringId(snapshot.accountId),
+    accountId,
     importedAt,
     events,
     samples: samples.length > 0 ? samples : undefined,
@@ -1108,6 +1240,7 @@ export function normalizeJunctionSnapshot(
       normalizerVersion: "junction-normalizer.v1",
       windowStart,
       windowEnd,
+      timeseriesWindowKind: snapshot.timeseriesWindowKind,
       connections: connections.length,
       summaryResources: listAllowedResourceKeys(snapshot.summaries, SUMMARY_RESOURCE_ALLOWLIST),
       timeseriesResources: listAllowedResourceKeys(snapshot.timeseries, TIMESERIES_RESOURCE_ALLOWLIST),
@@ -1201,6 +1334,8 @@ export function identifyJunctionBloodPressureProviderRecords(
     evidenceParts: [],
     events: [],
     samples: [],
+    temporalFeatureCurrentFacetsByResource: new Map(),
+    temporalFeatureObservationCountsByDay: new Map(),
     authoritativeEventSets: [],
   };
   const repairStableExternalRefResourceIds: Array<string | null> = [];
@@ -1262,6 +1397,8 @@ export function countAcceptedJunctionDailyTimeseriesProviderRecords(
     evidenceParts: [],
     events: [],
     samples: [],
+    temporalFeatureCurrentFacetsByResource: new Map(),
+    temporalFeatureObservationCountsByDay: new Map(),
     authoritativeEventSets: [],
   };
 
@@ -1689,8 +1826,7 @@ interface JunctionFeatureTimeseriesDescriptor {
 // respiratory_rate, blood_oxygen, glucose, and stress_level are discrete
 // timeseries; vo2_max, body_temperature(_delta), basal_body_temperature,
 // caffeine, water, mindfulness_minutes, heart_rate_recovery_one_minute,
-// sleep_breathing_disturbance, and afib_burden are interval timeseries. All
-// reduce to daily-grain observations below.
+// sleep_breathing_disturbance, and afib_burden are interval timeseries.
 const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
   JunctionTimeseriesResource,
   JunctionDailyTimeseriesDescriptor,
@@ -2058,7 +2194,9 @@ function normalizeTimeseries(
   timeseries: Record<string, unknown> | undefined,
   context: NormalizationContext,
 ): void {
-  for (const [resource, payload] of allowedResourceEntries(timeseries, TIMESERIES_RESOURCE_ALLOWLIST)) {
+  const resources = allowedResourceEntries(timeseries, TIMESERIES_RESOURCE_ALLOWLIST)
+    .sort(([left], [right]) => left.localeCompare(right));
+  for (const [resource, payload] of resources) {
     if (resource === JUNCTION_NOTE_RESOURCE) {
       pushJunctionNoteTags(payload, resource, slugify(resource, "timeseries"), context);
       continue;
@@ -2093,13 +2231,36 @@ function normalizeTimeseries(
 
     const dailyDescriptor = JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource);
     if (dailyDescriptor) {
-      pushJunctionDailyTimeseriesObservations(
-        payload,
-        resource,
-        slugify(resource, "timeseries"),
-        context,
-        dailyDescriptor,
-      );
+      let selectedSparseRecords: ReadonlyMap<string, JunctionSparseIntervalReading> | undefined;
+      if (isJunctionSparseIntervalResource(resource)) {
+        assertJunctionSparseCalendarRepairRowsValid({
+          context,
+          descriptor: dailyDescriptor,
+          payload,
+          resource,
+          resourceSlug: slugify(resource, "timeseries"),
+        });
+        selectedSparseRecords = pushJunctionSparseIntervalReadings(
+          payload,
+          resource,
+          slugify(resource, "timeseries"),
+          context,
+          dailyDescriptor,
+        );
+      }
+      if (
+        !isJunctionSparseIntervalResource(resource)
+        || context.timeseriesWindowKind !== "precise"
+      ) {
+        pushJunctionDailyTimeseriesObservations(
+          payload,
+          resource,
+          slugify(resource, "timeseries"),
+          context,
+          dailyDescriptor,
+          selectedSparseRecords,
+        );
+      }
       continue;
     }
 
@@ -2113,6 +2274,90 @@ function normalizeTimeseries(
         featureDescriptor,
       );
     }
+  }
+}
+
+function assertJunctionSparseCalendarRepairRowsValid(input: {
+  context: NormalizationContext;
+  descriptor: JunctionDailyTimeseriesDescriptor;
+  payload: unknown;
+  resource: JunctionSparseIntervalResource;
+  resourceSlug: string;
+}): void {
+  const expectation = input.context.strictSparseCalendarRepair;
+  if (!expectation || expectation.resource !== input.resource) {
+    return;
+  }
+
+  const entries = timeseriesResourceEntries(input.payload);
+  assertJunctionTimeseriesResponseBound(input.resource, entries.length);
+  if (
+    entries.length === 1
+    && entries[0]?.entry.authoritativeEmptyCalendarSet === true
+  ) {
+    return;
+  }
+
+  for (const [index, { entry, originFallback }] of entries.entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource: input.resource,
+      resourceSlug: input.resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: `junction-timeseries-reading-${input.resourceSlug}`,
+      context: input.context,
+    });
+    const providerValue = finiteNumber(firstValueFromPaths(entry, input.descriptor.valuePaths));
+    const value = input.descriptor.normalizeValue(providerValue, entry);
+    const startRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS);
+    const endRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS);
+    const startAt = resolveSafeTimestamp(startRaw);
+    const endAt = resolveSafeTimestamp(endRaw);
+    const timestamp = resourceContext && startRaw
+      ? resolveJunctionSparseIntervalTimestamp(
+          entry,
+          startRaw,
+          input.context,
+          resourceContext.sourceProviderSlug,
+        )
+      : null;
+    const dayKey = timestamp && startAt
+      ? resolveJunctionTimeseriesAggregateDayKey(
+          entry,
+          timestamp,
+          startAt,
+          input.context.defaultTimeZone,
+        )
+      : undefined;
+    const valid = resourceContext !== null
+      && providerValue !== undefined
+      && value !== undefined
+      && startRaw !== undefined
+      && endRaw !== undefined
+      && startAt !== undefined
+      && endAt !== undefined
+      && Date.parse(endAt) >= Date.parse(startAt)
+      && dayKey === expectation.dayKey
+      && resourceContext.sourceProviderSlug === expectation.sourceProviderSlug
+      && (expectation.sourceType == null
+        || resourceContext.origin.sourceType === expectation.sourceType)
+      && (expectation.sourceInstanceId == null
+        || resourceContext.origin.sourceInstanceId === expectation.sourceInstanceId);
+    if (!valid) {
+      throw new JunctionSparseCalendarRepairNormalizationError();
+    }
+  }
+}
+
+export class JunctionSparseCalendarRepairNormalizationError extends Error {
+  readonly code = "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION";
+  readonly retryable = true;
+
+  constructor() {
+    super("Junction calendar refresh contained a row that could not be applied completely.");
+    this.name = "JunctionSparseCalendarRepairNormalizationError";
   }
 }
 
@@ -2173,15 +2418,36 @@ function pushJunctionWorkoutStreamFeature(
   }
 
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
-  const timestamp = withTimestampOverride(baseTimestamp, {
+  const workoutDayKey = firstStringFromPaths(entry, ["workoutDayKey"]);
+  const timestamp = {
+    ...baseTimestamp,
     occurredAt,
-    dayKey: extractIsoDatePrefix(occurredAt) ?? baseTimestamp.dayKey,
+    dayKey: workoutDayKey,
     observedAtRaw: stringId(startRaw) ?? occurredAt,
-  });
+  };
   const durationSeconds = firstNonNegativeNumberFromPaths(entry, ["durationSeconds"]);
   const distanceMeters = firstNonNegativeNumberFromPaths(entry, ["distanceMeters"]);
   const averageHeartRate = firstNonNegativeNumberFromPaths(entry, ["averageHeartRate"]);
   const maxHeartRate = firstNonNegativeNumberFromPaths(entry, ["maxHeartRate"]);
+  const firstHalfAverageHeartRate = firstNonNegativeNumberFromPaths(
+    entry,
+    ["firstHalfAverageHeartRate"],
+  );
+  const secondHalfAverageHeartRate = firstNonNegativeNumberFromPaths(
+    entry,
+    ["secondHalfAverageHeartRate"],
+  );
+  const averageCadence = firstNonNegativeNumberFromPaths(entry, ["averageCadence"]);
+  const maxCadence = firstNonNegativeNumberFromPaths(entry, ["maxCadence"]);
+  const cadenceUnit = firstStringFromPaths(entry, ["cadenceUnit"]);
+  const averagePower = firstNonNegativeNumberFromPaths(entry, ["averagePower"]);
+  const maxPower = firstNonNegativeNumberFromPaths(entry, ["maxPower"]);
+  const averageSpeed = firstNonNegativeNumberFromPaths(entry, ["averageSpeed"]);
+  const maxSpeed = firstNonNegativeNumberFromPaths(entry, ["maxSpeed"]);
+  const sport = firstStringFromPaths(entry, ["sport"]);
+  const workoutTags = sport
+    ? [`workout-sport-${trimSlugToLength(slugify(sport, "workout"), 60)}`]
+    : undefined;
   const measurements = [
     ...(durationSeconds === undefined
       ? []
@@ -2195,18 +2461,52 @@ function pushJunctionWorkoutStreamFeature(
     ...(maxHeartRate === undefined
       ? []
       : [{ metric: "max-heart-rate", value: maxHeartRate, unit: "bpm" }]),
+    ...(firstHalfAverageHeartRate === undefined
+      ? []
+      : [{
+          metric: "first-half-average-workout-heart-rate",
+          value: firstHalfAverageHeartRate,
+          unit: "bpm",
+        }]),
+    ...(secondHalfAverageHeartRate === undefined
+      ? []
+      : [{
+          metric: "second-half-average-workout-heart-rate",
+          value: secondHalfAverageHeartRate,
+          unit: "bpm",
+        }]),
+    ...(averageCadence === undefined || !cadenceUnit
+      ? []
+      : [{ metric: "average-workout-cadence", value: averageCadence, unit: cadenceUnit }]),
+    ...(maxCadence === undefined || !cadenceUnit
+      ? []
+      : [{ metric: "max-workout-cadence", value: maxCadence, unit: cadenceUnit }]),
+    ...(averagePower === undefined
+      ? []
+      : [{ metric: "average-workout-power", value: averagePower, unit: "watt" }]),
+    ...(maxPower === undefined
+      ? []
+      : [{ metric: "max-workout-power", value: maxPower, unit: "watt" }]),
+    ...(averageSpeed === undefined
+      ? []
+      : [{ metric: "average-workout-speed", value: averageSpeed, unit: "mps" }]),
+    ...(maxSpeed === undefined
+      ? []
+      : [{ metric: "max-workout-speed", value: maxSpeed, unit: "mps" }]),
   ];
   if (measurements.length === 0) {
     return;
   }
 
-  context.events.push(stripUndefined({
+  const emittedEvents: DeviceEventPayload[] = [];
+  emittedEvents.push(stripUndefined({
     kind: "measurement",
     occurredAt,
     recordedAt: timestamp.recordedAt,
     dayKey: timestamp.dayKey,
     source: "device",
     title: "Junction workout stream features",
+    tags: workoutTags,
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(
       resourceContext,
@@ -2217,6 +2517,83 @@ function pushJunctionWorkoutStreamFeature(
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
     fields: { measurements },
   }));
+
+  const splits = Array.isArray(entry.splits)
+    ? entry.splits.flatMap((value) => {
+        const split = asPlainObject(value);
+        return split ? [split] : [];
+      })
+    : [];
+  for (const split of splits) {
+    const splitIndex = finiteNumber(split.index);
+    const splitEndedAt = normalizeTimestamp(firstValueFromPaths(split, ["endedAt"]));
+    const splitDistance = firstNonNegativeNumberFromPaths(split, ["distanceMeters"]);
+    const splitDuration = firstNonNegativeNumberFromPaths(split, ["durationSeconds"]);
+    if (
+      splitIndex === undefined
+      || !Number.isSafeInteger(splitIndex)
+      || !splitEndedAt
+      || splitDistance === undefined
+      || splitDuration === undefined
+    ) {
+      continue;
+    }
+    const splitCadence = firstNonNegativeNumberFromPaths(split, ["averageCadence"]);
+    const splitCadenceUnit = firstStringFromPaths(split, ["cadenceUnit"]);
+    const splitHeartRate = firstNonNegativeNumberFromPaths(split, ["averageHeartRate"]);
+    const splitPower = firstNonNegativeNumberFromPaths(split, ["averagePower"]);
+    const splitMeasurements = [
+      { metric: "workout-split-duration", value: splitDuration, unit: "seconds" },
+      { metric: "workout-split-distance", value: splitDistance, unit: "meter" },
+      ...(splitHeartRate === undefined
+        ? []
+        : [{ metric: "average-workout-split-heart-rate", value: splitHeartRate, unit: "bpm" }]),
+      ...(splitCadence === undefined || !splitCadenceUnit
+        ? []
+        : [{
+            metric: "average-workout-split-cadence",
+            value: splitCadence,
+            unit: splitCadenceUnit,
+          }]),
+      ...(splitPower === undefined
+        ? []
+        : [{ metric: "average-workout-split-power", value: splitPower, unit: "watt" }]),
+    ];
+    emittedEvents.push(stripUndefined({
+      kind: "measurement",
+      occurredAt: splitEndedAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey: timestamp.dayKey,
+      source: "device",
+      title: `Junction workout split ${splitIndex}`,
+      tags: workoutTags,
+      evidenceRoles: resourceContext.evidenceRoles,
+      externalRef: makeJunctionExternalRef(
+        resourceContext,
+        entry,
+        timestamp,
+        `workout-stream-split-${splitIndex}`,
+      ),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: { measurements: splitMeasurements },
+    }));
+  }
+
+  context.events.push(...emittedEvents);
+  const version = junctionExternalRefVersion(resourceContext, entry);
+  const identity = emittedEvents[0]?.externalRef;
+  if (version && identity) {
+    context.authoritativeEventSets.push({
+      system: identity.system,
+      resourceType: identity.resourceType,
+      resourceId: identity.resourceId,
+      version,
+      facetPrefixes: ["workout-stream-feature", "workout-stream-split"],
+      currentFacets: emittedEvents.flatMap((event) =>
+        event.externalRef?.facet ? [event.externalRef.facet] : []
+      ),
+    });
+  }
 }
 
 function normalizeJunctionBoundedTimeseriesFeatures(
@@ -3080,6 +3457,7 @@ function pushJunctionDailyTimeseriesObservations(
   resourceSlug: string,
   context: NormalizationContext,
   descriptor: JunctionDailyTimeseriesDescriptor,
+  selectedSparseRecords?: ReadonlyMap<string, JunctionSparseIntervalReading>,
 ): void {
   for (const aggregate of buildJunctionDailyTimeseriesAggregates({
     payload,
@@ -3088,6 +3466,7 @@ function pushJunctionDailyTimeseriesObservations(
     context,
     valuePaths: descriptor.valuePaths,
     normalizeValue: descriptor.normalizeValue,
+    selectedSparseRecords,
     requireExplicitTimestamp: descriptor.requireExplicitTimestamp === true,
   })) {
     for (const observation of descriptor.observations) {
@@ -3097,6 +3476,11 @@ function pushJunctionDailyTimeseriesObservations(
         unit: observation.unit ?? descriptor.unit,
         value: junctionDailyTimeseriesStatisticValue(aggregate, observation.statistic),
       });
+    }
+    // Keep the complete feature identity present even when the provider supplied
+    // only date precision, so an empty temporal view clears older clocked facts.
+    if (isJunctionDenseFidelityResource(resource)) {
+      pushJunctionTimeseriesFeatureEnvelope(context, aggregate, resource);
     }
   }
 }
@@ -3138,6 +3522,312 @@ function junctionDailyTimeseriesCoefficientOfVariation(
   return mean === 0 ? 0 : junctionDailyTimeseriesStandardDeviation(aggregate) / mean * 100;
 }
 
+function buildJunctionTimeseriesFidelityRecordKey(input: {
+  entry: PlainObject;
+  providerUnit?: string;
+  providerValue: unknown;
+  resource: string;
+  resourceContext: ResourceContext;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+}): string {
+  const stableId = firstStringFromPaths(input.entry, JUNCTION_TIMESERIES_RECORD_ID_PATHS);
+  const shared = [
+    input.resource,
+    input.resourceContext.sourceProviderSlug,
+    input.resourceContext.origin.sourceType ?? "",
+    input.resourceContext.origin.sourceInstanceId ?? "",
+    stableId ?? "",
+    input.timestamp.dayKey ?? "",
+    input.timestamp.timestampSemantics ?? "",
+    firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]) ?? "",
+    readJunctionTimeZoneOffsetSeconds(input.entry) ?? "",
+  ];
+  if (isJunctionSparseIntervalResource(input.resource)) {
+    return JSON.stringify([
+      ...shared,
+      firstStringFromPaths(input.entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS) ?? "",
+      firstStringFromPaths(input.entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS) ?? "",
+      input.providerUnit ?? "",
+      input.providerValue,
+    ]);
+  }
+  return JSON.stringify([
+    ...shared,
+    input.timestamp.observedAtRaw ?? "",
+    input.providerUnit ?? "",
+    input.providerValue,
+  ]);
+}
+
+function buildJunctionDenseFidelityStableIdentity(
+  resource: JunctionDenseFidelityResource,
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+): string | undefined {
+  const stableId = firstStringFromPaths(entry, JUNCTION_TIMESERIES_RECORD_ID_PATHS);
+  return stableId
+    ? JSON.stringify([
+        resource,
+        resourceContext.sourceProviderSlug,
+        resourceContext.origin.sourceType ?? "",
+        resourceContext.origin.sourceInstanceId ?? "",
+        stableId,
+      ])
+    : undefined;
+}
+
+interface JunctionFidelityRecordSelection {
+  contentFingerprint: string;
+  recordKey: string;
+  sourceVersion?: string;
+}
+
+function resolveJunctionExplicitSourceVersion(
+  entry: PlainObject,
+  sourceProviderSlug: string,
+): string | undefined {
+  return resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["recordedAt", "recorded_at", "updatedAt", "updated_at"]),
+    sourceProviderSlug,
+  );
+}
+
+function selectJunctionAuthoritativeRevision<T extends {
+  contentFingerprint: string;
+  sourceVersion?: string;
+}>(
+  resource: JunctionFidelityResource,
+  existing: T,
+  candidate: T,
+): T {
+  if (existing.contentFingerprint === candidate.contentFingerprint) {
+    if (!existing.sourceVersion) return candidate.sourceVersion ? candidate : existing;
+    if (!candidate.sourceVersion) return existing;
+    return candidate.sourceVersion > existing.sourceVersion ? candidate : existing;
+  }
+
+  if (
+    !existing.sourceVersion
+    || !candidate.sourceVersion
+    || existing.sourceVersion === candidate.sourceVersion
+  ) {
+    throw new RangeError(
+      `Junction ${resource} stable-id records with different bodies require distinct explicit provider revisions.`,
+    );
+  }
+
+  return candidate.sourceVersion > existing.sourceVersion ? candidate : existing;
+}
+
+function selectJunctionDenseFidelityRecordKeys(input: {
+  context: NormalizationContext;
+  entries: readonly JunctionResourceEntry[];
+  normalizeValue: (value: unknown, entry: PlainObject) => number | undefined;
+  resource: JunctionDenseFidelityResource;
+  resourceSlug: string;
+  valuePaths: readonly string[];
+}): ReadonlyMap<string, JunctionFidelityRecordSelection> {
+  const selected = new Map<string, JunctionFidelityRecordSelection>();
+  const fallbackArtifactRole = `junction-timeseries-daily-${input.resourceSlug}`;
+
+  for (const [index, { entry, originFallback }] of input.entries.entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource: input.resource,
+      resourceSlug: input.resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole,
+      context: input.context,
+    });
+    if (!resourceContext) continue;
+
+    const stableIdentity = buildJunctionDenseFidelityStableIdentity(
+      input.resource,
+      entry,
+      resourceContext,
+    );
+    if (!stableIdentity) continue;
+
+    const providerValue = firstValueFromPaths(entry, input.valuePaths);
+    const value = input.normalizeValue(
+      firstNumberFromPaths(entry, input.valuePaths),
+      entry,
+    );
+    const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
+    const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp, false);
+    if (value === undefined || !sampleAt) continue;
+
+    const providerUnit = trimOptionalToLength(
+      firstStringFromPaths(entry, JUNCTION_INTERVAL_UNIT_PATHS),
+      160,
+    );
+    const recordKey = buildJunctionTimeseriesFidelityRecordKey({
+      entry,
+      providerUnit,
+      providerValue,
+      resource: input.resource,
+      resourceContext,
+      timestamp,
+    });
+    const candidate: JunctionFidelityRecordSelection = {
+      contentFingerprint: recordKey,
+      recordKey,
+      sourceVersion: resolveJunctionExplicitSourceVersion(
+        entry,
+        resourceContext.sourceProviderSlug,
+      ),
+    };
+    const existing = selected.get(stableIdentity);
+    selected.set(
+      stableIdentity,
+      existing
+        ? selectJunctionAuthoritativeRevision(input.resource, existing, candidate)
+        : candidate,
+    );
+  }
+
+  return selected;
+}
+
+function buildJunctionTimeseriesFidelityPoint(input: {
+  defaultTimeZone?: string;
+  entry: PlainObject;
+  resource: JunctionDenseFidelityResource;
+  sampleAt: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  value: number;
+}): JunctionTimeseriesFidelityPoint | undefined {
+  if (
+    !input.timestamp.observedAtRaw
+    || isDateOnlyJunctionTimestamp(input.timestamp.observedAtRaw)
+  ) {
+    // Calendar precision belongs in the established daily aggregate only.
+    return undefined;
+  }
+  const observedAtMs = resolveJunctionFidelityObservedAtMs(input.timestamp);
+  const localMinute = resolveJunctionFidelityLocalMinute(
+    input.entry,
+    input.timestamp,
+    input.sampleAt,
+    input.defaultTimeZone,
+  );
+  if (observedAtMs === undefined || localMinute === undefined) return undefined;
+  return { localMinute, observedAtMs, value: input.value };
+}
+
+function resolveJunctionFidelityObservedAtMs(
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): number | undefined {
+  const raw = timestamp.observedAtRaw;
+  if (raw && timestamp.timestampSemantics === "floating") {
+    const floating = parseJunctionFloatingDateTime(raw);
+    if (floating) {
+      return Date.UTC(
+        floating.year,
+        floating.month - 1,
+        floating.day,
+        floating.hour,
+        floating.minute,
+        floating.second,
+        floating.millisecond,
+      );
+    }
+  }
+  const rawMs = raw ? Date.parse(raw) : Number.NaN;
+  return Number.isFinite(rawMs) ? rawMs : undefined;
+}
+
+function resolveJunctionFidelityLocalMinute(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  sampleAt: string,
+  defaultTimeZone: string | undefined,
+): number | undefined {
+  const rawParts = timestamp.observedAtRaw
+    ? parseJunctionFloatingDateTime(timestamp.observedAtRaw)
+    : undefined;
+  const rawHasNumericOffset = timestamp.observedAtRaw
+    ? /[+-]\d{2}:?\d{2}$/u.test(timestamp.observedAtRaw.trim())
+    : false;
+  if (
+    rawParts
+    && (timestamp.timestampSemantics === "floating" || rawHasNumericOffset)
+  ) {
+    return rawParts.hour * 60
+      + rawParts.minute
+      + rawParts.second / 60
+      + rawParts.millisecond / 60_000;
+  }
+
+  const sampleMs = Date.parse(sampleAt);
+  if (!Number.isFinite(sampleMs)) return undefined;
+  const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
+  if (offsetSeconds !== null && offsetSeconds !== undefined) {
+    const shifted = new Date(sampleMs + offsetSeconds * 1000);
+    return shifted.getUTCHours() * 60
+      + shifted.getUTCMinutes()
+      + shifted.getUTCSeconds() / 60
+      + shifted.getUTCMilliseconds() / 60_000;
+  }
+
+  const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"])
+    ?? defaultTimeZone;
+  if (timeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(new Date(sampleMs));
+      const hour = Number(parts.find((part) => part.type === "hour")?.value);
+      const minute = Number(parts.find((part) => part.type === "minute")?.value);
+      const second = Number(parts.find((part) => part.type === "second")?.value);
+      if (Number.isFinite(hour) && Number.isFinite(minute) && Number.isFinite(second)) {
+        return (hour % 24) * 60 + minute + second / 60;
+      }
+    } catch {
+      // Fall through to UTC when a provider/vault timezone label is invalid.
+    }
+  }
+
+  const utc = new Date(sampleMs);
+  return utc.getUTCHours() * 60
+    + utc.getUTCMinutes()
+    + utc.getUTCSeconds() / 60
+    + utc.getUTCMilliseconds() / 60_000;
+}
+
+function parseJunctionFloatingDateTime(value: string): {
+  day: number;
+  hour: number;
+  millisecond: number;
+  minute: number;
+  month: number;
+  second: number;
+  year: number;
+} | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?/u.exec(
+    value.trim(),
+  );
+  if (!match) return undefined;
+  const [year, month, day, hour = "0", minute = "0", second = "0"] = match.slice(1, 7);
+  const fraction = match[7] ?? "";
+  const parsed = {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    hour: Number(hour),
+    minute: Number(minute),
+    second: Number(second),
+    millisecond: Number(fraction.padEnd(3, "0").slice(0, 3)),
+  };
+  return Object.values(parsed).every(Number.isFinite) ? parsed : undefined;
+}
+
 function buildJunctionDailyTimeseriesAggregates(input: {
   context: NormalizationContext;
   normalizeValue: (value: unknown, entry: PlainObject) => number | undefined;
@@ -3146,11 +3836,46 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   resource: string;
   resourceSlug: string;
   valuePaths: readonly string[];
+  selectedSparseRecords?: ReadonlyMap<string, JunctionSparseIntervalReading>;
 }): JunctionDailyTimeseriesAggregate[] {
   const evidencePartRole = `junction-timeseries-daily-${input.resourceSlug}`;
   const aggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
+  const temporalAggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
+  const temporalFeatureResource = isJunctionTemporalFeatureResource(input.resource)
+    ? input.resource
+    : undefined;
+  const ownsTemporalFeatures = temporalFeatureResource !== undefined
+    && input.context.temporalFeatureSourceDay?.resources.includes(input.resource) === true;
+  let temporalFeatureInputCount = 0;
+  let temporalFeatureImportSuppressed = false;
+  // A complete-source-day payload is always grouped; its rows are exactly the
+  // grouped rows, so an empty grouped envelope or an explicitly empty group
+  // data array is a valid authoritative empty rather than a lossy row.
+  const entries = ownsTemporalFeatures && asPlainObject(asPlainObject(input.payload)?.groups)
+    ? groupedTimeseriesResourceEntries(input.payload).filter(({ entry }) =>
+        !Array.isArray(entry.data) || entry.data.length > 0)
+    : timeseriesResourceEntries(input.payload);
+  const fidelityResource = isJunctionDenseFidelityResource(input.resource)
+    ? input.resource
+    : isJunctionSparseIntervalResource(input.resource)
+      ? input.resource
+      : undefined;
+  if (fidelityResource) {
+    assertJunctionTimeseriesResponseBound(fidelityResource, entries.length);
+  }
+  const selectedDenseRecordKeys = isJunctionDenseFidelityResource(input.resource)
+    ? selectJunctionDenseFidelityRecordKeys({
+        context: input.context,
+        entries,
+        normalizeValue: input.normalizeValue,
+        resource: input.resource,
+        resourceSlug: input.resourceSlug,
+        valuePaths: input.valuePaths,
+      })
+    : undefined;
+  const seenFidelityRecords = new Set<string>();
 
-  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
+  for (const [index, { entry, originFallback }] of entries.entries()) {
     const resourceContext = buildResourceContext({
       entry,
       originFallback,
@@ -3163,16 +3888,32 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     });
 
     if (!resourceContext) {
+      // A complete-source-day replacement may not silently drop a delivered
+      // row; an unowned row invalidates the day's replacement authority.
+      if (ownsTemporalFeatures) {
+        throw new JunctionSparseCalendarRepairNormalizationError();
+      }
       continue;
     }
 
+    const providerValue = firstValueFromPaths(entry, input.valuePaths);
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths), entry);
-    const timestamp = resolveRecordTimestamp(
-      entry,
-      input.context,
-      resourceContext.sourceProviderSlug,
-      JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS,
-    );
+    const sparseStartRaw = isJunctionSparseIntervalResource(input.resource)
+      ? firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS)
+      : undefined;
+    const timestamp = sparseStartRaw
+      ? resolveJunctionSparseIntervalTimestamp(
+          entry,
+          sparseStartRaw,
+          input.context,
+          resourceContext.sourceProviderSlug,
+        )
+      : resolveRecordTimestamp(
+          entry,
+          input.context,
+          resourceContext.sourceProviderSlug,
+          JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS,
+        );
     const sampleAt = resolveJunctionDailyAggregateSampleAt(
       timestamp,
       input.requireExplicitTimestamp,
@@ -3200,6 +3941,12 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       || !sampleAt
       || !dayKey
     ) {
+      // Rows without a usable value, timestamp semantics, or target day cannot
+      // certify a complete source day; fail the import instead of certifying a
+      // lossy response as authoritative.
+      if (ownsTemporalFeatures) {
+        throw new JunctionSparseCalendarRepairNormalizationError();
+      }
       continue;
     }
 
@@ -3214,6 +3961,64 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const timeZone = input.requireExplicitTimestamp
       ? "UTC"
       : firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+    const providerUnit = trimOptionalToLength(
+      firstStringFromPaths(entry, JUNCTION_INTERVAL_UNIT_PATHS),
+      160,
+    );
+    const fidelityRecordKey = fidelityResource
+      ? buildJunctionTimeseriesFidelityRecordKey({
+          entry,
+          providerUnit,
+          providerValue,
+          resource: input.resource,
+          resourceContext,
+          timestamp,
+        })
+      : undefined;
+    const denseStableIdentity = isJunctionDenseFidelityResource(input.resource)
+      ? buildJunctionDenseFidelityStableIdentity(input.resource, entry, resourceContext)
+      : undefined;
+    const denseSelection = denseStableIdentity
+      ? selectedDenseRecordKeys?.get(denseStableIdentity)
+      : undefined;
+    if (
+      denseStableIdentity
+      && fidelityRecordKey
+      && denseSelection?.recordKey !== fidelityRecordKey
+    ) {
+      continue;
+    }
+    const sparseSelection = fidelityRecordKey
+      ? input.selectedSparseRecords?.get(fidelityRecordKey)
+      : undefined;
+    if (
+      isJunctionSparseIntervalResource(input.resource)
+      && entry.authoritativeEmptyCalendarSet !== true
+      && fidelityRecordKey
+      && input.selectedSparseRecords
+      && !sparseSelection
+    ) {
+      continue;
+    }
+    if (fidelityRecordKey && seenFidelityRecords.has(fidelityRecordKey)) {
+      if (existing) {
+        existing.duplicateSampleCount += 1;
+      }
+      continue;
+    }
+    if (fidelityRecordKey) {
+      seenFidelityRecords.add(fidelityRecordKey);
+    }
+    const fidelitySample = isJunctionDenseFidelityResource(input.resource)
+      ? buildJunctionTimeseriesFidelityPoint({
+          defaultTimeZone: input.context.defaultTimeZone,
+          entry,
+          resource: input.resource,
+          sampleAt,
+          timestamp,
+          value,
+      })
+      : undefined;
     const legacyDayKeys = new Set<string>();
     if (legacyDayKey && legacyDayKey !== dayKey) {
       legacyDayKeys.add(legacyDayKey);
@@ -3221,8 +4026,11 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     if (!existing) {
       aggregates.set(key, {
+        authoritativeEmptyCalendarSet: entry.authoritativeEmptyCalendarSet === true,
         dayKey,
+        duplicateSampleCount: 0,
         entry,
+        fidelitySamples: fidelitySample ? [fidelitySample] : [],
         firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
@@ -3237,35 +4045,180 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         timestamp,
         timeZone,
       });
-      continue;
+      if (fidelityResource) {
+        assertJunctionTimeseriesSourceDayBound(fidelityResource, 1);
+      }
+    } else {
+      existing.sampleCount += 1;
+      existing.authoritativeEmptyCalendarSet ||= entry.authoritativeEmptyCalendarSet === true;
+      if (fidelitySample) {
+        existing.fidelitySamples.push(fidelitySample);
+      }
+      if (fidelityResource) {
+        assertJunctionTimeseriesSourceDayBound(fidelityResource, existing.sampleCount);
+      }
+      existing.sum += value;
+      existing.sumSquares += value * value;
+      if (legacyDayKey && legacyDayKey !== dayKey) {
+        existing.legacyDayKeys.add(legacyDayKey);
+      }
+      if (sampleAt < existing.firstSampleAt) {
+        existing.firstSampleAt = sampleAt;
+      }
+
+      if (sampleAt >= existing.lastSampleAt) {
+        existing.lastSampleAt = sampleAt;
+        existing.lastRecordedAt = recordedAt;
+        existing.timestamp = timestamp;
+      }
+
+      if (value < existing.minValue) {
+        existing.minValue = value;
+      }
+
+      if (value > existing.maxValue) {
+        existing.maxValue = value;
+      }
     }
 
-    existing.sampleCount += 1;
-    existing.sum += value;
-    existing.sumSquares += value * value;
-    if (legacyDayKey && legacyDayKey !== dayKey) {
-      existing.legacyDayKeys.add(legacyDayKey);
-    }
-    if (sampleAt < existing.firstSampleAt) {
-      existing.firstSampleAt = sampleAt;
-    }
-
-    if (sampleAt >= existing.lastSampleAt) {
-      existing.lastSampleAt = sampleAt;
-      existing.lastRecordedAt = recordedAt;
-      existing.timestamp = timestamp;
-    }
-
-    if (value < existing.minValue) {
-      existing.minValue = value;
-    }
-
-    if (value > existing.maxValue) {
-      existing.maxValue = value;
+    const temporalSourceDay = ownsTemporalFeatures && !temporalFeatureImportSuppressed
+      ? input.context.temporalFeatureSourceDay
+      : undefined;
+    const temporalSampleAt = temporalSourceDay
+      ? resolveJunctionTemporalFeatureInstant(timestamp, temporalSourceDay.timeZone)
+      : null;
+    if (temporalSourceDay && temporalSampleAt !== null) {
+      temporalFeatureInputCount += 1;
+      if (temporalFeatureInputCount > JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT) {
+        temporalFeatureImportSuppressed = true;
+        for (const current of temporalAggregates.values()) {
+          delete current.temporalFeatureSamples;
+        }
+      } else {
+        const sourceDay = temporalSourceDay;
+        const vaultDayKey = toLocalDayKey(temporalSampleAt, sourceDay.timeZone);
+        if (vaultDayKey !== sourceDay.dayKey) {
+          // The provider fetched the exact authorized window, so a row that
+          // normalizes outside the target vault day (for example a fallback
+          // timestamp) is a lossy normalization, not out-of-scope data.
+          throw new JunctionSparseCalendarRepairNormalizationError();
+        }
+        const temporalKey = [
+          resourceContext.externalRefResourceType,
+          resourceContext.origin.sourceType ?? "",
+          resourceContext.origin.sourceInstanceId ?? "",
+          sourceDay.dayKey,
+        ].join("\u0000");
+        let temporalAggregate = temporalAggregates.get(temporalKey);
+        if (!temporalAggregate) {
+          const sourceFacet = shortHash([
+            resourceContext.sourceProviderSlug,
+            resourceContext.origin.sourceType ?? "",
+            resourceContext.origin.sourceInstanceId ?? "",
+          ]);
+          temporalAggregate = {
+            authoritativeEmptyCalendarSet: false,
+            dayKey: sourceDay.dayKey,
+            duplicateSampleCount: 0,
+            entry,
+            fidelitySamples: [],
+            firstSampleAt: temporalSampleAt,
+            lastRecordedAt: recordedAt,
+            lastSampleAt: temporalSampleAt,
+            legacyDayKeys: new Set(),
+            maxValue: value,
+            minValue: value,
+            evidencePartRole:
+              `junction-timeseries-temporal-${input.resourceSlug}:${sourceDay.dayKey}:${sourceFacet}`,
+            resourceContext,
+            sampleCount: 0,
+            sum: 0,
+            sumSquares: 0,
+            timestamp,
+            timeZone: sourceDay.timeZone,
+          };
+          temporalAggregates.set(temporalKey, temporalAggregate);
+        }
+        temporalAggregate.sampleCount += 1;
+        temporalAggregate.sum += value;
+        if (temporalSampleAt < temporalAggregate.firstSampleAt) {
+          temporalAggregate.firstSampleAt = temporalSampleAt;
+        }
+        if (temporalSampleAt >= temporalAggregate.lastSampleAt) {
+          temporalAggregate.lastSampleAt = temporalSampleAt;
+          temporalAggregate.lastRecordedAt = recordedAt;
+          temporalAggregate.timestamp = timestamp;
+        }
+        temporalAggregate.minValue = Math.min(temporalAggregate.minValue, value);
+        temporalAggregate.maxValue = Math.max(temporalAggregate.maxValue, value);
+        const temporalFeatureSamples = temporalAggregate.temporalFeatureSamples ?? [];
+        if (temporalFeatureSamples.length >= JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY) {
+          temporalAggregate.temporalFeatureInputSuppressed = true;
+          delete temporalAggregate.temporalFeatureSamples;
+        } else {
+          temporalFeatureSamples.push(stripUndefined({
+            recordedAt: temporalSampleAt,
+            value,
+            localMinuteOfDay: resolveJunctionTemporalFeatureVaultLocalMinuteOfDay(
+              temporalSampleAt,
+              sourceDay.timeZone,
+            ),
+          }));
+          temporalAggregate.temporalFeatureSamples = temporalFeatureSamples;
+        }
+      }
     }
   }
 
   const sortedAggregates = [...aggregates.values()].sort(compareJunctionDailyTimeseriesAggregates);
+  if (temporalFeatureResource && ownsTemporalFeatures) {
+    for (const aggregate of [...temporalAggregates.values()].sort(
+      compareJunctionDailyTimeseriesAggregates,
+    )) {
+      const result: JunctionTemporalFeatureResult =
+        temporalFeatureImportSuppressed || aggregate.temporalFeatureInputSuppressed
+          ? { observations: [], status: "suppressed_input_cap" }
+          : buildJunctionTemporalFeatures({
+            resource: temporalFeatureResource,
+            samples: aggregate.temporalFeatureSamples ?? [],
+          });
+      const existingObservationCount = input.context.temporalFeatureObservationCountsByDay.get(
+        aggregate.dayKey,
+      ) ?? 0;
+      if (
+        result.status === "complete"
+        && existingObservationCount + result.observations.length
+          > JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY
+      ) {
+        aggregate.temporalFeatureResult = {
+          observations: [],
+          status: "suppressed_output_cap",
+        };
+      } else {
+        aggregate.temporalFeatureResult = result;
+        input.context.temporalFeatureObservationCountsByDay.set(
+          aggregate.dayKey,
+          existingObservationCount + result.observations.length,
+        );
+      }
+      pushJunctionTemporalFeatureArtifact(input.context, input.resource, aggregate);
+      if (aggregate.temporalFeatureResult?.status === "complete") {
+        for (const observation of aggregate.temporalFeatureResult.observations) {
+          pushJunctionDailyTimeseriesObservation(input.context, aggregate, observation);
+        }
+      }
+      delete aggregate.temporalFeatureSamples;
+    }
+  }
+
+  // A complete-source-day import owns only temporal facets. Its vault-window
+  // samples cover partial provider days, so emitting ordinary observations,
+  // aggregate artifacts, or dense envelopes would supersede the calendar-day
+  // owner's full-day facts with partial revisions.
+  if (ownsTemporalFeatures) {
+    return [];
+  }
+
   if (sortedAggregates.length === 0) {
     pushJunctionEmptyDailyTimeseriesAggregateArtifact(input.context, input.resource, input.resourceSlug);
     return sortedAggregates;
@@ -3325,42 +4278,97 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
           role,
           `${role}.json`,
           stripUndefined({
-            schema: "junction.timeseries_daily_aggregate.v1",
+            schema: aggregate.temporalFeatureResult
+              ? "junction.timeseries_daily_aggregate.v2"
+              : "junction.timeseries_daily_aggregate.v1",
             provider: "junction",
             resource,
             dayKey: aggregate.dayKey,
             sourceProviderSlug: aggregate.resourceContext.sourceProviderSlug,
             sourceType: aggregate.resourceContext.origin.sourceType,
             sourceInstanceId: aggregate.resourceContext.origin.sourceInstanceId,
-            sampleCount: aggregate.sampleCount,
+            status: aggregate.authoritativeEmptyCalendarSet
+              ? "authoritative_empty_calendar_set"
+              : undefined,
+            sampleCount: aggregate.authoritativeEmptyCalendarSet ? 0 : aggregate.sampleCount,
+            duplicateSampleCount: aggregate.duplicateSampleCount > 0
+              ? aggregate.duplicateSampleCount
+              : undefined,
             firstSampleAt: aggregate.firstSampleAt,
             lastSampleAt: aggregate.lastSampleAt,
             lastRecordedAt: aggregate.lastRecordedAt,
             legacyDayKeys: aggregate.legacyDayKeys.size > 0
               ? [...aggregate.legacyDayKeys].sort()
               : undefined,
-            meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
-            minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
-            maxValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
+            meanValue: aggregate.authoritativeEmptyCalendarSet
+              ? undefined
+              : roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
+            minValue: aggregate.authoritativeEmptyCalendarSet
+              ? undefined
+              : roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
+            maxValue: aggregate.authoritativeEmptyCalendarSet
+              ? undefined
+              : roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
             standardDeviationValue: resource === "glucose"
+                && !aggregate.authoritativeEmptyCalendarSet
               ? roundJunctionDailyAggregateValue(
                   junctionDailyTimeseriesStandardDeviation(aggregate),
                 )
               : undefined,
             coefficientOfVariationPercent: resource === "glucose"
+                && !aggregate.authoritativeEmptyCalendarSet
               ? roundJunctionDailyAggregateValue(
                   junctionDailyTimeseriesCoefficientOfVariation(aggregate),
                 )
               : undefined,
             sumValue: JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource)?.retainSumValue === true
+              && !aggregate.authoritativeEmptyCalendarSet
               ? roundJunctionTimeseriesAggregateValue(resource, aggregate.sum)
               : undefined,
             unit: junctionDailyTimeseriesAggregateUnit(resource),
+            temporalFeatureStatus: aggregate.temporalFeatureResult?.status,
+            temporalFeatures: aggregate.temporalFeatureResult?.status === "complete"
+              ? aggregate.temporalFeatureResult.envelope
+              : undefined,
           }),
         ),
       ),
     );
   }
+}
+
+function pushJunctionTemporalFeatureArtifact(
+  context: NormalizationContext,
+  resource: string,
+  aggregate: JunctionDailyTimeseriesAggregate,
+): void {
+  pushEvidencePart(
+    context.evidenceParts,
+    withJunctionCompactTimeseriesMetadata(
+      resource,
+      createEvidencePart(
+        aggregate.evidencePartRole,
+        `${aggregate.evidencePartRole}.json`,
+        stripUndefined({
+          schema: "junction.timeseries_temporal_features.v2",
+          provider: "junction",
+          resource,
+          dayKey: aggregate.dayKey,
+          timeZone: aggregate.timeZone,
+          sourceProviderSlug: aggregate.resourceContext.sourceProviderSlug,
+          sourceType: aggregate.resourceContext.origin.sourceType,
+          sourceInstanceId: aggregate.resourceContext.origin.sourceInstanceId,
+          sampleCount: aggregate.sampleCount,
+          firstSampleAt: aggregate.firstSampleAt,
+          lastSampleAt: aggregate.lastSampleAt,
+          status: aggregate.temporalFeatureResult?.status,
+          features: aggregate.temporalFeatureResult?.status === "complete"
+            ? aggregate.temporalFeatureResult.envelope
+            : undefined,
+        }),
+      ),
+    ),
+  );
 }
 
 function roundJunctionTimeseriesAggregateValue(resource: string, value: number): number {
@@ -3373,11 +4381,211 @@ function junctionDailyTimeseriesAggregateUnit(resource: string): string | undefi
   return JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource)?.unit;
 }
 
+function resolveJunctionTemporalFeatureVaultLocalMinuteOfDay(
+  sampleAt: string,
+  timeZone: string,
+): number | undefined {
+  const sampleEpochMs = Date.parse(sampleAt);
+  if (!Number.isFinite(sampleEpochMs)) {
+    return undefined;
+  }
+
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      hour: "2-digit",
+      hourCycle: "h23",
+      minute: "2-digit",
+      timeZone,
+    }).formatToParts(sampleEpochMs);
+    const hour = Number(parts.find((part) => part.type === "hour")?.value);
+    const minute = Number(parts.find((part) => part.type === "minute")?.value);
+    return Number.isInteger(hour) && Number.isInteger(minute)
+      ? hour * 60 + minute
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Temporal samples require a genuine provider clock. Date-only rows prove raw
+// source-day membership for ordinary daily facts but return null here so they
+// never become temporal observations. A supplied clock that cannot resolve in
+// the retained authority timezone (a daylight-saving gap or malformed clock)
+// fails the complete-day import retryably instead of inventing an instant.
+// The single accepted timestamp language for complete-source-day authority.
+// Every pattern is anchored: the full raw value must be consumed, so a valid
+// prefix followed by unsupported text can never certify a temporal instant or
+// day membership.
+const JUNCTION_COMPLETE_DAY_DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const JUNCTION_COMPLETE_DAY_FLOATING_PATTERN =
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/u;
+const JUNCTION_COMPLETE_DAY_ABSOLUTE_PATTERN =
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?:[Zz]|([+-])(\d{2}):?(\d{2}))$/u;
+
+export type JunctionCompleteDayTimestamp =
+  | { kind: "date-only"; dayKey: string }
+  | {
+      kind: "floating";
+      dayKey: string;
+      hour: number;
+      minute: number;
+      second: number;
+      millisecond: number;
+    }
+  | { kind: "absolute"; instant: string };
+
+function readJunctionCompleteDayClock(
+  match: RegExpMatchArray,
+): { hour: number; minute: number; second: number; millisecond: number } | null {
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  const second = match[4] === undefined ? 0 : Number(match[4]);
+  if (hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+  const fraction = match[5];
+  const millisecond = fraction === undefined
+    ? 0
+    : Number(fraction.slice(0, 3).padEnd(3, "0"));
+  return { hour, minute, second, millisecond };
+}
+
+// The one strict acceptance parse for the complete-source-day timestamp
+// language. It consumes the entire raw value, proves the actual Gregorian
+// calendar date and clock/offset field ranges, and preserves fractional
+// seconds, so a lexically plausible but impossible value (a non-leap
+// February 29, an April 31, a 24:00 clock) can never be normalized onto a
+// neighboring valid day. Both the importing owner and the provider's
+// authorized-day filter consume this one result; a value this parse rejects
+// must be retained for the importer to fail closed, never reinterpreted.
+export function parseJunctionCompleteDayTimestamp(
+  value: string,
+): JunctionCompleteDayTimestamp | null {
+  const raw = value.trim();
+  if (JUNCTION_COMPLETE_DAY_DATE_ONLY_PATTERN.test(raw)) {
+    return isStrictIsoDate(raw) ? { kind: "date-only", dayKey: raw } : null;
+  }
+  const floatingMatch = raw.match(JUNCTION_COMPLETE_DAY_FLOATING_PATTERN);
+  if (floatingMatch) {
+    const dayKey = floatingMatch[1] ?? "";
+    const clock = readJunctionCompleteDayClock(floatingMatch);
+    if (!clock || !isStrictIsoDate(dayKey)) {
+      return null;
+    }
+    return { kind: "floating", dayKey, ...clock };
+  }
+  const absoluteMatch = raw.match(JUNCTION_COMPLETE_DAY_ABSOLUTE_PATTERN);
+  if (!absoluteMatch) {
+    return null;
+  }
+  const dayKey = absoluteMatch[1] ?? "";
+  const clock = readJunctionCompleteDayClock(absoluteMatch);
+  if (!clock || !isStrictIsoDate(dayKey)) {
+    return null;
+  }
+  const offsetHours = absoluteMatch[7] === undefined ? 0 : Number(absoluteMatch[7]);
+  const offsetMinutesPart = absoluteMatch[8] === undefined ? 0 : Number(absoluteMatch[8]);
+  if (offsetHours > 23 || offsetMinutesPart > 59) {
+    return null;
+  }
+  const offsetMinutes =
+    (absoluteMatch[6] === "-" ? -1 : 1) * (offsetHours * 60 + offsetMinutesPart);
+  const [year, month, day] = dayKey.split("-").map(Number) as [number, number, number];
+  const local = new Date(Date.UTC(
+    year,
+    month - 1,
+    day,
+    clock.hour,
+    clock.minute,
+    clock.second,
+    clock.millisecond,
+  ));
+  local.setUTCFullYear(year);
+  return {
+    kind: "absolute",
+    instant: new Date(local.getTime() - offsetMinutes * 60_000).toISOString(),
+  };
+}
+
+// The importer's complete-day boundary is the one acceptance owner: the
+// single strict parse above yields semantics agreement, day membership, and
+// temporal-instant eligibility together. Date-only rows return null (day
+// membership, zero temporal coverage); floating clocks resolve in the
+// retained authority timezone with omitted seconds as zero and fractional
+// seconds preserved; absolute forms use the exact instant derived from their
+// validated parts, never from permissive runtime normalization. Anything
+// else — trailing unsupported text, an impossible calendar or clock value,
+// or semantics that contradict the raw shape — fails the import retryably
+// before any canonical write.
+function resolveJunctionTemporalFeatureInstant(
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  timeZone: string,
+): string | null {
+  const raw = timestamp.observedAtRaw?.trim();
+  if (!raw) {
+    throw new JunctionSparseCalendarRepairNormalizationError();
+  }
+  const parsed = parseJunctionCompleteDayTimestamp(raw);
+  if (!parsed) {
+    throw new JunctionSparseCalendarRepairNormalizationError();
+  }
+  if (parsed.kind === "date-only") {
+    if (timestamp.timestampSemantics !== "floating") {
+      throw new JunctionSparseCalendarRepairNormalizationError();
+    }
+    return null;
+  }
+  if (parsed.kind === "absolute") {
+    if (timestamp.timestampSemantics === "floating") {
+      throw new JunctionSparseCalendarRepairNormalizationError();
+    }
+    return parsed.instant;
+  }
+  if (timestamp.timestampSemantics !== "floating") {
+    throw new JunctionSparseCalendarRepairNormalizationError();
+  }
+  const [year, month, day] = parsed.dayKey.split("-").map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  const { hour, minute, second } = parsed;
+  const targetPseudoMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  // Enumerate the bounded candidate instants implied by the zone's offsets
+  // around the target wall clock and require exactly one to display it: a
+  // spring-forward gap yields zero matches and a fall-back overlap yields
+  // two, and both fail retryably instead of silently picking one DST fold.
+  const candidateOffsets = new Set<number>();
+  for (const probeMs of [targetPseudoMs - 86_400_000, targetPseudoMs, targetPseudoMs + 86_400_000]) {
+    const parts = formatTimeZoneDateTimeParts(probeMs, timeZone);
+    candidateOffsets.add(
+      Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+        - probeMs,
+    );
+  }
+  const matches = [...candidateOffsets]
+    .map((offsetMs) => targetPseudoMs - offsetMs)
+    .filter((candidateMs) => {
+      const resolved = formatTimeZoneDateTimeParts(candidateMs, timeZone);
+      return resolved.year === year
+        && resolved.month === month
+        && resolved.day === day
+        && resolved.hour === hour
+        && resolved.minute === minute
+        && resolved.second === second;
+    });
+  if (matches.length !== 1 || matches[0] === undefined) {
+    throw new JunctionSparseCalendarRepairNormalizationError();
+  }
+  return new Date(matches[0] + parsed.millisecond).toISOString();
+}
+
 function withJunctionCompactTimeseriesMetadata(
   resource: string,
   artifact: DeviceEvidencePartPayload | null,
   resourceCategory:
     | "timeseries_daily_aggregate"
+    | "timeseries_feature_envelope"
     | "timeseries_feature_aggregate"
     | "timeseries_reading" = "timeseries_daily_aggregate",
 ): DeviceEvidencePartPayload | null {
@@ -3390,7 +4598,9 @@ function withJunctionCompactTimeseriesMetadata(
     metadata: {
       artifactClass: resourceCategory === "timeseries_reading"
         ? "compact_provider_timeseries_reading"
-        : "compact_provider_timeseries_aggregate",
+        : resourceCategory === "timeseries_feature_envelope"
+          ? "compact_provider_timeseries_feature_envelope"
+          : "compact_provider_timeseries_aggregate",
       provider: "junction",
       resource,
       resourceCategory,
@@ -3403,7 +4613,9 @@ function pushJunctionDailyTimeseriesObservation(
   context: NormalizationContext,
   aggregate: JunctionDailyTimeseriesAggregate,
   observation: {
+    confidence?: "low" | "medium";
     metric: string;
+    qualifiers?: JunctionTemporalFeatureObservationQualifiers;
     title: string;
     unit: string;
     value: number;
@@ -3423,6 +4635,7 @@ function pushJunctionDailyTimeseriesObservation(
     aggregate,
     observation.metric,
   );
+  const dataOrigin = buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp);
 
   context.events.push(stripUndefined({
     kind: "observation",
@@ -3433,21 +4646,92 @@ function pushJunctionDailyTimeseriesObservation(
     source: "device",
     title: resolveJunctionHrvTitle(metric, observation.title),
     evidenceRoles: [aggregate.evidencePartRole],
-    externalRef: makeJunctionExternalRef(
-      aggregate.resourceContext,
-      aggregate.entry,
-      timestamp,
-      observation.metric,
-    ),
+    externalRef: observation.qualifiers
+      ? buildJunctionTemporalFeatureExternalRef(context, aggregate, observation.metric)
+      : makeJunctionExternalRef(
+          aggregate.resourceContext,
+          aggregate.entry,
+          timestamp,
+          observation.metric,
+        ),
     legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
-    dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
+    dataOrigin: observation.confidence
+      ? { ...dataOrigin, originConfidence: observation.confidence }
+      : dataOrigin,
     fields: {
       metric,
       observationGrain: "summary",
+      ...(observation.qualifiers ? { qualifiers: observation.qualifiers } : {}),
       value: roundJunctionDailyAggregateValue(observation.value),
       unit: observation.unit,
     },
   }));
+}
+
+function buildJunctionTemporalFeatureExternalRef(
+  context: NormalizationContext,
+  aggregate: JunctionDailyTimeseriesAggregate,
+  metric: string,
+): DeviceExternalRefPayload {
+  const sourceDay = context.temporalFeatureSourceDay;
+  if (!sourceDay) {
+    throw new TypeError("Junction temporal feature authority is missing.");
+  }
+  const resource = aggregate.resourceContext.resource;
+  const sourceFacet = shortHash([
+    aggregate.resourceContext.sourceProviderSlug,
+    aggregate.resourceContext.origin.sourceType ?? "",
+    aggregate.resourceContext.origin.sourceInstanceId ?? "",
+  ]);
+  const facet = `temporal-${sourceFacet}-${metric}`;
+  const currentFacets = context.temporalFeatureCurrentFacetsByResource.get(resource)
+    ?? new Set<string>();
+  currentFacets.add(facet);
+  context.temporalFeatureCurrentFacetsByResource.set(resource, currentFacets);
+  // Temporal facets follow the repository's unversioned complete-set
+  // reconciliation: the import wall clock is not a source version, so an
+  // unchanged replacement set collapses as a no-op on the canonical event
+  // spine while growth, change, removal, and reassertion reconcile through
+  // the serialized authoritative-set seam in arrival order.
+  return {
+    system: "junction",
+    resourceType: "junction-timeseries-temporal-day",
+    resourceId: junctionTemporalFeatureResourceId(context, resource, sourceDay.dayKey),
+    facet,
+  };
+}
+
+function finalizeJunctionTemporalAuthoritativeSets(context: NormalizationContext): void {
+  const sourceDay = context.temporalFeatureSourceDay;
+  if (!sourceDay) {
+    return;
+  }
+  for (const resource of [...new Set(sourceDay.resources)].sort()) {
+    if (!isJunctionTemporalFeatureResource(resource)) {
+      continue;
+    }
+    context.authoritativeEventSets.push({
+      system: "junction",
+      resourceType: "junction-timeseries-temporal-day",
+      resourceId: junctionTemporalFeatureResourceId(context, resource, sourceDay.dayKey),
+      version: sourceDay.revisionAt,
+      facetPrefixes: ["temporal"],
+      currentFacets: [...(context.temporalFeatureCurrentFacetsByResource.get(resource) ?? [])]
+        .sort(),
+    });
+  }
+}
+
+function junctionTemporalFeatureResourceId(
+  context: NormalizationContext,
+  resource: string,
+  dayKey: string,
+): string {
+  const connectionId = context.temporalFeatureSourceDay?.connectionId;
+  if (!connectionId) {
+    throw new TypeError("Junction temporal feature connection identity is missing.");
+  }
+  return shortHash([connectionId, resource, dayKey]);
 }
 
 function legacyJunctionDailyTimeseriesAggregateExternalRefs(
@@ -3471,6 +4755,107 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
       metric,
     )
   );
+}
+
+function pushJunctionTimeseriesFeatureEnvelope(
+  context: NormalizationContext,
+  aggregate: JunctionDailyTimeseriesAggregate,
+  resource: JunctionDenseFidelityResource,
+): void {
+  const policy = getJunctionDenseFidelityPolicy(resource);
+  const { envelope, facts } = deriveJunctionTimeseriesFeatureEnvelope(
+    resource,
+    aggregate.fidelitySamples,
+  );
+  const featureSampleTimes = aggregate.fidelitySamples
+    .map((sample) => sample.observedAtMs)
+    .sort((left, right) => left - right);
+  const firstFeatureSampleAt = featureSampleTimes[0];
+  const lastFeatureSampleAt = featureSampleTimes[featureSampleTimes.length - 1];
+  const identityHash = shortHash([
+    policy.identityVersion,
+    aggregate.resourceContext.resourceSlug,
+    aggregate.resourceContext.sourceProviderSlug,
+    aggregate.resourceContext.origin.sourceType ?? "",
+    aggregate.resourceContext.origin.sourceInstanceId ?? "",
+    aggregate.dayKey,
+  ]);
+  const resourceId = `${aggregate.resourceContext.resourceSlug}-${identityHash}`;
+  const role = [
+    `junction-timeseries-features-${aggregate.resourceContext.resourceSlug}`,
+    aggregate.dayKey,
+    identityHash,
+  ].join(":");
+
+  pushEvidencePart(
+    context.evidenceParts,
+    withJunctionCompactTimeseriesMetadata(
+      resource,
+      createEvidencePart(
+        role,
+        `${role}.json`,
+        stripUndefined({
+          ...envelope,
+          provider: "junction",
+          resource,
+          dayKey: aggregate.dayKey,
+          sourceProviderSlug: aggregate.resourceContext.sourceProviderSlug,
+          sourceType: aggregate.resourceContext.origin.sourceType,
+          sourceInstanceId: aggregate.resourceContext.origin.sourceInstanceId,
+          firstSampleAt: firstFeatureSampleAt === undefined
+            ? undefined
+            : new Date(firstFeatureSampleAt).toISOString(),
+          lastSampleAt: lastFeatureSampleAt === undefined
+            ? undefined
+            : new Date(lastFeatureSampleAt).toISOString(),
+          duplicateSampleCount: aggregate.duplicateSampleCount > 0
+            ? aggregate.duplicateSampleCount
+            : undefined,
+        }),
+      ),
+      "timeseries_feature_envelope",
+    ),
+  );
+
+  const timestamp = withTimestampOverride(aggregate.timestamp, {
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+    observedAtRaw: `${aggregate.dayKey}:${resource}:features:${policy.policyVersion}`,
+  });
+  context.events.push(stripUndefined({
+    kind: "measurement",
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+    timeZone: aggregate.timeZone,
+    source: "device",
+    title: `Junction ${resource.replaceAll("_", " ")} temporal features`,
+    evidenceRoles: [role],
+    externalRef: makeProviderExternalRef(
+      "junction",
+      aggregate.resourceContext.externalRefResourceType,
+      resourceId,
+      undefined,
+      "features",
+    ),
+    dataOrigin: buildDataOrigin(
+      aggregate.entry,
+      aggregate.resourceContext,
+      timestamp,
+      { normalizerVersion: policy.policyVersion },
+    ),
+    fields: {
+      measurements: facts.map((fact) => ({
+        metric: fact.metric,
+        value: fact.value,
+        unit: fact.unit,
+        qualifiers: {
+          "feature-policy-version": policy.policyVersion,
+        },
+      })),
+    },
+  }));
 }
 
 // Dense timeseries streams never retain provider rows. They collapse into one
@@ -3743,6 +5128,256 @@ function pushJunctionFeatureTimeseriesObservation(
       observationGrain: "derived_fact",
       value: roundJunctionDailyAggregateValue(value),
       unit,
+    },
+  }));
+}
+
+function pushJunctionSparseIntervalReadings(
+  payload: unknown,
+  resource: JunctionSparseIntervalResource,
+  resourceSlug: string,
+  context: NormalizationContext,
+  descriptor: JunctionDailyTimeseriesDescriptor,
+): ReadonlyMap<string, JunctionSparseIntervalReading> {
+  const policy = getJunctionSparseIntervalPolicy(resource);
+  const entries = timeseriesResourceEntries(payload);
+  assertJunctionTimeseriesResponseBound(resource, entries.length);
+  const readingsByIdentity = new Map<string, JunctionSparseIntervalReading>();
+
+  for (const [index, { entry, originFallback }] of entries.entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: `junction-timeseries-reading-${resourceSlug}`,
+      context,
+    });
+    if (!resourceContext) continue;
+
+    const providerValue = finiteNumber(firstValueFromPaths(entry, descriptor.valuePaths));
+    const value = descriptor.normalizeValue(providerValue, entry);
+    const startRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS);
+    const endRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS);
+    const startAt = resolveSafeTimestamp(startRaw);
+    const endAt = resolveSafeTimestamp(endRaw);
+    if (
+      providerValue === undefined
+      || value === undefined
+      || !startRaw
+      || !endRaw
+      || !startAt
+      || !endAt
+      || Date.parse(endAt) < Date.parse(startAt)
+    ) {
+      continue;
+    }
+
+    const timestamp = resolveJunctionSparseIntervalTimestamp(
+      entry,
+      startRaw,
+      context,
+      resourceContext.sourceProviderSlug,
+    );
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+      entry,
+      timestamp,
+      startAt,
+      context.defaultTimeZone,
+    );
+    if (!dayKey) continue;
+
+    const providerUnit = trimOptionalToLength(
+      firstStringFromPaths(entry, JUNCTION_INTERVAL_UNIT_PATHS),
+      160,
+    );
+    const explicitId = firstStringFromPaths(entry, JUNCTION_TIMESERIES_RECORD_ID_PATHS);
+    const externalIdentityHash = shortHash(explicitId
+      ? [
+          policy.identityVersion,
+          resourceSlug,
+          resourceContext.sourceProviderSlug,
+          resourceContext.origin.sourceType ?? "",
+          resourceContext.origin.sourceInstanceId ?? "",
+          explicitId,
+        ]
+      : [
+          policy.identityVersion,
+          resourceSlug,
+          resourceContext.sourceProviderSlug,
+          resourceContext.origin.sourceType ?? "",
+          resourceContext.origin.sourceInstanceId ?? "",
+          startAt,
+          endAt,
+          providerValue,
+          providerUnit ?? "",
+        ]);
+    const fidelityRecordKey = buildJunctionTimeseriesFidelityRecordKey({
+      entry,
+      providerUnit,
+      providerValue,
+      resource,
+      resourceContext,
+      timestamp,
+    });
+    const durationSeconds = Number(((Date.parse(endAt) - Date.parse(startAt)) / 1000).toFixed(3));
+    const candidate: JunctionSparseIntervalReading = {
+      contentFingerprint: fidelityRecordKey,
+      dayKey,
+      durationSeconds,
+      endAt,
+      entry,
+      fidelityRecordKey,
+      externalIdentityHash,
+      providerUnit,
+      providerValue,
+      recordedAt: timestamp.recordedAt,
+      resourceContext,
+      startAt,
+      sourceVersion: explicitId
+        ? resolveJunctionExplicitSourceVersion(entry, resourceContext.sourceProviderSlug)
+        : undefined,
+      stableIdentity: explicitId !== undefined,
+      timestamp,
+      timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+      value,
+    };
+    const existing = readingsByIdentity.get(externalIdentityHash);
+    readingsByIdentity.set(
+      externalIdentityHash,
+      existing && explicitId
+        ? selectJunctionAuthoritativeRevision(resource, existing, candidate)
+        : existing ?? candidate,
+    );
+  }
+
+  const readings = [...readingsByIdentity.values()].sort(compareJunctionSparseIntervalReadingOrder);
+  const sourceDayCounts = new Map<string, number>();
+  for (const reading of readings) {
+    const sourceDayKey = [
+      reading.resourceContext.externalRefResourceType,
+      reading.resourceContext.origin.sourceType ?? "",
+      reading.resourceContext.origin.sourceInstanceId ?? "",
+      reading.dayKey,
+    ].join("\u0000");
+    const sourceDayCount = (sourceDayCounts.get(sourceDayKey) ?? 0) + 1;
+    assertJunctionTimeseriesSourceDayBound(resource, sourceDayCount);
+    sourceDayCounts.set(sourceDayKey, sourceDayCount);
+    pushJunctionSparseIntervalReading(context, resource, resourceSlug, reading);
+  }
+  return new Map(readings.map((reading) => [reading.fidelityRecordKey, reading]));
+}
+
+function resolveJunctionSparseIntervalTimestamp(
+  entry: PlainObject,
+  startRaw: string,
+  context: NormalizationContext,
+  sourceProviderSlug: string,
+): ReturnType<typeof resolveRecordTimestamp> {
+  const startAt = resolveSafeTimestamp(startRaw);
+  const timestamp = resolveRecordTimestamp(
+    { ...entry, observedAtRaw: startRaw },
+    context,
+    sourceProviderSlug,
+  );
+  return startAt
+    ? withTimestampOverride(timestamp, {
+        occurredAt: startAt,
+        recordedAt: timestamp.recordedAt ?? startAt,
+        observedAtRaw: startRaw,
+        timestampSemantics: inferTimestampSemantics(startRaw),
+      })
+    : timestamp;
+}
+
+function compareJunctionSparseIntervalReadingOrder(
+  left: JunctionSparseIntervalReading,
+  right: JunctionSparseIntervalReading,
+): number {
+  return left.startAt.localeCompare(right.startAt)
+    || left.endAt.localeCompare(right.endAt)
+    || left.resourceContext.sourceProviderSlug.localeCompare(right.resourceContext.sourceProviderSlug)
+    || left.externalIdentityHash.localeCompare(right.externalIdentityHash);
+}
+
+function pushJunctionSparseIntervalReading(
+  context: NormalizationContext,
+  resource: JunctionSparseIntervalResource,
+  resourceSlug: string,
+  reading: JunctionSparseIntervalReading,
+): void {
+  const policy = getJunctionSparseIntervalPolicy(resource);
+  const role = `junction-timeseries-reading-${resourceSlug}:${reading.dayKey}:${reading.externalIdentityHash}`;
+  const externalRefUpdatePolicy: DeviceEventPayload["externalRefUpdatePolicy"] =
+    reading.sourceVersion ? undefined : "immutable";
+
+  pushEvidencePart(
+    context.evidenceParts,
+    withJunctionCompactTimeseriesMetadata(
+      resource,
+      createEvidencePart(
+        role,
+        `${role}.json`,
+        stripUndefined({
+          schema: "junction.interval_reading.v1",
+          policyVersion: policy.policyVersion,
+          provider: "junction",
+          resource,
+          dayKey: reading.dayKey,
+          sourceProviderSlug: reading.resourceContext.sourceProviderSlug,
+          sourceType: reading.resourceContext.origin.sourceType,
+          sourceInstanceId: reading.resourceContext.origin.sourceInstanceId,
+          startAt: reading.startAt,
+          endAt: reading.endAt,
+          durationSeconds: reading.durationSeconds,
+          providerValue: reading.providerValue,
+          providerUnit: reading.providerUnit,
+          value: reading.value,
+          unit: policy.unit,
+          recordedAt: reading.recordedAt,
+        }),
+      ),
+      "timeseries_reading",
+    ),
+  );
+
+  context.events.push(stripUndefined({
+    kind: "measurement",
+    occurredAt: reading.startAt,
+    recordedAt: reading.recordedAt,
+    dayKey: reading.dayKey,
+    timeZone: reading.timeZone,
+    source: "device",
+    title: policy.title,
+    evidenceRoles: [role],
+    externalRef: makeProviderExternalRef(
+      "junction",
+      reading.resourceContext.externalRefResourceType,
+      `${resourceSlug}-${reading.externalIdentityHash}`,
+      reading.sourceVersion,
+      "interval",
+    ),
+    externalRefUpdatePolicy,
+    dataOrigin: buildDataOrigin(
+      reading.entry,
+      reading.resourceContext,
+      reading.timestamp,
+      { normalizerVersion: policy.policyVersion },
+    ),
+    fields: {
+      measurements: [{
+        metric: policy.metric,
+        value: reading.value,
+        unit: policy.unit,
+        qualifiers: stripUndefined({
+          "interval-start-at": reading.startAt,
+          "interval-end-at": reading.endAt,
+          "interval-duration-seconds": reading.durationSeconds,
+          "provider-unit": reading.providerUnit,
+        }),
+      }],
     },
   }));
 }
@@ -4272,6 +5907,9 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   if (!sanitized) {
     return sanitized;
   }
+  const sanitizedSnapshot = Object.fromEntries(
+    Object.entries(sanitized).filter(([key]) => key !== "strictSparseCalendarRepair"),
+  );
   const connections = asArray(snapshot.connections).flatMap((connection) => {
     const normalized = asPlainObject(connection);
     return normalized ? [normalized] : [];
@@ -4293,7 +5931,7 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   }
 
   return stripUndefined({
-    ...sanitized,
+    ...sanitizedSnapshot,
     connections: sanitizeJunctionRawConnections(snapshot.connections),
     summaries,
     timeseries,
@@ -4381,18 +6019,23 @@ function sanitizeProfilePayload(payload: unknown, connection?: PlainObject): Pla
   const gender = firstStringFromPaths(profile, JUNCTION_PROFILE_GENDER_PATHS);
   const sourceProviderSlug = readJunctionSourceProviderSlug(profile, connection)
     ?? origin.sourceProviderSlug;
+  const createdAt = resolveSafeTimestamp(
+    firstValueFromPaths(profile, ["createdAt", "created_at", "updatedAt", "updated_at"]),
+    origin.sourceProviderSlug,
+  );
   const updatedAt = resolveSafeTimestamp(
     firstValueFromPaths(profile, ["updatedAt", "updated_at", "createdAt", "created_at"]),
     origin.sourceProviderSlug,
   );
   const sanitized = stripUndefined({
+    createdAt,
     gender: gender ? trimToLength(gender, 80) : undefined,
     stableResourceId: buildStableProfileResourceId(
       profile,
       sourceProviderSlug,
       origin.sourceType,
       origin.sourceInstanceId,
-      updatedAt,
+      createdAt ?? updatedAt,
     ),
     sourceProviderSlug,
     sourceInstanceId: origin.sourceInstanceId,
@@ -5787,13 +7430,10 @@ function pushProfileSummary(
     dayKey: extractIsoDatePrefix(pinnedOccurredAt) ?? baseTimestamp.dayKey,
     observedAtRaw: pinnedOccurredAt,
   });
-  const legacyExternalRefs = (facet: string) => buildJunctionProfileLegacyExternalRefs(
-    resourceContext,
-    entry,
-    timestamp,
-    providerTimestampRaw,
-    facet,
-  );
+  const profileNormalizerVersion = firstStringFromPaths(entry, ["stableResourceId"])
+      || firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
+    ? undefined
+    : JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION;
 
   pushObservationMetrics(
     entry,
@@ -5801,7 +7441,7 @@ function pushProfileSummary(
     context,
     JUNCTION_PROFILE_METRICS,
     timestamp,
-    legacyExternalRefs,
+    { normalizerVersion: profileNormalizerVersion },
   );
 
   if (!timestamp.occurredAt) {
@@ -5819,8 +7459,9 @@ function pushProfileSummary(
       title: "Junction gender",
       evidenceRoles: resourceContext.evidenceRoles,
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "gender"),
-      legacyExternalRefs: legacyExternalRefs("gender"),
-      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, {
+        normalizerVersion: profileNormalizerVersion,
+      }),
       fields: {
         measurements: [{
           metric: "gender",
@@ -5837,7 +7478,6 @@ function pushProfileSummary(
   const wheelchairUse = firstValueFromPaths(entry, ["wheelchairUse", "wheelchair_use"]);
   const segments = [
     birthDate ? `Birth date: ${birthDate}.` : undefined,
-    reportedGender ? `Reported gender: ${reportedGender}.` : undefined,
     sex ? `Biological sex: ${sex}.` : undefined,
     typeof wheelchairUse === "boolean" ? `Wheelchair use: ${wheelchairUse ? "yes" : "no"}.` : undefined,
   ].filter((segment): segment is string => segment !== undefined);
@@ -5856,9 +7496,9 @@ function pushProfileSummary(
     note: trimToLength(segments.join(" "), 4000),
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "profile-demographics"),
-    legacyExternalRefs: legacyExternalRefs("profile-demographics"),
-    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-    fields: reportedGender ? { reportedGender } : undefined,
+    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, {
+      normalizerVersion: profileNormalizerVersion,
+    }),
   }));
 }
 
@@ -6755,13 +8395,14 @@ function buildJunctionMealNutrition(
 }
 
 // Micronutrients land bounded and compactly: only the documented Junction
-// micro keys are read, and null/zero entries are skipped.
+// micro keys are read. Preserve an explicit finite zero so downstream coverage
+// can distinguish a recorded zero from an absent provider field.
 function readJunctionMealMicros(entry: PlainObject): Partial<MealMicronutrients> | undefined {
   const micros: Partial<MealMicronutrients> = {};
 
   for (const key of MEAL_MICRONUTRIENT_KEYS) {
     const value = roundMealNutritionValue(finiteNumber(readPath(entry, JUNCTION_MEAL_MICRO_PATHS[key])));
-    if (value !== undefined && value > 0) {
+    if (value !== undefined && value >= 0) {
       micros[key] = value;
     }
   }
@@ -7152,7 +8793,7 @@ function pushObservationMetrics(
   context: NormalizationContext,
   metrics: readonly MetricDescriptor[],
   timestampOverride?: ReturnType<typeof resolveRecordTimestamp>,
-  legacyExternalRefs?: (facet: string) => DeviceExternalRefPayload[] | undefined,
+  options: { normalizerVersion?: string } = {},
 ): void {
   const timestamp = timestampOverride ?? resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const occurredAt = timestamp.occurredAt;
@@ -7184,8 +8825,7 @@ function pushObservationMetrics(
       // supersedes an existing generic Apple HRV event instead of duplicating
       // it under the corrected SDNN metric.
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
-      legacyExternalRefs: legacyExternalRefs?.(metric.metric),
-      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, options),
       fields: {
         metric: metricKey,
         observationGrain: "summary",
@@ -7435,12 +9075,13 @@ function makeJunctionExternalRef(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   facet: string,
+  sourceVersion?: string,
 ): DeviceExternalRefPayload {
   return makeProviderExternalRef(
     "junction",
     resourceContext.externalRefResourceType,
     buildStableResourceId(resourceContext, entry, timestamp),
-    junctionExternalRefVersion(resourceContext, entry),
+    sourceVersion ?? junctionExternalRefVersion(resourceContext, entry),
     slugify(facet, "value"),
   );
 }
@@ -7449,6 +9090,13 @@ function junctionExternalRefVersion(
   resourceContext: ResourceContext,
   entry: PlainObject,
 ): string | undefined {
+  if (
+    resourceContext.identityKind === "timeseries"
+    && resourceContext.resource === "workout_stream"
+    && entry.schema === JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA
+  ) {
+    return normalizeTimestamp(firstValueFromPaths(entry, ["version"]));
+  }
   if (
     resourceContext.sourceProviderSlug !== "apple-health-kit"
     || resourceContext.origin.sourceType !== "companion-whoop-metadata-unverified"
@@ -7545,7 +9193,7 @@ function buildStableProfileResourceId(
   sourceProviderSlug: string | null | undefined,
   sourceType: string | null | undefined,
   sourceInstanceId: string | null | undefined,
-  updatedAt: string | undefined,
+  identityTimestamp: string | undefined,
 ): string | undefined {
   const retainedResourceId = firstStringFromPaths(entry, ["stableResourceId"]);
   if (retainedResourceId && /^profile-[a-f0-9]{16}$/u.test(retainedResourceId)) {
@@ -7562,52 +9210,14 @@ function buildStableProfileResourceId(
     ])}`;
   }
 
-  return updatedAt
+  return identityTimestamp
     ? `profile-${shortHash([
         "profile",
         sourceProviderSlug,
         sourceType,
         sourceInstanceId,
-        updatedAt,
+        identityTimestamp,
       ])}`
-    : undefined;
-}
-
-function buildJunctionProfileLegacyExternalRefs(
-  resourceContext: ResourceContext,
-  entry: PlainObject,
-  timestamp: ReturnType<typeof resolveRecordTimestamp>,
-  providerTimestampRaw: unknown,
-  facet: string,
-): DeviceExternalRefPayload[] | undefined {
-  if (
-    firstStringFromPaths(entry, ["stableResourceId"])
-    || firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
-  ) {
-    return undefined;
-  }
-
-  const primary = makeJunctionExternalRef(resourceContext, entry, timestamp, facet);
-  const updatedAtRaw = firstValueFromPaths(entry, ["updatedAt", "updated_at"]);
-  const legacyTimestamps = new Set([
-    stringId(providerTimestampRaw),
-    resolveSafeTimestamp(providerTimestampRaw, resourceContext.sourceProviderSlug),
-    stringId(updatedAtRaw),
-    resolveSafeTimestamp(updatedAtRaw, resourceContext.sourceProviderSlug),
-  ].filter((value): value is string => value !== undefined));
-  const legacyResourceIds = [...legacyTimestamps].map((legacyTimestamp) =>
-    `profile-${shortHash([
-      "profile",
-      resourceContext.sourceProviderSlug,
-      resourceContext.origin.sourceType,
-      resourceContext.origin.sourceInstanceId,
-      legacyTimestamp,
-    ])}`
-  ).filter((resourceId) => resourceId !== primary.resourceId);
-
-  const uniqueLegacyResourceIds = [...new Set(legacyResourceIds)];
-  return uniqueLegacyResourceIds.length > 0
-    ? uniqueLegacyResourceIds.map((resourceId) => ({ ...primary, resourceId }))
     : undefined;
 }
 
@@ -7621,13 +9231,43 @@ function buildStableTimeseriesResourceId(
     ])}`;
   }
 
-  return `${resourceContext.resourceSlug}-${shortHash([
-    resourceContext.resourceSlug,
-    resourceContext.sourceProviderSlug,
-    resourceContext.origin.sourceType,
-    resourceContext.origin.sourceInstanceId,
-    timestamp.observedAtRaw ?? timestamp.occurredAt,
+  return buildJunctionTimeseriesResourceId({
+    observedAtRaw: timestamp.observedAtRaw ?? timestamp.occurredAt,
+    resourceSlug: resourceContext.resourceSlug,
+    sourceInstanceId: resourceContext.origin.sourceInstanceId,
+    sourceProviderSlug: resourceContext.sourceProviderSlug,
+    sourceType: resourceContext.origin.sourceType,
+  });
+}
+
+function buildJunctionTimeseriesResourceId(input: {
+  observedAtRaw?: string;
+  resourceSlug: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string | null;
+}): string {
+  return `${input.resourceSlug}-${shortHash([
+    input.resourceSlug,
+    input.sourceProviderSlug,
+    input.sourceType,
+    input.sourceInstanceId,
+    input.observedAtRaw,
   ])}`;
+}
+
+export function buildJunctionDailyTimeseriesAggregateResourceId(
+  input: JunctionDailyTimeseriesAggregateIdentity,
+): string {
+  const resourceSlug = slugify(input.resource, "timeseries");
+  return buildJunctionTimeseriesResourceId({
+    observedAtRaw: `${input.dayKey}:${input.resource}:daily`,
+    resourceSlug,
+    sourceInstanceId: input.sourceInstanceId,
+    sourceProviderSlug: normalizeJunctionSourceProviderSlug(input.sourceProviderSlug)
+      ?? input.sourceProviderSlug,
+    sourceType: input.sourceType,
+  });
 }
 
 function shortHash(parts: readonly unknown[]): string {
@@ -8205,6 +9845,15 @@ function firstTimestampSemantics(entry: PlainObject): TimestampSemantics | undef
     : undefined;
 }
 
+function isImplicitJunctionCanonicalUtcTimestamp(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): boolean {
+  return firstTimestampSemantics(entry) === undefined
+    && timestamp.timestampSemantics !== "floating"
+    && /\+00:?00$/u.test(timestamp.observedAtRaw?.trim() ?? "");
+}
+
 function resolveJunctionTimeseriesAggregateDayKey(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
@@ -8286,6 +9935,16 @@ function resolveLegacyJunctionTimeseriesAggregateDayKey(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   sampleAt: string | undefined,
 ): string | undefined {
+  // Before canonical +00:00 timestamps were recognized as UTC, the importer
+  // treated their raw calendar date as authoritative. Keep that old day as a
+  // replay alias when the corrected source-local day crosses midnight.
+  if (
+    timestamp.timestampSemantics === "utc"
+    && isImplicitJunctionCanonicalUtcTimestamp(entry, timestamp)
+  ) {
+    return extractIsoDatePrefix(timestamp.observedAtRaw) ?? undefined;
+  }
+
   const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
   if (
     offsetSeconds !== null
@@ -8954,7 +10613,7 @@ function normalizeBodyTemperatureCelsius(value: unknown): number | undefined {
 function normalizeCaffeineMilligrams(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
-  if (numeric === undefined || numeric <= 0 || numeric > 2) {
+  if (numeric === undefined || numeric < 0 || numeric > 2) {
     return undefined;
   }
 
@@ -8964,7 +10623,7 @@ function normalizeCaffeineMilligrams(value: unknown): number | undefined {
 function normalizeWaterMilliliters(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
-  if (numeric === undefined || numeric <= 0 || numeric > 10_000) {
+  if (numeric === undefined || numeric < 0 || numeric > 10_000) {
     return undefined;
   }
 
@@ -8974,7 +10633,7 @@ function normalizeWaterMilliliters(value: unknown): number | undefined {
 function normalizeMindfulnessMinutesValue(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
-  if (numeric === undefined || numeric <= 0 || numeric > 1440) {
+  if (numeric === undefined || numeric < 0 || numeric > 1440) {
     return undefined;
   }
 

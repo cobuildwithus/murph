@@ -248,6 +248,15 @@ describe('assistant skill assets', () => {
     expect(daily).toMatch(
       /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
     )
+    expect(daily).toContain(
+      '`workoutFeatures` associates bounded heart-rate, cadence, power, speed, and split details',
+    )
+    expect(daily).toContain(
+      'Treat an empty `splits` array as no retained split facets for that workout',
+    )
+    expect(daily).toContain(
+      'Power fields ending in `Watts` are watts,',
+    )
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
   })
@@ -261,6 +270,102 @@ describe('assistant skill assets', () => {
 
     expect(shared).toContain('its cause is unverified')
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
+  })
+
+  it('keeps longitudinal routing compact while the skill owns trial selection and onboarding owns activation', async () => {
+    const experimentSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'self-management-experiments',
+    )
+    expect(experimentSkill).toBeTruthy()
+    if (!experimentSkill) return
+
+    expect(experimentSkill.triggerHint).toContain(
+      'Use to design, run, and interpret low-burden personalized experiments',
+    )
+    expect(experimentSkill.triggerHint).not.toContain('private direct')
+    expect(experimentSkill.triggerHint).not.toContain('proactively use it')
+
+    const raw = await readSkillFile(experimentSkill)
+    const compact = raw.replace(/\s+/gu, ' ')
+    expect(raw).toContain('## Personalized trial selection')
+    expect(raw).not.toContain('## Private longitudinal default')
+    expect(compact).toContain(
+      'Use longitudinal context as a decision input, not decoration',
+    )
+    expect(compact).toContain(
+      'let prior partial benefit refine technique, timing, dose, or comparison',
+    )
+    expect(compact).toContain(
+      'Lead the first useful response with a calibrated working assessment, the one or two longitudinal facts that changed the choice, and one selected trial.',
+    )
+    expect(compact).toContain(
+      'Do not answer an eligible request with a list of hydration, sleep, stress, diet, trigger avoidance, or other general wellness ideas.',
+    )
+    expect(compact).toContain(
+      'Do not withhold it because run creation, reminders, check-ins, or tracking still need authorization.',
+    )
+    expect(compact).toContain(
+      'mentions history without letting it change the lever, technique, timing, dose, comparison, or outcome',
+    )
+    expect(compact).toContain(
+      'ends with generic wellness advice when a safe bounded trial is the selected answer',
+    )
+
+    const onboarding = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'experiment-onboarding',
+    )
+    expect(onboarding).toBeTruthy()
+    if (!onboarding) return
+    const onboardingRaw = await readSkillFile(onboarding)
+    expect(onboardingRaw).toContain(
+      'This restriction is about persistence and activation, not about withholding a useful proposal.',
+    )
+    expect(onboardingRaw).toContain(
+      'create the run and support only after authorization.',
+    )
+
+    const repositoryRoot = path.resolve(resolveAssistantSkillsRoot(), '../../..')
+    const [productContract, changelog] = await Promise.all([
+      readFile(
+        path.join(repositoryRoot, 'agent-docs/product-specs/health-commons.md'),
+        'utf8',
+      ),
+      readFile(
+        path.join(
+          repositoryRoot,
+          'apps/web/changelog/entries/2026-08-14/personalized-next-trials.json',
+        ),
+        'utf8',
+      ),
+    ])
+    const compactProductContract = productContract.replace(/\s+/gu, ' ')
+    expect(compactProductContract).toContain(
+      'it may suggest one context-grounded bounded trial without experiment vocabulary',
+    )
+    expect(compactProductContract).toContain(
+      'factual questions, logging or record updates, requests to be heard',
+    )
+    expect(compactProductContract).toContain(
+      'acute or unstable situations, cases primarily owned by urgent or clinician-led evaluation',
+    )
+    expect(compactProductContract).toContain(
+      'the existing record already resolves',
+    )
+    expect(compactProductContract).toContain(
+      'one clearly indicated direct action makes comparison unnecessary',
+    )
+    expect(compactProductContract).toContain(
+      'A proposal never authorizes a run, reminder, check-in, or tracking plan',
+    )
+    expect(compactProductContract).not.toContain(
+      'does not create or suggest an experiment unless the member asks',
+    )
+    expect(changelog).toContain(
+      'When a private health problem keeps returning',
+    )
+    expect(changelog).toContain(
+      'starting a tracked experiment, reminder, or check-in still requires the member\'s authorization',
+    )
   })
 
   it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
@@ -1226,14 +1331,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Default to private/minimal support when shared-channel permission is unclear.',
     )
-    expect(raw).toContain(
-      'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
+    expect(compact).toContain(
+      'The scheduled runtime owns generic recurring reminder cadence',
     )
     expect(compact).toContain(
-      'A reminder is a cue. An accountability check-in is normally a separate, later action whose job is to learn the outcome, not repeat the cue.',
+      'A reminder is a cue. An accountability check-in is a separate, later action whose job is to learn the outcome, not repeat the cue.',
     )
     expect(compact).toContain(
-      'The accepted dense-loop policy above is the narrow exception',
+      'The runtime-owned keep/change/pause cadence question does not ask about the outcome and does not turn a reminder into a check-in.',
+    )
+    expect(compact).toContain(
+      'Medication, prescribed treatment, clinician-directed care, clinical monitoring, and safety-critical reminders continue the saved cue after silence',
     )
     expect(compact).toContain(
       'A direct request to check back later authorizes that exact check-in.',
@@ -1274,7 +1382,21 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Silence after that check-in does not authorize another same-occurrence follow-up.',
     )
-    expect(compact).toContain('Prefer bounded support. Never create open-ended nag loops.')
+    expect(compact).toContain(
+      'never increase frequency or add messages after non-response',
+    )
+    expect(compact).toContain(
+      'Reuse a good concise cue when the context has not changed.',
+    )
+    expect(compact).toContain('do not manufacture novelty')
+    expect(compact).toContain(
+      'Never copy these generic repair or review requirements into an ordinary recurring reminder.',
+    )
+    expect(compact).toContain(
+      'The generic repair, skip, and miss rules below apply only to Murph-designed habit support or an explicitly consented `check_in` or `review`',
+    )
+    expect(compact).not.toContain('Do not repeat stale reminder copy.')
+    expect(raw).not.toContain('### Reminder density and reply loop')
     expect(raw).toContain('Count an ignored support attempt only when')
     expect(raw).toContain('When support is working, fade it instead of adding more.')
     expect(raw).toContain('Use `completed`, `partial`, `missed`, or `skipped` session status')
@@ -1481,7 +1603,10 @@ describe('assistant skill assets', () => {
       'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
     )
     expect(compactCatalog).toContain(
-      'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
+      'Familiarity alone is not a reason to omit images. Omit exercise images only when the user explicitly asks for a response without them.',
+    )
+    expect(compactCatalog).toContain(
+      'at least one useful returned catalog image for every exercise that has one by default.',
     )
     expect(compactCatalog).toContain(
       'Construct source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`.',
@@ -1489,6 +1614,9 @@ describe('assistant skill assets', () => {
     expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
+    )
+    expect(compactCatalog).not.toContain(
+      'include available catalog media in the same response',
     )
   })
 
@@ -1503,6 +1631,18 @@ describe('assistant skill assets', () => {
 
     const raw = await readSkillFile(supplementSkill)
 
+    expect(raw).toContain(
+      'For connected or saved-meal nutrient questions, also read `food-journal`',
+    )
+    expect(raw).toContain(
+      'missing or partial meal coverage is not zero intake',
+    )
+    expect(raw).toContain(
+      'source-app targets and percentages are not imported',
+    )
+    expect(raw).toContain(
+      'one day of food records cannot diagnose a deficiency',
+    )
     expect(raw).toContain('vault-cli supplement search-labels`')
     expect(raw).toContain('vault-cli\nsupplement search-labels-batch`')
     expect(raw).toContain('preserve the full active ingredient panel')

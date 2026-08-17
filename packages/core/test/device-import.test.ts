@@ -2073,13 +2073,12 @@ test("importDeviceBatch retracts omitted facets from a newer bounded authoritati
       occurredAt: "2026-05-01T08:00:00.000Z",
       recordedAt: "2026-05-01T09:00:00.000Z",
       title: "Junction profile",
-      note: "Reported gender: other.",
+      note: "Biological sex: female.",
       externalRef: {
         ...identity,
         facet,
         version: "2026-05-01T08:00:00.000Z",
       },
-      fields: { reportedGender: "other" },
     }],
     authoritativeEventSets: [{
       ...identity,
@@ -7579,6 +7578,147 @@ test("importDeviceBatch rejects sleep-type enrichment with other same-revision c
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
 });
 
+test("importDeviceBatch reports each immediate Junction sparse cross-day transition", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-junction-cross-day-chain");
+  await initializeVault({ vaultRoot, createdAt: "2026-04-01T00:00:00.000Z" });
+  const buildEvent = (dayKey: string, version: string) => ({
+    kind: "measurement" as const,
+    occurredAt: `${dayKey}T08:00:00.000Z`,
+    recordedAt: `${dayKey}T08:00:00.000Z`,
+    dayKey,
+    title: "Junction water intake",
+    externalRef: {
+      system: "junction",
+      resourceType: "junction-garmin-water",
+      resourceId: "water-cross-day-chain",
+      facet: "interval",
+      version,
+    },
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      sourceInstanceId: "garmin-watch-1",
+      normalizerVersion: "junction-timeseries.v1",
+    },
+    fields: {
+      measurements: [{ metric: "water", unit: "ml", value: 250 }],
+    },
+  });
+
+  const v1 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-04T09:00:00.000Z",
+    events: [buildEvent("2026-04-01", "2026-04-04T08:00:00.000Z")],
+  });
+  assert.deepEqual(v1.affectedEventDayKeys, ["2026-04-01"]);
+  assert.deepEqual(v1.affectedSparseCalendarTargets, [{
+    dayKey: "2026-04-01",
+    sourceInstanceId: "garmin-watch-1",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+  }]);
+
+  const v2 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-05T09:00:00.000Z",
+    events: [buildEvent("2026-04-02", "2026-04-05T08:00:00.000Z")],
+  });
+  assert.deepEqual(v2.affectedEventDayKeys, ["2026-04-01", "2026-04-02"]);
+  assert.deepEqual(v2.affectedSparseCalendarTargets?.map((target) => target.dayKey), [
+    "2026-04-01",
+    "2026-04-02",
+  ]);
+
+  const v3 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-06T09:00:00.000Z",
+    events: [buildEvent("2026-04-03", "2026-04-06T08:00:00.000Z")],
+  });
+  assert.deepEqual(v3.affectedEventDayKeys, ["2026-04-02", "2026-04-03"]);
+  assert.deepEqual(v3.affectedSparseCalendarTargets?.map((target) => target.dayKey), [
+    "2026-04-02",
+    "2026-04-03",
+  ]);
+
+  const delayedV2 = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-07T09:00:00.000Z",
+    events: [buildEvent("2026-04-02", "2026-04-05T08:00:00.000Z")],
+  });
+  assert.equal(delayedV2.applied, false);
+  assert.equal(
+    delayedV2.affectedEventDayKeys,
+    undefined,
+    "A delayed stale revision cannot reconstruct older refresh work; the durable day jobs retain it.",
+  );
+  assert.equal(delayedV2.affectedSparseCalendarTargets, undefined);
+});
+
+test("importDeviceBatch rejects excessive Junction sparse affected-day fanout atomically", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-junction-affected-days");
+  await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+
+  const buildEvents = (startAt: string, version: string) =>
+    Array.from({ length: 33 }, (_, index) => {
+      const occurredAt = new Date(Date.parse(startAt) + index * 24 * 60 * 60_000).toISOString();
+      return {
+        kind: "measurement" as const,
+        occurredAt,
+        recordedAt: occurredAt,
+        dayKey: occurredAt.slice(0, 10),
+        title: "Junction water intake",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-water",
+          resourceId: `water-affected-day-${index}`,
+          facet: "interval",
+          version,
+        },
+        fields: {
+          measurements: [{
+            metric: "water",
+            unit: "ml",
+            value: index + 1,
+          }],
+        },
+      };
+    });
+
+  const baseline = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-04-10T12:00:00.000Z",
+    events: buildEvents("2026-01-01T08:00:00.000Z", "2026-04-10T10:00:00.000Z"),
+  });
+  assert.equal(baseline.affectedEventDayKeys?.length, 33);
+  const beforeRejectedCorrection = await snapshotVaultFiles(vaultRoot);
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      accountId: "junction-user-1",
+      importedAt: "2026-04-11T12:00:00.000Z",
+      events: buildEvents("2026-03-01T08:00:00.000Z", "2026-04-11T10:00:00.000Z"),
+    }),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "DEVICE_IMPORT_AFFECTED_DAY_LIMIT_EXCEEDED",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedCorrection);
+});
+
 test("importDeviceBatch keeps Junction sleep summary stages over later cycle fallback facts", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-junction-summary-over-cycle");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -8323,6 +8463,173 @@ test("importDeviceBatch retains member edits while advancing provider siblings a
     && event.externalRef?.version === "2026-06-12T09:00:00.000Z"
     && eventObservationValue(event) === 3
   ));
+});
+
+test("importDeviceBatch scopes no-id Junction profile predecessor claims to one source instance", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-profile-predecessor-scope");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const resourceType = "junction-oura-profile";
+  const profileResourceId = (sourceInstanceId: string, occurredAt: string) =>
+    `profile-${createHash("sha256")
+      .update(JSON.stringify(["profile", "oura", "ring", sourceInstanceId, occurredAt]))
+      .digest("hex")
+      .slice(0, 16)}`;
+  const profileEvent = (input: {
+    normalizerVersion: string;
+    occurredAt: string;
+    sourceInstanceId: string;
+    value: number;
+    version?: string;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: input.occurredAt,
+    recordedAt: input.occurredAt,
+    dayKey: input.occurredAt.slice(0, 10),
+    title: "Junction height",
+    externalRef: {
+      system: "junction",
+      resourceType,
+      resourceId: profileResourceId(input.sourceInstanceId, input.occurredAt),
+      ...(input.version ? { version: input.version } : {}),
+      facet: "height",
+    },
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      sourceInstanceId: input.sourceInstanceId,
+      observedAtRaw: input.occurredAt,
+      timestampSemantics: "utc" as const,
+      normalizerVersion: input.normalizerVersion,
+    },
+    fields: {
+      metric: "height",
+      observationGrain: "summary" as const,
+      value: input.value,
+      unit: "cm",
+    },
+  });
+  const firstUpdatedAt = "2026-05-20T09:00:00.000Z";
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-20T10:00:00.000Z",
+    events: [profileEvent({
+      normalizerVersion: "junction-normalizer.v1",
+      occurredAt: firstUpdatedAt,
+      sourceInstanceId: "profile-source-a",
+      value: 180,
+    })],
+  });
+  const createdAt = "2026-05-01T09:00:00.000Z";
+  const second = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-22T10:00:00.000Z",
+    events: [profileEvent({
+      normalizerVersion: "junction-no-id-profile.v1",
+      occurredAt: createdAt,
+      sourceInstanceId: "profile-source-b",
+      value: 181,
+      version: "2026-05-22T09:00:00.000Z",
+    })],
+  });
+
+  assert.notEqual(second.events[0]?.id, first.events[0]?.id);
+  const rows = (
+    await Promise.all(
+      [...new Set([...first.eventShardPaths, ...second.eventShardPaths])].map((relativePath) =>
+        readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )
+  ).flat() as EventRecord[];
+  assert.equal(collapseEventSpines(rows).length, 2);
+});
+
+test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors atomically", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-profile-predecessor-ambiguity");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const resourceType = "junction-oura-profile";
+  const sourceInstanceId = "profile-source";
+  const profileResourceId = (occurredAt: string) =>
+    `profile-${createHash("sha256")
+      .update(JSON.stringify(["profile", "oura", "ring", sourceInstanceId, occurredAt]))
+      .digest("hex")
+      .slice(0, 16)}`;
+  const profileEvent = (input: {
+    normalizerVersion: string;
+    occurredAt: string;
+    value: number;
+    version?: string;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: input.occurredAt,
+    recordedAt: input.occurredAt,
+    dayKey: input.occurredAt.slice(0, 10),
+    title: "Junction height",
+    externalRef: {
+      system: "junction",
+      resourceType,
+      resourceId: profileResourceId(input.occurredAt),
+      ...(input.version ? { version: input.version } : {}),
+      facet: "height",
+    },
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      sourceInstanceId,
+      observedAtRaw: input.occurredAt,
+      timestampSemantics: "utc" as const,
+      normalizerVersion: input.normalizerVersion,
+    },
+    fields: {
+      metric: "height",
+      observationGrain: "summary" as const,
+      value: input.value,
+      unit: "cm",
+    },
+  });
+  const firstUpdatedAt = "2026-05-19T09:00:00.000Z";
+  const secondUpdatedAt = "2026-05-20T09:00:00.000Z";
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-20T10:00:00.000Z",
+    events: [
+      profileEvent({
+        normalizerVersion: "junction-normalizer.v1",
+        occurredAt: firstUpdatedAt,
+        value: 179,
+      }),
+      profileEvent({
+        normalizerVersion: "junction-normalizer.v1",
+        occurredAt: secondUpdatedAt,
+        value: 180,
+      }),
+    ],
+  });
+  const before = await snapshotVaultFiles(vaultRoot);
+  const createdAt = "2026-05-01T09:00:00.000Z";
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-05-22T10:00:00.000Z",
+      events: [profileEvent({
+        normalizerVersion: "junction-no-id-profile.v1",
+        occurredAt: createdAt,
+        value: 181,
+        version: "2026-05-22T09:00:00.000Z",
+      })],
+    }),
+    (error: unknown) => error instanceof VaultError
+      && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
 });
 
 test("importDeviceBatch retains omitted member edits above provider tombstones", async () => {

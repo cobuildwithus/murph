@@ -9,6 +9,8 @@ import {
 } from "@murphai/health-commons/runtime";
 
 import {
+  collectLazyRunnerBundleOutputPaths,
+  collectStaticRunnerBundleOutputPaths,
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
 } from "./bundle-shared.js";
@@ -268,9 +270,29 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // production assembly measured 10,174,998B on Linux and 10,218,245B on macOS
 // on 2026-08-13, so ratchet the total to the larger cross-platform measurement
 // and retain the established 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_218_245 + 32_768;
+//
+// Generation-10 Browser Vault projection adds the replica builder to lazy
+// runner output. A dedicated Query server facade keeps that graph off startup;
+// exact macOS assembly measured an 8,065,357B static closure and 10,325,065B
+// total after the merged AgentMail removal on 2026-08-14. Keep the entry and
+// static-closure ratchets below, while giving the previous 10,357,833B total
+// cap 10% headroom and retaining the forbidden-startup-input guards.
+// The reviewed Junction temporal-fidelity and shared source-authority paths
+// extend existing device-sync and hosted-runtime chunks without adding a
+// forbidden boot input. Exact merged macOS assembly measured an 8,163,368B
+// static closure on 2026-08-14; retain the fixed 96KB platform tolerance.
+// Junction temporal authority and canonical temporal-feature projection extend
+// the same lazy device-sync and importer outputs without adding a forbidden
+// boot input.
+// Junction summary completeness extends the already-loaded Core event and
+// Junction normalization paths without adding a forbidden boot input. Exact
+// local production assembly measured an 8,261,567B static closure on
+// 2026-08-17. The combined summary-completeness and bounded workout-feature
+// graph measured an 8,268,744B static closure on macOS; ratchet the combined
+// baseline and retain the fixed platform tolerance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_393_617;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_992_470;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_268_744;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
@@ -408,7 +430,7 @@ export function assertRunnerEntrypointBundleWithinBudgets(
       `runner entrypoint bundle metafile is missing output ${entryPath}; cannot enforce the entry-chunk byte budget.`,
     );
   }
-  const staticBootOutputPaths = collectStaticRunnerEntrypointOutputPaths(
+  const staticBootOutputPaths = collectStaticRunnerBundleOutputPaths(
     metafile,
     entryPath,
   );
@@ -509,93 +531,11 @@ function assertRunnerEntrypointBundleBootInputsAllowed(
   }
 }
 
-type MetafileOutputImport = Metafile["outputs"][string]["imports"][number];
-
-function collectStaticRunnerEntrypointOutputPaths(
-  metafile: Metafile,
-  entryPath: string,
-): Set<string> {
-  return collectRunnerEntrypointOutputPaths(
-    metafile,
-    entryPath,
-    (imported) => imported.kind !== "dynamic-import",
-  );
-}
-
 export function collectLazyRunnerEntrypointOutputPaths(
   metafile: Metafile,
   entryPath: string,
 ): Set<string> {
-  const staticOutputPaths = collectStaticRunnerEntrypointOutputPaths(
-    metafile,
-    entryPath,
-  );
-  const outputPaths = collectRunnerEntrypointOutputPaths(
-    metafile,
-    entryPath,
-    () => true,
-  );
-
-  for (const outputPath of staticOutputPaths) {
-    outputPaths.delete(outputPath);
-  }
-
-  return outputPaths;
-}
-
-function collectRunnerEntrypointOutputPaths(
-  metafile: Metafile,
-  entryPath: string,
-  shouldFollowImport: (imported: MetafileOutputImport) => boolean,
-): Set<string> {
-  const outputPaths = new Set<string>();
-  const pending = [normalizeMetafilePath(entryPath)];
-
-  while (pending.length > 0) {
-    const outputPath = pending.pop();
-    if (!outputPath || outputPaths.has(outputPath)) {
-      continue;
-    }
-    outputPaths.add(outputPath);
-
-    const output = metafile.outputs[outputPath];
-    if (!output) {
-      continue;
-    }
-    for (const imported of output.imports) {
-      if (!shouldFollowImport(imported)) {
-        continue;
-      }
-      const importedOutputPath = resolveMetafileOutputImportPath({
-        importedPath: imported.path,
-        importerOutputPath: outputPath,
-        outputPaths: metafile.outputs,
-      });
-      if (importedOutputPath in metafile.outputs) {
-        pending.push(importedOutputPath);
-      }
-    }
-  }
-
-  return outputPaths;
-}
-
-function resolveMetafileOutputImportPath(input: {
-  importedPath: string;
-  importerOutputPath: string;
-  outputPaths: Metafile["outputs"];
-}): string {
-  const { importedPath, importerOutputPath, outputPaths } = input;
-  const normalizedImportedPath = normalizeMetafilePath(importedPath);
-  if (normalizedImportedPath in outputPaths) {
-    return normalizedImportedPath;
-  }
-  if (!normalizedImportedPath.startsWith(".")) {
-    return normalizedImportedPath;
-  }
-  return normalizeMetafilePath(
-    path.join(path.dirname(importerOutputPath), normalizedImportedPath),
-  );
+  return collectLazyRunnerBundleOutputPaths(metafile, entryPath);
 }
 
 function normalizeMetafilePath(inputPath: string): string {

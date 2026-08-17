@@ -3704,14 +3704,6 @@
           "minLength": 1,
           "maxLength": 120
         },
-        "reportedGender": {
-          "type": "string",
-          "enum": [
-            "female",
-            "male",
-            "other"
-          ]
-        },
         "authoredAt": {
           "type": "string",
           "format": "date-time"
@@ -4334,6 +4326,101 @@
           "type": "string",
           "enum": [
             "default"
+          ]
+        },
+        "qualifiers": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "derived": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "evidenceConfidence": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium"
+                  ]
+                },
+                "evidenceMethod": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "eveningSampleCount": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 5000
+                },
+                "maxAdjacentGapSeconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 86400
+                },
+                "morningSampleCount": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 5000
+                },
+                "qualifyingPairCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4999
+                },
+                "sampleCount": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 5000
+                },
+                "sampleIntervalSeconds": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 86400
+                },
+                "thresholdSampleCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 5000
+                }
+              },
+              "required": [
+                "derived",
+                "evidenceConfidence",
+                "evidenceMethod",
+                "maxAdjacentGapSeconds",
+                "qualifyingPairCount",
+                "sampleCount"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              }
+            }
           ]
         },
         "value": {
@@ -9910,6 +9997,13 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 160
+            },
+            "lastMemberActionId": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             },
             "sessionNote": {
               "type": "string",

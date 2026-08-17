@@ -10,6 +10,7 @@ import {
   initializeVault,
   readJsonlRecords,
 } from "@murphai/core";
+import { normalizeJunctionSnapshot } from "@murphai/importers/device-providers/junction";
 import { summarizeWearableSourceHealthRuntime } from "@murphai/query";
 import { test } from "vitest";
 
@@ -373,46 +374,68 @@ test("WHOOP typed-sleep replay preserves a source-retaining edit", async () => {
   }
 });
 
-test("a real profile edit remains live above an authoritative provider update", async () => {
+test("a real gender edit remains live across sanitized no-id profile replays", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-event-edit-junction-profile-"));
+  const createdAt = "2026-06-01T15:00:00.000Z";
+  const updatedAt = "2026-06-03T15:00:00.000Z";
+  const normalized = normalizeJunctionSnapshot({
+    importedAt: "2026-06-03T16:00:00.000Z",
+    summaries: {
+      profile: {
+        created_at: createdAt,
+        updated_at: updatedAt,
+        gender: "other",
+        source_device_id: "profile-source-instance-proof",
+        source: { provider: "apple_health", type: "phone" },
+      },
+    },
+  });
+  const profileArtifact = normalized.evidenceParts?.find(
+    (part) => part.role === "junction-summary-profile",
+  );
+  assert.ok(profileArtifact);
+  const firstReplay = normalizeJunctionSnapshot({
+    importedAt: "2026-07-03T16:00:00.000Z",
+    summaries: { profile: profileArtifact.content },
+  });
+  const firstReplayArtifact = firstReplay.evidenceParts?.find(
+    (part) => part.role === "junction-summary-profile",
+  );
+  assert.ok(firstReplayArtifact);
+  const secondReplay = normalizeJunctionSnapshot({
+    importedAt: "2026-08-03T16:00:00.000Z",
+    summaries: { profile: firstReplayArtifact.content },
+  });
+  const genderEvents = [normalized, firstReplay, secondReplay].map((payload) =>
+    payload.events?.find((event) => event.title === "Junction gender")
+  );
+  assert.equal(genderEvents.every((event) => event !== undefined), true);
+  assert.deepEqual(
+    genderEvents.map((event) => event?.externalRef),
+    genderEvents.map(() => genderEvents[0]?.externalRef),
+  );
+  assert.deepEqual(
+    genderEvents.map((event) => [event?.occurredAt, event?.dayKey]),
+    genderEvents.map(() => [createdAt, "2026-06-01"]),
+  );
+  assert.deepEqual(firstReplayArtifact.content, profileArtifact.content);
+  const genderEvent = genderEvents[0];
+  assert.ok(genderEvent?.externalRef);
   const identity = {
-    system: "junction",
-    resourceType: "junction-apple-health-profile",
-    resourceId: "stable-profile",
-  } as const;
-  const facet = "profile-demographics";
-  const initialVersion = "2026-06-03T15:00:00.000Z";
-  const dataOrigin = {
-    version: 1 as const,
-    aggregatorProvider: "junction",
-    sourceProviderSlug: "apple-health",
-    sourceType: "phone",
-    observedAtRaw: initialVersion,
-    timestampSemantics: "offset" as const,
+    system: genderEvent.externalRef.system,
+    resourceType: genderEvent.externalRef.resourceType,
+    resourceId: genderEvent.externalRef.resourceId,
   };
+  const facet = genderEvent.externalRef.facet;
+  assert.ok(facet);
   const initialInput = {
     vaultRoot,
     provider: "junction",
     accountId: "junction-account",
     importedAt: "2026-06-03T16:00:00.000Z",
-    events: [{
-      kind: "note" as const,
-      occurredAt: initialVersion,
-      recordedAt: initialVersion,
-      dayKey: "2026-06-03",
-      timeZone: "UTC",
-      title: "Junction profile",
-      note: "Reported gender: other.",
-      externalRef: { ...identity, facet, version: initialVersion },
-      dataOrigin,
-      fields: { reportedGender: "other" },
-    }],
-    authoritativeEventSets: [{
-      ...identity,
-      version: initialVersion,
-      facetPrefixes: [facet],
-      currentFacets: [facet],
-    }],
+    events: normalized.events?.map((event) => ({ ...event })) ?? [],
+    evidenceParts: normalized.evidenceParts?.map((part) => ({ ...part })) ?? [],
+    authoritativeEventSets: normalized.authoritativeEventSets?.map((set) => ({ ...set })) ?? [],
   };
 
   try {
@@ -429,16 +452,24 @@ test("a real profile edit remains live above an authoritative provider update", 
       vault: vaultRoot,
       lookup: eventId,
       entityLabel: "event",
-      set: [
-        "title=Corrected profile context",
-        "note=Member-confirmed profile context.",
-      ],
+      set: ["measurements.0.qualifiers.gender=female"],
     });
 
-    const exactReplay = await importDeviceBatch(initialInput);
-    assert.equal(exactReplay.applied, false);
-    assert.equal(exactReplay.ingestId, null);
-
+    const replayInput = {
+      ...initialInput,
+      importedAt: "2026-07-03T16:00:00.000Z",
+      events: firstReplay.events?.map((event) => ({ ...event })) ?? [],
+      evidenceParts: firstReplay.evidenceParts?.map((part) => ({ ...part })) ?? [],
+      authoritativeEventSets: firstReplay.authoritativeEventSets?.map((set) => ({ ...set })) ?? [],
+    };
+    const firstReplayImport = await importDeviceBatch(replayInput);
+    const secondReplayImport = await importDeviceBatch({
+      ...replayInput,
+      importedAt: "2026-08-03T16:00:00.000Z",
+      events: secondReplay.events?.map((event) => ({ ...event })) ?? [],
+      evidenceParts: secondReplay.evidenceParts?.map((part) => ({ ...part })) ?? [],
+      authoritativeEventSets: secondReplay.authoritativeEventSets?.map((set) => ({ ...set })) ?? [],
+    });
     const corrected = await findEventByExternalRef({
       vaultRoot,
       ...identity,
@@ -447,59 +478,32 @@ test("a real profile edit remains live above an authoritative provider update", 
     assert.equal(corrected?.id, eventId);
     assert.equal(corrected?.lifecycle?.revision, 2);
     assert.equal(corrected?.source, "manual");
-    assert.equal(corrected?.title, "Corrected profile context");
-    assert.equal(corrected?.note, "Member-confirmed profile context.");
-    assert.deepEqual(corrected?.externalRef, { ...identity, facet, version: initialVersion });
-    assert.deepEqual(corrected?.dataOrigin, dataOrigin);
-
-    const updatedVersion = "2026-06-04T15:00:00.000Z";
-    const updatedInput = {
-      vaultRoot,
-      provider: "junction",
-      accountId: "junction-account",
-      importedAt: "2026-06-04T16:00:00.000Z",
-      events: [{
-        ...initialInput.events[0],
-        occurredAt: updatedVersion,
-        recordedAt: updatedVersion,
-        note: "Reported gender: female.",
-        externalRef: { ...identity, facet, version: updatedVersion },
-        dataOrigin: { ...dataOrigin, observedAtRaw: updatedVersion },
-        fields: { reportedGender: "female" },
-      }],
-      authoritativeEventSets: [{
-        ...identity,
-        version: updatedVersion,
-        facetPrefixes: [facet],
-        currentFacets: [facet],
-      }],
-    };
-    const updated = await importDeviceBatch(updatedInput);
-    assert.equal(updated.applied, true);
-
-    const retained = await findEventByExternalRef({ vaultRoot, ...identity, facet });
-    assert.equal(retained?.id, eventId);
-    assert.equal(retained?.source, "manual");
-    assert.equal(retained?.title, "Corrected profile context");
-    assert.equal(retained?.note, "Member-confirmed profile context.");
-    assert.deepEqual(retained?.externalRef, { ...identity, facet, version: initialVersion });
-    assert.deepEqual(retained?.dataOrigin, dataOrigin);
+    assert.equal(
+      corrected?.kind === "measurement"
+        ? corrected.measurements[0]?.qualifiers?.gender
+        : undefined,
+      "female",
+    );
     const rows = (
       await Promise.all(
-        [...new Set([...initial.eventShardPaths, ...updated.eventShardPaths])]
+        [...new Set([
+          ...initial.eventShardPaths,
+          ...firstReplayImport.eventShardPaths,
+          ...secondReplayImport.eventShardPaths,
+        ])]
           .map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
       )
     ).flat() as EventRecord[];
-    assert.ok(rows.some((event) =>
-      event.id === eventId
-      && event.source === "device"
-      && event.externalRef?.version === updatedVersion
-      && event.kind === "note"
-      && event.note === "Reported gender: female."
-    ));
-    assert.equal(
-      (await importDeviceBatch(updatedInput)).applied,
-      false,
+    assert.deepEqual(
+      [...new Set(rows
+        .filter((event) =>
+          event.externalRef?.system === identity.system
+          && event.externalRef.resourceType === identity.resourceType
+          && event.externalRef.resourceId === identity.resourceId
+          && event.externalRef.facet === facet
+        )
+        .map((event) => event.id))],
+      [eventId],
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

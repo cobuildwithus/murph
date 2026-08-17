@@ -396,6 +396,39 @@ describe("Strava device-sync provider", () => {
     });
   });
 
+  it("marks an incomplete rotated token generation as provider-state unknown", async () => {
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
+        const url = readUrl(input);
+
+        if (url === "https://www.strava.com/oauth/token") {
+          return new Response(JSON.stringify({
+            access_token: "rotated-access-token",
+            expires_in: 3600,
+          }), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        throw new Error(`Unexpected Strava fetch: ${url}`);
+      }),
+    });
+
+    await expect(
+      provider.oauthAdapter.refreshTokens(buildStravaAccount({
+        refreshToken: "stored-refresh-token",
+      })),
+    ).rejects.toMatchObject({
+      accountStatus: "reauthorization_required",
+      code: "TOKEN_REFRESH_STATE_UNKNOWN",
+    });
+  });
+
   it("rejects authorization when neither the token response nor the athlete profile provides a stable id", async () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "strava-client-id",

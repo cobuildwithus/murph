@@ -6,7 +6,10 @@ import {
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { canonicalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
+  canonicalizeJunctionProviderSlug,
+} from "@murphai/device-syncd/connect-config";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
@@ -16,7 +19,13 @@ import {
   clearJunctionAllExtendedHistoryCoverageForProvider,
 } from "@murphai/device-syncd/junction-source-reconnect";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
-import { isDeviceSyncSourceDisconnectFenced } from "@murphai/device-syncd/public-account";
+import {
+  compareDeviceSyncSourceIdentity,
+  dedupeDeviceSyncSourcesByIdentity,
+  isDeviceSyncSourceDisconnectFenced,
+  mergeDeviceSyncSourceLastDataAt,
+  resolveDeviceSyncSourceState,
+} from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
@@ -44,6 +53,7 @@ import type {
   HostedDeviceSyncEventToProviderSendBucket,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
+  HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot as HostedDeviceSyncRuntimeConnectionSourceSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate as HostedDeviceSyncRuntimeConnectionSourceUpdate,
   HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
   HostedExecutionDeviceSyncRuntimeFailureDiagnostic as HostedDeviceSyncRuntimeFailureDiagnostic,
@@ -64,14 +74,12 @@ import {
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
-import {
-  canonicalizeHostedJunctionSources,
-  requireHostedRuntimeDeviceSyncStore,
-} from "./device-sync-service.ts";
+import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "./hosted-device-sync-limits.ts";
+import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
 import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
 } from "./hosted-runtime/device-sync-snapshot-pagination.ts";
@@ -192,17 +200,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     ...snapshot.connections.filter((entry) => !isTerminalHostedPrivacyScrub(entry.connection)),
   ];
   let classifyJunctionProviderJob: HostedAccountHydrationInput["classifyProviderJob"];
-  for (const rawEntry of orderedConnections) {
-    const entry = rawEntry.connection.provider.trim().toLowerCase() === "junction"
-      && rawEntry.sources !== undefined
-      ? {
-          ...rawEntry,
-          sources: canonicalizeHostedJunctionSources(
-            rawEntry.sources,
-            rawEntry.connection.id,
-          ),
-        }
-      : rawEntry;
+  for (const entry of orderedConnections) {
     const existingByHostedConnection = store.getAccountByHostedConnectionId(
       entry.connection.id,
     );
@@ -231,8 +229,12 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     const localSourcesBeforeHydration = existing
       ? store.listConnectionSources({ connectionId: existing.id })
       : [];
+    const hostedSources = dedupeHostedHydrationConnectionSources(
+      entry.connection.provider,
+      (entry.sources ?? []).filter((source) => source.sourceInstanceKey),
+    );
     const hydrationExisting = clearNonDurableHostedJunctionSourceCoverageFromLocalMerge(
-      entry,
+      { ...entry, sources: hostedSources },
       existing,
       localSourcesBeforeHydration,
     );
@@ -261,7 +263,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         (source) => [source.sourceInstanceKey, source] as const,
       ),
     );
-    for (const source of entry.sources ?? []) {
+    for (const source of hostedSources) {
       if (!source.sourceInstanceKey) {
         continue;
       }
@@ -273,35 +275,89 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         sourceInstanceKey: source.sourceInstanceKey,
       });
       const localSource = localSourcesByKey.get(sourceInstanceKey);
+      const establishedLocalSource = localSource ?? (
+        entry.connection.provider.trim().toLowerCase() === "junction"
+          ? selectHostedJunctionSource(localSources, source.sourceProviderSlug)
+          : undefined
+      );
+      const isJunctionSource = entry.connection.provider.trim().toLowerCase()
+        === "junction";
       if (
-        !terminalStatus
-        && localSource
-        && shouldPreserveLocalHydrationSource({
+        !isJunctionSource
+        && !terminalStatus
+        && establishedLocalSource
+        && shouldPreserveNonJunctionHydrationSource({
           hostedConnectionEpochChanged,
-          localSource,
+          localSource: establishedLocalSource,
           source,
         })
       ) {
         continue;
       }
+      const localLifecycleSource = establishedLocalSource
+        ? {
+            ...source,
+            displayName: establishedLocalSource.displayName,
+            ...(source.lifecycleEpoch === undefined
+              ? {}
+              : { lifecycleEpoch: establishedLocalSource.lifecycleEpoch }),
+            lastDataAt: establishedLocalSource.lastDataAt,
+            lastErrorCode: establishedLocalSource.lastErrorCode,
+            lastErrorMessage: establishedLocalSource.lastErrorMessage,
+            lastSeenAt: establishedLocalSource.lastSeenAt,
+            resourceAvailabilitySummary:
+              establishedLocalSource.resourceAvailabilitySummary,
+            status: establishedLocalSource.status,
+          }
+        : null;
+      const consolidatedState = (
+        isJunctionSource
+        && localLifecycleSource
+        && !terminalStatus
+        && !hostedConnectionEpochChanged
+      )
+        ? resolveHostedJunctionHydrationSourceState({
+            hostedSource: source,
+            localSource: localLifecycleSource,
+          })
+        : {
+            lastDataAt: mergeDeviceSyncSourceLastDataAt(
+              source.lastDataAt,
+              establishedLocalSource?.lastDataAt ?? null,
+              hostedSourceStateUnavailable,
+            ),
+            lifecycleSource: source,
+          };
+      if (
+        localLifecycleSource
+        && consolidatedState.lifecycleSource === localLifecycleSource
+        && consolidatedState.lastDataAt === establishedLocalSource?.lastDataAt
+      ) {
+        continue;
+      }
+      const lifecycleSource = consolidatedState.lifecycleSource;
 
       const hydratedSource = store.upsertConnectionSource({
         connectionId: stored.id,
         sourceInstanceKey,
-        sourceProviderSlug: source.sourceProviderSlug,
-        displayName: source.displayName,
-        status: source.status,
-        ...(source.resourceAvailabilitySummary === undefined
+        sourceProviderSlug:
+          establishedLocalSource?.sourceProviderSlug ?? source.sourceProviderSlug,
+        displayName: lifecycleSource.displayName,
+        status: lifecycleSource.status,
+        ...(lifecycleSource.resourceAvailabilitySummary === undefined
           ? {}
-          : { resourceAvailabilitySummary: source.resourceAvailabilitySummary }),
-        lastErrorCode: source.lastErrorCode,
-        lastErrorMessage: source.lastErrorMessage,
-        lifecycleEpoch: source.lifecycleEpoch ?? 1,
-        firstSeenAt: source.firstSeenAt,
-        lastSeenAt: source.lastSeenAt,
-        // Merged monotonically below rather than taken verbatim: Web and the
-        // runner can each have seen an arrival the other has not.
-        lastDataAt: laterIsoTimestamp(source.lastDataAt ?? null, localSource?.lastDataAt ?? null),
+          : {
+              resourceAvailabilitySummary:
+                lifecycleSource.resourceAvailabilitySummary,
+            }),
+        lastErrorCode: lifecycleSource.lastErrorCode,
+        lastErrorMessage: lifecycleSource.lastErrorMessage,
+        ...(source.lifecycleEpoch === undefined
+          ? {}
+          : { lifecycleEpoch: lifecycleSource.lifecycleEpoch ?? 1 }),
+        firstSeenAt: establishedLocalSource?.firstSeenAt ?? source.firstSeenAt,
+        lastSeenAt: lifecycleSource.lastSeenAt,
+        lastDataAt: consolidatedState.lastDataAt,
       });
       localSourcesByKey.set(sourceInstanceKey, hydratedSource);
     }
@@ -389,18 +445,6 @@ function isTerminalHostedPrivacyScrub(
     && connection.externalAccountId === `opaque:${connection.id}`;
 }
 
-function findSemanticJunctionSource(
-  sources: readonly StoredDeviceConnectionSource[],
-  sourceProviderSlug: string,
-): StoredDeviceConnectionSource | null {
-  const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
-  return canonicalSourceProviderSlug
-    ? canonicalizeHostedJunctionSources(sources).find(
-        (source) => source.sourceProviderSlug === canonicalSourceProviderSlug,
-      ) ?? null
-    : null;
-}
-
 function resolveHostedHydrationSourceInstanceKey(input: {
   entry: HostedDeviceSyncRuntimeConnectionSnapshot;
   localSources: readonly StoredDeviceConnectionSource[];
@@ -411,15 +455,99 @@ function resolveHostedHydrationSourceInstanceKey(input: {
     return input.sourceInstanceKey;
   }
 
-  const matchingSource = input.localSources.find((source) =>
-    source.sourceInstanceKey === input.sourceInstanceKey
-  ) ?? findSemanticJunctionSource(
+  const matchingSource = selectHostedJunctionSource(
     input.localSources,
     input.source.sourceProviderSlug,
+  ) ?? input.localSources.find((source) =>
+    source.sourceInstanceKey === input.sourceInstanceKey
   );
 
-  return matchingSource?.sourceInstanceKey
-    ?? input.sourceInstanceKey;
+  return matchingSource?.sourceInstanceKey ?? input.sourceInstanceKey;
+}
+
+function areHostedJunctionSourceSlugsEquivalent(left: string, right: string): boolean {
+  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
+}
+
+function dedupeHostedHydrationConnectionSources(
+  provider: string,
+  sources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
+): HostedDeviceSyncRuntimeConnectionSourceSnapshot[] {
+  if (provider.trim().toLowerCase() !== "junction") {
+    return [...sources];
+  }
+  return dedupeDeviceSyncSourcesByIdentity(
+    sources,
+    (left, right) => areHostedJunctionSourceSlugsEquivalent(
+      left.sourceProviderSlug,
+      right.sourceProviderSlug,
+    ),
+    hostedSourceStateUnavailable,
+  );
+}
+
+function resolveHostedJunctionHydrationSourceState(input: {
+  hostedSource: HostedDeviceSyncRuntimeConnectionSourceSnapshot;
+  localSource: HostedDeviceSyncRuntimeConnectionSourceSnapshot;
+}) {
+  const lastDataAt = mergeDeviceSyncSourceLastDataAt(
+    input.hostedSource.lastDataAt,
+    input.localSource.lastDataAt,
+    hostedSourceStateUnavailable,
+  );
+  if (input.hostedSource.lifecycleEpoch === undefined) {
+    return resolveDeviceSyncSourceState(
+      [input.localSource, input.hostedSource],
+      hostedSourceStateUnavailable,
+    );
+  }
+
+  const hostedLifecycleEpoch = input.hostedSource.lifecycleEpoch;
+  const localLifecycleEpoch = input.localSource.lifecycleEpoch ?? 1;
+  if (hostedLifecycleEpoch !== localLifecycleEpoch) {
+    return {
+      lastDataAt,
+      lifecycleSource: hostedLifecycleEpoch > localLifecycleEpoch
+        ? input.hostedSource
+        : input.localSource,
+    };
+  }
+
+  const hostedLastSeenAt = Date.parse(input.hostedSource.lastSeenAt);
+  const localLastSeenAt = Date.parse(input.localSource.lastSeenAt);
+  if (!Number.isFinite(hostedLastSeenAt) || !Number.isFinite(localLastSeenAt)) {
+    throw hostedSourceStateUnavailable();
+  }
+  if (hostedLastSeenAt !== localLastSeenAt) {
+    return {
+      lastDataAt,
+      lifecycleSource: hostedLastSeenAt > localLastSeenAt
+        ? input.hostedSource
+        : input.localSource,
+    };
+  }
+
+  const { lifecycleEpoch: _localLifecycleEpoch, ...unversionedLocalSource } =
+    input.localSource;
+  const { lifecycleEpoch: _hostedLifecycleEpoch, ...unversionedHostedSource } =
+    input.hostedSource;
+  resolveDeviceSyncSourceState(
+    [unversionedLocalSource, unversionedHostedSource],
+    hostedSourceStateUnavailable,
+  );
+  return { lastDataAt, lifecycleSource: input.hostedSource };
+}
+
+function selectHostedJunctionSource(
+  sources: readonly StoredDeviceConnectionSource[],
+  sourceProviderSlug: string,
+): StoredDeviceConnectionSource | undefined {
+  return sources
+    .filter((source) => areHostedJunctionSourceSlugsEquivalent(
+      source.sourceProviderSlug,
+      sourceProviderSlug,
+    ))
+    .sort(compareDeviceSyncSourceIdentity)[0];
 }
 
 function clearNonDurableHostedJunctionSourceCoverageFromLocalMerge(
@@ -441,7 +569,7 @@ function clearNonDurableHostedJunctionSourceCoverageFromLocalMerge(
 
   let metadata = existing.metadata;
   for (const source of entry.sources ?? []) {
-    const localSource = findSemanticJunctionSource(
+    const localSource = selectHostedJunctionSource(
       localSources,
       source.sourceProviderSlug,
     );
@@ -462,43 +590,30 @@ function clearNonDurableHostedJunctionSourceCoverageFromLocalMerge(
   return metadata === existing.metadata ? existing : { ...existing, metadata };
 }
 
-function shouldPreserveLocalHydrationSource(input: {
+function shouldPreserveNonJunctionHydrationSource(input: {
   hostedConnectionEpochChanged: boolean;
   localSource: StoredDeviceConnectionSource;
-  source: NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number];
+  source: HostedDeviceSyncRuntimeConnectionSourceSnapshot;
 }): boolean {
   if (input.hostedConnectionEpochChanged) {
     return false;
   }
-
-  const hostedLifecycleEpoch = input.source.lifecycleEpoch ?? 1;
-  if (input.localSource.lifecycleEpoch !== hostedLifecycleEpoch) {
-    return input.localSource.lifecycleEpoch > hostedLifecycleEpoch;
-  }
-
-  // An arrival can advance with no other field moving, so a lastSeenAt-only
-  // shortcut would drop the one signal a stall is measured against.
   if (
-    laterIsoTimestamp(input.source.lastDataAt ?? null, input.localSource.lastDataAt)
-      !== input.localSource.lastDataAt
+    input.source.lifecycleEpoch !== undefined
+    && input.source.lifecycleEpoch > input.localSource.lifecycleEpoch
   ) {
     return false;
   }
-
+  if (
+    mergeDeviceSyncSourceLastDataAt(
+      input.source.lastDataAt,
+      input.localSource.lastDataAt,
+      hostedSourceStateUnavailable,
+    ) !== input.localSource.lastDataAt
+  ) {
+    return false;
+  }
   return Date.parse(input.localSource.lastSeenAt) >= Date.parse(input.source.lastSeenAt);
-}
-
-/** Returns whichever ISO timestamp is later, treating null as "never". */
-function laterIsoTimestamp(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-
-  if (!right) {
-    return left;
-  }
-
-  return Date.parse(left) >= Date.parse(right) ? left : right;
 }
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {

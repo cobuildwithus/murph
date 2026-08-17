@@ -305,7 +305,7 @@ function createMessagesCredentialService(
 ): IMessageMiniAppService {
   return new IMessageMiniAppService({
     request: new Request(
-      "https://example.test/api/device-sync/companion/imessage-mini-app/proof-action",
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
       { headers: { authorization: `Bearer ${token}` } },
     ),
     store: new PrismaHostedAgentSessionStore(prisma),

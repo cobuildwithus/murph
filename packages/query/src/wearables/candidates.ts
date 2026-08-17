@@ -65,6 +65,7 @@ import {
 } from "./types.ts";
 
 import { compareMetricCandidateByDateDesc, compareSleepWindowByDateDesc } from "./selection.ts";
+import { collectJunctionWorkoutFeatures } from "./workout-features.ts";
 
 const APPLE_HEALTH_KIT_PROVIDER = "apple-health-kit";
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
@@ -118,6 +119,12 @@ export function collectWearableDataset(
   for (const entity of [...vault.events, ...vault.samples.filter((sample) => sample.kind !== "metric_sample")]) {
     const externalRef = readWearableExternalRef(entity.attributes.externalRef);
     const provider = normalizeLowercaseString(externalRef?.system);
+    // Manual observations remain their own canonical metric evidence. Letting
+    // the wearable resolver absorb them can suppress the raw manual point when
+    // a device summary exists for the same day.
+    if (provider === "manual") {
+      continue;
+    }
     const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);
     const publicProvider = resolveWearablePublicSourceProvider({ dataOrigin, externalRef, provider }, {
       suppressJunctionSourceInstanceFallback: true,
@@ -231,6 +238,7 @@ export function collectWearableDataset(
     provenanceDiagnostics: [...provenanceDiagnostics.values()].sort(compareWearableProvenanceDiagnostics),
     rawMetricCandidates,
     sleepWindows: filteredSleepWindows,
+    workoutFeatures: collectJunctionWorkoutFeatures(vault.events, filters),
   };
 }
 

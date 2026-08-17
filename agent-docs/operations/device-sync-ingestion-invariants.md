@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-08-12
+Last verified: 2026-08-14
 
 ## Purpose
 
@@ -141,6 +141,172 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    optimization is unnecessary: re-fetching is cheap and correct, not a
    correctness risk.
 
+   Compact Junction timeseries retain that same single-owner rule. Dense
+   `glucose`, `blood_oxygen`, and `stress_level` reconcile and direct-resource
+   jobs both use closed provider-calendar-date imports; a precise window must
+   not publish a partial day under the daily fact or 24-hour feature identity.
+   A provider calendar date becomes publishable only after it has closed at
+   UTC-12, so UTC midnight cannot freeze a partial negative-offset source day.
+   Only dense rows with a provider-supplied clock contribute temporal samples.
+   Date-only rows remain daily aggregate inputs and publish a zero-coverage
+   feature envelope without fabricated hourly, overnight, rate, peak, or
+   episode facts, allowing a complete response to clear older temporal facts.
+   Sparse `caffeine`, `water`, and `mindfulness_minutes` direct-resource jobs
+   retain precise windows because each admitted interval has its own exact-start
+   identity, but those precise snapshots emit intervals only. The canonical
+   import receipt returns the provider-local day keys that own those intervals.
+   When an accepted stable-row correction moves an interval between provider
+   dates, the transient receipt includes both the displaced and incoming day.
+   Before the precise job completes, it atomically converts every closed
+   affected date into one deduplicated existing `resource` job. Each job owns
+   exactly one resource/provider date and retries that existing calendar-day
+   importer independently, so a failed date, a later correction, or a runtime
+   yield cannot erase or restart accepted refresh work. Setup, account, source,
+   and credential-epoch transitions keep that same job dormant without
+   provider I/O and wake it when authority returns. A calendar job completes
+   only when the canonical import receipt names its exact source/resource/day
+   daily identity. A successful exact-source HTTP 200 empty response applies
+   an explicit zero through that identity; a nonempty response that normalizes
+   to no owned daily state stays retryable. The exact calendar-repair snapshot
+   also fails before the canonical write if its provider-scoped response is
+   structurally incomplete or any target row lacks a valid value, interval,
+   source identity, or provider day. Non-object groups or samples cannot be
+   silently discarded into a partial set or fabricated authoritative empty
+   response, so one surviving row cannot certify a partial complete-set
+   revision. The calendar path uses the existing Junction connect-route owner
+   to compare provider aliases at authority and response-selection boundaries,
+   queries the route's canonical target, and projects selected rows onto the
+   account's established persisted source key and provider spelling before
+   strict import. Routine calendar imports, direct dense imports, precise sparse
+   corrections, and retained calendar repairs all perform that same projection;
+   none derives a replacement source key from an execution-local account id.
+   If legacy state contains route-equivalent duplicate rows, the oldest keyed
+   row wins deterministically so retries remain bounded and stable. Core rejects more than
+   64 affected dates before its canonical write, and the provider repeats that
+   bound before queue fanout. That path is the sole writer of their
+   daily sums, so a UTC-normalized execution window cannot select the wrong provider
+   date and a growing precise set cannot
+   create an immutable partial aggregate or block a later interval. Every
+   scheduled reconcile refreshes the latest globally closed date for the six
+   fidelity resources. The account's existing UTC-day gate retains the broader
+   seven-day correction sweep across all configured resources without turning
+   the hourly floor into an all-resource fanout. Daily sums and dense feature
+   envelopes describe a complete
+   resource/day collection, so a maximum child-row revision must not version or
+   order that set. Serialized complete-calendar imports reconcile those
+   unversioned facts through the canonical event spine, where exact replays are
+   no-ops and later non-empty set growth or removal remains revisionable. An
+   ordinary empty provider collection emits no aggregate tombstone, so it cannot
+   delete a previously published fact outside the exact-source calendar repair
+   exception above. Explicit
+   provider revisions belong only to stable sparse interval identities. One
+   versioned interval may supersede a pre-versioning baseline; after that, only
+   a strictly newer revision may change it, while stale replay is a no-op and
+   conflicting equal or unversioned interval content fails closed. Fetch-side
+   fidelity dedupe must preserve provider calendar-date and timestamp-semantics
+   differences so those conflicts reach this importer-owned comparison in
+   either response order. This keeps
+   each compact resolution consistent without a second cursor, watermark,
+   queue, schema, or state owner; the already-durable device-job row is the
+   calendar-refresh obligation.
+
+   Day-scoped Junction blood-oxygen and stress temporal facts have a narrower
+   owner than ordinary daily aggregates. Only a closed date-by-date pull may
+   pass transient complete-source-day authority into the importer; precise
+   resource windows and webhook imports must not publish temporal features
+   from their partial payloads. A complete-source-day import is facet-only: it
+   emits no ordinary daily observations, ordinary aggregate evidence, or dense
+   feature envelopes, because its vault-local window covers only part of each
+   provider calendar day and the calendar-day collection remains the sole
+   writer of those ordinary identities. Authorized vault-day fetches require a
+   structurally complete grouped provider collection: a successful payload
+   without a grouped envelope — including generic, legacy, and raw SDK-parse
+   fallback bodies — is a retryable incomplete collection, and a delivered row
+   that cannot normalize into an owned source, usable value, and the target
+   vault day fails the import retryably before any canonical write. A
+   structurally empty grouped response remains the only valid authoritative
+   empty. Complete-source-day authority accepts exactly one anchored timestamp
+   language, owned by a single importer-side strict parse that yields
+   semantics, day membership, and temporal-instant eligibility together and
+   admits only valid Gregorian calendar instants — real dates (leap years and
+   month lengths proven, never normalized), in-range clock and offset fields,
+   and fractional seconds preserved into the resulting instant: a pure
+   `YYYY-MM-DD` date proves day membership with zero temporal coverage; a
+   floating datetime with an `HH:mm` clock (optional seconds and fraction,
+   omitted seconds resolving as zero) contributes a vault-local instant; a
+   supported absolute ISO-8601 value ending in `Z` or an explicit offset
+   contributes the exact instant derived from its validated parts, never from
+   permissive runtime date parsing. The full raw value must be consumed — a
+   valid prefix with trailing unsupported text, an impossible calendar or
+   clock value, contradictory semantics, or a floating clock that does not
+   resolve to exactly one instant in the retained authority timezone — a
+   spring-forward gap or a fall-back repetition — fails the import retryably
+   instead of fabricating, collapsing, or laundering an instant. The temporal replacement
+   domain keys on the stable Junction import identity derived from the external
+   account, never the machine-local account row, so hosted cold restores retract
+   and replace the same facets they seeded. Under complete-day authority the
+   provider filter reuses that same strict parse and excludes only rows it
+   proves belong to a different valid calendar day, and only when the raw
+   shape and the record's declared timestamp semantics agree on absoluteness;
+   a row the parse rejects — or whose declared semantics contradict its raw
+   shape — stays in the collection so the importer fails the day closed
+   instead of certifying a laundered partial or empty replacement. Complete-source-day
+   imports never reach the generic provider-snapshot evidence fallback: they
+   persist only adapter-produced compact evidence, so a day with zero temporal
+   samples carries the authoritative set with zero evidence parts and retains
+   no request body. Authoritative reassertion is scoped to provider-owned
+   retraction tombstones, which carry the set's explicit version marker; a
+   member-authored deletion preserves the member's unversioned reference and
+   survives authoritative replay permanently. The authorized result
+   treats the fixed feature facets as an unversioned replacement set whose
+   ordering authority is the serialized authoritative-set seam itself: a facet
+   declared current with identical live content is a no-op, an omitted facet
+   uses the existing canonical event retraction seam, and a facet declared
+   current over its own retraction is reasserted as the next serialized
+   event-spine revision. The import wall clock is not a facet source version,
+   so unchanged replays append nothing, and an ordinary versionless delivery
+   without complete-day authority can never resurrect a retracted facet. Thus a
+   later insufficient or capped day removes stale derived facts, and retries
+   converge without another queue, merge store, or lifecycle owner. Date-only
+   and floating provider responses are filtered by raw calendar day only under
+   that complete local-day authority; absolute timestamps use the exact UTC
+   bounds, and precise partial windows do not manufacture instants with the
+   worker process timezone. Generic account completion does not satisfy this
+   resource-specific proof. For temporal resources, the configured reconcile
+   horizon is clamped to `1..14` authoritative local days. A scheduled
+   reconcile imports the newest eligible day immediately and enqueues each
+   older resource/day coordinate on the existing durable device-job queue,
+   newest day first. Queued or running rows remain the retry and deduplication
+   owner across restart. Succeeded rows remain execution history, not permanent
+   completion proof, because a later scheduled pull can observe newly admitted
+   sources or newly available provider data. Enqueueing any temporal child
+   sweeps every terminal row in the account's temporal dedupe namespace inside
+   the same transaction, so retained terminal history stays bounded by the
+   current horizon even as coordinates roll out of it or the vault timezone
+   changes. Failed, dead, or yielded work never
+   grants day authority, and any terminal row may be recreated by a later
+   reconcile. A failed, unavailable, or yielded immediate
+   resource becomes the same stable resource/day job ahead of the older
+   backlog; a retryable failure does not block an independent temporal sibling.
+   Temporal resource/day children never advance generic account completion.
+   Generic completion is account activity state, not complete-resource or
+   complete-floor coverage, so it never gates ordinary reconcile collection.
+   When a parent also retains ordinary work, its one durable ordinary reconcile
+   follow-up preserves that work without becoming a separate coverage ledger.
+   With two temporal resources, one reconcile therefore performs at most two
+   immediate one-day collections and normally schedules at most 26 older
+   one-resource/one-day jobs. If both immediate resources require durable
+   continuation, the queue bound is 28 resource/day jobs across the full
+   14-day horizon plus at most one ordinary reconcile follow-up, for 29
+   serialized rows. Each child performs at most one canonical import transaction,
+   while the provider transport independently caps the collection at 100 pages
+   and 25,000 records with no more than three attempts for each page request.
+   The existing one-running-job-per-account fence bounds composition with other
+   device work. The ordinary completion optimization remains limited to
+   non-temporal resources. These rules do not relax the no-full-timeseries
+   retention boundary; base daily observations and compact evidence remain the
+   only non-temporal outputs.
+
 5. **Louder, never quieter.** Drops and skips surface as persisted
    `device-sync.job_failed`/skip metadata. But observability is not recovery:
    the persisted signal exists to explain *why*, while the floor (invariant 1)
@@ -265,17 +431,23 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    confirm the connection-wide disconnect, then reconnect Garmin. That reset can
    disconnect other wearables on the same Junction connection, so the UI and
    assistant must explain the scope before confirmation. If provider-side
-   deregistration fails, local disconnect still completes, but the member must
-   remove the connection in the Garmin account before reconnecting.
-   That unfinished-reset state rides the disconnected connection's existing
+   deregistration fails, the cleanup credential and source ownership remain
+   nonterminal so disconnect can retry, and the member must remove the
+   connection in the Garmin account before reconnecting.
+   That unfinished-reset state rides the connection's existing
    durable error code (`HISTORICAL_RESET_REVOKE_FAILED`), so the settings and
    connect surfaces keep projecting the manual-removal guidance across refresh
    until a fresh established connection clears it; there is no separate warning
    store. Junction source-only writes carry the same connection-epoch fence as
-   account writes. Hydration resolves Junction
-   sources by semantic provider identity and lets an accepted reconnect epoch
-   replace older local source state, so hosted/local keys or timestamps cannot
-   create competing source owners. Future aggregate-progress ownership comes
+   account writes. Hydration and hosted job-time source listing resolve Junction
+   sources by semantic provider identity, retain the established local source
+   key and spelling, and use one source-state consolidation rule: the newest
+   valid `lastSeenAt` owns status, errors, and availability, equal-timestamp
+   lifecycle conflicts fail retryably, and `lastDataAt` merges independently as
+   monotonic arrival evidence. An accepted reconnect therefore replaces an
+   older fence before its first new payload without discarding historical
+   arrival evidence, so hosted/local keys or timestamps cannot create competing
+   source owners. Future aggregate-progress ownership comes
    from the versioned status scalar rather than today's window fields; opaque
    future progress and evidence remain unchanged while canonical webhook import
    continues.

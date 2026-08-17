@@ -7,6 +7,8 @@ export const WRITABLE_ISO_DATE_TIME_PATTERN =
 const DAILY_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/u;
 const FLOATING_ISO_DATE_TIME_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:z|[+-]00:?00)?$/iu;
+const LOCAL_NOON_HOUR = 12;
+const MAX_LOCAL_TIME_RESOLUTION_ITERATIONS = 4;
 
 const TIME_ZONE_PARTS_CACHE = new Map<string, Intl.DateTimeFormat>();
 
@@ -188,6 +190,84 @@ export function resolveSystemTimeZone(fallback = "UTC"): string {
     normalizeIanaTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone) ??
     normalizeIanaTimeZone(fallback) ??
     "UTC"
+  );
+}
+
+/**
+ * Resolve a civil date to noon in the supplied IANA timezone. Noon avoids the
+ * daylight-saving gaps that commonly occur around local midnight while still
+ * preserving the exact member-local date.
+ */
+export function resolveLocalDateAtNoon(
+  localDate: string,
+  timeZone: string,
+): string {
+  if (!isStrictIsoDate(localDate)) {
+    throw new RangeError(`Invalid ISO date: ${localDate}`);
+  }
+  const normalizedTimeZone = normalizeIanaTimeZone(timeZone);
+  if (!normalizedTimeZone) {
+    throw new RangeError(`Invalid IANA time zone: ${String(timeZone)}`);
+  }
+
+  const [year, month, day] = localDate.split("-").map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  const targetLocalMilliseconds = Date.UTC(
+    year,
+    month - 1,
+    day,
+    LOCAL_NOON_HOUR,
+    0,
+    0,
+    0,
+  );
+  let guessMilliseconds = targetLocalMilliseconds;
+
+  for (
+    let iteration = 0;
+    iteration < MAX_LOCAL_TIME_RESOLUTION_ITERATIONS;
+    iteration += 1
+  ) {
+    const observed = formatTimeZoneDateTimeParts(
+      guessMilliseconds,
+      normalizedTimeZone,
+    );
+    const observedLocalMilliseconds = Date.UTC(
+      observed.year,
+      observed.month - 1,
+      observed.day,
+      observed.hour,
+      observed.minute,
+      observed.second,
+      0,
+    );
+    const deltaMilliseconds = observedLocalMilliseconds - targetLocalMilliseconds;
+    if (deltaMilliseconds === 0) {
+      return new Date(guessMilliseconds).toISOString();
+    }
+    guessMilliseconds -= deltaMilliseconds;
+  }
+
+  const resolved = formatTimeZoneDateTimeParts(
+    guessMilliseconds,
+    normalizedTimeZone,
+  );
+  if (
+    resolved.year === year
+    && resolved.month === month
+    && resolved.day === day
+    && resolved.hour === LOCAL_NOON_HOUR
+    && resolved.minute === 0
+    && resolved.second === 0
+  ) {
+    return new Date(guessMilliseconds).toISOString();
+  }
+
+  throw new RangeError(
+    `Could not resolve local date ${localDate} in time zone ${normalizedTimeZone}.`,
   );
 }
 

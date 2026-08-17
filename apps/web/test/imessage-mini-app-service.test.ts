@@ -7,7 +7,7 @@ import {
   IMESSAGE_MINI_APP_BEARER_TOKEN_PREFIX,
   IMessageMiniAppService,
   validateIMessageMiniAppEnrollmentBody,
-  validateIMessageMiniAppProofAction,
+  validateIMessageMiniAppMemberAction,
   type IMessageMiniAppSessionStore,
 } from "../src/lib/imessage-mini-app/service";
 
@@ -40,7 +40,7 @@ function createStore(overrides: Partial<IMessageMiniAppSessionStore> = {}) {
 }
 
 function createRequest(token?: string) {
-  return new Request("https://example.test/api/device-sync/companion/imessage-mini-app/proof-action", {
+  return new Request("https://example.test/api/device-sync/companion/imessage-mini-app/member-actions", {
     headers: token ? { authorization: `Bearer ${token}` } : undefined,
     method: "POST",
   });
@@ -93,11 +93,11 @@ describe("iMessage mini-app service", () => {
       authenticateWithHistoricalUnscopedAgentReader(token, store),
     ).resolves.toEqual({ status: "missing", session: null });
 
-    const proofAction = new IMessageMiniAppService({
+    const memberAction = new IMessageMiniAppService({
       request: createRequest(token),
       store,
     });
-    await expect(proofAction.requireCredential()).resolves.toEqual(ACTIVE_SESSION);
+    await expect(memberAction.requireCredential()).resolves.toEqual(ACTIVE_SESSION);
   });
 
   it("fails closed for a branch-era Messages row stored under the historical unscoped hash", async () => {
@@ -116,12 +116,12 @@ describe("iMessage mini-app service", () => {
             }
       )),
     });
-    const proofAction = new IMessageMiniAppService({
+    const memberAction = new IMessageMiniAppService({
       request: createRequest(token),
       store,
     });
 
-    await expect(proofAction.requireCredential()).rejects.toMatchObject({
+    await expect(memberAction.requireCredential()).rejects.toMatchObject({
       code: "IMESSAGE_MINI_APP_AUTH_INVALID",
       httpStatus: 401,
     });
@@ -220,42 +220,56 @@ describe("iMessage mini-app service", () => {
     expect(store.authenticateAgentSessionByTokenHash).not.toHaveBeenCalled();
   });
 
-  it("validates closed, versioned enrollment and proof-action envelopes", () => {
+  it("validates closed, versioned enrollment and member-action envelopes", () => {
+    const now = new Date("2026-08-12T15:00:00.000Z");
+    const request = validMemberActionRequest();
     expect(() => validateIMessageMiniAppEnrollmentBody({ schemaVersion: 1 })).not.toThrow();
-    expect(validateIMessageMiniAppProofAction({
-      schemaVersion: 1,
-      cardId: "privy-proof-v1",
-      choice: "afternoon",
-      idempotencyKey: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
-    })).toEqual({
-      schemaVersion: 1,
-      cardId: "privy-proof-v1",
-      choice: "afternoon",
-      idempotencyKey: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
-    });
+    expect(validateIMessageMiniAppMemberAction(request, now)).toEqual(request);
 
     expect(() => validateIMessageMiniAppEnrollmentBody({
       schemaVersion: 1,
       token: "must-not-be-accepted",
     })).toThrowError(/unsupported fields/iu);
-    expect(() => validateIMessageMiniAppProofAction({
-      schemaVersion: 1,
-      cardId: "privy-proof-v1",
-      choice: "anything",
-      idempotencyKey: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
-    })).toThrowError(/choice is not supported/iu);
-    expect(() => validateIMessageMiniAppProofAction({
-      schemaVersion: 1,
-      cardId: "privy-proof-v1",
-      choice: "morning",
-      idempotencyKey: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+    expect(() => validateIMessageMiniAppMemberAction({
+      ...request,
       token: "must-not-be-accepted",
-    })).toThrowError(/unsupported fields/iu);
-    expect(() => validateIMessageMiniAppProofAction({
-      schemaVersion: 1,
-      cardId: "privy-proof-v1",
-      choice: "morning",
-      idempotencyKey: "retry-1",
-    })).toThrowError(/idempotencyKey must be a UUID/iu);
+    }, now)).toThrowError(/request is invalid/iu);
+    expect(() => validateIMessageMiniAppMemberAction({
+      ...request,
+      actionId: "retry-1",
+    }, now)).toThrowError(/request is invalid/iu);
+    expect(() => validateIMessageMiniAppMemberAction({
+      ...request,
+      requestedAt: "2026-08-11T14:59:59.999Z",
+    }, now)).toThrowError(/timestamp is outside/iu);
   });
 });
+
+function validMemberActionRequest() {
+  return {
+    action: {
+      expectedWorkout: {
+        actionBinding: "a".repeat(64),
+        exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+      },
+      kind: "workout.live.apply" as const,
+      mutations: [{
+        exerciseName: "Leg press",
+        exercisePosition: 1,
+        expectedResult: null,
+        kind: "set.put" as const,
+        result: {
+          kind: "weight_reps" as const,
+          reps: 8,
+          weight: 180,
+          weightUnit: "lb" as const,
+        },
+        setPosition: 1,
+      }],
+      version: 1 as const,
+    },
+    actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+    requestedAt: "2026-08-12T15:00:00.000Z",
+    schemaVersion: 1 as const,
+  };
+}

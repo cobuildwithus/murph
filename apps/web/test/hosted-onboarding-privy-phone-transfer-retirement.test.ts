@@ -898,6 +898,34 @@ describe("Privy phone-transfer source retirement", () => {
     expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["a connected-app intent", "connectedAppConnectIntents"],
+    ["a Clinical connect intent", "clinicalRecordConnectIntents"],
+    ["a Clinical OAuth session", "clinicalRecordOauthSessions"],
+    ["a sensitive-action challenge", "sensitiveActionChallenges"],
+  ] as const)("rejects a source retaining $label", async (_, relation) => {
+    const fixture = makeFixture({ autoTrial: true });
+    fixture.sourceShape._count[relation] = 1;
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a device-connect intent", "deviceConnectIntent", { claimHash: "claim" }],
+    ["a device OAuth session", "deviceOauthSession", { state: "state" }],
+  ] as const)("rejects a source retaining $label", async (_, model, blocker) => {
+    const fixture = makeFixture({ autoTrial: true });
+    fixture.prisma[model].findFirst.mockResolvedValue(blocker);
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
   it("keeps the source fence valid after cleanup changes trial billing state", async () => {
     const fixture = makeFixture({ autoTrial: true });
     fixture.sourceMember.billingStatus = HostedBillingStatus.canceled;

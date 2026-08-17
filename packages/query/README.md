@@ -19,6 +19,22 @@ or biomarker alias, so it cannot silently alias or aggregate with provider HRV.
 
 Root wearable summary APIs should use the runtime projection helpers such as `summarizeWearableLatestRuntime()` and `summarizeWearableActivityRuntime()`. The lower-level read-model helpers in `src/wearables.ts` are package-internal and expect a full raw/debug read model or an intentionally full source model, not the default `readVault()` projection.
 
+Junction workout-stream facets are grouped by their internal hashed workout
+identity during projection rebuild and stored inside the existing
+provider-scoped activity summary rows. The runtime activity read stays
+date/provider-filtered and never hydrates `query_entities` to answer workout
+feature questions. Public power keys end in `Watts`, speed keys end in `Mps`,
+and raw workout/source-instance identifiers remain projection-internal.
+
+Meal nutrition has two intentionally separate reads. `readMealNutritionTotals()`
+keeps the compact five-metric card contract, while `readMealNutrientTotals()`
+returns water plus the bounded supported micronutrient catalog only when a
+nutrient question needs it. The nutrient read emits every supported field in a
+stable order with `null` for unavailable totals and a per-field contributing
+meal count so callers can distinguish missing, partial, and explicit-zero data.
+It does not infer unlogged meals or reproduce source-app targets or daily
+percentages.
+
 Shared query entity-family metadata now lives on the dedicated `@murphai/query/entity-families` subpath so CLI and contract callers do not need the full query root barrel just to validate record-family flags.
 
 For health registry families, query now consumes the shared projection metadata exported from `@murphai/contracts` instead of maintaining a second per-kind taxonomy table locally.

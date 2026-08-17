@@ -612,6 +612,11 @@ export async function sendAssistantMessageLocal(
           return completed.result
         }
 
+        const runtimeState = createAssistantRuntimeStateService(input.vault)
+        const preProviderSteerAcceptedInputJournals = new Map<
+          string,
+          AssistantAcceptedTurnInputJournal
+        >()
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
             await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
@@ -622,7 +627,26 @@ export async function sendAssistantMessageLocal(
           admissionHook: input.activeTurnInput,
           beforeProviderSteer: input.beforeProviderAcceptedInputs
             ? async (event) => {
-                await input.beforeProviderAcceptedInputs?.(event)
+                const acceptedInputJournal =
+                  await runtimeState.turns.acceptedInputs.append({
+                    inputs: event.acceptedInputs,
+                    sessionId: resolved.session.sessionId,
+                    turnId: receipt.turnId,
+                  })
+                await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
+                  journal: acceptedInputJournal,
+                  vault: input.vault,
+                })
+                const releaseProviderAcceptedInputs =
+                  await input.beforeProviderAcceptedInputs?.({
+                    ...event,
+                    turnId: receipt.turnId,
+                  })
+                preProviderSteerAcceptedInputJournals.set(
+                  JSON.stringify(event.acceptedInputs.map((item) => item.id)),
+                  acceptedInputJournal,
+                )
+                return releaseProviderAcceptedInputs
               }
             : undefined,
           conversationKeys: [
@@ -636,7 +660,6 @@ export async function sendAssistantMessageLocal(
         activeTurnInputController = turnInputController
         userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
         let currentUserTurn = userTurn
-        const runtimeState = createAssistantRuntimeStateService(input.vault)
         const initialAcceptedTurnInputItems = resolveInitialAcceptedTurnInputItems({
           input,
           resolved,
@@ -697,11 +720,34 @@ export async function sendAssistantMessageLocal(
           hostedOptionalProgressDeliveryAvailable
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
+                const deliveryContextOrdinal =
+                  progressInput.deliveryContextOrdinal ?? 0
+                const { targetInputId, ...untargetedProgressInput } = progressInput
+                if (targetInputId) {
+                  await beforeHostedToolExecution(deliveryContextOrdinal)
+                }
+                const resolvedProgressInput = targetInputId
+                  ? {
+                      ...untargetedProgressInput,
+                      input:
+                        await applyAssistantAcceptedMessageTargetToDeliveryInput({
+                          acceptedInputIds:
+                            resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                              deliveryContextOrdinal,
+                            ),
+                          action: 'native-reply',
+                          input: progressInput.input,
+                          session: progressInput.session,
+                          sharedPlan,
+                          targetInputId,
+                        }),
+                    }
+                  : untargetedProgressInput
                 const hosted = hostedExecutionContext
                 if (hosted) {
                   const dependencies = hosted.progressDeliveryDependencies
                   const progressChannel =
-                    resolveAssistantProgressDeliveryChannel(progressInput)
+                    resolveAssistantProgressDeliveryChannel(resolvedProgressInput)
                   if (
                     !dependencies ||
                     !hasHostedTextDeliveryForChannel({
@@ -720,7 +766,7 @@ export async function sendAssistantMessageLocal(
                       : undefined
                   if (sendLinq) {
                     await beforeHostedToolExecution(
-                      progressInput.deliveryContextOrdinal ?? 0,
+                      deliveryContextOrdinal,
                     )
                   }
                   const progressDependencies = sendLinq
@@ -738,7 +784,7 @@ export async function sendAssistantMessageLocal(
                       }
                     : dependencies
                   const result = await deliverAssistantProgressUpdate({
-                    ...progressInput,
+                    ...resolvedProgressInput,
                     dependencies: progressDependencies,
                   })
                   refreshTypingIndicatorAfterProgress()
@@ -746,7 +792,7 @@ export async function sendAssistantMessageLocal(
                 }
 
                 const result = await deliverAssistantProgressUpdate({
-                  ...progressInput,
+                  ...resolvedProgressInput,
                 })
                 refreshTypingIndicatorAfterProgress()
                 return result
@@ -995,16 +1041,29 @@ export async function sendAssistantMessageLocal(
             acceptedInput: acceptanceInput.activeTurnInput,
             input: currentInput,
           })
-          assertAcceptedActiveTurnInputItemsAreNew({
-            acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
-            inputs: acceptedInputItems,
-          })
+          const preProviderSteerJournalKey = JSON.stringify(
+            acceptedInputItems.map((item) => item.id),
+          )
+          const preProviderSteerJournal =
+            preProviderSteerAcceptedInputJournals.get(
+              preProviderSteerJournalKey,
+            )
+          if (!preProviderSteerJournal) {
+            assertAcceptedActiveTurnInputItemsAreNew({
+              acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
+              inputs: acceptedInputItems,
+            })
+          }
           let acceptedInputJournal =
+            preProviderSteerJournal ??
             await runtimeState.turns.acceptedInputs.append({
               inputs: acceptedInputItems,
               sessionId: resolved.session.sessionId,
               turnId: currentUserTurn.turnId,
             })
+          preProviderSteerAcceptedInputJournals.delete(
+            preProviderSteerJournalKey,
+          )
           await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
             journal: acceptedInputJournal,
             vault: currentInput.vault,
@@ -1248,6 +1307,7 @@ export async function sendAssistantMessageLocal(
                 providerRequestAcceptedInputIds
               acceptedInputItemsForProviderRequest =
                 providerRequestAcceptedInputItems
+              turnInputController.commitLiveSteeredLocalAdmission(activeTurnInput)
             }
           })
           liveSteeredActiveTurnInputDrainTail = drain.catch(() => undefined)
@@ -1312,6 +1372,7 @@ export async function sendAssistantMessageLocal(
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
             return await input.beforeProviderAcceptedInputs?.({
               acceptedInputs: providerRequestAcceptedInputItems,
+              turnId: currentUserTurn.turnId,
             })
           },
           onProviderRequestStarted: (event) => {
@@ -1861,9 +1922,11 @@ export async function sendAssistantMessageLocal(
                 return segmentInput.input
               }
               return await applyAssistantAcceptedMessageTargetToDeliveryInput({
-                acceptedInputIdsByDeliveryContextOrdinal,
+                acceptedInputIds:
+                  acceptedInputIdsByDeliveryContextOrdinal[
+                    deliveryContextOrdinal
+                  ] ?? [],
                 action: 'native-reply',
-                deliveryContextOrdinal,
                 input: segmentInput.input,
                 session: segmentInput.session,
                 sharedPlan,
@@ -1951,10 +2014,11 @@ export async function sendAssistantMessageLocal(
           try {
             finalDeliveryInput =
               await applyAssistantAcceptedMessageTargetToDeliveryInput({
-                acceptedInputIdsByDeliveryContextOrdinal,
+                acceptedInputIds:
+                  acceptedInputIdsByDeliveryContextOrdinal[
+                    providerResult.responseDeliveryContextOrdinal
+                  ] ?? [],
                 action: 'native-reply',
-                deliveryContextOrdinal:
-                  providerResult.responseDeliveryContextOrdinal,
                 input: finalReplyInput,
                 session: deliverySession,
                 sharedPlan,
@@ -2718,10 +2782,11 @@ async function deliverAssistantProviderReactions(input: {
     let reactionInput: AssistantMessageInput
     try {
       reactionInput = await applyAssistantAcceptedMessageTargetToDeliveryInput({
-        acceptedInputIdsByDeliveryContextOrdinal:
-          input.acceptedInputIdsByDeliveryContextOrdinal,
+        acceptedInputIds:
+          input.acceptedInputIdsByDeliveryContextOrdinal[
+            reaction.deliveryContextOrdinal
+          ] ?? [],
         action: 'reaction',
-        deliveryContextOrdinal: reaction.deliveryContextOrdinal,
         input: baseReactionInput,
         session: deliverySession,
         sharedPlan: input.sharedPlan,
@@ -2756,18 +2821,15 @@ async function deliverAssistantProviderReactions(input: {
 }
 
 async function applyAssistantAcceptedMessageTargetToDeliveryInput(input: {
-  acceptedInputIdsByDeliveryContextOrdinal: readonly (readonly string[])[]
+  acceptedInputIds: readonly string[]
   action: 'native-reply' | 'reaction'
-  deliveryContextOrdinal: number
   input: AssistantMessageInput
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   targetInputId: string
 }): Promise<AssistantMessageInput> {
-  const acceptedInputIds =
-    input.acceptedInputIdsByDeliveryContextOrdinal[input.deliveryContextOrdinal]
   const target = await resolveAssistantAcceptedMessageTarget({
-    acceptedInputIds: acceptedInputIds ?? [],
+    acceptedInputIds: input.acceptedInputIds,
     action: input.action,
     messageRef: input.targetInputId,
     route: resolveAssistantCurrentAudienceDeliveryFields({

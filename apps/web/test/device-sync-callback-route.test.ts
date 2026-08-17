@@ -105,7 +105,9 @@ describe("hosted device-sync callback boundary", () => {
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
     expect(destination.searchParams.get("deviceSyncError")).toBe("CALLBACK_PROOF_INVALID");
     expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
-    expect(mocks.discardConnectionCallback).toHaveBeenCalledWith("junction");
+    expect(mocks.discardConnectionCallback).toHaveBeenCalledWith("junction", {
+      expectedOwnerId: "member_a",
+    });
     expect(mocks.handleConnectionCallback).not.toHaveBeenCalled();
     // The single provider-wide proof slot may belong to a newer concurrent
     // flow, so an unmatched callback must not clear it.
@@ -127,7 +129,9 @@ describe("hosted device-sync callback boundary", () => {
     const destination = new URL(response.headers.get("location")!);
     expect(destination.pathname).toBe("/connect");
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
-    expect(mocks.discardConnectionCallback).toHaveBeenCalledWith("junction");
+    expect(mocks.discardConnectionCallback).toHaveBeenCalledWith("junction", {
+      expectedOwnerId: "member_b",
+    });
     expect(mocks.handleConnectionCallback).not.toHaveBeenCalled();
     expect(response.headers.get("set-cookie")).toBeNull();
   });

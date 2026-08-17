@@ -18,7 +18,8 @@ import {
 } from "../hosted-web/encryption";
 import { normalizeNullableString } from "./shared";
 
-const HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD = "hosted-member-identity.privy-user-id";
+export const HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD =
+  "hosted-member-identity.privy-user-id";
 const HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD = "hosted-member-identity.phone-number";
 const HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD = "hosted-member-identity.wallet-address";
 const HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD = "hosted-member-identity.signup-phone-number";
@@ -36,8 +37,9 @@ const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_CURRENT_SCHEMA =
   "murph.hosted-member-routing.telegram.v2";
 const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_LEGACY_SCHEMA =
   "murph.hosted-member-routing.telegram.v1";
-const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD = "hosted-member-billing-ref.stripe-customer-id";
-const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
+export const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD =
+  "hosted-member-billing-ref.stripe-customer-id";
+export const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-member-billing-ref.stripe-subscription-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_SCHEDULE_FIELD =
   "hosted-member-billing-ref.stripe-subscription-schedule-id";

@@ -118,6 +118,7 @@ export interface JunctionCollectionWorkLimit {
 export interface JunctionWindowInput {
   collectionWorkLimit?: JunctionCollectionWorkLimit;
   dateQueryFormat?: JunctionDateQueryFormat;
+  requireStructurallyCompleteCollection?: boolean;
   maxRecords?: number;
   resource: string;
   signal?: AbortSignal | null;
@@ -215,6 +216,7 @@ const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
 const MAX_SDK_COMPAT_RESPONSE_BYTES = 32 * 1_024 * 1_024;
+export const JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES = 8 * 1_024 * 1_024;
 // These summary endpoints declare `start_date`/`end_date` as YYYY-MM-DD dates
 // (not datetimes) in the Junction API reference.
 const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["electrocardiogram", "menstrual_cycle", "sleep_cycle"]);
@@ -480,7 +482,13 @@ export class JunctionClient {
           ? input.maxRecords
           : Math.min(input.maxRecords ?? policy.maxSamplesPerWindow, policy.maxSamplesPerWindow),
       },
-      extractTimeseriesRecords,
+      input.requireStructurallyCompleteCollection
+        ? (payload, resource) => extractStructurallyCompleteTimeseriesRecords(
+            payload,
+            resource,
+            normalizeSourceSlug(input.sourceProviderSlug),
+          )
+        : extractTimeseriesRecords,
       (cursor) => this.requestTimeseriesPage(input, cursor),
     );
   }
@@ -494,6 +502,7 @@ export class JunctionClient {
       "GET",
       {
         endpointKind: "junction_workout_stream",
+        maxResponseBytes: JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES,
         signal: input.signal ?? null,
         ...(input.collectionWorkLimit
           ? {
@@ -799,6 +808,7 @@ export class JunctionClient {
       bodyFieldNames?: readonly string[];
       endpointKind: string;
       maxAttempts?: number;
+      maxResponseBytes?: number;
       optional404?: boolean;
       queryParameterNames?: readonly string[];
       signal?: AbortSignal | null;
@@ -833,12 +843,14 @@ export class JunctionClient {
         timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
       });
       let capturedResponse: JunctionSdkResponseCapture | null = null;
+      let observedOptionalNotFound = false;
       const sdkFetch: typeof fetch = async (input, init) => {
         const response = await this.fetchImpl(input, {
           ...init,
           signal: requestAbort.signal,
         });
         if (options.optional404 && response.status === 404) {
+          observedOptionalNotFound = true;
           await response.body?.cancel().catch(() => undefined);
           return new Response(null, {
             headers: response.headers,
@@ -849,7 +861,8 @@ export class JunctionClient {
         if (!response.body) {
           return response;
         }
-        if (junctionSdkResponseExceedsDeclaredLimit(response)) {
+        const maxResponseBytes = options.maxResponseBytes ?? MAX_SDK_COMPAT_RESPONSE_BYTES;
+        if (junctionSdkResponseExceedsDeclaredLimit(response, maxResponseBytes)) {
           await response.body.cancel().catch(() => undefined);
           throw junctionSdkResponseTooLargeError();
         }
@@ -857,7 +870,7 @@ export class JunctionClient {
         const capture = createJunctionSdkResponseCapture(response);
         capturedResponse = capture;
         return new Response(
-          createJunctionSdkBoundedBodyStream(response.body, capture),
+          createJunctionSdkBoundedBodyStream(response.body, capture, maxResponseBytes),
           {
             headers: response.headers,
             status: response.status,
@@ -902,6 +915,11 @@ export class JunctionClient {
           && isProviderTimeoutError(providerError, requestAbort.signal)
         ) {
           break;
+        }
+
+        if (observedOptionalNotFound) {
+          throwIfProviderRequestAborted(requestAbort.signal);
+          return null as T;
         }
 
         const sdkFailure = readJunctionSdkHttpFailure(error)
@@ -1048,6 +1066,7 @@ function createJunctionSdkResponseCapture(response: Response): JunctionSdkRespon
 function createJunctionSdkBoundedBodyStream(
   body: ReadableStream<Uint8Array>,
   capture: JunctionSdkResponseCapture,
+  maxResponseBytes: number,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   return new ReadableStream<Uint8Array>({
@@ -1062,7 +1081,7 @@ function createJunctionSdkBoundedBodyStream(
 
       const chunk = value;
       capture.totalBytes += chunk.byteLength;
-      if (capture.totalBytes > MAX_SDK_COMPAT_RESPONSE_BYTES) {
+      if (capture.totalBytes > maxResponseBytes) {
         capture.exceededLimit = true;
         capture.chunks = [];
         const error = junctionSdkResponseTooLargeError();
@@ -1081,13 +1100,16 @@ function createJunctionSdkBoundedBodyStream(
   });
 }
 
-function junctionSdkResponseExceedsDeclaredLimit(response: Response): boolean {
+function junctionSdkResponseExceedsDeclaredLimit(
+  response: Response,
+  maxResponseBytes: number,
+): boolean {
   const contentLength = response.headers.get("content-length");
   if (contentLength === null || !/^\d+$/u.test(contentLength.trim())) {
     return false;
   }
   const parsedLength = Number(contentLength);
-  return Number.isSafeInteger(parsedLength) && parsedLength > MAX_SDK_COMPAT_RESPONSE_BYTES;
+  return Number.isSafeInteger(parsedLength) && parsedLength > maxResponseBytes;
 }
 
 function junctionSdkResponseTooLargeError() {
@@ -1692,8 +1714,46 @@ function extractTimeseriesRecords(payload: unknown, resource: string): unknown[]
   return groupedRecords ?? extractCollectionRecords(payload, resource);
 }
 
-function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[] | null {
+function extractStructurallyCompleteTimeseriesRecords(
+  payload: unknown,
+  resource: string,
+  requestedSourceProviderSlug: string | null,
+): unknown[] {
+  const groupedRecords = flattenGroupedTimeseries(resource, payload, {
+    strict: true,
+  });
+  // A structurally complete collection requires grouped proof. Generic and
+  // legacy envelopes (arrays, data/results wrappers, resource-keyed bodies,
+  // raw SDK-parse fallbacks) stay parseable for ordinary ingestion but can
+  // never certify a complete source day.
+  if (groupedRecords === null) {
+    throw incompleteJunctionCalendarCollectionError();
+  }
+  const records = groupedRecords;
+
+  for (const record of records) {
+    const entry = readPlainObject(record);
+    const sourceProviderSlug = entry
+      ? normalizeSourceSlug(resolveJunctionOrigin(entry).sourceProviderSlug)
+      : null;
+    if (!entry || (requestedSourceProviderSlug && !sourceProviderSlug)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
+  }
+  return records;
+}
+
+function flattenGroupedTimeseries(
+  resource: string,
+  payload: unknown,
+  options: {
+    strict?: boolean;
+  } = {},
+): unknown[] | null {
   const envelope = readPlainObject(payload);
+  if (options.strict && envelope && "groups" in envelope && !readPlainObject(envelope.groups)) {
+    throw incompleteJunctionCalendarCollectionError();
+  }
   const groups = readPlainObject(envelope?.groups);
   if (!groups) {
     return null;
@@ -1702,13 +1762,37 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
   const records: unknown[] = [];
 
   for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
+    const normalizedGroupedSourceSlug = normalizeSourceSlug(sourceSlug);
+    if (options.strict && !normalizedGroupedSourceSlug) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
+    if (options.strict && (rawGroups === undefined || rawGroups === null)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
+    // A complete collection proof requires real arrays: a schema-drifted
+    // singleton object must fail retryably rather than certify the day.
+    if (options.strict && !Array.isArray(rawGroups)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
     for (const rawGroup of asArray(rawGroups)) {
       const group = readPlainObject(rawGroup);
       if (!group) {
+        if (options.strict) {
+          throw incompleteJunctionCalendarCollectionError();
+        }
         if (resource === "electrocardiogram_voltage") {
           throw new TypeError("Junction ECG group must be an object.");
         }
         continue;
+      }
+      if (
+        options.strict
+        && (!("data" in group) || group.data === undefined || group.data === null)
+      ) {
+        throw incompleteJunctionCalendarCollectionError();
+      }
+      if (options.strict && !Array.isArray(group.data)) {
+        throw incompleteJunctionCalendarCollectionError();
       }
 
       const groupId = firstDefinedString(group, ["id", "recordingId", "recording_id"]);
@@ -1722,6 +1806,9 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
       for (const rawSample of asArray(group.data)) {
         const sample = readPlainObject(rawSample);
         if (!sample) {
+          if (options.strict) {
+            throw incompleteJunctionCalendarCollectionError();
+          }
           if (resource === "electrocardiogram_voltage") {
             throw new TypeError("Junction ECG sample must be an object.");
           }
@@ -1739,14 +1826,18 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
 
         const origin = resolveJunctionOrigin(sample, {
           ...group,
-          groupedSourceSlug: sourceSlug,
+          groupedSourceSlug: normalizedGroupedSourceSlug ?? sourceSlug,
         });
+        const sourceProviderSlug = normalizeSourceSlug(origin.sourceProviderSlug);
+        if (options.strict && !sourceProviderSlug) {
+          throw incompleteJunctionCalendarCollectionError();
+        }
         records.push(stripUndefinedRecord({
           ...sample,
+          sourceProviderSlug: sourceProviderSlug ?? undefined,
           junctionGroupId: resource === "electrocardiogram_voltage"
             ? groupId
             : undefined,
-          sourceProviderSlug: normalizeSourceSlug(origin.sourceProviderSlug) ?? undefined,
           sourceType: origin.sourceType,
           sourceInstanceId: origin.sourceInstanceId,
           junctionResource: resource,
@@ -1756,6 +1847,15 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
   }
 
   return records;
+}
+
+function incompleteJunctionCalendarCollectionError() {
+  return deviceSyncError({
+    code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    message: "Junction calendar refresh response was not structurally complete.",
+    retryable: true,
+    httpStatus: 502,
+  });
 }
 
 function firstDefinedValue(

@@ -54,7 +54,9 @@ interface MealAddEnvelope {
       carbsGrams?: number
       fatGrams?: number
       fiberGrams?: number
+      waterGrams?: number
     }
+    micros?: Record<string, number>
     provenance?: {
       source: string
       confidence?: string
@@ -192,6 +194,27 @@ interface MealTotalsEnvelope {
         mealCount: number
       }
     }
+  }>
+}
+
+interface MealNutrientEnvelope {
+  filters: {
+    from: string | null
+    to: string | null
+  }
+  mealCount: number
+  nutrients: Array<{
+    key: string
+    label: string
+    category: string
+    unit: string
+    total: number | null
+    contributingMealCount: number
+  }>
+  days: Array<{
+    date: string
+    mealCount: number
+    nutrients: MealNutrientEnvelope['nutrients']
   }>
 }
 
@@ -879,6 +902,12 @@ test.sequential(
               carbsGrams: 56,
               fatGrams: 11,
               fiberGrams: 12,
+              waterGrams: 280,
+            },
+            micros: {
+              ironMg: 4.2,
+              magnesiumMg: 95,
+              vitaminCMg: 18,
             },
             provenance: {
               source: 'estimated',
@@ -915,6 +944,12 @@ test.sequential(
           carbsGrams: 56,
           fatGrams: 11,
           fiberGrams: 12,
+          waterGrams: 280,
+        },
+        micros: {
+          ironMg: 4.2,
+          magnesiumMg: 95,
+          vitaminCMg: 18,
         },
         provenance: {
           source: 'estimated',
@@ -949,11 +984,85 @@ test.sequential(
           carbsGrams: 56,
           fatGrams: 11,
           fiberGrams: 12,
+          waterGrams: 280,
+        },
+        micros: {
+          ironMg: 4.2,
+          magnesiumMg: 95,
+          vitaminCMg: 18,
         },
         provenance: {
           source: 'estimated',
           confidence: 'medium',
           sourceDetail: 'Recipe estimate',
+        },
+      })
+
+      const mealNutrients = await runSourceCli<MealNutrientEnvelope>([
+        'meal',
+        'nutrients',
+        '--from',
+        '2026-03-14',
+        '--to',
+        '2026-03-14',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mealNutrients.ok, true)
+      assert.equal(mealNutrients.meta?.command, 'meal nutrients')
+      assert.equal(requireData(mealNutrients).mealCount, 1)
+      assert.deepEqual(
+        requireData(mealNutrients).nutrients.find(({ key }) => key === 'waterGrams'),
+        {
+          category: 'water',
+          contributingMealCount: 1,
+          key: 'waterGrams',
+          label: 'Water',
+          total: 280,
+          unit: 'g',
+        },
+      )
+      assert.deepEqual(
+        requireData(mealNutrients).nutrients.find(({ key }) => key === 'ironMg'),
+        {
+          category: 'mineral',
+          contributingMealCount: 1,
+          key: 'ironMg',
+          label: 'Iron',
+          total: 4.2,
+          unit: 'mg',
+        },
+      )
+      assert.deepEqual(requireData(mealNutrients).filters, {
+        from: '2026-03-14',
+        to: '2026-03-14',
+      })
+      assert.equal(requireData(mealNutrients).days[0]?.nutrients.length, 29)
+
+      const micronutrientOnlyMeal = await runSourceCli<MealAddEnvelope>(
+        [
+          'meal',
+          'import-json',
+          '--input',
+          '-',
+          '--vault',
+          vaultRoot,
+        ],
+        {
+          stdin: JSON.stringify({
+            occurredAt: '2026-03-15T08:30:00Z',
+            nutrition: {
+              micros: {
+                vitaminB12Mcg: 2.4,
+              },
+            },
+          }),
+        },
+      )
+      assert.equal(micronutrientOnlyMeal.ok, true)
+      assert.deepEqual(requireData(micronutrientOnlyMeal).nutrition, {
+        micros: {
+          vitaminB12Mcg: 2.4,
         },
       })
     } finally {

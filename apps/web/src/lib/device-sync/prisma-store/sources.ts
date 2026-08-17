@@ -20,6 +20,7 @@ import {
   normalizeNullableString,
   omitHostedSqlErrorText,
 } from "../shared";
+import { resolveHostedJunctionConnectionSource } from "../connection-source-lifecycle";
 import { toNullablePrismaJsonValue } from "./prisma-json";
 import type { HostedPrismaTransactionClient } from "./types";
 
@@ -369,6 +370,11 @@ export class PrismaHostedConnectionSourceStore {
     const sourceProviderSlugs = expandCanonicalHostedSourceProviderSlugFilter([
       sourceProviderSlug,
     ]);
+    // Admission supports one established opaque identity alongside one row for
+    // each current/legacy route spelling. Read one sentinel beyond that fixed
+    // set so ambiguous physical state fails closed instead of choosing a
+    // partial authority snapshot.
+    const physicalRowLimit = sourceProviderSlugs.length + 1;
     const records = await prisma.deviceConnectionSource.findMany({
       where: {
         connectionId,
@@ -380,12 +386,33 @@ export class PrismaHostedConnectionSourceStore {
         { sourceInstanceKey: "asc" },
         { id: "asc" },
       ],
-      take: sourceProviderSlugs.length,
+      take: physicalRowLimit + 1,
       ...hostedConnectionSourceRecordArgs,
     });
-    return collapseHostedConnectionSourceRecords(records)
+    if (records.length > physicalRowLimit) {
+      throw sourceContractError(
+        "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+        "Hosted device connection source admission exceeded its bounded semantic authority.",
+      );
+    }
+    const matchingSources = collapseHostedConnectionSourceRecords(records)
       .filter((record) => record.sourceProviderSlug === sourceProviderSlug)
-      .map(mapHostedConnectionSourceAdmissionCandidate);
+      .map(mapHostedConnectionSourceRecord);
+    const source = resolveHostedJunctionConnectionSource(
+      matchingSources,
+      sourceProviderSlug,
+    );
+    return source
+      ? [{
+          lastErrorCode: source.lastErrorCode,
+          lastErrorMessage: source.lastErrorMessage,
+          lifecycleEpoch: source.lifecycleEpoch,
+          lastSeenAt: new Date(source.lastSeenAt),
+          sourceInstanceKey: source.sourceInstanceKey,
+          sourceProviderSlug: source.sourceProviderSlug,
+          status: source.status,
+        }]
+      : [];
   }
 
   async listConnectionSourcesForConnections(
@@ -794,20 +821,6 @@ export function mapHostedConnectionSourceRecord(
     sourceProviderSlug: normalizeSourceProviderSlug(record.sourceProviderSlug),
     status: normalizeSourceStatus(record.status),
     updatedAt: record.updatedAt.toISOString(),
-  };
-}
-
-function mapHostedConnectionSourceAdmissionCandidate(
-  record: HostedConnectionSourceRecord,
-): HostedConnectionSourceAdmissionCandidate {
-  return {
-    lastErrorCode: record.lastErrorCode,
-    lastErrorMessage: record.lastErrorMessage,
-    lifecycleEpoch: readSourceLifecycleEpoch(record.lifecycleEpoch),
-    lastSeenAt: record.lastSeenAt,
-    sourceInstanceKey: record.sourceInstanceKey,
-    sourceProviderSlug: record.sourceProviderSlug,
-    status: record.status,
   };
 }
 

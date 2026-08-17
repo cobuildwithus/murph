@@ -826,7 +826,7 @@ test("Junction glucose summaries expose bounded population variability", () => {
   assert.equal(values.get("glucose-standard-deviation"), 18.0182);
   assert.equal(values.get("glucose-coefficient-of-variation"), 16.6667);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.equal(payload.evidenceParts?.length, 1);
+  assert.equal(payload.evidenceParts?.length, 2);
 });
 
 test("Junction missing-resource slice rejects malformed values, units, intervals, and alert types", () => {

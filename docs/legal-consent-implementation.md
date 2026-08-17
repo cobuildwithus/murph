@@ -179,7 +179,7 @@ or partial launch consent cannot start or use those health-data device paths,
 but that absence remains distinct from withdrawal for legacy compatibility.
 Native or chat-adjacent actions with no current-document consent UI of their
 own — reaction-based group joins, meal-photo enrollment and uploads, and
-iMessage mini-app proof actions — use the same historical-launch boundary as
+iMessage mini-app member actions — use the same historical-launch boundary as
 device sync. Meal-photo enrollment still requires a foreground verified Privy
 identity, active member access, explicit Photos opt-in, and a current private
 delivery route. Independently guarded browser-vault, clinical-record, billing,
