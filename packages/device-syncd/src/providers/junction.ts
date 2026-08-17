@@ -559,7 +559,6 @@ const JUNCTION_TEMPORAL_AUTHORITY_RESOURCES = new Set([
   "stress_level",
 ]);
 const JUNCTION_TEMPORAL_AUTHORITY_JOB_VERSION = 1;
-const JUNCTION_TEMPORAL_CATCH_UP_PRIORITY = 45;
 const JUNCTION_MAX_TEMPORAL_RECONCILE_DAYS = 14;
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
@@ -8151,7 +8150,7 @@ function buildJunctionTemporalAuthorityJobs(input: {
         )}`,
         kind: "resource",
         payload,
-        priority: JUNCTION_TEMPORAL_CATCH_UP_PRIORITY,
+        priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
       };
     })
   );

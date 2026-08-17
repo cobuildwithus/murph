@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -322,6 +322,122 @@ test("complete Junction source-day retries retract stale facets after insufficie
     expect(finalPoints.some((point) => point.metricKey === "stress-level")).toBe(true);
     expect(finalTemporalPoints.some((point) => point.metricKey.startsWith("stress-"))).toBe(false);
     expect(finalTemporalPoints.filter((point) => point.metricKey.startsWith("spo2-")).length).toBe(9);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("disconnected Junction readings leave canonical continuity facets invariant across authoritative replay", async () => {
+  const parentRoot = await mkdtemp(path.join(tmpdir(), "junction-temporal-disconnected-"));
+  const vaultRoot = path.join(parentRoot, "vault");
+  const dayKey = "2026-04-22";
+  const connectedRows = {
+    blood_oxygen: [
+      { timestamp: "2026-04-22T06:00:00Z", unit: "%", value: 88 },
+      { timestamp: "2026-04-22T06:01:00Z", unit: "%", value: 88 },
+      { timestamp: "2026-04-22T06:04:00Z", unit: "%", value: 88 },
+      { timestamp: "2026-04-22T06:05:00Z", unit: "%", value: 88 },
+      { timestamp: "2026-04-22T20:00:00Z", unit: "%", value: 95 },
+      { timestamp: "2026-04-22T20:01:00Z", unit: "%", value: 95 },
+    ],
+    stress_level: [
+      { timestamp: "2026-04-22T11:00:00Z", value: 20 },
+      { timestamp: "2026-04-22T11:01:00Z", value: 30 },
+      { timestamp: "2026-04-22T11:02:00Z", value: 30 },
+      { timestamp: "2026-04-22T11:03:00Z", value: 20 },
+      { timestamp: "2026-04-23T01:00:00Z", value: 20 },
+      { timestamp: "2026-04-23T01:01:00Z", value: 20 },
+    ],
+  };
+  const disconnectedRows = {
+    blood_oxygen: [
+      ...connectedRows.blood_oxygen,
+      { timestamp: "2026-04-22T10:00:00Z", unit: "%", value: 80 },
+      { timestamp: "2026-04-22T15:00:00Z", unit: "%", value: 99 },
+    ],
+    stress_level: [
+      ...connectedRows.stress_level,
+      { timestamp: "2026-04-22T15:00:00Z", value: 0 },
+      { timestamp: "2026-04-22T20:00:00Z", value: 100 },
+    ],
+  };
+  const importDay = async (
+    rows: typeof connectedRows,
+    revisionAt: string,
+  ): Promise<void> => {
+    await importJunction(vaultRoot, junctionSnapshot({
+      importedAt: revisionAt,
+      timeseries: {
+        ...groupedTimeseries("blood_oxygen", rows.blood_oxygen),
+        ...groupedTimeseries("stress_level", rows.stress_level),
+      },
+    }), {
+      dayKey,
+      resources: ["blood_oxygen", "stress_level"],
+      revisionAt,
+    });
+  };
+  const readTemporalQuerySignature = async () => (await metricPoints(vaultRoot))
+    .filter((point) =>
+      point.effectiveDate === dayKey
+      && TEMPORAL_METRICS.includes(point.metricKey as typeof TEMPORAL_METRICS[number])
+    )
+    .map((point) => ({
+      confidence: point.confidence,
+      effectiveDate: point.effectiveDate,
+      metricKey: point.metricKey,
+      qualifiers: point.context.qualifiers ?? {},
+      unit: point.unit,
+      value: point.value,
+    }))
+    .sort((left, right) => left.metricKey.localeCompare(right.metricKey));
+  const ledgerPath = path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl");
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "America/Chicago",
+      vaultRoot,
+    });
+
+    await importDay(connectedRows, "2026-04-24T12:00:00.000Z");
+    const connected = await readTemporalQuerySignature();
+    const connectedContinuity = connected.filter((point) =>
+      point.metricKey !== "spo2-samples-below-90-percent"
+    );
+    const connectedBurden = connected.find((point) =>
+      point.metricKey === "spo2-samples-below-90-percent"
+    );
+    expect(connected).toHaveLength(6);
+    expect(connectedBurden).toMatchObject({
+      qualifiers: { sampleCount: 6, thresholdSampleCount: 4 },
+      value: 66.6667,
+    });
+    expect(connected.find((point) =>
+      point.metricKey === "spo2-longest-below-90-sample-count"
+    )).toMatchObject({ qualifiers: { sampleIntervalSeconds: 60 }, value: 2 });
+    expect(connected.find((point) =>
+      point.metricKey === "stress-above-daily-mean-run-count"
+    )).toMatchObject({ qualifiers: { sampleCount: 6 }, value: 1 });
+
+    await importDay(disconnectedRows, "2026-04-24T13:00:00.000Z");
+    const disconnected = await readTemporalQuerySignature();
+    const disconnectedContinuity = disconnected.filter((point) =>
+      point.metricKey !== "spo2-samples-below-90-percent"
+    );
+    const disconnectedBurden = disconnected.find((point) =>
+      point.metricKey === "spo2-samples-below-90-percent"
+    );
+    expect(disconnectedContinuity).toEqual(connectedContinuity);
+    expect(disconnectedBurden).toMatchObject({
+      qualifiers: { sampleCount: 8, thresholdSampleCount: 5 },
+      value: 62.5,
+    });
+
+    const ledgerBeforeReplay = await readFile(ledgerPath, "utf8");
+    await importDay(disconnectedRows, "2026-04-24T14:00:00.000Z");
+    expect(await readFile(ledgerPath, "utf8")).toBe(ledgerBeforeReplay);
+    expect(await readTemporalQuerySignature()).toEqual(disconnected);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

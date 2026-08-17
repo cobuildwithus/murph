@@ -7639,6 +7639,66 @@ test("Junction SpO2 runs split at established-cadence gaps without inferring dur
   assert.ok(result.observations.every((observation) => observation.unit !== "seconds"));
 });
 
+test("Junction SpO2 continuity ignores disconnected points while burden remains point-counted", () => {
+  const connectedSamples = [
+    { recordedAt: "2026-04-22T06:00:00Z", value: 88 },
+    { recordedAt: "2026-04-22T06:01:00Z", value: 88 },
+    { recordedAt: "2026-04-22T06:04:00Z", value: 88 },
+    { recordedAt: "2026-04-22T06:05:00Z", value: 88 },
+    { recordedAt: "2026-04-22T20:00:00Z", value: 95 },
+    { recordedAt: "2026-04-22T20:01:00Z", value: 95 },
+  ];
+  const disconnectedSamples = [
+    ...connectedSamples,
+    { recordedAt: "2026-04-22T10:00:00Z", value: 80 },
+    { recordedAt: "2026-04-22T15:00:00Z", value: 99 },
+  ];
+  const connected = buildJunctionTemporalFeatures({
+    resource: "blood_oxygen",
+    samples: connectedSamples,
+  });
+  const disconnected = buildJunctionTemporalFeatures({
+    resource: "blood_oxygen",
+    samples: disconnectedSamples,
+  });
+
+  assert.equal(connected.status, "complete");
+  assert.equal(disconnected.status, "complete");
+  if (
+    connected.status !== "complete"
+    || connected.envelope.kind !== "blood_oxygen"
+    || disconnected.status !== "complete"
+    || disconnected.envelope.kind !== "blood_oxygen"
+  ) {
+    assert.fail("expected complete blood oxygen temporal features");
+  }
+  const continuityObservations = (observations: typeof connected.observations) =>
+    observations.filter((observation) =>
+      observation.metric !== "spo2-samples-below-90-percent"
+    );
+  assert.deepEqual(
+    continuityObservations(disconnected.observations),
+    continuityObservations(connected.observations),
+  );
+  assert.equal(connected.envelope.sampleIntervalSeconds, 60);
+  assert.equal(disconnected.envelope.sampleIntervalSeconds, 60);
+  assert.equal(disconnected.envelope.qualifyingPairCount, 3);
+  assert.equal(disconnected.envelope.belowThresholdRunCount, 2);
+  assert.equal(disconnected.envelope.longestBelowThresholdSampleCount, 2);
+  const connectedBurden = connected.observations.find((observation) =>
+    observation.metric === "spo2-samples-below-90-percent"
+  );
+  const disconnectedBurden = disconnected.observations.find((observation) =>
+    observation.metric === "spo2-samples-below-90-percent"
+  );
+  assert.equal(connectedBurden?.value, 66.6667);
+  assert.equal(connectedBurden?.qualifiers.sampleCount, 6);
+  assert.equal(connectedBurden?.qualifiers.thresholdSampleCount, 4);
+  assert.equal(disconnectedBurden?.value, 62.5);
+  assert.equal(disconnectedBurden?.qualifiers.sampleCount, 8);
+  assert.equal(disconnectedBurden?.qualifiers.thresholdSampleCount, 5);
+});
+
 test("Junction sparse samples retain literal burden but suppress continuity claims", () => {
   const bloodOxygen = buildJunctionTemporalFeatures({
     resource: "blood_oxygen",
@@ -7686,6 +7746,66 @@ test("Junction stress runs compare against the unrounded daily mean", () => {
     assert.fail("expected complete stress temporal features");
   }
   assert.equal(result.envelope.aboveDailyMeanRunCount, 1);
+});
+
+test("Junction stress continuity ignores disconnected high and low readings", () => {
+  const connectedSamples = [
+    { localMinuteOfDay: 360, recordedAt: "2026-04-22T06:00:00Z", value: 20 },
+    { localMinuteOfDay: 361, recordedAt: "2026-04-22T06:01:00Z", value: 30 },
+    { localMinuteOfDay: 362, recordedAt: "2026-04-22T06:02:00Z", value: 30 },
+    { localMinuteOfDay: 363, recordedAt: "2026-04-22T06:03:00Z", value: 20 },
+    { localMinuteOfDay: 1_200, recordedAt: "2026-04-22T20:00:00Z", value: 20 },
+    { localMinuteOfDay: 1_201, recordedAt: "2026-04-22T20:01:00Z", value: 20 },
+  ];
+  const connected = buildJunctionTemporalFeatures({
+    resource: "stress_level",
+    samples: connectedSamples,
+  });
+  const disconnected = buildJunctionTemporalFeatures({
+    resource: "stress_level",
+    samples: [
+      ...connectedSamples,
+      { localMinuteOfDay: 600, recordedAt: "2026-04-22T10:00:00Z", value: 0 },
+      { localMinuteOfDay: 900, recordedAt: "2026-04-22T15:00:00Z", value: 100 },
+    ],
+  });
+
+  assert.deepEqual(disconnected, connected);
+  assert.equal(connected.status, "complete");
+  if (connected.status !== "complete" || connected.envelope.kind !== "stress_level") {
+    assert.fail("expected complete stress temporal features");
+  }
+  assert.equal(connected.envelope.sampleCount, 6);
+  assert.equal(connected.envelope.dailyMean, 23.3333);
+  assert.equal(connected.envelope.aboveDailyMeanRunCount, 1);
+});
+
+test("Junction low-cardinality stress evidence excludes disconnected readings", () => {
+  const connected = buildJunctionTemporalFeatures({
+    resource: "stress_level",
+    samples: [
+      { recordedAt: "2026-04-22T06:00:00Z", value: 20 },
+      { recordedAt: "2026-04-22T06:01:00Z", value: 30 },
+    ],
+  });
+  const disconnected = buildJunctionTemporalFeatures({
+    resource: "stress_level",
+    samples: [
+      { recordedAt: "2026-04-22T06:00:00Z", value: 20 },
+      { recordedAt: "2026-04-22T06:01:00Z", value: 30 },
+      { recordedAt: "2026-04-22T10:00:00Z", value: 0 },
+      { recordedAt: "2026-04-22T15:00:00Z", value: 100 },
+    ],
+  });
+
+  assert.deepEqual(disconnected, connected);
+  assert.equal(connected.status, "complete");
+  if (connected.status !== "complete" || connected.envelope.kind !== "stress_level") {
+    assert.fail("expected complete low-cardinality stress temporal features");
+  }
+  assert.equal(connected.envelope.sampleCount, 2);
+  assert.equal(connected.envelope.qualifyingPairCount, 1);
+  assert.equal(connected.envelope.dailyMean, 25);
 });
 
 test("Junction equal-time samples collapse deterministically before reduction", () => {
@@ -7823,7 +7943,7 @@ test("Junction stress features preserve local-day runs, variation, and daypart s
     return qualifiers?.derived === true
       && qualifiers.evidenceMethod
         === "distinct-instant-mean-median-gap-2.5x-absolute-cap.v2"
-      && qualifiers.sampleCount === 5
+      && qualifiers.sampleCount === 4
       && qualifiers.qualifyingPairCount === 2;
   }));
   assert.equal(artifactContent.status, "complete");

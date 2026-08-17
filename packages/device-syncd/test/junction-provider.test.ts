@@ -9619,7 +9619,7 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
       {
         availableAt: "2026-04-06T00:00:00.000Z",
         dayKey: "2026-04-03",
-        priority: 45,
+        priority: 30,
         resource: "blood_oxygen",
         windowEnd: "2026-04-04T00:00:00.000Z",
         windowStart: "2026-04-03T00:00:00.000Z",
@@ -9627,7 +9627,7 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
       {
         availableAt: "2026-04-06T00:00:00.000Z",
         dayKey: "2026-04-03",
-        priority: 45,
+        priority: 30,
         resource: "stress_level",
         windowEnd: "2026-04-04T00:00:00.000Z",
         windowStart: "2026-04-03T00:00:00.000Z",
@@ -9635,7 +9635,7 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
       {
         availableAt: "2026-04-06T00:00:00.001Z",
         dayKey: "2026-04-02",
-        priority: 45,
+        priority: 30,
         resource: "blood_oxygen",
         windowEnd: "2026-04-03T00:00:00.000Z",
         windowStart: "2026-04-02T00:00:00.000Z",
@@ -9643,7 +9643,7 @@ test("Junction reconcile schedules the remaining temporal horizon newest-first a
       {
         availableAt: "2026-04-06T00:00:00.001Z",
         dayKey: "2026-04-02",
-        priority: 45,
+        priority: 30,
         resource: "stress_level",
         windowEnd: "2026-04-03T00:00:00.000Z",
         windowStart: "2026-04-02T00:00:00.000Z",

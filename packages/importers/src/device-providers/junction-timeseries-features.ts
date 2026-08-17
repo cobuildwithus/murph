@@ -214,7 +214,7 @@ function buildBloodOxygenTemporalFeatures(
     method: JUNCTION_TEMPORAL_FEATURE_METHOD,
     kind: "blood_oxygen",
     sampleCount: samples.length,
-    sampleIntervalSeconds: summary.sampleIntervalSeconds,
+    sampleIntervalSeconds: continuity.sampleIntervalSeconds,
     maxAdjacentGapSeconds: BLOOD_OXYGEN_MAX_ADJACENT_GAP_SECONDS,
     qualifyingPairCount: continuity.qualifyingPairs.length,
     thresholdPercent: BLOOD_OXYGEN_THRESHOLD_PERCENT,
@@ -239,11 +239,18 @@ function buildBloodOxygenTemporalFeatures(
     ),
   ];
   if (runEvidence) {
+    const continuitySampleCount = continuity.participatingSampleIndexes.length;
+    const continuityThresholdSampleCount = continuity.participatingSampleIndexes.reduce(
+      (count, index) => count + (
+        (samples[index]?.value ?? Infinity) < BLOOD_OXYGEN_THRESHOLD_PERCENT ? 1 : 0
+      ),
+      0,
+    );
     const runQualifiers = evidenceQualifiers({
       confidence: "medium",
       continuity,
-      sampleCount: samples.length,
-      thresholdSampleCount: belowThresholdSampleCount,
+      sampleCount: continuitySampleCount,
+      thresholdSampleCount: continuityThresholdSampleCount,
     });
     observations.push(
       observation(
@@ -277,8 +284,13 @@ function buildStressTemporalFeatures(
   if (continuity.qualifyingPairs.length === 0) {
     return { observations: [], status: "insufficient_temporal_evidence" };
   }
+  const continuitySamples = continuity.participatingSampleIndexes.flatMap((index) => {
+    const sample = samples[index];
+    return sample ? [sample] : [];
+  });
   const unroundedDailyMean =
-    samples.reduce((sum, sample) => sum + sample.value, 0) / samples.length;
+    continuitySamples.reduce((sum, sample) => sum + sample.value, 0)
+      / continuitySamples.length;
   const dailyMean = round4(unroundedDailyMean);
   const aboveDailyMeanRunCount = summarizeThresholdRuns(
     samples,
@@ -308,7 +320,7 @@ function buildStressTemporalFeatures(
     schema: "junction.timeseries_temporal_features.v2",
     method: JUNCTION_TEMPORAL_FEATURE_METHOD,
     kind: "stress_level",
-    sampleCount: samples.length,
+    sampleCount: continuitySamples.length,
     sampleIntervalSeconds: continuity.sampleIntervalSeconds,
     maxAdjacentGapSeconds: STRESS_MAX_ADJACENT_GAP_SECONDS,
     qualifyingPairCount: continuity.qualifyingPairs.length,
@@ -328,7 +340,7 @@ function buildStressTemporalFeatures(
   const continuityQualifiers = evidenceQualifiers({
     confidence: "medium",
     continuity,
-    sampleCount: samples.length,
+    sampleCount: continuitySamples.length,
   });
   const observations: JunctionTemporalFeatureObservation[] = [
     observation(
@@ -358,7 +370,7 @@ function buildStressTemporalFeatures(
         eveningSampleCount: evening.sampleCount,
         morningSampleCount: morning.sampleCount,
         qualifyingPairCount: morning.qualifyingPairCount + evening.qualifyingPairCount,
-        sampleCount: samples.length,
+        sampleCount: continuitySamples.length,
       }),
     ));
   }
@@ -384,6 +396,7 @@ interface QualifyingAdjacentPair {
 
 interface ContinuityAssessment {
   maxAdjacentGapSeconds: number;
+  participatingSampleIndexes: readonly number[];
   qualifyingPairs: readonly QualifyingAdjacentPair[];
   sampleIntervalSeconds: number | null;
 }
@@ -392,26 +405,72 @@ function assessContinuity(
   samples: readonly JunctionTemporalFeatureSample[],
   maxAdjacentGapSeconds: number,
 ): ContinuityAssessment {
-  const sampleIntervalSeconds = summarizeBelowThresholds(samples, []).sampleIntervalSeconds;
-  const cadenceGapSeconds = sampleIntervalSeconds === null
-    ? maxAdjacentGapSeconds
-    : sampleIntervalSeconds * 2.5;
-  const qualifyingGapSeconds = Math.min(maxAdjacentGapSeconds, cadenceGapSeconds);
+  const partitionCadences: number[] = [];
   const qualifyingPairs: QualifyingAdjacentPair[] = [];
+  let partitionStart = 0;
 
-  for (let index = 1; index < samples.length; index += 1) {
+  for (let index = 1; index <= samples.length; index += 1) {
     const previous = samples[index - 1];
     const current = samples[index];
-    if (!previous || !current) {
+    const gapSeconds = previous && current
+      ? (Date.parse(current.recordedAt) - Date.parse(previous.recordedAt)) / 1_000
+      : Infinity;
+    if (index < samples.length && gapSeconds <= maxAdjacentGapSeconds) {
       continue;
     }
-    const gapSeconds = (Date.parse(current.recordedAt) - Date.parse(previous.recordedAt)) / 1_000;
-    if (gapSeconds > 0 && gapSeconds <= qualifyingGapSeconds) {
-      qualifyingPairs.push({ currentIndex: index, previousIndex: index - 1 });
+
+    const partition = samples.slice(partitionStart, index);
+    if (partition.length > 1) {
+      const partitionCadence = summarizeBelowThresholds(partition, []).sampleIntervalSeconds;
+      if (partitionCadence !== null) {
+        partitionCadences.push(partitionCadence);
+        const qualifyingGapSeconds = Math.min(
+          maxAdjacentGapSeconds,
+          partitionCadence * 2.5,
+        );
+        for (let partitionIndex = partitionStart + 1; partitionIndex < index; partitionIndex += 1) {
+          const partitionPrevious = samples[partitionIndex - 1];
+          const partitionCurrent = samples[partitionIndex];
+          if (!partitionPrevious || !partitionCurrent) {
+            continue;
+          }
+          const partitionGapSeconds = (
+            Date.parse(partitionCurrent.recordedAt)
+            - Date.parse(partitionPrevious.recordedAt)
+          ) / 1_000;
+          if (partitionGapSeconds > 0 && partitionGapSeconds <= qualifyingGapSeconds) {
+            qualifyingPairs.push({
+              currentIndex: partitionIndex,
+              previousIndex: partitionIndex - 1,
+            });
+          }
+        }
+      }
     }
+    partitionStart = index;
   }
 
-  return { maxAdjacentGapSeconds, qualifyingPairs, sampleIntervalSeconds };
+  return {
+    maxAdjacentGapSeconds,
+    participatingSampleIndexes: [...new Set(qualifyingPairs.flatMap((pair) => [
+      pair.previousIndex,
+      pair.currentIndex,
+    ]))].sort((left, right) => left - right),
+    qualifyingPairs,
+    sampleIntervalSeconds: medianPositiveNumber(partitionCadences),
+  };
+}
+
+function medianPositiveNumber(values: readonly number[]): number | null {
+  if (values.length === 0) {
+    return null;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const midpoint = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0
+    ? ((sorted[midpoint - 1] ?? 0) + (sorted[midpoint] ?? 0)) / 2
+    : sorted[midpoint] ?? 0;
+  return median > 0 ? round4(median) : null;
 }
 
 function summarizeThresholdRuns(
