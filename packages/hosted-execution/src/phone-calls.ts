@@ -24,10 +24,6 @@ export const HOSTED_PHONE_CALL_RESULT_DELIVERY_OUTCOME_STATUSES = [
   "failed",
   "failed_ambiguous",
 ] as const;
-export const HOSTED_PHONE_CALL_RESULT_PRE_PROVIDER_ROUTE_FAILURE_CODES = [
-  "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE",
-  "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
-] as const;
 
 // Murph must never dial emergency or crisis dispatch: it is an unattended
 // caller that cannot hold a line, give a location, or stay reachable, so an
@@ -241,15 +237,6 @@ export function parseHostedPhoneCallResultDeliveryOutcomeRequest(
   value: unknown,
 ): HostedPhoneCallResultDeliveryOutcomeRequest {
   return hostedPhoneCallResultDeliveryOutcomeRequestSchema.parse(value);
-}
-
-export function isHostedPhoneCallResultPreProviderRouteFailureCode(
-  value: string | null | undefined,
-): boolean {
-  return typeof value === "string"
-    && HOSTED_PHONE_CALL_RESULT_PRE_PROVIDER_ROUTE_FAILURE_CODES.some(
-      (code) => code === value,
-    );
 }
 
 export function parseHostedPhoneCallStartRequest(

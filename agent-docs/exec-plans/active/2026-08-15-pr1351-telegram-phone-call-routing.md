@@ -438,3 +438,32 @@ the member's current authorized Telegram route.
   build then passed at the 1 GiB parent / 3.5 GiB worker split, including all
   248 static pages. The production script, its focused guards, and current
   verification docs now carry that measured limit.
+
+## Round 30 retrospective
+
+- ReviewGPT round 30 at `5dbad42d24fdee81dfe709e41928a51112f7c4f6`
+  required a new retrospective because the remediation path had grown beyond the
+  round-28 scope and repeated one provider-effect classification mechanism:
+  signed `failed` callbacks were being treated as durable no-effect proof even
+  when the runtime could produce that callback after Telegram had already
+  accepted a tracked result.
+- Requirement decision: the existing assistant outbox remains the only
+  provider-effect evidence owner, and `HostedPhoneCall` remains the only result
+  generation owner. Web may recover a `failed` callback only when the outbox
+  evidence proves no Telegram-visible effect began. Cancellation, lease loss, or
+  liveness loss after provider acceptance must preserve the existing receipt or
+  ambiguity classification; it must not be downgraded into a new sendable
+  generation.
+- Implementation direction: keep the round-29 deletion of Web-side error-code
+  allowlists, but remove the runtime seam that could manufacture a false
+  no-effect callback. For tracked phone-call result Telegram sends, once
+  Telegram returns a receipt, the runtime returns that receipt to the existing
+  outbox confirmation path even if the invocation signal is now aborted. This
+  adds no state, queue, timer, lease, manager, or compatibility layer.
+- Cleanup direction: delete obsolete pre-provider route-failure helper exports
+  that are no longer production authorities, so the public package surface does
+  not imply a second effect-classification owner.
+- Required proof before the next review: a post-Telegram liveness loss for a
+  tracked result must produce one Telegram request, persist a `sent` terminal
+  callback, and avoid generation N+1; pre-provider failures must still produce
+  zero Telegram requests and remain recoverable.

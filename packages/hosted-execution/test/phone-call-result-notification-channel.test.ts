@@ -4,7 +4,6 @@ import {
   buildHostedPhoneCallResultDeliveryKey,
   hostedPhoneCallResultSchema,
   hostedPhoneCallStartRequestSchema,
-  isHostedPhoneCallResultPreProviderRouteFailureCode,
   parseHostedPhoneCallResultDeliveryKey,
   parseHostedPhoneCallResultDeliveryOutcomeRequest,
   parseHostedPhoneCallResultNotificationChannel,
@@ -127,16 +126,4 @@ describe("hosted phone-call result notification channels", () => {
     })).toThrow();
   });
 
-  it("classifies only exact pre-provider route-loss codes", () => {
-    expect(isHostedPhoneCallResultPreProviderRouteFailureCode(
-      "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
-    )).toBe(true);
-    expect(isHostedPhoneCallResultPreProviderRouteFailureCode(
-      "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE",
-    )).toBe(true);
-    expect(isHostedPhoneCallResultPreProviderRouteFailureCode(
-      "ASSISTANT_DELIVERY_AMBIGUOUS",
-    )).toBe(false);
-    expect(isHostedPhoneCallResultPreProviderRouteFailureCode(null)).toBe(false);
-  });
 });

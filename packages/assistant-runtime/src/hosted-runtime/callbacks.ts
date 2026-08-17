@@ -3465,6 +3465,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             providerDispatchEntered = true;
           }
           const result = await sendTelegramMessage(request, dependencies);
+          if (trackedPhoneCallResult) {
+            // Telegram has accepted the non-idempotent result; preserve the
+            // receipt through the existing outbox confirmation path.
+            return result;
+          }
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
@@ -3918,7 +3923,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         userId: input.userId,
       });
     }
-    assertHostedDeliveryLiveness(input.signal);
+    const trackedPhoneCallResultSent =
+      dispatched.intent.status === "sent"
+      && readHostedPhoneCallResultDeliveryFromEffect(
+        input.assistantDeliveryEffect,
+      ) !== null;
+    if (!trackedPhoneCallResultSent) {
+      assertHostedDeliveryLiveness(input.signal);
+    }
     return buildHostedAssistantDeliveryDispatchResult({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
