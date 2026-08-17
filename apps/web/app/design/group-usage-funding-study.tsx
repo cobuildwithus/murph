@@ -22,6 +22,7 @@ import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-spo
 import {
   GroupSponsorshipCanceledReceipt,
   GroupSponsorshipManagementCard,
+  GroupSponsorshipManagementConfirmationDialog,
 } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
@@ -448,19 +449,21 @@ function GroupUsageFundingStudy() {
           label="Active management near cap"
           state="monthly-active"
         >
-          <GroupSponsorshipManagementCard
-            endpoint={endpoint}
-            inert
-            management={{
-              authorizationId: "hgsa_design_active",
-              chargedThisPeriodMinor: 500,
-              monthlyCapMinor: 1_000,
-              pendingMonthlyCapMinor: null,
-              pendingThisPeriodMinor: 500,
-              periodEnd: "2026-08-30T16:00:00.000Z",
-              status: "active",
-            }}
-          />
+          <div inert>
+            <GroupSponsorshipManagementCard
+              endpoint={endpoint}
+              initialSelectedMonthlyCapMinor={2_000}
+              management={{
+                authorizationId: "hgsa_design_active",
+                chargedThisPeriodMinor: 500,
+                monthlyCapMinor: 1_000,
+                pendingMonthlyCapMinor: null,
+                pendingThisPeriodMinor: 500,
+                periodEnd: "2026-08-30T16:00:00.000Z",
+                status: "active",
+              }}
+            />
+          </div>
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
@@ -535,6 +538,13 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
+          label="Monthly limit increase confirmation"
+          state="monthly-limit-confirmation"
+        >
+          <GroupSponsorshipManagementConfirmationStudy />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
           label="Sponsored-chat one-time purchase recovery"
           state="sponsored-one-time-recovery"
         >
@@ -544,6 +554,37 @@ function GroupUsageFundingStudy() {
           />
         </DesignSponsorshipState>
       </div>
+    </div>
+  );
+}
+
+export function GroupSponsorshipManagementConfirmationStudy() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      className="flex flex-col items-start gap-3"
+      data-design-component="group-sponsorship-management-confirmation"
+    >
+      <p className="max-w-[48ch] text-sm/6 text-muted-foreground">
+        Preview the payer confirmation shown before a monthly limit increase.
+      </p>
+      <Button onClick={() => setOpen(true)} variant="outline">
+        Preview $20 limit confirmation
+      </Button>
+      <GroupSponsorshipManagementConfirmationDialog
+        busy={false}
+        confirmation={open
+          ? {
+            currentMonthlyCapMinor: 1_000,
+            kind: "increase",
+            nextMonthlyCapMinor: 2_000,
+          }
+          : null}
+        inert
+        onConfirm={() => undefined}
+        onOpenChange={setOpen}
+      />
     </div>
   );
 }

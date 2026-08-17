@@ -157,6 +157,7 @@ import {
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
   GroupFundingSupportersStudy,
+  GroupSponsorshipManagementConfirmationStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import {
@@ -1718,7 +1719,7 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
-                inert
+                initialSelectedMonthlyCapMinor={2_000}
                 management={{
                   authorizationId: "hgsa_design_component",
                   chargedThisPeriodMinor: 500,
@@ -1730,6 +1731,7 @@ export function ComponentsContent() {
                 }}
               />
             </div>
+            <GroupSponsorshipManagementConfirmationStudy />
             <div
               className="rounded-3xl border border-border bg-card p-6"
               data-design-component="family-member-usage-top-up"

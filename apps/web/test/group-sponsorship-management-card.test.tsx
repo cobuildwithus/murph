@@ -26,23 +26,31 @@ vi.mock("@/src/components/ui/alert", () => ({
     createElement("h2", null, children),
 }));
 
-vi.mock("@/src/components/ui/card", () => ({
-  Card: ({ children }: { children?: ReactNode }) =>
-    createElement("section", null, children),
-  CardContent: ({ children }: { children?: ReactNode }) =>
+vi.mock("@/src/components/ui/alert-dialog", () => ({
+  AlertDialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
+    open ? createElement("section", null, children) : null,
+  AlertDialogAction: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) =>
+    createElement("button", { ...props, "data-slot": "alert-dialog-action" }, children),
+  AlertDialogCancel: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) =>
+    createElement("button", { ...props, "data-slot": "alert-dialog-cancel" }, children),
+  AlertDialogContent: ({ children }: { children?: ReactNode }) =>
     createElement("div", null, children),
-  CardDescription: ({ children }: { children?: ReactNode }) =>
+  AlertDialogDescription: ({ children }: { children?: ReactNode }) =>
     createElement("p", null, children),
-  CardFooter: ({ children }: { children?: ReactNode }) =>
+  AlertDialogFooter: ({ children }: { children?: ReactNode }) =>
     createElement("footer", null, children),
-  CardHeader: ({ children }: { children?: ReactNode }) =>
+  AlertDialogHeader: ({ children }: { children?: ReactNode }) =>
     createElement("header", null, children),
-  CardTitle: ({ children }: { children?: ReactNode }) =>
+  AlertDialogTitle: ({ children }: { children?: ReactNode }) =>
     createElement("h2", null, children),
 }));
 
 vi.mock("@/src/components/ui/choice-card", () => ({
-  ChoiceCard: ({ title }: { title: string }) => createElement("span", null, title),
+  ChoiceCard: ({ title }: { title: ReactNode }) => createElement("span", null, title),
+}));
+
+vi.mock("@/src/components/ui/spinner", () => ({
+  Spinner: () => createElement("span", null, "Loading"),
 }));
 
 vi.mock("@/src/components/ui/radio-group", () => ({
@@ -96,12 +104,6 @@ test.each([
     initialStatus: "recovery_required" as const,
     responseStatus: "recovery_required" as const,
   },
-  {
-    action: "cancel",
-    button: "Cancel sponsorship",
-    initialStatus: "active" as const,
-    responseStatus: "active" as const,
-  },
 ])("binds the $action mutation to the displayed authorization", async ({
   action,
   button,
@@ -129,11 +131,6 @@ test.each([
       management: { ...baseManagement, status: initialStatus },
     },
   ));
-  Object.defineProperty(rendered.window, "confirm", {
-    configurable: true,
-    value: vi.fn(() => true),
-  });
-
   try {
     const mutationButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === button);
@@ -173,11 +170,6 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       management: baseManagement,
     },
   ));
-  Object.defineProperty(rendered.window, "confirm", {
-    configurable: true,
-    value: vi.fn(() => true),
-  });
-
   try {
     const capButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === "Choose $20");
@@ -189,10 +181,25 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     assert.equal(fetchMock.mock.calls.length, 0);
 
     const applyButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Confirm $20 limit");
+      .find((candidate) => candidate.textContent === "Review $20 limit");
     assert.ok(applyButton);
     await act(async () => {
       applyButton.click();
+    });
+
+    expect(rendered.container.textContent).toContain("Increase limit to $20?");
+    expect(rendered.container.textContent).toContain(
+      "This changes your monthly maximum from $10 to $20",
+    );
+    assert.equal(fetchMock.mock.calls.length, 0);
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    expect(confirmButton.textContent).toBe("Increase to $20");
+    await act(async () => {
+      confirmButton.click();
     });
 
     assert.equal(fetchMock.mock.calls.length, 1);
@@ -203,6 +210,56 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       confirmed: true,
       monthlyCapMinor: 2_000,
     });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps the confirmation open when a cap increase fails", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({}),
+    ok: false,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: baseManagement,
+    },
+  ));
+  try {
+    const capButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Choose $20");
+    assert.ok(capButton);
+    await act(async () => {
+      capButton.click();
+    });
+
+    const applyButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review $20 limit");
+    assert.ok(applyButton);
+    await act(async () => {
+      applyButton.click();
+    });
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    await act(async () => {
+      confirmButton.click();
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    expect(rendered.container.textContent).toContain("Increase limit to $20?");
+    expect(rendered.container.textContent).toContain(
+      "That change didn’t go through. Try again.",
+    );
   } finally {
     await rendered.cleanup();
   }
@@ -255,17 +312,28 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
       management: baseManagement,
     },
   ));
-  Object.defineProperty(rendered.window, "confirm", {
-    configurable: true,
-    value: vi.fn(() => true),
-  });
-
   try {
     const cancelButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === "Cancel sponsorship");
     assert.ok(cancelButton);
     await act(async () => {
       cancelButton.click();
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 0);
+    expect(rendered.container.textContent).toContain(
+      "Cancel monthly sponsorship?",
+    );
+    expect(rendered.container.textContent).toContain(
+      "Usage credit already purchased stays with the group",
+    );
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    await act(async () => {
+      confirmButton.click();
     });
 
     expect(rendered.reload).not.toHaveBeenCalled();

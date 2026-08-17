@@ -2,6 +2,16 @@
 
 import { useState } from "react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/src/components/ui/alert-dialog";
 import { Button } from "@/src/components/ui/button";
 import {
   Alert,
@@ -14,6 +24,7 @@ import {
   FieldSet,
 } from "@/src/components/ui/field";
 import { RadioGroup } from "@/src/components/ui/radio-group";
+import { Spinner } from "@/src/components/ui/spinner";
 
 export interface GroupSponsorshipManagementProjection {
   authorizationId: string;
@@ -27,28 +38,43 @@ export interface GroupSponsorshipManagementProjection {
 
 type MonthlyCapMinor = GroupSponsorshipManagementProjection["monthlyCapMinor"];
 
+export type GroupSponsorshipManagementConfirmation =
+  | {
+    currentMonthlyCapMinor: MonthlyCapMinor;
+    kind: "increase";
+    nextMonthlyCapMinor: MonthlyCapMinor;
+  }
+  | { kind: "cancel" };
+
 export function GroupSponsorshipManagementCard({
   cancelOnly = false,
   endpoint,
   inert = false,
+  initialSelectedMonthlyCapMinor,
   management: initialManagement,
 }: {
   cancelOnly?: boolean;
   endpoint: string;
   inert?: boolean;
+  initialSelectedMonthlyCapMinor?: MonthlyCapMinor;
   management: GroupSponsorshipManagementProjection;
 }) {
   const [management, setManagement] = useState(initialManagement);
   const [selectedMonthlyCapMinor, setSelectedMonthlyCapMinor] = useState(
-    initialManagement.pendingMonthlyCapMinor ?? initialManagement.monthlyCapMinor,
+    initialSelectedMonthlyCapMinor ??
+      initialManagement.pendingMonthlyCapMinor ??
+      initialManagement.monthlyCapMinor,
   );
   const [busy, setBusy] = useState(false);
   const [canceled, setCanceled] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<
+    GroupSponsorshipManagementConfirmation | null
+  >(null);
 
-  const submit = async (body: Record<string, unknown>) => {
+  const submit = async (body: Record<string, unknown>): Promise<boolean> => {
     if (inert || busy) {
-      return;
+      return false;
     }
     setBusy(true);
     setError(null);
@@ -72,18 +98,18 @@ export function GroupSponsorshipManagementCard({
           : null;
         if (checkoutUrl) {
           window.location.assign(checkoutUrl);
-          return;
+          return true;
         }
         window.location.reload();
-        return;
+        return true;
       }
       if (value.management === null) {
         if (body.action === "cancel") {
           setCanceled(true);
-          return;
+          return true;
         }
         window.location.reload();
-        return;
+        return true;
       }
       const next = readManagementProjection(value.management);
       if (!next) {
@@ -93,12 +119,14 @@ export function GroupSponsorshipManagementCard({
       setSelectedMonthlyCapMinor(
         next.pendingMonthlyCapMinor ?? next.monthlyCapMinor,
       );
+      return true;
     } catch (cause) {
       setError(
         cause instanceof Error
           ? cause.message
           : "That change didn’t go through. Try again.",
       );
+      return false;
     } finally {
       setBusy(false);
     }
@@ -117,12 +145,13 @@ export function GroupSponsorshipManagementCard({
     if (selectedMonthlyCapMinor === appliedMonthlyCapMinor) {
       return;
     }
-    if (
-      selectedMonthlyCapMinor > management.monthlyCapMinor &&
-      !window.confirm(
-        `Increase the monthly maximum to ${formatMoney(selectedMonthlyCapMinor)}? Murph may charge additional $5 usage-credit purchases this period when the group needs them.`,
-      )
-    ) {
+    if (selectedMonthlyCapMinor > management.monthlyCapMinor) {
+      setError(null);
+      setConfirmation({
+        currentMonthlyCapMinor: management.monthlyCapMinor,
+        kind: "increase",
+        nextMonthlyCapMinor: selectedMonthlyCapMinor,
+      });
       return;
     }
     void submit({
@@ -130,6 +159,22 @@ export function GroupSponsorshipManagementCard({
       confirmed: true,
       monthlyCapMinor: selectedMonthlyCapMinor,
     });
+  };
+
+  const confirmAction = async () => {
+    if (!confirmation) {
+      return;
+    }
+    const succeeded = confirmation.kind === "increase"
+      ? await submit({
+        action: "change_cap",
+        confirmed: true,
+        monthlyCapMinor: confirmation.nextMonthlyCapMinor,
+      })
+      : await submit({ action: "cancel" });
+    if (succeeded) {
+      setConfirmation(null);
+    }
   };
 
   return (
@@ -238,12 +283,13 @@ export function GroupSponsorshipManagementCard({
               {capChanged ? (
                 <Button
                   type="button"
+                  className="w-full sm:w-auto"
                   disabled={busy || inert}
                   onClick={applyCap}
-                  size="sm"
+                  size="lg"
                 >
                   {capIncrease
-                    ? `Confirm ${formatMoney(selectedMonthlyCapMinor)} limit`
+                    ? `Review ${formatMoney(selectedMonthlyCapMinor)} limit`
                     : `Save ${formatMoney(selectedMonthlyCapMinor)} limit`}
                 </Button>
               ) : null}
@@ -262,7 +308,7 @@ export function GroupSponsorshipManagementCard({
         </p>
       ) : null}
 
-      {error ? (
+      {error && confirmation === null ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
@@ -296,19 +342,100 @@ export function GroupSponsorshipManagementCard({
           variant="ghost"
           disabled={busy || inert}
           onClick={() => {
-            if (
-              window.confirm(
-                "Cancel this monthly sponsorship? Purchased usage credit stays with the group.",
-              )
-            ) {
-              void submit({ action: "cancel" });
-            }
+            setError(null);
+            setConfirmation({ kind: "cancel" });
           }}
         >
           Cancel sponsorship
         </Button>
       </div>
+
+      <GroupSponsorshipManagementConfirmationDialog
+        busy={busy}
+        confirmation={confirmation}
+        error={error}
+        inert={inert}
+        onConfirm={() => void confirmAction()}
+        onOpenChange={(open) => {
+          if (!open && !busy) {
+            setConfirmation(null);
+          }
+        }}
+      />
     </section>
+  );
+}
+
+export function GroupSponsorshipManagementConfirmationDialog({
+  busy,
+  confirmation,
+  error = null,
+  inert = false,
+  onConfirm,
+  onOpenChange,
+}: {
+  busy: boolean;
+  confirmation: GroupSponsorshipManagementConfirmation | null;
+  error?: string | null;
+  inert?: boolean;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const isIncrease = confirmation?.kind === "increase";
+  const nextLimit = isIncrease
+    ? formatMoney(confirmation.nextMonthlyCapMinor)
+    : null;
+
+  return (
+    <AlertDialog
+      open={confirmation !== null}
+      onOpenChange={onOpenChange}
+    >
+      <AlertDialogContent
+        className="!bottom-[max(env(safe-area-inset-bottom),0.75rem)] !left-3 !right-3 !top-auto !w-auto !max-w-none !translate-x-0 !translate-y-0 gap-5 sm:!bottom-auto sm:!left-1/2 sm:!right-auto sm:!top-1/2 sm:!w-full sm:!max-w-md sm:!-translate-x-1/2 sm:!-translate-y-1/2"
+        data-component="group-sponsorship-management-confirmation"
+        inert={inert || undefined}
+      >
+        <AlertDialogHeader className="place-items-start text-left">
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            {isIncrease ? "Monthly limit" : "Monthly sponsorship"}
+          </p>
+          <AlertDialogTitle className="text-2xl/7 tracking-normal">
+            {isIncrease
+              ? `Increase limit to ${nextLimit}?`
+              : "Cancel monthly sponsorship?"}
+          </AlertDialogTitle>
+          <AlertDialogDescription className="max-w-[48ch]">
+            {isIncrease
+              ? `This changes your monthly maximum from ${formatMoney(confirmation.currentMonthlyCapMinor)} to ${nextLimit}. Murph can then make additional $5 usage purchases this period when the group needs more capacity.`
+              : "Future automatic refills will stop. Usage credit already purchased stays with the group."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        {error ? (
+          <p role="alert" className="text-sm/6 text-destructive">
+            {error}
+          </p>
+        ) : null}
+
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy} size="lg">
+            Keep current setup
+          </AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={onConfirm}
+            size="lg"
+            variant={isIncrease ? "default" : "destructive"}
+          >
+            {busy ? <Spinner data-icon="inline-start" /> : null}
+            {busy
+              ? isIncrease ? "Updating limit" : "Canceling sponsorship"
+              : isIncrease ? `Increase to ${nextLimit}` : "Cancel sponsorship"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
