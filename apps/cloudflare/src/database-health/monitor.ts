@@ -511,19 +511,7 @@ export class DatabaseHealthMonitor {
         });
       }
     }
-    const observationConnectionErrorDeltas =
-      observation.snapshot.connectionErrorCounters === null
-        ? null
-        : calculateConnectionErrorDeltas(
-          observation.snapshot.connectionErrorCounters,
-          previousConnectionErrorCounterBaseline,
-        );
-    if (
-      !shouldConfirmMissingConnectionErrors(
-        observation,
-        observationConnectionErrorDeltas,
-      )
-    ) {
+    if (!shouldConfirmMissingConnectionErrors(observation)) {
       return buildDatabaseMetricCollection({
         attempts,
         observation,
@@ -536,69 +524,43 @@ export class DatabaseHealthMonitor {
     try {
       const confirmation = await this.collectMetricObservationOnce();
       parsedObservations.push(confirmation);
-      const confirmedObservation = composeConnectionErrorConfirmation(
-        observation,
-        confirmation,
-      );
-      const confirmedCounters =
-        confirmedObservation.snapshot.connectionErrorCounters;
+      const confirmationCounters =
+        confirmation.snapshot.connectionErrorCounters;
       if (
         evaluateDatabaseMetricSnapshot(
-          confirmedObservation.snapshot,
+          confirmation.snapshot,
           null,
         ).length > 0
       ) {
         return buildDatabaseMetricCollection({
           attempts,
-          observation: confirmedObservation,
+          observation: confirmation,
           parsedObservations,
         });
       }
-      if (
-        confirmedCounters !== null
-      ) {
-        if (confirmedObservation.missingMetrics.length === 0) {
-          return buildDatabaseMetricCollection({
-            attempts,
-            observation: confirmedObservation,
-            parsedObservations,
-          });
-        }
+      if (confirmationCounters === null) {
         return buildDatabaseMetricCollection({
           attempts,
-          observation: {
-            missingMetrics: observation.missingMetrics.filter(
-              (name) => name !== DATABASE_CONNECTION_ERROR_METRIC_NAME,
-            ),
-            snapshot: {
-              ...observation.snapshot,
-              connectionErrorCounters: confirmedCounters,
-            },
-          },
+          observation,
           parsedObservations,
         });
       }
-      const confirmedConnectionErrorDeltas = confirmedCounters === null
-        ? null
-        : calculateConnectionErrorDeltas(
-          confirmedCounters,
-          previousConnectionErrorCounterBaseline,
-        );
-      const hasUnsafeConfirmationSignal = evaluateDatabaseMetricSnapshot(
-        confirmedObservation.snapshot,
-        confirmedConnectionErrorDeltas,
-      ).length > 0;
+      if (confirmation.missingMetrics.length === 0) {
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation: confirmation,
+          parsedObservations,
+        });
+      }
       return buildDatabaseMetricCollection({
         attempts,
-        observation: hasUnsafeConfirmationSignal
-          ? confirmedObservation
-          : {
-            missingMetrics: observation.missingMetrics,
-            snapshot: {
-              ...observation.snapshot,
-              connectionErrorCounters: confirmedCounters,
-            },
+        observation: {
+          missingMetrics: [],
+          snapshot: {
+            ...observation.snapshot,
+            connectionErrorCounters: confirmationCounters,
           },
+        },
         parsedObservations,
       });
     } catch {
@@ -1584,45 +1546,14 @@ function hasUsableDatabaseHealthMetric(
 
 function shouldConfirmMissingConnectionErrors(
   observation: DatabaseMetricObservation,
-  connectionErrorDeltas: DatabaseConnectionErrorDeltas | null,
 ): boolean {
   return observation.missingMetrics.length === 1
     && observation.missingMetrics[0]
       === DATABASE_CONNECTION_ERROR_METRIC_NAME
     && evaluateDatabaseMetricSnapshot(
       observation.snapshot,
-      connectionErrorDeltas,
+      null,
     ).length === 0;
-}
-
-function composeConnectionErrorConfirmation(
-  observation: DatabaseMetricObservation,
-  confirmation: DatabaseMetricObservation,
-): DatabaseMetricObservation {
-  const originalCounters = observation.snapshot.connectionErrorCounters;
-  const confirmationCounters = confirmation.snapshot.connectionErrorCounters;
-  const connectionErrorCounters = confirmationCounters === null
-    ? originalCounters
-    : advanceConnectionErrorCounterBaseline(
-      confirmationCounters,
-      originalCounters,
-    );
-  const hasConnectionErrors = connectionErrorCounters !== null;
-  const missingMetricSet = new Set(confirmation.missingMetrics);
-  if (hasConnectionErrors) {
-    missingMetricSet.delete(DATABASE_CONNECTION_ERROR_METRIC_NAME);
-  } else {
-    missingMetricSet.add(DATABASE_CONNECTION_ERROR_METRIC_NAME);
-  }
-  return {
-    missingMetrics: DATABASE_HEALTH_REQUIRED_METRIC_NAMES.filter(
-      (name) => missingMetricSet.has(name),
-    ),
-    snapshot: {
-      ...confirmation.snapshot,
-      connectionErrorCounters,
-    },
-  };
 }
 
 async function readBoundedResponseText(

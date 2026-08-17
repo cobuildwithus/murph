@@ -50,6 +50,9 @@ Updated: 2026-08-17
 - Keep sparse-port detail transient during unrelated collection failures. Clear
   its durable missing-port count unless the whole family is missing, so rollback
   Workers retain the existing family/evidence correlation contract.
+- Handle the reachable confirmation outcomes directly. The parser now makes a
+  partial original connection-error family impossible, so no composition state
+  or duplicate confirmation evaluation remains.
 - Add no new state, queue, service, retry, or alert lifecycle.
 
 ## Tasks
