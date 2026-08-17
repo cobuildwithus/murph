@@ -1856,7 +1856,7 @@ describe('monorepo release flow coverage audit', () => {
       'A different-lane retry must use a fresh',
     )
     expect(prReviewGptLoop).toContain('zero accepted findings')
-    expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
+    expect(prReviewGptLoop).toContain('non-obvious surface is')
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
     expect(prReviewGptLoop).toContain('disclosure-only finding')
     expect(prReviewGptLoop).toContain('retry the same substantive round number')
@@ -1917,7 +1917,7 @@ describe('monorepo release flow coverage audit', () => {
       'Prompt-primary PRs still run the preliminary specialist prompt',
     )
     expect(agentsGuide).toContain(
-      'One preliminary `completion-specialists` ReviewGPT pass replaces',
+      'One preliminary `completion-specialists` ReviewGPT pass applies',
     )
     expect(agentWorkflowRouting).toContain(
       'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
@@ -1927,7 +1927,7 @@ describe('monorepo release flow coverage audit', () => {
       'sensitive, undeclared, or large current PRs get a fresh full-patch audit',
     )
     expect(agentWorkflowRouting).toContain('final-ReviewGPT-eligible PR-lane work')
-    expect(agentWorkflowRouting).toContain('scope-anomaly signal')
+    expect(agentWorkflowRouting).toContain('cross-cutting trigger')
     expect(prReviewGptLoop).toContain('final cross-cutting gate for eligible work')
     expect(prReviewGptLoop).toContain(
       'Never combine local `deep-review` with the final ReviewGPT gate',
@@ -2020,21 +2020,19 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).not.toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('ReviewGPT context sensitivity: sensitive')
     expect(completionWorkflow).toContain('manual line-count table')
-    expect(completionWorkflow).toContain('evidenced current member/event volume')
+    expect(completionWorkflow).toContain('evidenced current scale')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
     expect(completionWorkflow).not.toContain(
       'User experience (when applicable)',
     )
-    expect(completionWorkflow).toContain('expected timing and longest')
-    expect(completionWorkflow).toContain(
-      'without an unrelated new inbound action',
-    )
+    expect(completionWorkflow).toContain('affected people, material')
+    expect(completionWorkflow).toContain('difference from the approved plan')
     expect(completionWorkflow).toContain('direct journey proof')
     expect(completionWorkflow).toContain('Add a **Risks** section only when')
     expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
     expect(completionWorkflow).toContain('`reviewgpt-coverage.patch`')
     expect(completionWorkflow).toContain(
-      'the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to the corrected pushed head',
+      'the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to that corrected pushed head',
     )
     expect(completionWorkflow).toContain(
       'This is a bounded parent revalidation, not another subagent or ReviewGPT invocation.',
