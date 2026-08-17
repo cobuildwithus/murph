@@ -144,6 +144,48 @@ export default function Page() { return <PageShell />; }
   );
 });
 
+test("treats static and generated viewport changes as frontend changes", () => {
+  const page = "export default function Page() { return null; }";
+  const flexibleViewport = `
+export const viewport = {
+  initialScale: 1,
+  userScalable: true,
+  width: "device-width",
+};
+${page}
+`;
+  const fixedViewport = `
+export const viewport = {
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  width: 1280,
+};
+${page}
+`;
+  const generatedFlexibleViewport = `
+export function generateViewport() {
+  return { userScalable: true, width: "device-width" };
+}
+${page}
+`;
+  const generatedFixedViewport = `
+export function generateViewport() {
+  return { userScalable: false, width: 1280 };
+}
+${page}
+`;
+
+  assert.notEqual(
+    renderedRouteSignature(flexibleViewport),
+    renderedRouteSignature(fixedViewport),
+  );
+  assert.notEqual(
+    renderedRouteSignature(generatedFlexibleViewport),
+    renderedRouteSignature(generatedFixedViewport),
+  );
+});
+
 test("passes rendered design-page proof with both hosted viewports", () => {
   assert.deepEqual(
     validateFrontendDesignProof({

@@ -47,6 +47,7 @@ Updated: 2026-08-17
 - Keep workflow/private pages crawlable enough for their `noindex` metadata to be observed; do not use `robots.txt` as an indexing substitute.
 - Accept the preliminary coverage finding and strengthen test oracles only; the production ownership and route policy remain unchanged.
 - Treat metadata-only route-module edits as non-visual in the design-proof gate by comparing dependency-free rendered-route signatures; keep the catalog and screenshot requirement for any remaining UI change.
+- Accept the final-audit viewport finding: viewport exports affect responsive presentation and zoom accessibility, so only metadata and generateMetadata exports qualify for the non-visual exemption.
 
 ## Verification
 
@@ -55,4 +56,4 @@ Updated: 2026-08-17
 - Passed focused ESLint for every changed source and test file.
 - Passed the hosted-Web typecheck, including the repository-owned Health Commons and Prisma generation prerequisites.
 - Direct sitemap coverage proof is part of the focused test: one canonical host, no duplicate URLs, all published Health Commons routes present, and private/result/internal routes absent.
-- Passed all 12 frontend design-proof checker tests, including metadata-only helpers and a rendered-change control; the checker reports no UI change for the exact task diff.
+- Passed all 13 frontend design-proof checker tests, including metadata-only helpers plus rendered-body, import, static viewport, and generated viewport controls; the checker reports no UI change for the exact task diff.

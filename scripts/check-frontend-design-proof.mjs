@@ -9,7 +9,7 @@ const DESIGN_CATALOG_PATHS = new Set([
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
 const GITHUB_MARKDOWN_URL = "https://api.github.com/markdown";
 const IMPORT_PATTERN = /^[\t ]*import\b/gmu;
-const METADATA_EXPORT_PATTERN = /^[\t ]*export[\t ]+(?:async[\t ]+)?(?:function|const|let|var)[\t ]+(?:generateMetadata|generateViewport|metadata|viewport)\b/gmu;
+const METADATA_EXPORT_PATTERN = /^[\t ]*export[\t ]+(?:async[\t ]+)?(?:function|const|let|var)[\t ]+(?:generateMetadata|metadata)\b/gmu;
 const ROUTE_HELPER_PATTERN = /^[\t ]*(?:(?:const|let|var)[\t ]+([A-Za-z_$][\w$]*)|(?:async[\t ]+)?function[\t ]+([A-Za-z_$][\w$]*))\b/gmu;
 
 function isFrontendUiPath(filePath) {
