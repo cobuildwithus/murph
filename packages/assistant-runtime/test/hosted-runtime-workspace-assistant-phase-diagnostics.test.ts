@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
@@ -37,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
   prepareHostedProviderCleanupPlan: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
@@ -88,6 +91,8 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
     mocks.drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch:
     mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault:
+    mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault,
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
 }));
 
@@ -190,6 +195,7 @@ beforeEach(() => {
   mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
+  mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault.mockResolvedValue(0);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,
     recorded: 1,
@@ -554,6 +560,11 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
 function createPhaseInput(input: {
   logRequests: HostedRuntimeLogRequest[];
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
+  const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+  if (!testTempRoot) {
+    throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+  }
+
   return {
     initialMailboxImport: {
       afterCheckpointEffects: [],
@@ -616,9 +627,9 @@ function createPhaseInput(input: {
       workspaceVersion: "8",
     },
     restored: {
-      assistantStateRoot: "/tmp/murph-assistant-state",
-      operatorHomeRoot: "/tmp/murph-operator-home",
-      vaultRoot: "/tmp/murph-vault",
+      assistantStateRoot: path.join(testTempRoot, "assistant-state"),
+      operatorHomeRoot: path.join(testTempRoot, "operator-home"),
+      vaultRoot: path.join(testTempRoot, "vault"),
     },
     runtime: {
       commitTimeoutMs: null,
