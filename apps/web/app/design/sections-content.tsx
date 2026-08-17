@@ -29,9 +29,7 @@ import { ModelProviderSecuritySection } from "@/src/components/security/model-pr
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
 import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
-import {
-  HOSTED_PUBLIC_REFERRAL_REWARDS,
-} from "@/src/lib/hosted-growth/referral-program";
+import { HOSTED_PUBLIC_REFERRAL_REWARDS } from "@/src/lib/hosted-growth/referral-program";
 import { ValidationSlide } from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
@@ -80,6 +78,10 @@ import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
+import {
+  SCREENSHOT_CATEGORIES,
+  type ScreenshotCategory,
+} from "../screenshots/categories";
 
 function StudySection({
   children,
@@ -98,676 +100,772 @@ function StudySection({
   );
 }
 
-export function SectionsContent() {
+export function SectionsContent({
+  category,
+}: {
+  category: ScreenshotCategory;
+}) {
+  const categoryLabel = SCREENSHOT_CATEGORIES.find(
+    (candidate) => candidate.id === category,
+  )?.label;
+
   return (
     <div
       className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12"
-      data-design-section="catalog-navigation"
+      data-screenshot-category={category}
+      inert
     >
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
-        Sections
+        {categoryLabel}
       </h1>
 
       <Separator />
 
-      <StudySection title="Homepage solo-first hero">
-        <div
-          id="homepage-solo-first-hero"
-          data-design-section="homepage-solo-first-hero"
-          data-design-state="light-topic-labels-mobile-narrow-phone"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <HeroClocksIn
-            authenticated={false}
-            contactInfo={{
-              phone: "+15555550100",
-              telegram: "murph_test_bot",
-            }}
-            messengerChannel="imessage"
-            murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
-          />
-        </div>
-      </StudySection>
+      {category === "home" ? (
+        <>
+          <StudySection title="Homepage solo-first hero">
+            <div
+              id="homepage-solo-first-hero"
+              data-design-section="homepage-solo-first-hero"
+              data-design-state="light-topic-labels-mobile-narrow-phone"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <HeroClocksIn
+                authenticated={false}
+                contactInfo={{
+                  phone: "+15555550100",
+                  telegram: "murph_test_bot",
+                }}
+                messengerChannel="imessage"
+                murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
+              />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Knowledge topic depth">
-        <div
-          id="knowledge-topic-depth"
-          data-design-section="knowledge-topic-depth"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <DeepCarouselSection />
-        </div>
-      </StudySection>
+          <StudySection title="Knowledge topic depth">
+            <div
+              id="knowledge-topic-depth"
+              data-design-section="knowledge-topic-depth"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <DeepCarouselSection />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage background readiness and phone handoff">
-        <HomepageAuthWarmRuntimeStudy />
-      </StudySection>
+          <StudySection title="Homepage background readiness and phone handoff">
+            <HomepageAuthWarmRuntimeStudy />
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage technical runtime · inference choice">
-        <div
-          id="homepage-technical-runtime"
-          data-design-section="homepage-technical-runtime"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <TechnicalCapabilitiesSection customInferenceAvailable veniceAvailable />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage technical runtime · inference choice">
+            <div
+              id="homepage-technical-runtime"
+              data-design-section="homepage-technical-runtime"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <TechnicalCapabilitiesSection
+                customInferenceAvailable
+                veniceAvailable
+              />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage technical runtime · provider flags off">
-        <div
-          data-design-section="homepage-technical-runtime-minimal"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <TechnicalCapabilitiesSection
-            customInferenceAvailable={false}
-            veniceAvailable={false}
-          />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage technical runtime · provider flags off">
+            <div
+              data-design-section="homepage-technical-runtime-minimal"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <TechnicalCapabilitiesSection
+                customInferenceAvailable={false}
+                veniceAvailable={false}
+              />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage security and privacy">
-        <SecurityTeaserSection />
-      </StudySection>
+          <StudySection title="Homepage security and privacy">
+            <SecurityTeaserSection />
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage model provider FAQ">
-        <div
-          data-design-section="homepage-model-provider-faq"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <FaqSection veniceAvailable />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage model provider FAQ">
+            <div
+              data-design-section="homepage-model-provider-faq"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <FaqSection veniceAvailable />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Security model provider choice">
-        <div
-          data-design-section="security-model-provider-choice"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <ModelProviderSecuritySection />
-        </div>
-      </StudySection>
+          <StudySection title="Security model provider choice">
+            <div
+              data-design-section="security-model-provider-choice"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <ModelProviderSecuritySection />
+            </div>
+          </StudySection>
+        </>
+      ) : null}
 
-      <Separator />
+      {category === "settings" ? (
+        <>
+          <Separator />
 
-      <StudySection title="Settings model choice with provider usage disclosure">
-        <div
-          id="settings-model-provider-save-controls"
-          data-design-section="settings-compact-provider-control"
-          className="max-w-5xl"
-          inert
-        >
-          <HostedAssistantModelSettings
-            canUpgradeToEdge={false}
-            configurationAvailable
-            customInferenceAvailable
-            initialDormantSolPreference={false}
-            initialModel="gpt-5.6-terra"
-            initialProvider="venice"
-            solAvailable
-            veniceAvailable
-          />
-        </div>
-      </StudySection>
+          <StudySection title="Settings model choice with provider usage disclosure">
+            <div
+              id="settings-model-provider-save-controls"
+              data-design-section="settings-compact-provider-control"
+              className="max-w-5xl"
+              inert
+            >
+              <HostedAssistantModelSettings
+                canUpgradeToEdge={false}
+                configurationAvailable
+                customInferenceAvailable
+                initialDormantSolPreference={false}
+                initialModel="gpt-5.6-terra"
+                initialProvider="venice"
+                solAvailable
+                veniceAvailable
+              />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Settings inference routing, locked models, and endpoint">
-        <SettingsCustomInferenceStudy />
-      </StudySection>
+          <StudySection title="Settings inference routing, locked models, and endpoint">
+            <SettingsCustomInferenceStudy />
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Settings health data consent withdrawal and return">
-        <HealthDataConsentWithdrawalFlowStudy />
-      </StudySection>
+          <StudySection title="Settings health data consent withdrawal and return">
+            <HealthDataConsentWithdrawalFlowStudy />
+          </StudySection>
+        </>
+      ) : null}
 
-      <Separator />
+      {category === "messages" ? (
+        <>
+          <Separator />
 
-      <StudySection title="Secure approval pending and recorded states">
-        <div id="action-approval-lifecycle">
-          <ActionApprovalLifecycleStudy />
-        </div>
-      </StudySection>
+          <StudySection title="Secure approval pending and recorded states">
+            <div id="action-approval-lifecycle">
+              <ActionApprovalLifecycleStudy />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      {/* Card image routes must live in ungrouped app segments: metadata
-          images inside a route group emit hash-suffixed URLs in production,
-          which 404s the exact URL the pages advertise. Each entry renders
-          the production card component with its shipped alt text as the
-          caption, so card copy changes (like the referral card's
-          "Meet Murph." headline) surface here without a separate study. */}
-      <StudySection title="Share link previews">
-        <div data-design-section="share-link-previews">
-          <ShareLinkPreviewsStudy />
-        </div>
-      </StudySection>
+          <StudySection title="Static share link previews">
+            <ShareLinkPreviewsStudy />
+          </StudySection>
+        </>
+      ) : null}
 
-      <Separator />
+      {category === "settings" ? (
+        <>
+          <Separator />
 
-      <StudySection title="Settings retained export while newer data is processing">
-        <DataExportFlowStudy />
-      </StudySection>
+          <StudySection title="Settings retained export while newer data is processing">
+            <DataExportFlowStudy />
+          </StudySection>
+        </>
+      ) : null}
 
-      <Separator />
+      {category === "health" ? (
+        <>
+          <Separator />
 
-      <StudySection title="Environment full-width progressive voice capture">
-        <EnvironmentProgressStudy />
-      </StudySection>
+          <StudySection title="Environment full-width progressive voice capture">
+            <EnvironmentProgressStudy />
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Private Environment print report loading and ready states">
-        <EnvironmentPrintStudy />
-      </StudySection>
+          <StudySection title="Private Environment print report loading and ready states">
+            <EnvironmentPrintStudy />
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Private training dashboard">
-        <div
-          id="private-training-dashboard"
-          data-design-section="private-training-dashboard"
-          inert
-        >
-          <TrainingDashboardStudy />
-        </div>
-      </StudySection>
+          <StudySection title="Private training dashboard">
+            <div
+              id="private-training-dashboard"
+              data-design-section="private-training-dashboard"
+              inert
+            >
+              <TrainingDashboardStudy />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Patterns page">
-        <PersonalPatternsStudy />
-      </StudySection>
+          <StudySection title="Patterns page">
+            <PersonalPatternsStudy />
+          </StudySection>
+        </>
+      ) : null}
 
-      <Separator />
+      {category === "home" ? (
+        <>
+          <Separator />
 
-      <StudySection title="Homepage experiment flow">
-        <div
-          id="homepage-experiment-flow"
-          data-design-section="homepage-experiment-flow"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <HowItWorksSection />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage experiment flow">
+            <div
+              id="homepage-experiment-flow"
+              data-design-section="homepage-experiment-flow"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <HowItWorksSection />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage personas">
-        <div
-          id="homepage-personas"
-          data-design-section="homepage-personas"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage personas">
+            <div
+              id="homepage-personas"
+              data-design-section="homepage-personas"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage feature cards">
-        <div
-          id="homepage-feature-cards"
-          data-design-section="homepage-feature-cards"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <TogetherSection />
-          <AsksGridSection />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage feature cards">
+            <div
+              id="homepage-feature-cards"
+              data-design-section="homepage-feature-cards"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <TogetherSection />
+              <AsksGridSection />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage nutrition research">
-        <div
-          id="homepage-nutrition-research"
-          data-design-section="homepage-nutrition-research"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <NutritionSection />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage nutrition research">
+            <div
+              id="homepage-nutrition-research"
+              data-design-section="homepage-nutrition-research"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <NutritionSection />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage integrations">
-        <div
-          id="homepage-integrations"
-          data-design-section="homepage-integrations"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <IntegrationsSection authenticated={false} />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage integrations">
+            <div
+              id="homepage-integrations"
+              data-design-section="homepage-integrations"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <IntegrationsSection authenticated={false} />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage local installation">
-        <div
-          id="homepage-local-installation"
-          data-design-section="homepage-local-installation"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <LocalRunSection installCommandUrl="https://www.withmurph.ai/install.sh" />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage local installation">
+            <div
+              id="homepage-local-installation"
+              data-design-section="homepage-local-installation"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <LocalRunSection installCommandUrl="https://www.withmurph.ai/install.sh" />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage referral program · days-only rewards">
-        <div
-          id="referral-program"
-          data-design-section="homepage-referral-program"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <ReferralSection rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage referral program · days-only rewards">
+            <div
+              id="referral-program"
+              data-design-section="homepage-referral-program"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <ReferralSection rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage referral program · group rewards">
-        <div
-          data-design-section="homepage-referral-program-group-only"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <ReferralSection
-            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
-              ({ id }) => id !== "signup-link",
-            )}
-          />
-        </div>
-      </StudySection>
+          <StudySection title="Homepage referral program · group rewards">
+            <div
+              data-design-section="homepage-referral-program-group-only"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <ReferralSection
+                rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                  ({ id }) => id !== "signup-link",
+                )}
+              />
+            </div>
+          </StudySection>
 
-      <Separator />
+          <Separator />
 
-      <StudySection title="Homepage referral program · signup reward">
-        <div
-          data-design-section="homepage-referral-program-signup-only"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <ReferralSection
-            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
-              ({ id }) => id === "signup-link",
-            )}
-          />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Referral page · reward presentation states">
-        <div
-          id="referral-page-reward-states"
-          data-design-section="referral-page-reward-states"
-          className="-mx-5 space-y-10 bg-[#ede5d8] p-5 sm:-mx-8 sm:p-8 lg:-mx-12 lg:p-12"
-          inert
-        >
-          <div className="space-y-5" data-referral-reward-state="signup-only">
-            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
-              Signup link only
-            </h3>
-            <div className="grid gap-6 xl:grid-cols-2">
-              <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
-                <ReferralRewardReceiptPreview
-                  reward={HOSTED_PUBLIC_REFERRAL_REWARDS.find(
-                    ({ id }) => id === "signup-link",
-                  )!}
-                />
-              </div>
-              <ReferralRewardCards
+          <StudySection title="Homepage referral program · signup reward">
+            <div
+              data-design-section="homepage-referral-program-signup-only"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <ReferralSection
                 rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
                   ({ id }) => id === "signup-link",
                 )}
               />
             </div>
-          </div>
+          </StudySection>
 
-          <div className="space-y-5" data-referral-reward-state="group-only">
-            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
-              Group referral options only
-            </h3>
-            <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
-              <ReferralRewardReceiptPreview
-                reward={HOSTED_PUBLIC_REFERRAL_REWARDS.find(
-                  ({ id }) => id === "new-person-group",
-                )!}
+          <Separator />
+
+          <StudySection title="Referral page · reward presentation states">
+            <div
+              id="referral-page-reward-states"
+              data-design-section="referral-page-reward-states"
+              className="-mx-5 space-y-10 bg-[#ede5d8] p-5 sm:-mx-8 sm:p-8 lg:-mx-12 lg:p-12"
+              inert
+            >
+              <div
+                className="space-y-5"
+                data-referral-reward-state="signup-only"
+              >
+                <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+                  Signup link only
+                </h3>
+                <div className="grid gap-6 xl:grid-cols-2">
+                  <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
+                    <ReferralRewardReceiptPreview
+                      reward={
+                        HOSTED_PUBLIC_REFERRAL_REWARDS.find(
+                          ({ id }) => id === "signup-link",
+                        )!
+                      }
+                    />
+                  </div>
+                  <ReferralRewardCards
+                    rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                      ({ id }) => id === "signup-link",
+                    )}
+                  />
+                </div>
+              </div>
+
+              <div
+                className="space-y-5"
+                data-referral-reward-state="group-only"
+              >
+                <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+                  Group referral options only
+                </h3>
+                <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
+                  <ReferralRewardReceiptPreview
+                    reward={
+                      HOSTED_PUBLIC_REFERRAL_REWARDS.find(
+                        ({ id }) => id === "new-person-group",
+                      )!
+                    }
+                  />
+                </div>
+                <ReferralRewardCards
+                  includeShareLink
+                  rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                    ({ id }) => id !== "signup-link",
+                  )}
+                />
+              </div>
+
+              <div
+                className="space-y-5"
+                data-referral-reward-state="all-rewards"
+              >
+                <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+                  Signup link and group referral options
+                </h3>
+                <ReferralRewardCards rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
+              </div>
+            </div>
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Referral rewards page · group referrals and share link">
+            <div
+              id="referral-rewards-page"
+              data-design-section="referral-rewards-page"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <ReferralPageContent
+                authenticated={false}
+                identityKey={null}
+                rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                  ({ id }) => id !== "signup-link",
+                )}
               />
             </div>
-            <ReferralRewardCards
-              includeShareLink
-              rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
-                ({ id }) => id !== "signup-link",
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Referral rewards page · member share action">
+            <div
+              id="referral-rewards-page-member"
+              data-design-section="referral-rewards-page-member"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <ReferralPageContent
+                authenticated
+                identityKey="referral-design-member"
+                referralSignupUrl="https://example.com/r/referral-design-member"
+                rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                  ({ id }) => id !== "signup-link",
+                )}
+              />
+            </div>
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Referral rewards unavailable">
+            <div
+              data-design-section="referral-rewards-unavailable"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <ReferralPageContent
+                authenticated={false}
+                identityKey={null}
+                rewards={[]}
+              />
+            </div>
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Homepage footer with vitals, iOS app, and split link columns">
+            <div
+              data-design-section="homepage-footer"
+              className="-mx-5 sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <SiteFooter
+                id="design-site-footer-preview"
+                referralsAvailable
+                vitalsMode="synthetic"
+              />
+            </div>
+          </StudySection>
+        </>
+      ) : null}
+
+      {category === "messages" ? (
+        <>
+          <Separator />
+
+          <StudySection title="Clubs profiles, iMessage, and wearables">
+            <ClubsPageStudy />
+          </StudySection>
+        </>
+      ) : null}
+
+      {category === "ops" ? (
+        <>
+          <Separator />
+
+          <StudySection title="Changelog archive with explanatory visuals">
+            <div data-design-section="changelog-archive">
+              <ChangelogArchiveStudy />
+            </div>
+          </StudySection>
+        </>
+      ) : null}
+
+      {category === "account" ? (
+        <>
+          <Separator />
+
+          <StudySection title="Persona onboarding with stacked tone samples">
+            <div data-design-section="persona-onboarding">
+              <PersonaOnboardingStudy />
+              <Separator />
+              <PersonaSettingsStudy />
+            </div>
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Family plan invite acceptance">
+            <FamilyInviteJoinStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Family billing recovery and management on Join">
+            <JoinFamilyBillingRecoveryStudy />
+          </StudySection>
+        </>
+      ) : null}
+
+      {category === "health" ? (
+        <>
+          <Separator />
+
+          <StudySection title="Connect source availability, actions, and disconnect lifecycle">
+            <ConnectSourceCardStudy
+              androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
+            />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Connected app authorization handoff">
+            <ConnectedAppAuthorizationStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Clinical Records scheduled launcher">
+            <ClinicalRecordsConnectLauncherStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Zepp/Amazfit Apple Health setup">
+            <ZeppAppleHealthSetupStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Apple Health relay wearable sources">
+            <AppleHealthRelaySetupStudy />
+          </StudySection>
+        </>
+      ) : null}
+
+      {category === "account" ? (
+        <>
+          <Separator />
+
+          <StudySection title="Account deletion exit reason">
+            <AccountExitReasonStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
+            <SettingsAuthRequiredStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status, plus Family draft recovery">
+            <GroupMemberPlanStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Account deletion during migration maintenance">
+            <AccountDeletionMaintenanceStudy />
+          </StudySection>
+        </>
+      ) : null}
+
+      {category === "home" ? (
+        <>
+          <Separator />
+
+          <StudySection title="Home partial-load and vault-unavailable recovery">
+            <HomeLoadStateStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
+            <BrowserVaultLoadingTransitionsStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Home onboarding steps">
+            <HomeOnboardingStepsStudy />
+          </StudySection>
+        </>
+      ) : null}
+
+      {category === "groups" ? (
+        <>
+          <Separator />
+
+          <StudySection title="Group join invites, source-aware sharing, and setup recovery">
+            <GroupJoinStudy
+              comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
+                resolveHostedGroupAccessOfferProjectionScopes(undefined),
               )}
             />
-          </div>
+          </StudySection>
 
-          <div className="space-y-5" data-referral-reward-state="all-rewards">
-            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
-              Signup link and group referral options
-            </h3>
-            <ReferralRewardCards rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
-          </div>
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Referral rewards page · group referrals and share link">
-        <div
-          id="referral-rewards-page"
-          data-design-section="referral-rewards-page"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <ReferralPageContent
-            authenticated={false}
-            identityKey={null}
-            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
-              ({ id }) => id !== "signup-link",
-            )}
-          />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Referral rewards page · member share action">
-        <div
-          id="referral-rewards-page-member"
-          data-design-section="referral-rewards-page-member"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <ReferralPageContent
-            authenticated
-            identityKey="referral-design-member"
-            referralSignupUrl="https://example.com/r/referral-design-member"
-            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
-              ({ id }) => id !== "signup-link",
-            )}
-          />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Referral rewards unavailable">
-        <div
-          data-design-section="referral-rewards-unavailable"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <ReferralPageContent
-            authenticated={false}
-            identityKey={null}
-            rewards={[]}
-          />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Homepage footer with vitals, iOS app, and split link columns">
-        <div
-          data-design-section="homepage-footer"
-          className="-mx-5 sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <SiteFooter
-            id="design-site-footer-preview"
-            referralsAvailable
-            vitalsMode="synthetic"
-          />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Clubs profiles, iMessage, and wearables">
-        <ClubsPageStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Changelog archive with explanatory visuals">
-        <div data-design-section="changelog-archive">
-          <ChangelogArchiveStudy />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Persona onboarding with stacked tone samples">
-        <div data-design-section="persona-onboarding">
-          <PersonaOnboardingStudy />
           <Separator />
-          <PersonaSettingsStudy />
-        </div>
-      </StudySection>
 
-      <Separator />
+          <StudySection title="Unknown iMessage group setup and recovery">
+            <GroupStartStudy />
+          </StudySection>
 
-      <StudySection title="Family plan invite acceptance">
-        <FamilyInviteJoinStudy />
-      </StudySection>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
+            <GroupUsageFundingStudy />
+          </StudySection>
+        </>
+      ) : null}
 
-      <StudySection title="Family billing recovery and management on Join">
-        <JoinFamilyBillingRecoveryStudy />
-      </StudySection>
+      {category === "account" ? (
+        <>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
+            <SignupReferralFlowStudy />
+          </StudySection>
 
-      <StudySection title="Connect source signed-out actions, capabilities, availability, and disconnect lifecycle">
-        <ConnectSourceCardStudy
-          androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
-        />
-      </StudySection>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Connect source signed-out actions, capabilities, availability, and disconnect lifecycle">
+            <ConnectSourceCardStudy
+              androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
+            />
+          </StudySection>
 
-      <StudySection title="Connected app authorization handoff">
-        <ConnectedAppAuthorizationStudy />
-      </StudySection>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals">
+            <PersonalUsageCreditOwnerStudy />
+          </StudySection>
+        </>
+      ) : null}
 
-      <StudySection title="Clinical Records scheduled launcher">
-        <ClinicalRecordsConnectLauncherStudy />
-      </StudySection>
+      {category === "ops" ? (
+        <>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Ops usage dashboard pagination">
+            <OpsUsageStudy />
+          </StudySection>
+        </>
+      ) : null}
 
-      <StudySection title="Zepp/Amazfit Apple Health setup">
-        <ZeppAppleHealthSetupStudy />
-      </StudySection>
+      {category === "messages" ? (
+        <>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Private experiment results share">
+            <ExperimentResultsShareStudy />
+          </StudySection>
 
-      <StudySection title="Apple Health relay wearable sources">
-        <AppleHealthRelaySetupStudy />
-      </StudySection>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Private structured-review result">
+            <StructuredReviewResultsStudy />
+          </StudySection>
+        </>
+      ) : null}
 
-      <StudySection title="Account deletion exit reason">
-        <AccountExitReasonStudy />
-      </StudySection>
+      {category === "ops" ? (
+        <>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Pitch deck progress slide">
+            <div
+              id="pitch-progress-slide"
+              data-design-section="pitch-progress-slide"
+              className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
+              inert
+            >
+              <ValidationSlide />
+            </div>
+          </StudySection>
 
-      <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
-        {/* Includes the signed-out account-deletion handoff rendered by this study. */}
-        <SettingsAuthRequiredStudy />
-      </StudySection>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
+            <div inert>
+              <GrowthScorecardStudy />
+            </div>
+          </StudySection>
+        </>
+      ) : null}
 
-      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status, plus Family draft recovery">
-        <GroupMemberPlanStudy />
-      </StudySection>
+      {category === "health" ? (
+        <>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Biomarker preparing state">
+            <BiomarkerPreparingStateStudy />
+          </StudySection>
 
-      <StudySection title="Account deletion billing, maintenance, provider-access, and connected-app recovery">
-        <AccountDeletionMaintenanceStudy />
-      </StudySection>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Biomarker index">
+            <BiomarkerIndexStudy />
+          </StudySection>
 
-      <StudySection title="Home partial-load and vault-unavailable recovery">
-        <HomeLoadStateStudy />
-      </StudySection>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Biomarker result detail">
+            <div id="biomarker-result-range-bands">
+              <BiomarkerDetailStudy />
+            </div>
+          </StudySection>
 
-      <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
-        <BrowserVaultLoadingTransitionsStudy />
-      </StudySection>
+          <Separator />
 
-      <Separator />
+          <StudySection title="Biomarker reference context">
+            <BiomarkerReferenceContextStudy />
+          </StudySection>
 
-      <StudySection title="Home onboarding steps">
-        <HomeOnboardingStepsStudy />
-      </StudySection>
+          <Separator />
 
-      <Separator />
-
-      <StudySection title="Group join invites, source-aware sharing, and setup recovery">
-        <GroupJoinStudy
-          comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
-            resolveHostedGroupAccessOfferProjectionScopes(undefined),
-          )}
-        />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Unknown iMessage group setup and recovery">
-        <GroupStartStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
-        <GroupUsageFundingStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
-        <SignupReferralFlowStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals">
-        <PersonalUsageCreditOwnerStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Ops usage dashboard pagination">
-        <OpsUsageStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Private experiment results share">
-        <ExperimentResultsShareStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Private structured-review result">
-        <StructuredReviewResultsStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Pitch deck progress slide">
-        <div
-          id="pitch-progress-slide"
-          data-design-section="pitch-progress-slide"
-          className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
-          inert
-        >
-          <ValidationSlide />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
-        <div inert>
-          <GrowthScorecardStudy />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Biomarker preparing state">
-        <BiomarkerPreparingStateStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Biomarker index">
-        <BiomarkerIndexStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Biomarker result detail">
-        <div id="biomarker-result-range-bands">
-          <BiomarkerDetailStudy />
-        </div>
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Biomarker reference context">
-        <BiomarkerReferenceContextStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Biomarker boundary result · published comparator provenance">
-        <div id="biomarker-boundary-result">
-          <BiomarkerBoundaryResultStudy />
-        </div>
-      </StudySection>
+          <StudySection title="Biomarker boundary result · published comparator provenance">
+            <div id="biomarker-boundary-result">
+              <BiomarkerBoundaryResultStudy />
+            </div>
+          </StudySection>
+        </>
+      ) : null}
     </div>
   );
 }

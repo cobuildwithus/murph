@@ -1665,7 +1665,7 @@ export const trustedReviewControlPaths = [
   ".pnpmfile.cjs",
   "agent-docs/prompts/coverage-write.md",
   "agent-docs/prompts/frontend-review.md",
-  "agent-docs/prompts/product-experience-review.md",
+  "agent-docs/operations/product-ux.md",
   "agent-docs/prompts/prompt-review.md",
   "package.json",
   "pnpm-lock.yaml",
