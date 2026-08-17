@@ -93,7 +93,11 @@ export function withImmediateTransaction<T>(database: DatabaseSync, operation: (
     database.exec("COMMIT");
     return result;
   } catch (error) {
-    database.exec("ROLLBACK");
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+      // Preserve the operation or commit error that determines recovery.
+    }
     throw error;
   }
 }

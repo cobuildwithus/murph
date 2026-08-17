@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   access,
   chmod,
@@ -888,6 +889,129 @@ describe('assistant store persistence seams', () => {
     })
   })
 
+  it('quarantines operation-time corruption once and rebuilds on the next lookup', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-route-operation-corruption-',
+    )
+    await ensureAssistantState(paths)
+    await readAssistantSessionRouting(paths, {
+      alias: null,
+      conversationKeys: [],
+    })
+
+    const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+    const database = openSqliteRuntimeDatabase(databasePath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    const insertRoute = database.prepare(`
+      INSERT INTO assistant_session_routes (kind, key_digest, session_id)
+      VALUES (?, ?, ?)
+    `)
+    const aliasesByDigest = new Map<string, string>()
+    database.exec('BEGIN IMMEDIATE TRANSACTION;')
+    for (let index = 0; index < 512; index += 1) {
+      const alias = `operation-corruption-${String(index).padStart(4, '0')}`
+      const keyDigest = createHash('sha256')
+        .update('alias')
+        .update('\0')
+        .update(alias)
+        .digest('hex')
+      aliasesByDigest.set(keyDigest, alias)
+      insertRoute.run('alias', keyDigest, `bulk-session-${index}`)
+    }
+    database.exec('COMMIT;')
+    const target = database.prepare(`
+      SELECT key_digest AS keyDigest, session_id AS sessionId
+      FROM assistant_session_routes
+      WHERE kind = 'alias'
+      ORDER BY key_digest DESC
+      LIMIT 1
+    `).get() as { keyDigest: string; sessionId: string }
+    database.close()
+
+    const targetAlias = aliasesByDigest.get(target.keyDigest)
+    if (!targetAlias) {
+      throw new Error('Expected the damaged routing leaf to contain a known alias.')
+    }
+    await writeAssistantSession(paths, createSession({
+      alias: targetAlias,
+      sessionId: target.sessionId,
+    }))
+
+    await corruptRightmostAssistantRouteIndexLeaf(databasePath)
+
+    const probe = openSqliteRuntimeDatabase(databasePath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    expect(probe.prepare('PRAGMA user_version;').get()).toEqual({
+      user_version: 1,
+    })
+    expect(probe.prepare(`
+      SELECT kind, key_digest, session_id
+      FROM assistant_session_routes
+      LIMIT 0
+    `).all()).toEqual([])
+    expect(probe.prepare(`
+      SELECT session_id, last_active_at_ms
+      FROM assistant_recent_sessions
+      LIMIT 0
+    `).all()).toEqual([])
+    probe.close()
+
+    await expect(readAssistantSessionRouting(paths, {
+      alias: targetAlias,
+      conversationKeys: [],
+    })).rejects.toMatchObject({
+      code: 'ERR_SQLITE_ERROR',
+      errcode: 11,
+    })
+    await expect(access(databasePath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect((await listAssistantQuarantineEntriesAtPaths(paths)).filter((entry) =>
+      entry.artifactKind === 'indexes' && entry.originalPath === databasePath,
+    )).toHaveLength(1)
+
+    await expect(readAssistantSessionRouting(paths, {
+      alias: targetAlias,
+      conversationKeys: [],
+    })).resolves.toMatchObject({
+      aliasSessionId: target.sessionId,
+    })
+
+    const writeSession = createSession({
+      alias: 'operation-corruption-write',
+      sessionId: 'session-operation-corruption-write',
+    })
+    await writeAssistantSession(paths, writeSession)
+    await corruptRightmostAssistantRouteIndexLeaf(databasePath)
+
+    await expect(
+      synchronizeAssistantIndexes(paths, writeSession, null),
+    ).rejects.toMatchObject({
+      code: 'ERR_SQLITE_ERROR',
+      errcode: 11,
+    })
+    await expect(access(databasePath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect((await listAssistantQuarantineEntriesAtPaths(paths)).filter((entry) =>
+      entry.artifactKind === 'indexes' && entry.originalPath === databasePath,
+    )).toHaveLength(2)
+
+    await expect(
+      synchronizeAssistantIndexes(paths, writeSession, null),
+    ).resolves.toBeUndefined()
+    await expect(readAssistantSessionRouting(paths, {
+      alias: writeSession.alias,
+      conversationKeys: [],
+    })).resolves.toMatchObject({
+      aliasSessionId: writeSession.sessionId,
+    })
+  })
+
   it('quarantines and rebuilds unsupported or structurally invalid routing databases', async () => {
     const paths = await createAssistantPaths(
       'assistant-store-persistence-route-unsupported-version-',
@@ -928,10 +1052,57 @@ describe('assistant store persistence seams', () => {
       aliasSessionId: session.sessionId,
     })
 
+    const invalidRoute = openSqliteRuntimeDatabase(databasePath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    invalidRoute.prepare(`
+      UPDATE assistant_session_routes
+      SET session_id = '../invalid'
+      WHERE kind = 'alias'
+    `).run()
+    invalidRoute.close()
+    await expect(readAssistantSessionRouting(paths, {
+      alias: 'version-repair',
+      conversationKeys: [],
+    })).rejects.toThrow(
+      'Assistant session routing database contains an invalid route session id.',
+    )
+    await expect(access(databasePath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(readAssistantSessionRouting(paths, {
+      alias: 'version-repair',
+      conversationKeys: [],
+    })).resolves.toMatchObject({
+      aliasSessionId: session.sessionId,
+    })
+
+    const invalidRecent = openSqliteRuntimeDatabase(databasePath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    invalidRecent.prepare(`
+      UPDATE assistant_recent_sessions
+      SET session_id = '../invalid'
+    `).run()
+    invalidRecent.close()
+    await expect(readAssistantRecentSessionIds(paths, {
+      limit: 1,
+    })).rejects.toThrow(
+      'Assistant session routing database contains an invalid recent session row.',
+    )
+    await expect(access(databasePath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(readAssistantRecentSessionIds(paths, {
+      limit: 1,
+    })).resolves.toEqual([session.sessionId])
+
     const quarantines = await listAssistantQuarantineEntriesAtPaths(paths)
     expect(quarantines.filter((entry) =>
       entry.artifactKind === 'indexes' && entry.originalPath === databasePath,
-    )).toHaveLength(2)
+    )).toHaveLength(4)
   })
 
   it('rebuilds missing session indexes and prefers the newest duplicate conversation binding', async () => {
@@ -1628,6 +1799,31 @@ async function createAssistantPaths(prefix: string) {
 
 async function assertDirectoryExists(directoryPath: string): Promise<void> {
   await access(directoryPath)
+}
+
+async function corruptRightmostAssistantRouteIndexLeaf(
+  databasePath: string,
+): Promise<void> {
+  const database = openSqliteRuntimeDatabase(databasePath, {
+    journalMode: 'DELETE',
+    synchronous: 'FULL',
+  })
+  const damagedLeaf = database.prepare(`
+    SELECT pageno AS pageNumber
+    FROM dbstat
+    WHERE name = 'sqlite_autoindex_assistant_session_routes_1'
+      AND pagetype = 'leaf'
+    ORDER BY path DESC
+    LIMIT 1
+  `).get() as { pageNumber: number }
+  const pageSize = (database.prepare('PRAGMA page_size;').get() as {
+    page_size: number
+  }).page_size
+  database.close()
+
+  const bytes = await readFile(databasePath)
+  bytes[(damagedLeaf.pageNumber - 1) * pageSize] = 0
+  await writeFile(databasePath, bytes)
 }
 
 function createTranscriptEntry(

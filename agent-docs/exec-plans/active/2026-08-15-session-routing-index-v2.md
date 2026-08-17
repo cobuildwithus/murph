@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-15
-Updated: 2026-08-15
+Updated: 2026-08-17
 
 ## Goal
 
@@ -19,8 +19,8 @@ Updated: 2026-08-15
   route winners or bounded recent-session behavior; missing or malformed state
   recovers from durable session files.
 - Stale routes fail closed against the durable session, while a corrupt or
-  unsupported projection is quarantined and rebuilt; removed bindings no longer
-  resolve.
+  unsupported projection is quarantined and rebuilt without replaying a failed
+  operation; removed bindings no longer resolve.
 - Assistant-engine and runtime-state focused verification, workspace typecheck,
   exact-head CI, preliminary coverage review, and the final ReviewGPT loop pass.
 - The PR contains no unresolved accepted finding and remains cleanly mergeable
@@ -123,10 +123,31 @@ Updated: 2026-08-15
   route winner. Remove callback retry/recovery, propagate ordinary failures,
   and quarantine only positively identified corrupt, structurally invalid, or
   unsupported projections.
-- Round-5 retrospective: not required. The accepted correction deletes the
-  destructive retry branch and narrows one existing open boundary; it adds no
-  durable state or owner and stays within the completed single-projection
-  retrospective.
+- Round-5 retrospective: the round-4 correction fixed transient callback
+  failures by removing callback recovery entirely, but that left positively
+  identified corruption recoverable only when opening or validating SQLite.
+  Corruption first reported by an exact read, bounded recent-list read, or
+  transactional write therefore preserved the known-bad projection forever.
+  The root cause is two contradictory recovery boundaries rather than a missing
+  isolated catch. Continue with one classification contract across open,
+  configuration, schema validation, reads, lists, and writes: unsupported or
+  structurally invalid projection state and SQLite primary corruption codes 11
+  and 26 are quarantined; locking, permission, read-only, capacity, and ordinary
+  I/O failures preserve the projection and surface unchanged.
+- Operation-time corruption quarantines the closed database and fails that
+  request once. The next ordinary attempt performs the existing atomic rebuild;
+  the wrapper never replays a callback, especially a transactional write whose
+  commit outcome may be ambiguous. This uses the existing quarantine and rebuild
+  owners and adds no retry state or second recovery mechanism.
+- Genuine loss of the only effective-winner projection cannot promise the same
+  winner when multiple durable sessions claim one route. Recovery stays bounded
+  and truthful: durable sessions remain canonical, reconstruction uses the
+  existing deterministic timestamp order, and the next caller validates the
+  selected route against that session. Exact winner continuity is guaranteed
+  for valid projections, migrations, and above-floor restores, but not after
+  positively proven irrecoverable projection corruption. Preserving that winner
+  through true projection loss would require a second durable authority or
+  reconciliation system, which this design deliberately rejects.
 
 ## Verification
 
@@ -168,3 +189,19 @@ Updated: 2026-08-15
 - Round-4 recovery correction verification: assistant persistence 29/29,
   runtime-state SQLite helpers 6/6, and assistant-engine and runtime-state
   typechecks all pass.
+- ReviewGPT substantive round 5: the round-4 transient-failure mechanism is
+  resolved; one repeated-mechanism finding requires unified operation-time
+  corruption recovery and the retrospective above before implementation.
+- Round-5 correction verification: one real route-index leaf was damaged after
+  schema creation so version and both shape probes still passed while the exact
+  production lookup and transactional write returned SQLite primary corruption
+  code 11. Each request failed once, the projection was quarantined once, and
+  the next ordinary operation rebuilt from durable sessions without callback
+  replay. Invalid persisted route and recent rows follow the same deferred-
+  rebuild policy, while the existing transient-open and non-corruption-write
+  tests continue to preserve the active file. The shared transaction helper
+  also preserves the original operation error if rollback itself fails, so the
+  recovery classifier retains its evidence.
+- Corrected-head local verification: assistant persistence 30/30; exact final
+  recovery cases 2/2; runtime-state SQLite helpers 6/6; assistant-engine and
+  runtime-state package typechecks; and `git diff --check` all pass.

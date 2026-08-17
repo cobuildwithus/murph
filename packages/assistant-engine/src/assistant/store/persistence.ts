@@ -813,7 +813,7 @@ export async function readAssistantSessionRouting(
       if (!row) {
         return null
       }
-      return assistantSessionIdSchema.parse(row.sessionId)
+      return parseAssistantSessionRoutingSessionId(row.sessionId)
     }
 
     const aliasSessionId = input.alias
@@ -867,9 +867,7 @@ export async function readAssistantRecentSessionIds(
       ORDER BY last_active_at_ms DESC, session_id ASC
       LIMIT ?
     `).all(limit)
-    return rows.map((row) =>
-      assistantRecentSessionRowSchema.parse(row).sessionId,
-    )
+    return rows.map(parseAssistantRecentSessionRow).map((row) => row.sessionId)
   })
 }
 
@@ -940,7 +938,13 @@ async function withAssistantSessionRoutingDatabase<T>(
     try {
       database.close()
     } catch {
-      // Preserve the operation or close error without invoking recovery.
+      // Preserve the operation or close error for the shared recovery policy.
+    }
+    if (isAssistantSessionRoutingProjectionRecoveryError(error)) {
+      // The callback may have reached a write with an ambiguous commit outcome,
+      // so never replay it. Quarantine the closed projection and let the next
+      // ordinary attempt rebuild before running its own operation.
+      await quarantineAssistantSessionRoutingDatabase(paths, error)
     }
     throw error
   }
@@ -963,7 +967,7 @@ async function openOrRebuildAssistantSessionRoutingDatabase(
   try {
     return openAssistantSessionRoutingDatabase(paths)
   } catch (error) {
-    if (!isAssistantSessionRoutingDatabaseCorruptionError(error)) {
+    if (!isAssistantSessionRoutingProjectionRecoveryError(error)) {
       throw error
     }
     await quarantineAssistantSessionRoutingDatabase(paths, error)
@@ -1065,7 +1069,9 @@ function isAssistantSessionRoutingDatabaseShapeError(
   )
 }
 
-function isAssistantSessionRoutingDatabaseCorruptionError(
+// This is the single destructive classification for both opening and using the
+// projection. All unlisted SQLite failures preserve the active database.
+function isAssistantSessionRoutingProjectionRecoveryError(
   error: unknown,
 ): boolean {
   if (error instanceof AssistantSessionRoutingDatabaseValidationError) {
@@ -1086,6 +1092,30 @@ function isAssistantSessionRoutingDatabaseCorruptionError(
   }
   const primaryCode = candidate.errcode & 0xff
   return primaryCode === 11 || primaryCode === 26
+}
+
+function parseAssistantSessionRoutingSessionId(value: unknown): string {
+  try {
+    return assistantSessionIdSchema.parse(value)
+  } catch (error) {
+    throw new AssistantSessionRoutingDatabaseValidationError(
+      'Assistant session routing database contains an invalid route session id.',
+      { cause: error },
+    )
+  }
+}
+
+function parseAssistantRecentSessionRow(
+  value: unknown,
+): z.infer<typeof assistantRecentSessionRowSchema> {
+  try {
+    return assistantRecentSessionRowSchema.parse(value)
+  } catch (error) {
+    throw new AssistantSessionRoutingDatabaseValidationError(
+      'Assistant session routing database contains an invalid recent session row.',
+      { cause: error },
+    )
+  }
 }
 
 function initializeAssistantSessionRoutingDatabase(
