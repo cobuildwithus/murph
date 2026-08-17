@@ -1273,11 +1273,21 @@ Last verified: 2026-08-15
   post-commit Temporal signal fails, the existing scheduled mailbox-handoff
   sweep selects one exact unconsumed `device-sync.wake` pointer per user and
   retries from mailbox truth without scanning dirty rows. A pending webhook
-  without that exact provider proof releases its trace claim and returns a retryable
-  not-ready response. Manual reconcile, due scheduling, ordinary queued jobs,
-  and sync-success promotion apply the same account phase gate. After a shared
-  account is `source_confirmed`, a new target source does
-  not move the account back into a pending phase. Its `DeviceConnectionSource`
+  without that exact provider proof releases its trace claim and returns a
+  retryable not-ready response while the current persisted setup remains live.
+  Each delivery uses the trace claim's single processing-attempt instant to
+  recheck that lifecycle. Once the same persisted setup is expired, a later
+  delivery completes only the existing trace before provider I/O and
+  acknowledges the event without dirty state, source admission, last-webhook
+  freshness, signal, mailbox, wake, job, canonical-health, or setup-state
+  mutation. After pending-setup classification, both hosted lock owners use the
+  frozen receipt only for established-event ordering: a current `connectedAt`
+  later than that receipt completes the trace before provider I/O or
+  source/dirty admission, preventing prior-connection work from inheriting
+  replacement authority. Manual reconcile, due scheduling, ordinary queued
+  jobs, and sync-success promotion apply the same account phase gate. After a
+  shared account is `source_confirmed`, a new target source does not move the
+  account back into a pending phase. Its `DeviceConnectionSource`
   remains `disconnected`, and source-attributed webhooks, dirty-state commit
   races, and provider pulls fail or exit without admitting target data until
   callback completion or the same provider-verified hosted webhook admission

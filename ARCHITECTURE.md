@@ -2534,14 +2534,26 @@ epoch, and disconnect fences. It then commits `source_confirmed`, source
 admission, the callback-equivalent source-scoped initial jobs, a mandatory
 mailbox handoff, dirty state, and trace completion in one locked transaction.
 The initial handoff is committed even when the connection is already dirty. A
-failed or ambiguous provider read leaves setup pending and retryable. After an
-account reaches
+failed or ambiguous provider read leaves setup pending and retryable. That
+retry lifetime is bounded by the current persisted setup lifecycle at each
+delivery attempt. The authenticated prepared receipt remains frozen for
+provider event semantics, freshness, dirty state, signals, and receipt
+timestamps; it is neither setup-epoch identity nor retry-lifetime authority.
+The trace claim's one processing-attempt instant is used at shared ingress and
+both hosted database-lock rechecks. An expired pending setup completes only the
+existing trace before provider I/O and terminates transport handling without
+source admission, freshness, dirty, signal, mailbox, wake, job,
+canonical-health, or setup-state effects. After pending-setup classification,
+both hosted lock owners use the frozen receipt only as established-event
+ordering evidence: when the current `connectedAt` is later, they complete the
+trace before provider I/O or source/dirty admission so prior-connection work
+cannot inherit replacement authority. After an account reaches
 `source_confirmed`, adding or retrying another Junction-backed source preserves
 that account and its established siblings. The target `DeviceConnectionSource`
 stays `disconnected` and its webhook and pull work remain inert until callback
 completion or the same provider-verified hosted admission reaches the runtime
-owner. Shared ingress
-chooses one closed account write policy for every persistence request:
+owner. Shared ingress chooses one closed account write policy for every
+persistence request:
 `replace` for an account reconnect or `preserve_established` for a
 source-scoped addition. Hosted Prisma and local SQLite apply the same shared
 established-account predicate inside their persistence transactions; neither
