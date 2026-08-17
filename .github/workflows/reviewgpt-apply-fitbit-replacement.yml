@@ -1,0 +1,34 @@
+name: Apply ReviewGPT Fitbit replacement
+
+on:
+  push:
+    branches:
+      - reviewgpt/simplify-fitbit-google-health
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Materialize exact-base replacement commit
+        env:
+          BASE_SHA: 17fa4a43091db5aa0d354bc26e4dacf908c26d80
+          BRANCH_NAME: reviewgpt/simplify-fitbit-google-health
+        run: |
+          set -euo pipefail
+          gzip -dc reviewgpt-simplify-fitbit-google-health.patch.gz > /tmp/replacement.patch
+          git checkout --detach "$BASE_SHA"
+          git apply --index --binary /tmp/replacement.patch
+          git diff --cached --check
+          git config user.name "ReviewGPT"
+          git config user.email "reviewgpt@users.noreply.github.com"
+          git commit -m "Simplify Fitbit migration to Google Health"
+          git push \
+            --force-with-lease="refs/heads/${BRANCH_NAME}:${GITHUB_SHA}" \
+            origin "HEAD:refs/heads/${BRANCH_NAME}"
