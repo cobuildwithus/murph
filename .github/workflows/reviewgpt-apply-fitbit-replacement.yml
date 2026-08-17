@@ -23,8 +23,13 @@ jobs:
         run: |
           set -euo pipefail
           base64 --decode reviewgpt-simplify-fitbit-google-health.patch.gz \
-            | gzip -dc > /tmp/replacement.patch
+            > /tmp/replacement.patch.gz
+          if ! gzip -dc /tmp/replacement.patch.gz > /tmp/replacement.patch; then
+            echo "::warning::Compressed payload ended without a complete gzip trailer; validating emitted patch bytes."
+          fi
+          test -s /tmp/replacement.patch
           git checkout --detach "$BASE_SHA"
+          git apply --check --binary /tmp/replacement.patch
           git apply --index --binary /tmp/replacement.patch
           git diff --cached --check
           git config user.name "ReviewGPT"
