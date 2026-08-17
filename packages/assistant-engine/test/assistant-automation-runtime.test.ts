@@ -202,6 +202,8 @@ vi.mock('../src/assistant/fault-injection.ts', () => ({
 vi.mock('../src/assistant/outbox.ts', () => ({
   drainAssistantOutboxLocal: runLoopMocks.drainAssistantOutbox,
   listAssistantOutboxIntents: replyMocks.listAssistantOutboxIntents,
+  listAssistantOutboxIntentsForAutoReplyRoute:
+    replyMocks.listAssistantOutboxIntents,
 }))
 
 vi.mock('../src/assistant/outbox/summary.ts', () => ({

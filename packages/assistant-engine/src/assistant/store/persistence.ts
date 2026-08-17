@@ -1,16 +1,20 @@
+import { createHash, randomUUID } from 'node:crypto'
 import {
   access,
   open,
   readdir,
   readFile,
+  rename,
+  rm,
   type FileHandle,
 } from 'node:fs/promises'
 import path from 'node:path'
-import type * as z from '@murphai/contracts/zod-runtime'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantAliasStoreSchema,
   assistantAutomationStateSchema,
   assistantPersistedSessionSchema,
+  assistantSessionIdSchema,
   assistantTranscriptEntrySchema,
   type AssistantAliasStore,
   type AssistantAutomationState,
@@ -19,6 +23,13 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  adoptAssistantStateFile,
+  openSqliteRuntimeDatabase,
+  readSqliteRuntimeUserVersion,
+  withImmediateTransaction,
+  writeSqliteRuntimeUserVersion,
+} from '@murphai/runtime-state/node'
 import {
   assistantWithinConversationDriftFields,
   getAssistantBindingIsolationConflicts,
@@ -55,7 +66,6 @@ import { resolveAssistantOpaqueStateFilePath } from '../state-ids.js'
 import type { AssistantStatePaths } from './paths.js'
 import type { ResolvedAssistantSession } from './types.js'
 
-export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
 /**
@@ -69,6 +79,23 @@ export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
  */
 export const ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
+const ASSISTANT_SESSION_ROUTING_DATABASE_VERSION = 1
+const ASSISTANT_SESSION_ROUTING_DATABASE_NAME = 'session-routing.sqlite'
+type AssistantSessionRoutingKind = 'alias' | 'conversation-key'
+type AssistantSessionRoutingDatabase = import('node:sqlite').DatabaseSync
+
+class AssistantSessionRoutingDatabaseValidationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'AssistantSessionRoutingDatabaseValidationError'
+  }
+}
+
+const assistantRecentSessionRowSchema = z
+  .object({
+    sessionId: assistantSessionIdSchema,
+  })
+  .strict()
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
   name: 'assistant.automation-state',
@@ -265,6 +292,26 @@ export function resolveAssistantSessionPath(
     kind: 'session',
     value: sessionId,
   })
+}
+
+export function resolveAssistantSessionRoutingDatabasePath(
+  paths: AssistantStatePaths,
+): string {
+  return path.join(
+    paths.stateDirectory,
+    ASSISTANT_SESSION_ROUTING_DATABASE_NAME,
+  )
+}
+
+function resolveAssistantSessionRoutingKeyDigest(
+  kind: AssistantSessionRoutingKind,
+  key: string,
+): string {
+  return createHash('sha256')
+    .update(kind)
+    .update('\0')
+    .update(key)
+    .digest('hex')
 }
 
 export async function inspectAssistantSessionStorage(input: {
@@ -640,7 +687,9 @@ export async function loadAndPersistResolvedSession(input: {
     bindingPatch: AssistantBindingPatch
     lookupSource: 'alias' | 'conversation-key' | 'session-id'
   }
+  expectedAlias?: string
   expectedContinuityFingerprint?: string | null
+  expectedConversationKey?: string
   skipIfExpired?: boolean
   maxSessionAgeMs?: number | null
   now?: Date
@@ -650,6 +699,14 @@ export async function loadAndPersistResolvedSession(input: {
     sessionId: input.sessionId,
   })
   if (!existing) {
+    return null
+  }
+  if (
+    (input.expectedAlias !== undefined &&
+      existing.alias !== input.expectedAlias) ||
+    (input.expectedConversationKey !== undefined &&
+      existing.binding.conversationKey !== input.expectedConversationKey)
+  ) {
     return null
   }
   if (
@@ -729,51 +786,52 @@ export function isAssistantSessionExpired(
   return nowTime - referenceTime >= normalizedMaxAgeMs
 }
 
-export async function readAssistantIndexStore(
+export async function readAssistantSessionRouting(
   paths: AssistantStatePaths,
-): Promise<AssistantAliasStore> {
-  let raw: string
-  try {
-    raw = await readFile(paths.indexesPath, 'utf8')
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      throw error
-    }
-    if (await hasDurableAssistantSessions(paths)) {
-      return rebuildAssistantIndexStore(paths)
-    }
-    const initial = createInitialAssistantIndexStore()
-    await writeJsonFileAtomic(paths.indexesPath, initial)
-    return initial
-  }
-
-  try {
-    const parsed = assistantAliasStoreSchema.parse(JSON.parse(raw))
-    if (parsed.recentSessions === undefined) {
-      if (await hasDurableAssistantSessions(paths)) {
-        return rebuildAssistantIndexStore(paths)
+  input: {
+    alias: string | null
+    conversationKeys: readonly string[]
+  },
+): Promise<{
+  aliasSessionId: string | null
+  conversationKeySessionIds: ReadonlyMap<string, string>
+}> {
+  return await withAssistantSessionRoutingDatabase(paths, (database) => {
+    const readRoute = database.prepare(`
+      SELECT session_id AS sessionId
+      FROM assistant_session_routes
+      WHERE kind = ? AND key_digest = ?
+    `)
+    const readSessionId = (
+      kind: AssistantSessionRoutingKind,
+      key: string,
+    ): string | null => {
+      const row = readRoute.get(
+        kind,
+        resolveAssistantSessionRoutingKeyDigest(kind, key),
+      ) as { sessionId?: unknown } | undefined
+      if (!row) {
+        return null
       }
-      const upgraded = assistantAliasStoreSchema.parse({
-        ...parsed,
-        recentSessions: {},
-      })
-      await writeJsonFileAtomic(paths.indexesPath, upgraded)
-      return upgraded
+      return parseAssistantSessionRoutingSessionId(row.sessionId)
     }
-    return parsed
-  } catch (error) {
-    const quarantine = await quarantineAssistantStateFile({
-      artifactKind: 'indexes',
-      error,
-      expectedContent: raw,
-      filePath: paths.indexesPath,
-      paths,
-    })
-    if (!quarantine) {
-      return await readAssistantIndexStore(paths)
+
+    const aliasSessionId = input.alias
+      ? readSessionId('alias', input.alias)
+      : null
+    const conversationKeySessionIds = new Map<string, string>()
+    for (const conversationKey of new Set(input.conversationKeys)) {
+      const sessionId = readSessionId('conversation-key', conversationKey)
+      if (sessionId) {
+        conversationKeySessionIds.set(conversationKey, sessionId)
+      }
     }
-    return await rebuildAssistantIndexStore(paths)
-  }
+
+    return {
+      aliasSessionId,
+      conversationKeySessionIds,
+    }
+  })
 }
 
 export async function synchronizeAssistantIndexes(
@@ -781,41 +839,13 @@ export async function synchronizeAssistantIndexes(
   session: AssistantSession,
   previous: AssistantSession | null,
 ): Promise<void> {
-  const store = await readAssistantIndexStore(paths)
-  const aliases = {
-    ...store.aliases,
-  }
-  const conversationKeys = {
-    ...store.conversationKeys,
-  }
-
-  if (previous?.alias && previous.alias !== session.alias) {
-    delete aliases[previous.alias]
-  }
-  if (
-    previous?.binding.conversationKey &&
-    previous.binding.conversationKey !== session.binding.conversationKey
-  ) {
-    delete conversationKeys[previous.binding.conversationKey]
-  }
-
-  if (session.alias) {
-    aliases[session.alias] = session.sessionId
-  }
-  if (session.binding.conversationKey) {
-    conversationKeys[session.binding.conversationKey] = session.sessionId
-  }
-
-  const updated = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases,
-    conversationKeys,
-    recentSessions: pruneAssistantRecentSessions({
-      ...(store.recentSessions ?? {}),
-      [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
-    }),
+  await withAssistantSessionRoutingDatabase(paths, (database) => {
+    synchronizeAssistantSessionRoutingDatabase(
+      database,
+      session,
+      previous,
+    )
   })
-  await writeJsonFileAtomic(paths.indexesPath, updated)
 }
 
 export async function readAssistantRecentSessionIds(
@@ -829,18 +859,485 @@ export async function readAssistantRecentSessionIds(
     return []
   }
 
-  const store = await readAssistantIndexStore(paths)
-  return sortRecentSessionIds(store.recentSessions ?? {}).slice(0, limit)
+  return await withAssistantSessionRoutingDatabase(paths, (database) => {
+    const rows = database.prepare(`
+      SELECT
+        session_id AS sessionId
+      FROM assistant_recent_sessions
+      ORDER BY last_active_at_ms DESC, session_id ASC
+      LIMIT ?
+    `).all(limit)
+    return rows.map(parseAssistantRecentSessionRow).map((row) => row.sessionId)
+  })
 }
 
-function sortRecentSessionIds(
-  recentSessions: Record<string, string>,
-): string[] {
-  return Object.entries(recentSessions)
-    .sort(([, left], [, right]) =>
-      compareAssistantTimestampsAscending(right, left),
+async function collectAssistantSessionsForRoutingRebuild(
+  paths: AssistantStatePaths,
+): Promise<AssistantSession[]> {
+  const entries = await readdir(paths.sessionsDirectory, {
+    withFileTypes: true,
+  })
+  const sessions: AssistantSession[] = []
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue
+    }
+
+    try {
+      const session = await readAssistantSession({
+        paths,
+        sessionId: entry.name.replace(/\.json$/u, ''),
+        treatCorruptedAsMissing: true,
+      })
+      if (!session) {
+        continue
+      }
+      sessions.push(session)
+    } catch {
+      // Quarantine already happened in readAssistantSession; keep rebuild best-effort.
+    }
+  }
+  return sessions
+}
+
+function buildAssistantSessionRoutingProjection(
+  sessions: readonly AssistantSession[],
+): AssistantAliasStore {
+  const aliases: Record<string, string> = {}
+  const conversationKeys: Record<string, string> = {}
+  const recentSessions: Record<string, string> = {}
+  for (const session of sortSessionsForIndexRebuild(sessions)) {
+    if (session.alias) {
+      aliases[session.alias] = session.sessionId
+    }
+    if (session.binding.conversationKey) {
+      conversationKeys[session.binding.conversationKey] = session.sessionId
+    }
+    recentSessions[session.sessionId] =
+      resolveAssistantIndexRebuildTimestamp(session)
+  }
+  return assistantAliasStoreSchema.parse({
+    version: 1,
+    aliases,
+    conversationKeys,
+    recentSessions: pruneAssistantRecentSessions(recentSessions),
+  })
+}
+
+async function withAssistantSessionRoutingDatabase<T>(
+  paths: AssistantStatePaths,
+  operation: (database: AssistantSessionRoutingDatabase) => T,
+): Promise<T> {
+  const database = await openOrRebuildAssistantSessionRoutingDatabase(paths)
+  try {
+    const result = operation(database)
+    database.close()
+    return result
+  } catch (error) {
+    try {
+      database.close()
+    } catch {
+      // Preserve the operation or close error for the shared recovery policy.
+    }
+    if (isAssistantSessionRoutingProjectionRecoveryError(error)) {
+      // The callback may have reached a write with an ambiguous commit outcome,
+      // so never replay it. Quarantine the closed projection and let the next
+      // ordinary attempt rebuild before running its own operation.
+      await quarantineAssistantSessionRoutingDatabase(paths, error)
+    }
+    throw error
+  }
+}
+
+async function openOrRebuildAssistantSessionRoutingDatabase(
+  paths: AssistantStatePaths,
+): Promise<AssistantSessionRoutingDatabase> {
+  if (await pathExists(paths.indexesPath)) {
+    return await rebuildAssistantSessionRoutingDatabase(
+      paths,
+      await readAssistantLegacyIndex(paths),
     )
-    .map(([sessionId]) => sessionId)
+  }
+
+  const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+  if (!await pathExists(databasePath)) {
+    return await rebuildAssistantSessionRoutingDatabase(paths)
+  }
+  try {
+    return openAssistantSessionRoutingDatabase(paths)
+  } catch (error) {
+    if (!isAssistantSessionRoutingProjectionRecoveryError(error)) {
+      throw error
+    }
+    await quarantineAssistantSessionRoutingDatabase(paths, error)
+    return await rebuildAssistantSessionRoutingDatabase(paths)
+  }
+}
+
+async function readAssistantLegacyIndex(
+  paths: AssistantStatePaths,
+): Promise<AssistantAliasStore | null> {
+  let raw: string
+  try {
+    raw = await readFile(paths.indexesPath, 'utf8')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
+  }
+  try {
+    return assistantAliasStoreSchema.parse(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+function openAssistantSessionRoutingDatabase(
+  paths: AssistantStatePaths,
+): AssistantSessionRoutingDatabase {
+  const database = openSqliteRuntimeDatabase(
+    resolveAssistantSessionRoutingDatabasePath(paths),
+    {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    },
+  )
+  try {
+    const version = readSqliteRuntimeUserVersion(database)
+    if (version !== ASSISTANT_SESSION_ROUTING_DATABASE_VERSION) {
+      throw new AssistantSessionRoutingDatabaseValidationError(
+        `Unsupported assistant session routing database version: ${version}.`,
+      )
+    }
+    assertAssistantSessionRoutingDatabaseShape(database)
+    return database
+  } catch (error) {
+    try {
+      database.close()
+    } catch {
+      // Preserve the validation or SQLite error for the recovery boundary.
+    }
+    throw error
+  }
+}
+
+function assertAssistantSessionRoutingDatabaseShape(
+  database: AssistantSessionRoutingDatabase,
+): void {
+  try {
+    database.prepare(`
+      SELECT kind, key_digest, session_id
+      FROM assistant_session_routes
+      LIMIT 0
+    `).all()
+    database.prepare(`
+      SELECT session_id, last_active_at_ms
+      FROM assistant_recent_sessions
+      LIMIT 0
+    `).all()
+  } catch (error) {
+    if (!isAssistantSessionRoutingDatabaseShapeError(error)) {
+      throw error
+    }
+    throw new AssistantSessionRoutingDatabaseValidationError(
+      'Assistant session routing database has an invalid schema.',
+      { cause: error },
+    )
+  }
+}
+
+function isAssistantSessionRoutingDatabaseShapeError(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const candidate = error as {
+    code?: unknown
+    errcode?: unknown
+    message?: unknown
+  }
+  return (
+    candidate.code === 'ERR_SQLITE_ERROR' &&
+    candidate.errcode === 1 &&
+    typeof candidate.message === 'string' &&
+    /^(?:no such (?:column|table)|table .* has no column named)/u.test(
+      candidate.message,
+    )
+  )
+}
+
+// This is the single destructive classification for both opening and using the
+// projection. All unlisted SQLite failures preserve the active database.
+function isAssistantSessionRoutingProjectionRecoveryError(
+  error: unknown,
+): boolean {
+  if (error instanceof AssistantSessionRoutingDatabaseValidationError) {
+    return true
+  }
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const candidate = error as {
+    code?: unknown
+    errcode?: unknown
+  }
+  if (
+    candidate.code !== 'ERR_SQLITE_ERROR' ||
+    typeof candidate.errcode !== 'number'
+  ) {
+    return false
+  }
+  const primaryCode = candidate.errcode & 0xff
+  return primaryCode === 11 || primaryCode === 26
+}
+
+function parseAssistantSessionRoutingSessionId(value: unknown): string {
+  try {
+    return assistantSessionIdSchema.parse(value)
+  } catch (error) {
+    throw new AssistantSessionRoutingDatabaseValidationError(
+      'Assistant session routing database contains an invalid route session id.',
+      { cause: error },
+    )
+  }
+}
+
+function parseAssistantRecentSessionRow(
+  value: unknown,
+): z.infer<typeof assistantRecentSessionRowSchema> {
+  try {
+    return assistantRecentSessionRowSchema.parse(value)
+  } catch (error) {
+    throw new AssistantSessionRoutingDatabaseValidationError(
+      'Assistant session routing database contains an invalid recent session row.',
+      { cause: error },
+    )
+  }
+}
+
+function initializeAssistantSessionRoutingDatabase(
+  database: AssistantSessionRoutingDatabase,
+  projection: AssistantAliasStore,
+): void {
+  withImmediateTransaction(database, () => {
+    database.exec(`
+      CREATE TABLE assistant_session_routes (
+        kind TEXT NOT NULL CHECK (kind IN ('alias', 'conversation-key')),
+        key_digest TEXT NOT NULL CHECK (length(key_digest) = 64),
+        session_id TEXT NOT NULL,
+        PRIMARY KEY (kind, key_digest)
+      ) STRICT;
+      CREATE TABLE assistant_recent_sessions (
+        session_id TEXT PRIMARY KEY,
+        last_active_at_ms INTEGER NOT NULL
+      ) STRICT;
+    `)
+
+    const upsertRoute = database.prepare(`
+      INSERT INTO assistant_session_routes (kind, key_digest, session_id)
+      VALUES (?, ?, ?)
+      ON CONFLICT (kind, key_digest) DO UPDATE SET session_id = excluded.session_id
+    `)
+    const upsertRecent = database.prepare(`
+      INSERT INTO assistant_recent_sessions (session_id, last_active_at_ms)
+      VALUES (?, ?)
+    `)
+    for (const [alias, sessionId] of Object.entries(projection.aliases)) {
+      upsertRoute.run(
+        'alias',
+        resolveAssistantSessionRoutingKeyDigest('alias', alias),
+        sessionId,
+      )
+    }
+    for (const [conversationKey, sessionId] of Object.entries(
+      projection.conversationKeys,
+    )) {
+      upsertRoute.run(
+        'conversation-key',
+        resolveAssistantSessionRoutingKeyDigest(
+          'conversation-key',
+          conversationKey,
+        ),
+        sessionId,
+      )
+    }
+    for (const [sessionId, lastActiveAt] of Object.entries(
+      pruneAssistantRecentSessions(projection.recentSessions ?? {}),
+    )) {
+      upsertRecent.run(sessionId, Date.parse(lastActiveAt))
+    }
+    writeSqliteRuntimeUserVersion(
+      database,
+      ASSISTANT_SESSION_ROUTING_DATABASE_VERSION,
+    )
+  })
+}
+
+async function rebuildAssistantSessionRoutingDatabase(
+  paths: AssistantStatePaths,
+  legacyIndex: AssistantAliasStore | null = null,
+): Promise<AssistantSessionRoutingDatabase> {
+  const projection = await resolveAssistantSessionRoutingProjection(
+    paths,
+    legacyIndex,
+  )
+  const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+  const rebuildPath = `${databasePath}.${randomUUID()}.rebuild`
+  await removeAssistantSessionRoutingDatabaseSidecars(rebuildPath)
+  await rm(rebuildPath, { force: true })
+
+  let rebuilt: AssistantSessionRoutingDatabase | null = null
+  try {
+    rebuilt = openSqliteRuntimeDatabase(rebuildPath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    await adoptAssistantStateFile(rebuildPath)
+    initializeAssistantSessionRoutingDatabase(rebuilt, projection)
+    rebuilt.close()
+    rebuilt = null
+
+    await removeAssistantSessionRoutingDatabaseSidecars(databasePath)
+    await rename(rebuildPath, databasePath)
+    // A legacy aggregate is one-way migration input. Publishing this projection
+    // establishes the runtime rollback floor before the aggregate is removed.
+    await rm(paths.indexesPath, { force: true })
+  } catch (error) {
+    rebuilt?.close()
+    await rm(rebuildPath, { force: true }).catch(() => undefined)
+    await removeAssistantSessionRoutingDatabaseSidecars(rebuildPath)
+    throw error
+  }
+
+  await appendAssistantRuntimeEventAtPaths(paths, {
+    component: 'state',
+    entityId: 'indexes',
+    entityType: 'indexes',
+    kind: 'indexes.rebuilt',
+    level: 'warn',
+    message: 'Assistant session indexes were rebuilt from available routing state.',
+  }).catch(() => undefined)
+  return openAssistantSessionRoutingDatabase(paths)
+}
+
+async function resolveAssistantSessionRoutingProjection(
+  paths: AssistantStatePaths,
+  legacyIndex: AssistantAliasStore | null,
+): Promise<AssistantAliasStore> {
+  if (legacyIndex?.recentSessions !== undefined) {
+    return legacyIndex
+  }
+  const rebuilt = buildAssistantSessionRoutingProjection(
+    await collectAssistantSessionsForRoutingRebuild(paths),
+  )
+  return legacyIndex
+    ? assistantAliasStoreSchema.parse({
+        ...rebuilt,
+        aliases: legacyIndex.aliases,
+        conversationKeys: legacyIndex.conversationKeys,
+      })
+    : rebuilt
+}
+
+function synchronizeAssistantSessionRoutingDatabase(
+  database: AssistantSessionRoutingDatabase,
+  session: AssistantSession,
+  previous: AssistantSession | null,
+): void {
+  return withImmediateTransaction(database, () => {
+    const upsertRoute = database.prepare(`
+      INSERT INTO assistant_session_routes (kind, key_digest, session_id)
+      VALUES (?, ?, ?)
+      ON CONFLICT (kind, key_digest) DO UPDATE SET session_id = excluded.session_id
+    `)
+    const removeRouteIfOwned = database.prepare(`
+      DELETE FROM assistant_session_routes
+      WHERE kind = ? AND key_digest = ? AND session_id = ?
+    `)
+
+    if (session.alias) {
+      upsertRoute.run(
+        'alias',
+        resolveAssistantSessionRoutingKeyDigest('alias', session.alias),
+        session.sessionId,
+      )
+    }
+    if (session.binding.conversationKey) {
+      upsertRoute.run(
+        'conversation-key',
+        resolveAssistantSessionRoutingKeyDigest(
+          'conversation-key',
+          session.binding.conversationKey,
+        ),
+        session.sessionId,
+      )
+    }
+    if (previous?.alias && previous.alias !== session.alias) {
+      removeRouteIfOwned.run(
+        'alias',
+        resolveAssistantSessionRoutingKeyDigest('alias', previous.alias),
+        session.sessionId,
+      )
+    }
+    if (
+      previous?.binding.conversationKey &&
+      previous.binding.conversationKey !== session.binding.conversationKey
+    ) {
+      removeRouteIfOwned.run(
+        'conversation-key',
+        resolveAssistantSessionRoutingKeyDigest(
+          'conversation-key',
+          previous.binding.conversationKey,
+        ),
+        session.sessionId,
+      )
+    }
+
+    database.prepare(`
+      INSERT INTO assistant_recent_sessions (session_id, last_active_at_ms)
+      VALUES (?, ?)
+      ON CONFLICT (session_id) DO UPDATE SET last_active_at_ms = excluded.last_active_at_ms
+    `).run(
+      session.sessionId,
+      Date.parse(session.lastTurnAt ?? session.updatedAt),
+    )
+    database.exec(`
+      DELETE FROM assistant_recent_sessions
+      WHERE session_id IN (
+        SELECT session_id
+        FROM assistant_recent_sessions
+        ORDER BY last_active_at_ms DESC, session_id ASC
+        LIMIT -1 OFFSET ${ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT}
+      )
+    `)
+  })
+}
+
+async function quarantineAssistantSessionRoutingDatabase(
+  paths: AssistantStatePaths,
+  error: unknown,
+): Promise<void> {
+  const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+  await quarantineAssistantStateFile({
+    artifactKind: 'indexes',
+    error,
+    filePath: databasePath,
+    paths,
+  })
+  await removeAssistantSessionRoutingDatabaseSidecars(databasePath)
+}
+
+async function removeAssistantSessionRoutingDatabaseSidecars(
+  databasePath: string,
+): Promise<void> {
+  await Promise.all([
+    rm(`${databasePath}-journal`, { force: true }),
+    rm(`${databasePath}-shm`, { force: true }),
+    rm(`${databasePath}-wal`, { force: true }),
+  ])
 }
 
 function pruneAssistantRecentSessions(
@@ -922,92 +1419,18 @@ export async function readAutomationState(
   }
 }
 
-function createInitialAssistantIndexStore(): AssistantAliasStore {
-  return assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases: {},
-    conversationKeys: {},
-    recentSessions: {},
-  })
-}
-
-async function rebuildAssistantIndexStore(
-  paths: AssistantStatePaths,
-): Promise<AssistantAliasStore> {
-  const entries = await readdir(paths.sessionsDirectory, {
-    withFileTypes: true,
-  })
-  const sessions: AssistantSession[] = []
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) {
-      continue
-    }
-
-    try {
-      const session = await readAssistantSession({
-        paths,
-        sessionId: entry.name.replace(/\.json$/u, ''),
-        treatCorruptedAsMissing: true,
-      })
-      if (!session) {
-        continue
-      }
-      sessions.push(session)
-    } catch {
-      // Quarantine already happened in readAssistantSession; keep rebuild best-effort.
-    }
-  }
-
-  const aliases: Record<string, string> = {}
-  const conversationKeys: Record<string, string> = {}
-  const recentSessions: Record<string, string> = {}
-  for (const session of sortSessionsForIndexRebuild(sessions)) {
-    if (session.alias) {
-      aliases[session.alias] = session.sessionId
-    }
-    if (session.binding.conversationKey) {
-      conversationKeys[session.binding.conversationKey] = session.sessionId
-    }
-    recentSessions[session.sessionId] = resolveAssistantIndexRebuildTimestamp(session)
-  }
-
-  const rebuilt = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases,
-    conversationKeys,
-    recentSessions: pruneAssistantRecentSessions(recentSessions),
-  })
-  await writeJsonFileAtomic(paths.indexesPath, rebuilt)
-  await appendAssistantRuntimeEventAtPaths(paths, {
-    component: 'state',
-    entityId: 'indexes',
-    entityType: 'indexes',
-    kind: 'indexes.rebuilt',
-    level: 'warn',
-    message: 'Assistant session indexes were rebuilt from durable session files.',
-  }).catch(() => undefined)
-  return rebuilt
-}
-
-async function hasDurableAssistantSessions(
-  paths: AssistantStatePaths,
-): Promise<boolean> {
-  const entries = await readdir(paths.sessionsDirectory, {
-    withFileTypes: true,
-  })
-  return entries.some((entry) => entry.isFile() && entry.name.endsWith('.json'))
-}
-
 function sortSessionsForIndexRebuild(
   sessions: readonly AssistantSession[],
 ): AssistantSession[] {
-  return [...sessions].sort((left, right) =>
-    compareAssistantTimestampsAscending(
+  return [...sessions].sort((left, right) => {
+    const timestampOrder = compareAssistantTimestampsAscending(
       resolveAssistantIndexRebuildTimestamp(left),
       resolveAssistantIndexRebuildTimestamp(right),
-    ),
-  )
+    )
+    return timestampOrder === 0
+      ? left.sessionId.localeCompare(right.sessionId)
+      : timestampOrder
+  })
 }
 
 function resolveAssistantIndexRebuildTimestamp(

@@ -15,7 +15,6 @@ import {
 } from '../response-media.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
-import { writeJsonFileAtomic } from '../shared.js'
 import {
   sanitizeAssistantDeliveryErrorForPersistence,
   sanitizeAssistantOutboxIntentForPersistence,
@@ -32,7 +31,10 @@ import {
   normalizeAssistantDeliveryError,
   resolveAssistantOutboxRetryDelayMs,
 } from './retry-policy.js'
-import { readAssistantOutboxIntentAtPath } from './store.js'
+import {
+  persistAssistantOutboxIntentAtPath,
+  readAssistantOutboxIntentAtPath,
+} from './store.js'
 
 /**
  * Dispatch-state owns the persisted outbox intent transitions that happen once
@@ -150,9 +152,11 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(pendingIntent),
     )
-    const persistedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
-    await writeJsonFileAtomic(input.intentPath, persistedIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: persistedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     return persistedIntent
   })
 }
@@ -216,10 +220,11 @@ export async function persistAssistantOutboxIntentLinqAppCardTextFallback(input:
         updatedAt: input.persistedAt.toISOString(),
       }),
     )
-    await writeJsonFileAtomic(
-      input.intentPath,
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent),
-    )
+    await persistAssistantOutboxIntentAtPath({
+      intent: persistedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     return persistedIntent
   })
 }
@@ -303,8 +308,11 @@ export async function markAssistantOutboxIntentSent(input: {
         lastError: null,
       }),
     )
-    const sentIntentValue = sanitizeAssistantOutboxIntentForPersistence(sentIntent)
-    await writeJsonFileAtomic(input.intentPath, sentIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: sentIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: completedAt,
       intent: sentIntent,
@@ -475,8 +483,11 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
         lastError: deliveryError,
       }),
     )
-    const failedIntentValue = sanitizeAssistantOutboxIntentForPersistence(failedIntent)
-    await writeJsonFileAtomic(input.intentPath, failedIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: failedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: failedIntent.updatedAt,
       intent: failedIntent,
@@ -936,9 +947,11 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(retryIntent),
     )
-    const persistedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
-    await writeJsonFileAtomic(input.intentPath, persistedIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: persistedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: persistedIntent.updatedAt,
       intent: persistedIntent,
@@ -1274,10 +1287,11 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
           lastError: deliveryError,
         }),
       )
-      await writeJsonFileAtomic(
-        input.intentPath,
-        sanitizeAssistantOutboxIntentForPersistence(failedIntent),
-      )
+      await persistAssistantOutboxIntentAtPath({
+        intent: failedIntent,
+        intentPath: input.intentPath,
+        paths,
+      })
       await repairAssistantOutboxReceiptForIntent({
         at: failedIntent.updatedAt,
         intent: failedIntent,
@@ -1328,9 +1342,11 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
         status: 'sending',
       }),
     )
-    const sendingIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(sendingIntent)
-    await writeJsonFileAtomic(input.intentPath, sendingIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: sendingIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: input.startedAt,
       intent: sendingIntent,
@@ -1472,9 +1488,11 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
         lastError: restoreDispatchState ? restoreDispatchState.lastError : null,
       }),
     )
-    const pendingIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(pendingIntent)
-    await writeJsonFileAtomic(input.intentPath, pendingIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: pendingIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: resetAt,
       intent: pendingIntent,
@@ -1643,9 +1661,11 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
         lastError: deliveryError,
       }),
     )
-    const updatedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(updatedIntent)
-    await writeJsonFileAtomic(input.intentPath, updatedIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: updatedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: updatedIntent.updatedAt,
       intent: updatedIntent,
