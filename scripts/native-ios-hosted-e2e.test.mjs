@@ -775,7 +775,29 @@ test("PR lifecycle stays red when final cleanup fails", async () => {
     now: () => 123,
     postconditions: async () => undefined,
     retire: async () => undefined,
-  }), /final cleanup did not complete/u);
+  }), /finalization failed at cleanup_after_run/u);
+});
+
+test("PR lifecycle retains secret-safe primary and finalization stage names", async () => {
+  let cleanupCalls = 0;
+  await assert.rejects(() => runPrLifecycle({
+    cleanup: async () => {
+      cleanupCalls += 1;
+      if (cleanupCalls === 2) throw new Error("provider payload must stay hidden");
+    },
+    deploy: async () => { throw new Error("candidate payload must stay hidden"); },
+    dispatch: async () => undefined,
+    now: () => 123,
+    postconditions: async () => undefined,
+    retire: async () => undefined,
+  }), (error) => {
+    assert.equal(
+      error.message,
+      "Native iOS E2E failed at deploy; fail-closed finalization failed at cleanup_after_run.",
+    );
+    assert.doesNotMatch(error.message, /provider payload|candidate payload/u);
+    return true;
+  });
 });
 
 function runWorkflowSelector(workflow, file) {
