@@ -2480,10 +2480,11 @@ test("Junction tier-2 summary events pass the canonical device import contract",
       ironMg: 4,
       vitaminCMg: 30,
     });
-    const importedProfile = result.events.find((event) => event.kind === "note") as
-      | { reportedGender?: string }
-      | undefined;
-    assert.equal(importedProfile?.reportedGender, "other");
+    const importedGender = result.events
+      .filter((event) => event.kind === "measurement")
+      .flatMap((event) => event.measurements ?? [])
+      .find((measurement) => measurement.metric === "gender");
+    assert.equal(importedGender?.qualifiers?.gender, "other");
     assert.ok(result.evidencePartCount >= 1);
     assert.notEqual(result.ingestShardPath, "");
   } finally {
@@ -2562,9 +2563,7 @@ test("Junction summary completeness facts roundtrip and replay without samples",
     const measurements = first.events
       .filter((event) => event.kind === "measurement")
       .flatMap((event) => event.measurements ?? []);
-    const profile = first.events.find((event) => event.kind === "note") as
-      | { reportedGender?: string }
-      | undefined;
+    const gender = measurements.find((measurement) => measurement.metric === "gender");
 
     assert.equal(observations.get("activity-minutes"), 128);
     assert.equal(observations.get("low-activity-minutes"), 84);
@@ -2574,7 +2573,7 @@ test("Junction summary completeness facts roundtrip and replay without samples",
     assert.equal(observations.get("walking-average-heart-rate"), 83);
     assert.equal(observations.get("minimum-heart-rate"), 44);
     assert.equal(observations.get("sleep-latency-minutes"), 18);
-    assert.equal(profile?.reportedGender, "other");
+    assert.equal(gender?.qualifiers?.gender, "other");
     assert.deepEqual(
       measurements.map((measurement) => measurement.metric).sort(),
       [
@@ -7684,7 +7683,7 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   assert.equal(gender?.dataOrigin?.sourceProviderSlug, "apple-health-kit");
   assert.equal(
     demographics?.note,
-    "Birth date: 1990-05-14. Reported gender: other. Biological sex: female. Wheelchair use: yes.",
+    "Birth date: 1990-05-14. Biological sex: female. Wheelchair use: yes.",
   );
   assert.equal(demographics?.note?.includes("Gender"), false);
   assert.equal(demographics?.title, "Junction profile");
@@ -7722,6 +7721,7 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   const profileArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-profile");
   assertJsonOmits(JSON.stringify(profileArtifact?.content), ["1990-05-14", "183"]);
   assert.deepEqual(profileArtifact?.content, {
+    createdAt: "2026-04-19T09:00:00.000Z",
     gender: "other",
     sourceProviderSlug: "apple-health-kit",
     sourceType: "phone",
@@ -7771,6 +7771,7 @@ test("Junction future profile gender values stay bounded and evidence-only", () 
     (artifact) => artifact.role === "junction-summary-profile",
   );
   assert.deepEqual(genderArtifact?.content, {
+    createdAt: "2026-04-20T09:00:00.000Z",
     gender: oversizedGender.slice(0, 80),
     sourceProviderSlug: "oura",
     sourceInstanceId: genderArtifact?.content
@@ -7987,7 +7988,7 @@ test("Junction no-id profile migration claims updated-at identities and retains 
       event.kind === "observation" && event.fields?.metric === "height"
     );
 
-    assert.equal(live.length, 3);
+    assert.equal(live.length, 2);
     assert.equal(liveHeight?.source, "manual");
     assert.equal(storedObservationValue(liveHeight), 179);
     assert.equal(
@@ -8425,7 +8426,7 @@ test("Junction legacy progesterone omissions retain member-authored revisions", 
   }
 });
 
-test("Junction profile revisions preserve an unchanged member-edited gender while updating height", async () => {
+test("Junction profile revisions preserve an unchanged member-edited gender measurement while updating height", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-profile-member-edit");
   const snapshot = (input: { gender: string; height: number; updatedAt: string }) => ({
     importedAt: input.updatedAt,
@@ -8457,14 +8458,21 @@ test("Junction profile revisions preserve an unchanged member-edited gender whil
       height: 180,
       updatedAt: "2026-05-20T09:00:00.000Z",
     });
-    const demographics = first.events.find((event) => event.kind === "note");
-    assert.ok(demographics);
+    const gender = first.events.find((event) =>
+      event.kind === "measurement"
+      && event.measurements?.some((measurement) => measurement.metric === "gender")
+    );
+    assert.ok(gender?.kind === "measurement");
+    const genderMeasurement = gender.measurements[0];
+    assert.ok(genderMeasurement);
     await coreRuntime.upsertEvent({
       vaultRoot,
       payload: {
-        ...demographics,
-        note: "Reported gender: female.",
-        reportedGender: "female",
+        ...gender,
+        measurements: [{
+          ...genderMeasurement,
+          qualifiers: { ...genderMeasurement.qualifiers, gender: "female" },
+        }],
         source: "manual",
       },
     });
@@ -8482,16 +8490,17 @@ test("Junction profile revisions preserve an unchanged member-edited gender whil
       )
     ).flat();
     const live = latestLiveRecords(records);
-    const liveDemographics = live.find((event) => event.id === demographics.id);
+    const liveGender = live.find((event) => event.id === gender.id);
     const liveHeight = live.find((event) => event.kind === "observation" && event.metric === "height");
 
+    assert.ok(liveGender);
     assert.equal(storedObservationValue(liveHeight), 181);
-    assert.equal(liveDemographics?.reportedGender, "female");
-    assert.equal(liveDemographics?.source, "manual");
-    assert.equal(storedExternalRefField(liveDemographics, "version"), "2026-05-20T09:00:00.000Z");
-    assert.equal(storedDataOriginObservedAtRaw(liveDemographics), "2026-05-01T09:00:00.000Z");
+    assert.equal(storedMeasurements(liveGender)[0]?.qualifiers?.gender, "female");
+    assert.equal(liveGender?.source, "manual");
+    assert.equal(storedExternalRefField(liveGender, "version"), "2026-05-20T09:00:00.000Z");
+    assert.equal(storedDataOriginObservedAtRaw(liveGender), "2026-05-01T09:00:00.000Z");
     assert.ok(records.some((event) =>
-      event.id === demographics.id
+      event.id === gender.id
       && event.source === "device"
       && storedExternalRefField(event, "version") === "2026-05-21T09:00:00.000Z"
     ), "the provider ordering baseline advances behind the retained member revision");
@@ -8517,18 +8526,18 @@ test("Junction profile revisions preserve an unchanged member-edited gender whil
         ),
       )
     ).flat();
+    const liveAfterUpdate = latestLiveRecords(afterUpdate);
+    const afterUpdateGender = liveAfterUpdate.find((event) => event.id === gender.id);
     assert.equal(
       storedObservationValue(
-        latestLiveRecords(afterUpdate).find((event) =>
+        liveAfterUpdate.find((event) =>
           event.kind === "observation" && event.metric === "height"
         ),
       ),
       182,
     );
-    assert.equal(
-      latestLiveRecords(afterUpdate).find((event) => event.id === demographics.id)?.reportedGender,
-      "female",
-    );
+    assert.ok(afterUpdateGender);
+    assert.equal(storedMeasurements(afterUpdateGender)[0]?.qualifiers?.gender, "female");
     assert.equal(replay.applied, false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

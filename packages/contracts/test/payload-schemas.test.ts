@@ -397,10 +397,6 @@ test("event JSONL row payload schemas match public write kinds and reject explic
   assert.equal(safeParseContract(noteSchema, validNote).success, true);
   assert.equal(
     safeParseContract(noteSchema, { ...validNote, reportedGender: "other" }).success,
-    true,
-  );
-  assert.equal(
-    safeParseContract(noteSchema, { ...validNote, reportedGender: "unknown" }).success,
     false,
   );
   assert.equal(

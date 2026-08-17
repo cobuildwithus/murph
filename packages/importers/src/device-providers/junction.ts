@@ -5311,18 +5311,23 @@ function sanitizeProfilePayload(payload: unknown, connection?: PlainObject): Pla
   const gender = firstStringFromPaths(profile, JUNCTION_PROFILE_GENDER_PATHS);
   const sourceProviderSlug = readJunctionSourceProviderSlug(profile, connection)
     ?? origin.sourceProviderSlug;
+  const createdAt = resolveSafeTimestamp(
+    firstValueFromPaths(profile, ["createdAt", "created_at", "updatedAt", "updated_at"]),
+    origin.sourceProviderSlug,
+  );
   const updatedAt = resolveSafeTimestamp(
     firstValueFromPaths(profile, ["updatedAt", "updated_at", "createdAt", "created_at"]),
     origin.sourceProviderSlug,
   );
   const sanitized = stripUndefined({
+    createdAt,
     gender: gender ? trimToLength(gender, 80) : undefined,
     stableResourceId: buildStableProfileResourceId(
       profile,
       sourceProviderSlug,
       origin.sourceType,
       origin.sourceInstanceId,
-      updatedAt,
+      createdAt ?? updatedAt,
     ),
     sourceProviderSlug,
     sourceInstanceId: origin.sourceInstanceId,
@@ -6765,7 +6770,6 @@ function pushProfileSummary(
   const wheelchairUse = firstValueFromPaths(entry, ["wheelchairUse", "wheelchair_use"]);
   const segments = [
     birthDate ? `Birth date: ${birthDate}.` : undefined,
-    reportedGender ? `Reported gender: ${reportedGender}.` : undefined,
     sex ? `Biological sex: ${sex}.` : undefined,
     typeof wheelchairUse === "boolean" ? `Wheelchair use: ${wheelchairUse ? "yes" : "no"}.` : undefined,
   ].filter((segment): segment is string => segment !== undefined);
@@ -6787,7 +6791,6 @@ function pushProfileSummary(
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, {
       normalizerVersion: profileNormalizerVersion,
     }),
-    fields: reportedGender ? { reportedGender } : undefined,
   }));
 }
 
@@ -8482,7 +8485,7 @@ function buildStableProfileResourceId(
   sourceProviderSlug: string | null | undefined,
   sourceType: string | null | undefined,
   sourceInstanceId: string | null | undefined,
-  updatedAt: string | undefined,
+  identityTimestamp: string | undefined,
 ): string | undefined {
   const retainedResourceId = firstStringFromPaths(entry, ["stableResourceId"]);
   if (retainedResourceId && /^profile-[a-f0-9]{16}$/u.test(retainedResourceId)) {
@@ -8499,13 +8502,13 @@ function buildStableProfileResourceId(
     ])}`;
   }
 
-  return updatedAt
+  return identityTimestamp
     ? `profile-${shortHash([
         "profile",
         sourceProviderSlug,
         sourceType,
         sourceInstanceId,
-        updatedAt,
+        identityTimestamp,
       ])}`
     : undefined;
 }

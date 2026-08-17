@@ -2073,13 +2073,12 @@ test("importDeviceBatch retracts omitted facets from a newer bounded authoritati
       occurredAt: "2026-05-01T08:00:00.000Z",
       recordedAt: "2026-05-01T09:00:00.000Z",
       title: "Junction profile",
-      note: "Reported gender: other.",
+      note: "Biological sex: female.",
       externalRef: {
         ...identity,
         facet,
         version: "2026-05-01T08:00:00.000Z",
       },
-      fields: { reportedGender: "other" },
     }],
     authoritativeEventSets: [{
       ...identity,

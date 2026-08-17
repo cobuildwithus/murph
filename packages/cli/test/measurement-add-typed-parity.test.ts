@@ -858,6 +858,7 @@ test('normalized Junction categorical facts survive canonical import and query',
         gender: 'other',
         height: 181,
         source_device_id: 'profile-source-instance-proof',
+        created_at: '2026-07-01T08:00:00Z',
         updated_at: '2026-07-09T08:30:00Z',
         source: { provider: 'apple_health', type: 'phone' },
       },
@@ -877,7 +878,7 @@ test('normalized Junction categorical facts survive canonical import and query',
     },
   })
   const normalizedEvents = [
-    normalized.events?.find((event) => event.fields?.reportedGender === 'other'),
+    normalized.events?.find((event) => event.title === 'Junction gender'),
     normalized.events?.find((event) => event.title === 'Junction progesterone test'),
     normalized.events?.find((event) => event.title === 'Junction sexual activity'),
   ]
@@ -897,10 +898,18 @@ test('normalized Junction categorical facts survive canonical import and query',
   })
   const genderReplayEvents = [
     normalizedEvents[0],
-    firstReplay.events?.find((event) => event.fields?.reportedGender === 'other'),
-    secondReplay.events?.find((event) => event.fields?.reportedGender === 'other'),
+    firstReplay.events?.find((event) => event.title === 'Junction gender'),
+    secondReplay.events?.find((event) => event.title === 'Junction gender'),
   ]
   assert.ok(profileArtifact)
+  assert.equal(
+    (profileArtifact.content as { createdAt?: string }).createdAt,
+    '2026-07-01T08:00:00.000Z',
+  )
+  assert.equal(
+    (profileArtifact.content as { updatedAt?: string }).updatedAt,
+    '2026-07-09T08:30:00.000Z',
+  )
   assert.deepEqual(firstReplayArtifact?.content, profileArtifact.content)
   assert.deepEqual(
     genderReplayEvents.map((event) => event?.externalRef),
@@ -915,6 +924,8 @@ test('normalized Junction categorical facts survive canonical import and query',
     genderReplayEvents.slice(1).map(() => genderReplayEvents[1]?.dataOrigin),
   )
   assert.equal(new Set(genderReplayEvents.map((event) => event?.occurredAt)).size, 1)
+  assert.equal(genderReplayEvents[0]?.occurredAt, '2026-07-01T08:00:00.000Z')
+  assert.equal(genderReplayEvents[0]?.dayKey, '2026-07-01')
   const accountId = 'junction-profile-replay-proof'
   const currentHeightEvent = normalized.events?.find((event) => event.title === 'Junction height')
   assert.ok(currentHeightEvent)
@@ -964,7 +975,7 @@ test('normalized Junction categorical facts survive canonical import and query',
   const secondReplayCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
   const importedEventIds = new Map(currentImport.events.map((event) => [event.title, event.id]))
 
-  const genderEventId = importedEventIds.get('Junction profile')
+  const genderEventId = importedEventIds.get('Junction gender')
   const heightEventId = importedEventIds.get('Junction height')
   const progesteroneEventId = importedEventIds.get('Junction progesterone test')
   const sexualActivityEventId = importedEventIds.get('Junction sexual activity')
@@ -974,8 +985,8 @@ test('normalized Junction categorical facts survive canonical import and query',
   assert.ok(sexualActivityEventId)
   const firstReplayEvents = new Map(firstReplayImport.events.map((event) => [event.title, event]))
   const secondReplayEvents = new Map(secondReplayImport.events.map((event) => [event.title, event]))
-  assert.equal(firstReplayEvents.get('Junction profile')?.id, genderEventId)
-  assert.equal(secondReplayEvents.get('Junction profile')?.id, genderEventId)
+  assert.equal(firstReplayEvents.get('Junction gender')?.id, genderEventId)
+  assert.equal(secondReplayEvents.get('Junction gender')?.id, genderEventId)
   assert.deepEqual(firstReplayCanonicalHeight, currentCanonicalHeight)
   assert.deepEqual(secondReplayCanonicalHeight, currentCanonicalHeight)
   assert.deepEqual(firstReplayCanonicalGender, currentCanonicalGender)
