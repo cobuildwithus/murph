@@ -15,62 +15,65 @@ import {
   MURPH_PUBLIC_SITE_URL,
 } from "../src/lib/site-metadata";
 
+const EXPECTED_PUBLIC_SITE_URL = "https://www.withmurph.ai";
+const EXPECTED_STATIC_PUBLIC_ROUTES = [
+  "/",
+  "/changelog",
+  "/clubs",
+  "/consumer-health-data-privacy-policy",
+  "/experiments",
+  "/knowledge",
+  "/legal",
+  "/legal/health-ai-safety-disclosure",
+  "/legal/privacy",
+  "/legal/terms",
+  "/refer",
+  "/search",
+  "/security",
+  "/subprocessors",
+] as const;
+
 function publicUrl(route: string): string {
-  return new URL(route, MURPH_PUBLIC_SITE_URL).toString();
+  return new URL(route, EXPECTED_PUBLIC_SITE_URL).toString();
 }
 
 describe("public search indexing metadata", () => {
   it("publishes a robots policy that keeps page-level noindex metadata crawlable", () => {
+    expect(MURPH_PUBLIC_SITE_URL).toBe(EXPECTED_PUBLIC_SITE_URL);
     expect(robots()).toEqual({
-      host: MURPH_PUBLIC_SITE_URL,
+      host: EXPECTED_PUBLIC_SITE_URL,
       rules: {
         allow: "/",
         disallow: "/api/",
         userAgent: "*",
       },
-      sitemap: `${MURPH_PUBLIC_SITE_URL}/sitemap.xml`,
+      sitemap: `${EXPECTED_PUBLIC_SITE_URL}/sitemap.xml`,
     });
   });
 
-  it("publishes every indexable Health Commons route once", () => {
-    const entries = sitemap();
-    const urls = entries.map(({ url }) => url);
-    const uniqueUrls = new Set(urls);
+  it("publishes the exact approved public route inventory", () => {
+    const expectedRoutes = [
+      ...EXPECTED_STATIC_PUBLIC_ROUTES,
+      ...listHealthCommonsExperimentRouteParams().flatMap(({ experimentId }) => {
+        const route = `/experiments/${encodeURIComponent(experimentId)}`;
+        return [route, `${route}/research`];
+      }),
+      ...listHealthCommonsBiomarkerRoutes().flatMap((biomarkerId) => {
+        const route = `/biomarkers/${encodeURIComponent(biomarkerId)}`;
+        return [route, `${route}/research`];
+      }),
+      ...listHealthCommonsMeasurementMethodRoutes().map((measurementMethodId) =>
+        `/measurement-methods/${encodeURIComponent(measurementMethodId)}`
+      ),
+    ].sort();
 
-    expect(uniqueUrls.size).toBe(urls.length);
-    expect(urls).toEqual([...urls].sort());
-    for (const publicRoute of ["/", "/experiments", "/knowledge", "/search"]) {
-      expect(uniqueUrls).toContain(publicUrl(publicRoute));
-    }
+    expect(sitemap()).toEqual(expectedRoutes.map((route) => ({
+      url: publicUrl(route),
+    })));
 
     for (const { experimentId } of listHealthCommonsExperimentRouteParams()) {
       const route = `/experiments/${encodeURIComponent(experimentId)}`;
-      expect(uniqueUrls).toContain(publicUrl(route));
-      expect(uniqueUrls).toContain(publicUrl(`${route}/research`));
-      expect(uniqueUrls).not.toContain(publicUrl(`${route}/results`));
-    }
-
-    for (const biomarkerId of listHealthCommonsBiomarkerRoutes()) {
-      const route = `/biomarkers/${encodeURIComponent(biomarkerId)}`;
-      expect(uniqueUrls).toContain(publicUrl(route));
-      expect(uniqueUrls).toContain(publicUrl(`${route}/research`));
-    }
-
-    for (const measurementMethodId of listHealthCommonsMeasurementMethodRoutes()) {
-      expect(uniqueUrls).toContain(publicUrl(
-        `/measurement-methods/${encodeURIComponent(measurementMethodId)}`,
-      ));
-    }
-
-    for (const privateOrInternalRoute of [
-      "/biomarkers",
-      "/design",
-      "/environment",
-      "/home",
-      "/pitch",
-      "/settings",
-    ]) {
-      expect(uniqueUrls).not.toContain(publicUrl(privateOrInternalRoute));
+      expect(expectedRoutes).not.toContain(`${route}/results`);
     }
   });
 

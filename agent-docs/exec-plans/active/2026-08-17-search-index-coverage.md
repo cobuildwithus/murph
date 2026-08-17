@@ -45,10 +45,12 @@ Updated: 2026-08-17
 
 - Treat the supplied archive as aggregate evidence only because it contains issue counts but no affected URL list.
 - Keep workflow/private pages crawlable enough for their `noindex` metadata to be observed; do not use `robots.txt` as an indexing substitute.
+- Accept the preliminary coverage finding and strengthen test oracles only; the production ownership and route policy remain unchanged.
 
 ## Verification
 
 - Passed focused hosted-Web Vitest metadata coverage: 5 files and 41 tests.
+- Passed the specialist-requested exact-inventory and biomarker-research metadata slice: 2 files and 10 tests.
 - Passed focused ESLint for every changed source and test file.
 - Passed the hosted-Web typecheck, including the repository-owned Health Commons and Prisma generation prerequisites.
 - Direct sitemap coverage proof is part of the focused test: one canonical host, no duplicate URLs, all published Health Commons routes present, and private/result/internal routes absent.
