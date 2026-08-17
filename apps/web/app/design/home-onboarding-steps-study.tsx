@@ -17,6 +17,7 @@ function StudyAction({
     <Link
       className={getOnboardingStepActionClass(primary)}
       href="/screenshots/home"
+      prefetch={false}
     >
       {children}
       <ArrowRight className="size-4" />
