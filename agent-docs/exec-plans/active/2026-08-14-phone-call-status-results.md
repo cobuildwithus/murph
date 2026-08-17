@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-14
-Updated: 2026-08-15
+Updated: 2026-08-17
 
 ## Goal
 
@@ -22,9 +22,9 @@ Updated: 2026-08-15
 - The assistant exposes exact-id termination only in a private, current
   user-authorized turn and never claims success before provider authority is
   known.
-- A terminal result arriving during an active hosted invocation is imported and
-  folded ahead of later conversation input or delivered immediately, rather
-  than waiting behind unrelated maintenance work.
+- A terminal result arriving during an active hosted invocation is imported
+  promptly, but never blocks a newer foreground conversation reply. Delivery
+  resumes through the existing background outbox path.
 - Every meaningful terminal result, including failed and not-completed calls,
   requires a user-visible response; delivery failures remain retryable.
 - Focused Web, Cloudflare, assistant-engine, assistant-runtime, contract, and
@@ -47,8 +47,8 @@ Updated: 2026-08-15
   runtime wake, and Retell reconciliation seams.
 - Keep terminal result data bounded and treat provider/callee content as
   untrusted private data.
-- Preserve foreground conversation priority while allowing the exact
-  phone-call completion to join the next turn before Murph answers.
+- Preserve foreground conversation priority unconditionally. Phone-call
+  completion delivery may not delay admission of a newer conversation message.
 - Do not copy production feedback, identifiers, or private call content into
   code, tests, docs, review packets, or PR text.
 
@@ -59,11 +59,11 @@ Updated: 2026-08-15
    the existing bounded result projection plus operational status.
 2. Risk: a result and a new inbound message produce duplicate replies.
    Mitigation: retain the existing deterministic notification idempotency key
-   and drain the exact result through the existing notification path before
-   admitting later conversation input.
+   and drain the exact result through the existing notification path after the
+   newer conversation input is admitted.
 3. Risk: notification priority starves normal conversation or maintenance.
-   Mitigation: prioritize only exact phone-call result completions and preserve
-   existing foreground and checkpoint fences.
+   Mitigation: keep result delivery in the ordinary background outbox lifecycle;
+   no result-specific foreground owner or uninterruptible checkpoint exists.
 4. Risk: deploy skew makes a new runtime operation fail unexpectedly.
    Mitigation: deploy the additive database migration, then Web, then
    Cloudflare/runner capability exposure in one contiguous cutover. New Web
@@ -81,8 +81,8 @@ Updated: 2026-08-15
 3. Expose the read-only assistant tool and update prompt/catalog guidance.
 4. Expose exact-id, member-bound, idempotent termination over the existing
    provider stop authority.
-5. Make meaningful terminal results mandatory and fold them into the next turn
-   before later user input.
+5. Make meaningful terminal results mandatory without delaying later user
+   input.
 6. Run focused tests, typechecks, privacy inspection, and direct scenario proof.
 7. Commit, push, open the PR, run the required ReviewGPT stages with CI, resolve
    every accepted finding, and perform the parent final review.
@@ -133,15 +133,13 @@ Updated: 2026-08-15
   existing encrypted call-result field before delivery. A conditional write
   leaves `analyzedAt` null, preserves provider analysis that wins the race, and
   makes proactive delivery and later status reads consume one canonical truth.
-- When the foreground-only mailbox pass has already selected one exact
-  phone-call result, let that result keep its non-idempotent Telegram effect and
-  reuse the existing outbox owner. Pre-claim only that selected effect, commit
-  the resulting `sending` state in an actual workspace snapshot, run the fixed
-  destination provider call, and commit the terminal or retryable outcome in a
-  follow-up snapshot before admitting newer conversation input. Continue
-  filtering non-idempotent effects for every other foreground-only preparation,
-  and collect only the selected result's delivery intent so unrelated pending
-  outbox work remains deferred.
+- Never let a phone-call result block foreground input. Leave the result queued
+  when a conversation message is pending, then reuse the ordinary background
+  outbox lifecycle. For a selected non-idempotent result, checkpoint the
+  prepared `sending` claim before provider I/O and checkpoint its outcome
+  afterward; both checkpoints remain interruptible by newer foreground work.
+  Transport-idempotent delivery needs no extra claim barrier. No result-specific
+  runtime state, checkpoint mode, or queue owner remains.
 - Treat every accepted `call_analyzed` event as terminal even when Retell omits
   `end_timestamp`: preserve an existing provider end or persist the analysis
   time as the fallback. Publish a required deduped not-completed result when
@@ -281,6 +279,23 @@ Updated: 2026-08-15
   assistant-runtime suite passes 2,318 tests with 4 skipped across 88 files;
   package/workspace typecheck, docs drift, privacy scan, and `git diff --check`
   pass.
+- A later user-directed architecture review rejected the round-10/11
+  result-before-input barrier as incompatible with unconditional foreground
+  reply priority. The correction removes the result-specific durable-effect
+  marker, checkpoint barrier state, wake suppression, uninterruptible
+  checkpoints, and outcome-before-input rule. Pending input is admitted first;
+  an exact phone result then uses the ordinary background outbox flow. A
+  non-idempotent prepared claim still receives its replay-safety checkpoint,
+  but both that checkpoint and the ordinary outcome checkpoint can be
+  interrupted by newer input. The focused production-path proof passes for
+  Linq and Telegram, and the outer-runtime stress proof confirms foreground
+  input precedes a pending durable delivery effect while detached image work no
+  longer starves durability. Focused proof passes four assistant-phase cases,
+  both transport production-path cases, the outer-runtime ordering case, and
+  four route-restoration cases. Assistant-runtime typecheck, docs drift,
+  privacy inspection, and `git diff --check` pass. A two-worker aggregate
+  assistant-runtime run remained silent before the Vitest banner and was ended
+  after the bounded wait; it produced no aggregate test result.
 - Final ReviewGPT round 12 found that a nonterminal stop could return
   `start_pending` after swallowing a reconciliation-start failure, while a
   compare-and-set loser could return the same state without attempting a start.
@@ -324,12 +339,32 @@ Updated: 2026-08-15
   phone/planning tests, and 255 assistant-runtime callback tests. All 14
   phone-call Web files pass 245 tests, and Web, assistant-engine, and
   assistant-runtime typechecks pass.
+- A fourth exact-head round-12 full audit ran 37 minutes 17 seconds and found
+  one review-induced retry gap in the preceding route-authority correction.
+  The Web owner correctly denies a changed direct route with
+  `HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED`, but its generic non-retryable
+  classification caused the runtime outbox to terminalize a mandatory call
+  result or stop settlement before provider entry. The parent independently
+  confirmed and accepted the finding. The runtime now reclassifies only that
+  exact denial for an existing `phone-call-result:*` delivery as a
+  pre-provider retryable failure, preserves the frozen target, and never falls
+  back or switches channels; other notification classes retain their terminal
+  denial semantics. Focused Telegram and Linq coverage proves both result keys
+  remain provider-free while revoked, deliver exactly once after the exact
+  route is restored, and leave ordinary notifications unchanged. All 259
+  assistant-runtime callback tests, 56 adjacent system-mailbox tests, the
+  assistant-runtime typecheck, and docs drift pass. The Vonneumann response
+  again completed with the exact ZIP but reported
+  `MODEL_CONFIRMATION: UNKNOWN` and `gpt-5-6-pro`, so it remains useful finding
+  evidence rather than the required Sol gate.
 - Corrected-head product-experience revalidation finds the implementation is
   again the smallest complete experience for the incident: status is durable,
   stop state is truthful, fallback outcomes are canonical, and an exact result
   reaches the member before Murph admits a newer message on both supported
-  direct transports. The remaining evidence gap is live-provider timing, not a
-  known product-flow gap.
+  direct transports. A temporary route revocation now blocks disclosure and
+  preserves the exact deterministic delivery for retry after authorization is
+  restored. The remaining evidence gap is live-provider timing, not a known
+  product-flow gap.
 - Remaining gates: commit and push the remediation head, exact-head CI, final
   ReviewGPT `ROUND_OUTCOME: PASS`, clean merge-tree proof, and plan closure.
 - Direct proof: a synthetic call result arrives while one hosted invocation is

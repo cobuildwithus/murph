@@ -8828,6 +8828,119 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      idempotencyKey: "phone-call-result:hpc_route_restored",
+      notification: "result",
+    },
+    {
+      idempotencyKey: "phone-call-result:hpc_route_restored:stop-settled",
+      notification: "stop settlement",
+    },
+  ])("retries a direct Telegram phone-call $notification after its exact route is restored", async ({
+    idempotencyKey,
+  }) => {
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_direct_123",
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: routeAuthority.threadId,
+      idempotencyKey,
+      threadId: "hid_telegram_direct_123",
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: null,
+        deliveryIdempotencyKey: idempotencyKey,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    let routeAuthorized = false;
+    const routeRevoked = Object.assign(new Error("route revoked"), {
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      context: { retryable: false, status: 403 },
+      retryable: false,
+    });
+    const assertExternalThreadRouteAuthority = vi.fn(async () => {
+      if (!routeAuthorized) {
+        throw routeRevoked;
+      }
+    });
+    mocks.sendTelegramMessage.mockResolvedValue({
+      providerMessageId: "provider_123",
+      target: routeAuthority.threadId,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
+      const delivery = await dependencies.sendTelegram({
+        idempotencyKey,
+        message: "Private phone-call result.",
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          idempotencyKey,
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+        }),
+        status: "sent",
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+
+    routeAuthorized = true;
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        target: routeAuthority.threadId,
+      }),
+    ]);
+
+    expect(assertExternalThreadRouteAuthority).toHaveBeenCalledTimes(2);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("revalidates the exact Telegram group route immediately before provider entry", async () => {
     const routeAuthority = {
       channel: "telegram" as const,
@@ -10139,6 +10252,8 @@ describe("hosted runtime callbacks", () => {
     );
     const routeRevoked = Object.assign(new Error("route revoked"), {
       code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      context: { retryable: false, status: 403 },
+      retryable: false,
     });
     const assertExternalThreadRouteAuthority = vi.fn()
       .mockRejectedValueOnce(routeRevoked);
@@ -10168,6 +10283,7 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     })).rejects.toMatchObject({
       code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      retryable: false,
     });
 
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
@@ -15559,6 +15675,123 @@ describe("hosted runtime callbacks", () => {
       { signal: null },
     );
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      idempotencyKey: "phone-call-result:hpc_linq_route_restored",
+      notification: "result",
+    },
+    {
+      idempotencyKey: "phone-call-result:hpc_linq_route_restored:stop-settled",
+      notification: "stop settlement",
+    },
+  ])("retries a direct Linq phone-call $notification after its exact route is restored", async ({
+    idempotencyKey,
+  }) => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_current",
+    };
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_phone_result_restored",
+      linqMessage: {
+        chatId: routeAuthority.threadId,
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [{ type: "text", value: "hello on the routed wake" }],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      routeAuthority,
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: routeAuthority.threadId,
+      channel: "linq",
+      explicitTarget: routeAuthority.threadId,
+      idempotencyKey,
+      transportIdempotent: true,
+    });
+    let routeAuthorized = false;
+    const routeRevoked = Object.assign(new Error("route revoked"), {
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      context: { retryable: false, status: 403 },
+      retryable: false,
+    });
+    const assertRecentInbound = vi.fn(async (request) => {
+      if (!routeAuthorized) {
+        throw routeRevoked;
+      }
+      return buildClaimedLinqEngagementResult(request);
+    });
+    mocks.sendLinqMessage.mockResolvedValue({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: routeAuthority.threadId,
+      target: routeAuthority.threadId,
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey,
+        message: "Private phone-call result.",
+        replyToMessageId: "linq_message_current",
+        target: routeAuthority.threadId,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey,
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+
+    routeAuthorized = true;
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        target: routeAuthority.threadId,
+      }),
+    ]);
+
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(3);
   });
 
   it("authorizes routed Linq sends before vault-file approval or reads", async () => {

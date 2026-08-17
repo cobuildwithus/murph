@@ -7913,7 +7913,7 @@ describe("hosted workspace runtime entrypoint", () => {
             "assistant.notification.requested:",
             "",
           );
-      const telegramPhoneResultMustOutrankPendingInput =
+      const telegramPhoneResultHasPendingInput =
         completion.label === "phone-call result"
         && transport.channel === "telegram";
       const requestId = `aask_req_${"a".repeat(64)}`;
@@ -7921,14 +7921,7 @@ describe("hosted workspace runtime entrypoint", () => {
       let assistantPhaseCalls = 0;
       let currentPhaseIsForegroundCausal = false;
       let newerPendingInputId: string | null = null;
-      let unrelatedPendingIntentId: string | null = null;
-      let unrelatedIntentStayedPendingDuringPhoneResult = false;
-      let phoneResultClaimIncludedInSnapshot = false;
-      let phoneResultClaimSnapshot:
-        Awaited<ReturnType<typeof createVaultSnapshotBundle>> | null = null;
-      let phoneResultClaimCommittedBeforeProviderDispatch = false;
       let providerDispatchWasForegroundCausal: boolean | null = null;
-      let restoredClaimVaultRoot: string | null = null;
       const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
         const method =
           init?.method
@@ -7944,23 +7937,9 @@ describe("hosted workspace runtime entrypoint", () => {
             || (transport.channel === "telegram" && url.endsWith("/sendMessage"))
           )
         ) {
-          const requestBody = typeof init?.body === "string" ? init.body : "";
-          const isUnrelatedPendingDelivery = requestBody.includes(
-            "Unrelated pending delivery.",
-          );
-          if (isUnrelatedPendingDelivery) {
-            events.push("provider.send:unrelated-pending");
-          } else {
-            providerDispatchWasForegroundCausal =
-              currentPhaseIsForegroundCausal;
-            if (telegramPhoneResultMustOutrankPendingInput) {
-              phoneResultClaimCommittedBeforeProviderDispatch =
-                phoneResultClaimCommittedBeforeProviderDispatch
-                &&
-                phoneResultClaimIncludedInSnapshot
-            }
-            events.push(`provider.send:${deliveryKey}`);
-          }
+          providerDispatchWasForegroundCausal =
+            currentPhaseIsForegroundCausal;
+          events.push(`provider.send:${deliveryKey}`);
           if (transport.channel === "telegram") {
             return new Response(
               JSON.stringify({
@@ -8060,42 +8039,18 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
           {
             async createCheckpointSnapshot(snapshotInput) {
-              let claimSnapshotForThisCheckpoint:
-                Awaited<ReturnType<typeof createVaultSnapshotBundle>> | null = null;
-              if (
-                telegramPhoneResultMustOutrankPendingInput
-                && !events.includes(`provider.send:${deliveryKey}`)
-              ) {
-                const outboxIntents =
-                  await listAssistantOutboxIntents(activeVaultRoot);
-                phoneResultClaimIncludedInSnapshot =
-                  outboxIntents.find((intent) =>
-                    intent.deliveryIdempotencyKey === deliveryKey
-                  )?.status === "sending"
-                  && outboxIntents.find((intent) =>
-                    intent.intentId === unrelatedPendingIntentId
-                  )?.status === "pending";
-                phoneResultClaimSnapshot = await createVaultSnapshotBundle({
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "telegram-phone-result-claimed.bundle.json",
-                  vaultRoot: activeVaultRoot,
-                });
-                claimSnapshotForThisCheckpoint = phoneResultClaimSnapshot;
-              }
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: claimSnapshotForThisCheckpoint?.snapshotRef
-                  ?? createBundleRef({
-                    hash:
-                      snapshotInput.reason === "idle_shutdown"
-                        ? "e".repeat(64)
-                        : "d".repeat(64),
-                    key:
-                      "users/bundles/member-synthetic/"
-                      + `${completion.label.replaceAll(" ", "-")}-${transport.channel}-real-path.bundle.json`,
-                    size: 512,
-                  }),
+                snapshotRef: createBundleRef({
+                  hash:
+                    snapshotInput.reason === "idle_shutdown"
+                      ? "e".repeat(64)
+                      : "d".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `${completion.label.replaceAll(" ", "-")}-${transport.channel}-real-path.bundle.json`,
+                  size: 512,
+                }),
               };
             },
             async importItem(item) {
@@ -8210,13 +8165,6 @@ describe("hosted workspace runtime entrypoint", () => {
                   checkpointRequests,
                   events,
                   checkpointWorkspace(request) {
-                    if (
-                      telegramPhoneResultMustOutrankPendingInput
-                      && phoneResultClaimIncludedInSnapshot
-                      && !events.includes(`provider.send:${deliveryKey}`)
-                    ) {
-                      phoneResultClaimCommittedBeforeProviderDispatch = true;
-                    }
                     return createWorkspaceState({
                       inboxMediaRetentionWakeAt:
                         request.inboxMediaRetentionWakeAt ?? null,
@@ -8306,7 +8254,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     operatorHomeRoot: input.restored.operatorHomeRoot,
                   },
                 );
-                if (telegramPhoneResultMustOutrankPendingInput) {
+                if (telegramPhoneResultHasPendingInput) {
                   newerPendingInputId =
                     await stagePendingLinqAssistantInputForMailboxItem({
                       item: createMailboxItem({
@@ -8319,20 +8267,6 @@ describe("hosted workspace runtime entrypoint", () => {
                       threadId: "thread_phone_result_newer_input",
                       vaultRoot: activeVaultRoot,
                     });
-                  const unrelatedIntent = await createAssistantOutboxIntent({
-                    channel: "telegram",
-                    dedupeToken: "unrelated-pending-delivery",
-                    deliveryTransportIdempotent: false,
-                    explicitTarget: "987654321",
-                    identityId: "telegram-bot",
-                    message: "Unrelated pending delivery.",
-                    sessionId: "session_unrelated_pending_delivery",
-                    threadId: "987654321",
-                    threadIsDirect: true,
-                    turnId: "turn_unrelated_pending_delivery",
-                    vault: activeVaultRoot,
-                  });
-                  unrelatedPendingIntentId = unrelatedIntent.intentId;
                   events.push("assistant.input:newer-accepted");
                 }
                 if (!completion.privateCompletion) {
@@ -8375,14 +8309,14 @@ describe("hosted workspace runtime entrypoint", () => {
                   await resolveHostedPendingAssistantInputWakeAt({
                     vaultRoot: activeVaultRoot,
                   });
-                if (telegramPhoneResultMustOutrankPendingInput) {
+                if (telegramPhoneResultHasPendingInput) {
                   assert.ok(pendingAssistantInputWakeAt);
                 } else {
                   assert.equal(pendingAssistantInputWakeAt, null);
                 }
               }
               if (
-                telegramPhoneResultMustOutrankPendingInput
+                telegramPhoneResultHasPendingInput
                 && assistantPhaseCalls > 2
                 && input.foregroundCausalOnly !== true
               ) {
@@ -8395,7 +8329,7 @@ describe("hosted workspace runtime entrypoint", () => {
               }
               const phaseResult = await runHostedWorkspaceAssistantPhase(input);
               if (
-                telegramPhoneResultMustOutrankPendingInput
+                telegramPhoneResultHasPendingInput
                 && assistantPhaseCalls === 2
               ) {
                 events.push(
@@ -8411,16 +8345,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push(
                   `outbox.completion.after-phase:${completionIntent.status}`,
                 );
-              }
-              if (
-                telegramPhoneResultMustOutrankPendingInput
-                && assistantPhaseCalls === 2
-                && unrelatedPendingIntentId
-              ) {
-                unrelatedIntentStayedPendingDuringPhoneResult =
-                  outboxIntents.find((intent) =>
-                    intent.intentId === unrelatedPendingIntentId
-                  )?.status === "pending";
               }
               const outboxStatuses = outboxIntents.map((intent) => intent.status);
               events.push(
@@ -8443,7 +8367,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
         const result = await withRealTimeout(
           resultPromise,
-          5_000,
+          15_000,
           () => events.join(","),
         );
         const providerEvent = `provider.send:${deliveryKey}`;
@@ -8475,10 +8399,7 @@ describe("hosted workspace runtime entrypoint", () => {
           );
         }
 
-        if (
-          transport.channel === "telegram"
-          && !telegramPhoneResultMustOutrankPendingInput
-        ) {
+        if (transport.channel === "telegram") {
           const finalIntents = await listAssistantOutboxIntents(activeVaultRoot);
           const telegramDiagnostics = JSON.stringify(
             finalIntents.map((intent) => ({
@@ -8492,18 +8413,35 @@ describe("hosted workspace runtime entrypoint", () => {
             `${events.join(",")};${telegramDiagnostics}`,
           );
           assert.equal(providerDispatchWasForegroundCausal, false);
-          assert.ok(
-            requireEventIndex(events, "outbox.after-phase:pending")
-              < requireEventIndex(events, "snapshot:idle_shutdown"),
-            events.join(","),
-          );
-          assert.ok(
-            requireEventIndex(events, "snapshot:idle_shutdown")
-              < requireEventIndex(events, providerEvent),
-            events.join(","),
-          );
+          if (telegramPhoneResultHasPendingInput) {
+            assert.ok(newerPendingInputId);
+            assert.ok(
+              requireEventIndex(events, "assistant.input:newer-lane-admitted")
+                < requireEventIndex(events, providerEvent),
+              events.join(","),
+            );
+            assert.ok(
+              requireEventIndex(events, "outbox.after-phase:sending")
+                < requireEventIndex(events, providerEvent),
+              events.join(","),
+            );
+          } else {
+            assert.ok(
+              requireEventIndex(events, "outbox.after-phase:pending")
+                < requireEventIndex(events, "snapshot:idle_shutdown"),
+              events.join(","),
+            );
+            assert.ok(
+              requireEventIndex(events, "snapshot:idle_shutdown")
+                < requireEventIndex(events, providerEvent),
+              events.join(","),
+            );
+          }
           assert.equal(finalIntents[0]?.status, "sent");
-          assert.equal(result.status, "idle");
+          assert.equal(
+            result.status,
+            telegramPhoneResultHasPendingInput ? "scheduled" : "idle",
+          );
           assert.ok(assistantPhaseCalls >= 3);
           return;
         }
@@ -8524,199 +8462,17 @@ describe("hosted workspace runtime entrypoint", () => {
             < requireEventIndex(events, "outbox.completion.after-phase:sent"),
           events.join(","),
         );
-        if (telegramPhoneResultMustOutrankPendingInput) {
-          assert.ok(
-            requireEventIndex(events, "snapshot:idle_shutdown")
-              < requireEventIndex(events, providerEvent),
-            events.join(","),
-          );
-          assert.ok(
-            requireEventIndex(events, providerEvent)
-              < events.lastIndexOf("snapshot:idle_shutdown"),
-            events.join(","),
-          );
-        } else {
-          assert.ok(
-            requireEventIndex(events, providerEvent)
-              < requireEventIndex(events, "snapshot:idle_shutdown"),
-            events.join(","),
-          );
-        }
-        if (telegramPhoneResultMustOutrankPendingInput) {
-          assert.ok(newerPendingInputId);
-          assert.ok(unrelatedPendingIntentId);
-          assert.equal(
-            phoneResultClaimCommittedBeforeProviderDispatch,
-            true,
-          );
-          assert.equal(
-            checkpointRequests.at(-1)?.redactedStatus
-              ?.hostedOutboxDeliverySent,
-            1,
-          );
-          assert.equal(unrelatedIntentStayedPendingDuringPhoneResult, true);
-          assert.ok(
-            requireEventIndex(events, providerEvent)
-              < requireEventIndex(events, "assistant.input:newer-lane-admitted"),
-            events.join(","),
-          );
-          if (events.includes("provider.send:unrelated-pending")) {
-            assert.ok(
-              requireEventIndex(events, providerEvent)
-                < requireEventIndex(events, "provider.send:unrelated-pending"),
-              events.join(","),
-            );
-          }
-          const claimedSnapshot = phoneResultClaimSnapshot as
-            Awaited<ReturnType<typeof createVaultSnapshotBundle>> | null;
-          assert.ok(claimedSnapshot);
-          const claimRestoreWorkspaceRoot = await mkdtemp(
-            path.join(tmpdir(), "murph-workspace-entrypoint-claim-restore-"),
-          );
-          restoredClaimVaultRoot = claimRestoreWorkspaceRoot;
-          const claimRestoreVaultRoot = path.join(
-            claimRestoreWorkspaceRoot,
-            "vault",
-          );
-          const restoredProviderDeliveryBodies: string[] = [];
-          const restoredProviderFetch = vi.fn<typeof fetch>(async (_request, init) => {
-            restoredProviderDeliveryBodies.push(
-              typeof init?.body === "string" ? init.body : "",
-            );
-            return new Response(
-              JSON.stringify({
-                ok: true,
-                result: { message_id: 456 },
-              }),
-              {
-                headers: { "content-type": "application/json" },
-                status: 200,
-              },
-            );
-          });
-          const restoredCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-          const restoredEvents: string[] = [];
-          const restoredWorkspace = createWorkspaceState({
-            snapshotRef: claimedSnapshot.snapshotRef,
-            version: "1",
-          });
-          const restoredArtifactBytesByHash = new Map([
-            [claimedSnapshot.hash, claimedSnapshot.bytes],
-          ]);
-          await restoreHostedWorkspaceRuntimeJobWorkspace({
-            platform: createPlatform({
-              artifactBytesByHash: restoredArtifactBytesByHash,
-              mailboxPort: createMailboxPort({ events: [], items: [] }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests: [],
-                events: [],
-                workspace: restoredWorkspace,
-              }),
-            }),
-            vaultRoot: claimRestoreVaultRoot,
-            workspace: restoredWorkspace,
-          });
-          const restoredClaimIntents = await listAssistantOutboxIntents(
-            claimRestoreVaultRoot,
-          );
-          assert.equal(
-            restoredClaimIntents.find((intent) =>
-              intent.deliveryIdempotencyKey === deliveryKey
-            )?.status,
-            "sending",
-          );
-          assert.equal(
-            restoredClaimIntents.find((intent) =>
-              intent.intentId === unrelatedPendingIntentId
-            )?.status,
-            "pending",
-          );
-          await runHostedWorkspaceRuntimeJobInProcess(
-            createWorkspaceRuntimeJobInput({
-              platformEnv: {
-                TELEGRAM_BOT_TOKEN: "synthetic-telegram-token",
-              },
-              resolvedConfig: {
-                channelCapabilities: {
-                  emailSendReady: false,
-                  telegramBotConfigured: true,
-                },
-                deviceSync: null,
-                managedAutoReplyChannels: [{
-                  capabilityReady: true,
-                  channel: "telegram",
-                  memberChannel: "telegram",
-                }],
-              },
-              request: {
-                attemptId:
-                  "attempt_synthetic_telegram_phone_result_claim_restore",
-                idleCheckpointDelayMs: 1,
-                leaseGeneration: "8",
-                userId: TEST_USER_ID,
-                workspaceVersion: restoredWorkspace.version,
-              },
-            }),
-            {
-              async createCheckpointSnapshot() {
-                return {
-                  snapshotRef: createBundleRef({
-                    hash: "c".repeat(64),
-                    key:
-                      "users/bundles/member-synthetic/"
-                      + "telegram-phone-result-restored.bundle.json",
-                    size: 512,
-                  }),
-                };
-              },
-              async importItem() {
-                throw new Error(
-                  "Cold claim restore must not need new mailbox input.",
-                );
-              },
-              platform: {
-                ...createPlatform({
-                  artifactBytesByHash: restoredArtifactBytesByHash,
-                  mailboxPort: createMailboxPort({
-                    events: restoredEvents,
-                    items: [],
-                  }),
-                  workspacePort: createWorkspacePort({
-                    checkpointRequests: restoredCheckpointRequests,
-                    events: restoredEvents,
-                    workspace: restoredWorkspace,
-                  }),
-                }),
-                providerFetch: restoredProviderFetch,
-              },
-              vaultRoot: claimRestoreVaultRoot,
-            },
-          );
-          const restoredIntents = await listAssistantOutboxIntents(
-            claimRestoreVaultRoot,
-          );
-          assert.ok(
-            restoredProviderDeliveryBodies.every((body) =>
-              !body.includes("Mission complete.")
-            ),
-            JSON.stringify(restoredProviderDeliveryBodies),
-          );
-          assert.equal(
-            restoredIntents.find((intent) =>
-              intent.deliveryIdempotencyKey === deliveryKey
-            )?.status,
-            "sending",
-          );
-        }
+        assert.ok(
+          requireEventIndex(events, providerEvent)
+            < requireEventIndex(events, "snapshot:idle_shutdown"),
+          events.join(","),
+        );
         assert.ok(assistantPhaseCalls >= 3);
       } finally {
         privateAskExecutionRelease.resolve();
         privateProductionDelayShutdown.abort(new Error("Test cleanup."));
         if (completion.privateCompletion) {
           vi.useRealTimers();
-        }
-        if (restoredClaimVaultRoot) {
-          await removeTempRoot(restoredClaimVaultRoot);
         }
         await removeTempRoot(vaultRoot);
       }
@@ -23942,7 +23698,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("does not let active image work starve a foreground causal delivery barrier", async () => {
+  test("admits foreground input before a pending durable delivery effect", async () => {
     for (const shutdownDuringDelivery of [false, true]) {
       const scenario = shutdownDuringDelivery ? "shutdown" : "conversation";
       const vaultRoot = await mkdtemp(
@@ -23970,19 +23726,16 @@ describe("hosted workspace runtime entrypoint", () => {
 
       try {
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-        const foregroundCausalDelivery = Object.assign(
-          async () => {
-            events.push("foreground-delivery");
-            assert.equal(imageGenerationCompleted, false);
-            if (shutdownDuringDelivery) {
-              shutdownController.abort(
-                new DOMException("Synthetic container SIGTERM.", "AbortError"),
-              );
-            }
-            return { requiresFollowUpCheckpoint: true };
-          },
-          { foregroundCausalDelivery: true as const },
-        );
+        const pendingDurableDelivery = async () => {
+          events.push("durable-delivery");
+          assert.equal(imageGenerationCompleted, false);
+          if (shutdownDuringDelivery) {
+            shutdownController.abort(
+              new DOMException("Synthetic container SIGTERM.", "AbortError"),
+            );
+          }
+          return { requiresFollowUpCheckpoint: true };
+        };
 
         resultPromise = runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
@@ -24126,7 +23879,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 originInputServiced = true;
                 return {
                   afterCheckpoint: async () => ({
-                    afterDurableCheckpoint: foregroundCausalDelivery,
+                    afterDurableCheckpoint: pendingDurableDelivery,
                     checkpointReason: "outbox_sending" as const,
                   }),
                   checkpointReason: "outbox_sending" as const,
@@ -24253,30 +24006,26 @@ describe("hosted workspace runtime entrypoint", () => {
             < requireEventIndex(events, "checkpoint:1"),
           events.join(","),
         );
-        assert.ok(
-          requireEventIndex(events, "checkpoint:1")
-            < requireEventIndex(events, "foreground-delivery"),
-          events.join(","),
-        );
-        assert.ok(
-          requireEventIndex(events, "foreground-delivery")
-            < requireEventIndex(events, "snapshot:2"),
-          events.join(","),
-        );
-        assert.ok(
-          requireEventIndex(events, "snapshot:2")
-            < requireEventIndex(events, "checkpoint:2"),
-          events.join(","),
-        );
-        if (!shutdownDuringDelivery) {
+        if (shutdownDuringDelivery) {
           assert.ok(
-            requireEventIndex(events, "checkpoint:2")
+            requireEventIndex(events, "checkpoint:1")
+              < requireEventIndex(events, "durable-delivery"),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, "durable-delivery")
+              < requireEventIndex(events, "snapshot:2"),
+            events.join(","),
+          );
+        } else {
+          assert.ok(
+            requireEventIndex(events, "checkpoint:1")
               < requireEventIndex(events, "newer-input-admitted"),
             events.join(","),
           );
           assert.ok(
             requireEventIndex(events, "newer-input-admitted")
-              < requireEventIndex(events, "image-completion-admitted"),
+              < requireEventIndex(events, "durable-delivery"),
             events.join(","),
           );
         }

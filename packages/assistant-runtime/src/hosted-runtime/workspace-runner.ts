@@ -328,12 +328,6 @@ export interface HostedWorkspaceDurableCheckpointEffect {
     | void;
   /** Consume the invocation-owned projection result; use the fallback wake only when none exists. */
   readonly requiresVaultShareProjectionResult?: boolean;
-  /**
-   * Run immediately after the claim checkpoint and before newly queued
-   * foreground input. Reserved for an already-selected fixed-destination
-   * delivery whose non-idempotent provider call cannot precede durability.
-   */
-  readonly foregroundCausalDelivery?: true;
   readonly vaultShareProjectionFailureWake?:
     HostedWorkspaceDurableCheckpointEffectResult;
 }
