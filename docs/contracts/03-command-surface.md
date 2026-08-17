@@ -97,7 +97,7 @@ vault-cli recipe show <id> --vault <path> [--request-id <id>]
 vault-cli recipe list --vault <path> [--status draft|saved|archived] [--limit <n>] [--request-id <id>]
 vault-cli event scaffold --vault <path> --kind <kind> [--request-id <id>]
 vault-cli event import-json --vault <path> --input @file.json [--request-id <id>]
-vault-cli event import-jsonl --vault <path> --input @file.jsonl|- [--apply] [--request-id <id>]
+vault-cli event import-jsonl --vault <path> --input @file.jsonl|- [--source-raw-ref-once <raw/path>] [--apply] [--request-id <id>]
 vault-cli event payload-schema --for import-jsonl --kind <kind>
 vault-cli event note add --vault <path> --note <text> [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event symptom add --vault <path> --symptom <name> --severity <0-10> [--body-region <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
@@ -111,7 +111,8 @@ vault-cli event exposure add --vault <path> --exposure-type <type> --substance <
 vault-cli event edit <id> --vault <path> [--kind <kind>] [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli event show <id> --vault <path> [--request-id <id>]
 vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag> ...] [--experiment <slug>] [--limit <n>] [--request-id <id>]
-vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--request-id <id>]
+vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--reuse-exact] [--request-id <id>]
+vault-cli document workout-import-status <raw-ref> --vault <path> [--request-id <id>]
 vault-cli document edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli document show <id> --vault <path> [--request-id <id>]
 vault-cli document list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
@@ -277,6 +278,23 @@ supersedes in place. Explicit retraction decisions exist only on the decisions
 surface, not `event import-jsonl`. Other same-identity rows are skipped when
 identical or superseded in place, while rows without `externalRef` intentionally
 append a fresh event every time the same file is applied.
+`--source-raw-ref-once` is the unfamiliar-workout source guard. Every row must
+be an external-reference-free `activity_session` that references the named raw source. Under the
+canonical write lock, any historical workout reference to that source rejects
+the whole batch without writes. The apply boundary also requires the current
+live source document to still own the exact raw attachment, so deleting the
+source during transformation or dry-run rejects the batch before append;
+otherwise the batch follows the ordinary append-only rules. `document
+workout-import-status` projects that same
+immutable event-ledger relationship so a later assistant turn can stop before
+regenerating a scratch transform. Edited and deleted workouts still count as a
+completed source import.
+
+`document import --reuse-exact` reuses only a verified live exact document. If
+any verified exact identity is deleted, it fences the complete byte-equivalent
+set and fails with a typed conflict without writing, minting, or adopting a
+replacement raw identity. Ordinary document import without `--reuse-exact`
+retains its explicit create-new behavior.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
@@ -469,8 +487,16 @@ The examples below are the full successful plain `--format json` response bodies
 
 ### `document import`
 
+Document import creates a new immutable document by default. `--reuse-exact`
+instead hashes the source and reuses one prior live document only after its raw
+artifact and manifest independently verify the same bytes. A reuse returns
+`created: false` and writes no document event, raw artifact, manifest, or audit
+row. Deleted documents are never revived or reused; different bytes create a
+new document normally.
+
 ```json
 {
+  "created": true,
   "vault": "<path>",
   "sourceFile": "<path>",
   "rawFile": "<path>",
@@ -564,6 +590,14 @@ Exact-file unit or provider corrections use a newer mapping revision. A provider
 Current Strong exports may include `W`, `D`, and `F` set tags, rest-timer metadata rows, unitless weight and distance values, timezone-less timestamps, and text fields with an unquoted comma. The importer preserves the three set tags, omits rest-timer metadata with an aggregate warning, uses the vault timezone, backfills the first non-empty session/exercise metadata across later rows, and repairs only a uniquely supported current-header row shape. Unit-bearing `Distance Km`, `Distance Meters`, and embedded-unit values preserve each set distance; the canonical session distance is the sum of accepted positive set distances. Plain positive distance still requires `--distance-unit`. Rows that cannot be mapped without guessing block the structured write. A missing, malformed, or out-of-range duration is omitted with a warning while its otherwise valid sets remain importable.
 
 An explicit recognized `--source strong|hevy` selects that parser dialect. Without it, only the exact recognized Strong signature or Hevy-specific markers select a provider. Headers shared by both formats leave inspection non-importable with an instruction to choose Strong or Hevy; they are never guessed as Strong. If an explicit source conflicts with unambiguous provider-specific headers, inspection and import fail before raw or canonical persistence. `--store-raw-only` relaxes row and unit importability, but it uses the same provider-recognition gate and does not persist an ambiguous export under a guessed label. A later structured import reuses an unattached raw-only batch only when its provider, delimiter, timezone, weight unit, and distance unit exactly match the final plan; confirmed provenance otherwise gets a new immutable batch, and canonical events attach only to that batch.
+
+### Unfamiliar workout CSV layouts
+
+The `workout-csv-import` assistant skill owns both the dedicated and unfamiliar-layout paths without adding its detailed workflow to every conversation. It may adapt a workout CSV that the Strong/Hevy planner does not recognize by using local Python's standard-library CSV parser, but Python remains a transformation layer rather than a vault writer. The dedicated planner always runs first; a recognized file with an unresolved provider or unit requirement must satisfy that gate instead of bypassing it through the generic path.
+
+For a genuinely unfamiliar layout, the assistant first preserves the CSV through `document import --reuse-exact`, then runs `document workout-import-status` for its returned raw reference. A successful document-import audit is the recreation authority: it records one content-derived `raw-source-v1` receipt followed by the owning document and event ids. That owner selects the document lifecycle row, which in turn derives the one manifest and raw artifact that must verify the same bytes. The guarded batch reuses the receipt in its existing completion audit. A missing or invalid selected event, manifest, artifact, owner relationship, or digest fails closed; a surviving authenticated completion without its source owner is also damaged rather than source absence. Only when neither a source owner nor an authenticated completion exists may exact reuse create a source identity. Deleting every authoritative audit receipt is destruction of recreation identity and is outside the supported recovery contract; raw and event projections are not a parallel authority. If any historical workout already references that source, the assistant stops before regenerating Python or JSONL. Otherwise it reads the current `activity_session` row contract from `event payload-schema --for import-jsonl`, maps the complete source into one temporary JSONL batch with one row per grouped workout and a reference to the preserved raw artifact, and performs one `event import-jsonl --source-raw-ref-once <raw-ref>` dry run followed by one apply of the byte-identical file. The source guard is checked again atomically under the canonical write lock, preventing concurrent first attempts from both landing and rejecting a source document deleted during transformation or dry-run. The mapping must resolve grouping, timestamps and timezone, required duration, units, and exercise/set meaning without guessing. Offsetless wall times with a known IANA timezone use Python's standard-library `zoneinfo`; ambiguous or nonexistent daylight-saving times stop before write for one targeted clarification. Assistant-facing discussion stays bounded to mappings, choices, warnings, and aggregate counts rather than source rows or per-set tool calls.
+
+The generic transform does not invent `externalRef` identity. Exact-artifact completion derives from the content receipt shared by the source-owner and guarded-batch audits, authenticated against immutable workout-to-raw provenance, not from reproducing scratch transformer choices across turns. A refreshed export with different bytes is a new source and does not inherit provider correction/edit/deletion semantics; Strong and Hevy retain those richer semantics. The assistant never blindly retries an ambiguous apply. When the apply process definitely returns without a trusted receipt and the current turn retains the raw reference plus byte-identical JSONL, the assistant verifies the saved digest and immediately reruns `workout-import-status`: `completed` triggers bounded canonical readback with no second apply, `partial_conflict` stops for explicit recovery, and `not_imported` permits exactly one recovery apply of the same verified bytes. Unknown child termination, changed bytes, unavailable status, or an untrusted canonical lock remains unresolved and must not retry. A later-turn status check is reserved for actual turn or workspace loss. At most one canonical apply may succeed, and every confirmed result receives a bounded canonical read. Temporary scripts and JSONL files remain scratch and do not count as durable import state.
 
 ### `workout format save`
 

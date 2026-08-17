@@ -88,6 +88,20 @@ describe('assistant auto-reply exact route state', () => {
       }),
       deliveryTarget: 'serialized-email-target-a',
     })).digest).not.toBe(emailInputA.digest)
+    expect(resolveAssistantAutoReplyInputExactRoute({
+      conversation: createConversation({
+        actorId: null,
+        source: 'email',
+        threadIsDirect: true,
+      }),
+      deliveryTarget: 'serialized-email-target-a',
+    })).toBeNull()
+    expect(resolveAssistantAutoReplyOutboxExactRoute(createOutboxIntent({
+      actorId: null,
+      channel: 'email',
+      target: 'serialized-email-target-c',
+      threadIsDirect: true,
+    }))).toBeNull()
 
     const telegramRoute = requireRoute(resolveAssistantAutoReplyInputExactRoute({
       conversation: createConversation({ source: 'telegram' }),
@@ -97,10 +111,29 @@ describe('assistant auto-reply exact route state', () => {
       conversation: createConversation({ source: 'telegram' }),
       deliveryTarget: 'telegram-target-2',
     })).digest).not.toBe(telegramRoute.digest)
+    const actorlessDirectTelegramInput = requireRoute(
+      resolveAssistantAutoReplyInputExactRoute({
+        conversation: createConversation({
+          actorId: null,
+          source: 'telegram',
+        }),
+        deliveryTarget: 'telegram-target-1',
+      }),
+    )
+    const actorlessDirectTelegramOutbox = requireRoute(
+      resolveAssistantAutoReplyOutboxExactRoute(createOutboxIntent({
+        actorId: null,
+        channel: 'telegram',
+        target: 'telegram-target-1',
+      })),
+    )
+    expect(actorlessDirectTelegramOutbox.digest)
+      .toBe(actorlessDirectTelegramInput.digest)
     expect(resolveAssistantAutoReplyInputExactRoute({
       conversation: createConversation({
         actorId: null,
         source: 'telegram',
+        threadIsDirect: false,
       }),
       deliveryTarget: 'telegram-target-1',
     })).toBeNull()
@@ -108,6 +141,21 @@ describe('assistant auto-reply exact route state', () => {
       actorId: null,
       channel: 'telegram',
       target: 'telegram-target-1',
+      threadIsDirect: false,
+    }))).toBeNull()
+    expect(resolveAssistantAutoReplyInputExactRoute({
+      conversation: createConversation({
+        actorId: null,
+        source: 'telegram',
+        threadIsDirect: null,
+      }),
+      deliveryTarget: 'telegram-target-1',
+    })).toBeNull()
+    expect(resolveAssistantAutoReplyOutboxExactRoute(createOutboxIntent({
+      actorId: null,
+      channel: 'telegram',
+      target: 'telegram-target-1',
+      threadIsDirect: null,
     }))).toBeNull()
     expect(resolveAssistantAutoReplyOutboxExactRoute(createOutboxIntent({
       channel: 'linq',
@@ -1419,6 +1467,7 @@ function createOutboxIntent(input: {
   target?: string
   targetKind?: 'explicit' | 'participant' | 'thread'
   threadId?: string | null
+  threadIsDirect?: boolean | null
 } = {}): AssistantOutboxIntent {
   const channel = input.channel ?? 'email'
   const intentId = input.intentId ?? 'intent-default'
@@ -1445,7 +1494,9 @@ function createOutboxIntent(input: {
       : input.identityId,
     actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
     threadId: input.threadId === undefined ? 'thread-1' : input.threadId,
-    threadIsDirect: true,
+    threadIsDirect: input.threadIsDirect === undefined
+      ? true
+      : input.threadIsDirect,
     bindingDelivery: null,
     explicitTarget: target,
     delivery: {

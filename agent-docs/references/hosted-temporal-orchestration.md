@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-11
+Last verified: 2026-08-16
 
 ## Decision
 
@@ -187,7 +187,9 @@ the owning marker is durable, then represented as a bounded `device-sync.wake`
 mailbox handoff keyed by connection and reconcile timestamp. Dirty webhook
 freshness is separate: web persists dirty state and appends one deterministic
 `device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
-selected by a global scheduled sweep. Historical `runtime.mailbox-lag-observed`
+selected by a global scheduled sweep. The existing shared mailbox-handoff sweep
+may re-signal one exact unconsumed `device-sync.wake` pointer per user; it reads
+mailbox and lane-watermark truth, not dirty rows. Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
 rows for drain compatibility, but web no longer produces them.
 
@@ -592,8 +594,9 @@ The hard-cut architecture is accepted when:
   sleeps/retries.
 - Temporal has one global due-reconcile device-sync scheduled wakes Schedule that
   starts a short-lived reconciler workflow whose web command appends bounded
-  `device-sync.wake` handoffs and re-signals bounded, already-durable preference
-  and queued Clinical Records mailbox candidates through one shared sweep. It
+  `device-sync.wake` handoffs and re-signals bounded, already-durable
+  device-sync, preference, runtime-control, and queued Clinical Records mailbox
+  candidates through one shared sweep. It
   selects at most one exact pending item per user ahead of its lane watermark.
   Clinical recovery does not create a second run, wake, receipt, or generation.
   There is no Vercel device-sync dirty-sweeper cron cadence and no

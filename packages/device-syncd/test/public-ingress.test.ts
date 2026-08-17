@@ -1869,9 +1869,10 @@ test("public ingress completes seeded external-link callbacks after mutable webh
   assert.equal(Object.values(callbackStateMetadata ?? {}).includes(completed.account.id), false);
 });
 
-test("public ingress keeps pending external-link accounts inert until callback confirmation", async () => {
+test("public ingress keeps pending external-link accounts inert unless runtime owns exact-source admission", async () => {
   const store = new InMemoryPublicIngressStore();
   let acceptedCalls = 0;
+  let deferSourceAdmission = false;
   const provider = createFakeProvider({
     provider: "junction",
     credentialPolicy: {
@@ -1925,9 +1926,11 @@ test("public ingress keeps pending external-link accounts inert until callback c
     },
     async verifyAndParseWebhook() {
       return {
+        dataSourceProviderSlug: "garmin",
         externalAccountId: "external-account-1",
         eventType: "daily.data.sleep.created",
         traceId: "pending-link-trace",
+        sourceProviderSlug: "garmin",
         jobs: [],
       };
     },
@@ -1937,15 +1940,48 @@ test("public ingress keeps pending external-link accounts inert until callback c
     registry: createDeviceSyncRegistry([provider]),
     store,
     hooks: {
-      onWebhookAccepted({ account, claimToken, traceId }) {
+      onConnectionSourceObserved() {
+        return deferSourceAdmission
+          ? { sourceAdmissionDeferred: true as const }
+          : undefined;
+      },
+      onWebhookAccepted({ account, claimToken, sourceAdmissionDeferred, traceId }) {
         acceptedCalls += 1;
+        assert.equal(sourceAdmissionDeferred, true);
+        const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+          connectionId: account.id,
+          sourceProviderSlug: "garmin",
+        });
+        assert.ok(sourceInstanceKey);
+        store.upsertConnectionSource({
+          connectionId: account.id,
+          sourceInstanceKey,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+          lastSeenAt: "2026-04-10T12:00:00.000Z",
+        });
+        store.upsertConnection({
+          connectedAt: account.connectedAt,
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          externalAccountId: account.externalAccountId,
+          existingAccountPolicy: "replace",
+          ownerId: "<REDACTED_OWNER_ID>",
+          provider: account.provider,
+          setupExpiresAt: null,
+          setupPhase: "source_confirmed",
+          status: "active",
+        });
         return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
-  const begin = await ingress.startConnection({
+  await ingress.startConnection({
     ownerId: "<REDACTED_OWNER_ID>",
     provider: "junction",
+    sourceProviderSlug: "garmin",
   });
   const pending = store.getConnectionByExternalAccount("junction", "external-account-1");
 
@@ -1968,25 +2004,46 @@ test("public ingress keeps pending external-link accounts inert until callback c
     null,
   );
 
-  const completed = await ingress.handleConnectionCallback({
-    expectedOwnerId: "<REDACTED_OWNER_ID>",
-    provider: "junction",
-    query: new URLSearchParams({
-      murph_state: begin.state,
-      result: "success",
-    }),
+  const deferredWithoutOwner = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+    hooks: {
+      onConnectionSourceObserved() {
+        return { sourceAdmissionDeferred: true };
+      },
+    },
   });
-  const retried = await ingress.handleWebhook(
+  await assert.rejects(
+    () => deferredWithoutOwner.handleWebhook("junction", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.retryable === true,
+  );
+
+  deferSourceAdmission = true;
+  const recovered = await ingress.handleWebhook(
     "junction",
     new Headers(),
     Buffer.from("{}"),
   );
 
-  assert.equal(completed.account.setupPhase, "source_confirmed");
-  assert.equal(retried.accepted, true);
+  assert.equal(recovered.accepted, true);
   assert.equal(acceptedCalls, 1);
-  assert.equal(store.claimWebhookTraceCalls, 2);
+  assert.equal(store.claimWebhookTraceCalls, 3);
   assert.equal(store.completedWebhookTraceCalls, 1);
+  assert.equal(
+    store.getConnectionByExternalAccount("junction", "external-account-1")?.setupPhase,
+    "source_confirmed",
+  );
+  assert.equal(
+    store.listConnectionSources({
+      connectionId: pending?.id ?? "",
+      sourceProviderSlug: "garmin",
+    })[0]?.status,
+    "connected",
+  );
 });
 
 test("public ingress rejects external-link callbacks that do not match the seeded account", async () => {

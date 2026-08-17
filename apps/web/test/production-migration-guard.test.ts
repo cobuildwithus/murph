@@ -44,6 +44,7 @@ import {
   normalizeHostedWebMigrationDatabaseUrl,
   runHostedWebPrismaMigrateDeploy,
   resolveHostedWebMigrationDatabaseUrl,
+  type HostedWebMigrationEnvironment,
 } from "../scripts/run-prisma-migrate-deploy";
 
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
@@ -1542,7 +1543,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       vercelJson.buildCommand,
-      "pnpm release:production:migrate && MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS=1 pnpm build",
+      "sh scripts/vercel-build.sh",
     );
     assert.equal(scripts["migrate:production:prebuild"], undefined);
     assert.equal(

@@ -3,7 +3,11 @@
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
-import { HostedAccountProviderAccessRemovalConfirmation } from "@/src/components/settings/hosted-data-privacy-settings";
+import {
+  HostedAccountDeletionErrorAlert,
+  HostedAccountProviderAccessRemovalConfirmation,
+} from "@/src/components/settings/hosted-data-privacy-settings";
+import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE } from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import {
   HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
@@ -12,25 +16,24 @@ import {
 } from "@/src/lib/hosted-privacy/account-data-shared";
 
 /**
- * Exceptional confirmation states of the delete-account dialog: maintenance,
- * an OAuth callback whose provider-side result is no longer knowable, and a
- * connected-app setup that still owns its completion window.
+ * Exceptional confirmation states of the delete-account dialog: a concurrent
+ * billing change, maintenance, an OAuth callback whose provider-side result is
+ * no longer knowable, and a connected-app setup that still owns its completion
+ * window.
  *
  * What this frame proves: the exact sentence a member reads, and that it fits
  * its container at desktop and mobile widths. The sentence is imported from the
  * same constant the route returns, so the copy cannot drift.
  *
- * What it does not prove: this reproduces the dialog's markup rather than
- * mounting the shipped one, so it is not evidence about focus order, the close
- * affordance, or constrained-height scrolling. Those behaviours come from the
- * Dialog primitives around the real component and can only be verified against
- * a running /settings. The arrival path -- declined at the sensitive-action
- * challenge before any passkey approval or browser-vault teardown -- is proven
- * by the route and component tests.
+ * What it does not prove: this reproduces the dialog shell rather than mounting
+ * the stateful shipped flow, so it is not evidence about focus order, the close
+ * affordance, or constrained-height scrolling. It does mount the production
+ * error alert used by /settings. The arrival and retry paths are proven by the
+ * route and component tests.
  *
  * Once the OC buckets are retired, delete only the temporary maintenance copy
- * and frames. Keep the durable provider and connected-app recovery sections in
- * the catalog.
+ * and frames. Keep the durable billing, provider, and connected-app recovery
+ * sections in the catalog.
  */
 export function AccountDeletionMaintenanceStudy() {
   return (
@@ -40,29 +43,66 @@ export function AccountDeletionMaintenanceStudy() {
       id="account-deletion-maintenance"
     >
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-        What a member sees in <code>/settings</code> if they try to delete their
-        account during the storage-migration maintenance window. Nothing has been
-        started: no passkey prompt, no browser-vault teardown, and their
-        sensitive-action authorization is unspent. The message names no return
-        time, because the window can outlast any duration we could promise. These
-        frames reproduce the dialog to show the copy and its containment; focus,
-        close, and scroll behaviour belong to the real dialog in{" "}
-        <code>/settings</code>.
+        Recoverable delete-account conflicts in <code>/settings</code>. A billing
+        change keeps the dialog, typed confirmation, and retry action in place.
+        Storage maintenance declines before the deletion starts. These frames
+        use the production error alert to prove its copy and containment; focus,
+        close, and scroll behaviour belong to the real dialog.
       </p>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <DialogFrame label="Desktop" width="max-w-md">
-          <AccountDeletionMessageDialogBody
-            id="design-maintenance-desktop"
-            message={HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE}
-          />
-        </DialogFrame>
-        <DialogFrame label="Mobile · 390px" width="max-w-[390px]">
-          <AccountDeletionMessageDialogBody
-            id="design-maintenance-mobile"
-            message={HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE}
-          />
-        </DialogFrame>
+      <div
+        className="flex flex-col gap-4"
+        data-design-state="stripe-effect-pending"
+      >
+        <div className="max-w-2xl space-y-1">
+          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+            Billing change in progress
+          </h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            The member can retry from the same confirmation state after the
+            in-flight billing change finishes.
+          </p>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div data-design-proof="stripe-effect-pending-desktop">
+            <DialogFrame label="Desktop" width="max-w-md">
+              <AccountDeletionMessageDialogBody
+                id="design-stripe-effect-pending-desktop"
+                message={HOSTED_STRIPE_EFFECT_PENDING_MESSAGE}
+              />
+            </DialogFrame>
+          </div>
+          <div data-design-proof="stripe-effect-pending-mobile">
+            <DialogFrame label="Mobile · 390px" width="max-w-[390px]">
+              <AccountDeletionMessageDialogBody
+                id="design-stripe-effect-pending-mobile"
+                message={HOSTED_STRIPE_EFFECT_PENDING_MESSAGE}
+              />
+            </DialogFrame>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <div className="max-w-2xl space-y-1">
+          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+            Storage maintenance
+          </h3>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <DialogFrame label="Desktop" width="max-w-md">
+            <AccountDeletionMessageDialogBody
+              id="design-maintenance-desktop"
+              message={HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE}
+            />
+          </DialogFrame>
+          <DialogFrame label="Mobile · 390px" width="max-w-[390px]">
+            <AccountDeletionMessageDialogBody
+              id="design-maintenance-mobile"
+              message={HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE}
+            />
+          </DialogFrame>
+        </div>
       </div>
 
       <div className="flex flex-col gap-4">
@@ -231,12 +271,7 @@ function AccountDeletionMessageDialogBody({
         </p>
       </div>
 
-      <p
-        className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive [overflow-wrap:anywhere]"
-        role="alert"
-      >
-        {message}
-      </p>
+      <HostedAccountDeletionErrorAlert message={message} />
 
       <div className="flex flex-col gap-2">
         <Label className="block leading-5" htmlFor={`${id}-phrase`}>

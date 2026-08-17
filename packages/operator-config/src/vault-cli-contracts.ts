@@ -83,6 +83,7 @@ export const vaultValidateResultSchema = z.object({
 })
 
 export const documentImportResultSchema = z.object({
+  created: z.boolean(),
   vault: pathSchema,
   sourceFile: pathSchema,
   rawFile: pathSchema,

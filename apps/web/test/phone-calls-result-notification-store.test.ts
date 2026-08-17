@@ -154,12 +154,24 @@ describe("default phone-call result notification store", () => {
       return await rootPhase.run();
     });
     mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input: {
-      envelope: { eventId: string };
+      envelope: {
+        eventId: string;
+        notification: {
+          instructions: string;
+          responsePolicy: { kind: string };
+        };
+      };
       tx: unknown;
     }) => {
       expect(transactionOpen).toBe(true);
       expect(input.tx).toBe(transactionClient);
       expect(input.envelope.eventId).toBe(NOTIFICATION_DEDUPE_KEY);
+      expect(input.envelope.notification.responsePolicy).toEqual({
+        kind: "allow_send_or_skip",
+      });
+      expect(input.envelope.notification.instructions).not.toContain(
+        "Ask the user what happened after the handoff",
+      );
       phases.push("mailbox-append");
       return {
         item: {
@@ -215,6 +227,50 @@ describe("default phone-call result notification store", () => {
       prisma,
       retainFailureInScopedCache: true,
       userId: MEMBER_ID,
+    });
+  });
+
+  it("recovers the durable transfer follow-up policy without a transient flag", async () => {
+    const prisma = buildPrisma();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue({
+      completionPolicy: "transfer_follow_up_required",
+      outcome: "needs_user",
+      summary: "Murph completed the handoff before the human conversation ended.",
+    });
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_result_notification_store" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: {
+        id: "mailbox_result_notification_transfer",
+        userId: MEMBER_ID,
+      },
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: buildAnalyzedRetellCallPayload(),
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_result_notification_transfer",
+      notificationUserId: MEMBER_ID,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        notification: expect.objectContaining({
+          instructions: expect.stringContaining(
+            "Ask the user what happened after the handoff",
+          ),
+          responsePolicy: { kind: "require_send" },
+        }),
+      }),
+      tx: expect.anything(),
     });
   });
 

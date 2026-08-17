@@ -7720,6 +7720,9 @@ function parseHostedRuntimeRedactedValue(
   if (key === "routePlanningSlowestStage") {
     return parseHostedRuntimeRedactedRoutePlanningStage(value, label);
   }
+  if (key === "reasoningEffort") {
+    return parseHostedRuntimeRedactedReasoningEffort(value, label);
+  }
 
   if (Array.isArray(value)) {
     if (value.length > HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH) {
@@ -7785,6 +7788,21 @@ function parseHostedRuntimeRedactedRoutePlanningStage(
   }
 
   throw new TypeError(`${label} must be a known route-planning stage or null.`);
+}
+
+function parseHostedRuntimeRedactedReasoningEffort(
+  value: unknown,
+  label: string,
+): HostedAssistantReasoningEffort | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (isHostedAssistantReasoningEffort(value)) {
+    return value;
+  }
+
+  throw new TypeError(`${label} must be a known reasoning effort or null.`);
 }
 
 function parseHostedRuntimeRedactedObject(
