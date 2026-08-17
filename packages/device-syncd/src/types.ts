@@ -15,6 +15,7 @@ import type {
   DeviceProviderDescriptor,
   NamedDeviceProviderRegistry,
 } from "@murphai/importers/device-providers/provider-descriptors";
+import type { CompleteDeviceProviderSourceDay } from "@murphai/importers";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 export type { DeviceSyncAccountSetupPhase } from "./client.ts";
@@ -29,6 +30,9 @@ export type { DeviceConnectionSourceRecord } from "./client.ts";
 export type { DeviceSyncJobRecord } from "./client.ts";
 
 export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
+// Shared between the Junction provider's temporal resource/day dedupe keys and
+// the store's bounded terminal-history retention for those coordinates.
+export const JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX = "junction-temporal-authority:";
 export const DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED = {
   webhookTraceCompleted: true,
 } as const;
@@ -845,6 +849,8 @@ export interface ProviderJobConnectionSource {
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
+  /** Vault-local IANA timezone used by closed-day schedulers and importers. */
+  vaultTimeZone?: string;
   signal?: AbortSignal;
   // Standalone sync discovers provider sub-sources from the provider API.
   // Hosted sync must treat the Web projection as the admission authority.
@@ -853,7 +859,10 @@ export interface ProviderJobContext {
   throwIfAborted?(): void;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
-  importSnapshot(snapshot: unknown): Promise<unknown>;
+  importSnapshot(
+    snapshot: unknown,
+    options?: { completeSourceDay?: CompleteDeviceProviderSourceDay },
+  ): Promise<unknown>;
   upsertConnectionSource?(
     input: Omit<UpsertDeviceConnectionSourceInput, "connectionId">,
   ): DeviceConnectionSourceRecord | Promise<DeviceConnectionSourceRecord>;
@@ -1095,10 +1104,14 @@ export interface DeviceSyncServiceSummary {
 
 export interface DeviceSyncImporterPort {
   importDeviceProviderSnapshot(input: {
+    completeSourceDay?: CompleteDeviceProviderSourceDay;
     provider: string;
     snapshot: unknown;
     vaultRoot?: string;
   }): Promise<unknown>;
+  resolveDeviceProviderSnapshotDefaultTimeZone?(input: {
+    vaultRoot?: string;
+  }): Promise<string | undefined>;
 }
 
 export interface NodeServerHandle {

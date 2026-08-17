@@ -21,6 +21,7 @@ import {
   deleteConnectionForTesting,
   insertWebhookTraceRowForTesting,
   readCredentialStateForTesting,
+  readJobsForAccountForTesting,
   readObservationStateForTesting,
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceRowForTesting,
@@ -4016,6 +4017,327 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
     assert.deepEqual(duplicateJob.payload, {
       full: true,
     });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store requeues completed Junction temporal days after restart and drains newer backlog first", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-requeue");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  let store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-history",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const completed = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T00:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:completed",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob("worker-before-restart", "2026-04-06T00:00:00.000Z", 60_000)?.id,
+      completed.id,
+    );
+    store.completeJob(completed.id, "2026-04-06T00:00:01.000Z");
+    store.close();
+
+    store = new SqliteDeviceSyncStore(databasePath);
+    const enqueueRepeatedDay = () => store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:completed",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const repeated = enqueueRepeatedDay();
+    assert.notEqual(repeated.id, completed.id);
+    assert.equal(repeated.status, "queued");
+    assert.equal(enqueueRepeatedDay().id, repeated.id);
+    assert.equal(
+      store.claimDueJob("worker-repeated", "2026-04-06T01:00:00.000Z", 60_000)?.id,
+      repeated.id,
+    );
+    assert.equal(enqueueRepeatedDay().id, repeated.id);
+    store.completeJob(repeated.id, "2026-04-06T01:00:00.001Z");
+
+    const older = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.001Z",
+      dedupeKey: "junction-temporal-authority:older",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-01",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const newer = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:newer",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-02",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const urgent = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-webhook:urgent",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+
+    const first = store.claimDueJob("worker-after-restart", "2026-04-06T01:00:00.002Z", 60_000);
+    assert.equal(first?.id, urgent.id);
+    store.completeJob(urgent.id, "2026-04-06T01:00:01.000Z");
+    const second = store.claimDueJob("worker-after-restart", "2026-04-06T01:00:01.000Z", 60_000);
+    assert.equal(second?.id, newer.id);
+    store.completeJob(newer.id, "2026-04-06T01:00:02.000Z");
+    assert.equal(
+      store.claimDueJob("worker-after-restart", "2026-04-06T01:00:02.000Z", 60_000)?.id,
+      older.id,
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store sweeps Junction temporal terminal history across the rolling horizon", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-horizon-sweep");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  const horizonDays = 3;
+  const resources = ["blood_oxygen", "stress_level"] as const;
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-horizon-sweep",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-03-01T00:00:00.000Z",
+    });
+    const dayKeyFor = (cadence: number, offset: number) => {
+      const dayMs = Date.UTC(2026, 2, 1 + cadence + offset);
+      return new Date(dayMs).toISOString().slice(0, 10);
+    };
+    const enqueueCoordinate = (timeZone: string, resource: string, dayKey: string, availableAt: string) =>
+      store.enqueueJob({
+        accountId: account.id,
+        availableAt,
+        dedupeKey: `junction-temporal-authority:v1:${timeZone}:${resource}:${dayKey}`,
+        kind: "resource",
+        payload: {
+          resource,
+          resourceCategory: "timeseries",
+          temporalAuthorityDayKey: dayKey,
+          temporalAuthorityTimeZone: timeZone,
+          windowEnd: `${dayKey}T23:59:59.000Z`,
+          windowStart: `${dayKey}T00:00:00.000Z`,
+        },
+        priority: 45,
+        provider: "junction",
+      });
+    const temporalTerminalRowCount = () =>
+      readJobsForAccountForTesting(store, account.id).filter((job) =>
+        job.status !== "queued"
+        && job.status !== "running"
+        && store.getJobById(job.id)?.dedupeKey?.startsWith("junction-temporal-authority:")
+      ).length;
+
+    for (let cadence = 0; cadence < 16; cadence += 1) {
+      const timeZone = cadence < 12 ? "UTC" : "America/Chicago";
+      const availableAt = new Date(Date.UTC(2026, 2, 4 + cadence, 1)).toISOString();
+      const jobs = resources.flatMap((resource) =>
+        Array.from({ length: horizonDays }, (_, offset) =>
+          enqueueCoordinate(timeZone, resource, dayKeyFor(cadence, offset), availableAt)
+        ));
+      assert.equal(jobs.length, horizonDays * resources.length);
+      for (const job of jobs) {
+        assert.equal(enqueueCoordinate(
+          timeZone,
+          String(job.payload.resource),
+          String(job.payload.temporalAuthorityDayKey ?? job.payload.windowStart).slice(0, 10),
+          availableAt,
+        ).id, job.id);
+      }
+      for (
+        let claimed = store.claimDueJob(`worker-${cadence}`, availableAt, 60_000);
+        claimed;
+        claimed = store.claimDueJob(`worker-${cadence}`, availableAt, 60_000)
+      ) {
+        store.completeJob(claimed.id, availableAt);
+      }
+      assert.equal(
+        temporalTerminalRowCount() <= horizonDays * resources.length,
+        true,
+        `cadence ${cadence} exceeded the horizon terminal-row bound`,
+      );
+    }
+    assert.equal(temporalTerminalRowCount(), horizonDays * resources.length);
+
+    const queued = enqueueCoordinate("America/Chicago", "blood_oxygen", "2026-03-25", "2026-03-25T01:00:00.000Z");
+    assert.equal(queued.status, "queued");
+    const swept = enqueueCoordinate("America/Chicago", "stress_level", "2026-03-25", "2026-03-25T01:30:00.000Z");
+    assert.equal(store.getJobById(queued.id)?.status, "queued");
+    assert.equal(temporalTerminalRowCount(), 0);
+    assert.equal(
+      store.claimDueJob("worker-widening", "2026-03-25T01:00:00.000Z", 60_000)?.id,
+      queued.id,
+    );
+    assert.equal(store.getJobById(swept.id)?.status, "queued");
+    store.completeJob(queued.id, "2026-03-25T01:00:01.000Z");
+    const refetched = enqueueCoordinate(
+      "America/Chicago",
+      "blood_oxygen",
+      "2026-03-25",
+      "2026-03-25T02:00:00.000Z",
+    );
+    assert.notEqual(refetched.id, queued.id);
+    assert.equal(store.getJobById(queued.id), null);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store bounds Junction temporal terminal history to one row per coordinate", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-history-bound");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-history-bound",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const enqueueCoordinate = (availableAt: string) => store.enqueueJob({
+      accountId: account.id,
+      availableAt,
+      dedupeKey: "junction-temporal-authority:bounded-day",
+      kind: "resource",
+      payload: {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+
+    let previousTerminalId: string | undefined;
+    for (let cadence = 0; cadence < 5; cadence += 1) {
+      const availableAt = `2026-04-06T0${cadence}:00:00.000Z`;
+      const job = enqueueCoordinate(availableAt);
+      if (previousTerminalId !== undefined) {
+        assert.notEqual(job.id, previousTerminalId);
+        assert.equal(store.getJobById(previousTerminalId), null);
+      }
+      assert.equal(enqueueCoordinate(availableAt).id, job.id);
+      assert.equal(store.claimDueJob(`worker-${cadence}`, availableAt, 60_000)?.id, job.id);
+      assert.equal(enqueueCoordinate(availableAt).id, job.id);
+      store.completeJob(job.id, availableAt);
+      assert.equal(store.getJobById(job.id)?.status, "succeeded");
+      previousTerminalId = job.id;
+    }
+    assert.equal(
+      previousTerminalId !== undefined && store.getJobById(previousTerminalId)?.status,
+      "succeeded",
+    );
+
+    const ordinary = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T06:00:00.000Z",
+      dedupeKey: "junction-webhook:ordinary-history",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+    assert.equal(store.claimDueJob("worker-ordinary", "2026-04-06T06:00:00.000Z", 60_000)?.id, ordinary.id);
+    store.completeJob(ordinary.id, "2026-04-06T06:00:01.000Z");
+    const ordinaryRepeat = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T07:00:00.000Z",
+      dedupeKey: "junction-webhook:ordinary-history",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+    assert.notEqual(ordinaryRepeat.id, ordinary.id);
+    assert.equal(store.getJobById(ordinary.id)?.status, "succeeded");
   } finally {
     store.close();
     await rm(tempDir, {

@@ -270,11 +270,13 @@ function createJobContext(input: {
     status: string;
   }>;
   shouldYield?: () => boolean;
+  vaultTimeZone?: string;
 } = {}): ProviderJobContext {
   const account = input.account ?? createAccount();
   return {
     account,
     now: input.now ?? NOW,
+    ...(input.vaultTimeZone ? { vaultTimeZone: input.vaultTimeZone } : {}),
     ...(input.connectionSourceAdmissionMode
       ? { connectionSourceAdmissionMode: input.connectionSourceAdmissionMode }
       : {}),
@@ -1151,6 +1153,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
   const bounded = requireValue(scheduled.jobs.find((job) => job.kind === "reconcile"));
   const boundedContext = createJobContext({
       account: createAccount({ metadata: result.metadataPatch }),
+      vaultTimeZone: "UTC",
     });
   const boundedResult = await requireValue(provider.jobExecutor).executeJob(
     boundedContext,
@@ -1161,9 +1164,12 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
     initialResult: boundedResult,
     provider,
   });
+  // Bounded dual-owner shape: seven ordinary UTC provider-date requests from
+  // the broad correction sweep plus one exact vault-local temporal window for
+  // the newest lag-closed day.
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
-    7,
+    8,
   );
 
   const completed = createScheduledJobs(

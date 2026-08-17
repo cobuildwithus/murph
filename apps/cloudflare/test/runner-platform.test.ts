@@ -6651,7 +6651,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe("/api/internal/device-sync/reconcile");
-      await expect(request.json()).resolves.toEqual({ connectionId: "conn_123" });
+      await expect(request.json()).resolves.toEqual({
+        connectionId: "conn_123",
+      });
       return new Response(JSON.stringify({
         connectionId: "conn_123",
         occurredAt: "2026-07-15T12:00:00.000Z",

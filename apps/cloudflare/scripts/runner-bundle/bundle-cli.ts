@@ -78,12 +78,21 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // macOS after merging current main on 2026-08-14; no package entered the graph.
 // The reviewed cross-session context reply work measured 9,119,111 B after
 // normalizing the esbuild working directory on 2026-08-15; it grows the
-// existing Assistant Engine graph without adding a package. The static
-// startup closure measured 24,950 B. Keep total output inside a narrow 32 KiB
-// allowance and static startup inside an 8 KiB allowance. If a
+// existing Assistant Engine graph without adding a package. The August 2026
+// Junction temporal-authority and canonical event-schema additions extend the
+// same graph without a new package.
+// Junction summary-completeness work measured 9,170,089 B on Linux CI on
+// 2026-08-17; its 32,160 B increase is confined to the existing Core event
+// reconciliation and Junction normalization inputs, with no package entering
+// the graph or the static startup closure.
+// The combined reviewed summary-completeness and bounded workout-feature graph
+// measured 9,188,582 B on the same Linux CI lane; it extends the existing
+// device-sync, importer, and query packages without adding a package.
+// The static startup closure measured 24,950 B. Keep total output inside a
+// narrow 32 KiB allowance and static startup inside an 8 KiB allowance. If a
 // violation fires, investigate the listed largest inputs first; only raise the
 // budget deliberately for understood, intended growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_152_000;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_227_033;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

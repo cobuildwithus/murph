@@ -1226,10 +1226,27 @@ const noteEventFieldsShape = {
   sections: z.array(clinicalNoteSectionSchema).min(1).max(50).optional(),
 } satisfies z.ZodRawShape;
 
+const derivedObservationEvidenceQualifiersSchema = z
+  .object({
+    derived: z.literal(true),
+    evidenceConfidence: z.enum(["low", "medium"]),
+    evidenceMethod: boundedString(1, 120),
+    eveningSampleCount: integerSchema(2, 5_000).optional(),
+    maxAdjacentGapSeconds: integerSchema(1, 24 * 60 * 60),
+    morningSampleCount: integerSchema(2, 5_000).optional(),
+    qualifyingPairCount: integerSchema(0, 4_999),
+    sampleCount: integerSchema(2, 5_000),
+    sampleIntervalSeconds: numberSchema(0, 24 * 60 * 60).optional(),
+    thresholdSampleCount: integerSchema(0, 5_000).optional(),
+  })
+  .strict();
+
 const observationEventFieldsShape = {
   metric: patternedString(SLUG_PATTERN),
   queryVisibility: z.enum(["default"]).optional(),
-  qualifiers: measurementQualifiersSchema.optional(),
+  qualifiers: z
+    .union([derivedObservationEvidenceQualifiersSchema, measurementQualifiersSchema])
+    .optional(),
   value: numberSchema(),
   visibility: z.enum(["display"]).optional(),
   canonicalFact: z.literal(true).optional(),

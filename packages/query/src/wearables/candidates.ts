@@ -65,6 +65,7 @@ import {
 } from "./types.ts";
 
 import { compareMetricCandidateByDateDesc, compareSleepWindowByDateDesc } from "./selection.ts";
+import { collectJunctionWorkoutFeatures } from "./workout-features.ts";
 
 const APPLE_HEALTH_KIT_PROVIDER = "apple-health-kit";
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
@@ -237,6 +238,7 @@ export function collectWearableDataset(
     provenanceDiagnostics: [...provenanceDiagnostics.values()].sort(compareWearableProvenanceDiagnostics),
     rawMetricCandidates,
     sleepWindows: filteredSleepWindows,
+    workoutFeatures: collectJunctionWorkoutFeatures(vault.events, filters),
   };
 }
 

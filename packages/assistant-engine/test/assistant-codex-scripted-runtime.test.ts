@@ -453,6 +453,54 @@ describe('real codex app-server with scripted provider', () => {
         skillSlug: 'daily-activity',
       },
       {
+        answer: 'Your morning run averaged 142 bpm and its corrected record has no retained splits. Your evening ride averaged 150 bpm with 90 rpm cadence, 5 m/s speed, and 220 W power; its first 1 km split took 300 seconds at 225 W.',
+        command: 'wearables activity list --date 2026-07-12 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            activityTypes: ['cycling', 'running'],
+            date: '2026-07-12',
+            sessionCount: {
+              confidence: 'high',
+              metric: 'sessionCount',
+              provider: 'garmin',
+              unit: 'count',
+              value: 2,
+            },
+            summaryConfidence: {
+              level: 'high',
+              selectedProviders: ['garmin'],
+            },
+            workoutFeatures: [{
+              activityType: 'running',
+              averageHeartRate: 142,
+              provider: 'garmin',
+              splits: [],
+              startedAt: '2026-07-12T06:00:00.000Z',
+            }, {
+              activityType: 'cycling',
+              averageCadence: 90,
+              averageHeartRate: 150,
+              averagePowerWatts: 220,
+              averageSpeedMps: 5,
+              cadenceUnit: 'rpm',
+              provider: 'garmin',
+              splits: [{
+                distanceMeters: 1_000,
+                durationSeconds: 300,
+                endedAt: '2026-07-12T18:05:00.000Z',
+                index: 1,
+                averagePowerWatts: 225,
+              }],
+              startedAt: '2026-07-12T18:00:00.000Z',
+            }],
+          }],
+        },
+        prompt: 'Compare my two workouts on July 12: average heart rate, cycling cadence, speed, power, and retained splits.',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
         answer: 'Your connected device recorded 1,640 basal calories on July 12.',
         command: 'measurement entry list --metric calories_basal --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
         evidence: {
