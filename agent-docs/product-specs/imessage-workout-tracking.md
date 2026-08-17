@@ -189,7 +189,7 @@ must arrive in order. Occurrence-to-delivery and delivery-to-reply are each
 bounded to one hour. Runtime exposes only those three timestamps as
 `scheduled-direct-reply` data; automation identity and provider message identity
 do not enter the model prompt. The exact reminder and current reply must still
-uniquely establish a distinct canonical saved-routine id, exercise name and
+uniquely establish a canonical saved-routine id, exercise name and
 order, existing set order, and at least one member-stated numeric actual.
 Conversational recency is not authority.
 
@@ -200,7 +200,7 @@ one set, and has no pending set coordinate. It computes the prior end from the
 persisted start plus the duration already owned by the final live mutation; it
 never stretches the prior workout to the next scheduled occurrence or reply.
 The owner preserves the prior event id, routine reference, exercises, sets,
-actuals, types, and notes, starts the distinct saved routine at the scheduled
+actuals, types, and notes, starts the saved routine at the scheduled
 occurrence with targetless actual placeholders, and writes only the exact
 authorized set at the accepted-reply time. Saved targets remain in the format.
 
@@ -208,7 +208,7 @@ Rollover is one composite command, not assistant-authored finish/start/log
 sequencing. Deterministic per-session action markers on the two participating sessions
 let replay converge after a persisted close, start, or exact set write without
 a receipt, queue, schema, or second state owner. A pending prior coordinate,
-zero-set prior, same routine, stale or missing reply authority, note-only result,
+zero-set prior, stale or missing reply authority, note-only result,
 coordinate mismatch, more than one matching scheduled session, unrelated active
 workout, or marker mismatch rejects without closing, starting, correcting, or
 retargeting another workout. Historical sessions are not repaired.

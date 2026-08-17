@@ -820,13 +820,6 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
     shown: previousShown,
     workout: previousWorkout,
   })
-  if (previousWorkout.routineId === input.routineId) {
-    throw new VaultCliError(
-      'invalid_operation',
-      'Scheduled workout rollover requires a distinct saved routine.',
-    )
-  }
-
   const rolloverState = await findLiveWorkoutRolloverState({
     routineId: input.routineId,
     startedAt: input.scheduledOccurrenceAt,

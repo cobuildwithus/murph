@@ -340,6 +340,36 @@ describe('scheduled live-workout rollover', () => {
     expect(previousWorkout.sessionNote).toBe(beforeWorkout.sessionNote)
   })
 
+  it('starts a later occurrence when the scheduled plan repeats the prior saved routine', async () => {
+    const prepared = await createRolloverVault()
+    const previous = parseShownWorkout(
+      await showWorkoutRecord(prepared.vault, prepared.previousWorkoutId),
+    )
+    expect(previous.routineId).toEqual(expect.any(String))
+
+    const rolled = await logScheduledLiveWorkoutSet({
+      ...scheduledInput(prepared),
+      exerciseName: 'Split squat',
+      reps: 10,
+      routineId: previous.routineId!,
+      setOrder: 1,
+      type: 'warmup',
+      weight: 35,
+    })
+    const workout = parseShownWorkout(rolled)
+
+    expect(rolled.entity.id).not.toBe(prepared.previousWorkoutId)
+    expect(workout.routineId).toBe(previous.routineId)
+    expect(workout.startedAt).toBe(SCHEDULED_OCCURRENCE_AT)
+    expect(workout.exercises[0]?.sets[0]).toEqual({
+      order: 1,
+      reps: 10,
+      type: 'warmup',
+      weight: 35,
+      weightUnit: 'lb',
+    })
+  })
+
   it('refuses pending prior sets, stale authority, missing actuals, ambiguous or mismatched coordinates, and unrelated multiple-active state without retargeting', async () => {
     const pending = await createRolloverVault({ logAllPriorSets: false })
     await expect(logScheduledLiveWorkoutSet(scheduledInput(pending))).rejects.toThrow(
