@@ -11,6 +11,8 @@ on:
 # Secret-bearing jobs execute only this trusted default-branch workflow. PR code
 # is sent to the dedicated Vercel custom environment by exact SHA; it is never
 # checked out on a runner holding E2E credentials.
+# Workflow-file PRs intentionally self-select so this trusted controller proves
+# their exact candidate before the native status becomes a required check.
 permissions:
   contents: read
   pull-requests: read
