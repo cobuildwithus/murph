@@ -1390,6 +1390,16 @@ Last verified: 2026-08-16
   stale operator-shell export cannot reach preparation, runtimes, or Chromium.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
+- The protected native iOS PR E2E lane may share a Junction sandbox only through
+  an explicit non-empty `JUNCTION_CLIENT_USER_ID_NAMESPACE` whose default is
+  absent everywhere else. Cleanup must completely enumerate and validate the
+  configured team, ignore every unrelated namespace, delete at most one exact
+  namespace-owned user, and prove that namespace empty before resetting the
+  isolated database. This namespace limits trusted cleanup; it does not scope
+  the Junction Team API key, which retains full team data access. A second key
+  on the same team is not a least-privilege boundary, so the shared sandbox must
+  contain only disposable test identities and never staging, production, or
+  real-person data.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
 - Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
   every class and must contain no authorized keys. Deploy automation must not

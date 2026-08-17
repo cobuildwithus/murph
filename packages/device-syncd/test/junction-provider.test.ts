@@ -1639,6 +1639,24 @@ test("Junction client_user_id is deterministic, bounded, and owner-blinded", () 
     clientUserId,
     buildJunctionClientUserId("junction-client-user-id-secret", "owner-internal-id-123"),
   );
+
+  const namespacedClientUserId = buildJunctionClientUserId(
+    "junction-client-user-id-secret",
+    "owner-internal-id-123",
+    "e2e",
+  );
+  assert.equal(namespacedClientUserId.length, 32);
+  assert.ok(namespacedClientUserId.startsWith("murph_e2e_"));
+  assert.doesNotMatch(namespacedClientUserId, /owner|internal|123/u);
+  assert.notEqual(namespacedClientUserId, clientUserId);
+  assert.throws(
+    () => buildJunctionClientUserId(
+      "junction-client-user-id-secret",
+      "owner-internal-id-123",
+      "Native-iOS",
+    ),
+    /JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
+  );
 });
 
 test("Junction provider exposes primitive handlers without OAuth compatibility methods", () => {
