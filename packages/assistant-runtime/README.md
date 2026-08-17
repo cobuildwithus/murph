@@ -62,9 +62,18 @@ cursor, so an earlier unresolved sequence cannot starve later terminal rows.
 V1 migration preserves recorded pending IDs and recovers omitted events only
 when terminal evidence proves they are safe to acknowledge; ambiguous omitted
 nonterminal history stays nonreplyable instead of becoming stale work after a
-channel is enabled. Once an accepted snapshot contains the v2 envelope, its
-runner bundle is a hard rollback floor because the preceding v1-only reader
-cannot restore that state.
+channel is enabled. V2 also carries the conservative derived
+`hasImageCompletionCandidate` projection. A missing projection reads as
+positive, enqueue classifies only the newly added immutable event, and existing
+maintenance compaction recomputes the exact value. A negative projection lets
+ordinary foreground selection skip pending-event hydration; a positive value
+still exposes the complete cohort to the existing route and ordering selector.
+Once an accepted snapshot contains the v2 envelope, its runner bundle is a hard
+rollback floor because the preceding v1-only reader cannot restore that state.
+The first snapshot containing the additive projection similarly requires the
+projection-aware runner because the preceding v2 value reader is strict; deploy
+this runner with immediate container rollout and use a forward fix below that
+floor rather than adding a second compatibility owner for a derived hint.
 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records in the warm live workspace.

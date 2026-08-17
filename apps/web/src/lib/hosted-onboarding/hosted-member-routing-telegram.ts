@@ -1,11 +1,6 @@
-import {
-  Prisma,
-  type PrismaClient,
-} from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { parseTelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
 
-import { getPrisma } from "../prisma";
-import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   createHostedTelegramUserLookupKey,
   createHostedTelegramUserLookupKeyReadCandidates,
@@ -16,7 +11,6 @@ import {
   readHostedMemberRoutingTelegramPrivateState,
 } from "./member-private-codecs";
 import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "./shared";
 
@@ -25,7 +19,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
   prisma: Prisma.TransactionClient;
   telegramThreadId?: string | null;
   telegramUserId: string;
-}): Promise<void> {
+}): Promise<{ effectiveRouteChanged: boolean }> {
   const telegramUserLookupKey = createHostedTelegramUserLookupKey(input.telegramUserId);
 
   if (!telegramUserLookupKey) {
@@ -57,6 +51,12 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
         incomingTelegramThreadId: input.telegramThreadId ?? null,
       })
       : null;
+  const effectiveTelegramThreadId =
+    preferredTelegramThreadId ?? input.telegramThreadId ?? null;
+  const effectiveRouteChanged =
+    !existingTelegramRouting
+    || existingTelegramRouting.telegramUserId !== input.telegramUserId
+    || existingTelegramRouting.telegramThreadId !== effectiveTelegramThreadId;
 
   const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: null,
@@ -66,7 +66,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     pendingLinqParticipantContact: null,
     pendingLinqRecipientPhone: null,
     prisma: input.prisma,
-    telegramThreadId: preferredTelegramThreadId ?? input.telegramThreadId ?? null,
+    telegramThreadId: effectiveTelegramThreadId,
     telegramUserId: input.telegramUserId,
   });
 
@@ -96,27 +96,8 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
 
     throw error;
   }
-}
 
-export async function syncHostedMemberTelegramRoutingBinding(input: {
-  memberId: string;
-  prisma?: PrismaClient;
-  telegramThreadId?: string | null;
-  telegramUserId: string;
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.$transaction(
-    (tx) => runWithHostedDomainRootUnwrapCache(() =>
-      upsertHostedMemberTelegramRoutingBindingTx({
-        memberId: input.memberId,
-        prisma: tx,
-        telegramThreadId: input.telegramThreadId,
-        telegramUserId: input.telegramUserId,
-      })
-    ),
-    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  );
+  return { effectiveRouteChanged };
 }
 
 function isPrismaUniqueConstraintError(

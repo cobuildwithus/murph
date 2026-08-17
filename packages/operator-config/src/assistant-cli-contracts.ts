@@ -43,6 +43,7 @@ import {
   looksLikePrivateAssistantRoutePlaceholder,
 } from './assistant/current-delivery-route.js'
 import {
+  assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
 } from './assistant-response-cards.js'
 
@@ -1022,6 +1023,12 @@ export const assistantOutboxIntentSchema = z
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
     deliveryConfirmationPending: z.boolean().default(false),
+    // Undefined means the delivery predates outbound message-volume cutover
+    // or is not an eligible conversational Telegram/email message. Null is a
+    // durable pending receipt; a timestamp confirms the anonymous Web-side
+    // receipt was recorded. The delivery owner keeps this marker so a crash
+    // cannot lose or duplicate accounting without changing send behavior.
+    messageVolumeReceiptRecordedAt: isoTimestampSchema.nullable().optional(),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
     groupEmailAuthorizationProof: z
@@ -1060,13 +1067,13 @@ export const assistantOutboxIntentSchema = z
       })
     }
 
-    if (
-      intent.card?.kind === 'challenge_standings' &&
-      !(
-        intent.threadIsDirect === false &&
-        intent.channel?.trim().toLowerCase() === 'linq'
-      )
-    ) {
+    if (intent.card?.kind === 'challenge_standings' && !(
+      assistantResponseCardMatchesConversationAudience({
+        card: intent.card,
+        channel: intent.channel,
+        threadIsDirect: intent.threadIsDirect,
+      })
+    )) {
       context.addIssue({
         code: 'custom',
         message:
@@ -1077,7 +1084,11 @@ export const assistantOutboxIntentSchema = z
     if (
       intent.card !== null &&
       intent.card.kind !== 'challenge_standings' &&
-      intent.threadIsDirect !== true
+      !assistantResponseCardMatchesConversationAudience({
+        card: intent.card,
+        channel: intent.channel,
+        threadIsDirect: intent.threadIsDirect,
+      })
     ) {
       context.addIssue({
         code: 'custom',

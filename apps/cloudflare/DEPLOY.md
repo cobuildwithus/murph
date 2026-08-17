@@ -145,6 +145,32 @@ image-plus-link and one text-plus-voice response, checkpoint both workspaces,
 and confirm Workers Observability contains no outbox quarantine or runner schema
 version failures.
 
+## Outbound Message-Volume Receipt Rollout
+
+Deploy the additive Web receipt migration and signed callback route first, then
+deploy Cloudflare/runner with `container_rollout=immediate`. Old runners do not
+write Telegram/email receipt markers, so a gradual runner rollout would create
+an unrecoverable counting gap even though delivery itself remains safe. Keep the
+Web table and callback route available until the new managed runner fingerprint
+is confirmed everywhere.
+
+This release advances Durable Object runner state to schema version 17 before
+creating an invocation, workspace snapshot, or container service. A version-16
+Worker rejects version 17 before it can wake a runner or read an encrypted
+workspace, so it cannot pass the new strict outbox receipt marker to a legacy
+parser and quarantine the intent. Version 17 is a hard Cloudflare/runner
+rollback floor after the release reaches a member's Durable Object. Do not roll
+Worker or runner below that floor; forward-fix on version 17 or newer. The
+additive Web table and callback may remain deployed during a Cloudflare repair.
+
+After deployment, verify the managed runner fingerprint, record one signed
+Telegram receipt and one signed email receipt, replay each exact dedupe key, and
+confirm the public total increments once per delivery. Check Workers
+Observability for receipt callback failures, outbox quarantine, and runner
+schema-version rejection. Also confirm an intentionally failed callback leaves
+a bounded assistant wake and succeeds after recovery without provider
+redispatch.
+
 ## Health-Data Consent Stop-Target Rollout
 
 Deploy the Cloudflare Worker that retains an exact user-control stop target
@@ -323,6 +349,19 @@ runner bundle update with `container_rollout=immediate`. Before allowing card
 traffic, require managed-container smoke to report the exact new runner-bundle
 fingerprint and prove the updated assistant CLI surface.
 
+Treat backward compatibility as a permanent traffic gate for every iMessage
+app card. Linq capability is not decoder-version negotiation, so a new schema,
+discriminator, required field, stricter bound, or changed meaning must not emit
+while any previously released extension that can claim the card would reject
+it. App Store availability of a new reader does not retire older installed
+readers. Before enabling traffic, prove either that unknown clients receive the
+last readable envelope, that an explicit capability selects a compatible
+envelope, or that every earlier claiming extension already provides a complete
+non-interactive recovery for the unknown shape. Otherwise keep the producer on
+the prior schema or deterministic ordinary text. TestFlight, App Review,
+provider acceptance, delivery receipts, and proof on only the new build do not
+satisfy this gate.
+
 An expansion of an existing strict card version has a reader floor even when
 its discriminator is unchanged. For the V4 workout expansion above eight
 exercises or eight sets per exercise, release the native reader first, deploy
@@ -380,6 +419,25 @@ written. After that write, the new runner bundle is a hard rollback floor for
 that workspace because an older strict reader can quarantine the retained
 intent. Forward-fix on this bundle or newer. Monitor `outbox.intent.quarantined`,
 strict outbox parse failures, and stale runner fingerprints after rollout.
+
+## Telegram Group Presentation-Card Audience Rollout
+
+This release expands the strict audience rule for the existing
+`exercise_routine` and `telegram_rich_content` card kinds. Deploy the runner
+bundle with `container_rollout=immediate`. Before group-card authoring is
+considered converged, require managed-container smoke to report the exact new
+runner-bundle fingerprint.
+
+The preceding runner remains a safe rollback only before the first Telegram
+group presentation-card intent or hosted effect is persisted. After that write,
+the audience-capable bundle is the hard rollback floor. The preceding strict
+readers reject the non-direct card, and an old outbox reader can move a retained
+intent into quarantine. Forward-fix on the compatible bundle or newer.
+
+After rollout, monitor `outbox.intent.quarantined`, strict response-card parse
+failures, and stale runner fingerprints. Restore a quarantined intent only after
+the compatible bundle is live, then confirm that the restored card reaches the
+same authenticated Telegram group.
 
 Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
@@ -1219,12 +1277,16 @@ authorization; do not bypass it to recover an invalid split-host environment.
 Device-webhook burst transport requires a main Queue and DLQ named from the
 deployed Worker (`<worker>-device-webhooks` and
 `<worker>-device-webhooks-dlq`). Create both before deploying the Worker config.
-Deploy the Queue-capable Worker and the Web batch-admission callback before
-setting Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout
-gate. Start with one provider and prove Queue depth returns to zero, no DLQ rows
-appear, and Web admission stays serial before expanding. To roll back, clear the
-Web gate first, drain the main Queue through the still-deployed consumer, retain
-the encrypted DLQ for bounded recovery, and remove the consumer/bindings last.
+Keep Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout gate
+empty while deploying the callback and consumer. Deploy Web first: an old
+Worker sends callbacks of at most 25 entries, which the new Web reader accepts.
+Then deploy the Queue-capable Worker, which may send up to 100 entries; deploying
+that Worker against old Web would make callbacks above 25 fail closed and retry.
+Start with one provider and prove Queue depth returns to zero, no DLQ rows
+appear, no more than four independent account lanes run, and each account stays
+serial before expanding. To roll back, clear the Web gate first, drain the main
+Queue through the still-deployed consumer, retain the encrypted DLQ for bounded
+recovery, and remove the consumer/bindings last.
 During Cloudflare automation-key rotation, keep the prior private key as
 `decrypt_only` until Web uses the new public key and both the main Queue and
 encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ

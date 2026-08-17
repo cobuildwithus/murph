@@ -280,7 +280,7 @@ describe("hosted preference handoff sweeper", () => {
     });
   });
 
-  it("selects pending browser-vault and maintenance wakes in the shared mailbox sweep", async () => {
+  it("selects pending device-sync, browser-vault, and maintenance wakes in the shared mailbox sweep", async () => {
     mocks.queryRaw.mockResolvedValueOnce([{
       mailboxItemId: "mailbox_browser_refresh",
       userId: "member_browser_refresh",
@@ -301,6 +301,9 @@ describe("hosted preference handoff sweeper", () => {
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
     expect(sql).toContain('"pending_runtime_control_users"');
+    expect(sql).toContain(
+      "'device-sync.wake'",
+    );
     expect(sql).toContain(
       "'runtime.browser-vault-refresh-requested'",
     );

@@ -292,7 +292,7 @@ test(
     assert.equal('occurredAt' in documentImportSchema.options.properties, true)
     assert.equal('note' in documentImportSchema.options.properties, true)
     assert.equal('source' in documentImportSchema.options.properties, true)
-    assert.deepEqual(documentImportSchema.options.required ?? [], [])
+    assert.deepEqual(documentImportSchema.options.required ?? [], ['reuseExact'])
 
     assert.equal('from' in documentListSchema.options.properties, true)
     assert.equal('to' in documentListSchema.options.properties, true)

@@ -55,6 +55,37 @@ const NUTRITION_RESPONSE_CARD = {
   },
 } as const
 
+const EXERCISE_ROUTINE_RESPONSE_CARD = {
+  exercises: [{
+    dose: '8 repetitions',
+    estimatedSeconds: 45,
+    images: [],
+    instructions: ['Move slowly.'],
+    name: 'Shoulder circles',
+  }],
+  footer: null,
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain increases.',
+  subtitle: null,
+  title: 'Short reset',
+  totalSeconds: 60,
+  transitionSeconds: 15,
+  version: 1,
+} as const
+
+const TELEGRAM_RICH_CONTENT_RESPONSE_CARD = {
+  html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol>',
+  kind: 'telegram_rich_content',
+  version: 1,
+} as const
+
 describe('assistant CLI delivery contracts', () => {
   it('accepts hash-bound private vault images without a public URL', () => {
     const media = {
@@ -179,7 +210,7 @@ describe('assistant CLI delivery contracts', () => {
     })).toThrow()
   })
 
-  it('defaults legacy outbox cards to null and rejects card conflicts', () => {
+  it('defaults legacy outbox cards to null and enforces card boundaries', () => {
     const baseIntent = {
       schema: 'murph.assistant-outbox-intent.v1',
       intentId: 'outbox_card_contract',
@@ -245,8 +276,27 @@ describe('assistant CLI delivery contracts', () => {
     expect(() => assistantOutboxIntentSchema.parse({
       ...baseIntent,
       card: NUTRITION_RESPONSE_CARD,
+      channel: 'telegram',
       threadIsDirect: false,
     })).toThrow('Assistant response cards require a private direct conversation.')
+
+    for (const card of [
+      EXERCISE_ROUTINE_RESPONSE_CARD,
+      TELEGRAM_RICH_CONTENT_RESPONSE_CARD,
+    ]) {
+      expect(assistantOutboxIntentSchema.parse({
+        ...baseIntent,
+        card,
+        channel: 'telegram',
+        threadIsDirect: false,
+      }).card).toEqual(card)
+      expect(() => assistantOutboxIntentSchema.parse({
+        ...baseIntent,
+        card,
+        channel: 'linq',
+        threadIsDirect: false,
+      })).toThrow('Assistant response cards require a private direct conversation.')
+    }
   })
 
   it('accepts only valid true-only native reply message intents', () => {

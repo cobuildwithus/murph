@@ -32,6 +32,7 @@ import {
   hostedOnboardingError,
   isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
+import { assertHostedStripeEffectClaimAbsent } from "../hosted-onboarding/hosted-member-billing-store";
 import {
   commitPreparedHostedMemberChannelsUpdatedTx,
   prepareHostedMemberChannelsUpdatedForSnapshot,
@@ -156,6 +157,7 @@ const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
 const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
 const HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS = 10;
 const HOSTED_ACCOUNT_DELETION_REFRESH_LEASE_RECOVERY_LIMIT = 32;
+const HOSTED_ACCOUNT_DELETION_MAX_FAMILY_CLAIM_OWNER_ROWS = 4;
 const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS: Stripe.RequestOptions = {
   maxNetworkRetries: 0,
   timeout: HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS,
@@ -975,6 +977,17 @@ async function deleteHostedAccountDataInternal(input: {
     providerAccessRemovalConfirmationToken:
       input.providerAccessRemovalConfirmationToken ?? null,
   });
+  // Sponsorship owns a beneficiary-first, payer-second lock order. Run that
+  // existing owner immediately after the durable suspension fence so no new
+  // payer admission can race it and no external deletion work precedes it.
+  await input.prisma.$transaction(
+    (tx) => cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
+      now: deletionStartedAt,
+      payerMemberIds: deletionMemberIds,
+      tx,
+    }),
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
   // The suspension fence is committed before provider identifiers are
   // decrypted so relationship writers cannot add ownership outside this
   // durable cleanup snapshot.
@@ -1122,6 +1135,13 @@ async function deleteHostedAccountDataInternal(input: {
           input.phoneTransfer.targetPhoneNumberBeforeTransfer,
         transferPhoneNumber: input.phoneTransfer.transfer.phoneNumber,
       });
+    }
+    const lockedFamilyClaimOwnerIds =
+      await lockHostedFamilyClaimOwnersForAccountDeletionTx({
+        memberIds: deletionMemberIds,
+        prisma: tx,
+      });
+    if (input.phoneTransfer && phoneTransferSession) {
       await lockHostedMembersForAccountDeletionTx({
         memberIds: [
           input.phoneTransfer.targetMember.id,
@@ -1138,14 +1158,14 @@ async function deleteHostedAccountDataInternal(input: {
         prisma: tx,
       });
     }
-    await cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
-      now: deletionStartedAt,
-      payerMemberIds: deletionMemberIds,
-      tx,
-    });
-    await lockHostedMemberForAccountDeletionTx({
-      memberId: input.memberId,
+    await lockHostedMembersForAccountDeletionTx({
+      memberIds: deletionMemberIds.filter(
+        (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
+      ),
       prisma: tx,
+      requiredMemberIds: deletionMemberIds.filter(
+        (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
+      ),
     });
     const transactionDeletionMemberIds = uniqueStrings([
       input.memberId,
@@ -1154,6 +1174,14 @@ async function deleteHostedAccountDataInternal(input: {
         prisma: tx,
       }),
     ]);
+    if (!haveSameStrings(transactionDeletionMemberIds, deletionMemberIds)) {
+      throwHostedAccountDeletionRuntimeSetChanged();
+    }
+    await assertHostedFamilyClaimOwnersUnchangedForAccountDeletionTx({
+      expectedOwnerMemberIds: lockedFamilyClaimOwnerIds,
+      memberIds: transactionDeletionMemberIds,
+      prisma: tx,
+    });
     const transactionDeletionMemberIdFilter = buildStringInFilter(
       transactionDeletionMemberIds,
     );
@@ -1169,6 +1197,10 @@ async function deleteHostedAccountDataInternal(input: {
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
+      prisma: tx,
+    });
+    await assertNoHostedStripeEffectClaimsForAccountDeletionTx({
+      memberIds: transactionDeletionMemberIds,
       prisma: tx,
     });
     // Every writer for these selected target columns serializes on the
@@ -1827,9 +1859,26 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
   providerAccessRemovalConfirmationToken: string | null;
 }): Promise<string[]> {
   return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberForAccountDeletionTx({
-      memberId: input.ownerMemberId,
+    const preparedMemberIds = uniqueStrings([
+      input.ownerMemberId,
+      ...await listOwnedHostedThreadContainerMemberIds({
+        ownerMemberId: input.ownerMemberId,
+        prisma: tx,
+      }),
+    ]);
+    const lockedFamilyClaimOwnerIds =
+      await lockHostedFamilyClaimOwnersForAccountDeletionTx({
+        memberIds: preparedMemberIds,
+        prisma: tx,
+      });
+    await lockHostedMembersForAccountDeletionTx({
+      memberIds: preparedMemberIds.filter(
+        (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
+      ),
       prisma: tx,
+      requiredMemberIds: preparedMemberIds.filter(
+        (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
+      ),
     });
     const memberIds = uniqueStrings([
       input.ownerMemberId,
@@ -1838,10 +1887,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         prisma: tx,
       }),
     ]);
-    await lockHostedMembersForAccountDeletionTx({
-      memberIds: memberIds.slice(1),
+    if (!haveSameStrings(memberIds, preparedMemberIds)) {
+      throwHostedAccountDeletionRuntimeSetChanged();
+    }
+    await assertHostedFamilyClaimOwnersUnchangedForAccountDeletionTx({
+      expectedOwnerMemberIds: lockedFamilyClaimOwnerIds,
+      memberIds,
       prisma: tx,
-      requiredMemberIds: memberIds.slice(1),
     });
     await assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
       memberIds,
@@ -1918,6 +1970,10 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         });
       }
     }
+    await assertNoHostedStripeEffectClaimsForAccountDeletionTx({
+      memberIds,
+      prisma: tx,
+    });
     await tx.hostedMember.updateMany({
       data: {
         suspendedAt: input.now,
@@ -2146,6 +2202,133 @@ async function refreshHostedMembersAccountDeletionFenceTx(input: {
     where: {
       id: buildStringInFilter(input.memberIds),
     },
+  });
+}
+
+async function assertNoHostedStripeEffectClaimsForAccountDeletionTx(input: {
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const memberIdFilter = buildStringInFilter(input.memberIds);
+  const [memberClaim, familyClaim] = await Promise.all([
+    input.prisma.hostedMemberBillingRef.findFirst({
+      select: { stripeEffectClaimId: true },
+      where: {
+        memberId: memberIdFilter,
+        stripeEffectClaimId: { not: null },
+      },
+    }),
+    input.prisma.hostedAccountGroupBillingRef.findFirst({
+      select: { stripeEffectClaimId: true },
+      where: {
+        OR: [
+          { stripeEffectBeneficiaryMemberId: memberIdFilter },
+          {
+            group: {
+              OR: [
+                { ownerMemberId: memberIdFilter },
+                {
+                  memberships: {
+                    some: {
+                      memberId: memberIdFilter,
+                      status: "active",
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        stripeEffectClaimId: { not: null },
+      },
+    }),
+  ]);
+  assertHostedStripeEffectClaimAbsent(memberClaim?.stripeEffectClaimId);
+  assertHostedStripeEffectClaimAbsent(familyClaim?.stripeEffectClaimId);
+}
+
+async function lockHostedFamilyClaimOwnersForAccountDeletionTx(input: {
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<string[]> {
+  const ownerMemberIds = await listHostedFamilyClaimOwnerMemberIdsForAccountDeletionTx(
+    input,
+  );
+  await lockHostedMembersForAccountDeletionTx({
+    memberIds: ownerMemberIds,
+    prisma: input.prisma,
+    requiredMemberIds: ownerMemberIds,
+  });
+  return ownerMemberIds;
+}
+
+async function assertHostedFamilyClaimOwnersUnchangedForAccountDeletionTx(input: {
+  expectedOwnerMemberIds: readonly string[];
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const currentOwnerMemberIds =
+    await listHostedFamilyClaimOwnerMemberIdsForAccountDeletionTx(input);
+  if (!haveSameStrings(currentOwnerMemberIds, input.expectedOwnerMemberIds)) {
+    throwHostedAccountDeletionFamilyAuthorityChanged();
+  }
+}
+
+async function listHostedFamilyClaimOwnerMemberIdsForAccountDeletionTx(input: {
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<string[]> {
+  const memberIds = uniqueStrings(input.memberIds);
+  if (memberIds.length === 0) {
+    return [];
+  }
+  const memberIdFilter = buildStringInFilter(memberIds);
+  const groups = await input.prisma.hostedAccountGroup.findMany({
+    orderBy: { ownerMemberId: "asc" },
+    select: { ownerMemberId: true },
+    take: HOSTED_ACCOUNT_DELETION_MAX_FAMILY_CLAIM_OWNER_ROWS,
+    where: {
+      OR: [
+        { ownerMemberId: memberIdFilter },
+        {
+          memberships: {
+            some: {
+              memberId: memberIdFilter,
+              status: "active",
+            },
+          },
+        },
+        {
+          billingRef: {
+            is: {
+              stripeEffectBeneficiaryMemberId: memberIdFilter,
+            },
+          },
+        },
+      ],
+    },
+  });
+  if (groups.length === HOSTED_ACCOUNT_DELETION_MAX_FAMILY_CLAIM_OWNER_ROWS) {
+    throwHostedAccountDeletionFamilyAuthorityChanged();
+  }
+  return uniqueStrings(groups.map((group) => group.ownerMemberId)).sort();
+}
+
+function throwHostedAccountDeletionFamilyAuthorityChanged(): never {
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_FAMILY_AUTHORITY_CHANGED",
+    httpStatus: 503,
+    message: "Family billing changed while account deletion was starting. Retry account deletion.",
+    retryable: true,
+  });
+}
+
+function throwHostedAccountDeletionRuntimeSetChanged(): never {
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
+    httpStatus: 503,
+    message: "Your account changed during deletion. Retry so every hosted runtime is included.",
+    retryable: true,
   });
 }
 
@@ -3619,17 +3802,6 @@ async function listDeviceConnectionIdentities(input: {
       tokenVersion: true,
     },
     where: { userId: input.memberId },
-  });
-}
-
-async function lockHostedMemberForAccountDeletionTx(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  await lockHostedMembersForAccountDeletionTx({
-    memberIds: [input.memberId],
-    prisma: input.prisma,
-    requiredMemberIds: [input.memberId],
   });
 }
 

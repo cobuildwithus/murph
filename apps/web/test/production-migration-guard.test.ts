@@ -44,6 +44,7 @@ import {
   normalizeHostedWebMigrationDatabaseUrl,
   runHostedWebPrismaMigrateDeploy,
   resolveHostedWebMigrationDatabaseUrl,
+  type HostedWebMigrationEnvironment,
 } from "../scripts/run-prisma-migrate-deploy";
 
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
@@ -1438,8 +1439,13 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
-    assert.match(productionNextBuildScript, /typecheck_worker_old_space_mb=3072/u);
-    assert.match(productionNextBuildScript, /build_cache_epoch=webpack-next-16\.3-v1/u);
+    assert.match(productionNextBuildScript, /build_worker_old_space_mb=3072/u);
+    assert.match(productionNextBuildScript, /typecheck_old_space_mb=3584/u);
+    assert.match(
+      productionNextBuildScript,
+      /build_cache_epoch=webpack-next-16\.3-v3-prepared-typecheck-cold-webpack/u,
+    );
+    assert.match(productionNextBuildScript, /webpack_cache_dir=\.next\/cache\/webpack/u);
     assert.match(
       productionNextBuildScript,
       /node \.\.\/\.\.\/scripts\/rm-paths\.mjs \.next\/cache/u,
@@ -1457,6 +1463,85 @@ describe("hosted web production migration guard", () => {
       productionNextBuildScript,
       /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
+    assert.match(
+      productionNextBuildScript,
+      /node \.\.\/\.\.\/scripts\/rm-paths\.mjs "\$webpack_cache_dir"/u,
+    );
+
+    // The production build deadline lives in the package-build process owner,
+    // not in the runner: vercel-build.sh arms it for production deployments
+    // only, and the supervisor owns whole-group termination and reaping.
+    const vercelBuildScript = await readFile(
+      path.join(appRoot, "scripts", "vercel-build.sh"),
+      "utf8",
+    );
+    assert.match(
+      vercelBuildScript,
+      /if \[ "\$\{VERCEL:-\}" = "1" \] && \[ "\$\{VERCEL_ENV:-\}" = "production" \]; then/u,
+    );
+    assert.match(
+      vercelBuildScript,
+      /MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS="\$\{MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS:-900000\}"/u,
+    );
+    assert.match(vercelBuildScript, /export MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS/u);
+    assert.doesNotMatch(productionNextBuildScript, /timeout /u);
+    assert.doesNotMatch(productionNextBuildScript, /VERCEL/u);
+    const verificationSlotScript = await readFile(
+      path.join(appRoot, "..", "..", "scripts", "run-with-host-verification-slot.mjs"),
+      "utf8",
+    );
+    assert.match(
+      verificationSlotScript,
+      /COMMAND_TIMEOUT_ENV = "MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS"/u,
+    );
+    assert.match(verificationSlotScript, /COMMAND_TIMEOUT_EXIT_CODE = 124/u);
+    assert.match(verificationSlotScript, /reapCommandProcessGroup/u);
+
+    // apps/web/README.md § "Production build memory guard" is the single prose
+    // owner of the mutable runner contract (cache policy, epoch stamping, and
+    // the production watchdog). Secondary guidance documents keep only
+    // purpose-level statements plus a reference to that owner, so drift like a
+    // stale "preserves ordinary warm caching" claim cannot recur unnoticed.
+    const readmeDoc = await readFile(path.join(appRoot, "README.md"), "utf8");
+    const repoRoot = path.join(appRoot, "..", "..");
+    const verificationDoc = await readFile(
+      path.join(repoRoot, "agent-docs", "operations", "verification-and-runtime.md"),
+      "utf8",
+    );
+    const testingCiMapDoc = await readFile(
+      path.join(repoRoot, "agent-docs", "references", "testing-ci-map.md"),
+      "utf8",
+    );
+    assert.match(readmeDoc, /## Production build memory guard/u);
+    assert.match(readmeDoc, /`VERCEL=1` with\s+`VERCEL_ENV=production`/u);
+    assert.match(readmeDoc, /`\.next\/cache\/webpack` before every compile/u);
+    for (const [docName, doc] of [
+      ["verification-and-runtime.md", verificationDoc],
+      ["testing-ci-map.md", testingCiMapDoc],
+    ] as const) {
+      assert.match(
+        doc,
+        /Production\s+build memory guard/u,
+        `${docName} must reference the owner`,
+      );
+      for (const copiedMechanic of [
+        /preserves ordinary warm caching/u,
+        /15-minute `timeout`/u,
+        /kill-after/u,
+        /SIGKILL 30/u,
+        // The deadline is owned by vercel-build.sh arming plus the shared
+        // supervisor; secondary guidance must not assign watchdog ownership
+        // or behavioral authority to the build runner.
+        /watchdog/u,
+        /behavioral authority/u,
+      ]) {
+        assert.doesNotMatch(
+          doc,
+          copiedMechanic,
+          `${docName} must not copy mutable runner mechanics (${String(copiedMechanic)})`,
+        );
+      }
+    }
     assert.match(productionNextBuildScript, /compiler=webpack/u);
     assert.match(
       verifyFastScript,
@@ -1542,7 +1627,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       vercelJson.buildCommand,
-      "pnpm release:production:migrate && MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS=1 pnpm build",
+      "sh scripts/vercel-build.sh",
     );
     assert.equal(scripts["migrate:production:prebuild"], undefined);
     assert.equal(

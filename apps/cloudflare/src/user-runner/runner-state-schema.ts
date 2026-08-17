@@ -1,8 +1,8 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-// Version 16 is also a semantic rollback floor: its runner can persist the
-// physical media-owner fact inside strict provider-message effects.
-export const RUNNER_STATE_SCHEMA_VERSION = 16;
+// Version 17 is also a semantic rollback floor: its runner can persist the
+// outbound message-volume receipt marker inside strict outbox intents.
+export const RUNNER_STATE_SCHEMA_VERSION = 17;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`

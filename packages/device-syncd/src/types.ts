@@ -720,6 +720,10 @@ export interface DeviceSyncPublicIngressConnectionSourceObservedInput {
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
   claimToken: string;
+  /** Delivery-attempt instant; do not use as provider event or receipt time. */
+  processingAttemptedAt: string;
+  /** True only when hosted admission must finish exact-source recovery. */
+  sourceAdmissionDeferred: boolean;
   traceId: string;
   webhook: DeviceSyncIngressWebhook;
   provider: DeviceSyncProvider;
@@ -776,9 +780,9 @@ export interface DeviceSyncPublicIngressHooks {
   onConnectionSourceAdmissionRejected?(
     input: DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput,
   ): void | Promise<void>;
-  // Native SDK sources have no browser callback. A current provider-authored
-  // event may commit their pending exact-source epoch; passive traffic cannot
-  // clear a completed disconnect fence.
+  // A current provider-authored event may trigger exact-source verification
+  // when a native or browser callback is absent. Passive traffic cannot clear
+  // a completed disconnect fence because the runtime owns final admission.
   onConnectionSourceObserved?(
     input: DeviceSyncPublicIngressConnectionSourceObservedInput,
   ): void
@@ -922,6 +926,10 @@ export interface DeviceSyncProviderDiagnostics {
 export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
+  buildSourceConnectionWork?(input: {
+    now: string;
+    sourceProviderSlug: string;
+  }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
   revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;

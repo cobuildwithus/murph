@@ -140,12 +140,14 @@ export async function readHostedPhoneCallResult(input: {
   call: HostedPhoneCall;
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedSecureBoxPrismaClient;
+  signal?: AbortSignal;
 }): Promise<HostedPhoneCallResult | null> {
   if (input.call.resultEncrypted !== null) {
     return (input.crypto ?? hostedPhoneCallCrypto).decryptResult({
       callId: input.call.id,
       memberId: input.call.memberId,
       prisma: input.prisma,
+      signal: input.signal,
       value: input.call.resultEncrypted,
     });
   }

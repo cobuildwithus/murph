@@ -135,7 +135,7 @@ describe("assistant phone calls", () => {
   it.each([
     ["exact direct Linq occurrence", "linq", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],
     ["direct email occurrence", "email", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],
-    ["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],
     ["group occurrence", "linq", "group", "automation-cron", "2026-08-05T18:00:00.000Z", false],
     ["mismatched occurrence", "linq", "direct", "automation-cron", "2026-08-05T18:01:00.000Z", false],
     ["manual trigger", "linq", "direct", "manual-ask", "2026-08-05T18:00:00.000Z", false],
@@ -171,7 +171,7 @@ describe("assistant phone calls", () => {
     }
   });
 
-  it("keeps generic scheduled authority route-neutral while phone authority stays direct Linq", () => {
+  it("keeps generic scheduled authority route-neutral while phone authority stays on a supported direct surface", () => {
     const messageInput = {
       scheduledInvocationAuthority: {
         automationId: "automation-scheduled-tools",
@@ -549,6 +549,65 @@ describe("assistant phone calls", () => {
     );
     expect(result.rpcResult.contentItems[0]?.text).not.toContain(
       "a later result",
+    );
+  });
+
+  it("reports scheduled result-route loss as a definitive no-call failure", async () => {
+    const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
+      automationId: "automation-scheduled-call",
+      occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originSessionId: "session-scheduled-call-route-loss",
+    };
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+    const start = vi.fn(async () => {
+      throw Object.assign(
+        new Error("The direct result route is unavailable."),
+        {
+          code: "HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED",
+          retryable: true,
+          status: 503,
+        },
+      );
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentScheduledPhoneCallScope: () => scheduledScope,
+        currentUserActionScope: () => null,
+        phoneCalls: { start },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "no phone call was started",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "Restore that messaging route",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "ask the requester to reschedule",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "do not retry automatically",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "a later result",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "could not be confirmed",
     );
   });
 

@@ -33,12 +33,18 @@ import {
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
-import { HostedOnboardingError, hostedOnboardingError } from "./errors";
+import {
+  HostedOnboardingError,
+  hostedOnboardingError,
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+  HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+} from "./errors";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
 import {
   acceptHostedMemberStripeCheckoutCompletionTx,
+  assertNoHostedMemberStripeEffectTx,
   clearHostedMemberLegacyTrialBillingUnderLockTx,
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
   prepareHostedMemberStripeCheckoutCompletion,
@@ -93,6 +99,7 @@ import {
   applyHostedFamilyStripeCheckoutExpiredTx,
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
+  assertNoHostedFamilyStripeEffectTx,
   HOSTED_FAMILY_BILLING_PLAN_CODE,
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
   lookupHostedAccountGroupIdByStripeSubscriptionId,
@@ -229,6 +236,14 @@ async function classifyHostedFamilyBillingClaimTx(input: {
   });
   if (!familyClaim) {
     return "none";
+  }
+  if (familyClaim.kind === "stripe_effect") {
+    throw hostedOnboardingError({
+      code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+      httpStatus: 409,
+      message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+      retryable: true,
+    });
   }
   if (input.stripeSubscriptionId) {
     const familyGroupId =
@@ -954,6 +969,16 @@ export async function cleanupHostedFamilySponsoredDirectSubscription(input: {
       ) {
         throw new HostedStripeFamilySponsoredCleanupPendingError();
       }
+      await Promise.all([
+        assertNoHostedFamilyStripeEffectTx({
+          groupId: familyClaim.groupId,
+          tx,
+        }),
+        assertNoHostedMemberStripeEffectTx({
+          memberId: input.memberId,
+          tx,
+        }),
+      ]);
 
       const familyBillingRef = await readHostedAccountGroupStripeBillingRef({
         groupId: familyClaim.groupId,
