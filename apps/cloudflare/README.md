@@ -35,8 +35,9 @@ Internal control routes:
   hint (dispatched by presented credential, never falling through a failed
   one), records which trigger won as the `triggeredByWebDirect` orchestration
   latency leaf, and starts, wakes, or accepts a pending runtime wake for only
-  the bound user's runtime, returning after that start/wake intent is accepted,
-  not after the runtime reaches idle
+  the bound user's runtime. Both credentials receive the real accepted-or-retry
+  result after start/wake intent is accepted, not after the runtime reaches
+  idle; the direct path does not hide that result behind Worker `waitUntil()`
 - `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
   Vercel OIDC-authenticated typing/instant-start shell hint. Its bounded source
   distinguishes those two existing callers; an empty legacy request remains
@@ -396,6 +397,9 @@ unawaited, best-effort, and absent from successful processing. Run
 [`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
 through the private Cloudflare Analytics Engine SQL API or dashboard to get a
 sampling-corrected 24-hour reason breakdown.
+The corresponding Workers structured log includes the bounded retry reason and
+`orchestrationAttemptId` for request-level joins. That identifier is never
+copied into Analytics Engine blobs, indexes, or doubles.
 
 For the primary production control database, run the identifier-free cold-start
 report through the read-only helper:
@@ -455,7 +459,21 @@ member, mailbox, trace, or attempt identifiers.
 
 ## Runner Container Lifecycle
 
-The native Cloudflare container is a warm per-user shell. Successful workspace
+The native Cloudflare container is a warm per-user shell. Startup readiness is
+allowed up to 15 wall-clock seconds, including lifecycle-lock queue time. Once
+readiness-triggered cleanup starts, one absolute five-second cleanup deadline covers both
+the pre-destroy state read and destroy settlement, with a distinct one-second
+caller guard margin. The command budget begins at runtime-control authorization,
+before route parsing, Durable Object dispatch, consent serialization, and
+health-data admission. A settled readiness
+failure compare-clears its fresh write fence. An
+unsettled cleanup result or outer-guard timeout preserves that fence because
+the container lifecycle RPC may still be completing; normal startup-grace
+convergence, not a second state owner, performs recovery. For shorter commands,
+readiness gets the smaller of 15 seconds and remaining budget minus the
+one-second guard. Cleanup is not subtracted before readiness; if it cannot fit
+after a failure, the guard preserves the fence. Deploy Web's backward-compatible
+bounded client first, then this Worker result boundary. Successful workspace
 invocations keep the same Durable Object write fence while the runtime waits
 through `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`. Coalesced foreground input
 may preempt that wait. While dirty, the exact assistant wake projected by the
