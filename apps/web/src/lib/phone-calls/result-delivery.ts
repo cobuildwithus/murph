@@ -25,6 +25,8 @@ const HOSTED_PHONE_CALL_RESULT_DELIVERY_TERMINAL_STATUSES = new Set<
   "delivered",
   "failed",
 ]);
+const ASSISTANT_DELIVERY_RETRY_EXHAUSTED =
+  "ASSISTANT_DELIVERY_RETRY_EXHAUSTED";
 
 export interface HostedPhoneCallResultDeliveryOutcomeResult {
   recorded: boolean;
@@ -166,8 +168,11 @@ function shouldRearmHostedPhoneCallResultDeliveryReplay(input: {
   }
   return input.currentStatus === "pending"
     && input.request.status === "failed"
-    && isHostedPhoneCallResultPreProviderRouteFailureCode(
-      input.request.deliveryErrorCode,
+    && (
+      input.request.deliveryErrorCode === ASSISTANT_DELIVERY_RETRY_EXHAUSTED
+      || isHostedPhoneCallResultPreProviderRouteFailureCode(
+        input.request.deliveryErrorCode,
+      )
     );
 }
 
@@ -203,6 +208,22 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
   }
 
   if (input.request.status === "failed_ambiguous") {
+    if (input.currentStatus === "pending") {
+      return null;
+    }
+    if (input.currentStatus === "queued") {
+      return {
+        rearm: true,
+        status: "pending",
+        terminal: false,
+      };
+    }
+  }
+
+  if (
+    input.request.status === "failed"
+    && input.request.deliveryErrorCode === ASSISTANT_DELIVERY_RETRY_EXHAUSTED
+  ) {
     if (input.currentStatus === "pending") {
       return null;
     }

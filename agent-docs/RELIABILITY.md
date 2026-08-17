@@ -1919,8 +1919,13 @@ Last verified: 2026-08-16
   definitive route failure returns either queued or sending to `pending`
   because the runtime's cumulative outcome proves no Telegram request occurred.
   A different definitive runtime failure before the provider-entry callback
-  commits terminalizes the queued generation as `failed`; provider success from
-  queued remains invalid.
+  commits terminalizes the queued generation as `failed`, except that exact
+  transport retry exhaustion returns a still-queued generation to `pending`:
+  the missing signed `sending` transition is durable proof that provider entry
+  never occurred. Replay of that terminal callback repeats only the bounded
+  recovery re-arm. Retry exhaustion after `sending` remains terminal because
+  provider entry may have occurred; provider success from queued remains
+  invalid.
   Callback-loss recovery treats a stored result and terminal Retell usage as
   sibling obligations in the same reconciliation pass. After the exact row and
   provider-authority reconciliation, those two branches start together and one

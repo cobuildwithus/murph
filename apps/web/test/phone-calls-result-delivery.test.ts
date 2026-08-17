@@ -102,6 +102,28 @@ describe("hosted phone-call result delivery ownership", () => {
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
+    "ASSISTANT_TELEGRAM_SEND_FAILED",
+  ])("keeps %s terminal after provider entry may have occurred", async (
+    deliveryErrorCode,
+  ) => {
+    const store = createDeliveryStore("sending");
+    mocks.getPrisma.mockReturnValue(store.prisma);
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: {
+        ...deliveryRequest("failed"),
+        deliveryErrorCode,
+      },
+    })).resolves.toEqual({ recorded: true, status: "failed" });
+
+    expect(store.readStatus()).toBe("failed");
+    expect(store.readTerminalAt()).toBeInstanceOf(Date);
+    expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
+  });
+
   it("rejects provider success while the generation still proves pre-provider queued", async () => {
     const store = createDeliveryStore("queued");
     mocks.getPrisma.mockReturnValue(store.prisma);
@@ -119,7 +141,7 @@ describe("hosted phone-call result delivery ownership", () => {
     expect(mocks.rearmRecovery).not.toHaveBeenCalled();
   });
 
-  it("records a definitive pre-provider failure while Web still proves queued", async () => {
+  it("returns transport retry exhaustion to pending while Web still proves queued", async () => {
     const store = createDeliveryStore("queued");
     mocks.getPrisma.mockReturnValue(store.prisma);
 
@@ -129,11 +151,61 @@ describe("hosted phone-call result delivery ownership", () => {
         ...deliveryRequest("failed"),
         deliveryErrorCode: "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
       },
-    })).resolves.toEqual({ recorded: true, status: "failed" });
+    })).resolves.toEqual({ recorded: true, status: "pending" });
 
-    expect(store.readStatus()).toBe("failed");
-    expect(store.readTerminalAt()).toBeInstanceOf(Date);
+    expect(store.readStatus()).toBe("pending");
+    expect(store.readTerminalAt()).toBeNull();
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
+  });
+
+  it("replays queued transport exhaustion and recovers through one later provider send", async () => {
+    const store = createDeliveryStore("queued");
+    mocks.getPrisma.mockReturnValue(store.prisma);
+    mocks.rearmRecovery
+      .mockRejectedValueOnce(new Error("re-arm response lost"))
+      .mockResolvedValue(true);
+    const exhausted = {
+      ...deliveryRequest("failed"),
+      deliveryErrorCode: "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
+    };
+    const providerFetch = vi.fn(async () => ({ messageId: "telegram_1" }));
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: exhausted,
+    })).rejects.toThrow("re-arm response lost");
+    expect(store.readStatus()).toBe("pending");
+    expect(providerFetch).not.toHaveBeenCalled();
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: exhausted,
+    })).resolves.toEqual({ recorded: false, status: "pending" });
+    expect(store.updateMany).toHaveBeenCalledOnce();
+    expect(mocks.rearmRecovery).toHaveBeenCalledTimes(2);
+    expect(providerFetch).not.toHaveBeenCalled();
+
+    store.queueNextGeneration();
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: {
+        ...deliveryRequest("sending"),
+        generation: 2,
+      },
+    })).resolves.toEqual({ recorded: true, status: "sending" });
+    await providerFetch();
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: {
+        ...deliveryRequest("sent"),
+        generation: 2,
+      },
+    })).resolves.toEqual({ recorded: true, status: "delivered" });
+
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(store.readGeneration()).toBe(2);
+    expect(store.readStatus()).toBe("delivered");
+    expect(store.readTerminalAt()).toBeInstanceOf(Date);
   });
 
   it("replays a committed queued failure to repair a lost recovery response", async () => {
@@ -444,7 +516,7 @@ function createDeliveryStore(
   initialStatus: HostedPhoneCallResultDeliveryStatus,
   initialGeneration: number | null = 1,
 ) {
-  const generation = initialGeneration;
+  let generation = initialGeneration;
   let status = initialStatus;
   let terminalAt: Date | null = null;
   const updateMany = vi.fn(async (input: {
@@ -477,6 +549,15 @@ function createDeliveryStore(
         updateMany,
       },
     },
+    queueNextGeneration: () => {
+      if (generation === null || status !== "pending") {
+        throw new Error("Only pending tracked delivery can queue a generation.");
+      }
+      generation += 1;
+      status = "queued";
+      terminalAt = null;
+    },
+    readGeneration: () => generation,
     readStatus: () => status,
     readTerminalAt: () => terminalAt,
     updateMany,
