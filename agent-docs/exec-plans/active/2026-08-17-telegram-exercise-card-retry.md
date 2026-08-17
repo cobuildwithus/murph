@@ -60,6 +60,8 @@ Updated: 2026-08-17
 - Assistant Engine typecheck.
 - Provider-input measurement for direct and group Telegram turns.
 - Preliminary ReviewGPT product-experience, prompt, and coverage lenses.
+- Opt-in real-model proof for grouped movements, one rejected card, and two
+  rejected cards.
 - Exact-head required CI and current-base merge-tree proof.
 
 The pinned real Codex App Server capture used identical synthetic direct and
@@ -72,3 +74,11 @@ temporary paths, and the repository path. The selected provider fields were
 changed shared skill body and deferred exercise-card description are not part
 of the first request. They become visible only after the matching skill or
 tool is loaded.
+
+The first preliminary ReviewGPT pass returned `INVALID`. The prompt and product
+lenses found no issue, but the pass required production-faithful behavior proof
+instead of string-only tests. A synthetic opt-in real-model test now covers four
+movements under two phases, one corrected card rejection, and the image-free
+Rich Message fallback after two rejections. The focused proof passed with one
+exercise item and one catalog image per movement, no response media, and no
+model-authored text after the successful card attachment.

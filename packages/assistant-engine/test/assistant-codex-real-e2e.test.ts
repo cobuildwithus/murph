@@ -1466,6 +1466,222 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps phase-grouped Telegram movements through bounded card repair',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-routine-card-repair-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'telegram' as const,
+            }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const prompt = [
+          'Create this short routine now.',
+          'Mobility phase: ankle circles and torso turns.',
+          'Balance phase: tandem stand and side-to-side weight shifts.',
+          'Include the available catalog image for every named movement and keep the stop rule visible.',
+          'The available routine-card schema may include a test-only conformance probe; follow its property description exactly.',
+        ].join(' ')
+        const scenarios = [
+          {
+            expectedKind: 'exercise_routine' as const,
+            expectedRoutineCalls: 1,
+            label: 'valid multi-phase card',
+            probeCount: 0 as const,
+          },
+          {
+            expectedKind: 'exercise_routine' as const,
+            expectedRoutineCalls: 2,
+            label: 'one rejected call then corrected card',
+            probeCount: 1 as const,
+          },
+          {
+            expectedKind: 'telegram_rich_content' as const,
+            expectedRoutineCalls: 2,
+            label: 'two rejected calls then generic card',
+            probeCount: 2 as const,
+          },
+        ]
+
+        for (const scenario of scenarios) {
+          const routineTool = buildRoutineValidationProbeTool(
+            scenario.probeCount,
+          )
+          const result = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            dynamicTools: [
+              routineTool,
+              MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+              MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+            ],
+            prompt: [
+              prompt,
+              ...(scenario.probeCount >= 1
+                ? [
+                    'For the first routine-card call, include the top-level test field validation_probe_one with value "first".',
+                  ]
+                : []),
+              ...(scenario.probeCount === 2
+                ? [
+                    'If that call is rejected, include validation_probe_two with value "second" on the next routine-card call.',
+                  ]
+                : []),
+            ].join(' '),
+          })
+          const dynamicAttempts = readDynamicToolAttempts(result.jsonEvents)
+          const commandActions = readCapabilityRoutingActions(
+            result.jsonEvents,
+          ).filter(
+            (action): action is Extract<
+              CapabilityRoutingAction,
+              { kind: 'command' }
+            > => action.kind === 'command',
+          )
+          const routineCalls = dynamicAttempts.filter(
+            (action) =>
+              action.tool
+              === MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name,
+          )
+          const genericCalls = dynamicAttempts.filter(
+            (action) =>
+              action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name,
+          )
+          const mediaCalls = dynamicAttempts.filter(
+            (action) => action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+          )
+
+          expect(
+            routineCalls,
+            `${scenario.label} routine-card calls`,
+          ).toHaveLength(scenario.expectedRoutineCalls)
+          expect(mediaCalls, `${scenario.label} response-media calls`).toEqual(
+            [],
+          )
+          expect(
+            result.responseMedia,
+            `${scenario.label} response media`,
+          ).toEqual([])
+          const lastCardCallIndex = Math.max(
+            ...[...routineCalls, ...genericCalls].map(
+              (action) => action.eventIndex,
+            ),
+          )
+          expect(
+            readCompletedAgentMessages(result.jsonEvents).filter(
+              (message) => message.eventIndex > lastCardCallIndex,
+            ),
+            `${scenario.label} model text after card attachment`,
+          ).toEqual([])
+
+          if (scenario.probeCount >= 1) {
+            expect(routineCalls[0]?.argumentsValue).toHaveProperty(
+              'validation_probe_one',
+              'first',
+            )
+            expect(routineCalls[1]?.argumentsValue).not.toHaveProperty(
+              'validation_probe_one',
+            )
+          }
+          if (scenario.probeCount === 2) {
+            expect(routineCalls[0]?.argumentsValue).not.toHaveProperty(
+              'validation_probe_two',
+            )
+            expect(routineCalls[1]?.argumentsValue).toHaveProperty(
+              'validation_probe_two',
+              'second',
+            )
+          }
+
+          if (scenario.expectedKind === 'exercise_routine') {
+            expect(
+              genericCalls,
+              `${scenario.label} generic-card calls`,
+            ).toEqual([])
+            if (result.responseCard?.kind !== 'exercise_routine') {
+              throw new Error(
+                `${scenario.label} did not attach an exercise card.`,
+              )
+            }
+            expect(result.responseCard.exercises).toHaveLength(4)
+            const exerciseText = result.responseCard.exercises
+              .map((exercise) => exercise.name)
+              .join('\n')
+            expect(exerciseText).toMatch(/ankle/iu)
+            expect(exerciseText).toMatch(/torso/iu)
+            expect(exerciseText).toMatch(/tandem/iu)
+            expect(exerciseText).toMatch(/weight shift/iu)
+            expect(
+              result.responseCard.exercises.map(
+                (exercise) => exercise.images?.length ?? 0,
+              ),
+              `${scenario.label} catalog images after ${JSON.stringify(
+                commandActions.map((action) => action.command),
+              )}`,
+            ).toEqual([1, 1, 1, 1])
+          } else {
+            expect(
+              genericCalls,
+              `${scenario.label} generic-card calls`,
+            ).toHaveLength(1)
+            if (result.responseCard?.kind !== 'telegram_rich_content') {
+              throw new Error(
+                `${scenario.label} did not attach a generic Rich Message.`,
+              )
+            }
+            expect(result.responseCard.html).toMatch(/ankle/iu)
+            expect(result.responseCard.html).toMatch(/torso/iu)
+            expect(result.responseCard.html).toMatch(/tandem/iu)
+            expect(result.responseCard.html).toMatch(/weight shift/iu)
+            expect(
+              result.responseCard.html.match(/<(?:h3|li|summary)>/giu)?.length
+                ?? 0,
+              `${scenario.label} separate movement entries`,
+            ).toBeGreaterThanOrEqual(4)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'uses model-authored Telegram rich content only when structure improves the answer',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -9801,6 +10017,38 @@ function buildRoutinePresentationDeveloperInstructions(input: {
   })
 }
 
+function buildRoutineValidationProbeTool(
+  probeCount: 0 | 1 | 2,
+): AssistantProviderDynamicTool {
+  if (probeCount === 0) {
+    return MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL
+  }
+
+  return {
+    ...MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+    inputSchema: {
+      ...MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.inputSchema,
+      properties: {
+        ...MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.inputSchema.properties,
+        validation_probe_one: {
+          type: 'string',
+          description:
+            'Test-only conformance field. Set it to "first" on the first routine-card call only. Never include it on a later call.',
+        },
+        ...(probeCount === 2
+          ? {
+              validation_probe_two: {
+                type: 'string',
+                description:
+                  'Test-only conformance field. Do not include it on the first call. If that call is rejected, set it to "second" on the second routine-card call only. Never include it later.',
+              },
+            }
+          : {}),
+      },
+    },
+  }
+}
+
 function buildTelegramRichContentDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -9835,11 +10083,26 @@ async function materializeRoutinePresentationVaultCli(
       '#!/bin/sh',
       'set -eu',
       'case "$*" in',
+      '  *"commons knowledge search"*)',
+      '    printf \'%s\\n\' \'{"items":[]}\'',
+      '    ;;',
       '  *"exercise list"*)',
-      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"}]}\'',
+      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"},{"id":"MB101","slug":"ankle-circles","name":"Ankle circles"},{"id":"MB102","slug":"torso-turns","name":"Torso turns"},{"id":"BL201","slug":"tandem-stand","name":"Tandem stand"},{"id":"BL202","slug":"side-to-side-weight-shifts","name":"Side-to-side weight shifts"}]}\'',
       '    ;;',
       '  "exercise show doorway-stretch --format json"|"exercise show ST170 --format json")',
       '    printf \'%s\\n\' \'{"id":"ST170","name":"Doorway stretch","level":"beginner","instructions":["Take a small step forward.","Keep the ribs quiet."],"images":[{"url":"https://cdn.example.test/doorway-stretch.png","alt":"Person with a forearm resting on a door frame.","step":"Setup"}],"safetyNotes":["Stop if pain increases."]}\'',
+      '    ;;',
+      '  "exercise show ankle-circles --format json"|"exercise show MB101 --format json")',
+      '    printf \'%s\\n\' \'{"id":"MB101","name":"Ankle circles","level":"beginner","instructions":["Stand supported.","Draw small circles."],"images":[{"url":"https://cdn.example.test/ankle-circles.png","alt":"Person making a small ankle circle while standing with support.","step":"Movement"}],"safetyNotes":["Use a comfortable range."]}\'',
+      '    ;;',
+      '  "exercise show torso-turns --format json"|"exercise show MB102 --format json")',
+      '    printf \'%s\\n\' \'{"id":"MB102","name":"Torso turns","level":"beginner","instructions":["Stand tall.","Turn gently from the trunk."],"images":[{"url":"https://cdn.example.test/torso-turns.png","alt":"Person turning the torso gently while standing.","step":"Movement"}],"safetyNotes":["Keep the range comfortable."]}\'',
+      '    ;;',
+      '  "exercise show tandem-stand --format json"|"exercise show BL201 --format json")',
+      '    printf \'%s\\n\' \'{"id":"BL201","name":"Tandem stand","level":"beginner","instructions":["Place one foot before the other.","Use support if needed."],"images":[{"url":"https://cdn.example.test/tandem-stand.png","alt":"Person standing heel to toe near a stable support.","step":"Setup"}],"safetyNotes":["Stop if you feel unsteady."]}\'',
+      '    ;;',
+      '  "exercise show side-to-side-weight-shifts --format json"|"exercise show BL202 --format json")',
+      '    printf \'%s\\n\' \'{"id":"BL202","name":"Side-to-side weight shifts","level":"beginner","instructions":["Stand with feet apart.","Shift weight slowly from side to side."],"images":[{"url":"https://cdn.example.test/weight-shifts.png","alt":"Person shifting body weight from side to side.","step":"Movement"}],"safetyNotes":["Keep a stable support nearby."]}\'',
       '    ;;',
       '  *)',
       '    printf \'%s\\n\' \'unsupported routine fixture command\' >&2',
@@ -9866,6 +10129,56 @@ type CapabilityRoutingAction =
       kind: 'dynamic'
       tool: string
     }
+
+interface CompletedAgentMessage {
+  eventIndex: number
+  text: string
+}
+
+interface DynamicToolAttempt {
+  argumentsValue: Record<string, unknown>
+  eventIndex: number
+  tool: string
+}
+
+function readDynamicToolAttempts(
+  events: readonly unknown[],
+): DynamicToolAttempt[] {
+  return events.flatMap<DynamicToolAttempt>((event, eventIndex) => {
+    const record = readRecord(event)
+    if (readString(record?.method, record?.type) !== 'item/tool/call') {
+      return []
+    }
+    const params = readRecord(record?.params)
+    const tool = readString(params?.tool, params?.name)
+    if (!tool) {
+      return []
+    }
+    return [{
+      argumentsValue: readArgumentsRecord(params?.arguments),
+      eventIndex,
+      tool,
+    }]
+  })
+}
+
+function readCompletedAgentMessages(
+  events: readonly unknown[],
+): CompletedAgentMessage[] {
+  return events.flatMap<CompletedAgentMessage>((event, eventIndex) => {
+    const record = readRecord(event)
+    if (readString(record?.method, record?.type) !== 'item/completed') {
+      return []
+    }
+    const item = readRecord(readRecord(record?.params)?.item)
+    const itemType = readString(item?.type)
+    if (itemType !== 'agentMessage' && itemType !== 'agent_message') {
+      return []
+    }
+    const text = readString(item?.text)
+    return text ? [{ eventIndex, text }] : []
+  })
+}
 
 function readCapabilityRoutingActions(
   events: readonly unknown[],
