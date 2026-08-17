@@ -1586,18 +1586,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
   never treated as zero. Unusable collections receive one bounded retry after
-  one second. The connection-error family retains the expected ports 5432
-  and 6432 as independent region-plus-port monotonic series. Missing either
-  port leaves that family unknown, while an observed port can still contribute
-  unsafe evidence. Usable partial collections stay single-pass whenever
-  available evidence is unsafe; a safe observation missing only part or all of
-  the connection-error family receives one bounded confirmation after one
-  second. PlanetScale's example 30-second Prometheus scrape configuration is
-  not treated as a freshness guarantee or a basis for more provider calls. The
-  confirmation's available signals are evaluated, complementary observed ports
+  one second. The connection-error family retains ports 5432 and 6432 as
+  independent region-plus-port monotonic series. Any observed supported port
+  makes the family available. An absent port is diagnostic sparse label
+  cardinality, not a collection failure, while an observed port can still
+  contribute unsafe evidence. A safe observation with the complete
+  connection-error family absent receives one bounded confirmation after one
+  second. Usable partial collections stay single-pass whenever available
+  evidence is unsafe. PlanetScale's example 30-second Prometheus scrape
+  configuration is not treated as a freshness guarantee or a basis for more
+  provider calls. The
+  confirmation's available signals are evaluated, any recovered supported port
   may join the original complete gauge evidence, and failure retains the
-  original incomplete observation. A still-incomplete confirmation contributes
-  any observed connection-error counters to that original gauge evidence. Each
+  original incomplete observation. Each
   observed port, including one first seen by confirmation, advances only its
   usable baseline; an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed so an old delta is
@@ -1608,12 +1609,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   reserved for a check with no parsed observation. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families, and sums parsed observations plus exact omission
-  counts for ports 5432/6432 from partial checks. It uses the threshold time as
-  the window end; one bounded
+  counts for ports 5432/6432 from checks where the whole family was absent. It uses the threshold
+  time as the window end; one bounded
   evidence value on each existing sample preserves that provenance across
-  restart. A failed check retains every family omitted by any of its parsed
-  observations, so its exact port evidence and canonical missing-family list
-  cannot diverge. If any sample in the two-check window predates detailed port
+  restart. Structured warnings can retain a sparse-port omission during another
+  collection failure, but durable evidence clears that diagnostic count unless
+  the canonical connection-error family is missing. This preserves the legacy
+  reader correlation invariant across rollback. Legacy single-port monitoring
+  obligations remain readable. If any sample in the
+  two-check window predates detailed port
   evidence, the aggregate keeps port detail unknown instead of presenting a
   partial ratio as exact. Structured collection warnings include the bounded
   parsed-observation count and per-port omission counts without raw provider

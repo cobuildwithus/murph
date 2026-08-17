@@ -100,7 +100,7 @@ describe("database health scheduled Worker path", () => {
     expect(readDatabaseHealthMessageRequests()).toEqual([]);
   });
 
-  it("persists exact missing-port evidence through the scheduled Durable Object", async () => {
+  it("does not page for a sparse port through the scheduled Durable Object", async () => {
     resetDatabaseHealthMessageRequests();
     const scheduledAtMs = Date.now();
     setDatabaseHealthNowMs(scheduledAtMs);
@@ -120,19 +120,12 @@ describe("database health scheduled Worker path", () => {
     });
 
     expect(readDatabaseHealthPlanetScaleRequestCounts()).toEqual({
-      discovery: 4,
-      metrics: 4,
+      discovery: 2,
+      metrics: 2,
     });
-    const messageRequests = readDatabaseHealthMessageRequests();
-    expect(messageRequests).toHaveLength(2);
-    expect(messageRequests[0]?.messageParts[0]?.value).toContain(
-      "6432 in 4/4",
-    );
-    expect(messageRequests[0]?.messageParts[0]?.value).not.toContain(
-      "5432 in",
-    );
+    expect(readDatabaseHealthMessageRequests()).toEqual([]);
     await expect(monitor.readAlertState()).resolves.toMatchObject({
-      consecutiveScrapeFailures: 2,
+      consecutiveScrapeFailures: 0,
       pendingAlertIdempotencyKey: null,
       pendingAlertMessage: null,
     });

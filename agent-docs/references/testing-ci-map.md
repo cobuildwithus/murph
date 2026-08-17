@@ -624,15 +624,17 @@ supported provider credential.
 - `apps/cloudflare/test/database-health-{metrics,monitor,store,worker}.test.ts`
   and `apps/cloudflare/test/workers/database-health-e2e.test.ts` cover the
   independent PlanetScale/Linq database-health plane. The tests prove strict
-  per-family metric normalization, explicit unknowns when either expected
-  connection-error port is missing, collision-free region-plus-port series,
+  per-family metric normalization, healthy sparse connection-error port
+  cardinality without false monitoring pages, collision-free region-plus-port
+  series,
   continued evaluation of available signals, positive 5432 and 6432 deltas,
   and independent reset/new-series suppression across complete and partial
   samples. They also prove per-port baseline advancement with omitted-port
-  retention, one bounded confirmation for a safe connection-error-family
-  omission, confirmation-only port baseline advancement, exact single-port
-  warning and persisted alert evidence, alternating-port window aggregation,
-  mixed-confirmation family/evidence alignment, legacy evidence parsing, and
+  retention, one bounded confirmation when the whole connection-error family
+  is absent, confirmation-only port baseline advancement, transient diagnostic
+  port evidence with legacy-reader-compatible durable normalization,
+  alternating sparse-port observations, legacy single-port obligation parsing,
+  and
   conservative legacy-plus-detailed window formatting,
   retention of an all-family-missing parsed observation across retry transport
   failure with exact window ratios and immutable restart delivery,
