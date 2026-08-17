@@ -1634,15 +1634,18 @@ test("Junction complete-source-day imports bypass the provider-snapshot fallback
   );
 });
 
-test("Junction member deletions survive authoritative temporal replay", async () => {
+test("Junction member deletions survive retained edits and authoritative temporal replay", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-member-deletion-survives");
-  const clockedRows = [
+  const clockedRows = (lastEveningValue = 80) => [
     { timestamp: "2026-04-22 07:00", value: 20 },
     { timestamp: "2026-04-22 07:05", value: 30 },
     { timestamp: "2026-04-22 19:00", value: 70 },
-    { timestamp: "2026-04-22 19:05", value: 80 },
+    { timestamp: "2026-04-22 19:05", value: lastEveningValue },
   ];
-  const importDay = (revisionAt: string) =>
+  const importDay = (
+    rows: readonly Record<string, unknown>[],
+    revisionAt: string,
+  ) =>
     importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {
         completeSourceDay: {
@@ -1660,7 +1663,7 @@ test("Junction member deletions survive authoritative temporal replay", async ()
           timeseries: {
             stress_level: {
               groups: {
-                garmin: [{ data: clockedRows, source: { provider: "garmin", type: "watch" } }],
+                garmin: [{ data: rows, source: { provider: "garmin", type: "watch" } }],
               },
             },
           },
@@ -1676,32 +1679,62 @@ test("Junction member deletions survive authoritative temporal replay", async ()
       timezone: "UTC",
     });
 
-    const seeded = await importDay("2026-04-24T12:00:00.000Z");
+    const seeded = await importDay(clockedRows(), "2026-04-24T12:00:00.000Z");
     const facet = seeded.events.find((event) =>
       event.kind === "observation"
       && event.metric === "stress-evening-minus-morning-score"
     );
     assert.ok(facet);
+    assert.equal(facet.externalRef?.version, undefined);
+
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: { ...facet, note: "member context", source: "manual" },
+    });
+    await importDay([], "2026-04-24T13:00:00.000Z");
+    const recordsAfterOmission = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/events/2026/2026-04.jsonl",
+    });
+    const retainedAfterOmission = latestLiveRecords(
+      recordsAfterOmission,
+    ).find((record) => record.id === facet.id);
+    assert.equal(retainedAfterOmission?.note, "member context");
+    assert.equal(retainedAfterOmission?.source, "manual");
+    assert.equal(storedExternalRefField(retainedAfterOmission, "version"), undefined);
+    assert.ok(recordsAfterOmission.some((record) =>
+      record.id === facet.id
+      && record.source === "device"
+      && isDeletedEventLifecycle(record.lifecycle)
+      && storedExternalRefField(record, "version") === "2026-04-24T13:00:00.000Z"
+    ));
 
     await coreRuntime.deleteEvent({ vaultRoot, eventId: facet.id });
 
-    const ledgerBefore = await readFile(
-      join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
-      "utf8",
+    const recordsBeforeReplay = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/events/2026/2026-04.jsonl",
+    });
+    const deletedFacetRecordsBeforeReplay = recordsBeforeReplay.filter((record) =>
+      record.id === facet.id
     );
-    await importDay("2026-04-24T13:00:00.000Z");
-    const ledgerAfter = await readFile(
-      join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
-      "utf8",
+    const memberDeletion = deletedFacetRecordsBeforeReplay.at(-1);
+    assert.equal(memberDeletion?.source, "manual");
+    assert.equal(isDeletedEventLifecycle(memberDeletion?.lifecycle), true);
+    assert.equal(storedExternalRefField(memberDeletion, "version"), undefined);
+    await importDay(clockedRows(90), "2026-04-24T14:00:00.000Z");
+    const recordsAfterReplay = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/events/2026/2026-04.jsonl",
+    });
+    // The provider may reassert its other tombstones, but it appends no
+    // superseding revision over the member's deletion tombstone.
+    assert.deepEqual(
+      recordsAfterReplay.filter((record) => record.id === facet.id),
+      deletedFacetRecordsBeforeReplay,
     );
-    // The authoritative replay appends no superseding revision over the
-    // member's deletion tombstone and resurrects nothing.
-    assert.equal(ledgerAfter, ledgerBefore);
     const live = latestLiveRecords(
-      await coreRuntime.readJsonlRecords({
-        vaultRoot,
-        relativePath: "ledger/events/2026/2026-04.jsonl",
-      }),
+      recordsAfterReplay,
     );
     assert.equal(
       live.some((record) =>

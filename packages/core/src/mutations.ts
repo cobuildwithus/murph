@@ -3331,7 +3331,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
       authoritativeSet
       && indexedSourceVersionComparison === null
       && isDeletedEventSpineRecord(latest)
-      && indexedProviderMatch?.indexedExternalRef.version !== undefined,
+      && latest.source === "device"
+      && latest.externalRef?.version !== undefined,
     );
     if (
       deviceEventContentKey(latest) === deviceEventContentKey(entry.record)
