@@ -32,6 +32,7 @@ import {
   eventRecordSchema,
   eventImportDecisionSchema,
   isWritableIsoDateTime,
+  resolveFloatingIsoTimestampInTimeZone,
   safeParseContract,
   sampleRecordSchema,
 } from "@murphai/contracts";
@@ -2564,6 +2565,130 @@ function shouldKeepExistingJunctionSleepStageSummaryObservation(
 
 const JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE =
   "companion-whoop-metadata-unverified";
+const JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION =
+  "junction-sparse-timeseries.floating-fallback.v2";
+
+function resolveJunctionFloatingFallbackTime(
+  existing: EventRecord | undefined,
+  incoming: EventRecord,
+): EventRecord | null {
+  if (
+    incoming.externalRef?.system !== "junction"
+    || incoming.dataOrigin?.normalizerVersion
+      !== JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
+    || incoming.dataOrigin.timestampSemantics !== "floating"
+  ) {
+    return incoming;
+  }
+
+  if (!incoming.timeZone) {
+    return incoming;
+  }
+
+  // Junction documents Libre's +00:00 values as wall clocks, not instants.
+  // The importer carries those raw wall values through a schema-valid transient
+  // event. Resolve them only after stable external identity lookup, so a matched
+  // row uses its event spine's accepted zone while a new row uses the incoming
+  // fallback zone. Each endpoint resolves independently across DST transitions.
+  const acceptedExisting = existing?.externalRef?.system === "junction"
+    && existing.dataOrigin?.timestampSemantics === "floating"
+    && deviceDataOriginSourceMatches(existing.dataOrigin, incoming.dataOrigin)
+    ? existing
+    : undefined;
+  const targetTimeZone = acceptedExisting?.timeZone ?? incoming.timeZone;
+  const startRaw = incoming.dataOrigin.observedAtRaw;
+  if (typeof startRaw !== "string") {
+    return incoming;
+  }
+  const resolvedOccurrence = resolveFloatingIsoTimestampInTimeZone(
+    startRaw,
+    targetTimeZone,
+  );
+  const resolvedStart = incoming.kind === "intervention_session"
+    && typeof incoming.fields?.["start-at"] === "string"
+    ? resolveFloatingIsoTimestampInTimeZone(
+        incoming.fields["start-at"],
+        targetTimeZone,
+      )
+    : undefined;
+  const resolvedStartAt = resolvedStart?.timestamp;
+  const resolvedEndAt = incoming.kind === "intervention_session"
+    && typeof incoming.fields?.["end-at"] === "string"
+    ? resolveFloatingIsoTimestampInTimeZone(
+        incoming.fields["end-at"],
+        targetTimeZone,
+      )?.timestamp
+    : undefined;
+  if (
+    !resolvedOccurrence
+    || (
+      incoming.kind === "intervention_session"
+      && (
+        !resolvedStartAt
+        || !resolvedEndAt
+        || Date.parse(resolvedEndAt) < Date.parse(resolvedStartAt)
+      )
+    )
+  ) {
+    return null;
+  }
+  const resolvedInterventionFields = incoming.kind === "intervention_session"
+    && incoming.fields
+    ? {
+        ...incoming.fields,
+        ...(resolvedStartAt ? { "start-at": resolvedStartAt } : {}),
+        ...(resolvedEndAt ? { "end-at": resolvedEndAt } : {}),
+      }
+    : undefined;
+  const canonicalOccurrence = incoming.kind === "intervention_session"
+    && resolvedStartAt
+    ? resolvedStartAt
+    : resolvedOccurrence.timestamp;
+  const canonicalDayKey = incoming.kind === "intervention_session"
+    && resolvedStart
+    ? resolvedStart.dayKey
+    : resolvedOccurrence.dayKey;
+  return {
+    ...incoming,
+    occurredAt: canonicalOccurrence,
+    recordedAt: acceptedExisting?.recordedAt ?? incoming.recordedAt,
+    dayKey: canonicalDayKey,
+    timeZone: targetTimeZone,
+    ...(incoming.kind === "intervention_session" && resolvedInterventionFields
+      ? { fields: resolvedInterventionFields }
+      : {}),
+  };
+}
+
+function resolveJunctionFloatingFallbackEntries(
+  entries: readonly PreparedDeviceEventEntry[],
+  context: DeviceEventIdentityContext,
+): PreparedDeviceEventEntry[] {
+  return entries.flatMap((entry) => {
+    if (
+      entry.record.externalRef?.system !== "junction"
+      || entry.record.dataOrigin?.normalizerVersion
+        !== JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
+    ) {
+      return [entry];
+    }
+    const resolved = resolveDeviceEventIdentity(entry, context, { strict: true });
+    const indexedProviderMatch = resolved?.matchedEntries.find(
+      (match) => match.indexedMatch.record.id === resolved.latest?.id,
+    )?.indexedMatch ?? resolved?.matchedEntries[0]?.indexedMatch;
+    const canonicalRecord = resolveJunctionFloatingFallbackTime(
+      indexedProviderMatch?.indexedRecord,
+      entry.record,
+    );
+    return canonicalRecord
+      ? [{
+          ...entry,
+          relativePath: toEventLedgerFile(canonicalRecord.occurredAt),
+          record: canonicalRecord,
+        }]
+      : [];
+  });
+}
 
 function parseJunctionCompanionSyncVersion(version: string | undefined): number | undefined {
   if (!version || !/^(?:0|[1-9]\d*)$/u.test(version)) {
@@ -3211,7 +3336,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
   let supersededCount = 0;
   let retractedCount = 0;
 
-  for (const entry of entries) {
+  for (const originalEntry of entries) {
+    let entry = originalEntry;
     const externalRef = entry.record.externalRef;
 
     if (!externalRef) {
@@ -5342,18 +5468,29 @@ export async function importDeviceBatch({
     ingestReceipt,
     provenance,
   });
-  const eventTargetShardPaths = [
-    ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
-  ].sort();
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
   const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
     dedupeWithinPlan: true,
   });
-  const eventIdentityContext = await buildDeviceEventIdentityContext(
+  const initialEventIdentityContext = await buildDeviceEventIdentityContext(
     vaultRoot,
     deviceBatchPlan.preparedEvents,
     deviceBatchPlan.authoritativeEventSets,
   );
+  deviceBatchPlan.preparedEvents = resolveJunctionFloatingFallbackEntries(
+    deviceBatchPlan.preparedEvents,
+    initialEventIdentityContext,
+  );
+  const eventIdentityContext: DeviceEventIdentityContext = {
+    index: initialEventIdentityContext.index,
+    legacyReservations: buildLegacyExternalRefReservations(
+      deviceBatchPlan.preparedEvents,
+      initialEventIdentityContext.index,
+    ),
+  };
+  const eventTargetShardPaths = [
+    ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
+  ].sort();
   const currentEventOwners = mapCurrentDeviceEventOwners(
     deviceBatchPlan.preparedEvents,
     eventIdentityContext,

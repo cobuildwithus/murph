@@ -198,6 +198,8 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+type JunctionSourceLifecycleFence = ReadonlyMap<string, number>;
+
 interface JunctionFullJobTimeseriesContinuation {
   timeseriesCursor: string;
   timeseriesResourceCursor: string;
@@ -437,7 +439,7 @@ const JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY = Object.freeze({
   history: "extended",
   version: 1,
 } as const);
-const JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY = Object.freeze({
+const JUNCTION_SPARSE_EXACT_TIMESERIES_BACKFILL_POLICY = Object.freeze({
   anchor: "current_day",
   completion: "exact_records",
   history: "extended",
@@ -479,19 +481,19 @@ const JUNCTION_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   stress_level: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   vo2_max: JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY,
   water: JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY,
-  weight: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
-  body_mass_index: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
-  carbohydrates: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
-  fat: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
+  weight: JUNCTION_SPARSE_EXACT_TIMESERIES_BACKFILL_POLICY,
+  body_mass_index: JUNCTION_SPARSE_EXACT_TIMESERIES_BACKFILL_POLICY,
+  carbohydrates: JUNCTION_SPARSE_EXACT_TIMESERIES_BACKFILL_POLICY,
+  fat: JUNCTION_SPARSE_EXACT_TIMESERIES_BACKFILL_POLICY,
   forced_expiratory_volume_1: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   forced_vital_capacity: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   heart_rate_alert: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   inhaler_usage: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
-  insulin_injection: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
-  lean_body_mass: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
+  insulin_injection: JUNCTION_SPARSE_EXACT_TIMESERIES_BACKFILL_POLICY,
+  lean_body_mass: JUNCTION_SPARSE_EXACT_TIMESERIES_BACKFILL_POLICY,
   peak_expiratory_flow_rate: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   sleep_apnea_alert: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
-  waist_circumference: JUNCTION_SPARSE_BODY_TIMESERIES_BACKFILL_POLICY,
+  waist_circumference: JUNCTION_SPARSE_EXACT_TIMESERIES_BACKFILL_POLICY,
   calories_basal: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   daylight_exposure: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   fall: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
@@ -518,6 +520,19 @@ function resolveJunctionExtendedTimeseriesBackfillPolicy(
     resource as JunctionTimeseriesResource
   ];
   return policy.history === "extended" ? policy : null;
+}
+
+function requiresJunctionHistoricalPullReadiness(
+  policy: JunctionExtendedTimeseriesBackfillPolicy | null,
+): boolean {
+  return policy?.anchor === "current_day"
+    && (policy.completion === "daily_aggregate" || policy.completion === "exact_records");
+}
+
+function doesJunctionImportReceiptResolveDeliveredRows(resource: string): boolean {
+  return isJunctionBodyTimeseriesResource(resource)
+    || resource === "carbohydrates"
+    || resource === "insulin_injection";
 }
 
 const JUNCTION_DENSE_FIDELITY_RESOURCE_SET = new Set<string>(
@@ -2690,7 +2705,7 @@ export function createJunctionDeviceSyncProvider(
           });
         }
         if (
-          extendedHistoricalPolicy?.completion === "daily_aggregate"
+          requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
           && window.windowStart === historicalWindowStart
         ) {
           const historicalPullReadiness = resolveJunctionHistoricalPullReadiness({
@@ -2806,6 +2821,44 @@ export function createJunctionDeviceSyncProvider(
           );
           return result;
         }
+        if (
+          !extendedHistoricalBackfill
+          && timeseriesPolicy?.maxCanonicalRecordsPerWindow !== undefined
+        ) {
+          const [boundedWindow] = buildPreciseTimeseriesWindows(
+            window.windowStart,
+            window.windowEnd,
+          );
+          if (!boundedWindow) {
+            return withJunctionSkippedResourceMetadata(
+              context,
+              { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+              skippedOptionalResources,
+            );
+          }
+          await importJunctionTimeseriesResourceSnapshot({
+            context,
+            dateQueryFormat: "datetime",
+            resource: effectiveResource,
+            skippedOptionalResources,
+            sourceProviderSlug,
+            sourceProviders,
+            windowEnd: boundedWindow.windowEnd,
+            windowStart: boundedWindow.windowStart,
+          });
+          return withJunctionSkippedResourceMetadata(
+            context,
+            Date.parse(boundedWindow.windowEnd) < Date.parse(window.windowEnd)
+              ? buildYieldedJunctionJobResult({
+                  context,
+                  job,
+                  windowEnd: window.windowEnd,
+                  windowStart: boundedWindow.windowEnd,
+                })
+              : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+            skippedOptionalResources,
+          );
+        }
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,
           sourceProviders,
@@ -2878,7 +2931,7 @@ export function createJunctionDeviceSyncProvider(
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
             || (
-              isJunctionBodyTimeseriesResource(effectiveResource)
+              doesJunctionImportReceiptResolveDeliveredRows(effectiveResource)
               && timeseriesImport.providerRecordsExamined
             )
           : undefined;
@@ -2968,7 +3021,7 @@ export function createJunctionDeviceSyncProvider(
           skippedOptionalResources,
         );
         const historicalPullReadiness =
-          extendedHistoricalPolicy?.completion === "daily_aggregate"
+          requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
           && timeseriesImport.fetchComplete
             ? resolveJunctionHistoricalPullReadiness({
                 resource: effectiveResource,
@@ -3134,7 +3187,7 @@ export function createJunctionDeviceSyncProvider(
       input.job.payload.historicalRecordsSeen === true
       || input.importResult.canonicalEventCount > 0
       || (
-        isJunctionBodyTimeseriesResource(input.resource)
+        doesJunctionImportReceiptResolveDeliveredRows(input.resource)
         && input.importResult.providerRecordsExamined
       );
     const unresolvedProviderRecords =
@@ -3152,14 +3205,18 @@ export function createJunctionDeviceSyncProvider(
       encodeJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
-    if (policy.completion === "daily_aggregate" && input.importResult.fetchComplete) {
+    if (requiresJunctionHistoricalPullReadiness(policy) && input.importResult.fetchComplete) {
       const historicalPullReadiness = input.historicalPullReadiness ?? "unavailable";
       const currentReconcileWindowStart = floorUtcDayTimestamp(
         subtractDays(floorUtcDayTimestamp(input.context.now), reconcileDays),
       );
       if (
         historicalPullReadiness === "pending"
-        || (historicalPullReadiness === "unavailable" && !recordsSeen)
+        || (
+          policy.completion === "daily_aggregate"
+          && historicalPullReadiness === "unavailable"
+          && !recordsSeen
+        )
       ) {
         const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.at(-1) ?? 0;
         return {
@@ -3194,15 +3251,20 @@ export function createJunctionDeviceSyncProvider(
       if (historicalPullReadiness === "terminal_failure") {
         return input.result;
       }
-      return withJunctionMetadataPatch(
-        input.result,
-        buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
-          input.context,
-          input.job,
-          input.resource,
-          sourceProviderSlug,
-        ),
-      );
+      if (
+        policy.completion === "daily_aggregate"
+        || historicalPullReadiness !== "unavailable"
+      ) {
+        return withJunctionMetadataPatch(
+          input.result,
+          buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
+            input.context,
+            input.job,
+            input.resource,
+            sourceProviderSlug,
+          ),
+        );
+      }
     }
 
     // A complete note scan can close its one-time source coverage even when
@@ -3247,7 +3309,10 @@ export function createJunctionDeviceSyncProvider(
       ?? null;
     if (
       retryDelayMs === null
-      && (!input.importResult.fetchComplete || unresolvedProviderRecordsSeen)
+      && (
+        !input.importResult.fetchComplete
+        || unresolvedProviderRecords.identities.length > 0
+      )
     ) {
       emptyBackfillAttempts = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length;
       retryDelayMs =
@@ -3789,9 +3854,9 @@ export function createJunctionDeviceSyncProvider(
     let unresolvedProviderRecordCount = providerRecordCount;
     let unresolvedProviderRecordsWithoutStableIdentity = providerRecordCount > 0;
     const requiresBloodPressureRecordResolution = resources.includes("blood_pressure");
-    const successfulImportTerminatesBodyRows =
+    const successfulImportTerminatesDeliveredRows =
       resources.length === 1
-      && isJunctionBodyTimeseriesResource(resources[0] ?? "");
+      && doesJunctionImportReceiptResolveDeliveredRows(resources[0] ?? "");
 
     if (executionWindowStart && executionWindowEnd) {
       const identifyFetchedProviderRecords = (
@@ -3928,11 +3993,11 @@ export function createJunctionDeviceSyncProvider(
             unresolvedProviderRecordCount =
               unresolvedProviderRecordIdentities.length
               + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
-          } else if (successfulImportTerminatesBodyRows) {
-            // A resolved import receipt means the body normalizer examined
-            // every delivered row. Valid readings became canonical events and
-            // deterministic validation rejects are terminal; delivery errors
-            // throw before this branch and retain the retry obligation.
+          } else if (successfulImportTerminatesDeliveredRows) {
+            // A resolved exact-record import receipt means the canonical owner
+            // examined every delivered row. Valid readings became canonical
+            // events and deterministic validation rejects are terminal;
+            // delivery errors throw before this branch and remain retryable.
             unresolvedProviderRecordCount = 0;
             unresolvedProviderRecordsWithoutStableIdentity = false;
           } else {
@@ -4415,6 +4480,11 @@ export function createJunctionDeviceSyncProvider(
       }
     }
     const skippedResourceCountBeforeFetch = input.skippedOptionalResources.length;
+    const sourceLifecycleFence = resolveJunctionTimeseriesResourcePolicy(input.resource)
+      ?.maxCanonicalRecordsPerWindow !== undefined
+      && input.context.listConnectionSources
+      ? captureJunctionSourceLifecycleFence(input.context.account.sources ?? [])
+      : null;
     const records = await fetchTimeseriesResourceInChunks(
       input.context,
       input.resource,
@@ -4438,16 +4508,39 @@ export function createJunctionDeviceSyncProvider(
     if (input.skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
       return;
     }
+    const currentSources = sourceLifecycleFence && input.context.listConnectionSources
+      ? await input.context.listConnectionSources()
+      : null;
+    if (
+      sourceLifecycleFence
+      && (!currentSources
+        || !isJunctionSourceLifecycleFenceCurrent(sourceLifecycleFence, currentSources))
+    ) {
+      throw junctionTimeseriesSourceLifecycleSuperseded();
+    }
     if (records.length === 0 && !input.authorizedLocalDay) {
       return;
     }
 
-    const preparedImport = await prepareJunctionImportSnapshot(
-      input.context,
-      { [input.resource]: records },
-      input.sourceProviders,
-      { projectAccountSourceIdentities: calendarDayAggregate },
-    );
+    const preparedImport = currentSources
+      ? prepareJunctionImportSnapshotForSources(
+          { [input.resource]: records },
+          input.sourceProviders,
+          currentSources,
+          calendarDayAggregate
+            ? { sourceIdentities: resolveJunctionAccountSourceIdentities(currentSources) }
+            : {},
+          {
+            allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only",
+            sourceStatusRequirement: "not_disconnected",
+          },
+        )
+      : await prepareJunctionImportSnapshot(
+          input.context,
+          { [input.resource]: records },
+          input.sourceProviders,
+          { projectAccountSourceIdentities: calendarDayAggregate },
+        );
     if (!hasJunctionSnapshotRecords(preparedImport.snapshots) && !input.authorizedLocalDay) {
       return;
     }
@@ -9118,7 +9211,7 @@ function resolveJunctionHistoricalUnresolvedProviderRecords(
   return {
     identities: [...identities].sort(),
     withoutStableIdentity:
-      carried.withoutStableIdentity
+      (!importResult.fetchComplete && carried.withoutStableIdentity)
       || importResult.unresolvedProviderRecordsWithoutStableIdentity,
   };
 }
@@ -10749,6 +10842,86 @@ function readJunctionSourceLifecycleEpoch(source: { lifecycleEpoch?: number }): 
     : 1;
 }
 
+function captureJunctionSourceLifecycleFence(
+  sources: readonly JunctionImportAdmissionSource[],
+): JunctionSourceLifecycleFence {
+  return new Map(
+    [...buildJunctionCurrentLifecycleSourceMap(sources)]
+      .map(([sourceProviderSlug, sources]) => [
+        sourceProviderSlug,
+        readJunctionSourceLifecycleEpoch(sources[0]!),
+      ] as const),
+  );
+}
+
+function isJunctionSourceLifecycleFenceCurrent(
+  expected: JunctionSourceLifecycleFence,
+  currentSources: readonly JunctionImportAdmissionSource[],
+): boolean {
+  const current = captureJunctionSourceLifecycleFence(currentSources);
+  return current.size === expected.size
+    && [...expected].every(([sourceProviderSlug, lifecycleEpoch]) =>
+      current.get(sourceProviderSlug) === lifecycleEpoch
+    );
+}
+
+function junctionTimeseriesSourceLifecycleSuperseded(): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED",
+    message: "Junction source authorization changed during collection. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+  });
+}
+
+function buildJunctionCurrentLifecycleSourceMap<TSource extends JunctionImportAdmissionSource>(
+  sources: readonly TSource[],
+): Map<string, TSource[]> {
+  const currentByProviderSlug = new Map<string, TSource[]>();
+  for (const source of sources) {
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(source.sourceProviderSlug);
+    if (!sourceProviderSlug) {
+      continue;
+    }
+    const lifecycleEpoch = readJunctionSourceLifecycleEpoch(source);
+    const current = currentByProviderSlug.get(sourceProviderSlug);
+    const currentLifecycleEpoch = current?.[0]
+      ? readJunctionSourceLifecycleEpoch(current[0])
+      : 0;
+    if (!current || lifecycleEpoch > currentLifecycleEpoch) {
+      currentByProviderSlug.set(sourceProviderSlug, [source]);
+    } else if (lifecycleEpoch === currentLifecycleEpoch) {
+      current.push(source);
+    }
+  }
+  return currentByProviderSlug;
+}
+
+function selectCurrentJunctionLifecycleSources(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string,
+): JunctionImportAdmissionSource[] {
+  const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
+  if (!canonicalSourceProviderSlug) {
+    return [];
+  }
+  return buildJunctionCurrentLifecycleSourceMap(sources).get(canonicalSourceProviderSlug) ?? [];
+}
+
+function isJunctionLifecycleSourceGroupAdmitted(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceStatusRequirement: JunctionImportSourceStatusRequirement,
+): boolean {
+  if (sources.length === 0 || sources.some(isDeviceSyncSourceDisconnectFenced)) {
+    return false;
+  }
+  const status = sources
+    .map((source) => source.status)
+    .reduce(mergeJunctionSourceStatus);
+  return sourceStatusRequirement === "connected"
+    ? status === "connected"
+      : status !== "disconnected";
+}
 function isJunctionSourceAdmittedForImport(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,

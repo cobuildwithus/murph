@@ -53,7 +53,8 @@ Current providers:
   unversioned work remains v1 after an upgrade and cannot certify or downgrade
   v2 coverage.
 - Junction's product-default labels include `steps`, `distance`,
-  `calories_active`, `heartrate`, and `weight`. Production configuration sets
+  `calories_active`, `heartrate`, `weight`, `carbohydrates`, and
+  `insulin_injection`. Production configuration sets
   the exhaustive 48-resource registry explicitly, and omitting the list at the
   programmatic runtime seam resolves to that same registry. An explicit empty
   list disables all timeseries; an explicit non-empty list remains exact and
@@ -65,15 +66,30 @@ Current providers:
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
   per-reading evidence and the existing long summary-history backfill window.
-- Twelve additional sparse Junction timeseries are code-owned opt-ins: BMI,
-  carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
-  inhaler usage, insulin injections, lean body mass, peak expiratory flow,
-  sleep-apnea alerts, and waist circumference. The contract default remains off,
-  while the production provider assembly enables this exact audited resource set;
-  member overlays and environment variables cannot widen or narrow it. Enabled resources use the same
-  extended-history horizon as summaries, fetched in bounded 30-day windows;
-  dense/default timeseries retain their one-day windows. `fat` remains the
-  public resource name while the client requests Junction's `body_fat` path.
+- Seven sparse clinical and safety resources are product-default labels: FEV1,
+  FVC, heart-rate alerts, inhaler usage, peak expiratory flow, sleep-apnea
+  alerts, and falls. Each resource is fetched in a one-day unit with at most
+  128 provider records and retains at most 100 deterministic canonical facts;
+  an overflow leaves only a compact count marker. The source lifecycle epoch
+  is checked again after each provider read so a reconnect retries the same
+  resource/day instead of importing a stale response. Stable provider row IDs
+  may inform hashing but are omitted from compact evidence.
+- Carbohydrates and insulin injections use bounded 30-day history chunks with
+  at most 3,840 provider rows and 3,000 deterministic canonical facts. Libre's
+  documented fake-UTC wall times are admitted only when the vault timezone
+  identifies one exact instant; real nonzero offsets stay absolute, while DST
+  gaps, overlaps, and mixed floating/absolute intervals fail closed. The first
+  accepted fallback-zone interpretation belongs to the existing canonical event
+  spine, so later profile-timezone changes cannot rewrite only the recently
+  replayed portion of history. Explicit row zones and changed raw wall times
+  remain authoritative corrections. The lifecycle fence rechecks the source
+  after each fetch before import.
+- BMI, body fat, lean body mass, and waist circumference remain product opt-in
+  labels. The production provider assembly
+  still enables the exhaustive exact code-owned registry; member overlays and
+  environment variables cannot widen or narrow it. These four resources retain
+  bounded 30-day fetch chunks. `fat` remains the public resource name while the
+  client requests Junction's `body_fat` path.
 - `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
   that same code-owned production set. ECG voltage uses one-day grouped windows capped at
   100,000 admitted samples and 64 recordings, then reduces each recording to one
@@ -81,8 +97,8 @@ Current providers:
   uses the ordinary workout index only to admit at most 32 stable workouts per
   one-day window, then reads Junction's dedicated per-workout stream endpoint
   serially and caps each stream at 100,000 points. The exact production assembly has
-  48 production timeseries resources: 13 wide and 35 dense, including 34 ordinary
-  dense resources plus `workout_stream`. A full-job continuation owns one resource
+  48 production timeseries resources: 6 wide and 42 one-day resources, including
+  41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
   pages with one attempt and an eight-second timeout per page, limiting provider
   wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
@@ -206,14 +222,16 @@ second raw-payload metric parser.
 Junction timeseries use one exhaustive static history policy. Dense daily
 aggregates keep the bounded 14-day initial window. Advertised AFib burden, VO2
 max, heart-rate recovery, body and basal temperatures, sleep-breathing
-disturbance, caffeine, water, and mindfulness use the summary-history window,
-180 days by default. The existing source-scoped sparse-history jobs fetch one
-day at a time, serialize per account, and record terminal coverage in compact
+disturbance, caffeine, water, mindfulness, carbohydrates, and insulin injections
+use the summary-history window, 180 days by default. The existing source-scoped
+sparse-history jobs fetch policy-sized one- or 30-day chunks, serialize per
+account, and record terminal coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
-source-by-resource matrix in an existing blood-pressure or note metadata slot;
-legacy values still read, and unsupported route identities fail before history
+source-by-resource matrix in an existing blood-pressure or note metadata slot.
+The shorter pre-metabolic matrix zero-extends on its next write; older legacy
+values still read, and unsupported route identities fail before history
 egress rather than advancing an unretainable checkpoint. Every date-mode
 timeseries fetch preserves one complete provider
 calendar date during both migration and normal reconcile; a provider-bearing

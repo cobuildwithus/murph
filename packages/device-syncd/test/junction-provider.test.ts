@@ -19265,6 +19265,318 @@ test("Junction full backfills keep configured sparse and dense resources in boun
   assert.equal(denseOrdinaryRequests.length, 14);
 });
 
+test("Junction metabolic resources reuse exact-record extended history", () => {
+  const now = "2026-07-01T12:00:00.000Z";
+
+  for (const resource of ["carbohydrates", "insulin_injection"] as const) {
+    const provider = createJunctionProvider(async () => {
+      throw new Error("Scheduling should not make provider requests.");
+    }, {
+      summaryBackfillDays: 180,
+      timeseriesResources: [resource],
+    });
+    const source = createConnectionSource({
+      resourceAvailabilitySummary: { [resource]: true },
+    });
+    const sourceSummary = {
+      displayName: source.displayName,
+      firstSeenAt: source.firstSeenAt,
+      lastDataAt: source.lastDataAt,
+      lastErrorCode: source.lastErrorCode,
+      lastErrorMessage: source.lastErrorMessage,
+      lastSeenAt: source.lastSeenAt,
+      lifecycleEpoch: source.lifecycleEpoch,
+      resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+      resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: source.status,
+    };
+    const scheduled = requireValue(provider.jobExecutor?.createScheduledJobs?.(
+      createStoredAccount({
+        metadata: { junctionHistoricalBackfillStatus: "coverage_v3_complete" },
+        nextReconcileAt: now,
+        sources: [sourceSummary],
+      }),
+      now,
+    ));
+    const historyJobs = scheduled.jobs.filter((job) =>
+      job.kind === "resource" && job.payload?.historicalBackfill === true
+    );
+
+    assert.equal(historyJobs.length, 1, resource);
+    assert.equal(historyJobs[0]?.payload?.resource, resource);
+    assert.equal(historyJobs[0]?.payload?.historicalWindowStart, "2026-01-02T00:00:00.000Z");
+    assert.equal(historyJobs[0]?.payload?.windowEnd, "2026-07-01T00:00:00.000Z");
+  }
+});
+
+test("Junction metabolic history waits for authoritative pull readiness at both boundaries", async () => {
+  const source = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { carbohydrates: true },
+  });
+  const job = createJob("resource", {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-04-01T00:00:00.000Z",
+    resource: "carbohydrates",
+    resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-04-02T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  });
+  const execute = async (statuses: readonly string[]) => {
+    let groupedRequestCount = 0;
+    let historicalPullRequestCount = 0;
+    let importCount = 0;
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-1",
+            slug: "garmin",
+            status: "connected",
+            resource_availability: { carbohydrates: true },
+          }],
+        });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+        groupedRequestCount += 1;
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                end: "2026-04-01T12:05:00.000Z",
+                id: "carbohydrate-1",
+                start: "2026-04-01T12:00:00.000Z",
+                unit: "g",
+                value: 30,
+              }],
+              source: { provider: "garmin", type: "nutrition" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, {
+      summaryResources: [],
+      timeseriesResources: ["carbohydrates"],
+    }, async () => {
+      const status = statuses[
+        Math.min(historicalPullRequestCount, statuses.length - 1)
+      ];
+      historicalPullRequestCount += 1;
+      return createJsonResponse({
+        data: [{
+          provider: {
+            garmin: {
+              not_pulled: [],
+              pulled: {
+                carbohydrates: { days_with_data: 1, status },
+              },
+            },
+          },
+          user_id: "junction-user-1",
+        }],
+      });
+    });
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async () => {
+          importCount += 1;
+          return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+        },
+        listConnectionSources: () => [source],
+        now: "2026-04-03T00:00:00.000Z",
+      }),
+      job,
+    );
+    return {
+      groupedRequestCount,
+      historicalPullRequestCount,
+      importCount,
+      result,
+    };
+  };
+
+  const pendingBeforeFetch = await execute(["in_progress"]);
+  assert.equal(pendingBeforeFetch.groupedRequestCount, 0);
+  assert.equal(pendingBeforeFetch.importCount, 0);
+  assert.equal(pendingBeforeFetch.historicalPullRequestCount, 1);
+  assert.equal(pendingBeforeFetch.result.metadataPatch, undefined);
+  assert.equal(pendingBeforeFetch.result.scheduledJobs?.length, 1);
+
+  const becamePendingDuringFetch = await execute(["success", "in_progress"]);
+  assert.equal(becamePendingDuringFetch.groupedRequestCount, 1);
+  assert.equal(becamePendingDuringFetch.importCount, 1);
+  assert.equal(becamePendingDuringFetch.historicalPullRequestCount, 2);
+  assert.equal(becamePendingDuringFetch.result.metadataPatch, undefined);
+  assert.equal(becamePendingDuringFetch.result.scheduledJobs?.length, 1);
+
+  const ready = await execute(["success"]);
+  assert.equal(ready.groupedRequestCount, 1);
+  assert.equal(ready.importCount, 1);
+  assert.equal(ready.historicalPullRequestCount, 2);
+  assert.equal(ready.result.scheduledJobs, undefined);
+  assert.equal(
+    hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      ready.result.metadataPatch ?? {},
+      "garmin",
+      "carbohydrates",
+      1,
+    ),
+    true,
+  );
+});
+
+test("Junction metabolic history clears stale count-only ambiguity after a complete fetch", async () => {
+  const source = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { carbohydrates: true },
+  });
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          status: "connected",
+          resource_availability: { carbohydrates: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["carbohydrates"],
+  });
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      listConnectionSources: () => [source],
+      now: "2026-04-03T00:00:00.000Z",
+    }),
+    createJob("resource", {
+      emptyBackfillAttempts: 4,
+      historicalBackfill: true,
+      historicalProviderRecordsSeen: true,
+      historicalRecordsSeen: true,
+      historicalUnresolvedProviderRecordCount: 1,
+      historicalUnresolvedProviderRecordIdentitiesJson: JSON.stringify({
+        v: 1,
+        i: [],
+        u: true,
+      }),
+      historicalWindowStart: "2026-04-01T00:00:00.000Z",
+      resource: "carbohydrates",
+      resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-04-02T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(
+    hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadataPatch ?? {},
+      "garmin",
+      "carbohydrates",
+      1,
+    ),
+    true,
+  );
+});
+
+test("Junction metabolic history terminalizes deterministic rejects across the full chunked scan", async () => {
+  const source = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { carbohydrates: true },
+  });
+  let groupedRequestCount = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          status: "connected",
+          resource_availability: { carbohydrates: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+      groupedRequestCount += 1;
+      return createJsonResponse({
+        groups: groupedRequestCount === 1 ? {
+          garmin: [{
+            data: [{
+              timestamp: "2026-01-15T12:00:00.000Z",
+              unit: "g",
+              value: "invalid",
+            }],
+            source: { provider: "garmin", type: "nutrition" },
+          }],
+        } : {},
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["carbohydrates"],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async () => ({
+      canonicalEventCount: 0,
+      durableDeliveryAccepted: true,
+    }),
+    listConnectionSources: () => [source],
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  let job = createJob("resource", {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-01-01T00:00:00.000Z",
+    resource: "carbohydrates",
+    resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-06-30T00:00:00.000Z",
+    windowStart: "2026-01-01T00:00:00.000Z",
+  });
+  let result = await executeJunctionJob(provider, context, job);
+
+  for (let completedChunkCount = 1; completedChunkCount < 6; completedChunkCount += 1) {
+    const followUp = requireValue(
+      result.scheduledJobs?.find((candidate) => candidate.kind === "resource"),
+      `metabolic history continuation after chunk ${completedChunkCount}`,
+    );
+    assert.equal(followUp.payload?.emptyBackfillAttempts, undefined);
+    assert.equal(followUp.payload?.historicalRecordsSeen, true);
+    job = createJob(followUp.kind, followUp.payload ?? {});
+    result = await executeJunctionJob(provider, context, job);
+  }
+
+  assert.equal(groupedRequestCount, 6);
+  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(
+    hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadataPatch ?? {},
+      "garmin",
+      "carbohydrates",
+      1,
+    ),
+    true,
+  );
+});
+
 test("Junction direct-Link body data activates the existing extended-history owner", async () => {
   const connectedAt = "2026-04-03T00:00:00.000Z";
   const now = "2026-07-01T12:00:00.000Z";
@@ -19465,7 +19777,340 @@ test("Junction direct-Link body data activates the existing extended-history own
   }
 });
 
-test("Junction activity opt-ins keep fall on bounded sparse history while dense aggregates and features stay daily", async () => {
+test("Junction timeseries continuations fail retryably after a source reconnect", async () => {
+  let liveSource = createConnectionSource({ lifecycleEpoch: 1 });
+  let advanceLifecycleDuringFetch = true;
+  let sourceListReads = 0;
+  let requestCount = 0;
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname !== "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    requestCount += 1;
+    if (advanceLifecycleDuringFetch) {
+      liveSource = createConnectionSource({ lifecycleEpoch: 2 });
+      advanceLifecycleDuringFetch = false;
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            end: "2026-04-02T10:01:00.000Z",
+            id: "heart-alert-reconnect",
+            start: "2026-04-02T10:00:00.000Z",
+            type: "irregular_rhythm",
+            unit: "count",
+            value: 1,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heart_rate_alert"],
+  });
+  const currentSourceSummary = () => ({
+    displayName: liveSource.displayName,
+    firstSeenAt: liveSource.firstSeenAt,
+    lastDataAt: liveSource.lastDataAt,
+    lastErrorCode: liveSource.lastErrorCode,
+    lastErrorMessage: liveSource.lastErrorMessage,
+    lastSeenAt: liveSource.lastSeenAt,
+    lifecycleEpoch: liveSource.lifecycleEpoch,
+    resourceAvailabilitySummary: liveSource.resourceAvailabilitySummary,
+    resourceCount: Object.keys(liveSource.resourceAvailabilitySummary).length,
+    sourceProviderSlug: liveSource.sourceProviderSlug,
+    status: liveSource.status,
+  });
+  const accountSources = [currentSourceSummary()];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: accountSources }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: () => {
+      sourceListReads += 1;
+      return [liveSource];
+    },
+  });
+  const job = createJob("reconcile", {
+    timeseriesCursor: "2026-04-02T00:00:00.000Z",
+    timeseriesResourceCursor: "heart_rate_alert",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(provider, context, job),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED"
+      && error.retryable,
+  );
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(sourceListReads, 1);
+
+  accountSources[0] = currentSourceSummary();
+  await executeJunctionJob(provider, context, job);
+
+  assert.equal(requestCount, 2);
+  assert.equal(sourceListReads, 2);
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction clinical webhook pulls reuse the lifecycle-fenced resource owner", async () => {
+  let liveSource = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { heart_rate_alert: true },
+  });
+  let advanceLifecycleDuringFetch = true;
+  let sourceListReads = 0;
+  let requestCount = 0;
+  const sourceListReadsAtFetch: number[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { heart_rate_alert: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.pathname !== "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    requestCount += 1;
+    sourceListReadsAtFetch.push(sourceListReads);
+    if (advanceLifecycleDuringFetch) {
+      liveSource = createConnectionSource({
+        lifecycleEpoch: 2,
+        resourceAvailabilitySummary: { heart_rate_alert: true },
+      });
+      advanceLifecycleDuringFetch = false;
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            end: "2026-04-02T10:01:00.000Z",
+            id: "heart-alert-webhook-reconnect",
+            start: "2026-04-02T10:00:00.000Z",
+            type: "irregular_rhythm",
+            unit: "count",
+            value: 1,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heart_rate_alert"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.heart_rate_alert.created",
+      user_id: "junction-user-1",
+      data: {
+        data: [{
+          end: "2026-04-02T10:01:00.000Z",
+          start: "2026-04-02T10:00:00.000Z",
+        }],
+        source: { provider: "garmin", type: "watch" },
+      },
+    },
+    messageId: "msg_heart_alert_webhook_reconnect_1",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const parsedJob = requireValue(parsed.jobs[0]);
+  assert.equal(parsedJob.kind, "resource");
+  assert.equal(parsedJob.payload?.resource, "heart_rate_alert");
+
+  const currentSourceSummary = () => ({
+    displayName: liveSource.displayName,
+    firstSeenAt: liveSource.firstSeenAt,
+    lastDataAt: liveSource.lastDataAt,
+    lastErrorCode: liveSource.lastErrorCode,
+    lastErrorMessage: liveSource.lastErrorMessage,
+    lastSeenAt: liveSource.lastSeenAt,
+    lifecycleEpoch: liveSource.lifecycleEpoch,
+    resourceAvailabilitySummary: liveSource.resourceAvailabilitySummary,
+    resourceCount: Object.keys(liveSource.resourceAvailabilitySummary).length,
+    sourceProviderSlug: liveSource.sourceProviderSlug,
+    status: liveSource.status,
+  });
+  const accountSources = [currentSourceSummary()];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: accountSources }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: () => {
+      sourceListReads += 1;
+      return [liveSource];
+    },
+  });
+  const job = createJob(parsedJob.kind, parsedJob.payload ?? {});
+
+  await assert.rejects(
+    () => executeJunctionJob(provider, context, job),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED"
+      && error.retryable,
+  );
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(sourceListReads - (sourceListReadsAtFetch[0] ?? 0), 1);
+
+  accountSources[0] = currentSourceSummary();
+  await executeJunctionJob(provider, context, job);
+
+  assert.equal(requestCount, 2);
+  assert.equal(sourceListReads - (sourceListReadsAtFetch[1] ?? 0), 1);
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction historical clinical webhooks preserve one capped day per continuation", async () => {
+  const source = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { heart_rate_alert: true },
+  });
+  const sourceSummary = {
+    displayName: source.displayName,
+    firstSeenAt: source.firstSeenAt,
+    lastDataAt: source.lastDataAt,
+    lastErrorCode: source.lastErrorCode,
+    lastErrorMessage: source.lastErrorMessage,
+    lastSeenAt: source.lastSeenAt,
+    lifecycleEpoch: source.lifecycleEpoch,
+    resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+    resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
+  };
+  const requestedWindows: Array<{ windowEnd: string | null; windowStart: string | null }> = [];
+  const importedSnapshots: Array<{
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  }> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { heart_rate_alert: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.pathname !== "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    const windowStart = url.searchParams.get("start_date");
+    const windowEnd = url.searchParams.get("end_date");
+    requestedWindows.push({ windowEnd, windowStart });
+    const day = windowStart?.slice(0, 10) ?? "2026-04-01";
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: Array.from({ length: 80 }, (_value, index) => ({
+            end: `${day}T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:30.000Z`,
+            id: `heart-alert-${day}-${index}`,
+            start: `${day}T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00.000Z`,
+            type: "irregular_rhythm",
+            unit: "count",
+            value: 1,
+          })),
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heart_rate_alert"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "historical.data.heart_rate_alert.created",
+      user_id: "junction-user-1",
+      data: {
+        end_date: "2026-04-02",
+        source: { provider: "garmin", type: "watch" },
+        start_date: "2026-04-01",
+      },
+    },
+    messageId: "msg_heart_alert_historical_1",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const parsedJob = requireValue(parsed.jobs[0]);
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [sourceSummary] }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot as {
+        timeseries?: Record<string, Array<Record<string, unknown>>>;
+      });
+      return { canonicalEventCount: 80, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: () => [source],
+  });
+
+  const firstResult = await executeJunctionJob(
+    provider,
+    context,
+    createJob(parsedJob.kind, parsedJob.payload ?? {}),
+  );
+  const followUp = requireValue(firstResult.scheduledJobs?.[0]);
+  assert.deepEqual(requestedWindows, [{
+    windowEnd: "2026-04-02T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  }]);
+  assert.equal(importedSnapshots[0]?.timeseries?.heart_rate_alert?.length, 80);
+  assert.equal(followUp.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(followUp.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+
+  const secondResult = await executeJunctionJob(
+    provider,
+    context,
+    createJob(followUp.kind, followUp.payload ?? {}),
+  );
+  assert.equal(secondResult.scheduledJobs, undefined);
+  assert.deepEqual(requestedWindows[1], {
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  });
+  assert.equal(importedSnapshots[1]?.timeseries?.heart_rate_alert?.length, 80);
+  assert.equal(
+    importedSnapshots.reduce(
+      (total, snapshot) => total + (snapshot.timeseries?.heart_rate_alert?.length ?? 0),
+      0,
+    ),
+    160,
+  );
+});
+
+test("Junction activity resources keep fall sparse while dense aggregates and features stay daily", async () => {
   const denseResources = ["calories_basal", "handwashing", "workout_distance"];
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -19999,15 +20644,15 @@ test("Junction production timeseries resources and direct provider bound match d
   const wideResources = productionResources.filter(
     (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) > 1,
   );
-  const denseResources = productionResources.filter(
+  const oneDayResources = productionResources.filter(
     (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) === 1,
   );
-  const ordinaryDenseResources = denseResources.filter(
+  const ordinaryOneDayResources = oneDayResources.filter(
     (resource) => resource !== "workout_stream",
   );
   assert.deepEqual(
-    [productionResources.length, wideResources.length, denseResources.length, ordinaryDenseResources.length],
-    [48, 13, 35, 34],
+    [productionResources.length, wideResources.length, oneDayResources.length, ordinaryOneDayResources.length],
+    [48, 6, 42, 41],
   );
 
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
@@ -20017,7 +20662,7 @@ test("Junction production timeseries resources and direct provider bound match d
   );
   for (const documentation of [readme, compatibilityMatrix]) {
     assert.match(documentation, /48 production timeseries resources/u);
-    assert.match(documentation, /13 wide and 35 dense/u);
+    assert.match(documentation, /6 wide and 42 one-day/u);
     assert.match(documentation, /three\s+sequential\s+pages/u);
     assert.match(documentation, /one attempt/u);
     assert.match(documentation, /24 seconds/u);
