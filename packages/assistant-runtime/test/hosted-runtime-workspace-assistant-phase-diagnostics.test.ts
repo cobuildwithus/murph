@@ -400,7 +400,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     expect(JSON.stringify(logRequests)).not.toContain("test-token-value");
   });
 
-  it("preserves neutral route-planning timing diagnostics", async () => {
+  it("preserves neutral provider-plan diagnostics", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       deviceSyncProcessed: 0,
@@ -416,6 +416,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
         phase: "wake.running",
         redacted: {
           providerTraceKind: "assistant.provider.plan",
+          reasoningEffort: "high",
           routePlanningElapsedMs: 71_000,
           routePlanningFallbackInstructionsElapsedMs: 66_000,
           routePlanningMeasuredElapsedMs: 70_990,
@@ -437,6 +438,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
       component: "assistant",
       eventCode: "assistant.automation_detail",
       redactedJson: expect.objectContaining({
+        reasoningEffort: "high",
         routePlanningElapsedMs: 71_000,
         routePlanningFallbackInstructionsElapsedMs: 66_000,
         routePlanningMeasuredElapsedMs: 70_990,

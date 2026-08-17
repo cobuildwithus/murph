@@ -196,6 +196,7 @@ import {
 import {
   type GenerateSongToolArgs,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoPhaseTimingRecorder,
   type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
 import {
@@ -2033,6 +2034,7 @@ export async function executeMurphDynamicToolRequest(input: {
   groupChallengeResponseCardAllowed?: boolean | null
   knowledgePageReadTextFile?: KnowledgeServiceDependencies['readTextFile'] | null
   privateDirectResponseCardAllowed?: boolean | null
+  telegramPresentationResponseCardAllowed?: boolean | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
@@ -2046,6 +2048,7 @@ export async function executeMurphDynamicToolRequest(input: {
   request: MurphDynamicToolRequest
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
+  voiceMemoPhaseTimingRecorder?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
@@ -2223,7 +2226,16 @@ export async function executeMurphDynamicToolRequest(input: {
           'challenge standings response cards require page-authorized observation input',
         )
       }
-      if (input.privateDirectResponseCardAllowed !== true) {
+      const telegramPresentationAllowed =
+        input.telegramPresentationResponseCardAllowed === true &&
+        (
+          input.request.card.kind === 'exercise_routine' ||
+          input.request.card.kind === 'telegram_rich_content'
+        )
+      if (
+        input.privateDirectResponseCardAllowed !== true &&
+        !telegramPresentationAllowed
+      ) {
         return toolTextResult(
           false,
           'response cards require a private direct conversation',
@@ -3163,6 +3175,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
@@ -3174,6 +3187,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })

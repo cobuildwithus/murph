@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-08-13
+Last verified against repo layout: 2026-08-16
 
 ## Current split
 
@@ -161,22 +161,50 @@ a failed canary is rolled back to the synchronous path before investigation.
 
 The Queue consumer is configured for 100 messages, five-second collection,
 one consumer, ten retries, and an encrypted DLQ. It decrypts outside Postgres
-and partitions each delivery into signed Web callbacks of at most 25 messages.
-Web validates the whole callback, then uses an explicit serial loop around the
-existing shared ingress's prepared-event admission. It does not re-run the
-provider signature verifier or parser. The frozen receipt instant and parsed
-meaning therefore survive provider secret or parser rotation while queued; the
-trace processing lease begins at Web admission time so a delayed delivery never
-starts with an expired lease. Every emitted prepared schema decoder must remain
-readable through the maximum Queue, DLQ, and redrive horizon, just as an old
-transport recipient key remains decrypt-only during its retention window.
-Existing trace claims, health-data consent,
-provider-application revision, setup, source, reconnect, disconnect, dirty
-state, exact encrypted payload, mailbox wake, and post-commit Temporal behavior
-remain unchanged. Thus a 100-message burst creates peak-one webhook admission
-pressure, although it still performs the existing sequential canonical writes.
-No raw-SQL batch owner, Queue database, Durable Object state, Vercel Workflow,
-or Temporal webhook workflow is introduced.
+and normally sends each delivery as one signed Web callback of at most 100
+messages. It partitions only when the exact UTF-8 callback would exceed the
+2 MiB Web body contract, so individually valid large events remain admissible.
+Web validates the whole callback, groups prepared events by provider account,
+and runs at most four independent account lanes. One account remains ordered
+and serial. Each event acquires its existing trace-processing lease only when
+that exact event starts durable admission. Web never preclaims later events in
+an account lane, so a callback deadline or process termination cannot leave
+not-yet-started events waiting on five-minute processing leases. Web does not
+re-run the provider signature verifier or parser.
+The frozen receipt instant and parsed meaning therefore survive provider secret
+or parser rotation while queued; the trace processing lease begins at Web
+admission time so a delayed delivery never starts with an expired lease. Every
+emitted prepared schema decoder must remain readable through the maximum Queue,
+DLQ, and redrive horizon, just as an old transport recipient key remains
+decrypt-only during its retention window.
+
+Transport admission is batched; durable database ownership remains per event.
+Trace admission, health-data consent, provider-application revision, setup,
+source, reconnect, disconnect, dirty state, exact encrypted payload, mailbox
+wake, trace completion, and post-commit Temporal behavior retain their existing
+per-event authority checks and independently retryable transactions.
+Cloudflare consumer concurrency remains one, so the four-lane Web bound is also
+the composed database-concurrency bound for this Queue. Value-free batch logs
+report input, lane, disposition, failure-code count, and duration totals; they
+never include account, trace, transport, provider payload, or exception values.
+No Queue database, Durable Object state, Vercel Workflow, Temporal webhook
+workflow, or cross-event processing lease is introduced.
+
+The historical three-account five-minute peak was 2,675 events; its 10x model
+is 26,750 events (about 89/s average and 222/s in the peak minute). At 200 ms of
+per-event durable work, the old serial path takes about 89 minutes. Four evenly
+loaded lanes approach 22 minutes, but the observed top account carried about
+65% of the five-minute peak, so preserving its order puts the conservative
+lower bound near 58 minutes. At 500 ms/event,
+the corresponding bounds are about 56 minutes when evenly loaded and 2.4 hours
+at the observed skew instead of 3.7 hours. These are service-time bounds, not a
+production latency guarantee: connection authority, consent, locks, crypto,
+dirty persistence, mailbox and signal work remain part of every exact event.
+A one-account storm remains serial because parallel writes to the same
+member/connection lock would amplify contention and cannot safely reorder exact
+resource work. The throughput gain therefore comes from fewer signed Vercel
+callbacks and bounded progress across independent accounts, not from acquiring
+database authority for future same-account events.
 
 Queue-visible state contains random transport identifiers, ciphertext, and key
 wrap metadata only. Provider, account, event, trace, and prepared job meaning
@@ -507,7 +535,7 @@ Webhook ingress separates level-triggered dirty hints from event-triggered durab
 
 Provider webhook traces remain exact for side-effect-bearing accepted deliveries. Accepted level dirty hints write sparse audit signals and upsert `device_sync_dirty_connection` only when they create fresh dirty work; later level hints for an already-pending connection can be accepted before trace claim. Durable webhook work still passes through exact trace claim and durable acceptance so provider-owned event work is not lost. The steady-state architecture does not use per-webhook hosted mailbox items or Vercel Workflows for freshness.
 
-When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion overnight PRV row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. Exact missed-wake recovery would need a future explicit pending-handoff ledger, not a dirty sweeper. Webhook and app paths do not send runner nudges directly to Cloudflare.
+When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion overnight PRV row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. The existing scheduled mailbox-handoff sweep selects one unconsumed `device-sync.wake` pointer per user alongside its other durable mailbox candidates, so a failed first Temporal signal is retried from mailbox truth without a pending-handoff ledger or dirty-row scan. Webhook and app paths do not send runner nudges directly to Cloudflare.
 
 Temporal is the only normal wake orchestrator. When mailbox signals or reconciliation facts show durable work, it calls Cloudflare's signed `ensure-processing` adapter; Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns runner start, wake, active-fence alarm cleanup, and execution cleanup.
 

@@ -115,6 +115,26 @@ export type AssistantResponseCard =
   | TelegramRichContentResponseCardV1
   | ChallengeStandingsResponseCardV1;
 
+export function assistantResponseCardMatchesConversationAudience(input: {
+  card: AssistantResponseCard;
+  channel: string | null;
+  threadIsDirect: boolean | null;
+}): boolean {
+  const channel = input.channel?.trim().toLowerCase() ?? null;
+  if (input.card.kind === "challenge_standings") {
+    return channel === "linq" && input.threadIsDirect === false;
+  }
+  if (input.threadIsDirect === true) {
+    return true;
+  }
+  return channel === "telegram"
+    && input.threadIsDirect === false
+    && (
+      input.card.kind === "exercise_routine"
+      || input.card.kind === "telegram_rich_content"
+    );
+}
+
 const nutritionCardMealCountSchema = z
   .number()
   .int()

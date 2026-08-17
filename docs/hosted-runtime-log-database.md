@@ -95,6 +95,12 @@ The separate assistant `provider.prompt_size` trace may record
 history flattened into the initial provider prompt; they do not measure
 function outputs carried into later mid-turn Responses requests.
 
+The existing `assistant.provider.plan` trace may record `reasoningEffort` only
+as `low`, `medium`, `high`, `xhigh`, or `null`. The value is captured after
+conversation and turn-scoped automation overrides resolve and is the normalized
+value passed to the Codex provider attempt. Raw provider configuration, prompts,
+messages, credentials, and paths remain excluded.
+
 ## Append and deletion serialization
 
 Every append runs in one short transaction:
