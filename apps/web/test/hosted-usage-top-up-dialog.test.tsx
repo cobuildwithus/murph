@@ -2726,7 +2726,6 @@ test.each([
       createElement(HostedUsageTopUpDialog, {
         payerMemberId: TEST_PAYER_MEMBER_ID,
         checkoutUrl,
-        contactOptions: [textMurphContactOption()],
         initialOpen: true,
         offers: usageCreditOffers(),
         scope,
@@ -4791,6 +4790,8 @@ test("times out a stalled status lookup and lets the member check again", async 
         kind: "success",
         purchaseId: "hucp_stalled",
       },
+      quietSuccessfulReturn: true,
+      renderPurchaseDetails: createElement("p", null, "Purchase details"),
     }),
     {
       location: {
@@ -4801,6 +4802,8 @@ test("times out a stalled status lookup and lets the member check again", async 
   );
 
   try {
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+
     await act(async () => {
       vi.advanceTimersByTime(30_000);
       await Promise.resolve();
@@ -4812,165 +4815,58 @@ test("times out a stalled status lookup and lets the member check again", async 
     );
     assert.equal(buttonByText(rendered.container, "Check again").disabled, false);
     assert.equal(buttonByText(rendered.container, "Close").disabled, false);
-  } finally {
-    await rendered.cleanup();
-    vi.useRealTimers();
-  }
-});
-
-test("offers Text Murph once a successful return is confirmed fulfilled", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    purchaseId: "hucp_contact_added0",
-    status: "fulfilled",
-  });
-  const { HostedUsageTopUpDialog } = await import(
-    "@/src/components/settings/hosted-usage-top-up-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(HostedUsageTopUpDialog, {
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      contactOptions: [textMurphContactOption()],
-      offers: [],
-      purchaseReturn: {
-        kind: "success",
-        purchaseId: "hucp_contact_added0",
-      },
-    }),
-    {
-      location: {
-        href: "https://example.test/settings?usagePurchase=hucp_contact_added0&usageCheckout=success",
-      },
-      requireButton: false,
-    },
-  );
-
-  try {
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    assert.match(rendered.container.textContent ?? "", /Usage added/);
-    const contactLink = rendered.container.querySelector("a");
-    assert.ok(contactLink);
-    assert.equal(contactLink.textContent, "Text Murph");
-    assert.equal(
-      contactLink.getAttribute("href"),
-      "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-    );
-    assert.equal(
-      contactLink.getAttribute("aria-label"),
-      "Text Murph in Messages",
-    );
-    assert.equal(
-      buttonByText(rendered.container, "Close").dataset.variant,
-      "ghost",
-    );
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("keeps the fulfilled confirmation unchanged when no contact channel resolves", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    purchaseId: "hucp_contact_none00",
-    status: "fulfilled",
-  });
-  const { HostedUsageTopUpDialog } = await import(
-    "@/src/components/settings/hosted-usage-top-up-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(HostedUsageTopUpDialog, {
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      contactOptions: [],
-      offers: [],
-      purchaseReturn: {
-        kind: "success",
-        purchaseId: "hucp_contact_none00",
-      },
-    }),
-    {
-      location: {
-        href: "https://example.test/settings?usagePurchase=hucp_contact_none00&usageCheckout=success",
-      },
-      requireButton: false,
-    },
-  );
-
-  try {
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    assert.match(rendered.container.textContent ?? "", /Usage added/);
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
-    assert.equal(rendered.container.querySelector("a"), null);
-    assert.equal(buttonByText(rendered.container, "Close").disabled, false);
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("withholds Text Murph until the returned payment is confirmed fulfilled", async () => {
-  vi.useFakeTimers();
-  mocks.requestHostedOnboardingJson
-    .mockResolvedValueOnce({
-      purchaseId: "hucp_contact_wait00",
-      status: "payment_pending",
-    })
-    .mockResolvedValueOnce({
-      purchaseId: "hucp_contact_wait00",
-      status: "fulfilled",
-    });
-  const { HostedUsageTopUpDialog } = await import(
-    "@/src/components/settings/hosted-usage-top-up-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(HostedUsageTopUpDialog, {
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      contactOptions: [textMurphContactOption()],
-      offers: [],
-      purchaseReturn: {
-        kind: "success",
-        purchaseId: "hucp_contact_wait00",
-      },
-    }),
-    {
-      location: {
-        href: "https://example.test/settings?usagePurchase=hucp_contact_wait00&usageCheckout=success",
-      },
-      requireButton: false,
-    },
-  );
-
-  try {
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Purchase details/);
     assert.match(
-      rendered.container.textContent ?? "",
-      /Payment submitted\. We’re confirming it\./,
+      rendered.container.querySelector('[role="dialog"]')?.className ?? "",
+      /sm:max-w-md/,
     );
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
-    assert.equal(rendered.container.querySelector("a"), null);
-
-    await act(async () => {
-      vi.advanceTimersByTime(1_250);
-      await Promise.resolve();
-    });
-
-    assert.match(rendered.container.textContent ?? "", /Usage added/);
-    assert.match(rendered.container.textContent ?? "", /Text Murph/);
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
   }
 });
 
-test("keeps confirming on a success return that still reads checkout_open", async () => {
+test("reconciles a fulfilled Settings return without presenting a confirmation", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    purchaseId: "hucp_quiet_added00",
+    status: "fulfilled",
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      offers: [],
+      purchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_quiet_added00",
+      },
+      quietSuccessfulReturn: true,
+    }),
+    {
+      location: {
+        href: "https://example.test/settings?usagePurchase=hucp_quiet_added00&usageCheckout=success",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added/);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps a lagging successful Settings return quiet through fulfillment", async () => {
   vi.useFakeTimers();
   mocks.requestHostedOnboardingJson
     .mockResolvedValueOnce({
@@ -4993,6 +4889,7 @@ test("keeps confirming on a success return that still reads checkout_open", asyn
         kind: "success",
         purchaseId: "hucp_webhook_lag000",
       },
+      quietSuccessfulReturn: true,
     }),
     {
       location: {
@@ -5008,15 +4905,7 @@ test("keeps confirming on a success return that still reads checkout_open", asyn
       await Promise.resolve();
     });
 
-    assert.match(rendered.container.textContent ?? "", /Confirming payment/);
-    assert.match(
-      rendered.container.textContent ?? "",
-      /Payment submitted\. We’re confirming it\./,
-    );
-    assert.doesNotMatch(
-      rendered.container.textContent ?? "",
-      /Checkout already open/,
-    );
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
     assert.equal(hasButton(rendered.container, "Resume checkout"), false);
     assert.equal(hasButton(rendered.container, "Cancel checkout"), false);
 
@@ -5025,17 +4914,18 @@ test("keeps confirming on a success return that still reads checkout_open", asyn
       await Promise.resolve();
     });
 
-    assert.match(rendered.container.textContent ?? "", /Usage added/);
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added/);
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
   }
 });
 
-test("never offers Text Murph on a canceled checkout confirmation", async () => {
+test("shows a compact recovery dialog when a successful return did not complete", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    purchaseId: "hucp_contact_cancel",
-    status: "expired",
+    purchaseId: "hucp_quiet_failed00",
+    status: "payment_failed",
   });
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
@@ -5043,16 +4933,17 @@ test("never offers Text Murph on a canceled checkout confirmation", async () => 
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
       payerMemberId: TEST_PAYER_MEMBER_ID,
-      contactOptions: [textMurphContactOption()],
       offers: [],
       purchaseReturn: {
-        kind: "cancel",
-        purchaseId: "hucp_contact_cancel",
+        kind: "success",
+        purchaseId: "hucp_quiet_failed00",
       },
+      quietSuccessfulReturn: true,
+      renderPurchaseDetails: createElement("p", null, "Purchase details"),
     }),
     {
       location: {
-        href: "https://example.test/settings?usagePurchase=hucp_contact_cancel&usageCheckout=cancel",
+        href: "https://example.test/settings?usagePurchase=hucp_quiet_failed00&usageCheckout=success",
       },
       requireButton: false,
     },
@@ -5066,10 +4957,14 @@ test("never offers Text Murph on a canceled checkout confirmation", async () => 
 
     assert.match(
       rendered.container.textContent ?? "",
-      /Checkout canceled\. No usage was added\./,
+      /The payment did not complete\. No usage was added\./,
     );
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
-    assert.equal(rendered.container.querySelector("a"), null);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Purchase details/);
+    assert.match(
+      rendered.container.querySelector('[role="dialog"]')?.className ?? "",
+      /sm:max-w-md/,
+    );
+    assert.equal(buttonByText(rendered.container, "Close").disabled, false);
   } finally {
     await rendered.cleanup();
   }
@@ -5086,7 +4981,6 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
       payerMemberId: TEST_PAYER_MEMBER_ID,
-      contactOptions: [textMurphContactOption()],
       offers: [],
       purchaseReturn: {
         kind: "success",
@@ -5135,191 +5029,6 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
     await rendered.cleanup();
   }
 });
-
-test("offers the payer Text Murph on a fulfilled Family top-up return", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValue({
-    purchaseId: "hucp_contact_family",
-    status: "fulfilled",
-  });
-  const { HostedUsageTopUpDialog } = await import(
-    "@/src/components/settings/hosted-usage-top-up-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(HostedUsageTopUpDialog, {
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      contactOptions: [textMurphContactOption()],
-      offers: [],
-      purchaseReturn: {
-        kind: "success",
-        purchaseId: "hucp_contact_family",
-      },
-      scope: "family",
-      targetLabel: "Family member",
-    }),
-    {
-      location: {
-        href: "https://example.test/settings?usagePurchase=hucp_contact_family&usageCheckout=success&usageFamily=hbag_abcdefghijklmnop&usageMember=member_family",
-      },
-      requireButton: false,
-    },
-  );
-
-  try {
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    assert.equal(
-      rendered.container.querySelector("h2")?.textContent,
-      "Usage added for Family member",
-    );
-    assert.match(
-      rendered.container.textContent ?? "",
-      /The available usage for Family member has been updated\./,
-    );
-    const contactLink = rendered.container.querySelector("a");
-    assert.ok(contactLink);
-    assert.equal(contactLink.textContent, "Text Murph");
-    assert.equal(
-      contactLink.getAttribute("href"),
-      "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-    );
-  } finally {
-    await rendered.cleanup();
-  }
-
-  mocks.requestHostedOnboardingJson.mockResolvedValue({
-    purchaseId: "hucp_contact_family",
-    status: "fulfilled",
-  });
-  const renderedWithoutContact = await renderClientComponent(
-    createElement(HostedUsageTopUpDialog, {
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      offers: [],
-      purchaseReturn: {
-        kind: "success",
-        purchaseId: "hucp_contact_family",
-      },
-      scope: "family",
-      targetLabel: "Family member",
-    }),
-    {
-      location: {
-        href: "https://example.test/settings?usagePurchase=hucp_contact_family&usageCheckout=success&usageFamily=hbag_abcdefghijklmnop&usageMember=member_family",
-      },
-      requireButton: false,
-    },
-  );
-
-  try {
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    assert.equal(
-      renderedWithoutContact.container.querySelector("h2")?.textContent,
-      "Usage added for Family member",
-    );
-    assert.doesNotMatch(
-      renderedWithoutContact.container.textContent ?? "",
-      /Text Murph/,
-    );
-    assert.equal(renderedWithoutContact.container.querySelector("a"), null);
-  } finally {
-    await renderedWithoutContact.cleanup();
-  }
-});
-
-test("renders inline channel rows in the one dialog when several channels resolve", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    purchaseId: "hucp_contact_multi0",
-    status: "fulfilled",
-  });
-  const { HostedUsageTopUpDialog } = await import(
-    "@/src/components/settings/hosted-usage-top-up-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(HostedUsageTopUpDialog, {
-      payerMemberId: TEST_PAYER_MEMBER_ID,
-      contactOptions: [
-        textMurphContactOption(),
-        {
-          href: "https://t.me/withmurph_bot?text=Hey+Murph%2C+I+just+added+more+usage.",
-          kind: "telegram",
-          label: "Telegram",
-          rel: "noopener noreferrer",
-          target: "_blank",
-        },
-      ],
-      offers: [],
-      purchaseReturn: {
-        kind: "success",
-        purchaseId: "hucp_contact_multi0",
-      },
-    }),
-    {
-      location: {
-        href: "https://example.test/settings?usagePurchase=hucp_contact_multi0&usageCheckout=success",
-      },
-      requireButton: false,
-    },
-  );
-
-  try {
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    assert.match(rendered.container.textContent ?? "", /Usage added/);
-    // The channel rows live inside the success dialog itself; no nested
-    // picker dialog opens on top of it.
-    assert.equal(
-      rendered.container.querySelectorAll('[role="dialog"]').length,
-      1,
-    );
-    assert.match(rendered.container.textContent ?? "", /Text Murph/);
-    const textLink = rendered.container.querySelector('a[href^="sms:"]');
-    assert.ok(textLink);
-    assert.equal(
-      textLink.getAttribute("href"),
-      "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-    );
-    assert.match(textLink.textContent ?? "", /Messages/);
-    assert.equal(
-      textLink.getAttribute("aria-label"),
-      "Text Murph in Messages",
-    );
-    const telegramLink = rendered.container.querySelector(
-      'a[href^="https://t.me/"]',
-    );
-    assert.ok(telegramLink);
-    assert.equal(
-      telegramLink.getAttribute("href"),
-      "https://t.me/withmurph_bot?text=Hey+Murph%2C+I+just+added+more+usage.",
-    );
-    assert.match(telegramLink.textContent ?? "", /Telegram/);
-    assert.equal(
-      telegramLink.getAttribute("aria-label"),
-      "Text Murph in Telegram (opens in a new tab)",
-    );
-
-    await clickButton(rendered.container, rendered.window, "Close");
-    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-function textMurphContactOption() {
-  return {
-    href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-    kind: "text" as const,
-    label: "Messages",
-  };
-}
 
 function usageCreditOffers() {
   return [

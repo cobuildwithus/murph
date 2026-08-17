@@ -1,15 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import {
-  CheckIcon,
-  CircleAlertIcon,
-  MessageCircle,
-  XIcon,
-} from "lucide-react";
+import { CheckIcon, CircleAlertIcon, MessageCircle, XIcon } from "lucide-react";
 
-import { MurphContactChannelRows } from "@/src/components/murph/murph-contact-channel-rows";
-import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
@@ -187,7 +180,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         targetConflict: purchase.targetConflict,
       })
     : null;
-  const contactOptions = props.contactOptions ?? [];
   const fulfilledConfirmation =
     purchase !== null &&
     purchase.status === "fulfilled" &&
@@ -195,10 +187,25 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     !purchase.targetConflict;
   const showGroupMessagesAction =
     fulfilledConfirmation && props.scope === "group";
-  const showContactAction =
-    fulfilledConfirmation &&
-    props.scope !== "group" &&
-    contactOptions.length > 0;
+  const quietSuccessfulReturn =
+    props.quietSuccessfulReturn === true &&
+    (returnedFromSuccessfulCheckout || fulfilledConfirmation);
+  const returnNeedsRecovery = Boolean(
+    quietSuccessfulReturn &&
+      purchase &&
+      (purchase.checkoutError ||
+        purchase.selectionConflict ||
+        purchase.targetConflict ||
+        purchase.status === "expired" ||
+        purchase.status === "payment_failed" ||
+        purchase.poll.kind === "failed" ||
+        (purchase.poll.kind === "exhausted" &&
+          (purchase.status === null ||
+            shouldPollPurchaseStatus(purchase.status)))),
+  );
+  const presentedOpen =
+    controller.state.open &&
+    (!quietSuccessfulReturn || returnNeedsRecovery);
   const capacityConflict = selection?.capacityConflict === true;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
@@ -278,7 +285,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               </p>
             </div>
           ) : null}
-          {showGroupMessagesAction ? null : props.renderPurchaseDetails}
+          {showGroupMessagesAction || returnNeedsRecovery
+            ? null
+            : props.renderPurchaseDetails}
           <FieldError>{purchase.checkoutError}</FieldError>
           <div className="flex flex-col gap-2">
             {showGroupMessagesAction ? (
@@ -377,28 +386,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 >
                   Check again
                 </Button>
-              ) : null}
-              {showContactAction ? (
-                contactOptions.length === 1 ? (
-                  <MurphContactLink
-                    actionLabel="Text Murph"
-                    option={contactOptions[0]}
-                    className={cn(buttonVariants({ size: "lg" }), "w-full")}
-                  >
-                    <MessageCircle className="size-4 shrink-0" aria-hidden="true" />
-                    Text Murph
-                  </MurphContactLink>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    <p className="text-sm font-medium text-foreground">
-                      Text Murph
-                    </p>
-                    <MurphContactChannelRows
-                      actionLabel="Text Murph"
-                      options={contactOptions}
-                    />
-                  </div>
-                )
               ) : null}
               <Button
                 type="button"
@@ -615,7 +602,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         ) : null}
     </>
   );
-  const canShowTrigger = props.offers.length > 0 || purchaseTriggerLabel;
+  const canShowTrigger = quietSuccessfulReturn && !returnNeedsRecovery
+    ? false
+    : props.offers.length > 0 || purchaseTriggerLabel;
   const drawerTriggerButton = (
     <Button
       type="button"
@@ -704,7 +693,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
 
   return (
     <Dialog
-      open={controller.state.open}
+      open={presentedOpen}
       onOpenChange={controller.handleOpenChange}
     >
       {canShowTrigger ? (
@@ -741,6 +730,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         className={cn(
           "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
           showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
+          returnNeedsRecovery && "sm:max-w-md",
         )}
         initialFocus={titleRef}
       >

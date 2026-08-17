@@ -776,7 +776,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /reconcil/iu);
   });
 
-  test("mounts an exact return without offers or an active purchase", async () => {
+  test("mounts an exact return controller without presenting payment status", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -797,8 +797,10 @@ describe("HostedBillingSettings", () => {
       ),
     );
 
-    assert.match(markup, /Confirming payment for you/);
-    assert.match(markup, /We’re confirming your payment/);
+    assert.match(markup, /AI usage/);
+    assert.doesNotMatch(markup, /Confirming payment for you/);
+    assert.doesNotMatch(markup, /We’re confirming your payment/);
+    assert.doesNotMatch(markup, /Check payment/);
     assert.doesNotMatch(
       markup,
       /Other checkout|unfinished checkout|another usage destination/i,
@@ -810,7 +812,7 @@ describe("HostedBillingSettings", () => {
     );
   });
 
-  test("offers Text Murph on a fulfilled top-up when a contact channel resolves", async () => {
+  test("keeps a fulfilled Settings top-up quiet beside the refreshed meter", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const fulfilledPurchase = {
@@ -827,36 +829,13 @@ describe("HostedBillingSettings", () => {
         usedPercent: 55,
       }),
       usageTopUpActivePurchase: fulfilledPurchase,
-      usageTopUpContactOptions: [{
-        href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-        kind: "text" as const,
-        label: "Messages",
-      }],
       usageTopUpInitialOpen: true,
     }));
 
-    assert.match(markup, /Usage added/);
+    assert.doesNotMatch(markup, /Usage added/);
     assert.match(markup, /55% used/);
     assert.match(markup, /45% remaining/);
-    assert.match(markup, /Text Murph/);
-    assert.match(
-      markup,
-      /sms:\+15555550100\?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage\./,
-    );
-    assert.match(markup, /aria-label="Text Murph in Messages"/);
-
-    const withoutContactMarkup = renderToStaticMarkup(
-      createElement(HostedBillingSettings, {
-        payerMemberId: TEST_PAYER_MEMBER_ID,
-        authenticated: true,
-        usageStatus: buildUsageStatus(),
-        usageTopUpActivePurchase: fulfilledPurchase,
-        usageTopUpInitialOpen: true,
-      }),
-    );
-
-    assert.match(withoutContactMarkup, /Usage added/);
-    assert.doesNotMatch(withoutContactMarkup, /Text Murph/);
+    assert.doesNotMatch(markup, /Text Murph/);
   });
 
   test("offers the same top-up primitive to a direct paid Edge member", async () => {

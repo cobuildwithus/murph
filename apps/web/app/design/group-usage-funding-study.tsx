@@ -75,17 +75,6 @@ const DESIGN_GROUP_FUNDING_SUPPORTERS = {
   ],
 };
 
-const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
-  {
-    href: buildMurphSmsHref({
-      body: "Hey Murph, I just added more usage.",
-      murphPhoneNumber: "+15555550100",
-    }),
-    kind: "text",
-    label: "Messages",
-  },
-];
-
 const DESIGN_USAGE_MISSION_CONTACT_OPTION: MurphContactOption = {
   href: buildMurphSmsHref({
     body: "Hey Murph, what referral options can I choose from?",
@@ -695,14 +684,14 @@ function PersonalUsageCreditOwnerStudy() {
         data-design-state="fulfilled-with-overall-usage"
       >
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Fulfilled top-up with refreshed usage
+          Successful top-up return
         </p>
         <Button
           className="self-start"
           variant="outline"
           onClick={() => setFulfilledPreviewKey((key) => key + 1)}
         >
-          Preview fulfilled top-up
+          Preview quiet refresh
         </Button>
         {fulfilledPreviewKey > 0 ? (
           <div key={fulfilledPreviewKey}>
@@ -713,14 +702,6 @@ function PersonalUsageCreditOwnerStudy() {
               currentBillingPlanCode="launch_monthly"
               payerMemberId={DESIGN_PAYER_MEMBER_ID}
               usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
-              usageTopUpActivePurchase={{
-                offerCode: "usage_5_usd",
-                purchaseId: "hucp_design_overall_usage_added",
-                retryAllowed: false,
-                status: "fulfilled",
-              }}
-              usageTopUpContactOptions={DESIGN_TOP_UP_CONTACT_OPTIONS}
-              usageTopUpInitialOpen
               usageTopUpOffers={[]}
             />
           </div>

@@ -22,7 +22,6 @@ import {
   SETTINGS_MAX_FEATURES,
   SETTINGS_PULSE_FEATURES,
 } from "@/src/lib/hosted-onboarding/plan-features";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type {
   HostedFamilyDraftRecoveryProjection,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -84,7 +83,6 @@ export function HostedBillingSettings(props: {
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpCheckoutUrl?: string;
-  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
@@ -593,7 +591,6 @@ export function HostedBillingSettings(props: {
         status={props.usageStatus}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
         usageTopUpCheckoutUrl={props.usageTopUpCheckoutUrl}
-        usageTopUpContactOptions={props.usageTopUpContactOptions}
         usageTopUpInitialOpen={props.usageTopUpInitialOpen}
         usageTopUpOffers={usageTopUpOffers}
         payerMemberId={props.payerMemberId}
@@ -641,7 +638,6 @@ function PlanUsageBand(props: {
   status?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpCheckoutUrl?: string;
-  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers: readonly HostedUsageTopUpOffer[];
   payerMemberId?: string | null;
@@ -658,11 +654,11 @@ function PlanUsageBand(props: {
       <HostedUsageTopUpDialog
         activePurchase={props.usageTopUpActivePurchase}
         checkoutUrl={props.usageTopUpCheckoutUrl}
-        contactOptions={props.usageTopUpContactOptions}
         initialOpen={props.usageTopUpInitialOpen}
         offers={[]}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
+        quietSuccessfulReturn
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
       />
@@ -689,11 +685,11 @@ function PlanUsageBand(props: {
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
       checkoutUrl={props.usageTopUpCheckoutUrl}
-      contactOptions={props.usageTopUpContactOptions}
       initialOpen={props.usageTopUpInitialOpen}
       offers={eligibleUsageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
+      quietSuccessfulReturn
       scope={props.usageTopUpScope}
       targetLabel={props.usageTopUpTargetLabel}
       triggerClassName="shrink-0"

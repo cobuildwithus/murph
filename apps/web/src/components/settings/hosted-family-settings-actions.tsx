@@ -29,7 +29,6 @@ import {
   normalizeHostedTelegramUsernameForLookup,
 } from "@/src/lib/hosted-onboarding/contact-normalization";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 import {
@@ -170,7 +169,6 @@ export function HostedFamilyManager(props: {
   tiers: FamilyManagerTier[];
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
-  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
@@ -663,6 +661,7 @@ export function HostedFamilyManager(props: {
                     ? props.usageTopUpPurchaseReturn
                     : null
                 }
+                quietSuccessfulReturn
                 scope="family"
                 targetLabel="a former family member"
               />
@@ -958,7 +957,6 @@ export function HostedFamilyManager(props: {
                     : null
                 }
                 checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}/usage-credit/checkout`}
-                contactOptions={props.usageTopUpContactOptions}
                 offers={props.usageTopUpActivePurchase ? [] : props.usageTopUpOffers ?? []}
                 payerMemberId={props.payerMemberId}
                 purchaseReturn={
@@ -966,6 +964,7 @@ export function HostedFamilyManager(props: {
                     ? props.usageTopUpPurchaseReturn
                     : null
                 }
+                quietSuccessfulReturn
                 scope="family"
                 targetLabel={pendingAction.label}
                 triggerClassName="w-full"

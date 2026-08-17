@@ -40,10 +40,10 @@ vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
   HostedUsageTopUpDialog: (props: {
     activePurchase?: unknown;
     checkoutUrl?: string;
-    contactOptions?: readonly unknown[];
     deferTerminalRefreshUntilClose?: boolean;
     offers: readonly unknown[];
     purchaseReturn?: unknown;
+    quietSuccessfulReturn?: boolean;
     scope?: string;
     targetLabel?: string;
   }) => {
@@ -1122,7 +1122,6 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
       ],
       usageTopUpActiveMemberId: "member_family",
       usageTopUpActivePurchase: activePurchase,
-      usageTopUpContactOptions: [payerTopUpContactOption()],
       usageTopUpOffers: [
         { amountLabel: "$5", offerCode: "usage_5_usd" },
         { amountLabel: "$10", offerCode: "usage_10_usd" },
@@ -1147,8 +1146,8 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
         activePurchase,
         checkoutUrl:
           "/api/settings/billing/family/members/member_family/usage-credit/checkout",
-        contactOptions: [payerTopUpContactOption()],
         offers: [],
+        quietSuccessfulReturn: true,
         scope: "family",
         targetLabel: "Family member",
       }),
@@ -1169,8 +1168,8 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
         activePurchase: null,
         checkoutUrl:
           "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
-        contactOptions: [payerTopUpContactOption()],
         offers: [],
+        quietSuccessfulReturn: true,
         scope: "family",
         targetLabel: "you",
       }),
@@ -1195,7 +1194,6 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
       ...baseFamilyManagerProps(),
       usageTopUpActiveMemberId: "member_former",
       usageTopUpActivePurchase: activePurchase,
-      usageTopUpContactOptions: [payerTopUpContactOption()],
     }),
     { requireButton: false },
   );
@@ -1212,6 +1210,7 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
           "/api/settings/billing/family/members/member_former/usage-credit/checkout",
         deferTerminalRefreshUntilClose: true,
         offers: [],
+        quietSuccessfulReturn: true,
         scope: "family",
         targetLabel: "a former family member",
       }),
@@ -1226,13 +1225,6 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
   }
 });
 
-function payerTopUpContactOption() {
-  return {
-    href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-    kind: "text" as const,
-    label: "Messages",
-  };
-}
 
 function baseFamilyManagerProps() {
   return {
