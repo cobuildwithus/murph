@@ -355,10 +355,7 @@ export class DatabaseHealthMonitor {
         )
         : (previousConnectionErrorCounterBaseline ?? {});
       if (observation.missingMetrics.length > 0) {
-        const monitoringMissingMetrics = readMonitoringMissingMetrics({
-          connectionErrorEvidence,
-          missingMetrics: observation.missingMetrics,
-        });
+        const monitoringMissingMetrics = [...observation.missingMetrics];
         const connectionErrorDeltas =
           observedConnectionErrorCounters === null
             ? null
@@ -554,7 +551,6 @@ export class DatabaseHealthMonitor {
       }
       if (
         confirmedCounters !== null
-        && readMissingConnectionErrorPorts(confirmedCounters).length === 0
       ) {
         if (confirmedObservation.missingMetrics.length === 0) {
           return buildDatabaseMetricCollection({
@@ -1554,23 +1550,6 @@ function buildDatabaseMetricCollection(input: {
   };
 }
 
-function readMonitoringMissingMetrics(input: {
-  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence;
-  missingMetrics: readonly DatabaseHealthRequiredMetricName[];
-}): DatabaseHealthRequiredMetricName[] {
-  const missingMetricSet = new Set(input.missingMetrics);
-  if (
-    DATABASE_CONNECTION_ERROR_PORTS.some(
-      (port) => input.connectionErrorEvidence.missingPortAttempts[port] > 0,
-    )
-  ) {
-    missingMetricSet.add(DATABASE_CONNECTION_ERROR_METRIC_NAME);
-  }
-  return DATABASE_HEALTH_REQUIRED_METRIC_NAMES.filter(
-    (name) => missingMetricSet.has(name),
-  );
-}
-
 function emptyConnectionErrorCollectionEvidence():
   DatabaseConnectionErrorCollectionEvidence {
   return {
@@ -1611,10 +1590,9 @@ function composeConnectionErrorConfirmation(
       confirmationCounters,
       originalCounters,
     );
-  const hasCompleteConnectionErrors = connectionErrorCounters !== null
-    && readMissingConnectionErrorPorts(connectionErrorCounters).length === 0;
+  const hasConnectionErrors = connectionErrorCounters !== null;
   const missingMetricSet = new Set(confirmation.missingMetrics);
-  if (hasCompleteConnectionErrors) {
+  if (hasConnectionErrors) {
     missingMetricSet.delete(DATABASE_CONNECTION_ERROR_METRIC_NAME);
   } else {
     missingMetricSet.add(DATABASE_CONNECTION_ERROR_METRIC_NAME);
