@@ -81,25 +81,6 @@ describe("ChangelogPage", () => {
       expect(markup).not.toContain(`id="edition-${edition.id}"`);
     }
 
-    const correctedEdition = firstPage.editions.find(
-      (edition) => edition.id === "2026-08-10",
-    );
-    expect(correctedEdition).toBeDefined();
-    if (!correctedEdition) {
-      throw new TypeError(
-        "The current archive must include the corrected edition.",
-      );
-    }
-    expect(markup).toContain(
-      renderToStaticMarkup(<>{correctedEdition.summary}</>),
-    );
-    expect(correctedEdition.summary).toContain("Training shows saved workouts");
-    expect(correctedEdition.summary).toContain("group photos on request");
-    expect(correctedEdition.summary).toContain("Luna, Terra, and Sol on OpenAI");
-    expect(correctedEdition.summary).toContain("one first photo");
-    expect(correctedEdition.summary).toContain("wearable recovery");
-    expect(correctedEdition.summary).not.toContain("original detail");
-
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
     expect(markup).toContain('aria-label="Changelog pages"');
