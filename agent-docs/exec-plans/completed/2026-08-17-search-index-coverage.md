@@ -1,6 +1,6 @@
 # Fix public search coverage metadata
 
-Status: active
+Status: completed
 Created: 2026-08-17
 Updated: 2026-08-17
 
@@ -39,7 +39,7 @@ Updated: 2026-08-17
 2. [x] Add the canonical public-site URL owner plus robots and sitemap metadata routes.
 3. [x] Add missing canonical metadata and explicit internal-route `noindex` declarations.
 4. [x] Add focused tests for exact crawler outputs and metadata intent.
-5. [ ] Complete the required exact-head PR review and CI gates.
+5. [x] Complete the required exact-head PR review and CI gates.
 
 ## Decisions
 
@@ -60,6 +60,8 @@ Updated: 2026-08-17
 - Direct sitemap coverage proof is part of the focused test: one canonical host, no duplicate URLs, all published Health Commons routes present, and private/result/internal routes absent.
 - Passed all 11 frontend design-proof checker tests after deleting the metadata classifier, including a co-declared rendered-value control that keeps every app TSX change inside the proof gate.
 - Captured and inspected lossless hosted desktop and mobile screenshots of the existing synthetic pitch-deck study as a non-visual baseline for the metadata-only route edits.
+- Final ReviewGPT round 6 returned `ROUND_OUTCOME: PASS` with no findings against the exact pushed behavior-bearing head after verifying the simplification and prior corrections.
+- All required GitHub checks passed on the reviewed behavior-bearing head. Native iOS hosted E2E is not a required status for this Web metadata change and was not used as completion evidence.
 
 ## Round 5 simplification
 
@@ -75,3 +77,4 @@ Updated: 2026-08-17
 - Decision: justified continuation. The existing frontend design-proof guard is the sole owner that misclassified the required route metadata edits, so correcting that owner is indivisible from completing the crawler fix truthfully.
 - Invariant proof: additions, deletions, component bodies, rendered imports, static viewport exports, and generated viewport exports remain frontend-affecting. The focused positive and negative controls and exact task-diff proof exercise the boundary.
 - Complexity accounting: no production service, runtime state, dependency, middleware, queue, compatibility path, or lifecycle was added; the broadened concept is one CI classifier inside its existing owner.
+Completed: 2026-08-17

@@ -13,7 +13,7 @@ The frontend design-proof checker classifies every changed TSX file under `apps/
 
 ## Possible Solution
 
-Compare the rendered portion of changed route modules across the base and head revisions, excluding Next.js metadata and viewport exports plus imports used only by those exports. Continue requiring design proof when the remaining module changes.
+Keep the conservative path rule until a trustworthy structural owner can distinguish metadata from rendered behavior without rewriting raw source. Improve the non-visual proof path instead of stripping declarations or inferring import liveness inside the checker.
 
 ## Minimal Reproducible Example
 
