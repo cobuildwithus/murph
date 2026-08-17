@@ -4940,6 +4940,86 @@ test("reconciles a fulfilled Settings return without presenting a confirmation",
   }
 });
 
+test("keeps an in-place Family saved-card result visible until dismissal", async () => {
+  mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
+    method: string;
+  }) => request.method === "POST"
+    ? {
+        purchaseId: "hucp_family_owner_saved_card",
+        status: "payment_pending",
+      }
+    : {
+        purchaseId: "hucp_family_owner_saved_card",
+        status: "fulfilled",
+      });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      checkoutUrl:
+        "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+      initialOpen: true,
+      offers: usageCreditOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      scope: "family",
+      targetLabel: "you",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_1000");
+    await clickButton(rendered.container, rendered.window, "Add usage · $10");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_1000",
+      },
+      signal: expect.any(AbortSignal),
+      url:
+        "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      method: "GET",
+      signal: expect.any(AbortSignal),
+      url:
+        "/api/settings/billing/usage-credit/purchases/hucp_family_owner_saved_card",
+    });
+    assert.match(rendered.container.textContent ?? "", /Usage added for you/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /The available usage for you has been updated\./,
+    );
+    assert.ok(rendered.container.querySelector('[role="dialog"]'));
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.match(rendered.container.textContent ?? "", /Usage added for you/);
+
+    await clickButton(rendered.container, rendered.window, "Close");
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+
+    await clickButton(rendered.container, rendered.window, "Add usage");
+    assert.equal(
+      rendered.container.querySelector("h2")?.textContent,
+      "Add usage for you",
+    );
+    assert.match(rendered.container.textContent ?? "", /Choose an amount/);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("keeps a lagging successful Settings return quiet through fulfillment", async () => {
   vi.useFakeTimers();
   mocks.requestHostedOnboardingJson

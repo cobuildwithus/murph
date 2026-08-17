@@ -1,6 +1,6 @@
 # Quiet Settings usage-credit returns
 
-Status: active
+Status: completed
 Created: 2026-08-17
 Updated: 2026-08-17
 
@@ -66,6 +66,12 @@ Updated: 2026-08-17
    Mitigation: derive quiet presentation from the meter-owning branch, keep the
    unavailable branch close-owned, and close the fulfilled hidden controller so
    its existing trigger can reset to selection.
+6. Risk: applying return-only quiet presentation to a sessionless saved-card
+   purchase inside Family Manage hides the only visible result and immediately
+   permits a repeat charge.
+   Mitigation: keep the nested Manage caller on the existing visible fulfilled
+   state; only the independently mounted owner-return surface may defer to the
+   visible Settings meter.
 
 ## Tasks
 
@@ -91,6 +97,9 @@ Updated: 2026-08-17
   owns polling, query cleanup, compact result presentation, and close refresh.
 - Treat unavailable personal usage as off-meter: confirm durable account credit
   without claiming current availability and refresh only after Close.
+- Keep a Family saved-card purchase initiated inside Manage visible through
+  verified fulfillment and dismissal. Quiet presentation belongs only to the
+  independently mounted checkout-return owner beside the visible meter.
 
 ## Verification
 
@@ -101,3 +110,4 @@ Updated: 2026-08-17
   beneficiary meter; off-meter fulfillment stays visible until Close; failed or
   unresolved returns expose recovery; group success is unchanged; all focused
   checks pass.
+Completed: 2026-08-17

@@ -1148,11 +1148,15 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
           "/api/settings/billing/family/members/member_family/usage-credit/checkout",
         deferTerminalRefreshUntilClose: true,
         offers: [],
-        quietSuccessfulReturn: false,
         scope: "family",
         targetLabel: "Family member",
       }),
     );
+    const memberManageProps = mocks.usageTopUpDialogProps.mock.calls
+      .map(([callProps]) => callProps)
+      .find((callProps) => callProps.targetLabel === "Family member");
+    assert.ok(memberManageProps);
+    assert.equal("quietSuccessfulReturn" in memberManageProps, false);
 
     // The owner's manage modal gates offers away and shows no payment action.
     const dismiss = container.querySelector<HTMLButtonElement>(
@@ -1171,11 +1175,15 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
           "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
         deferTerminalRefreshUntilClose: false,
         offers: [],
-        quietSuccessfulReturn: true,
         scope: "family",
         targetLabel: "you",
       }),
     );
+    const ownerManageProps = mocks.usageTopUpDialogProps.mock.calls
+      .map(([callProps]) => callProps)
+      .find((callProps) => callProps.targetLabel === "you");
+    assert.ok(ownerManageProps);
+    assert.equal("quietSuccessfulReturn" in ownerManageProps, false);
   } finally {
     await cleanup();
   }

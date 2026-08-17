@@ -149,7 +149,10 @@ An active Family owner can use the same dialog from an exact active member row
 in Settings. The fixed pack is credited only to that selected member. A
 sponsored member cannot buy a personal pack, and Family credit is neither
 shared nor transferable. The same conservative saved-card selection and
-Checkout fallback apply.
+Checkout fallback apply. A sessionless saved-card fulfillment initiated inside
+Manage keeps its verified result visible in that dialog until the payer closes
+it; the page meter does not replace feedback while the broader Manage dialog is
+still active.
 
 ## Capped Monthly Group Sponsorship
 

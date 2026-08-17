@@ -992,7 +992,6 @@ export function HostedFamilyManager(props: {
                     ? props.usageTopUpPurchaseReturn
                     : null
                 }
-                quietSuccessfulReturn={pendingAction.id === props.payerMemberId}
                 scope="family"
                 targetLabel={pendingAction.label}
                 triggerClassName="w-full"
