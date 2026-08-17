@@ -6177,6 +6177,8 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       deferredSystemMailboxRecord?.redactedStatus ?? {};
     await writeHostedSystemMailboxRuntimeLog({
       attemptCount: input.systemMailboxPreparation.item.attemptCount,
+      errorCode: statusCallback.errorCode ?? null,
+      errorMessage: statusCallback.errorMessage ?? null,
       input: input.input,
       legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: statusNextWakeAt,

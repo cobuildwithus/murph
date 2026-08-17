@@ -2621,6 +2621,91 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves member-action outcome recording on the guarded mailbox port", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const recordedOutcomes: Array<
+      Parameters<NonNullable<HostedRuntimeMailboxPort["recordMemberActionOutcome"]>>[0]
+    > = [];
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      ...createMailboxPort({
+        events,
+        items: [createMailboxItem({
+          id: "mailbox_item_entrypoint_member_action_outcome_port",
+          laneSeq: "1",
+        })],
+      }),
+      async recordMemberActionOutcome(outcome) {
+        recordedOutcomes.push(outcome);
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_member_action_outcome_port",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}-member-action-outcome-port.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            const recordMemberActionOutcome =
+              input.runtime.platform.mailboxPort?.recordMemberActionOutcome;
+            assert.ok(recordMemberActionOutcome);
+            await recordMemberActionOutcome({
+              actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+              completedAt: TEST_NOW,
+              reason: null,
+              schemaVersion: 1,
+              status: "applied",
+            });
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(recordedOutcomes, [{
+        actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+        completedAt: TEST_NOW,
+        reason: null,
+        schemaVersion: 1,
+        status: "applied",
+      }]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("passes stable container CA env into hosted Codex runtime env", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

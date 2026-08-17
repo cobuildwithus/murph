@@ -14130,6 +14130,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValueOnce(null);
     mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      errorCode: "MEMBER_ACTION_OUTCOME_UNAVAILABLE",
+      errorMessage: "Hosted member action outcome write was unavailable.",
       failed: 1,
       nextWakeAt: "2026-04-27T00:15:00.000Z",
       recorded: 0,
@@ -14169,14 +14171,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     expect(logRequests[2]?.entries[0]).toEqual(expect.objectContaining({
       component: "mailbox",
+      errorCode: "MEMBER_ACTION_OUTCOME_UNAVAILABLE",
       eventCode: "mailbox.system_processed",
       level: "warn",
       redactedJson: expect.objectContaining({
         attemptCount: 2,
+        errorCode: "MEMBER_ACTION_OUTCOME_UNAVAILABLE",
         nextWakeAtPresent: true,
         recordFailed: 1,
         recorded: 0,
         routeAction: "dispatch-assistant-notification",
+        safeErrorMessage: "Hosted member action outcome write was unavailable.",
         status: "recorded",
         wakeKind: "assistant.notification.requested",
       }),
