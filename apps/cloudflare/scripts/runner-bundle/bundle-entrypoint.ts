@@ -281,9 +281,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // extend existing device-sync and hosted-runtime chunks without adding a
 // forbidden boot input. Exact merged macOS assembly measured an 8,163,368B
 // static closure on 2026-08-14; retain the fixed 96KB platform tolerance.
+// The combined reviewed Junction complete-summary and bounded workout-feature
+// graph measured an 8,268,744B static closure on macOS after merging the current
+// stacked base on 2026-08-17; it extends the same allowed graph, so ratchet the
+// measured baseline and retain that tolerance.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_393_617;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_163_368;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_268_744;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
