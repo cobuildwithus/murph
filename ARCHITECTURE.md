@@ -1609,12 +1609,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   reserved for a check with no parsed observation. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families, and sums parsed observations plus exact omission
-  counts for ports 5432/6432 from otherwise failed checks. It uses the threshold
+  counts for ports 5432/6432 from checks where the whole family was absent. It uses the threshold
   time as the window end; one bounded
   evidence value on each existing sample preserves that provenance across
-  restart. Canonical missing families and diagnostic port evidence remain
-  independent because sparse label cardinality is not a missing family. Legacy
-  single-port monitoring obligations remain readable. If any sample in the
+  restart. Structured warnings can retain a sparse-port omission during another
+  collection failure, but durable evidence clears that diagnostic count unless
+  the canonical connection-error family is missing. This preserves the legacy
+  reader correlation invariant across rollback. Legacy single-port monitoring
+  obligations remain readable. If any sample in the
   two-check window predates detailed port
   evidence, the aggregate keeps port detail unknown instead of presenting a
   partial ratio as exact. Structured collection warnings include the bounded

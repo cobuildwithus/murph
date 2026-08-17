@@ -631,9 +631,10 @@ supported provider credential.
   and independent reset/new-series suppression across complete and partial
   samples. They also prove per-port baseline advancement with omitted-port
   retention, one bounded confirmation when the whole connection-error family
-  is absent, confirmation-only port baseline advancement, diagnostic port
-  evidence independent from canonical missing families, alternating sparse-port
-  observations, legacy single-port obligation parsing, and
+  is absent, confirmation-only port baseline advancement, transient diagnostic
+  port evidence with legacy-reader-compatible durable normalization,
+  alternating sparse-port observations, legacy single-port obligation parsing,
+  and
   conservative legacy-plus-detailed window formatting,
   retention of an all-family-missing parsed observation across retry transport
   failure with exact window ratios and immutable restart delivery,

@@ -3,6 +3,7 @@ import type {
   DurableObjectSqlValue,
 } from "../user-runner/types.js";
 import {
+  DATABASE_CONNECTION_ERROR_METRIC_NAME,
   DATABASE_CONNECTION_ERROR_PORTS,
   DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
   type DatabaseConnectionErrorCollectionEvidence,
@@ -727,6 +728,20 @@ function parseMonitoringAlertObligation(
           )
       )
     )
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && hasMissingConnectionErrorPortAttempts(
+        normalizedConnectionErrorEvidence,
+      )
+      && !missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+    )
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+      && !hasMissingConnectionErrorPortAttempts(
+        normalizedConnectionErrorEvidence,
+      )
+    )
   ) {
     throw new Error("Stored database monitoring alert obligation is invalid.");
   }
@@ -788,6 +803,20 @@ function parseMonitoringEvidence(
         || normalizedConnectionErrorEvidence.parsedAttempts === 0
       )
     )
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && hasMissingConnectionErrorPortAttempts(
+        normalizedConnectionErrorEvidence,
+      )
+      && !missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+    )
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+      && !hasMissingConnectionErrorPortAttempts(
+        normalizedConnectionErrorEvidence,
+      )
+    )
   ) {
     throw new Error("Stored database monitoring evidence is invalid.");
   }
@@ -845,6 +874,14 @@ function parseConnectionErrorEvidence(
     missingPortAttempts: normalizedMissingPortAttempts,
     parsedAttempts,
   };
+}
+
+function hasMissingConnectionErrorPortAttempts(
+  evidence: DatabaseConnectionErrorCollectionEvidence,
+): boolean {
+  return DATABASE_CONNECTION_ERROR_PORTS.some(
+    (port) => evidence.missingPortAttempts[port] > 0,
+  );
 }
 
 function parseNumberRecord(value: string): Record<string, number> {

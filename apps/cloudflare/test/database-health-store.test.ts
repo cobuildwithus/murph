@@ -74,7 +74,7 @@ describe("database health store", () => {
     ).one().value).toBe(1);
   });
 
-  it("stores sparse-port evidence independently from missing families", () => {
+  it("stores rollback-compatible evidence with a generalized baseline", () => {
     const sql = createTestSqlStorage();
     const store = new DatabaseHealthStore(sql);
     const connectionErrorCounterBaseline = {
@@ -92,7 +92,7 @@ describe("database health store", () => {
       monitoringEvidence: {
         availability: "incomplete",
         connectionErrorEvidence: {
-          missingPortAttempts: { "5432": 0, "6432": 1 },
+          missingPortAttempts: { "5432": 0, "6432": 0 },
           parsedAttempts: 1,
         },
         missingMetrics: [
@@ -122,7 +122,7 @@ describe("database health store", () => {
     expect(store.readLatestMonitoringEvidence()).toEqual({
       availability: "incomplete",
       connectionErrorEvidence: {
-        missingPortAttempts: { "5432": 0, "6432": 1 },
+        missingPortAttempts: { "5432": 0, "6432": 0 },
         parsedAttempts: 1,
       },
       missingMetrics: [
@@ -205,7 +205,7 @@ describe("database health store", () => {
     store.recordMonitoringAlertObligation({
       checkedAtMs: 600_000,
       connectionErrorEvidence: {
-        missingPortAttempts: { "5432": 0, "6432": 1 },
+        missingPortAttempts: { "5432": 0, "6432": 0 },
         parsedAttempts: 2,
       },
       failures: 2,
@@ -326,6 +326,32 @@ describe("database health store", () => {
   });
 
   it.each([
+    {
+      name: "port evidence without the connection-error family",
+      value: {
+        availability: "incomplete",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 1 },
+          parsedAttempts: 1,
+        },
+        missingMetrics: [
+          "planetscale_postgres_settings_max_connections",
+        ],
+      },
+    },
+    {
+      name: "connection-error family without a missing-port count",
+      value: {
+        availability: "incomplete",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 0 },
+          parsedAttempts: 1,
+        },
+        missingMetrics: [
+          "planetscale_edge_postgres_connection_errors_total",
+        ],
+      },
+    },
     {
       name: "unknown port",
       value: {

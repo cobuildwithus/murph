@@ -510,15 +510,17 @@ Last verified: 2026-08-15
   existing incident row. The represented first two-check window counts
   incomplete versus unavailable observations, unions only canonical missing
   families, and sums parsed observations plus exact 5432/6432 omission counts
-  from otherwise failed checks.
+  from checks where the whole family was absent.
   It uses the threshold time as its window end. One bounded evidence value on
   each existing sample
   preserves that aggregate provenance across restart. Legacy evidence without
   port detail remains readable; any window containing it reports unavailable
   port detail rather than presenting the detailed portion as an exact ratio.
-  Canonical missing families and diagnostic port evidence remain independent
-  because sparse label cardinality is not a missing family. Legacy single-port
-  monitoring obligations remain readable. The obligation survives an
+  Structured warnings can retain a sparse-port omission during another
+  collection failure, but durable evidence clears that diagnostic count unless
+  the canonical connection-error family is missing. This preserves the legacy
+  reader correlation invariant across rollback. Legacy single-port monitoring
+  obligations remain readable. The obligation survives an
   occupied pending-message slot,
   restart, recovery, and connection-error-only prioritization; only
   acknowledgment of a pending body that includes the monitoring condition

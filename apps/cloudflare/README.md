@@ -261,13 +261,15 @@ one-shot for one unresolved operator-notification window.
 Crossing the two-failure threshold records one bounded alert obligation in the
 existing incident row. The first two-check window counts incomplete versus
 unavailable observations, unions only canonical missing families, and sums
-parsed observations plus exact 5432/6432 omission counts from otherwise failed
-checks.
+parsed observations plus exact 5432/6432 omission counts from checks where the
+whole family was absent.
 It identifies the threshold time as the window end. A bounded per-sample evidence value preserves
-that provenance across restart. Canonical missing families and diagnostic port
-evidence remain independent because sparse label cardinality is not a missing
-family. Legacy evidence, including a single-port monitoring obligation, remains
-readable. Any window containing legacy evidence reports unavailable port detail
+that provenance across restart. Structured warnings can retain a sparse-port
+omission during another collection failure, but durable evidence clears that
+diagnostic count unless the canonical connection-error family is missing. This
+preserves the legacy reader correlation invariant across rollback. Legacy
+evidence, including a single-port monitoring obligation, remains readable. Any
+window containing legacy evidence reports unavailable port detail
 rather than presenting a partial ratio as exact. An older
 pending page or connection-error priority cannot lose the obligation; recovery
 and another gap before acknowledgment coalesce into that same notification

@@ -356,6 +356,11 @@ export class DatabaseHealthMonitor {
         : (previousConnectionErrorCounterBaseline ?? {});
       if (observation.missingMetrics.length > 0) {
         const monitoringMissingMetrics = [...observation.missingMetrics];
+        const durableConnectionErrorEvidence =
+          buildDurableConnectionErrorEvidence({
+            connectionErrorEvidence,
+            missingMetrics: monitoringMissingMetrics,
+          });
         const connectionErrorDeltas =
           observedConnectionErrorCounters === null
             ? null
@@ -372,7 +377,7 @@ export class DatabaseHealthMonitor {
         const failures = priorFailures + 1;
         if (failures >= MONITORING_FAILURE_ALERT_COUNT) {
           conditions.push({
-            connectionErrorEvidence,
+            connectionErrorEvidence: durableConnectionErrorEvidence,
             failures,
             kind: "monitoring_unavailable",
             missingMetrics: monitoringMissingMetrics,
@@ -394,7 +399,7 @@ export class DatabaseHealthMonitor {
           failures,
           monitoringEvidence: {
             availability: "incomplete",
-            connectionErrorEvidence,
+            connectionErrorEvidence: durableConnectionErrorEvidence,
             missingMetrics: monitoringMissingMetrics,
           },
           snapshot: observation.snapshot,
@@ -1556,6 +1561,18 @@ function emptyConnectionErrorCollectionEvidence():
     missingPortAttempts: { "5432": 0, "6432": 0 },
     parsedAttempts: 0,
   };
+}
+
+function buildDurableConnectionErrorEvidence(input: {
+  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence;
+  missingMetrics: readonly DatabaseHealthRequiredMetricName[];
+}): DatabaseConnectionErrorCollectionEvidence {
+  return input.missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+    ? input.connectionErrorEvidence
+    : {
+      missingPortAttempts: { "5432": 0, "6432": 0 },
+      parsedAttempts: input.connectionErrorEvidence.parsedAttempts,
+    };
 }
 
 function hasUsableDatabaseHealthMetric(

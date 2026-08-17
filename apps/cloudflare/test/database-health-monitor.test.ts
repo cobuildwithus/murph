@@ -1445,6 +1445,7 @@ describe("database health monitor", () => {
   });
 
   it("keeps sparse-port evidence diagnostic during a real telemetry failure", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
     const missingMaxConnectionsMetricsBody = completeMetricsBody.replace(
       /^planetscale_postgres_settings_max_connections.*$/mu,
@@ -1499,7 +1500,7 @@ describe("database health monitor", () => {
     expect(pendingState.monitoringAlertObligation).toEqual({
       checkedAtMs: FIVE_MINUTES_MS * 2,
       connectionErrorEvidence: {
-        missingPortAttempts: { "5432": 0, "6432": 1 },
+        missingPortAttempts: { "5432": 0, "6432": 0 },
         parsedAttempts: 2,
       },
       failures: 2,
@@ -1513,6 +1514,21 @@ describe("database health monitor", () => {
     expect(pendingMessage).toContain("Postgres max connections");
     expect(pendingMessage).not.toContain("connection errors");
     expect(pendingMessage).not.toContain("missing-port");
+    expect(warning).toHaveBeenCalledWith(
+      "Database health metrics collection failed.",
+      {
+        attempts: 1,
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 1 },
+          parsedAttempts: 1,
+        },
+        failureCode: "required_metrics_missing",
+        failures: 2,
+        missingMetrics: [
+          "planetscale_postgres_settings_max_connections",
+        ],
+      },
+    );
 
     const originalBodies = await Promise.all(
       harness.allLinqRequests.map(readLinqRequestBody),
@@ -1521,7 +1537,7 @@ describe("database health monitor", () => {
     expect(harness.monitor.readAlertState()).toMatchObject({
       monitoringAlertObligation: {
         connectionErrorEvidence: {
-          missingPortAttempts: { "5432": 0, "6432": 1 },
+          missingPortAttempts: { "5432": 0, "6432": 0 },
           parsedAttempts: 2,
         },
       },

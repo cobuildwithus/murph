@@ -47,6 +47,9 @@ Updated: 2026-08-17
 - Preserve the existing observed-only per-port baseline and delta behavior.
 - Keep complete family absence fail-closed through the existing confirmation
   and telemetry-page path.
+- Keep sparse-port detail transient during unrelated collection failures. Clear
+  its durable missing-port count unless the whole family is missing, so rollback
+  Workers retain the existing family/evidence correlation contract.
 - Add no new state, queue, service, retry, or alert lifecycle.
 
 ## Tasks
