@@ -48,6 +48,7 @@ Updated: 2026-08-17
 - Accept the preliminary coverage finding and strengthen test oracles only; the production ownership and route policy remain unchanged.
 - Treat metadata-only route-module edits as non-visual in the design-proof gate by comparing dependency-free rendered-route signatures; keep the catalog and screenshot requirement for any remaining UI change.
 - Accept the final-audit viewport finding: viewport exports affect responsive presentation and zoom accessibility, so only metadata and generateMetadata exports qualify for the non-visual exemption.
+- Accept the round 4 shared-metadata finding: a metadata export can feed rendered output, so the exemption applies only to standalone metadata declarations whose binding is unused by the remaining route body.
 
 ## Verification
 
@@ -56,7 +57,7 @@ Updated: 2026-08-17
 - Passed focused ESLint for every changed source and test file.
 - Passed the hosted-Web typecheck, including the repository-owned Health Commons and Prisma generation prerequisites.
 - Direct sitemap coverage proof is part of the focused test: one canonical host, no duplicate URLs, all published Health Commons routes present, and private/result/internal routes absent.
-- Passed all 13 frontend design-proof checker tests, including metadata-only helpers plus rendered-body, import, static viewport, and generated viewport controls; the checker reports no UI change for the exact task diff.
+- Passed all 14 frontend design-proof checker tests, including metadata-only helpers plus rendered-body, import, static/generated viewport, rendered metadata, rendered generateMetadata, and co-declared-value controls; the checker reports no UI change for the exact task diff.
 
 ## Round 3 change-shape retrospective
 

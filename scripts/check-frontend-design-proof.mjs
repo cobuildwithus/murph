@@ -9,7 +9,7 @@ const DESIGN_CATALOG_PATHS = new Set([
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
 const GITHUB_MARKDOWN_URL = "https://api.github.com/markdown";
 const IMPORT_PATTERN = /^[\t ]*import\b/gmu;
-const METADATA_EXPORT_PATTERN = /^[\t ]*export[\t ]+(?:async[\t ]+)?(?:function|const|let|var)[\t ]+(?:generateMetadata|metadata)\b/gmu;
+const METADATA_EXPORT_PATTERN = /^[\t ]*export[\t ]+(?:async[\t ]+)?(?:function|const|let|var)[\t ]+(generateMetadata|metadata)\b/gmu;
 const ROUTE_HELPER_PATTERN = /^[\t ]*(?:(?:const|let|var)[\t ]+([A-Za-z_$][\w$]*)|(?:async[\t ]+)?function[\t ]+([A-Za-z_$][\w$]*))\b/gmu;
 
 function isFrontendUiPath(filePath) {
@@ -41,16 +41,24 @@ function isFrontendUiPath(filePath) {
 }
 
 function renderedRouteSignature(source) {
-  const withoutMetadata = stripSpans(
-    source,
-    findDeclarationSpans(source, METADATA_EXPORT_PATTERN),
+  const importSpans = findDeclarationSpans(source, IMPORT_PATTERN);
+  const withoutImports = stripSpans(source, importSpans);
+  const removableMetadataSpans = findDeclarationSpans(
+    withoutImports,
+    METADATA_EXPORT_PATTERN,
+  ).filter(({ end, isFunction, name, start }) =>
+    name
+      && (isFunction || !hasTopLevelComma(withoutImports, start, end))
+      && !usesIdentifier(
+        withoutImports.slice(0, start) + withoutImports.slice(end),
+        name,
+      )
   );
-  const importSpans = findDeclarationSpans(withoutMetadata, IMPORT_PATTERN);
   const renderedBody = stripUnusedMetadataHelpers(
-    stripSpans(withoutMetadata, importSpans),
+    stripSpans(withoutImports, removableMetadataSpans),
   );
   const imports = importSpans
-    .map(({ end, start }) => withoutMetadata.slice(start, end))
+    .map(({ end, start }) => source.slice(start, end))
     .filter((statement) => importAffectsRenderedBody(statement, renderedBody))
     .map((statement) => statement.replace(/\s+/gu, " ").trim());
   const body = renderedBody
@@ -106,10 +114,39 @@ function findDeclarationSpans(source, pattern) {
     if (end === null) {
       continue;
     }
-    spans.push({ end, name: match[1] ?? match[2] ?? null, start: match.index });
+    spans.push({
+      end,
+      isFunction,
+      name: match[1] ?? match[2] ?? null,
+      start: match.index,
+    });
     pattern.lastIndex = end;
   }
   return spans;
+}
+
+function hasTopLevelComma(source, start, end) {
+  const depth = { "(": 0, "[": 0, "{": 0 };
+  const closing = { ")": "(", "]": "[", "}": "{" };
+  for (let index = start; index < end; index += 1) {
+    const skippedTo = skipNonCode(source, index);
+    if (skippedTo !== index) {
+      index = skippedTo - 1;
+      continue;
+    }
+    const character = source[index];
+    if (Object.hasOwn(depth, character)) {
+      depth[character] += 1;
+    } else if (closing[character]) {
+      depth[closing[character]] -= 1;
+    } else if (
+      character === ","
+      && Object.values(depth).every((value) => value === 0)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function findFunctionEnd(source, start) {

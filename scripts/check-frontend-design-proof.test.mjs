@@ -186,6 +186,37 @@ ${page}
   );
 });
 
+test("keeps metadata declarations that feed rendered output", () => {
+  const staticBase = `
+export const metadata = { title: "Settings" };
+export default function Page() { return <h1>{metadata.title}</h1>; }
+`;
+  const staticHead = staticBase.replace("Settings", "Account");
+  const generatedBase = `
+export function generateMetadata() { return { title: "Settings" }; }
+export default function Page() { return <h1>{generateMetadata().title}</h1>; }
+`;
+  const generatedHead = generatedBase.replace("Settings", "Account");
+  const coDeclaredBase = `
+export const metadata = { title: "Settings" }, heading = "Settings";
+export default function Page() { return <h1>{heading}</h1>; }
+`;
+  const coDeclaredHead = coDeclaredBase.replaceAll("Settings", "Account");
+
+  assert.notEqual(
+    renderedRouteSignature(staticBase),
+    renderedRouteSignature(staticHead),
+  );
+  assert.notEqual(
+    renderedRouteSignature(generatedBase),
+    renderedRouteSignature(generatedHead),
+  );
+  assert.notEqual(
+    renderedRouteSignature(coDeclaredBase),
+    renderedRouteSignature(coDeclaredHead),
+  );
+});
+
 test("passes rendered design-page proof with both hosted viewports", () => {
   assert.deepEqual(
     validateFrontendDesignProof({
