@@ -6368,6 +6368,24 @@ describe('assistant outbox runtime', () => {
 
   it.each([
     {
+      error: Object.assign(new Error('Telegram token is unavailable'), {
+        code: 'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
+        context: { retryable: false },
+      }),
+      expectedCallbackStatus: 'failed' as const,
+      expectedOutboxStatus: 'failed' as const,
+      label: 'missing Telegram token failure',
+    },
+    {
+      error: Object.assign(new Error('Telegram rejected the request'), {
+        code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+        deliveryMayHaveSucceeded: false,
+      }),
+      expectedCallbackStatus: 'failed' as const,
+      expectedOutboxStatus: 'failed' as const,
+      label: 'definitive Telegram rejection',
+    },
+    {
       error: Object.assign(new Error('route revoked before provider entry'), {
         code: 'HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED',
         context: { retryable: false },

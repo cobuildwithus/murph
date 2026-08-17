@@ -7,7 +7,7 @@ CREATE TYPE "HostedPhoneCallResultNotificationChannel"
   AS ENUM ('telegram');
 
 CREATE TYPE "HostedPhoneCallResultDeliveryStatus"
-  AS ENUM ('pending', 'queued', 'sending', 'delivered', 'failed', 'ambiguous');
+  AS ENUM ('pending', 'queued', 'sending', 'delivered', 'ambiguous');
 
 ALTER TABLE "hosted_phone_call"
   ADD COLUMN "result_notification_channel"

@@ -102,21 +102,115 @@ describe("hosted phone-call result delivery ownership", () => {
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
   });
 
-  it("keeps generic failure terminal after provider entry may have occurred", async () => {
-    const store = createDeliveryStore("sending");
+  it("recovers a missing Telegram token without losing the sole result", async () => {
+    const store = createDeliveryStore("queued");
     mocks.getPrisma.mockReturnValue(store.prisma);
+    mocks.rearmRecovery
+      .mockRejectedValueOnce(new Error("re-arm response lost"))
+      .mockResolvedValue(true);
+    const failed = {
+      ...deliveryRequest("failed"),
+      deliveryErrorCode: "ASSISTANT_TELEGRAM_TOKEN_REQUIRED",
+    };
+    const providerFetch = vi.fn(async () => ({ messageId: "telegram_1" }));
 
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("sending"),
+    })).resolves.toEqual({ recorded: true, status: "sending" });
+    expect(providerFetch).not.toHaveBeenCalled();
+
+    // The signed failed callback proves configuration rejected this attempt
+    // before Telegram entry. Web commits recovery even when its first wake is
+    // lost, and callback replay repairs only that bounded accelerator.
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: failed,
+    })).rejects.toThrow("re-arm response lost");
+
+    expect(store.readStatus()).toBe("pending");
+    expect(store.readTerminalAt()).toBeNull();
+    expect(providerFetch).not.toHaveBeenCalled();
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: failed,
+    })).resolves.toEqual({ recorded: false, status: "pending" });
+
+    store.queueNextGeneration();
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: {
+        ...deliveryRequest("sending"),
+        generation: 2,
+      },
+    })).resolves.toEqual({ recorded: true, status: "sending" });
+    await providerFetch();
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: {
+        ...deliveryRequest("sent"),
+        generation: 2,
+      },
+    })).resolves.toEqual({ recorded: true, status: "delivered" });
+
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(store.readGeneration()).toBe(2);
+    expect(store.readStatus()).toBe("delivered");
+    expect(store.readTerminalAt()).toBeInstanceOf(Date);
+  });
+
+  it("recovers after a definitive Telegram rejection", async () => {
+    const store = createDeliveryStore("queued");
+    mocks.getPrisma.mockReturnValue(store.prisma);
+    const providerFetch = vi.fn()
+      .mockRejectedValueOnce(Object.assign(
+        new Error("Telegram rejected the request"),
+        { deliveryMayHaveSucceeded: false },
+      ))
+      .mockResolvedValueOnce({ messageId: "telegram_2" });
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("sending"),
+    })).resolves.toEqual({ recorded: true, status: "sending" });
+    await expect(providerFetch()).rejects.toMatchObject({
+      deliveryMayHaveSucceeded: false,
+    });
     await expect(recordHostedPhoneCallResultDeliveryOutcome({
       memberId: MEMBER_ID,
       request: {
         ...deliveryRequest("failed"),
-        deliveryErrorCode: "ASSISTANT_TELEGRAM_SEND_FAILED",
+        deliveryErrorCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       },
-    })).resolves.toEqual({ recorded: true, status: "failed" });
+    })).resolves.toEqual({ recorded: true, status: "pending" });
 
-    expect(store.readStatus()).toBe("failed");
+    expect(store.readStatus()).toBe("pending");
+    expect(store.readTerminalAt()).toBeNull();
+
+    // The existing timer-paced Workflow owns the next generation after the
+    // route/provider condition is restored; it is the only retry owner.
+    store.queueNextGeneration();
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: {
+        ...deliveryRequest("sending"),
+        generation: 2,
+      },
+    })).resolves.toEqual({ recorded: true, status: "sending" });
+    await providerFetch();
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: {
+        ...deliveryRequest("sent"),
+        generation: 2,
+      },
+    })).resolves.toEqual({ recorded: true, status: "delivered" });
+
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(store.readGeneration()).toBe(2);
+    expect(store.readStatus()).toBe("delivered");
     expect(store.readTerminalAt()).toBeInstanceOf(Date);
-    expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
   });
 
   it("rejects provider success while the generation still proves pre-provider queued", async () => {
@@ -227,12 +321,13 @@ describe("hosted phone-call result delivery ownership", () => {
       memberId: MEMBER_ID,
       request,
     })).rejects.toThrow("re-arm response lost");
-    expect(store.readStatus()).toBe("failed");
+    expect(store.readStatus()).toBe("pending");
+    expect(store.readTerminalAt()).toBeNull();
 
     await expect(recordHostedPhoneCallResultDeliveryOutcome({
       memberId: MEMBER_ID,
       request,
-    })).resolves.toEqual({ recorded: false, status: "failed" });
+    })).resolves.toEqual({ recorded: false, status: "pending" });
 
     expect(store.updateMany).toHaveBeenCalledOnce();
     expect(mocks.rearmRecovery).toHaveBeenCalledTimes(2);
@@ -316,15 +411,15 @@ describe("hosted phone-call result delivery ownership", () => {
         ...deliveryRequest("failed"),
         deliveryErrorCode: "ASSISTANT_TELEGRAM_TOKEN_REQUIRED",
       },
-    })).resolves.toEqual({ recorded: true, status: "failed" });
+    })).resolves.toEqual({ recorded: true, status: "pending" });
     releaseProviderEntry();
 
     await expect(sending).rejects.toMatchObject({
       code: "HOSTED_PHONE_CALL_RESULT_DELIVERY_TRANSITION_INVALID",
       retryable: false,
     });
-    expect(store.readStatus()).toBe("failed");
-    expect(store.readTerminalAt()).toBeInstanceOf(Date);
+    expect(store.readStatus()).toBe("pending");
+    expect(store.readTerminalAt()).toBeNull();
   });
 
   it("replays stale pre-provider recovery after Web commits pending but re-arm fails", async () => {

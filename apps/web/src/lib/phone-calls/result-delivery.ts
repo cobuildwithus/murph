@@ -5,10 +5,6 @@ import type {
 import type {
   HostedPhoneCallResultDeliveryOutcomeRequest,
 } from "@murphai/hosted-execution/phone-calls";
-import {
-  isHostedPhoneCallResultPreProviderRouteFailureCode,
-} from "@murphai/hosted-execution/phone-calls";
-
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   assertHostedAssistantNotificationRouteAuthority,
@@ -23,10 +19,7 @@ const HOSTED_PHONE_CALL_RESULT_DELIVERY_TERMINAL_STATUSES = new Set<
 >([
   "ambiguous",
   "delivered",
-  "failed",
 ]);
-const ASSISTANT_DELIVERY_RETRY_EXHAUSTED =
-  "ASSISTANT_DELIVERY_RETRY_EXHAUSTED";
 
 export interface HostedPhoneCallResultDeliveryOutcomeResult {
   recorded: boolean;
@@ -167,13 +160,7 @@ function shouldRearmHostedPhoneCallResultDeliveryReplay(input: {
     return true;
   }
   return input.currentStatus === "pending"
-    && input.request.status === "failed"
-    && (
-      input.request.deliveryErrorCode === ASSISTANT_DELIVERY_RETRY_EXHAUSTED
-      || isHostedPhoneCallResultPreProviderRouteFailureCode(
-        input.request.deliveryErrorCode,
-      )
-    );
+    && input.request.status === "failed";
 }
 
 function resolveHostedPhoneCallResultDeliveryTransition(input: {
@@ -220,10 +207,7 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
     }
   }
 
-  if (
-    input.request.status === "failed"
-    && input.request.deliveryErrorCode === ASSISTANT_DELIVERY_RETRY_EXHAUSTED
-  ) {
+  if (input.request.status === "failed") {
     if (input.currentStatus === "pending") {
       return null;
     }
@@ -231,33 +215,6 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
       rearm: true,
       status: "pending",
       terminal: false,
-    };
-  }
-
-  if (
-    input.request.status === "failed"
-    && isHostedPhoneCallResultPreProviderRouteFailureCode(
-      input.request.deliveryErrorCode,
-    )
-  ) {
-    if (input.currentStatus === "pending") {
-      return null;
-    }
-    return {
-      rearm: true,
-      status: "pending",
-      terminal: false,
-    };
-  }
-
-  if (
-    input.currentStatus === "queued"
-    && input.request.status === "failed"
-  ) {
-    return {
-      rearm: true,
-      status: "failed",
-      terminal: true,
     };
   }
 
@@ -269,9 +226,7 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
     rearm: true,
     status: input.request.status === "sent"
       ? "delivered"
-      : input.request.status === "failed_ambiguous"
-        ? "ambiguous"
-        : "failed",
+      : "ambiguous",
     terminal: true,
   };
 }

@@ -2085,6 +2085,7 @@ describe('assistant channels runtime seam', () => {
   })
 
   it('rejects Telegram sends without runtime support or with invalid targets', async () => {
+    const missingTokenFetch = vi.fn<typeof fetch>()
     await expect(
       sendTelegramMessage(
         {
@@ -2093,12 +2094,13 @@ describe('assistant channels runtime seam', () => {
         },
         {
           env: {},
-          fetchImplementation: createQueuedFetch([]),
+          fetchImplementation: missingTokenFetch,
         },
       ),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
     })
+    expect(missingTokenFetch).not.toHaveBeenCalled()
 
     vi.stubGlobal('fetch', undefined)
     await expect(

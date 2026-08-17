@@ -1893,8 +1893,8 @@ Last verified: 2026-08-16
   same-item retry path. This recovery never falls back, appends, or rewinds.
 - Direct phone-call result recovery is intentionally Telegram-only. The
   `HostedPhoneCall` row is the sole durable delivery owner: it records a
-  generation-scoped `pending`, `queued`, `sending`, `delivered`, `failed`, or
-  `ambiguous` disposition. Mailbox, outbox, journal, and Temporal rows remain
+  generation-scoped `pending`, `queued`, `sending`, `delivered`, or `ambiguous`
+  disposition. Mailbox, outbox, journal, and Temporal rows remain
   transport and wake machinery; their existence or retention expiry never
   proves result delivery. Web atomically advances `pending` to a new queued
   generation with its mailbox append. The write-fenced runtime reports provider
@@ -1916,17 +1916,16 @@ Last verified: 2026-08-16
   the existing intent, and waits for Web acknowledgement before terminalizing
   the outbox. The call row supplies the stronger generation fact: queued
   ambiguity returns to `pending`, while sending ambiguity is terminal. A
-  definitive route failure returns either queued or sending to `pending`
-  because the runtime's cumulative outcome proves no Telegram request occurred.
-  A different definitive runtime failure before the provider-entry callback
-  commits terminalizes the queued generation as `failed`, except that exact
-  transport retry exhaustion returns any nonterminal generation to `pending`.
+  definitive failure returns either queued or sending to `pending` because the
+  signed runtime outcome proves that no Telegram provider effect occurred. This
+  includes route/configuration failures, definitive provider rejections, and
+  exact transport retry exhaustion.
   A `sending` commit admits dispatch but can lose its response before the
   runtime enters Telegram; the retry ceiling itself is cumulative evidence of
   no-effect attempts because a may-have-succeeded request takes the separate
   terminal ambiguity path before exhaustion. Replay of the exhausted terminal
-  callback repeats only the bounded recovery re-arm. Generic definitive
-  failures retain their existing terminal contract; provider success from
+  callback repeats only the bounded recovery re-arm. Only the separate
+  `failed_ambiguous` outcome terminalizes without resend; provider success from
   queued remains invalid.
   Callback-loss recovery treats a stored result and terminal Retell usage as
   sibling obligations in the same reconciliation pass. After the exact row and
@@ -1970,11 +1969,10 @@ Last verified: 2026-08-16
   and compare-and-sets the same generation from `queued` to `sending` in the
   callback operation. A lost callback response sends nothing on that attempt,
   and retry revalidates the route before continuing the same generation.
-  Provider acceptance completes delivery;
-  definitive failure records non-delivery; a may-have-succeeded failure records
-  ambiguity and is never resent. Exact Telegram route loss with a definitive
-  no-effect outcome returns either a queued or sending generation to `pending`;
-  a may-have-succeeded outcome remains terminally ambiguous. Every committed
+  Provider acceptance completes delivery. A definitive no-effect failure
+  returns either a queued or sending generation to `pending`; a
+  may-have-succeeded failure remains terminally ambiguous and is never resent.
+  Every committed
   exact-route bind and each terminal callback re-arms at most one oldest member-local
   nonterminal call, so there is no second queue or fanout scheduler. Every
   recovery-hint attempt uses the existing five-second reconciliation-signal

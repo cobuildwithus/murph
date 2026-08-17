@@ -255,7 +255,6 @@ function isHostedPhoneCallTrackedResultOutstanding(
     return ![
       "ambiguous",
       "delivered",
-      "failed",
     ].includes(call.resultDeliveryStatus);
   }
   return call.status === "calling"

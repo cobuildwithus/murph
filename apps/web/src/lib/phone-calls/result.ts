@@ -438,7 +438,7 @@ async function readHostedPhoneCallResultDeliveryCompletion(input: {
 function isHostedPhoneCallResultDeliveryTerminal(
   status: HostedPhoneCallResultDeliveryStatus | null,
 ): boolean {
-  return status === "delivered" || status === "failed" || status === "ambiguous";
+  return status === "delivered" || status === "ambiguous";
 }
 
 function requireHostedPhoneCallResultDeliveryGeneration(
