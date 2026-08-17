@@ -16,7 +16,13 @@ const SLOW_ACTION_SAMPLE_LIMIT = 8
 const OUTPUT_ITEM_SCAN_LIMIT = 64
 const TRACKED_ACTION_LIMIT = 256
 const TOOL_DIAGNOSTIC_LIMIT = 16
+const COMMAND_RUNTIME_ISSUE_TRACK_LIMIT = 256
+const COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT = 8
+const COMMAND_CLASSIFICATION_SCAN_LIMIT = 4096
+const COMMAND_ORDINAL_MAX = 10_000
 const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
+const DIRECT_SEARCH_COMMAND_PATTERN = /^(?:grep|rg)(?:\s|$)/u
+const UNQUOTED_SHELL_CONTROL_PATTERN = /[\r\n;&|<>`$(){}]/u
 
 type CodexActionKind =
   | 'command.execution'
@@ -40,6 +46,13 @@ type BytesBucket =
   | '1_10kb'
   | '10_100kb'
   | 'gt_100kb'
+
+type CommandDiagnosticFamily = 'search' | 'unknown'
+
+type TrackedCommandDiagnostic = {
+  commandOrdinal: number
+  commandFamily: CommandDiagnosticFamily
+}
 
 type TokenUsageSample = {
   cachedInputTokens: number | null
@@ -94,6 +107,135 @@ export interface CodexActionDiagnosticsReducer {
     normalizedEvent: CodexNormalizedEvent
     rawEvent: unknown
   }): void
+}
+
+export interface CodexActionRuntimeIssueTracker {
+  recordEvent(input: {
+    activeTurnId: string | null
+    normalizedEvent: CodexNormalizedEvent
+    rawEvent: unknown
+  }): AssistantRuntimeIssueInput | null
+}
+
+export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueTracker {
+  let commandActionOrdinal = 0
+  const startedCommands = new Map<string, TrackedCommandDiagnostic>()
+  const completedCommandIds = new Set<string>()
+  const pendingSearchFailureDetails: Record<string, unknown>[] = []
+
+  const nextCommandOrdinal = (): number => {
+    commandActionOrdinal = Math.min(
+      commandActionOrdinal + 1,
+      COMMAND_ORDINAL_MAX,
+    )
+    return commandActionOrdinal
+  }
+
+  const nextCommandDiagnostic = (
+    normalizedEvent: CodexNormalizedEvent,
+  ): TrackedCommandDiagnostic => ({
+    commandOrdinal: nextCommandOrdinal(),
+    commandFamily: resolveDirectSearchCommandFamily(normalizedEvent),
+  })
+
+  return {
+    recordEvent(input) {
+      if (!shouldRecordEventForTurn(input.rawEvent, input.activeTurnId)) {
+        return null
+      }
+      const eventType = readEventType(input.rawEvent)
+      const kind = resolveActionKind(input.normalizedEvent, input.rawEvent)
+      if (kind !== 'command.execution') {
+        return buildRuntimeIssueInputForFailedCodexAction(input)
+      }
+
+      const itemId =
+        readNormalizedItemId(input.normalizedEvent)
+        ?? readRawItemId(input.rawEvent)
+      if (eventType === 'item.started') {
+        if (
+          itemId !== null
+          && !startedCommands.has(itemId)
+          && startedCommands.size < COMMAND_RUNTIME_ISSUE_TRACK_LIMIT
+        ) {
+          startedCommands.set(
+            itemId,
+            nextCommandDiagnostic(input.normalizedEvent),
+          )
+        }
+        return null
+      }
+      if (eventType !== 'item.completed') {
+        return null
+      }
+
+      if (itemId !== null && completedCommandIds.has(itemId)) {
+        return null
+      }
+      if (
+        itemId !== null
+        && completedCommandIds.size < COMMAND_RUNTIME_ISSUE_TRACK_LIMIT
+      ) {
+        completedCommandIds.add(itemId)
+      }
+
+      const startedDiagnostic = itemId === null
+        ? null
+        : startedCommands.get(itemId) ?? null
+      if (itemId !== null) {
+        startedCommands.delete(itemId)
+      }
+      const completionCommandPresent =
+        input.normalizedEvent.kind === 'status_item'
+        && input.normalizedEvent.commandLabel !== null
+      const commandDiagnostic = completionCommandPresent
+        ? {
+            commandOrdinal:
+              startedDiagnostic?.commandOrdinal ?? nextCommandOrdinal(),
+            commandFamily: resolveDirectSearchCommandFamily(
+              input.normalizedEvent,
+            ),
+          }
+        : startedDiagnostic ?? nextCommandDiagnostic(input.normalizedEvent)
+      const exitCode = readCommandExitCode({
+        item: readEventItem(input.rawEvent),
+        normalizedEvent: input.normalizedEvent,
+      })
+
+      if (exitCode === 0) {
+        if (commandDiagnostic.commandFamily === 'search') {
+          // Raw commands never enter diagnostic state, so recovery is the
+          // intentionally coarse fact that a later direct search succeeded;
+          // it does not claim that the exact query was retried.
+          for (const details of pendingSearchFailureDetails) {
+            details.recoveredAfterFailure = true
+          }
+          pendingSearchFailureDetails.length = 0
+        }
+        return null
+      }
+      if (
+        exitCode === 1
+        && commandDiagnostic.commandFamily === 'search'
+      ) {
+        return null
+      }
+
+      const issue = buildRuntimeIssueInputForFailedCodexAction({
+        ...input,
+        commandDiagnostic,
+      })
+      if (
+        issue?.details
+        && commandDiagnostic.commandFamily === 'search'
+        && pendingSearchFailureDetails.length
+          < COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT
+      ) {
+        pendingSearchFailureDetails.push(issue.details)
+      }
+      return issue
+    },
+  }
 }
 
 export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsReducer {
@@ -354,7 +496,8 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   }
 }
 
-export function buildRuntimeIssueInputForFailedCodexAction(input: {
+function buildRuntimeIssueInputForFailedCodexAction(input: {
+  commandDiagnostic?: TrackedCommandDiagnostic
   normalizedEvent: CodexNormalizedEvent
   rawEvent: unknown
 }): AssistantRuntimeIssueInput | null {
@@ -408,6 +551,15 @@ export function buildRuntimeIssueInputForFailedCodexAction(input: {
       summary: 'Codex command execution failed during provider turn.',
       details: {
         ...commonDetails,
+        ...(input.commandDiagnostic
+          ? {
+              commandFamily: input.commandDiagnostic.commandFamily,
+              commandOrdinal: input.commandDiagnostic.commandOrdinal,
+              ...(input.commandDiagnostic.commandFamily === 'search'
+                ? { recoveredAfterFailure: false }
+                : {}),
+            }
+          : {}),
         exitCode,
       },
     }
@@ -436,6 +588,84 @@ export function buildRuntimeIssueInputForFailedCodexAction(input: {
     summary: 'Codex tool call failed during provider turn.',
     details: commonDetails,
   }
+}
+
+function resolveDirectSearchCommandFamily(
+  normalizedEvent: CodexNormalizedEvent,
+): CommandDiagnosticFamily {
+  if (
+    normalizedEvent.kind !== 'status_item'
+    || normalizedEvent.commandLabel === null
+  ) {
+    return 'unknown'
+  }
+
+  const command = normalizedEvent.commandLabel.trim()
+  return DIRECT_SEARCH_COMMAND_PATTERN.test(command)
+    && !hasExecutableShellControl(command)
+    ? 'search'
+    : 'unknown'
+}
+
+/**
+ * Codex serializes command argv with shell quoting for display. Keep this scan
+ * transient and bounded: quoted or escaped regex syntax is argument data, while
+ * unquoted control syntax means the displayed command is not provably a direct
+ * `rg` or `grep` invocation. No token or argument content leaves this helper.
+ */
+function hasExecutableShellControl(command: string): boolean {
+  if (command.length > COMMAND_CLASSIFICATION_SCAN_LIMIT) {
+    return true
+  }
+
+  let quote: 'double' | 'single' | null = null
+  let escaped = false
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index] ?? ''
+    if (character === '\r' || character === '\n') {
+      return true
+    }
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === '\\' && quote !== 'single') {
+      escaped = true
+      continue
+    }
+    if (quote === 'single') {
+      if (character === "'") {
+        quote = null
+      }
+      continue
+    }
+    if (quote === 'double') {
+      if (character === '"') {
+        quote = null
+        continue
+      }
+      if (
+        character === '`'
+        || (character === '$' && command[index + 1] === '(')
+      ) {
+        return true
+      }
+      continue
+    }
+    if (character === "'") {
+      quote = 'single'
+      continue
+    }
+    if (character === '"') {
+      quote = 'double'
+      continue
+    }
+    if (UNQUOTED_SHELL_CONTROL_PATTERN.test(character)) {
+      return true
+    }
+  }
+
+  return escaped || quote !== null
 }
 
 function readCommandExitCode(input: {

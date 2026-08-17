@@ -3,8 +3,12 @@
 import { useMemo, type ReactNode } from "react";
 
 import { Skeleton } from "@/src/components/ui/skeleton";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
-import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
+import {
+  useBrowserVault,
+} from "@/src/lib/browser-vault/context";
+import {
+  buildBrowserVaultExperimentResultLookups,
+} from "@/src/lib/browser-vault/experiment-run";
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
 import { cn } from "@/src/lib/utils";
 
@@ -20,16 +24,16 @@ export function ExperimentStartOrRunStatus({
   startAction,
 }: ExperimentStartOrRunStatusProps) {
   const browserVault = useBrowserVault();
-  const privateRun = useMemo(
-    () =>
-      resolveBrowserVaultExperimentRun({
-        client: browserVault.client,
-        protocol: activeRunProtocol,
-      }),
-    [activeRunProtocol, browserVault.client],
-  );
+  const privateRunCard = useMemo(() => {
+    if (!browserVault.client) return null;
+    for (const lookup of buildBrowserVaultExperimentResultLookups(activeRunProtocol)) {
+      const card = browserVault.client.experimentRunCards.find(lookup);
+      if (card) return card;
+    }
+    return null;
+  }, [activeRunProtocol, browserVault.client]);
   const isRunning =
-    privateRun?.status === "active" || privateRun?.status === "paused";
+    privateRunCard?.status === "active" || privateRunCard?.status === "paused";
 
   if (browserVault.status === "loading") {
     // Neutral placeholder: the slot resolves into either the start button or
@@ -47,7 +51,7 @@ export function ExperimentStartOrRunStatus({
 
   // The run's results already render on the experiment page itself, so the
   // header shows a quiet status chip instead of a CTA pointing at the same page.
-  const isPaused = privateRun.status === "paused";
+  const isPaused = privateRunCard!.status === "paused";
 
   return (
     <ExperimentHeaderActionFrame protocolDays={protocolDays}>

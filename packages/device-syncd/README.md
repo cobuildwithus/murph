@@ -104,7 +104,11 @@ Current providers:
   `wearables activity list` filtered summary read exposes only provider, sport,
   timestamps, unit-bearing compact metrics, and splits for each workout. This
   adds no control-database collection path, pooled transaction, foreground
-  full-vault hydration, or sample persistence.
+  full-vault hydration, or sample persistence. Each present workout metric
+  array must align with the timestamp array. A workout whose present metric
+  arrays do not align is skipped so one malformed stream cannot block other
+  workouts or replace a previously complete canonical measurement; the skip
+  emits a metadata-only cardinality warning for provider follow-up.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day

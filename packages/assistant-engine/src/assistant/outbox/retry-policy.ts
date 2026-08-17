@@ -61,12 +61,33 @@ export function shouldDispatchAssistantOutboxIntent(
       return !Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime()
     }
     case 'sending': {
-      const lastAttemptMs = intent.lastAttemptAt ? Date.parse(intent.lastAttemptAt) : Number.NaN
-      return !Number.isFinite(lastAttemptMs) || now.getTime() - lastAttemptMs >= STALE_SENDING_AFTER_MS
+      const recoveryAt = resolveAssistantOutboxSendingRecoveryAt(intent, now)
+      return recoveryAt !== null && Date.parse(recoveryAt) <= now.getTime()
     }
     default:
       return false
   }
+}
+
+export function resolveAssistantOutboxSendingRecoveryAt(
+  intent: AssistantOutboxIntent,
+  now: Date,
+): string | null {
+  if (intent.status !== 'sending') {
+    return null
+  }
+
+  const lastAttemptMs = intent.lastAttemptAt
+    ? Date.parse(intent.lastAttemptAt)
+    : Number.NaN
+  if (!Number.isFinite(lastAttemptMs)) {
+    return now.toISOString()
+  }
+
+  const recoveryAt = new Date(lastAttemptMs + STALE_SENDING_AFTER_MS)
+  return Number.isFinite(recoveryAt.getTime())
+    ? recoveryAt.toISOString()
+    : now.toISOString()
 }
 
 export function shouldBeginAssistantOutboxDispatch(

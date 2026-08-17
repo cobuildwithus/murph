@@ -134,7 +134,7 @@ export function selectJunctionWorkoutStreamCandidates(
 
 export function reduceJunctionWorkoutStreamPayload(
   input: JunctionWorkoutStreamReductionInput,
-): PlainObject {
+): PlainObject | undefined {
   positiveInteger(input.maxSamples, "workout sample limit");
   const summary = record(input.summary, "workout summary");
   const stream = record(input.stream, "workout stream");
@@ -142,16 +142,39 @@ export function reduceJunctionWorkoutStreamPayload(
   if (times.length === 0 || times.length > input.maxSamples) {
     invalid(`workout stream must contain 1-${input.maxSamples} timestamps`);
   }
-  const heartRates = parallelArray(
+  const heartRateSeries = parallelArray(
     stream.heartrate ?? stream.heart_rate,
     times.length,
     "heartrate",
   );
-  const distances = parallelArray(stream.distance, times.length, "distance");
-  const cadence = parallelArray(stream.cadence, times.length, "cadence");
-  const power = parallelArray(stream.power, times.length, "power");
-  const speeds = parallelArray(stream.velocity_smooth, times.length, "velocity_smooth");
-  if (!heartRates && !distances && !cadence && !power && !speeds) {
+  const distanceSeries = parallelArray(stream.distance, times.length, "distance");
+  const cadenceSeries = parallelArray(stream.cadence, times.length, "cadence");
+  const powerSeries = parallelArray(stream.power, times.length, "power");
+  const speedSeries = parallelArray(
+    stream.velocity_smooth,
+    times.length,
+    "velocity_smooth",
+  );
+  if (
+    heartRateSeries.cardinalityMismatch
+    || distanceSeries.cardinalityMismatch
+    || cadenceSeries.cardinalityMismatch
+    || powerSeries.cardinalityMismatch
+    || speedSeries.cardinalityMismatch
+  ) {
+    return undefined;
+  }
+  const heartRates = heartRateSeries.values;
+  const distances = distanceSeries.values;
+  const cadence = cadenceSeries.values;
+  const power = powerSeries.values;
+  const speeds = speedSeries.values;
+  const sport = firstString(
+    summary,
+    ["sport.slug", "sportSlug", "sport_slug", "sport.name", "sport"],
+  );
+  const cadenceUnit = resolveWorkoutCadenceUnit(sport);
+  if (!heartRates && !distances && !(cadence && cadenceUnit) && !power && !speeds) {
     invalid("workout stream had no supported metrics");
   }
 
@@ -195,8 +218,6 @@ export function reduceJunctionWorkoutStreamPayload(
   if (!workoutId || !origin.sourceProviderSlug) {
     invalid("workout summary lacked identity");
   }
-  const sport = firstString(summary, ["sport.slug", "sportSlug", "sport_slug", "sport.name", "sport"]);
-  const cadenceUnit = resolveWorkoutCadenceUnit(sport);
   const cadenceStats = cadenceUnit
     ? workoutSeriesStats(cadence, points, "cadence", 0, 400)
     : undefined;
@@ -335,9 +356,9 @@ function buildWorkoutSplits(
     stream.heartrate ?? stream.heart_rate,
     points.length,
     "heartrate",
-  );
-  const cadence = parallelArray(stream.cadence, points.length, "cadence");
-  const power = parallelArray(stream.power, points.length, "power");
+  ).values;
+  const cadence = parallelArray(stream.cadence, points.length, "cadence").values;
+  const power = parallelArray(stream.power, points.length, "power").values;
   const cadenceUnit = resolveWorkoutCadenceUnit(sport);
   const splits: PlainObject[] = [];
   let previousBoundaryTimeMs = firstBoundary.timeMs;
@@ -868,11 +889,16 @@ function compareSamples(left: EcgSample, right: EcgSample): number {
   return left.timestampMs - right.timestampMs || left.lead.localeCompare(right.lead);
 }
 
-function parallelArray(value: unknown, length: number, label: string): unknown[] | undefined {
-  if (value === undefined || value === null) return undefined;
+function parallelArray(
+  value: unknown,
+  length: number,
+  label: string,
+): { cardinalityMismatch: boolean; values?: unknown[] } {
+  if (value === undefined || value === null) return { cardinalityMismatch: false };
   const values = array(value, label);
-  if (values.length !== length) invalid(`${label} cardinality was invalid`);
-  return values;
+  return values.length === length
+    ? { cardinalityMismatch: false, values }
+    : { cardinalityMismatch: true };
 }
 
 function array(value: unknown, label: string): unknown[] {

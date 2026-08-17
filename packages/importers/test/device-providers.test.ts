@@ -27,6 +27,7 @@ import { normalizeWhoopSnapshot } from "../src/device-providers/whoop.ts";
 import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  reduceJunctionWorkoutStreamPayload,
 } from "../src/device-providers/junction-bounded-features.ts";
 import {
   makeNormalizedDeviceBatch,
@@ -1842,6 +1843,82 @@ test("importDeviceProviderSnapshot authoritatively retracts stale Junction worko
       storedExternalRefVersion(liveOverall),
       "2026-07-01T14:00:00.000Z",
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("malformed Junction workout metric cardinality cannot supersede a complete canonical measurement", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-stream-cardinality");
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-01T00:00:00.000Z",
+      vaultRoot,
+    });
+    const completeFeature = {
+      schema: JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+      id: "stable-1",
+      workoutId: "stable-1",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      sourceInstanceId: "garmin-1",
+      startAt: "2026-07-01T10:00:00.000Z",
+      endAt: "2026-07-01T10:30:00.000Z",
+      durationSeconds: 1_800,
+      distanceMeters: 5_000,
+      averageHeartRate: 130,
+      maxHeartRate: 170,
+      sampleCount: 1_000,
+      splits: [],
+      version: "2026-07-01T10:30:00.000Z",
+    };
+    const first = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-user-workout-cardinality",
+          importedAt: "2026-07-02T00:00:00.000Z",
+          timeseries: { workout_stream: [completeFeature] },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+    const malformedFeature = reduceJunctionWorkoutStreamPayload({
+      maxSamples: 3,
+      summary: completeFeature,
+      stream: {
+        time: [1_783_000_000, 1_783_000_001, 1_783_000_002],
+        heartrate: [100, 110, 120],
+        distance: [0, 10],
+      },
+    });
+    assert.equal(malformedFeature, undefined);
+
+    const skipped = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-user-workout-cardinality",
+          importedAt: "2026-07-02T01:00:00.000Z",
+          timeseries: { workout_stream: malformedFeature ? [malformedFeature] : [] },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+    const firstEvent = first.events[0];
+    assert.ok(firstEvent);
+    assert.equal(skipped.events.length, 0);
+
+    const stored = (
+      await Promise.all(first.eventShardPaths.map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ))
+    ).flat();
+    const current = latestLiveRecords(stored).filter((record) => record.id === firstEvent.id);
+    assert.equal(current.length, 1);
+    assert.equal(eventRevisionFromLifecycle(current[0]?.lifecycle), 1);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

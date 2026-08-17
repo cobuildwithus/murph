@@ -1,17 +1,23 @@
 import {
-  type BrowserVaultQueryClient,
   type OverviewExperiment,
 } from "@murphai/query/browser-overview";
+import type {
+  BrowserVaultCoreCapableQueryClient,
+  BrowserVaultExperimentRunCard,
+  BrowserVaultMetricsCapableQueryClient,
+} from "@murphai/query/browser-replica-client";
 
 import { formatIsoDate, formatStatusLabel } from "@/src/lib/browser-vault/display";
 import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment-status";
 import {
+  buildBrowserVaultExperimentResultLookups,
   resolveBrowserVaultExperimentRun,
   resolveBrowserVaultExperimentRunById,
 } from "@/src/lib/browser-vault/experiment-run";
 import { resolveExperimentRunCardDailyCadence } from "@/src/lib/experiments/run-card-daily-cadence";
 import {
   buildExperimentRunCardSummary,
+  projectBrowserVaultExperimentRunCardSummary,
   type ExperimentRunCardSummary,
 } from "@/src/lib/experiments/run-card-summary";
 import type { ExperimentProtocol, ExperimentRunProjection } from "@/src/types/experiments";
@@ -83,7 +89,7 @@ export function buildExperimentLibraryCards({
   protocols,
   trackedExperiments,
 }: {
-  client: BrowserVaultQueryClient | null;
+  client: BrowserVaultMetricsCapableQueryClient | null;
   protocols: ExperimentProtocol[];
   trackedExperiments: OverviewExperiment[];
 }): ExperimentLibraryCard[] {
@@ -105,8 +111,142 @@ export function buildExperimentLibraryCards({
   return [...protocolCards, ...trackedOnlyCards].sort(compareExperimentCards);
 }
 
+/**
+ * Home uses the compact producer-built summaries in core. Experiment detail
+ * and the experiment library continue to resolve against the metrics shard.
+ */
+export function buildHomeExperimentLibraryCards({
+  client,
+  protocols,
+  trackedExperiments,
+}: {
+  client: BrowserVaultCoreCapableQueryClient | null;
+  protocols: ExperimentProtocol[];
+  trackedExperiments: OverviewExperiment[];
+}): ExperimentLibraryCard[] {
+  const protocolCards = protocols.map((protocol) => {
+    const privateRun = findProjectedRunForProtocol(client, protocol);
+    return protocolToHomeCard(protocol, privateRun);
+  });
+  const matchedTrackedExperimentIds = new Set(
+    protocolCards.flatMap((card) => card.trackedExperimentId ? [card.trackedExperimentId] : []),
+  );
+  const trackedOnlyCards = trackedExperiments
+    .filter((entry) => !matchedTrackedExperimentIds.has(entry.id))
+    .map((entry) => trackedExperimentToHomeCard(
+      entry,
+      client?.experimentRunCards.get(entry.id) ?? null,
+    ));
+
+  return [...protocolCards, ...trackedOnlyCards].sort(compareExperimentCards);
+}
+
+function findProjectedRunForProtocol(
+  client: BrowserVaultCoreCapableQueryClient | null,
+  protocol: ExperimentProtocol,
+): BrowserVaultExperimentRunCard | null {
+  if (!client) return null;
+  for (const lookup of buildBrowserVaultExperimentResultLookups(protocol)) {
+    const run = client.experimentRunCards.find(lookup);
+    if (run) return run;
+  }
+  return null;
+}
+
+function protocolToHomeCard(
+  protocol: ExperimentProtocol,
+  privateRun: BrowserVaultExperimentRunCard | null,
+): ExperimentLibraryCard {
+  const startedOn = privateRun?.startedOn;
+  const protocolDays = formatProtocolDays(protocol);
+  const metadata = [
+    startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
+    `${protocolDays} days`,
+    protocol.researchSummaryLabel,
+  ].filter((part): part is string => part !== null).join(" · ");
+
+  return {
+    id: protocol.id,
+    title: protocol.title,
+    category: protocol.category,
+    image: protocol.image,
+    href: `/experiments/${protocol.id}`,
+    matchPercent: protocol.matchPercent,
+    durationDays: protocolDays,
+    metadata,
+    privateBadgeLabel: privateRun ? "Private data" : undefined,
+    statusLabel: privateRun?.statusLabel,
+    statusVariant: privateRun ? statusVariantForRunStatus(privateRun.status) : undefined,
+    description: privateRun?.summaryDetail ?? privateRun?.summary ?? protocol.description,
+    hasPrivateData: privateRun !== null,
+    runStatus: privateRun?.status,
+    runSummary: privateRun
+      ? projectBrowserVaultExperimentRunCardSummary(privateRun.runSummary)
+      : undefined,
+    startedOn,
+    trackedExperimentId: privateRun?.id,
+    searchText: [
+      protocol.title,
+      protocol.category,
+      protocol.description,
+      protocol.commons?.key,
+      protocol.commons?.slug,
+      ...(protocol.commons?.aliases ?? []),
+      privateRun?.title,
+      privateRun?.summary,
+      ...(privateRun?.tags ?? []),
+    ].filter((value): value is string => typeof value === "string").join(" "),
+  };
+}
+
+function trackedExperimentToHomeCard(
+  entry: OverviewExperiment,
+  privateRun: BrowserVaultExperimentRunCard | null,
+): ExperimentLibraryCard {
+  const runStatus = privateRun?.status ?? runStatusForTrackedExperiment(entry);
+  const startedOn = privateRun?.startedOn ?? entry.startedOn;
+  const title = privateRun?.title || entry.title || entry.slug || entry.id;
+  const metadata = [
+    startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
+    "Private run only",
+  ].filter((part): part is string => part !== null).join(" · ");
+
+  return {
+    id: entry.id,
+    title,
+    category: "Private",
+    image: selectTrackedExperimentImage(entry),
+    href: `/experiments/runs/${encodeURIComponent(entry.id)}`,
+    privateBadgeLabel: "Private only",
+    metadata,
+    statusLabel: privateRun?.statusLabel ?? formatStatusLabel(entry.status),
+    statusVariant: statusVariantForRunStatus(runStatus),
+    description: entry.summary
+      ?? privateRun?.summaryDetail
+      ?? privateRun?.summary
+      ?? "This experiment has private data saved on this device, but it doesn't match a public protocol page right now.",
+    hasPrivateData: true,
+    runStatus,
+    runSummary: privateRun
+      ? projectBrowserVaultExperimentRunCardSummary(privateRun.runSummary)
+      : undefined,
+    startedOn,
+    trackedExperimentId: entry.id,
+    searchText: [
+      entry.id,
+      entry.slug,
+      entry.title,
+      entry.summary,
+      privateRun?.title,
+      privateRun?.summary,
+      ...(privateRun?.tags ?? []),
+      ...entry.tags,
+    ].filter((value): value is string => typeof value === "string").join(" "),
+  };
+}
+
 function protocolToCard(
-  client: BrowserVaultQueryClient | null,
+  client: BrowserVaultMetricsCapableQueryClient | null,
   protocol: ExperimentProtocol,
   privateRun: ExperimentRunProjection | null,
 ): ExperimentLibraryCard {
@@ -157,7 +297,7 @@ function formatProtocolDays(protocol: ExperimentProtocol): number {
 }
 
 function trackedExperimentToCard(
-  client: BrowserVaultQueryClient | null,
+  client: BrowserVaultMetricsCapableQueryClient | null,
   entry: OverviewExperiment,
   privateRun: ExperimentRunProjection | null,
 ): ExperimentLibraryCard {
@@ -206,7 +346,7 @@ function trackedExperimentToCard(
 }
 
 function buildPrivateRunCardSummary(
-  client: BrowserVaultQueryClient | null,
+  client: BrowserVaultMetricsCapableQueryClient | null,
   privateRun: ExperimentRunProjection | null,
 ): ExperimentRunCardSummary | undefined {
   if (!privateRun) {

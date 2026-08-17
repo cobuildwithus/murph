@@ -206,6 +206,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   },
   resource: {
     payload: {
+      calendarRefreshDay: stringJobField({ includeInHostedHint: true }),
       companionAdmissionId: stringJobField({ includeInHostedHint: true }),
       companionObservationJson: stringJobField({ includeInHostedHint: true }),
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
@@ -222,7 +223,9 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       resource: stringJobField({ includeInHostedHint: true }),
       resourceCategory: stringJobField({ includeInHostedHint: true }),
       sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),
+      sourceInstanceId: stringJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      sourceType: stringJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),

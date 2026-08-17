@@ -234,6 +234,7 @@ export function bridgeAbortSignals(
 
 export interface AssistantAutomationWakeController {
   consumePendingWake(): boolean
+  hasPendingWake(): boolean
   requestWake(): void
   waitForWakeOrDeadline(
     signal: AbortSignal,
@@ -257,6 +258,9 @@ export function createAssistantAutomationWakeController(): AssistantAutomationWa
       const hadPendingWake = pendingWake
       pendingWake = false
       return hadPendingWake
+    },
+    hasPendingWake() {
+      return pendingWake
     },
     requestWake() {
       pendingWake = true

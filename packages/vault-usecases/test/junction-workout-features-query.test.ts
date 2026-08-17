@@ -247,6 +247,9 @@ test("wearables activity list preserves provider and vault-local workout days", 
     1_000,
   )
   const vaultLocalFeature = reduce(vaultLocalSummary, vaultLocalSummary.endAt, 1_000)
+  if (!offsetFeature || !explicitCalendarFeature || !vaultLocalFeature) {
+    throw new Error("Expected valid workout streams to reduce to compact features")
+  }
 
   expect(offsetFeature.workoutDayKey).toBe("2026-08-15")
   expect(explicitCalendarFeature.workoutDayKey).toBe("2026-08-14")

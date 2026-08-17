@@ -35,6 +35,7 @@ import {
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_ID,
@@ -81,11 +82,11 @@ const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
 // within ~45 minutes regardless of prefix size or prompt_cache_retention
 // (measured 2026-06-10 across 32k-170k prefixes), so member messages after an
 // idle gap re-pay the full thread at uncached input rates. Keep the ceiling at
-// 164k: it is still a meaningful reduction from the old 233k ceiling, and the
-// 2026-07 hosted model cost profile leaves room for longer tool loops. The
-// separate idle-shutdown compaction threshold intentionally stays lower so
-// off-hot-path checkpointing can clean up large threads before the next wake.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
+// 132k to reduce uncached resend cost while retaining room for longer tool
+// loops. The separate idle-shutdown compaction threshold intentionally stays
+// lower so off-hot-path checkpointing can clean up large threads before the
+// next wake.
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 132_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 // Hosted runs get one WebSocket attempt, then Codex replays the request over
@@ -490,7 +491,9 @@ function resolveHostedCodexModelProviderConfig(input: {
     baseUrl: url.toString(),
     id: providerConfig.id === VENICE_CODEX_MODEL_PROVIDER_ID
       ? HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
-      : providerConfig.id,
+      : providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID
+        ? HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+        : providerConfig.id,
     supportsWebSockets: false,
   };
 }

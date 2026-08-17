@@ -1555,6 +1555,90 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("refreshes a stale shared prefetch before the pre-assistant system import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const events: string[] = [];
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_stale_prefetch_conversation",
+        laneSeq: "1",
+      }),
+    ];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const initialMailboxPrefetch = prefetchHostedMailboxPrefix({
+      lanes: ["conversation", "system"],
+      limitPerLane: 10,
+      mailboxPort,
+      requestId: "request_synthetic_runner_stale_prefetch",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    try {
+      await initialMailboxPrefetch.response;
+      items.push(createMailboxItem({
+        id: "mailbox_item_runner_stale_prefetch_activation",
+        kind: "member.activated",
+        lane: "system",
+        laneSeq: "1",
+      }));
+
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_stale_prefetch",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.item.lane}`);
+          return { status: "imported" };
+        },
+        initialMailboxPrefetch,
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_stale_prefetch",
+        async runAssistantPhase(input) {
+          events.push("assistant");
+          assert.equal(input.initialMailboxImport.state.watermarks.system, "0");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+      ]);
+      assert.deepEqual(events, [
+        "import:conversation",
+        "import:system",
+        "assistant",
+      ]);
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "1");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("imports paged member preference system work before a fresh conversation assistant phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -1625,6 +1709,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "0", lane: "conversation" },
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
           { importedSeq: "0", lane: "system" },
         ],
         [
@@ -5354,7 +5441,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("foreground stop aborts projection-stalled import after conversation staging", async () => {
+  test("foreground stop preserves the mailbox watermark after aborting a staged projection", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const lateOccurredAt = "2026-04-26T00:00:02.000Z";
     const lateWake: HostedExecutionConversationMessageWake = {
@@ -5485,20 +5572,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(yieldStates, [false, true]);
       assert.equal(projectionAbortObserved, true);
       assert.equal(projectionFinished, false);
-      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
       assert.deepEqual(fetchRequests[0]?.lanes, [
         { importedSeq: "0", lane: "conversation" },
       ]);
-      assert.ok(
-        fetchRequests.slice(1).some((request) =>
-          request.lanes.some((lane) =>
-            lane.lane === "conversation" && lane.importedSeq === "0"
-          )
-        ),
-        "aborted item should remain eligible for a later conversation fetch",
-      );
       assert.equal(
         logRequests.flatMap((request) => request.entries)
           .some((entry) => entry.errorCode === "foreground_mailbox_import_failed"),
@@ -5656,7 +5735,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               await waitForCondition(() =>
                 input.shouldYieldBackgroundMaintenance?.() === true
               );
-              assert.equal(input.backgroundMaintenanceSignal?.aborted, true);
+              assert.equal(input.backgroundMaintenanceSignal?.aborted, false);
               yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
               return {
                 checkpointReason: "assistant_runtime_commit",
@@ -5795,7 +5874,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runtime wake waits for late assistant input import before interrupting background maintenance", async () => {
+  test("earlier staged foreground input cannot abort the next item before it stages", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -5804,6 +5883,172 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }),
     ];
     const importStartedSeqs: string[] = [];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+    let heldImportSignal: AbortSignal | null = null;
+    const readHeldImportSignal = (): AbortSignal | null => heldImportSignal;
+    let releaseLateImport = (): void => {};
+    let lateImportStarted = (): void => {};
+    let assistantPhaseReturned = (): void => {};
+    const lateImportStartedPromise = new Promise<void>((resolve) => {
+      lateImportStarted = resolve;
+    });
+    const lateImportReleasePromise = new Promise<void>((resolve) => {
+      releaseLateImport = resolve;
+    });
+    const assistantPhaseReturnedPromise = new Promise<void>((resolve) => {
+      assistantPhaseReturned = resolve;
+    });
+
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+      const runner = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_active_turn_yield_during_import",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item, context) {
+          importStartedSeqs.push(item.item.laneSeq);
+          if (item.item.laneSeq === "1") {
+            importedSeqs.push(item.item.laneSeq);
+            return { status: "imported" };
+          }
+
+          if (item.item.laneSeq === "3") {
+            heldImportSignal = context?.signal ?? null;
+            lateImportStarted();
+            await lateImportReleasePromise;
+            context?.signal?.throwIfAborted();
+          }
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              `late same-conversation input ${item.item.laneSeq}`,
+            ),
+            vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
+          context?.onConversationInputStaged?.("linq");
+          importedSeqs.push(item.item.laneSeq);
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_active_turn_yield_during_import",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_yield_during_import_first_late",
+            laneSeq: "2",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_yield_during_import_second_late",
+            laneSeq: "3",
+            occurredAt: "2026-04-26T00:00:03.000Z",
+          }));
+          runtimeWakeSignal.notify();
+          await lateImportStartedPromise;
+          assert.deepEqual(importedSeqs, ["1", "2"]);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          if (input.shouldYieldBackgroundMaintenance?.() !== true) {
+            throw new Error("Foreground yield must preempt lock-bound input staging.");
+          }
+          assert.equal(input.backgroundMaintenanceSignal?.aborted, false);
+          assistantPhaseReturned();
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+      let runnerSettled = false;
+      void runner.then(
+        () => {
+          runnerSettled = true;
+        },
+        () => {
+          runnerSettled = true;
+        },
+      );
+      await assistantPhaseReturnedPromise;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      assert.equal(runnerSettled, false);
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.equal(readHeldImportSignal()?.aborted, false);
+      releaseLateImport();
+      const result = await runner;
+
+      assert.deepEqual(importStartedSeqs, ["1", "2", "3"]);
+      assert.deepEqual(importedSeqs, ["1", "2", "3"]);
+      assert.deepEqual(yieldStates, [false, true]);
+      assert.equal(readHeldImportSignal()?.aborted, true);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "3");
+      assert.equal(
+        result.assistantPhaseResult?.nextWakeAt,
+        TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
+      );
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "1", lane: "conversation" },
+        ],
+      ]);
+    } finally {
+      releaseLateImport();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("foreground import without staged work releases background maintenance yield", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_unstaged_wake_initial",
+        laneSeq: "1",
+      }),
+    ];
     const importedSeqs: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
@@ -5831,7 +6076,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_active_turn_yield_during_import",
+          attemptId: "attempt_synthetic_runner_unstaged_wake",
           expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
           nextWakeAt: null,
@@ -5840,56 +6085,36 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
-          importStartedSeqs.push(item.item.laneSeq);
+          importedSeqs.push(item.item.laneSeq);
           if (item.item.laneSeq === "1") {
-            importedSeqs.push(item.item.laneSeq);
             return { status: "imported" };
           }
-
           lateImportStarted();
           await lateImportReleasePromise;
-          const staged = await upsertAssistantInputEvent({
-            event: createStoredAssistantInputEventForMailboxItem(
-              item.item,
-              `late same-conversation input ${item.item.laneSeq}`,
-            ),
-            vault: vaultRoot,
-          });
-          await enqueueHostedPendingAssistantInputId({
-            inputId: staged.inputId,
-            vaultRoot,
-          });
-          importedSeqs.push(item.item.laneSeq);
-          return {
-            assistantInputId: staged.inputId,
-            status: "imported",
-          };
+          return { status: "skipped" };
         },
         limitPerLane: 10,
         platform: createPlatform({
           mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
-        requestId: "request_synthetic_runner_active_turn_yield_during_import",
+        requestId: "request_synthetic_runner_unstaged_wake",
         runtimeWakeSignal,
         async runAssistantPhase(input) {
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
           items.push(createMailboxItem({
-            id: "mailbox_item_runner_yield_during_import_late",
+            id: "mailbox_item_runner_unstaged_wake_late",
             laneSeq: "2",
             occurredAt: "2026-04-26T00:00:02.000Z",
           }));
           runtimeWakeSignal.notify();
           await lateImportStartedPromise;
-          assert.deepEqual(importedSeqs, ["1"]);
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
-          if (input.shouldYieldBackgroundMaintenance?.() !== false) {
-            throw new Error("Foreground yield must wait for the mailbox import result.");
-          }
+          assert.equal(input.backgroundMaintenanceSignal?.aborted, false);
           releaseLateImport();
           await waitForCondition(() => importedSeqs.includes("2"));
           await waitForCondition(() =>
-            input.shouldYieldBackgroundMaintenance?.() === true
+            input.shouldYieldBackgroundMaintenance?.() === false
           );
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
           return {
@@ -5902,25 +6127,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.deepEqual(importStartedSeqs, ["1", "2"]);
       assert.deepEqual(importedSeqs, ["1", "2"]);
-      assert.deepEqual(yieldStates, [false, false, true]);
+      assert.deepEqual(yieldStates, [false, true, false]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.equal(
         result.assistantPhaseResult?.nextWakeAt,
         TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
       );
-      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
-      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
-        [
-          { importedSeq: "0", lane: "conversation" },
-        ],
-        [
-          { importedSeq: "0", lane: "system" },
-        ],
-        [
-          { importedSeq: "1", lane: "conversation" },
-        ],
-      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
     } finally {
       releaseLateImport();
       await rm(vaultRoot, {
