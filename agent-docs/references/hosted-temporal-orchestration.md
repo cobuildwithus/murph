@@ -508,6 +508,29 @@ existing Temporal HTTP timeout:
 Cloudflare uses its existing web-control/readiness timeout values as per-step
 caps inside that budget and never lets unsigned timeout metadata increase the
 configured Cloudflare wait.
+The Web direct-wake lane supplies a 25-second end-to-end command budget inside
+a shared 29-second outer deadline. Cloudflare starts its server-side clock at
+runtime-control authorization, before route parsing, Durable Object dispatch,
+consent serialization, and health-data admission. Container readiness is capped at 20
+wall-clock seconds end to end: at most 15 seconds for readiness, including
+lifecycle-lock queue time, plus one absolute five-second deadline shared by a
+readiness-triggered cleanup state read and destroy settlement. Its caller guard adds a
+separate one-second margin, so the RPC can
+settle before the request deadline. Shorter command budgets keep the smaller of
+15 seconds and the remaining time minus that one-second guard for readiness;
+they do not subtract cleanup time before a start fails. If cleanup then outlives
+the short budget, the outer guard preserves the fence. A `retry_later` may trigger one retry only
+when its delay and the minimum command/response window fit the remaining outer
+deadline. This fast lane never replaces the accepted Temporal signal or owns
+durable retry state. The relational latency trace stores only the final parsed
+direct result kind and accepted action/runtime attempt id; retry reasons remain
+in orchestration-correlated Cloudflare structured logs.
+
+Roll this boundary out Web first, then Cloudflare. New Web sends the bounded
+timeout but still accepts the legacy `202 { accepted: true }`; old Cloudflare
+already accepts the additive timeout metadata. After Web converges, new
+Cloudflare can safely await and return the full result without exposing old-Web
+callers to the shorter default budget during a cold start.
 
 ## Runtime Status And Completion
 

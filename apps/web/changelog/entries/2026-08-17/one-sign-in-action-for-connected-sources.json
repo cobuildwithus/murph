@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-17",
+  "order": 100,
+  "item": {
+    "id": "one-sign-in-action-for-connected-sources",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "One sign-in action for connected sources",
+    "summary": "When you browse connected sources while signed out, every source now starts with the same Sign in action.",
+    "details": "After authentication, each source keeps its existing connection, setup guide, app handoff, or availability state.",
+    "relevanceTags": ["connected-sources", "devices", "wearables"],
+    "sourcePullRequests": [1937]
+  }
+}

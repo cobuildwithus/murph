@@ -6,6 +6,7 @@ import {
   HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
   type HostedBrowserVaultReplicaMetricBucketId,
@@ -310,11 +311,14 @@ describe("createCloudflareHostedControlClient", () => {
       },
     });
     const onTiming = vi.fn();
+    const abortController = new AbortController();
 
     try {
       await expect(client.ensureRuntimeProcessing({
+        commandTimeoutMs: 25_000,
         onTiming,
         orchestrationAttemptId: "web-ingress-attempt-test",
+        signal: abortController.signal,
         userId: "user_123",
       })).resolves.toEqual({
         action: "woken",
@@ -345,9 +349,16 @@ describe("createCloudflareHostedControlClient", () => {
     expect(headers.get(
       HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
     )).toBe(String(Date.parse("2026-07-06T12:00:00.010Z")));
+    expect(headers.get(HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER)).toBe(
+      "25000",
+    );
+    expect(init.signal).toBe(abortController.signal);
     expect(onTiming).toHaveBeenCalledWith({
+      directEnsureAction: "woken",
       directEnsureRequestStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       directEnsureResponseReceivedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
+      directEnsureResultKind: "runtime_processing_accepted",
+      directEnsureRuntimeAttemptId: "runtime-attempt-test",
       orchestrationAttemptId: "web-ingress-attempt-test",
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
@@ -491,10 +502,56 @@ describe("createCloudflareHostedControlClient", () => {
     expect(onTiming).toHaveBeenCalledWith({
       directEnsureRequestStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       directEnsureResponseReceivedAtEpochMs: Date.parse("2026-07-06T12:00:00.025Z"),
+      directEnsureResultKind: "legacy_accepted",
       orchestrationAttemptId: "web-ingress-attempt-test",
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
     });
+  });
+
+  it("reports retry_later timing only after the response parses", async () => {
+    const onTiming = vi.fn();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl: vi.fn(async () => createJsonResponse({
+        kind: "retry_later",
+        retryAt: "2026-07-06T12:00:03.000Z",
+      })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.ensureRuntimeProcessing({
+      onTiming,
+      orchestrationAttemptId: "web-ingress-attempt-test",
+      userId: "user_123",
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-07-06T12:00:03.000Z",
+    });
+
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      directEnsureResultKind: "retry_later",
+      orchestrationAttemptId: "web-ingress-attempt-test",
+    }));
+    expect(onTiming.mock.invocationCallOrder[0]).toBeGreaterThan(0);
+  });
+
+  it("does not report timing for an unparseable ensure-processing response", async () => {
+    const onTiming = vi.fn();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl: vi.fn(async () => createJsonResponse({
+        error: "payload-shaped diagnostic must not be recorded",
+      })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.ensureRuntimeProcessing({
+      onTiming,
+      orchestrationAttemptId: "web-ingress-attempt-test",
+      userId: "user_123",
+    })).rejects.toThrow();
+    expect(onTiming).not.toHaveBeenCalled();
   });
 
   it("rejects blank user identifiers for runtime ensure-processing before issuing requests", () => {
@@ -509,6 +566,22 @@ describe("createCloudflareHostedControlClient", () => {
       orchestrationAttemptId: "web-ingress-attempt-test",
       userId: "  ",
     })).toThrow("Cloudflare hosted control userId must not be blank.");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid runtime ensure-processing command timeout before issuing requests", () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    expect(() => client.ensureRuntimeProcessing({
+      commandTimeoutMs: 1_000,
+      orchestrationAttemptId: "web-ingress-attempt-test",
+      userId: "user_123",
+    })).toThrow("commandTimeoutMs must be greater than 1000");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
