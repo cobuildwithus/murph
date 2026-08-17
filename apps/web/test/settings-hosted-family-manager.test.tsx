@@ -40,10 +40,10 @@ vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
   HostedUsageTopUpDialog: (props: {
     activePurchase?: unknown;
     checkoutUrl?: string;
-    contactOptions?: readonly unknown[];
     deferTerminalRefreshUntilClose?: boolean;
     offers: readonly unknown[];
     purchaseReturn?: unknown;
+    quietSuccessfulReturn?: boolean;
     scope?: string;
     targetLabel?: string;
   }) => {
@@ -1122,7 +1122,6 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
       ],
       usageTopUpActiveMemberId: "member_family",
       usageTopUpActivePurchase: activePurchase,
-      usageTopUpContactOptions: [payerTopUpContactOption()],
       usageTopUpOffers: [
         { amountLabel: "$5", offerCode: "usage_5_usd" },
         { amountLabel: "$10", offerCode: "usage_10_usd" },
@@ -1147,12 +1146,17 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
         activePurchase,
         checkoutUrl:
           "/api/settings/billing/family/members/member_family/usage-credit/checkout",
-        contactOptions: [payerTopUpContactOption()],
+        deferTerminalRefreshUntilClose: true,
         offers: [],
         scope: "family",
         targetLabel: "Family member",
       }),
     );
+    const memberManageProps = mocks.usageTopUpDialogProps.mock.calls
+      .map(([callProps]) => callProps)
+      .find((callProps) => callProps.targetLabel === "Family member");
+    assert.ok(memberManageProps);
+    assert.equal("quietSuccessfulReturn" in memberManageProps, false);
 
     // The owner's manage modal gates offers away and shows no payment action.
     const dismiss = container.querySelector<HTMLButtonElement>(
@@ -1169,12 +1173,17 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
         activePurchase: null,
         checkoutUrl:
           "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
-        contactOptions: [payerTopUpContactOption()],
+        deferTerminalRefreshUntilClose: false,
         offers: [],
         scope: "family",
         targetLabel: "you",
       }),
     );
+    const ownerManageProps = mocks.usageTopUpDialogProps.mock.calls
+      .map(([callProps]) => callProps)
+      .find((callProps) => callProps.targetLabel === "you");
+    assert.ok(ownerManageProps);
+    assert.equal("quietSuccessfulReturn" in ownerManageProps, false);
   } finally {
     await cleanup();
   }
@@ -1195,7 +1204,6 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
       ...baseFamilyManagerProps(),
       usageTopUpActiveMemberId: "member_former",
       usageTopUpActivePurchase: activePurchase,
-      usageTopUpContactOptions: [payerTopUpContactOption()],
     }),
     { requireButton: false },
   );
@@ -1221,18 +1229,77 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
       .find((callProps) => callProps.targetLabel === "a former family member");
     assert.ok(formerMountProps);
     assert.equal("contactOptions" in formerMountProps, false);
+    assert.equal("quietSuccessfulReturn" in formerMountProps, false);
   } finally {
     await cleanup();
   }
 });
 
-function payerTopUpContactOption() {
-  return {
-    href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-    kind: "text" as const,
-    label: "Messages",
+test("HostedFamilyManager owns an active member's exact return without opening Manage", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const activePurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_active_return00",
+    retryAllowed: false,
+    status: "fulfilled" as const,
   };
-}
+  const purchaseReturn = {
+    kind: "success" as const,
+    purchaseId: activePurchase.purchaseId,
+  };
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: [
+        ...props.members,
+        {
+          isOwner: false,
+          joinedAtIso: "2026-07-10T00:00:00.000Z",
+          label: "Family member",
+          memberId: "member_family",
+          pendingPlanCode: null,
+          planCode: "edge" as const,
+        },
+      ],
+      usageTopUpActiveMemberId: "member_family",
+      usageTopUpActivePurchase: activePurchase,
+      usageTopUpPurchaseReturn: purchaseReturn,
+      usageTopUpReturnMemberId: "member_family",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const returnOwnerCalls = mocks.usageTopUpDialogProps.mock.calls
+      .map(([callProps]) => callProps)
+      .filter(
+        (callProps) =>
+          callProps.targetLabel === "Family member" &&
+          callProps.purchaseReturn === purchaseReturn,
+      );
+    expect(returnOwnerCalls).toHaveLength(1);
+    const returnOwner = returnOwnerCalls[0];
+    assert.ok(returnOwner);
+    expect(returnOwner).toMatchObject({
+      activePurchase,
+      checkoutUrl:
+        "/api/settings/billing/family/members/member_family/usage-credit/checkout",
+      deferTerminalRefreshUntilClose: true,
+      offers: [],
+      purchaseReturn,
+      scope: "family",
+      targetLabel: "Family member",
+    });
+    assert.equal("quietSuccessfulReturn" in returnOwner, false);
+    assert.equal(container.querySelector('[data-dialog-open="true"]'), null);
+  } finally {
+    await cleanup();
+  }
+});
+
 
 function baseFamilyManagerProps() {
   return {

@@ -461,23 +461,6 @@ export default async function SettingsPage({
     resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"
       ? resolvedVoiceTestOption
       : null;
-  // Shown after a fulfilled usage top-up so the payer can hop back into the
-  // conversation without leaving the confirmation.
-  const usageTopUpContactOptions = account
-    ? resolveMurphContactOptions({
-        contactChannels: {
-          email: Boolean(account.email.murphEmailAddress),
-          telegram: Boolean(account.telegram.telegramUserId),
-          text: Boolean(account.phone.number),
-        },
-        message: {
-          body: "Hey Murph, I just added more usage.",
-        },
-        murphEmailAddress: account.email.murphEmailAddress ?? null,
-        murphPhoneNumber: routing?.linqRecipientPhone ?? null,
-        userEmailAddress: account.email.address,
-      })
-    : [];
   const usageMissionContactOption =
     usageActivity?.missionsEnabled === true && account
       ? resolveMurphContactOptions({
@@ -569,7 +552,6 @@ export default async function SettingsPage({
               ? `/api/settings/billing/family/members/${encodeURIComponent(familyOwnerUsageTopUpMember.memberId)}/usage-credit/checkout`
               : undefined
           }
-          usageTopUpContactOptions={usageTopUpContactOptions}
           usageTopUpInitialOpen={
             billingUsageTopUpUsesFamilyOwner
               ? requestedFamilyOwnerUsageTopUp || openPersonalUsageTopUp
@@ -639,7 +621,6 @@ export default async function SettingsPage({
             payerMemberId={authenticatedMember.id}
             usageTopUpActiveMemberId={familyUsageTopUpActiveMemberId}
             usageTopUpActivePurchase={familyUsageTopUpActivePurchase}
-            usageTopUpContactOptions={usageTopUpContactOptions}
             usageTopUpOffers={familyUsageTopUpOffers}
             usageTopUpPurchaseReturn={familySettingsUsageTopUpPurchaseReturn}
             usageTopUpReturnMemberId={familySettingsUsageTopUpReturnMemberId}
