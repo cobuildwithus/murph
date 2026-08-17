@@ -1722,13 +1722,14 @@ function extractStructurallyCompleteTimeseriesRecords(
   const groupedRecords = flattenGroupedTimeseries(resource, payload, {
     strict: true,
   });
-  const records = groupedRecords ?? extractCollectionRecords(payload, resource);
-  if (
-    groupedRecords === null
-    && (!payload || typeof payload !== "object")
-  ) {
+  // A structurally complete collection requires grouped proof. Generic and
+  // legacy envelopes (arrays, data/results wrappers, resource-keyed bodies,
+  // raw SDK-parse fallbacks) stay parseable for ordinary ingestion but can
+  // never certify a complete source day.
+  if (groupedRecords === null) {
     throw incompleteJunctionCalendarCollectionError();
   }
+  const records = groupedRecords;
 
   for (const record of records) {
     const entry = readPlainObject(record);
@@ -1768,6 +1769,11 @@ function flattenGroupedTimeseries(
     if (options.strict && (rawGroups === undefined || rawGroups === null)) {
       throw incompleteJunctionCalendarCollectionError();
     }
+    // A complete collection proof requires real arrays: a schema-drifted
+    // singleton object must fail retryably rather than certify the day.
+    if (options.strict && !Array.isArray(rawGroups)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
     for (const rawGroup of asArray(rawGroups)) {
       const group = readPlainObject(rawGroup);
       if (!group) {
@@ -1783,6 +1789,9 @@ function flattenGroupedTimeseries(
         options.strict
         && (!("data" in group) || group.data === undefined || group.data === null)
       ) {
+        throw incompleteJunctionCalendarCollectionError();
+      }
+      if (options.strict && !Array.isArray(group.data)) {
         throw incompleteJunctionCalendarCollectionError();
       }
 

@@ -16,6 +16,7 @@ import {
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
   type JunctionTimeseriesResource,
+  toLocalDayKey,
 } from "@murphai/contracts";
 import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
@@ -28,6 +29,7 @@ import {
   identifyJunctionBloodPressureProviderRecords,
   normalizeJunctionCanonicalBodyTimestamp,
   JUNCTION_DENSE_FIDELITY_RESOURCES,
+  parseJunctionCompleteDayTimestamp,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
   resolveJunctionBoundedFeatureRecords,
@@ -158,7 +160,10 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
-import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
+import {
+  classifyDeviceSyncWebhookAcceptanceMode,
+  JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX,
+} from "../types.ts";
 import { evaluatePushPrimarySourceStaleness } from "../source-staleness.ts";
 import {
   JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND,
@@ -315,8 +320,19 @@ const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9
 
 interface JunctionWindowFetchOptions {
   collectionWorkLimit?: JunctionCollectionWorkLimit;
+  authorizedLocalDay?: {
+    dayKey: string;
+    timeZone: string;
+  };
+  chunkDays?: number;
   dateQueryFormat?: JunctionDateQueryFormat;
   requireStructurallyCompleteCollection?: boolean;
+}
+
+interface JunctionDailyTimeseriesWindow {
+  dayKey: string;
+  windowEnd: string;
+  windowStart: string;
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
@@ -537,6 +553,13 @@ const JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT = Object.freeze({
   maxPages: 3,
   requestTimeoutMs: 8_000,
 } satisfies JunctionCollectionWorkLimit);
+const JUNCTION_TEMPORAL_AUTHORITY_LAG_MS = TIMESERIES_CHUNK_MS;
+const JUNCTION_TEMPORAL_AUTHORITY_RESOURCES = new Set([
+  "blood_oxygen",
+  "stress_level",
+]);
+const JUNCTION_TEMPORAL_AUTHORITY_JOB_VERSION = 1;
+const JUNCTION_MAX_TEMPORAL_RECONCILE_DAYS = 14;
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
 const JUNCTION_DIAGNOSTIC_RESOURCE_NAME_LIMIT = 64;
@@ -611,6 +634,7 @@ export function createJunctionDeviceSyncProvider(
     (resource) => resolveJunctionExtendedTimeseriesBackfillPolicy(resource) !== null,
   );
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
+  const temporalReconcileDays = normalizeJunctionTemporalReconcileDays(reconcileDays);
   const pushSourceRecoveryEnabled = config.pushSourceRecoveryEnabled === true;
   const webhookTimestampToleranceMs =
     config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS;
@@ -1549,6 +1573,86 @@ export function createJunctionDeviceSyncProvider(
         );
       }
     }
+    const temporalResources = context.vaultTimeZone
+      ? timeseriesResources.filter((resource) =>
+          JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+        )
+      : [];
+    const temporalRecoveryWindows = context.vaultTimeZone
+      ? buildLatestAuthoritativeDailyWindows({
+          horizonDays: temporalReconcileDays,
+          now: context.now,
+          timeZone: context.vaultTimeZone,
+          windowEnd: window.windowEnd,
+        })
+      : [];
+    const newestTemporalWindow = temporalRecoveryWindows[0] ?? null;
+    const deferredNewestTemporalResources = new Set<string>();
+
+    if (newestTemporalWindow && context.vaultTimeZone) {
+      for (const [resourceIndex, resource] of temporalResources.entries()) {
+        if (context.shouldYield?.()) {
+          for (const remainingResource of temporalResources.slice(resourceIndex)) {
+            deferredNewestTemporalResources.add(remainingResource);
+          }
+          break;
+        }
+
+        const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
+        try {
+          await importJunctionTimeseriesResourceSnapshot({
+            authorizedLocalDay: {
+              dayKey: newestTemporalWindow.dayKey,
+              timeZone: context.vaultTimeZone,
+            },
+            context,
+            dateQueryFormat: "datetime",
+            resource,
+            skippedOptionalResources,
+            sourceProviders,
+            windowEnd: newestTemporalWindow.windowEnd,
+            windowStart: newestTemporalWindow.windowStart,
+          });
+        } catch (error) {
+          if (
+            isRetryableDeviceSyncFailure(error)
+            || isJunctionJobSignalAbort(error, context.signal)
+          ) {
+            deferredNewestTemporalResources.add(resource);
+            if (isJunctionJobSignalAbort(error, context.signal)) {
+              for (const remainingResource of temporalResources.slice(resourceIndex + 1)) {
+                deferredNewestTemporalResources.add(remainingResource);
+              }
+              break;
+            }
+            continue;
+          }
+          throw error;
+        }
+        if (skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
+          deferredNewestTemporalResources.add(resource);
+        }
+      }
+    }
+
+    const temporalContinuationJobs = context.vaultTimeZone
+      ? [
+          ...(newestTemporalWindow && deferredNewestTemporalResources.size > 0
+            ? buildJunctionTemporalAuthorityJobs({
+                now: context.now,
+                resources: [...deferredNewestTemporalResources],
+                timeZone: context.vaultTimeZone,
+                windows: [newestTemporalWindow],
+              })
+            : []),
+          ...buildJunctionTemporalAuthorityJobs({
+            now: context.now,
+            resources: temporalResources,
+            timeZone: context.vaultTimeZone,
+            windows: temporalRecoveryWindows.slice(1),
+          }),
+        ]
+      : [];
     const nextReconcileAt = backfillFollowUp.nextReconcileAt ?? resolveJunctionNextReconcileAt(
       context.account,
       context.now,
@@ -1574,7 +1678,7 @@ export function createJunctionDeviceSyncProvider(
           workoutStreamCursor: null,
         })
       : null;
-    if (timeseriesContinuation) {
+    if (timeseriesContinuation || temporalContinuationJobs.length > 0) {
       return withJunctionSkippedResourceMetadata(
         context,
         withJunctionMetadataPatch(
@@ -1583,7 +1687,12 @@ export function createJunctionDeviceSyncProvider(
               ? { metadataPatch: backfillFollowUp.metadataPatch }
               : {}),
             nextReconcileAt,
-            scheduledJobs: [{ ...timeseriesContinuation, availableAt: context.now }],
+            scheduledJobs: [
+              ...temporalContinuationJobs,
+              ...(timeseriesContinuation
+                ? [{ ...timeseriesContinuation, availableAt: context.now }]
+                : []),
+            ],
           },
           profileMetadataPatch,
         ),
@@ -2253,6 +2362,69 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const summaries: Record<string, unknown[]> = {};
+
+    const temporalAuthorityJob = readJunctionTemporalAuthorityJob(job);
+    if (temporalAuthorityJob) {
+      if (context.shouldYield?.()) {
+        throw deviceSyncError({
+          code: "JUNCTION_TEMPORAL_AUTHORITY_JOB_YIELDED",
+          message: "Junction temporal catch-up yielded before collection.",
+          retryable: true,
+        });
+      }
+      if (!context.vaultTimeZone) {
+        throw deviceSyncError({
+          code: "JUNCTION_TEMPORAL_AUTHORITY_TIMEZONE_UNAVAILABLE",
+          message: "Junction temporal catch-up requires the vault timezone.",
+          retryable: true,
+        });
+      }
+      if (context.vaultTimeZone !== temporalAuthorityJob.timeZone) {
+        return {};
+      }
+      const expectedWindow = resolveVaultLocalDayWindow(
+        temporalAuthorityJob.dayKey,
+        temporalAuthorityJob.timeZone,
+      );
+      if (
+        !expectedWindow
+        || expectedWindow.windowStart !== window.windowStart
+        || expectedWindow.windowEnd !== window.windowEnd
+        || Date.parse(expectedWindow.windowEnd) + JUNCTION_TEMPORAL_AUTHORITY_LAG_MS
+          > Date.parse(context.now)
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_TEMPORAL_AUTHORITY_JOB_INVALID",
+          message: "Junction temporal catch-up job did not describe an eligible complete local day.",
+          retryable: false,
+        });
+      }
+      const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
+      const sourceProviders = await loadAndProjectSourceProviders();
+      await importJunctionTimeseriesResourceSnapshot({
+        authorizedLocalDay: {
+          dayKey: temporalAuthorityJob.dayKey,
+          timeZone: temporalAuthorityJob.timeZone,
+        },
+        context,
+        dateQueryFormat: "datetime",
+        resource: temporalAuthorityJob.resource,
+        skippedOptionalResources,
+        sourceProviders,
+        windowEnd: expectedWindow.windowEnd,
+        windowStart: expectedWindow.windowStart,
+      });
+      if (skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
+        throw deviceSyncError({
+          code: "JUNCTION_TEMPORAL_AUTHORITY_RESOURCE_UNAVAILABLE",
+          message: "Junction temporal catch-up resource was unavailable.",
+          retryable: true,
+        });
+      }
+      return {
+        nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+      };
+    }
 
     if (resource) {
       const directInput = readJunctionDirectResourceJobInput(job, window);
@@ -3482,6 +3654,8 @@ export function createJunctionDeviceSyncProvider(
             chunkWindowStart,
             chunkWindowEnd,
             options.dateQueryFormat,
+            options.authorizedLocalDay,
+            context.vaultTimeZone,
           ),
         );
       } catch (error) {
@@ -4209,6 +4383,7 @@ export function createJunctionDeviceSyncProvider(
   }
 
   async function importJunctionTimeseriesResourceSnapshot(input: {
+    authorizedLocalDay?: { dayKey: string; timeZone: string };
     context: ProviderJobContext;
     dateQueryFormat: JunctionDateQueryFormat;
     resource: string;
@@ -4222,7 +4397,10 @@ export function createJunctionDeviceSyncProvider(
     const calendarDayAggregate = JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(
       input.resource,
     );
-    if (calendarDayAggregate) {
+    // Temporal-authority fetches carry complete vault-local-day authority with
+    // their own conservative closure lag; the provider calendar-day closure
+    // gate owns only ordinary calendar-day imports.
+    if (calendarDayAggregate && !input.authorizedLocalDay) {
       const windowEndMs = Date.parse(input.windowEnd);
       const globallyClosedProviderDayEnd = resolveGloballyClosedProviderDayEnd(
         input.windowEnd,
@@ -4236,6 +4414,7 @@ export function createJunctionDeviceSyncProvider(
         return;
       }
     }
+    const skippedResourceCountBeforeFetch = input.skippedOptionalResources.length;
     const records = await fetchTimeseriesResourceInChunks(
       input.context,
       input.resource,
@@ -4244,11 +4423,22 @@ export function createJunctionDeviceSyncProvider(
       input.skippedOptionalResources,
       input.sourceProviderSlug,
       {
+        ...(input.authorizedLocalDay
+          ? {
+              authorizedLocalDay: input.authorizedLocalDay,
+              // A lossy successful response must never be certified as an
+              // authoritative empty or partial complete-day replacement.
+              requireStructurallyCompleteCollection: true,
+            }
+          : {}),
         collectionWorkLimit: input.collectionWorkLimit,
         dateQueryFormat: input.dateQueryFormat,
       },
     );
-    if (records.length === 0) {
+    if (input.skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
+      return;
+    }
+    if (records.length === 0 && !input.authorizedLocalDay) {
       return;
     }
 
@@ -4258,7 +4448,7 @@ export function createJunctionDeviceSyncProvider(
       input.sourceProviders,
       { projectAccountSourceIdentities: calendarDayAggregate },
     );
-    if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+    if (!hasJunctionSnapshotRecords(preparedImport.snapshots) && !input.authorizedLocalDay) {
       return;
     }
     await input.context.importSnapshot({
@@ -4268,11 +4458,28 @@ export function createJunctionDeviceSyncProvider(
       importedAt: input.windowEnd,
       windowStart: input.windowStart,
       windowEnd: input.windowEnd,
-      ...(calendarDayAggregate ? { timeseriesWindowKind: "calendar_day" as const } : {}),
+      ...(calendarDayAggregate && !input.authorizedLocalDay
+        ? { timeseriesWindowKind: "calendar_day" as const }
+        : {}),
       connections: preparedImport.connections,
       summaries: {},
       timeseries: preparedImport.snapshots,
-    });
+    }, input.authorizedLocalDay
+      ? {
+          completeSourceDay: {
+            // The replacement domain must survive hosted cold restores, so it
+            // keys on the stable Junction import identity rather than the
+            // machine-local account row that hydration re-mints.
+            connectionId: buildJunctionImportAccountId(
+              input.context.account.externalAccountId,
+            ),
+            dayKey: input.authorizedLocalDay.dayKey,
+            resources: [input.resource],
+            revisionAt: input.context.now,
+            timeZone: input.authorizedLocalDay.timeZone,
+          },
+        }
+      : undefined);
   }
 
   async function importJunctionWorkoutStreamWindow(input: {
@@ -7007,6 +7214,8 @@ function filterJunctionTimeseriesRecordsToWindow(
   windowStart: string,
   windowEnd: string,
   dateQueryFormat: JunctionDateQueryFormat | undefined,
+  authorizedLocalDay?: { dayKey: string; timeZone: string },
+  vaultTimeZone?: string,
 ): unknown[] {
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
@@ -7026,6 +7235,45 @@ function filterJunctionTimeseriesRecordsToWindow(
       : resolveJunctionTimeseriesRecordRawTimestamp(entry, preferIntervalStart);
     if (!rawTimestamp) {
       return !isJunctionBodyTimeseriesResource(resource);
+    }
+
+    if (authorizedLocalDay) {
+      // Drop only rows the strict complete-day parse proves belong to a
+      // different valid calendar day, and only when the raw shape and the
+      // record's declared semantics agree on absoluteness. Anything the
+      // parse rejects — and any raw-versus-semantics disagreement, which the
+      // importer must see to fail the day closed — stays in the collection
+      // so a contradictory row can never be laundered into a partial or
+      // empty replacement by being discarded as adjacent-day overlap.
+      const parsed = parseJunctionCompleteDayTimestamp(rawTimestamp);
+      if (!parsed) {
+        return true;
+      }
+      if (
+        (parsed.kind === "absolute")
+        !== hasAbsoluteJunctionTimeseriesTimestamp(rawTimestamp, entry)
+      ) {
+        return true;
+      }
+      if (parsed.kind === "absolute") {
+        return toLocalDayKey(parsed.instant, authorizedLocalDay.timeZone)
+          === authorizedLocalDay.dayKey;
+      }
+      return parsed.dayKey === authorizedLocalDay.dayKey;
+    }
+
+    if (!hasAbsoluteJunctionTimeseriesTimestamp(rawTimestamp, entry) && vaultTimeZone) {
+      const rawDayKey = /^\d{4}-\d{2}-\d{2}/u.exec(rawTimestamp)?.[0];
+      const windowStartDayKey = toLocalDayKey(windowStart, vaultTimeZone);
+      const windowEndDayKey = toLocalDayKey(
+        new Date(endMs - 1).toISOString(),
+        vaultTimeZone,
+      );
+      return Boolean(
+        rawDayKey
+        && rawDayKey >= windowStartDayKey
+        && rawDayKey <= windowEndDayKey,
+      );
     }
 
     if (
@@ -7144,7 +7392,7 @@ function buildJunctionTimeseriesRecordContentKey(
 
   return JSON.stringify([
     "junction-timeseries-content",
-    resolveJunctionTimeseriesRecordTimestamp(entry) ?? "",
+    resolveJunctionTimeseriesRecordTimestampForResource(resource, entry) ?? "",
     normalizeString(entry.recordedAt ?? entry.recorded_at ?? entry.updatedAt ?? entry.updated_at)
       ?? "",
     String(
@@ -7210,6 +7458,44 @@ function junctionTimeseriesRecordValueIdentity(
   entry: Record<string, unknown>,
   includeProviderRowId = true,
 ): string[] {
+  if (JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)) {
+    const providerRowId = [
+      "id",
+      "resourceId",
+      "resource_id",
+      "externalId",
+      "external_id",
+      "providerId",
+      "provider_id",
+      "recordId",
+      "record_id",
+      "sampleId",
+      "sample_id",
+    ].map((key) => normalizeString(entry[key])).find(Boolean) ?? "";
+    const value = resource === "blood_oxygen"
+      ? firstJunctionTimeseriesIdentityValue(entry, [
+          "value",
+          "spo2",
+          "spO2",
+          "bloodOxygen",
+          "blood_oxygen",
+          "oxygenSaturation",
+          "oxygen_saturation",
+        ])
+      : firstJunctionTimeseriesIdentityValue(entry, [
+          "value",
+          "stressLevel",
+          "stress_level",
+          "averageStressLevel",
+          "average_stress_level",
+          "stress.average",
+          "stressLevelValue",
+          "stress_level_value",
+          "score",
+        ]);
+    return [providerRowId, value];
+  }
+
   if (!junctionTimeseriesRecordNeedsSemanticIdentity(resource)) {
     return [];
   }
@@ -7364,6 +7650,25 @@ function junctionTimeseriesRecordValueIdentity(
   ];
 }
 
+function firstJunctionTimeseriesIdentityValue(
+  entry: Record<string, unknown>,
+  paths: readonly string[],
+): string {
+  for (const path of paths) {
+    let value: unknown = entry;
+    for (const segment of path.split(".")) {
+      value = readPlainObject(value)?.[segment];
+    }
+    const numericValue = typeof value === "number"
+      ? value
+      : Number(normalizeString(value));
+    if (Number.isFinite(numericValue)) {
+      return String(numericValue);
+    }
+  }
+  return "";
+}
+
 function resolveJunctionTimeseriesRecordTimestamp(
   record: Record<string, unknown>,
   preferIntervalStart = false,
@@ -7399,6 +7704,14 @@ function resolveJunctionTimeseriesRecordTimestampForResource(
   resource: string,
   record: Record<string, unknown>,
 ): string | null {
+  if (JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)) {
+    const rawTimestamp = resolveJunctionTimeseriesRecordRawTimestamp(record);
+    if (!rawTimestamp || !hasAbsoluteJunctionTimeseriesTimestamp(rawTimestamp, record)) {
+      return rawTimestamp;
+    }
+    return toIsoTimestampIfValid(rawTimestamp) ?? rawTimestamp;
+  }
+
   if (JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES.has(resource)) {
     return normalizeJunctionCanonicalBodyTimestamp(record.timestamp) ?? null;
   }
@@ -7453,6 +7766,22 @@ function isJunctionFloatingCalendarTimestamp(value: string): boolean {
   }
 
   return /^\d{4}-\d{2}-\d{2}(?:$|[ t]\d{2}:\d{2})/iu.test(normalized);
+}
+
+function hasAbsoluteJunctionTimeseriesTimestamp(
+  timestamp: string,
+  record: Record<string, unknown>,
+): boolean {
+  const explicitSemantics = normalizeString(
+    record.timestampSemantics ?? record.timestamp_semantics,
+  );
+  if (explicitSemantics === "floating") {
+    return false;
+  }
+  if (explicitSemantics === "utc" || explicitSemantics === "offset") {
+    return true;
+  }
+  return /(?:z|[+-]\d{2}:?\d{2})$/iu.test(timestamp.trim());
 }
 
 function buildJunctionRedirectUrl(callbackUrl: string, state: string): string {
@@ -7679,16 +8008,6 @@ function readDeferredEmptyBackfillAttempts(
   return 0;
 }
 
-function readBackfillTimeseriesCursor(
-  job: DeviceSyncJobRecord,
-  ownerWindow: { windowStart: string; windowEnd: string },
-): string | null {
-  const cursor = toIsoTimestampIfValid(job.payload.timeseriesCursor);
-  return cursor && isTimestampInHalfOpenWindow(cursor, ownerWindow)
-    ? cursor
-    : null;
-}
-
 function isTimestampInHalfOpenWindow(
   timestamp: string,
   window: { windowStart: string; windowEnd: string },
@@ -7744,6 +8063,129 @@ function shouldImportClosedTimeseriesForReconcile(
     || lastCompletedClosedDayMs < windowEndMs;
 }
 
+function normalizeJunctionTemporalReconcileDays(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_RECONCILE_DAYS;
+  }
+  return Math.max(
+    1,
+    Math.min(Math.floor(value), JUNCTION_MAX_TEMPORAL_RECONCILE_DAYS),
+  );
+}
+
+function buildLatestAuthoritativeDailyWindows(input: {
+  horizonDays: number;
+  now: string;
+  timeZone: string;
+  windowEnd: string;
+}): JunctionDailyTimeseriesWindow[] {
+  const nowMs = Date.parse(input.now);
+  const windowEndMs = Date.parse(input.windowEnd);
+  if (!Number.isFinite(nowMs) || !Number.isFinite(windowEndMs)) {
+    return [];
+  }
+  const latestAuthoritativeDayKey = latestAuthoritativeVaultDayKey(input.now, input.timeZone);
+  if (!latestAuthoritativeDayKey) {
+    return [];
+  }
+  let latestWindowBoundDayKey = toLocalDayKey(
+    new Date(windowEndMs - 1).toISOString(),
+    input.timeZone,
+  );
+  for (let offset = 0; offset < 4; offset += 1) {
+    const candidate = resolveVaultLocalDayWindow(latestWindowBoundDayKey, input.timeZone);
+    if (candidate && Date.parse(candidate.windowEnd) <= windowEndMs) {
+      break;
+    }
+    latestWindowBoundDayKey = addIsoDateDays(latestWindowBoundDayKey, -1);
+  }
+  const newestDayKey = latestAuthoritativeDayKey < latestWindowBoundDayKey
+    ? latestAuthoritativeDayKey
+    : latestWindowBoundDayKey;
+  const newestWindow = resolveVaultLocalDayWindow(newestDayKey, input.timeZone);
+  if (!newestWindow || Date.parse(newestWindow.windowEnd) > windowEndMs) {
+    return [];
+  }
+
+  const windows: JunctionDailyTimeseriesWindow[] = [];
+  for (let offset = 0; offset < input.horizonDays; offset += 1) {
+    const dayKey = addIsoDateDays(newestDayKey, -offset);
+    const window = resolveVaultLocalDayWindow(dayKey, input.timeZone);
+    if (!window) {
+      continue;
+    }
+    windows.push({
+      dayKey,
+      ...window,
+    });
+  }
+  return windows;
+}
+
+function buildJunctionTemporalAuthorityJobs(input: {
+  now: string;
+  resources: readonly string[];
+  timeZone: string;
+  windows: readonly JunctionDailyTimeseriesWindow[];
+}): DeviceSyncJobInput[] {
+  const temporalResources = input.resources.filter((resource) =>
+    JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+  );
+  return input.windows.flatMap((window, windowIndex) =>
+    temporalResources.map((resource) => {
+      const payload = {
+        resource,
+        resourceCategory: "timeseries",
+        temporalAuthorityTimeZone: input.timeZone,
+        windowEnd: window.windowEnd,
+        windowStart: window.windowStart,
+      };
+      return {
+        // The store orders equal-priority work by availability. Give each older
+        // day a stable millisecond tier so restarts drain the newest missing day
+        // first without outranking webhook work or introducing another cursor.
+        availableAt: addMilliseconds(input.now, windowIndex),
+        dedupeKey: `${JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX}v${JUNCTION_TEMPORAL_AUTHORITY_JOB_VERSION}:${sha256Text(
+          JSON.stringify([input.timeZone, resource, window.dayKey]),
+        )}`,
+        kind: "resource",
+        payload,
+        priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
+      };
+    })
+  );
+}
+
+function readJunctionTemporalAuthorityJob(job: DeviceSyncJobRecord): {
+  dayKey: string;
+  resource: string;
+  timeZone: string;
+} | null {
+  if (job.kind !== "resource") {
+    return null;
+  }
+  // The retained authority timezone is the only persisted authority state;
+  // the day key derives from the stored exact window so hosted wake hints
+  // cannot restore a temporal child with partial authority. Legacy payloads
+  // may still carry temporalAuthorityDayKey; it is ignored.
+  const timeZone = normalizeString(job.payload.temporalAuthorityTimeZone);
+  const resource = normalizeJunctionResourceName(job.payload.resource);
+  const windowStart = normalizeString(job.payload.windowStart);
+  if (
+    !timeZone
+    || !resource
+    || !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+    || !windowStart
+  ) {
+    return null;
+  }
+  const dayKey = toLocalDayKey(windowStart, timeZone);
+  if (!dayKey || !/^\d{4}-\d{2}-\d{2}$/u.test(dayKey)) {
+    return null;
+  }
+  return { dayKey, resource, timeZone };
+}
+
 function resolveLatestGloballyClosedProviderDayWindow(
   windowStart: string,
   windowEnd: string,
@@ -7767,7 +8209,7 @@ function resolveLatestGloballyClosedProviderDayWindow(
 function buildClosedDailyWindows(
   windowStart: string,
   windowEnd: string,
-): Array<{ windowStart: string; windowEnd: string }> {
+): JunctionDailyTimeseriesWindow[] {
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
@@ -7780,7 +8222,7 @@ function buildClosedDailyWindows(
     return [];
   }
 
-  const windows: Array<{ windowStart: string; windowEnd: string }> = [];
+  const windows: JunctionDailyTimeseriesWindow[] = [];
   let chunkStartMs = flooredStartMs;
   while (chunkStartMs < closedEndMs) {
     const nextDayMs = Date.parse(
@@ -7793,14 +8235,85 @@ function buildClosedDailyWindows(
     if (chunkEndMs <= chunkStartMs) {
       break;
     }
+    const dailyWindowStart = new Date(chunkStartMs).toISOString();
     windows.push({
-      windowStart: new Date(chunkStartMs).toISOString(),
+      dayKey: dailyWindowStart.slice(0, 10),
+      windowStart: dailyWindowStart,
       windowEnd: new Date(chunkEndMs).toISOString(),
     });
     chunkStartMs = chunkEndMs;
   }
 
   return windows;
+}
+
+function latestAuthoritativeVaultDayKey(at: string, timeZone: string): string | null {
+  const atMs = Date.parse(at);
+  if (!Number.isFinite(atMs)) {
+    return null;
+  }
+  let candidateDayKey = toLocalDayKey(at, timeZone);
+  for (let offset = 0; offset < 4; offset += 1) {
+    const candidate = resolveVaultLocalDayWindow(candidateDayKey, timeZone);
+    if (
+      candidate
+      && Date.parse(candidate.windowEnd) + JUNCTION_TEMPORAL_AUTHORITY_LAG_MS <= atMs
+    ) {
+      return candidateDayKey;
+    }
+    candidateDayKey = addIsoDateDays(candidateDayKey, -1);
+  }
+  return null;
+}
+
+function resolveVaultLocalDayWindow(
+  dayKey: string,
+  timeZone: string,
+): { windowStart: string; windowEnd: string } | null {
+  const startMs = findVaultLocalDayStartMs(dayKey, timeZone);
+  const endMs = findVaultLocalDayStartMs(addIsoDateDays(dayKey, 1), timeZone);
+  return startMs === null || endMs === null || startMs >= endMs
+    ? null
+    : {
+        windowStart: new Date(startMs).toISOString(),
+        windowEnd: new Date(endMs).toISOString(),
+      };
+}
+
+function findVaultLocalDayStartMs(dayKey: string, timeZone: string): number | null {
+  const anchorMs = Date.parse(`${dayKey}T00:00:00.000Z`);
+  if (!Number.isFinite(anchorMs)) {
+    return null;
+  }
+  const searchStartMs = anchorMs - 2 * TIMESERIES_CHUNK_MS;
+  const searchEndMs = anchorMs + 2 * TIMESERIES_CHUNK_MS;
+  let matchingMs: number | null = null;
+  for (let candidateMs = searchStartMs; candidateMs <= searchEndMs; candidateMs += 60 * 60_000) {
+    if (toLocalDayKey(new Date(candidateMs).toISOString(), timeZone) === dayKey) {
+      matchingMs = candidateMs;
+      break;
+    }
+  }
+  if (matchingMs === null) {
+    return null;
+  }
+
+  let lowerMs = matchingMs - 60 * 60_000;
+  let upperMs = matchingMs;
+  while (upperMs - lowerMs > 1) {
+    const middleMs = Math.floor((lowerMs + upperMs) / 2);
+    if (toLocalDayKey(new Date(middleMs).toISOString(), timeZone) < dayKey) {
+      lowerMs = middleMs;
+    } else {
+      upperMs = middleMs;
+    }
+  }
+  return upperMs;
+}
+
+function addIsoDateDays(dayKey: string, days: number): string {
+  const value = Date.parse(`${dayKey}T00:00:00.000Z`);
+  return new Date(value + days * TIMESERIES_CHUNK_MS).toISOString().slice(0, 10);
 }
 
 function resolveGloballyClosedProviderDayEnd(windowEnd: string, asOf: string): number {

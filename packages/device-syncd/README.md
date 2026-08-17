@@ -113,6 +113,25 @@ Current providers:
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
   horizon can prove the configured collection ran.
+- Only the closed date-by-date Junction fetch path may authorize blood-oxygen
+  and stress temporal features. Precise resource windows and webhook-driven
+  imports keep ordinary compact facts but cannot publish temporal features from
+  partial windows. Each successful complete resource/day owns its fixed
+  `temporal-*` facet set through existing authoritative event sets, so a
+  successful empty or insufficient replacement retracts stale derived facts;
+  failed or yielded work grants no authority.
+- The temporal horizon is clamped to 1–14 authoritative vault-local days. The
+  newest eligible day imports inline, while older resource/day coordinates use
+  the existing durable queue in newest-first order. Queued or running work
+  deduplicates across restarts, while succeeded rows remain history rather than
+  suppressing a later scheduled pull whose source roster or provider data may
+  have widened. At the failure/yield ceiling, 28 temporal rows plus one ordinary
+  reconcile follow-up remain serialized by the existing per-account fence.
+- Temporal children never advance generic account completion. That watermark is
+  account activity state rather than complete floor coverage, so every scheduled
+  reconcile still refetches configured ordinary resources. Collection remains
+  capped at 100 pages and 25,000 records with at most three attempts per page;
+  reduction persists bounded scalar evidence and never full timeseries values.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

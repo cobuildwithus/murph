@@ -281,6 +281,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // extend existing device-sync and hosted-runtime chunks without adding a
 // forbidden boot input. Exact merged macOS assembly measured an 8,163,368B
 // static closure on 2026-08-14; retain the fixed 96KB platform tolerance.
+// Junction temporal authority and canonical temporal-feature projection extend
+// the same lazy device-sync and importer outputs without adding a forbidden
+// boot input.
 // Junction summary completeness extends the already-loaded Core event and
 // Junction normalization paths without adding a forbidden boot input. Exact
 // local production assembly measured an 8,261,567B static closure on

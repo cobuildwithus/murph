@@ -1590,17 +1590,21 @@ function normalizeDeviceAuthoritativeEventSets(
 
   for (const set of sets) {
     for (const facet of set.currentFacets) {
+      // Unversioned members follow complete-set reconciliation: the set's
+      // version orders only retraction tombstones, while member events collapse
+      // by semantic content and reassert through the serialized set seam.
       const hasCurrentEvent = events.some(({ seed }) =>
         seed.externalRef?.system === set.system
         && seed.externalRef.resourceType === set.resourceType
         && seed.externalRef.resourceId === set.resourceId
-        && seed.externalRef.version === set.version
+        && (seed.externalRef.version === set.version
+          || seed.externalRef.version === undefined)
         && seed.externalRef.facet === facet
       );
       if (!hasCurrentEvent) {
         throw new VaultError(
           "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
-          `Device authoritative event set current facet "${facet}" has no matching versioned event.`,
+          `Device authoritative event set current facet "${facet}" has no matching current event.`,
         );
       }
     }
@@ -3315,9 +3319,25 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     }
 
+    // An unversioned member declared current by this batch's authoritative set
+    // reasserts a retracted facet in serialized arrival order rather than
+    // treating the tombstone's identical content as an exact replay. Ordinary
+    // versionless deliveries without complete-set authority never resurrect.
+    // Only provider-owned authoritative-set retractions may be reasserted.
+    // Their tombstones carry the set's explicit version marker on the external
+    // reference, while a member deletion preserves the member's unversioned
+    // reference and must stay deleted under authoritative replay.
+    const reassertsUnversionedSetMember = Boolean(
+      authoritativeSet
+      && indexedSourceVersionComparison === null
+      && isDeletedEventSpineRecord(latest)
+      && latest.source === "device"
+      && latest.externalRef?.version !== undefined,
+    );
     if (
       deviceEventContentKey(latest) === deviceEventContentKey(entry.record)
       && (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0)
+      && !reassertsUnversionedSetMember
     ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
@@ -3325,7 +3345,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    if (matchesIndexedProviderContent) {
+    if (matchesIndexedProviderContent && !reassertsUnversionedSetMember) {
       const historicalUserEditMatch = matchedEntries.find((match) =>
         hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
       );
@@ -3504,13 +3524,25 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    if (isDeletedEventSpineRecord(latest)) {
+    if (isDeletedEventSpineRecord(latest) && !reassertsUnversionedSetMember) {
+      // A member-authored deletion tombstone (unversioned reference) stays
+      // dead under authoritative replay: no append, no index change, so a
+      // later empty-then-populated cadence cannot launder the deletion away.
+      if (authoritativeSet && indexedSourceVersionComparison === null) {
+        skippedDuplicateCount += 1;
+        retainedPreparedIds.add(entry.record.id);
+        records.push(latest);
+        continue;
+      }
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
       continue;
     }
+    // A member declared current by this batch's authoritative set falls
+    // through to the superseding append below, so the reassertion lands as
+    // the next serialized event-spine revision over the retraction tombstone.
 
     if (shouldKeepExistingJunctionSleepStageSummaryObservation(latest, entry.record)) {
       if (eventSpineRevisionsAreComplete(index, latest.id)) {

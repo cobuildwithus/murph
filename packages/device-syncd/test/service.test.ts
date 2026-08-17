@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { readFile, rm } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
@@ -8,7 +9,8 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import { initializeVault } from "@murphai/core";
+import { createImporters, prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import { buildJunctionDailyTimeseriesAggregateResourceId } from "@murphai/importers/device-providers/junction";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
@@ -1380,7 +1382,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
 });
 
 test("local Junction workers exclude a disconnected source from production-normalized evidence", async () => {
-  const now = new Date("2026-07-28T12:00:00.000Z");
+  const now = new Date("2026-07-29T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-admission");
   const importerInputs: unknown[] = [];
   const importerResults: unknown[] = [];
@@ -1395,9 +1397,14 @@ test("local Junction workers exclude a disconnected source from production-norma
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     importer: {
+      async resolveDeviceProviderSnapshotDefaultTimeZone() {
+        return "UTC";
+      },
       async importDeviceProviderSnapshot(input) {
         importerInputs.push(input);
-        const result = await prepareDeviceProviderSnapshotImport(input);
+        const result = await prepareDeviceProviderSnapshotImport(input, {
+          defaultTimeZone: "UTC",
+        });
         importerResults.push(result);
         return { events: result.events ?? [] };
       },
@@ -1543,22 +1550,37 @@ test("local Junction workers exclude a disconnected source from production-norma
       })[0]?.status,
       "disconnected",
     );
-    const continuation = await service.runWorkerOnce();
-    assert.equal(continuation?.kind, "reconcile");
-    assert.equal(importerInputs.length, 2);
+    const temporalCatchUp = await service.runWorkerOnce();
+    assert.equal(temporalCatchUp?.kind, "resource");
+    const ordinaryContinuation = await service.runWorkerOnce();
+    assert.equal(ordinaryContinuation?.kind, "reconcile");
+    assert.equal(
+      (ordinaryContinuation?.payload as { timeseriesResourceCursor?: string })
+        ?.timeseriesResourceCursor,
+      "blood_oxygen",
+    );
+    assert.equal(await service.runWorkerOnce(), null);
+    assert.equal(importerInputs.length, 4);
     const durableInput = JSON.stringify(importerInputs);
     assert.match(durableInput, /garmin-activity-1|garmin-blood-oxygen-1/u);
     assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
 
     const durableResults = importerResults as Array<{
+      authoritativeEventSets?: unknown[];
       evidenceParts?: Array<{ content?: unknown }>;
       events?: Array<{
         dataOrigin?: { sourceProviderSlug?: string };
       }>;
       ingestReceipt?: Record<string, unknown>;
     }>;
+    // Complete-source-day imports never retain the provider snapshot, so a
+    // temporal day with no compact artifacts legitimately carries zero
+    // evidence parts alongside its authoritative set.
     assert.equal(
-      durableResults.every((result) => (result.evidenceParts?.length ?? 0) > 0),
+      durableResults.every((result) =>
+        (result.evidenceParts?.length ?? 0) > 0
+        || (result.authoritativeEventSets?.length ?? 0) > 0
+      ),
       true,
     );
     assert.equal(
@@ -1901,6 +1923,170 @@ test("Junction deployed full-job progress resumes durably and rewrites its succe
       now.toISOString(),
     );
     assert.deepEqual(requestedResources, ["steps", "heartrate"]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service reports canonical counts separately from durable delivery acceptance", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-receipt");
+  const importerInputs: unknown[] = [];
+  const importReceipts: unknown[] = [];
+  let importAttempt = 0;
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importerInputs.push(input);
+        importAttempt += 1;
+        return importAttempt === 1
+          ? { events: [{ kind: "activity" }, { kind: "sleep" }] }
+          : { applied: false, events: [] };
+      },
+    },
+    providers: [createFakeProvider({
+      async executeJob(context) {
+        importReceipts.push(await context.importSnapshot(
+          { provider: "demo" },
+          {
+            completeSourceDay: {
+              connectionId: "demo-connection",
+              dayKey: "2026-03-16",
+              resources: ["demo-resource"],
+              revisionAt: "2026-03-17T12:00:00.000Z",
+              timeZone: "UTC",
+            },
+          },
+        ));
+        return {};
+      },
+    })],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "import-receipt",
+    });
+    await service.runWorkerOnce();
+    service.queueManualReconcile(connected.account.id);
+    await service.runWorkerOnce();
+
+    assert.deepEqual(importReceipts, [
+      {
+        canonicalEventCount: 2,
+        canonicalEventDayKeys: [],
+        canonicalEventExternalRefResourceIds: [],
+        durableDeliveryAccepted: true,
+      },
+      {
+        canonicalEventCount: 0,
+        canonicalEventDayKeys: [],
+        canonicalEventExternalRefResourceIds: [],
+        durableDeliveryAccepted: true,
+      },
+    ]);
+    assert.deepEqual(importerInputs, [
+      {
+        completeSourceDay: {
+          connectionId: "demo-connection",
+          dayKey: "2026-03-16",
+          resources: ["demo-resource"],
+          revisionAt: "2026-03-17T12:00:00.000Z",
+          timeZone: "UTC",
+        },
+        provider: "demo",
+        snapshot: { provider: "demo" },
+        vaultRoot,
+      },
+      {
+        completeSourceDay: {
+          connectionId: "demo-connection",
+          dayKey: "2026-03-16",
+          resources: ["demo-resource"],
+          revisionAt: "2026-03-17T12:00:00.000Z",
+          timeZone: "UTC",
+        },
+        provider: "demo",
+        snapshot: { provider: "demo" },
+        vaultRoot,
+      },
+    ]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service supplies the vault timezone to Junction jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-timezone");
+  const observedTimeZones: Array<string | undefined> = [];
+  const demoDescriptor = createFakeProvider().descriptor;
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      ...demoDescriptor,
+      provider: "junction",
+      oauth: demoDescriptor.oauth
+        ? { ...demoDescriptor.oauth, callbackPath: "/oauth/junction/callback" }
+        : undefined,
+    },
+    async exchangeAuthorizationCode() {
+      return {
+        externalAccountId: "junction-timezone-test",
+        displayName: "Junction timezone test",
+        scopes: ["offline", "read:data"],
+        metadata: {},
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        initialJobs: [{ kind: "backfill", payload: {} }],
+        nextReconcileAt: "2026-03-17T12:00:00.000Z",
+      };
+    },
+    async executeJob(context) {
+      observedTimeZones.push(context.vaultTimeZone);
+      return {};
+    },
+  });
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { events: [] };
+      },
+      async resolveDeviceProviderSnapshotDefaultTimeZone() {
+        return "America/Los_Angeles";
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "junction" });
+    await service.handleOAuthCallback({
+      provider: "junction",
+      state: begin.state,
+      code: "timezone",
+    });
+    await service.runWorkerOnce();
+    assert.deepEqual(observedTimeZones, ["America/Los_Angeles"]);
   } finally {
     close();
   }
@@ -7939,7 +8125,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
         summaryBackfillDays: 3,
         summaryResources: ["activity"],
         timeseriesBackfillDays: 3,
-        timeseriesResources: ["stress"],
+        timeseriesResources: ["hrv"],
         fetchImpl: async (input, init) => {
           const url = new URL(readUrl(input));
 
@@ -7960,7 +8146,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
             });
           }
 
-          if (url.pathname === "/v2/timeseries/junction-account/stress_level/grouped") {
+          if (url.pathname === "/v2/timeseries/junction-account/hrv/grouped") {
             yieldRequested = true;
             return await new Promise<Response>((_resolve, reject) => {
               const signal = init?.signal;
@@ -8029,7 +8215,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
       windowStart: ownerWindowStart,
       windowEnd: ownerWindowEnd,
       timeseriesCursor: ownerWindowStart,
-      timeseriesResourceCursor: "stress_level",
+      timeseriesResourceCursor: "hrv",
     });
 
     yieldRequested = false;
@@ -8045,6 +8231,1551 @@ test("device sync service releases Junction backfill row when cooperative abort 
     assert.equal(released.dedupeKey, expectedDedupeKey);
   } finally {
     close();
+  }
+});
+
+test("Junction reconcile atomically replaces a yielded temporal continuation with durable jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-temporal-yield");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const now = new Date("2026-08-12T12:00:00.000Z");
+  let yieldRequested = false;
+  let yieldAfterNewestBloodOxygen = true;
+  const requestedWindows: Array<{ end: string | null; resource: string; start: string | null }> = [];
+  await initializeVault({ vaultRoot });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 2,
+    reconcileIntervalMs: 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_oxygen", "stress_level", "hrv"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-temporal-yield") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-temporal-yield",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              blood_oxygen: true,
+              hrv: true,
+              stress_level: true,
+            },
+          }],
+        });
+      }
+      if (url.pathname === "/v2/summary/activity/junction-temporal-yield") {
+        return createJsonResponse({ data: [] });
+      }
+      const resource = url.pathname.match(
+        /^\/v2\/timeseries\/junction-temporal-yield\/(blood_oxygen|stress_level|hrv)\/grouped$/u,
+      )?.[1];
+      if (resource) {
+        requestedWindows.push({
+          end: url.searchParams.get("end_date"),
+          resource,
+          start: url.searchParams.get("start_date"),
+        });
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected Junction temporal-yield request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input);
+        const timeseries = (input.snapshot as { timeseries?: Record<string, unknown[]> })
+          .timeseries;
+        if (
+          yieldAfterNewestBloodOxygen
+          && timeseries
+          && Object.hasOwn(timeseries, "blood_oxygen")
+        ) {
+          yieldAfterNewestBloodOxygen = false;
+          yieldRequested = true;
+        }
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+  const fixture = openFixture();
+  let fixtureClosed = false;
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-yield",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: now.toISOString(),
+      nextReconcileAt: null,
+    });
+    const parent = fixture.store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-08-10T00:00:00.000Z",
+        windowEnd: "2026-08-12T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      priority: 20,
+      dedupeKey: "junction-temporal-yield-fixed-window",
+    });
+
+    assert.equal((await fixture.service.runWorkerOnce())?.id, parent.id);
+    const jobs = readJobsForAccountForTesting(fixture.store, account.id);
+    const queuedRows = jobs.filter((job) => job.status === "queued");
+    const queuedJobs = queuedRows.map((job) => fixture.store.getJobById(job.id));
+    const temporalJobs = queuedJobs.filter((job) =>
+      job?.kind === "resource" && job.payload.temporalAuthorityTimeZone
+    );
+    const reconcileFollowUp = queuedJobs.find((job) => job?.kind === "reconcile");
+
+    assert.equal(fixture.store.getJobById(parent.id)?.status, "succeeded");
+    assert.equal(fixture.store.getJobById(parent.id)?.lastErrorCode, null);
+    assert.equal(temporalJobs.length, 3);
+    assert.deepEqual(
+      new Set(temporalJobs.map((job) =>
+        `${String(job?.payload.windowStart).slice(0, 10)}:${String(job?.payload.resource)}`
+      )),
+      new Set([
+        "2026-08-10:stress_level",
+        "2026-08-09:blood_oxygen",
+        "2026-08-09:stress_level",
+      ]),
+    );
+    assert.ok(reconcileFollowUp);
+    assert.notEqual(reconcileFollowUp.dedupeKey, parent.dedupeKey);
+    assert.deepEqual(reconcileFollowUp.payload, {
+      timeseriesCursor: "2026-08-10T00:00:00.000Z",
+      timeseriesResourceCursor: "blood_oxygen",
+      windowEnd: "2026-08-12T00:00:00.000Z",
+      windowStart: "2026-08-10T00:00:00.000Z",
+    });
+    assert.equal(fixture.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+
+    fixture.close();
+    fixtureClosed = true;
+    const restarted = openFixture();
+    try {
+      const restartedJobs = readJobsForAccountForTesting(restarted.store, account.id);
+      assert.equal(restartedJobs.filter((job) => job.status === "queued").length, 4);
+      assert.equal(restartedJobs.find((job) => job.id === parent.id)?.status, "succeeded");
+      yieldRequested = false;
+      for (let temporalRun = 0; temporalRun < 3; temporalRun += 1) {
+        const processed = await restarted.service.runWorkerOnce();
+        assert.equal(processed?.kind, "resource");
+        assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      }
+
+      const processedFollowUp = await restarted.service.runWorkerOnce();
+      assert.equal(processedFollowUp?.id, reconcileFollowUp.id);
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      for (let continuationRun = 0; continuationRun < 4; continuationRun += 1) {
+        const continued = await restarted.service.runWorkerOnce();
+        assert.equal(continued?.kind, "reconcile");
+        assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      }
+      const terminalFollowUp = await restarted.service.runWorkerOnce();
+      assert.equal(terminalFollowUp?.kind, "reconcile");
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
+      assert.deepEqual(
+        requestedWindows
+          .filter(({ resource }) => resource === "hrv")
+          .map(({ end, start }) => [start, end]),
+        [
+          ["2026-08-10", "2026-08-10"],
+          ["2026-08-11", "2026-08-11"],
+        ],
+      );
+      assert.equal(
+        requestedWindows.filter(({ resource }) => resource === "blood_oxygen").length,
+        4,
+      );
+      assert.equal(
+        requestedWindows.filter(({ resource }) => resource === "stress_level").length,
+        4,
+      );
+      assert.equal(
+        readJobsForAccountForTesting(restarted.store, account.id)
+          .filter((job) => job.status === "queued").length,
+        0,
+      );
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    if (!fixtureClosed) {
+      fixture.close();
+    }
+  }
+});
+
+test("Junction scheduled temporal history refetches after a new source and late data arrive", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-temporal-source-widening");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-temporal-source-widening";
+  let now = new Date("2026-08-12T12:00:00.000Z");
+  let sourceRosterWidened = false;
+  const requestedDays: string[] = [];
+  const importerResults: unknown[] = [];
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 2,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_oxygen"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-temporal-source-widening",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                activity: true,
+                blood_oxygen: true,
+              },
+            },
+            ...(sourceRosterWidened
+              ? [{
+                  id: "provider-oura-temporal-source-widening",
+                  slug: "oura",
+                  name: "Oura",
+                  status: "connected",
+                  resource_availability: {
+                    blood_oxygen: true,
+                  },
+                }]
+              : []),
+          ],
+        });
+      }
+      if (url.pathname === `/v2/summary/activity/${externalAccountId}`) {
+        return createJsonResponse({ data: [] });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`) {
+        const day = url.searchParams.get("start_date");
+        requestedDays.push(day ?? "");
+        if (!sourceRosterWidened || day !== "2026-08-09T00:00:00.000Z") {
+          return createJsonResponse({ groups: {} });
+        }
+        return createJsonResponse({
+          groups: {
+            oura: [{
+              data: [
+                {
+                  timestamp: "2026-08-09T10:00:00.000Z",
+                  unit: "%",
+                  value: 97,
+                },
+                {
+                  timestamp: "2026-08-09T10:10:00.000Z",
+                  unit: "%",
+                  value: 96,
+                },
+              ],
+              source: { provider: "oura", type: "ring" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction source-widening request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importerResults.push(await prepareDeviceProviderSnapshotImport(input, {
+          defaultTimeZone: "UTC",
+        }));
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input);
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+  const fixture = openFixture();
+  let fixtureClosed = false;
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+      nextReconcileAt: now.toISOString(),
+    });
+    const runUntilOlderTemporalDay = async (service: typeof fixture.service) => {
+      for (let workerRun = 0; workerRun < 40; workerRun += 1) {
+        const processed = await service.runWorkerOnce(account.id);
+        assert.ok(processed);
+        if (
+          processed.kind === "resource"
+          && processed.dedupeKey?.startsWith("junction-temporal-authority:")
+          && String(processed.payload.windowStart).slice(0, 10) === "2026-08-09"
+        ) {
+          return processed;
+        }
+        assert.ok(
+          processed.kind === "reconcile"
+          || processed.kind === "backfill"
+          || processed.kind === "resource",
+        );
+      }
+      assert.fail("expected an older temporal resource job within forty worker runs");
+    };
+
+    const firstSchedule = await fixture.service.runSchedulerOnce(account.id);
+    assert.equal(firstSchedule.some((job) => job.kind === "reconcile"), true);
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.kind, "reconcile");
+    const firstOlderDay = await runUntilOlderTemporalDay(fixture.service);
+    assert.equal(firstOlderDay?.kind, "resource");
+    assert.equal(String(firstOlderDay.payload.windowStart).slice(0, 10), "2026-08-09");
+    assert.equal(firstOlderDay.payload.temporalAuthorityTimeZone, "UTC");
+    assert.equal(
+      requestedDays.filter((day) => day === "2026-08-09T00:00:00.000Z").length,
+      1,
+    );
+
+    fixture.close();
+    fixtureClosed = true;
+    sourceRosterWidened = true;
+    now = new Date("2026-08-12T14:00:00.000Z");
+    const restarted = openFixture();
+    try {
+      const secondSchedule = await restarted.service.runSchedulerOnce(account.id);
+      assert.equal(secondSchedule.some((job) => job.kind === "reconcile"), true);
+      assert.equal((await restarted.service.runWorkerOnce(account.id))?.kind, "reconcile");
+      assert.equal(
+        restarted.store.listConnectionSources({
+          connectionId: account.id,
+          sourceProviderSlug: "oura",
+        })[0]?.status,
+        "connected",
+      );
+
+      const repeatedOlderDay = await runUntilOlderTemporalDay(restarted.service);
+      assert.equal(repeatedOlderDay?.kind, "resource");
+      assert.equal(String(repeatedOlderDay.payload.windowStart).slice(0, 10), "2026-08-09");
+      assert.equal(repeatedOlderDay.payload.temporalAuthorityTimeZone, "UTC");
+      assert.notEqual(repeatedOlderDay.id, firstOlderDay.id);
+      assert.equal(
+        requestedDays.filter((day) => day === "2026-08-09T00:00:00.000Z").length,
+        2,
+      );
+      // Facet-only temporal imports publish no ordinary spo2 fact; the
+      // widening proof is the repeated day's temporal artifact carrying the
+      // newly available oura samples through the importer.
+      const importedTemporalArtifacts = (importerResults as Array<{
+        evidenceParts?: Array<{ content?: unknown; role: string }>;
+      }>)
+        .flatMap((result) => result.evidenceParts ?? [])
+        .filter((artifact) => artifact.role.startsWith("junction-timeseries-temporal-blood-oxygen:"));
+      assert.equal(importedTemporalArtifacts.length > 0, true);
+      assert.equal(
+        importedTemporalArtifacts.some((artifact) =>
+          (artifact.content as { sampleCount?: number } | undefined)?.sampleCount === 2
+        ),
+        true,
+      );
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    if (!fixtureClosed) {
+      fixture.close();
+    }
+  }
+});
+
+function latestLiveRecords(
+  records: readonly Record<string, unknown>[],
+): Array<Record<string, unknown>> {
+  const revisionOf = (record: Record<string, unknown>): number =>
+    Number((record.lifecycle as { revision?: number } | undefined)?.revision ?? 1);
+  const latestById = new Map<string, Record<string, unknown>>();
+  for (const record of records) {
+    const id = String(record.id ?? "");
+    const existing = latestById.get(id);
+    if (!existing || revisionOf(record) > revisionOf(existing)) {
+      latestById.set(id, record);
+    }
+  }
+  return [...latestById.values()].filter((record) =>
+    (record.lifecycle as { state?: string } | undefined)?.state !== "deleted"
+  );
+}
+
+test("Junction ambiguous-timestamp rows fail a complete day closed through the real importer", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-ambiguous-rows");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-ambiguous-rows";
+  const now = new Date("2026-08-15T12:00:00.000Z");
+  let activeRows: readonly Record<string, unknown>[] = [];
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: [],
+    timeseriesResources: ["stress_level"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-ambiguous-rows",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { stress_level: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+        return createJsonResponse({
+          groups: {
+            garmin: [{ data: activeRows, source: { provider: "garmin", type: "watch" } }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction ambiguous-row request: ${url.pathname}`);
+    },
+  });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: canonicalImporter,
+    providers: [provider],
+  });
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+    });
+    const enqueueDay = (dedupeKey: string) => fixture.store.enqueueJob({
+      accountId: account.id,
+      availableAt: now.toISOString(),
+      dedupeKey,
+      kind: "resource",
+      payload: {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-08-13T00:00:00.000Z",
+        windowStart: "2026-08-12T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const liveFacets = async () => latestLiveRecords(
+      await (await import("@murphai/core")).readJsonlRecords({
+        vaultRoot,
+        relativePath: "ledger/events/2026/2026-08.jsonl",
+      }),
+    ).filter((record) =>
+      record.kind === "observation"
+      && typeof record.metric === "string"
+      && record.metric.startsWith("stress-")
+      && record.metric !== "stress-level"
+    );
+
+    // Every supported form of the accepted timestamp language imports: an
+    // absolute fractional instant, plain UTC, an explicit offset, a floating
+    // clock with seconds, a floating clock without seconds, and a floating
+    // clock with fractional seconds. The fractional floating clock is the
+    // latest sample, so the facet instant proves the fraction survives.
+    activeRows = [
+      { timestamp: "2026-08-12T07:00:00.000Z", value: 20 },
+      { timestamp: "2026-08-12T07:05:00Z", value: 30 },
+      { timestamp: "2026-08-12T07:10:00+00:00", value: 25 },
+      { timestamp: "2026-08-12 19:00:30", value: 70 },
+      { timestamp: "2026-08-12 19:05", value: 80 },
+      { timestamp: "2026-08-12 19:59:30.250", value: 60 },
+    ];
+    const seedJob = enqueueDay("junction-temporal-authority:v1:ambiguous-seed");
+    assert.equal(
+      (await fixture.service.runWorkerOnce(account.id))?.id,
+      seedJob.id,
+    );
+    const seededFacets = await liveFacets();
+    assert.equal(seededFacets.length, 3);
+    for (const record of seededFacets) {
+      assert.equal(record.occurredAt, "2026-08-12T19:59:30.250Z");
+    }
+    const ledgerBefore = await readFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"),
+      "utf8",
+    );
+
+    // Any value outside the anchored language — including a valid prefix with
+    // trailing unsupported text, semantics contradicting the raw shape, or a
+    // lexically valid but impossible calendar or clock value that permissive
+    // parsing would silently roll onto a neighboring valid day — fails the
+    // day retryably with zero canonical mutation.
+    const invalidRows: ReadonlyArray<Record<string, unknown>> = [
+      { timestamp: "not-a-timestamp", value: 50 },
+      { timestamp: "2026-08-12T07:00:00Z-extra", value: 50 },
+      { timestamp: "2026-08-12T07:00:00garbage", value: 50 },
+      { timestamp: "2026-08-12T07:00trailing", value: 50 },
+      { timestamp: "2026-08-12T07:00:00+9:30", value: 50 },
+      { timestamp: "2026-08-12 07:00", timestampSemantics: "utc", value: 50 },
+      { timestamp: "2026-02-29T07:00:00Z", value: 50 },
+      { timestamp: "2026-04-31T07:00:00Z", value: 50 },
+      { timestamp: "2026-08-11T24:00:00Z", value: 50 },
+      { timestamp: "2026-08-12T07:60:00Z", value: 50 },
+      { timestamp: "2026-08-12T07:00:60Z", value: 50 },
+      { timestamp: "2026-08-12T07:00:00+24:00", value: 50 },
+      { timestamp: "2026-02-29 07:00", value: 50 },
+      { timestamp: "2026-02-30", value: 50 },
+      // Cross-day absolute raws explicitly marked floating are contradictory
+      // input the importer must see, not adjacent-day overlap the provider
+      // filter may discard: one dated on the previous day, and one dated on
+      // the authorized day whose instant maps outside it.
+      { timestamp: "2026-08-11T23:30:00Z", timestampSemantics: "floating", value: 50 },
+      { timestamp: "2026-08-12T23:30:00-05:00", timestampSemantics: "floating", value: 50 },
+    ];
+    for (const [index, invalidRow] of invalidRows.entries()) {
+      activeRows = [
+        { timestamp: "2026-08-12T07:00:00.000Z", value: 20 },
+        { timestamp: "2026-08-12 19:05", value: 80 },
+        invalidRow,
+      ];
+      const lossyJob = enqueueDay(`junction-temporal-authority:v1:ambiguous-lossy-${index}`);
+      assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, lossyJob.id);
+      assert.equal(fixture.store.getJobById(lossyJob.id)?.status, "queued");
+      assert.equal(
+        fixture.store.getJobById(lossyJob.id)?.lastErrorCode,
+        "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+        JSON.stringify(invalidRow),
+      );
+      assert.equal(
+        await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+        ledgerBefore,
+      );
+      assert.equal((await liveFacets()).length, 3);
+      fixture.store.completeJob(lossyJob.id, now.toISOString());
+    }
+
+    // A malformed row alone must not become an authoritative empty.
+    activeRows = [{ timestamp: "not-a-timestamp", value: 50 }];
+    const lossyOnlyJob = enqueueDay("junction-temporal-authority:v1:ambiguous-only");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, lossyOnlyJob.id);
+    assert.equal(
+      fixture.store.getJobById(lossyOnlyJob.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    );
+    assert.equal(
+      await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+      ledgerBefore,
+    );
+    assert.equal((await liveFacets()).length, 3);
+    fixture.store.completeJob(lossyOnlyJob.id, now.toISOString());
+
+    // A cross-day absolute raw explicitly marked floating, alone, must stay
+    // retryable instead of being filtered out and minting an authoritative
+    // empty that retracts the live facets.
+    activeRows = [
+      { timestamp: "2026-08-11T23:30:00Z", timestampSemantics: "floating", value: 50 },
+    ];
+    const contradictoryOnlyJob = enqueueDay(
+      "junction-temporal-authority:v1:ambiguous-contradictory-only",
+    );
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, contradictoryOnlyJob.id);
+    assert.equal(
+      fixture.store.getJobById(contradictoryOnlyJob.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    );
+    assert.equal(
+      await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+      ledgerBefore,
+    );
+    assert.equal((await liveFacets()).length, 3);
+    fixture.store.completeJob(contradictoryOnlyJob.id, now.toISOString());
+
+    // A valid exact date-only day succeeds with zero temporal samples, and
+    // its empty facet set legitimately retracts the stale facets.
+    activeRows = [{ timestamp: "2026-08-12", value: 55 }];
+    const dateOnlyJob = enqueueDay("junction-temporal-authority:v1:ambiguous-date-only");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, dateOnlyJob.id);
+    assert.equal(fixture.store.getJobById(dateOnlyJob.id)?.status, "succeeded");
+    assert.equal((await liveFacets()).length, 0);
+
+    // Fractional seconds on an absolute instant survive into the canonical
+    // facet instant exactly, and the repopulated day replaces the retraction.
+    activeRows = [
+      { timestamp: "2026-08-12T07:00:00.125Z", value: 20 },
+      { timestamp: "2026-08-12T07:05:00Z", value: 30 },
+      { timestamp: "2026-08-12T07:10:00Z", value: 25 },
+      { timestamp: "2026-08-12T19:00:30Z", value: 70 },
+      { timestamp: "2026-08-12T19:05:00Z", value: 80 },
+      { timestamp: "2026-08-12T21:15:45.125Z", value: 60 },
+    ];
+    const fractionalJob = enqueueDay("junction-temporal-authority:v1:ambiguous-fractional");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, fractionalJob.id);
+    assert.equal(fixture.store.getJobById(fractionalJob.id)?.status, "succeeded");
+    const fractionalFacets = await liveFacets();
+    assert.equal(fractionalFacets.length, 3);
+    for (const record of fractionalFacets) {
+      assert.equal(record.occurredAt, "2026-08-12T21:15:45.125Z");
+    }
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Junction fall-back floating clocks fail the day closed through the real importer", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-fall-back");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-fall-back";
+  const now = new Date("2026-11-03T12:00:00.000Z");
+  let activeRows: readonly Record<string, unknown>[] = [];
+
+  await initializeVault({ vaultRoot, timezone: "America/Chicago" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: [],
+    timeseriesResources: ["stress_level"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-fall-back",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { stress_level: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+        return createJsonResponse({
+          groups: {
+            garmin: [{ data: activeRows, source: { provider: "garmin", type: "watch" } }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction fall-back request: ${url.pathname}`);
+    },
+  });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: canonicalImporter,
+    providers: [provider],
+  });
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-10-01T00:00:00.000Z",
+    });
+    // The Chicago 2026-11-01 vault day spans 25 hours: midnight CDT through
+    // the fall-back repetition of the 01:00 hour to midnight CST.
+    const enqueueDay = (dedupeKey: string) => fixture.store.enqueueJob({
+      accountId: account.id,
+      availableAt: now.toISOString(),
+      dedupeKey,
+      kind: "resource",
+      payload: {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityTimeZone: "America/Chicago",
+        windowEnd: "2026-11-02T06:00:00.000Z",
+        windowStart: "2026-11-01T05:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const liveFacets = async () => latestLiveRecords(
+      await (await import("@murphai/core")).readJsonlRecords({
+        vaultRoot,
+        relativePath: "ledger/events/2026/2026-11.jsonl",
+      }),
+    ).filter((record) =>
+      record.kind === "observation"
+      && typeof record.metric === "string"
+      && record.metric.startsWith("stress-")
+      && record.metric !== "stress-level"
+    );
+
+    // Unambiguous floating clocks on the fall-back day still import: every
+    // seeded clock falls outside the repeated 01:00 hour.
+    activeRows = [
+      { timestamp: "2026-11-01 07:00:00", value: 20 },
+      { timestamp: "2026-11-01 07:05", value: 30 },
+      { timestamp: "2026-11-01 07:10", value: 25 },
+      { timestamp: "2026-11-01 19:00:30", value: 70 },
+      { timestamp: "2026-11-01 19:05", value: 80 },
+      { timestamp: "2026-11-01 19:59:30", value: 60 },
+    ];
+    const seedJob = enqueueDay("junction-temporal-authority:v1:fall-back-seed");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, seedJob.id);
+    assert.equal(fixture.store.getJobById(seedJob.id)?.status, "succeeded");
+    assert.equal((await liveFacets()).length, 3);
+    const ledgerBefore = await readFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-11.jsonl"),
+      "utf8",
+    );
+
+    // A floating clock inside the repeated hour maps to two real instants.
+    // The repeated-clock 88/96 pair must never collapse into one averaged
+    // sample: the ambiguous day fails retryably with zero canonical mutation.
+    activeRows = [
+      { timestamp: "2026-11-01 07:00:00", value: 20 },
+      { timestamp: "2026-11-01 01:30", value: 88 },
+      { timestamp: "2026-11-01 01:30", value: 96 },
+    ];
+    const ambiguousJob = enqueueDay("junction-temporal-authority:v1:fall-back-ambiguous");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, ambiguousJob.id);
+    assert.equal(fixture.store.getJobById(ambiguousJob.id)?.status, "queued");
+    assert.equal(
+      fixture.store.getJobById(ambiguousJob.id)?.lastErrorCode,
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    );
+    assert.equal(
+      await readFile(path.join(vaultRoot, "ledger/events/2026/2026-11.jsonl"), "utf8"),
+      ledgerBefore,
+    );
+    assert.equal((await liveFacets()).length, 3);
+    fixture.store.completeJob(ambiguousJob.id, now.toISOString());
+
+    // Explicit offsets disambiguate the folds: the same 01:30 wall clock in
+    // CDT and CST stays two distinct readings, so the day imports all eight
+    // samples instead of averaging the pair away.
+    activeRows = [
+      { timestamp: "2026-11-01T01:30:00-05:00", value: 88 },
+      { timestamp: "2026-11-01T01:35:00-05:00", value: 90 },
+      { timestamp: "2026-11-01T01:30:00-06:00", value: 96 },
+      { timestamp: "2026-11-01T01:35:00-06:00", value: 94 },
+      { timestamp: "2026-11-01T07:00:00-06:00", value: 20 },
+      { timestamp: "2026-11-01T07:05:00-06:00", value: 30 },
+      { timestamp: "2026-11-01T19:00:30-06:00", value: 70 },
+      { timestamp: "2026-11-01T19:05:00-06:00", value: 80 },
+    ];
+    const foldsJob = enqueueDay("junction-temporal-authority:v1:fall-back-folds");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, foldsJob.id);
+    assert.equal(fixture.store.getJobById(foldsJob.id)?.status, "succeeded");
+    const foldFacets = await liveFacets();
+    assert.equal(foldFacets.length, 3);
+    for (const record of foldFacets) {
+      assert.equal(
+        (record.qualifiers as { sampleCount?: number } | undefined)?.sampleCount,
+        8,
+      );
+    }
+
+    // A real 65-minute cross-fold gap (01:00 CDT to 01:05 CST) never
+    // qualifies as continuity: the day succeeds with zero temporal claims.
+    activeRows = [
+      { timestamp: "2026-11-01T01:00:00-05:00", value: 60 },
+      { timestamp: "2026-11-01T01:05:00-06:00", value: 70 },
+    ];
+    const gapJob = enqueueDay("junction-temporal-authority:v1:fall-back-gap");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, gapJob.id);
+    assert.equal(fixture.store.getJobById(gapJob.id)?.status, "succeeded");
+    assert.equal((await liveFacets()).length, 0);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Junction temporal replacement identity survives a hosted cold restore", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-stable-identity");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-stable-identity";
+  const now = new Date("2026-08-15T12:00:00.000Z");
+  let phase: "populated" | "empty" | "corrected" = "populated";
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const buildProvider = () => createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: [],
+    timeseriesResources: ["stress_level"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-stable-identity",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { stress_level: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+        if (phase === "empty") {
+          return createJsonResponse({ groups: {} });
+        }
+        const values = phase === "populated" ? [20, 30, 70, 80] : [25, 35, 60, 90];
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [
+                { timestamp: "2026-08-12T07:00:00.000Z", value: values[0] },
+                { timestamp: "2026-08-12T07:05:00.000Z", value: values[1] },
+                { timestamp: "2026-08-12T19:00:00.000Z", value: values[2] },
+                { timestamp: "2026-08-12T19:05:00.000Z", value: values[3] },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction stable-identity request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: canonicalImporter,
+    providers: [buildProvider()],
+  });
+  const upsertAccount = (fixture: ReturnType<typeof openFixture>) =>
+    fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+    });
+  const enqueueDay = (
+    fixture: ReturnType<typeof openFixture>,
+    accountId: string,
+    dedupeKey: string,
+  ) => fixture.store.enqueueJob({
+    accountId,
+    availableAt: now.toISOString(),
+    dedupeKey,
+    kind: "resource",
+    payload: {
+      resource: "stress_level",
+      resourceCategory: "timeseries",
+      temporalAuthorityTimeZone: "UTC",
+      windowEnd: "2026-08-13T00:00:00.000Z",
+      windowStart: "2026-08-12T00:00:00.000Z",
+    },
+    priority: 45,
+    provider: "junction",
+  });
+  const readFacets = async () => latestLiveRecords(
+    await (await import("@murphai/core")).readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/events/2026/2026-08.jsonl",
+    }),
+  ).filter((record) =>
+    record.kind === "observation"
+    && typeof record.metric === "string"
+    && record.metric.startsWith("stress-")
+    && record.metric !== "stress-level"
+  );
+
+  const first = openFixture();
+  let firstClosed = false;
+  try {
+    const accountA = upsertAccount(first);
+    enqueueDay(first, accountA.id, "junction-temporal-authority:v1:restore-populated");
+    assert.equal((await first.service.runWorkerOnce(accountA.id))?.kind, "resource");
+    const seededFacets = await readFacets();
+    assert.equal(seededFacets.length, 3);
+    const seededResourceIds = new Set(
+      seededFacets.map((record) =>
+        (record.externalRef as { resourceId?: string } | undefined)?.resourceId
+      ),
+    );
+    assert.equal(seededResourceIds.size, 1);
+    first.close();
+    firstClosed = true;
+
+    // Only the machine-local device-sync store is lost; the vault persists.
+    await rm(databasePath, { force: true });
+    const restored = openFixture();
+    try {
+      const accountB = upsertAccount(restored);
+      assert.notEqual(accountB.id, accountA.id);
+
+      // The re-minted local row must not fork the replacement domain: an
+      // authoritative empty retracts the facets imported under row A.
+      phase = "empty";
+      enqueueDay(restored, accountB.id, "junction-temporal-authority:v1:restore-empty");
+      assert.equal((await restored.service.runWorkerOnce(accountB.id))?.kind, "resource");
+      assert.equal((await readFacets()).length, 0);
+
+      phase = "corrected";
+      enqueueDay(restored, accountB.id, "junction-temporal-authority:v1:restore-corrected");
+      assert.equal((await restored.service.runWorkerOnce(accountB.id))?.kind, "resource");
+      const correctedFacets = await readFacets();
+      assert.equal(correctedFacets.length, 3);
+      const correctedResourceIds = new Set(
+        correctedFacets.map((record) =>
+          (record.externalRef as { resourceId?: string } | undefined)?.resourceId
+        ),
+      );
+      assert.deepEqual(correctedResourceIds, seededResourceIds);
+
+      // A byte-identical replay of the corrected day is a no-op.
+      const ledgerBefore = await readFile(
+        path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"),
+        "utf8",
+      );
+      enqueueDay(restored, accountB.id, "junction-temporal-authority:v1:restore-replay");
+      assert.equal((await restored.service.runWorkerOnce(accountB.id))?.kind, "resource");
+      assert.equal(
+        await readFile(path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"), "utf8"),
+        ledgerBefore,
+      );
+    } finally {
+      restored.close();
+    }
+  } finally {
+    if (!firstClosed) {
+      first.close();
+    }
+  }
+});
+
+test("Junction default reconcile keeps ordinary blood-oxygen coverage ahead of temporal closure", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-ordinary-owner");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-ordinary-owner";
+  const now = new Date("2026-08-15T12:00:00.000Z");
+  const requestedWindows: Array<[string | null, string | null]> = [];
+  const importerResults: unknown[] = [];
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_oxygen"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-ordinary-owner",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              blood_oxygen: true,
+            },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/summary/activity/${externalAccountId}`) {
+        return createJsonResponse({ data: [] });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`) {
+        const start = url.searchParams.get("start_date");
+        requestedWindows.push([start, url.searchParams.get("end_date")]);
+        const sampleDay = start?.slice(0, 10) ?? "2026-08-14";
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                timestamp: `${sampleDay}T10:00:00.000Z`,
+                unit: "%",
+                value: 97,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction ordinary-owner request: ${url.pathname}`);
+    },
+  });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importerResults.push(await prepareDeviceProviderSnapshotImport(input, {
+          defaultTimeZone: "UTC",
+        }));
+        return canonicalImporter.importDeviceProviderSnapshot(input);
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+      nextReconcileAt: now.toISOString(),
+    });
+
+    const scheduledJobs = await fixture.service.runSchedulerOnce(account.id);
+    assert.equal(scheduledJobs.some((job) => job.kind === "reconcile"), true);
+    for (let workerRun = 0; workerRun < 40; workerRun += 1) {
+      if (await fixture.service.runWorkerOnce(account.id) === null) {
+        break;
+      }
+    }
+
+    const ordinaryDays = requestedWindows
+      .filter(([start, end]) => start !== null && start === end && start.length === 10)
+      .map(([start]) => start)
+      .sort();
+    const temporalWindows = requestedWindows.filter(([start, end]) =>
+      start !== null
+      && end !== null
+      && start !== end
+      && Date.parse(end) - Date.parse(start) === 24 * 60 * 60_000
+    );
+    const initialBackfillDays = Array.from({ length: 14 }, (_, index) =>
+      `2026-07-${String(18 + index).padStart(2, "0")}`);
+    assert.deepEqual(ordinaryDays, [
+      ...initialBackfillDays,
+      "2026-08-08",
+      "2026-08-09",
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+    ]);
+    const newestTemporalDay = temporalWindows
+      .map(([start]) => start?.slice(0, 10) ?? "")
+      .sort()
+      .at(-1);
+    assert.equal(newestTemporalDay, "2026-08-13");
+
+    const importedEvents = (importerResults as Array<{
+      events?: Array<{ dayKey?: string; fields?: { metric?: string } }>;
+    }>).flatMap((result) => result.events ?? []);
+    const ordinarySpo2Days = new Set(
+      importedEvents
+        .filter((event) => event.fields?.metric === "spo2")
+        .map((event) => event.dayKey),
+    );
+    assert.equal(ordinarySpo2Days.has("2026-08-14"), true);
+    assert.equal(ordinarySpo2Days.has("2026-08-08"), true);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("Junction maximum temporal catch-up yields to ordinary continuation before draining newest-first", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-temporal-priority");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-temporal-priority";
+  const initialNow = new Date("2026-08-15T12:00:00.000Z");
+  let currentNow = initialNow;
+  const requests: Array<{
+    end: string | null;
+    resource: string;
+    start: string | null;
+  }> = [];
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 14,
+    summaryResources: [],
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-temporal-priority",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              blood_oxygen: true,
+              stress_level: true,
+            },
+          }],
+        });
+      }
+      if (url.pathname.startsWith("/v2/summary/")) {
+        return createJsonResponse({ data: [] });
+      }
+      const match = url.pathname.match(
+        new RegExp(`^/v2/timeseries/${externalAccountId}/(blood_oxygen|stress_level)/grouped$`, "u"),
+      );
+      if (match?.[1]) {
+        const resource = match[1];
+        const start = url.searchParams.get("start_date");
+        const end = url.searchParams.get("end_date");
+        requests.push({ end, resource, start });
+        const sampleDay = start?.slice(0, 10) ?? "2026-08-01";
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: resource === "blood_oxygen"
+                ? [
+                    { timestamp: `${sampleDay}T10:00:00.000Z`, unit: "%", value: 97 },
+                    { timestamp: `${sampleDay}T10:01:00.000Z`, unit: "%", value: 96 },
+                  ]
+                : [
+                    { timestamp: `${sampleDay}T10:00:00.000Z`, value: 20 },
+                    { timestamp: `${sampleDay}T10:01:00.000Z`, value: 30 },
+                  ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction temporal-priority request: ${url.pathname}`);
+    },
+  });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => currentNow },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: canonicalImporter,
+    providers: [provider],
+  });
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    const seed = fixture.store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowEnd: "2026-08-15T00:00:00.000Z",
+        windowStart: "2026-08-01T00:00:00.000Z",
+      },
+      availableAt: initialNow.toISOString(),
+      priority: 40,
+    });
+
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, seed.id);
+    const queuedAfterSeed = readJobsForAccountForTesting(fixture.store, account.id)
+      .filter((row) => row.status === "queued")
+      .flatMap((row) => {
+        const job = fixture.store.getJobById(row.id);
+        return job ? [job] : [];
+      });
+    const temporalChildren = queuedAfterSeed.filter((job) => job.kind === "resource");
+    const ordinaryContinuations = queuedAfterSeed.filter((job) =>
+      job.kind === "reconcile" && job.payload.timeseriesResourceCursor !== undefined
+    );
+    assert.equal(temporalChildren.length, 26);
+    assert.equal(ordinaryContinuations.length, 1);
+    assert.ok(temporalChildren.every((job) => job.priority === 30));
+    assert.equal(ordinaryContinuations[0]?.priority, 40);
+    assert.deepEqual(
+      requests.map((request) => ({
+        dayKey: request.start?.slice(0, 10),
+        resource: request.resource,
+      })),
+      [
+        { dayKey: "2026-08-13", resource: "blood_oxygen" },
+        { dayKey: "2026-08-13", resource: "stress_level" },
+      ],
+    );
+
+    const ordinaryContinuation = await fixture.service.runWorkerOnce(account.id);
+    assert.equal(ordinaryContinuation?.id, ordinaryContinuations[0]?.id);
+    assert.equal(ordinaryContinuation?.payload.timeseriesResourceCursor, "blood_oxygen");
+    assert.deepEqual(
+      requests.at(-1) && {
+        dayKey: requests.at(-1)?.start?.slice(0, 10),
+        resource: requests.at(-1)?.resource,
+      },
+      { dayKey: "2026-08-01", resource: "blood_oxygen" },
+    );
+    const canonicalAfterOrdinary = latestLiveRecords(
+      await (await import("@murphai/core")).readJsonlRecords({
+        vaultRoot,
+        relativePath: "ledger/events/2026/2026-08.jsonl",
+      }),
+    );
+    assert.ok(canonicalAfterOrdinary.some((record) =>
+      record.kind === "observation"
+      && record.metric === "spo2"
+      && record.dayKey === "2026-08-01"
+    ));
+
+    currentNow = new Date(initialNow.getTime() + 1_000);
+    const temporalDaySequence: string[] = [];
+    let temporalDrainStarted = false;
+    for (let workerRun = 0; workerRun < 80; workerRun += 1) {
+      const processed = await fixture.service.runWorkerOnce(account.id);
+      if (processed === null) {
+        break;
+      }
+      if (processed.kind === "resource") {
+        temporalDrainStarted = true;
+        temporalDaySequence.push(String(processed.payload.windowStart).slice(0, 10));
+      } else {
+        assert.equal(temporalDrainStarted, false);
+        assert.equal(processed.kind, "reconcile");
+      }
+    }
+
+    const expectedTemporalDays = Array.from({ length: 13 }, (_, offset) =>
+      new Date(Date.UTC(2026, 7, 12 - offset)).toISOString().slice(0, 10)
+    );
+    assert.deepEqual(
+      temporalDaySequence,
+      expectedTemporalDays.flatMap((day) => [day, day]),
+    );
+    assert.equal(await fixture.service.runWorkerOnce(account.id), null);
+    const finalJobs = readJobsForAccountForTesting(fixture.store, account.id);
+    assert.equal(finalJobs.filter((job) => job.status === "queued").length, 0);
+    assert.ok(finalJobs.every((job) => job.status === "succeeded"));
+  } finally {
+    fixture.close();
+  }
+});
+
+test.each([
+  {
+    expectedProviderDays: ["2030-08-10", "2030-08-11"],
+    now: "2030-08-12T00:30:00.000Z",
+    timeZone: "UTC",
+  },
+  {
+    expectedProviderDays: ["2030-08-10", "2030-08-11"],
+    now: "2030-08-12T07:30:00.000Z",
+    timeZone: "America/Los_Angeles",
+  },
+  {
+    expectedProviderDays: ["2030-08-09", "2030-08-10"],
+    now: "2030-08-11T15:30:00.000Z",
+    timeZone: "Asia/Tokyo",
+  },
+])("Junction ordinary pull floor survives a higher-priority webhook and restart at the $timeZone boundary", async ({
+  expectedProviderDays,
+  now: nowIso,
+  timeZone,
+}) => {
+  const now = new Date(nowIso);
+  const zoneSlug = timeZone.replaceAll(/[^a-z]+/giu, "-").replaceAll(/^-|-$/gu, "");
+  const vaultRoot = await makeTempDirectory(`murph-device-syncd-junction-floor-${zoneSlug}`);
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = `junction-floor-${zoneSlug}`;
+  const activityRecord = {
+    id: `activity-${zoneSlug}`,
+    start: new Date(now.getTime() - 8 * 60 * 60_000).toISOString(),
+    end: new Date(now.getTime() - 60_000).toISOString(),
+    calories: 512,
+    heart_rate: 92,
+    source: { provider: "garmin" },
+  };
+  const requestedProviderDays: Array<[string | null, string | null]> = [];
+  const activityEvents: Array<{ id: string; revision: number }> = [];
+  let activityImportCount = 0;
+
+  await initializeVault({ vaultRoot, timezone: timeZone });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 2,
+    reconcileIntervalMs: 6 * 60 * 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: ["hrv"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: `provider-garmin-${zoneSlug}`,
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { activity: true, hrv: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/summary/activity/${externalAccountId}`) {
+        return createJsonResponse({ data: [activityRecord] });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/hrv/grouped`) {
+        requestedProviderDays.push([
+          url.searchParams.get("start_date"),
+          url.searchParams.get("end_date"),
+        ]);
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected Junction ordinary-floor request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input) as {
+          events?: Array<{ id: string; lifecycle?: { revision?: number } }>;
+        };
+        const activity = (input.snapshot as {
+          summaries?: { activity?: unknown[] };
+        }).summaries?.activity;
+        if ((activity?.length ?? 0) > 0) {
+          activityImportCount += 1;
+          activityEvents.push(...(result.events ?? []).map((event) => ({
+            id: event.id,
+            revision: event.lifecycle?.revision ?? 1,
+          })));
+        }
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+  const fixture = openFixture();
+  let fixtureClosed = false;
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: new Date(now.getTime() - 30 * 24 * 60 * 60_000).toISOString(),
+      nextReconcileAt: new Date(now.getTime() - 60_000).toISOString(),
+    });
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.activity.updated",
+        user_id: externalAccountId,
+        data: activityRecord,
+      },
+      messageId: `msg-ordinary-floor-${zoneSlug}`,
+    });
+
+    assert.equal(
+      (await fixture.service.handleWebhook("junction", webhook.headers, webhook.rawBody)).accepted,
+      true,
+    );
+    await fixture.service.runSchedulerOnce();
+    const queuedBeforeDrain = readJobsForAccountForTesting(fixture.store, account.id)
+      .map((job) => fixture.store.getJobById(job.id))
+      .filter((job): job is DeviceSyncJobRecord => job?.status === "queued");
+    assert.equal(
+      queuedBeforeDrain.some((job) => job.kind === "resource" && job.priority === 65),
+      true,
+      `expected priority-65 resource job; queued=${JSON.stringify(queuedBeforeDrain.map((job) => ({
+        kind: job.kind,
+        priority: job.priority,
+      })))}`,
+    );
+    assert.equal(
+      queuedBeforeDrain.some((job) => job.kind === "reconcile" && job.priority === 40),
+      true,
+    );
+
+    const processedWebhook = await fixture.service.runWorkerOnce();
+    assert.equal(processedWebhook?.kind, "resource");
+    assert.equal(processedWebhook?.priority, 65);
+    assert.equal(fixture.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    assert.equal(requestedProviderDays.length, 0);
+    assert.equal(activityImportCount, 1);
+    const webhookEventIds = new Set(activityEvents.map((event) => event.id));
+    assert.ok(webhookEventIds.size > 0);
+
+    fixture.close();
+    fixtureClosed = true;
+    const restarted = openFixture();
+    try {
+      const processedReconcile = await restarted.service.runWorkerOnce();
+      assert.equal(processedReconcile?.kind, "reconcile");
+      assert.equal(processedReconcile?.priority, 40);
+      assert.equal(requestedProviderDays.length, 0);
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      const firstContinuation = await restarted.service.runWorkerOnce();
+      assert.equal(firstContinuation?.kind, "reconcile");
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      const terminalContinuation = await restarted.service.runWorkerOnce();
+      assert.equal(terminalContinuation?.kind, "reconcile");
+      assert.equal(
+        restarted.store.getAccountById(account.id)?.lastSyncCompletedAt,
+        nowIso,
+      );
+      assert.deepEqual(
+        requestedProviderDays,
+        expectedProviderDays.map((day) => [day, day]),
+      );
+      assert.equal(activityImportCount, 2);
+      assert.deepEqual(new Set(activityEvents.map((event) => event.id)), webhookEventIds);
+      assert.equal(activityEvents.every((event) => event.revision === 1), true);
+      assert.equal(
+        readJobsForAccountForTesting(restarted.store, account.id)
+          .filter((job) => job.status === "queued" && job.kind === "reconcile").length,
+        0,
+      );
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    if (!fixtureClosed) {
+      fixture.close();
+    }
   }
 });
 
