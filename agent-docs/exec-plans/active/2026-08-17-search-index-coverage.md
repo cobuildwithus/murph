@@ -55,4 +55,4 @@ Updated: 2026-08-17
 - Passed focused ESLint for every changed source and test file.
 - Passed the hosted-Web typecheck, including the repository-owned Health Commons and Prisma generation prerequisites.
 - Direct sitemap coverage proof is part of the focused test: one canonical host, no duplicate URLs, all published Health Commons routes present, and private/result/internal routes absent.
-- Passed all 11 frontend design-proof checker tests, including metadata-only exclusion and a rendered-change control; the checker reports no UI change for the exact task diff.
+- Passed all 12 frontend design-proof checker tests, including metadata-only helpers and a rendered-change control; the checker reports no UI change for the exact task diff.

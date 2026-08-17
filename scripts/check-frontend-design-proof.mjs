@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { parse } from "@babel/parser";
+import { getOuterBindingIdentifiers, isReferenced } from "@babel/types";
 
 const DESIGN_CATALOG_PATHS = new Set([
   "apps/web/app/design/components-content.tsx",
@@ -58,11 +59,30 @@ function renderedRouteSignature(source) {
     plugins: ["jsx", "typescript"],
     sourceType: "module",
   });
-  const renderedStatements = sourceFile.program.body.filter(
-    (statement) => statement.type !== "ImportDeclaration"
-      && !isNonRenderedRouteExport(statement),
+  const routeStatements = sourceFile.program.body.filter(
+    (statement) => statement.type !== "ImportDeclaration",
   );
-  const renderedIdentifiers = collectIdentifiers(renderedStatements);
+  const metadataStatements = routeStatements.filter(isNonRenderedRouteExport);
+  const candidateStatements = routeStatements.filter(
+    (statement) => !isNonRenderedRouteExport(statement),
+  );
+  const bindingOwners = collectBindingOwners(candidateStatements);
+  const metadataDependencies = collectStatementDependencies(
+    metadataStatements,
+    bindingOwners,
+  );
+  const renderedRoots = candidateStatements.filter(
+    (statement) => !metadataDependencies.has(statement),
+  );
+  const renderedDependencies = collectStatementDependencies(
+    renderedRoots,
+    bindingOwners,
+  );
+  const renderedStatements = candidateStatements.filter(
+    (statement) => !metadataDependencies.has(statement)
+      || renderedDependencies.has(statement),
+  );
+  const renderedIdentifiers = collectReferencedIdentifiers(renderedStatements);
   const imports = sourceFile.program.body
     .filter((statement) => statement.type === "ImportDeclaration")
     .map((statement) => importSignature(statement, renderedIdentifiers))
@@ -92,20 +112,48 @@ function isNonRenderedRouteExport(statement) {
   );
 }
 
-function collectIdentifiers(nodes) {
+function collectBindingOwners(statements) {
+  const owners = new Map();
+  for (const statement of statements) {
+    for (const name of Object.keys(getOuterBindingIdentifiers(statement))) {
+      owners.set(name, statement);
+    }
+  }
+  return owners;
+}
+
+function collectStatementDependencies(seedStatements, bindingOwners) {
+  const dependencies = new Set();
+  const pendingNames = [...collectReferencedIdentifiers(seedStatements)];
+  while (pendingNames.length > 0) {
+    const owner = bindingOwners.get(pendingNames.pop());
+    if (!owner || dependencies.has(owner)) {
+      continue;
+    }
+    dependencies.add(owner);
+    pendingNames.push(...collectReferencedIdentifiers([owner]));
+  }
+  return dependencies;
+}
+
+function collectReferencedIdentifiers(nodes) {
   const identifiers = new Set();
-  const visit = (node) => {
+  const visit = (node, parent = null, grandparent = null) => {
     if (!node || typeof node !== "object") {
       return;
     }
-    if (node.type === "Identifier") {
+    if (
+      (node.type === "Identifier" || node.type === "JSXIdentifier")
+      && parent
+      && isReferenced(node, parent, grandparent)
+    ) {
       identifiers.add(node.name);
     }
     for (const value of Object.values(node)) {
       if (Array.isArray(value)) {
-        value.forEach(visit);
+        value.forEach((entry) => visit(entry, node, parent));
       } else {
-        visit(value);
+        visit(value, node, parent);
       }
     }
   };

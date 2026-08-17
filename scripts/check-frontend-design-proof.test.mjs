@@ -107,6 +107,35 @@ export default function Page() {
   );
 });
 
+test("ignores helpers reached only from route metadata", () => {
+  const baseSource = `
+import { PageShell } from "@/src/components/page-shell";
+import { createMetadata } from "@/src/lib/site-metadata";
+
+const DEFAULT_HOST = "https://example.test";
+const metadataBase = new URL(DEFAULT_HOST);
+const defaultMetadata = createMetadata({ title: "Example" });
+
+export const metadata = { ...defaultMetadata, metadataBase };
+export default function Page() { return <PageShell />; }
+`;
+  const consolidatedSource = `
+import { PageShell } from "@/src/components/page-shell";
+import { createMetadata, PUBLIC_HOST } from "@/src/lib/site-metadata";
+
+export const metadata = {
+  ...createMetadata({ title: "Example" }),
+  metadataBase: new URL(PUBLIC_HOST),
+};
+export default function Page() { return <PageShell />; }
+`;
+
+  assert.equal(
+    renderedRouteSignature(baseSource),
+    renderedRouteSignature(consolidatedSource),
+  );
+});
+
 test("passes rendered design-page proof with both hosted viewports", () => {
   assert.deepEqual(
     validateFrontendDesignProof({
