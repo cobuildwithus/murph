@@ -1600,6 +1600,15 @@ describe('assistant skill assets', () => {
       'Construct its source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`',
     )
     expect(compactCatalog).toContain(
+      "On Telegram, follow the routine-card tool's per-movement mapping and bounded validation-repair guidance.",
+    )
+    expect(compactCatalog).toContain(
+      'Keep catalog images inside that card and never use separate response media as its fallback.',
+    )
+    expect(compactCatalog).toContain(
+      'If the card still cannot attach, use one complete generic Rich Message without images.',
+    )
+    expect(compactCatalog).toContain(
       'never imply that an image was attached.',
     )
     expect(catalog).toContain(

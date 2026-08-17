@@ -809,6 +809,21 @@ describe('murph.attach_response_card', () => {
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
       'Never promise images for an exercise that has none.',
     )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'Represent every named movement as its own card.exercises item',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'A phase is not an exercise.',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'correct the reported fields and retry this tool once',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'Do not switch to separate response media on Telegram.',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'use one complete attach_telegram_rich_content card without images',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent',
     )

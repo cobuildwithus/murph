@@ -26,7 +26,16 @@ describe('exercise catalog runtime guidance', () => {
       '`exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>` and keep the returned order.',
     )
     expect(compact).toContain(
-      'For Linq/iMessage, or when a card does not fit, use the existing response-media path when images improve the instruction.',
+      'For Linq/iMessage, use the existing response-media path when images improve the instruction.',
+    )
+    expect(compact).toContain(
+      "On Telegram, follow the routine-card tool's per-movement mapping and bounded validation-repair guidance.",
+    )
+    expect(compact).toContain(
+      'Keep catalog images inside that card and never use separate response media as its fallback.',
+    )
+    expect(compact).toContain(
+      'If the card still cannot attach, use one complete generic Rich Message without images.',
     )
     expect(compact).toContain(
       'If an important movement has no useful image, keep the written cue clear and never imply that an image was attached.',
