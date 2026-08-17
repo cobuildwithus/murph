@@ -2101,6 +2101,7 @@ export async function markAssistantOutboxMessageVolumeReceiptRecorded(input: {
       sanitizeAssistantOutboxIntentForPersistence({
         ...current,
         messageVolumeReceiptRecordedAt: input.recordedAt,
+        nextAttemptAt: null,
       }),
     )
     await writeJsonFileAtomic(
@@ -2108,6 +2109,43 @@ export async function markAssistantOutboxMessageVolumeReceiptRecorded(input: {
       sanitizeAssistantOutboxIntentForPersistence(recorded),
     )
     return recorded
+  })
+}
+
+export async function rescheduleAssistantOutboxMessageVolumeReceipt(input: {
+  dedupeKey: string
+  intentId: string
+  nextAttemptAt: string
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const intentPath = resolveAssistantOutboxIntentPath(
+      paths.outboxDirectory,
+      input.intentId,
+    )
+    const current = await readAssistantOutboxIntentAtPath(intentPath, {
+      vault: input.vault,
+    })
+    if (
+      !current ||
+      current.dedupeKey !== input.dedupeKey ||
+      !hasPendingAssistantOutboxMessageVolumeReceipt(current)
+    ) {
+      return current
+    }
+
+    const rescheduled = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...current,
+        nextAttemptAt: input.nextAttemptAt,
+      }),
+    )
+    await writeJsonFileAtomic(
+      intentPath,
+      sanitizeAssistantOutboxIntentForPersistence(rescheduled),
+    )
+    return rescheduled
   })
 }
 

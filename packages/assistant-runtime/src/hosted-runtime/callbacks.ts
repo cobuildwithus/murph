@@ -61,6 +61,7 @@ import {
   sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById,
+  rescheduleAssistantOutboxMessageVolumeReceipt,
   saveAssistantOutboxIntentIfUnchanged,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
@@ -144,6 +145,7 @@ const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // an unbounded series of web-control round trips.
 const HOSTED_MAX_DUE_APPROVAL_RECONCILE = 4;
 const HOSTED_MAX_PENDING_MESSAGE_VOLUME_RECEIPTS = 8;
+const HOSTED_MESSAGE_VOLUME_RECEIPT_RETRY_DELAY_MS = 60_000;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
@@ -194,6 +196,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     queueHostedAssistantPendingMessageVolumeReceipts({
       effectsPort: input.messageVolumeReceiptPort ?? null,
       intents: storedIntents,
+      now,
       vaultRoot: request.vaultRoot,
     });
   }
@@ -1362,6 +1365,11 @@ function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
         // hide a ready approval-link reply queued later on the same boundary.
         continue;
       }
+      if (intent.status === "sent") {
+        // Receipt recovery shares the wake clock but is not an outbound
+        // delivery predecessor on this conversation boundary.
+        continue;
+      }
       if (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
         break;
       }
@@ -1716,6 +1724,7 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
   now: Date,
 ): string | null {
   let approvalFallbackWakeAt: string | null = null;
+  let receiptFallbackWakeAt: string | null = null;
   for (const intent of intents) {
     const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
     if (!wakeAt) {
@@ -1727,11 +1736,19 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
       }
       continue;
     }
-    return approvalFallbackWakeAt && approvalFallbackWakeAt < wakeAt
-      ? approvalFallbackWakeAt
-      : wakeAt;
+    if (intent.status === "sent") {
+      if (!receiptFallbackWakeAt || wakeAt < receiptFallbackWakeAt) {
+        receiptFallbackWakeAt = wakeAt;
+      }
+      continue;
+    }
+    return [approvalFallbackWakeAt, receiptFallbackWakeAt, wakeAt]
+      .filter((candidate): candidate is string => candidate !== null)
+      .sort()[0] ?? null;
   }
-  return approvalFallbackWakeAt;
+  return [approvalFallbackWakeAt, receiptFallbackWakeAt]
+    .filter((candidate): candidate is string => candidate !== null)
+    .sort()[0] ?? null;
 }
 
 function resolveHostedAssistantOutboxIntentWakeAt(
@@ -1769,6 +1786,18 @@ function resolveHostedAssistantOutboxIntentWakeAt(
       }
       const wakeMs = startedAtMs + HOSTED_SENDING_STALE_RECONCILIATION_MS;
       return new Date(Math.max(wakeMs, now.getTime())).toISOString();
+    }
+    case "sent": {
+      if (!hasPendingAssistantOutboxMessageVolumeReceipt(intent)) {
+        return null;
+      }
+      const nextAttemptMs = intent.nextAttemptAt
+        ? Date.parse(intent.nextAttemptAt)
+        : Number.NaN;
+      if (!Number.isFinite(nextAttemptMs)) {
+        return now.toISOString();
+      }
+      return new Date(nextAttemptMs).toISOString();
     }
     default:
       return null;
@@ -5437,11 +5466,15 @@ function queueHostedAssistantPendingMessageVolumeReceipts(input: {
     "recordOutboundMessageVolumeReceipt"
   > | null;
   intents: readonly AssistantOutboxIntent[];
+  now: Date;
   vaultRoot: string;
-}): void {
+}): number {
   let queued = 0;
   for (const intent of input.intents) {
-    if (!hasPendingAssistantOutboxMessageVolumeReceipt(intent)) {
+    if (
+      !hasPendingAssistantOutboxMessageVolumeReceipt(intent)
+      || !isHostedAssistantMessageVolumeReceiptDue(intent, input.now)
+    ) {
       continue;
     }
     const queuedReceipt = queueHostedAssistantMessageVolumeReceiptWrite({
@@ -5454,9 +5487,37 @@ function queueHostedAssistantPendingMessageVolumeReceipts(input: {
     }
     queued += 1;
     if (queued >= HOSTED_MAX_PENDING_MESSAGE_VOLUME_RECEIPTS) {
-      return;
+      return queued;
     }
   }
+  return queued;
+}
+
+export async function queueHostedAssistantPendingMessageVolumeReceiptsForVault(input: {
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "recordOutboundMessageVolumeReceipt"
+  > | null;
+  now?: Date;
+  vaultRoot: string;
+}): Promise<number> {
+  const intents = await listAssistantOutboxIntents(input.vaultRoot);
+  return queueHostedAssistantPendingMessageVolumeReceipts({
+    effectsPort: input.effectsPort ?? null,
+    intents,
+    now: input.now ?? new Date(),
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+function isHostedAssistantMessageVolumeReceiptDue(
+  intent: AssistantOutboxIntent,
+  now: Date,
+): boolean {
+  const nextAttemptMs = intent.nextAttemptAt
+    ? Date.parse(intent.nextAttemptAt)
+    : Number.NaN;
+  return !Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime();
 }
 
 function queueHostedAssistantMessageVolumeReceiptWrite(input: {
@@ -5517,6 +5578,11 @@ function queueHostedAssistantMessageVolumeReceiptWrite(input: {
         timeout,
       ]);
       if (result === "timed_out") {
+        await rescheduleHostedAssistantMessageVolumeReceipt({
+          dedupeKey: input.intent.dedupeKey,
+          intentId: input.intent.intentId,
+          vaultRoot: input.vaultRoot,
+        }).catch(() => undefined);
         console.warn(
           "Hosted outbound message-volume receipt recording timed out.",
           { timeoutMs: HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS },
@@ -5536,6 +5602,11 @@ function queueHostedAssistantMessageVolumeReceiptWrite(input: {
         vault: input.vaultRoot,
       });
     } catch (error) {
+      await rescheduleHostedAssistantMessageVolumeReceipt({
+        dedupeKey: input.intent.dedupeKey,
+        intentId: input.intent.intentId,
+        vaultRoot: input.vaultRoot,
+      }).catch(() => undefined);
       console.warn("Hosted outbound message-volume receipt recording failed.", {
         errorName: error instanceof Error ? error.name : typeof error,
       });
@@ -5549,6 +5620,21 @@ function queueHostedAssistantMessageVolumeReceiptWrite(input: {
   });
   pendingHostedAssistantDeliveryControlPlaneWrites.add(write);
   return true;
+}
+
+async function rescheduleHostedAssistantMessageVolumeReceipt(input: {
+  dedupeKey: string;
+  intentId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await rescheduleAssistantOutboxMessageVolumeReceipt({
+    dedupeKey: input.dedupeKey,
+    intentId: input.intentId,
+    nextAttemptAt: new Date(
+      Date.now() + HOSTED_MESSAGE_VOLUME_RECEIPT_RETRY_DELAY_MS,
+    ).toISOString(),
+    vault: input.vaultRoot,
+  });
 }
 
 export async function drainHostedAssistantDeliveryControlPlaneWritesBestEffort(

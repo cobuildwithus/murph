@@ -824,8 +824,20 @@ anonymous SHA-256 lookup receipt keyed from the authenticated member, channel,
 and stable outbox dedupe key. One eligible outbox intent contributes one
 receipt regardless of provider chunk or message-id count. The receipt primary
 key makes retries, replay, and a crash after central commit count exactly once;
-a failed callback never changes provider delivery state and is retried from the
-existing outbox inventory outside the foreground reply critical path. The
+a failed callback never changes provider delivery state. Pending receipts reuse
+the outbox intent's existing `nextAttemptAt` clock: the durable delivery write
+arms the first attempt, callback failure defers it by one bounded minute, and a
+successful callback clears both the marker and deadline. Sent pending receipts
+participate in the ordinary assistant wake projection without blocking later
+delivery on the same conversation boundary. Idle runtime passes scan at most
+eight due receipts, checkpoint that recovery pass, and preserve an immediate
+wake for any remainder, so a cold restore or a backlog converges without another
+mailbox item or user action. All recovery remains outside the foreground reply
+critical path and introduces no second queue or state owner. The strict persisted
+outbox marker advances hosted runner state schema to version 17 before any runner
+invocation. A version-16 Worker rejects that Durable Object state before it can
+restore and quarantine the newer outbox record, making version 17 the
+Cloudflare/runner rollback floor once deployed state is established. The
 Telegram/email receipt contribution excludes message reactions and ephemeral
 progress sends:
 neither is an outbox-backed conversational delivery, and those progress paths

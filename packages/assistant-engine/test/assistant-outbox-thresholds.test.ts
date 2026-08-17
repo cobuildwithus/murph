@@ -1031,6 +1031,9 @@ describe('assistant outbox thresholds', () => {
     })
 
     expect(telegramSent.intent.messageVolumeReceiptRecordedAt).toBeNull()
+    expect(telegramSent.intent.nextAttemptAt).toBe(
+      telegramSent.intent.sentAt,
+    )
     expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(
       telegramSent.intent,
     )).toBe(true)
@@ -1040,6 +1043,8 @@ describe('assistant outbox thresholds', () => {
     )).toBe(false)
     expect(childOneSent.intent.messageVolumeReceiptRecordedAt).toBeNull()
     expect(childTwoSent.intent.messageVolumeReceiptRecordedAt).toBeNull()
+    expect(childOneSent.intent.nextAttemptAt).toBe(childOneSent.intent.sentAt)
+    expect(childTwoSent.intent.nextAttemptAt).toBe(childTwoSent.intent.sentAt)
     expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(
       childOneSent.intent,
     )).toBe(true)
@@ -1062,6 +1067,14 @@ describe('assistant outbox thresholds', () => {
     })).toBe(false)
 
     const receiptRecordedAt = '2026-08-15T19:10:00.000Z'
+    const retryAt = '2026-08-15T19:09:00.000Z'
+    const rescheduled = await outbox.rescheduleAssistantOutboxMessageVolumeReceipt({
+      dedupeKey: telegramSent.intent.dedupeKey,
+      intentId: telegramSent.intent.intentId,
+      nextAttemptAt: retryAt,
+      vault: vaultRoot,
+    })
+    expect(rescheduled?.nextAttemptAt).toBe(retryAt)
     await outbox.markAssistantOutboxMessageVolumeReceiptRecorded({
       channel: 'telegram',
       dedupeKey: telegramSent.intent.dedupeKey,
@@ -1076,6 +1089,7 @@ describe('assistant outbox thresholds', () => {
     })
 
     expect(replay.intent.messageVolumeReceiptRecordedAt).toBe(receiptRecordedAt)
+    expect(replay.intent.nextAttemptAt).toBeNull()
     expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(
       replay.intent,
     )).toBe(false)
@@ -1106,6 +1120,7 @@ describe('assistant outbox thresholds', () => {
       expect(intent).toMatchObject({
         delivery,
         deliveryConfirmationPending: false,
+        nextAttemptAt: null,
         sentAt: null,
         status: 'sending',
       })

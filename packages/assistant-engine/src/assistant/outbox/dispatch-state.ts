@@ -155,7 +155,10 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
         deliveryIdempotencyKey:
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: input.completedAt,
-        nextAttemptAt: null,
+        nextAttemptAt:
+          input.intent.messageVolumeReceiptRecordedAt === null
+            ? input.completedAt
+            : null,
         status: 'sending',
         delivery: input.delivery,
         lastError: createAssistantDeliveryConfirmationPendingError(),
@@ -309,7 +312,10 @@ export async function markAssistantOutboxIntentSent(input: {
         deliveryIdempotencyKey:
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: completedAt,
-        nextAttemptAt: null,
+        nextAttemptAt:
+          baseIntent.messageVolumeReceiptRecordedAt === null
+            ? baseIntent.nextAttemptAt ?? completedAt
+            : null,
         preparedDispatchToken: null,
         sentAt: completedAt,
         status: 'sent',

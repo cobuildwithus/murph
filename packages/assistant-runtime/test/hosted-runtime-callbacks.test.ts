@@ -66,6 +66,7 @@ const mocks = vi.hoisted(() => ({
   readVerifiedAssistantVaultFileBytes: vi.fn(),
   readVerifiedAssistantVaultImageBytes: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
+  rescheduleAssistantOutboxMessageVolumeReceipt: vi.fn(),
   saveAssistantOutboxIntentIfUnchanged: vi.fn(),
   setLinqMessageReaction: vi.fn(),
   setTelegramMessageReaction: vi.fn(),
@@ -130,6 +131,8 @@ vi.mock("@murphai/assistant-engine", async () => {
       mocks.readVerifiedAssistantVaultImageBytes,
     resetAssistantOutboxPreparedDispatchById:
       mocks.resetAssistantOutboxPreparedDispatchById,
+    rescheduleAssistantOutboxMessageVolumeReceipt:
+      mocks.rescheduleAssistantOutboxMessageVolumeReceipt,
     saveAssistantOutboxIntentIfUnchanged:
       mocks.saveAssistantOutboxIntentIfUnchanged,
     sendLinqMessage: mocks.sendLinqMessage,
@@ -225,6 +228,7 @@ import {
   drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
@@ -533,6 +537,9 @@ beforeEach(() => {
       messageVolumeReceiptRecordedAt: recordedAt,
     }),
   );
+  mocks.rescheduleAssistantOutboxMessageVolumeReceipt.mockResolvedValue({
+    nextAttemptAt: "2026-08-15T19:22:00.000Z",
+  });
   mocks.normalizeAssistantDeliveryError.mockImplementation((
     error: Error & {
       code?: string | null;
@@ -10248,6 +10255,14 @@ describe("hosted runtime callbacks", () => {
       expect(
         mocks.markAssistantOutboxMessageVolumeReceiptRecorded,
       ).not.toHaveBeenCalled();
+      expect(
+        mocks.rescheduleAssistantOutboxMessageVolumeReceipt,
+      ).toHaveBeenCalledWith({
+        dedupeKey: durableIntent.dedupeKey,
+        intentId: durableIntent.intentId,
+        nextAttemptAt: expect.any(String),
+        vault: HOSTED_WAKE.vaultRoot,
+      });
       expect(warn).toHaveBeenCalledWith(
         "Hosted outbound message-volume receipt recording failed.",
         { errorName: "Error" },
@@ -10309,6 +10324,74 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.markAssistantOutboxMessageVolumeReceiptRecorded).toHaveBeenCalledTimes(8);
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+
+    mocks.listAssistantOutboxIntents.mockResolvedValue(pendingIntents.slice(8));
+    await expect(queueHostedAssistantPendingMessageVolumeReceiptsForVault({
+      effectsPort: collectionInput.messageVolumeReceiptPort,
+      now: new Date("2026-08-15T19:31:00.000Z"),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).resolves.toBe(2);
+    await drainHostedAssistantDeliveryControlPlaneWritesBestEffort();
+
+    expect(recordOutboundMessageVolumeReceipt).toHaveBeenCalledTimes(10);
+    expect(mocks.markAssistantOutboxMessageVolumeReceiptRecorded).toHaveBeenCalledTimes(10);
+  });
+
+  it("uses sent receipt deadlines without delaying outbound delivery wakes", async () => {
+    const dueIntent = createPendingHostedDeliveryIntent({
+      dedupeKey: "c".repeat(40),
+      delivery: createDelivery({
+        providerMessageId: "provider_message_volume_due",
+      }),
+      intentId: "intent_message_volume_due",
+      messageVolumeReceiptRecordedAt: null,
+      nextAttemptAt: "2026-08-15T19:39:00.000Z",
+      status: "sent",
+    }) as AssistantOutboxIntent;
+    const futureIntent = createPendingHostedDeliveryIntent({
+      dedupeKey: "d".repeat(40),
+      delivery: createDelivery({
+        providerMessageId: "provider_message_volume_future",
+      }),
+      intentId: "intent_message_volume_future",
+      messageVolumeReceiptRecordedAt: null,
+      nextAttemptAt: "2026-08-15T19:45:00.000Z",
+      status: "sent",
+    }) as AssistantOutboxIntent;
+    const readyDeliveryIntent = createPendingHostedDeliveryIntent({
+      dedupeKey: "e".repeat(40),
+      delivery: null,
+      intentId: "intent_ready_delivery",
+      nextAttemptAt: "2026-08-15T19:38:00.000Z",
+      status: "pending",
+    }) as AssistantOutboxIntent;
+    const recordOutboundMessageVolumeReceipt = vi.fn(async () => ({
+      recordedAt: "2026-08-15T19:40:01.000Z",
+    }));
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      dueIntent,
+      futureIntent,
+      readyDeliveryIntent,
+    ]);
+
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date("2026-08-15T19:40:00.000Z"),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).resolves.toBe("2026-08-15T19:38:00.000Z");
+    await expect(queueHostedAssistantPendingMessageVolumeReceiptsForVault({
+      effectsPort: { recordOutboundMessageVolumeReceipt },
+      now: new Date("2026-08-15T19:40:00.000Z"),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).resolves.toBe(1);
+
+    await drainHostedAssistantDeliveryControlPlaneWritesBestEffort();
+    expect(recordOutboundMessageVolumeReceipt).toHaveBeenCalledOnce();
+    expect(recordOutboundMessageVolumeReceipt).toHaveBeenCalledWith({
+      channel: "telegram",
+      dedupeKey: dueIntent.dedupeKey,
+    }, {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("routes persisted Telegram reaction intents without payload operations", async () => {

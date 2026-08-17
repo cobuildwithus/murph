@@ -67,6 +67,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(),
   readAssistantInputEvent: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
@@ -155,6 +156,8 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
     mocks.drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch:
     mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault:
+    mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault,
   resetHostedPreparedAssistantDeliveryEffects:
     mocks.resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
@@ -591,6 +594,7 @@ beforeEach(() => {
     PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE,
   );
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
+  mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault.mockResolvedValue(0);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
   mocks.readAssistantAutomationState.mockResolvedValue({
     autoReply: [],
@@ -1922,6 +1926,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+  });
+
+  it("checkpoints due message-volume receipt recovery without a system mailbox item", async () => {
+    mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault.mockResolvedValueOnce(1);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:01:00.000Z",
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(
+      mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault,
+    ).toHaveBeenCalledWith({
+      effectsPort: expect.objectContaining({
+        recordOutboundMessageVolumeReceipt: expect.any(Function),
+      }),
+      now: new Date("2026-04-27T00:00:00.000Z"),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      progressed: true,
+    }));
   });
 
   it("keeps browser-vault refresh control work behind fresh conversation input", async () => {
@@ -18913,7 +18944,9 @@ function createPhaseInput(input: {
       },
       effectsPort: {
         readRawEmailMessage: vi.fn(async () => null),
-        recordOutboundMessageVolumeReceipt: vi.fn(async () => ({ recorded: true })),
+        recordOutboundMessageVolumeReceipt: vi.fn(async () => ({
+          recordedAt: "2026-04-27T00:00:00.000Z",
+        })),
         sendEmail: vi.fn(async () => undefined),
       },
       ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
@@ -18951,7 +18984,9 @@ function createPhaseInput(input: {
         },
         effectsPort: {
           readRawEmailMessage: vi.fn(async () => null),
-          recordOutboundMessageVolumeReceipt: vi.fn(async () => ({ recorded: true })),
+          recordOutboundMessageVolumeReceipt: vi.fn(async () => ({
+            recordedAt: "2026-04-27T00:00:00.000Z",
+          })),
           sendEmail: vi.fn(async () => undefined),
         },
         ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
