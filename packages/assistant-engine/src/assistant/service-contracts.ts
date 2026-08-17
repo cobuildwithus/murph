@@ -84,6 +84,14 @@ export interface AssistantSessionResolutionFields {
   vault: string
 }
 
+export interface AssistantScheduledWorkoutDirectReplyAuthority {
+  acceptedAt: string
+  authorizedAssistantInputId: string
+  operationId: string
+  reminderSentAt: string
+  scheduledOccurrenceAt: string
+}
+
 export interface AssistantHostedDeliveryIdempotencyContext {
   assistantTurnOrdinal: number | string
   conversationId?: string | null
@@ -190,6 +198,10 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   // Generic engine-owned invocation identity. This grants no side effect by
   // itself and is never model supplied.
   scheduledInvocationAuthority?: HostedRuntimeScheduledAutomationAuthority | null
+  // Engine-owned authority for one exact accepted direct reply to one exact
+  // scheduled workout reminder. Tool arguments never supply or override it.
+  scheduledWorkoutDirectReplyAuthority?:
+    AssistantScheduledWorkoutDirectReplyAuthority | null
   // Exact engine-owned occurrence for this scheduled turn. This is ephemeral
   // decision context, not persisted automation or session state.
   scheduledOccurrenceAt?: string | null

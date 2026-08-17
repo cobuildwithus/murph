@@ -272,6 +272,11 @@ import {
   MURPH_ASK_GROK_TOOL,
   parseAskGrokArguments,
 } from './dynamic-tools/ask-grok.js'
+import {
+  executeScheduledWorkoutRolloverDynamicTool,
+  readScheduledWorkoutRolloverDynamicToolRequest,
+  type ScheduledWorkoutRolloverDynamicToolRequest,
+} from './dynamic-tools/scheduled-workout-rollover.js'
 import type {
   AskGrokToolArgs,
   AskGrokToolRuntime,
@@ -1213,6 +1218,7 @@ export type MurphDynamicToolRequest =
   | PendingVaultFilesDynamicToolRequest
   | GroupRoomModelDynamicToolRequest
   | AssistantStyleDynamicToolRequest
+  | ScheduledWorkoutRolloverDynamicToolRequest
   | {
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
@@ -1542,6 +1548,15 @@ export function readMurphDynamicToolRequest(
   })
   if (assistantStyleRequest) {
     return assistantStyleRequest
+  }
+
+  const scheduledWorkoutRolloverRequest =
+    readScheduledWorkoutRolloverDynamicToolRequest({
+      arguments: request.arguments,
+      tool: request.tool,
+    })
+  if (scheduledWorkoutRolloverRequest) {
+    return scheduledWorkoutRolloverRequest
   }
 
   const phoneCallRequest = readPhoneCallDynamicToolRequest({
@@ -2129,6 +2144,11 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-assistant-style-arguments':
       return toolTextResult(false, 'invalid assistant style arguments')
+    case 'invalid-scheduled-workout-rollover-arguments':
+      return invalidDynamicToolArgumentsResult(
+        'invalid_scheduled_workout_rollover_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-generate-image-arguments':
       return toolTextResult(false, 'invalid image generation arguments')
     case 'invalid-computer-arguments':
@@ -2405,6 +2425,16 @@ export async function executeMurphDynamicToolRequest(input: {
         vaultRoot: input.vaultRoot ?? null,
       })
     }
+    case 'scheduled-workout-rollover':
+      return await executeScheduledWorkoutRolloverDynamicTool({
+        authority:
+          input.hostedToolContext
+            ?.currentScheduledWorkoutDirectReplyAuthority?.() ?? null,
+        invocationScope:
+          input.hostedToolContext?.currentInvocationScope?.() ?? null,
+        request: input.request,
+        vaultRoot: input.vaultRoot ?? null,
+      })
     case 'send-vault-file': {
       const replyRequiredResult = (
         success: boolean,

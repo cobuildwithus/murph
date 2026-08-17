@@ -62,8 +62,8 @@ describe('assistant live workout card skill', () => {
       'start every planned set as an unlogged placeholder',
     )
     expect(skill).toContain('vault-cli workout set log')
-    expect(skill).toContain('vault-cli workout set log-scheduled')
-    expect(skill).toContain('scheduled-direct-reply')
+    expect(skill).toContain('murph.log_scheduled_workout_set')
+    expect(skill).toContain('host binds reply authority')
     expect(skill).toContain('Never select the routine, exercise, or set from conversational recency')
     expect(skill).toContain('vault-cli workout finish')
     expect(skill).toContain('Never use `workout format log` to start a live workout')

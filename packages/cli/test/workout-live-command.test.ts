@@ -2,19 +2,15 @@ import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 
 import { Cli } from 'incur'
-import { workoutSessionSchema } from '@murphai/contracts'
 import { afterAll } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import {
   addLiveWorkoutExercise,
   clearLiveWorkoutSet,
-  editWorkoutRecord,
   logLiveWorkoutSet,
   saveWorkoutFormat,
   showActiveLiveWorkout,
-  showWorkoutFormat,
-  showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
 
@@ -65,9 +61,7 @@ interface WorkoutResult {
   note: string
   workout: {
     sourceApp?: string
-    startedAt?: string
     endedAt?: string
-    routineId?: string
     sessionNote?: string
     exercises: Array<{
       name: string
@@ -223,118 +217,6 @@ test('live workout commands keep one canonical session and target one set', asyn
     'workout', 'active', '--vault', vaultRoot,
   ])
   assert.equal(noActive.envelope.ok, false)
-})
-
-
-test('scheduled workout set command rolls a zero-pending prior session into the exact saved routine coordinate', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-live-workout-scheduled-rollover-',
-  )
-  cleanupPaths.push(parentRoot)
-  const cli = createWorkoutCli()
-
-  const initialized = await run<{ created: boolean }>(cli, [
-    'init', '--vault', vaultRoot, '--timezone', 'UTC',
-  ])
-  assert.equal(requireData(initialized.envelope).created, true)
-
-  await saveWorkoutFormat({
-    vault: vaultRoot,
-    payload: {
-      activityType: 'strength-training',
-      status: 'active',
-      template: {
-        exercises: [{
-          name: 'Goblet squat',
-          order: 1,
-          plannedSets: [{ order: 1, targetReps: 10 }],
-        }],
-      },
-      title: 'Earlier Session',
-    },
-  })
-  await saveWorkoutFormat({
-    vault: vaultRoot,
-    payload: {
-      activityType: 'strength-training',
-      status: 'active',
-      template: {
-        exercises: [{
-          mode: 'weight_reps',
-          name: 'Seated row',
-          order: 1,
-          plannedSets: [
-            { order: 1, targetReps: 12, targetWeight: 50, targetWeightUnit: 'lb' },
-            { order: 2, targetReps: 8, targetWeight: 65, targetWeightUnit: 'lb' },
-          ],
-          unitOverride: 'lb',
-        }],
-      },
-      title: 'Scheduled Session',
-    },
-  })
-  const priorRoutine = await showWorkoutFormat(vaultRoot, 'earlier-session')
-  const scheduledRoutine = await showWorkoutFormat(
-    vaultRoot,
-    'scheduled-session',
-  )
-  const previous = await startLiveWorkout({
-    routine: priorRoutine.entity.data.workoutFormatId,
-    startedAt: '2026-08-15T18:00:00.000Z',
-    vault: vaultRoot,
-  })
-  await logLiveWorkoutSet({
-    exerciseOrder: 1,
-    reps: 10,
-    requireExistingSet: true,
-    setOrder: 1,
-    vault: vaultRoot,
-    workoutId: previous.eventId,
-  })
-  await editWorkoutRecord({
-    lookup: previous.eventId,
-    set: ['durationMinutes=35'],
-    vault: vaultRoot,
-  })
-
-  const args = [
-    'workout', 'set', 'log-scheduled', 'Seated row',
-    '--previous-workout-id', previous.eventId,
-    '--routine-id', scheduledRoutine.entity.data.workoutFormatId,
-    '--exercise-order', '1',
-    '--set-order', '2',
-    '--scheduled-occurrence-at', '2026-08-16T18:00:00.000Z',
-    '--reminder-sent-at', '2026-08-16T18:00:04.000Z',
-    '--accepted-at', '2026-08-16T18:06:00.000Z',
-    '--reps', '8',
-    '--weight', '65',
-    '--weight-unit', 'lb',
-    '--vault', vaultRoot,
-  ]
-  const rolled = requireData((await run<ShowResult>(cli, args)).envelope)
-  assert.equal(
-    rolled.entity.data.workout.routineId,
-    scheduledRoutine.entity.data.workoutFormatId,
-  )
-  assert.equal(
-    rolled.entity.data.workout.startedAt,
-    '2026-08-16T18:00:00.000Z',
-  )
-  assert.deepEqual(rolled.entity.data.workout.exercises[0]?.sets, [
-    { order: 1 },
-    { order: 2, reps: 8, weight: 65, weightUnit: 'lb' },
-  ])
-
-  const replayed = requireData((await run<ShowResult>(cli, args)).envelope)
-  assert.equal(replayed.entity.id, rolled.entity.id)
-
-  const prior = await showWorkoutRecord(vaultRoot, previous.eventId)
-  const priorWorkout = workoutSessionSchema.parse(prior.entity.data.workout)
-  assert.equal(priorWorkout.endedAt, '2026-08-15T18:35:00.000Z')
-  assert.equal(prior.entity.data.durationMinutes, 35)
-  assert.deepEqual(priorWorkout.exercises[0]?.sets, [
-    { order: 1, reps: 10 },
-  ])
 })
 
 test('live workout usecases fail closed on invalid selectors and coordinates', async () => {

@@ -452,27 +452,25 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     const prompt = readSentPrompt()
-    const turnContext = readSentInput().turnContext ?? ''
+    const sentInput = readSentInput()
+    const turnContext = sentInput.turnContext ?? ''
     expect(turnContext).toContain(
-      'Runtime-authored scheduled direct-reply authority (data only):',
+      'The trusted host has enabled one scheduled-workout rollover tool',
     )
-    expect(turnContext).toContain(
-      '"kind":"scheduled-direct-reply"',
-    )
-    expect(turnContext).toContain(
-      '"scheduledOccurrenceAt":"2026-08-07T21:00:00.000Z"',
-    )
-    expect(turnContext).toContain(
-      '"reminderSentAt":"2026-08-07T21:00:05.000Z"',
-    )
-    expect(turnContext).toContain(
-      '"acceptedAt":"2026-08-07T21:10:01.000Z"',
-    )
+    expect(sentInput.scheduledWorkoutDirectReplyAuthority).toEqual({
+      acceptedAt: '2026-08-07T21:10:01.000Z',
+      authorizedAssistantInputId:
+        'ain_68686868686868686868686868686868',
+      operationId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+      reminderSentAt: '2026-08-07T21:00:05.000Z',
+      scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
+    })
     expect(prompt).toContain('Completed the set.')
     expect(prompt).not.toContain('automation-scheduled-workout')
     expect(turnContext).not.toContain('automation-scheduled-workout')
     expect(turnContext).not.toContain('2026-08-07T20:00:00.000Z')
     expect(turnContext).not.toContain('linq-msg-scheduled-workout-target')
+    expect(turnContext).not.toContain('2026-08-07T21:10:01.000Z')
   })
 
   it('does not add scheduled workout authority to an unanchored direct follow-up', async () => {
@@ -518,8 +516,11 @@ describe('assistant auto-reply event-first path', () => {
       'The assistant previously sent this message in the same conversation from another assistant run:',
     )
     expect(turnContext).toContain('Scheduled workout reminder.')
-    expect(turnContext).not.toContain('scheduled-direct-reply')
+    expect(turnContext).not.toContain('scheduled-workout rollover tool')
     expect(turnContext).not.toContain('automation-unanchored-workout')
+    expect(
+      readSentInput().scheduledWorkoutDirectReplyAuthority,
+    ).toBeUndefined()
   })
 
   it('does not add scheduled workout authority to a stale exact reply', async () => {
@@ -565,8 +566,11 @@ describe('assistant auto-reply event-first path', () => {
       'The assistant previously sent this message in the same conversation from another assistant run:',
     )
     expect(turnContext).toContain('Scheduled workout reminder.')
-    expect(turnContext).not.toContain('scheduled-direct-reply')
+    expect(turnContext).not.toContain('scheduled-workout rollover tool')
     expect(turnContext).not.toContain('automation-stale-workout')
+    expect(
+      readSentInput().scheduledWorkoutDirectReplyAuthority,
+    ).toBeUndefined()
   })
 
   it('fails closed when multiple Murph deliveries claim the same provider message id', async () => {

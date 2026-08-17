@@ -25,6 +25,7 @@ import type { AssistantProviderUsageDraft } from './providers/types.js'
 import { recordAssistantUsageEvent } from './service-usage.js'
 import type {
   AssistantMessageInput,
+  AssistantScheduledWorkoutDirectReplyAuthority,
 } from './service-contracts.js'
 import type {
   AssistantConnectedAppsPort,
@@ -170,6 +171,8 @@ export interface AssistantHostedToolContext {
   claimSubscriptionAssistantInputId?(): string | null
   claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeGroupEmailScheduledAuthority | null
+  currentScheduledWorkoutDirectReplyAuthority?():
+    AssistantScheduledWorkoutDirectReplyAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
   closeGroupEmailCapability?(): void
   recordGroupEmailSendResult?(
@@ -528,6 +531,11 @@ export function createAssistantHostedToolContext(input: {
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
+    },
+    currentScheduledWorkoutDirectReplyAuthority: () => {
+      const deliveryContext = readDeliveryContext()
+      return deliveryContext.messageInput
+        .scheduledWorkoutDirectReplyAuthority ?? null
     },
     currentInvocationScope: readCurrentInvocationScope,
     closeGroupEmailCapability: groupEmailOutboxTool?.closeCapability,

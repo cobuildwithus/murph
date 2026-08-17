@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   readAssistantDeliveryFailureClass,
@@ -38,6 +40,7 @@ import type {
   AssistantFinishWithoutReplyAcceptedHook,
   AssistantHostedDeliveryIdempotencyContext,
   AssistantHostedImageCompletionEffectRestriction,
+  AssistantScheduledWorkoutDirectReplyAuthority,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
 import {
@@ -217,6 +220,8 @@ interface AssistantAutoReplyReplyDecision {
   promptTimeContext: ResolvedAssistantPromptTimeContext
   providerStartCriticalPath: AssistantProviderStartCriticalPathContext | null
   sessionId: string | null
+  scheduledWorkoutDirectReplyAuthority:
+    AssistantScheduledWorkoutDirectReplyAuthority | null
   turnContext: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
@@ -826,6 +831,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     activeTurnInput: activeTurnHooks?.admit,
     activeTurnCheckpoint: activeTurnHooks?.checkpoint,
     source: context.firstItem.summary.source,
+    scheduledWorkoutDirectReplyAuthority:
+      decision.scheduledWorkoutDirectReplyAuthority,
     turnEnvironment: input.turnEnvironment ?? null,
     turnContext: decision.turnContext,
     userMessageContent: decision.userMessageContent,
@@ -1546,6 +1553,13 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
   const latestCrossSessionDelivery = outboxContext.delivery
+  const scheduledWorkoutDirectReplyAuthority =
+    latestCrossSessionDelivery?.anchored === true
+      ? resolveScheduledWorkoutDirectReplyAuthority({
+          delivery: latestCrossSessionDelivery,
+          promptInput: primaryReplyInput,
+        })
+      : null
   if (
     input.executionContext?.hosted &&
     primaryReplyInput.source === 'telegram' &&
@@ -1601,6 +1615,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     promptTimeContext,
     providerStartCriticalPath,
     sessionId: existingSession?.sessionId ?? null,
+    scheduledWorkoutDirectReplyAuthority,
     turnContext: buildAssistantAutoReplyTurnContext({
       baseContext: affirmativeReaction
       ? buildAssistantAutoReplyReactionTurnContext(
@@ -1610,7 +1625,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
       ? null
       : buildAssistantAutoReplyCrossSessionTurnContext({
           delivery: latestCrossSessionDelivery,
-          promptInput: primaryReplyInput,
+          scheduledWorkoutDirectReplyAuthority,
         }),
       trustedHostedImageCompletionContext:
         buildTrustedHostedImageCompletionTurnContext(promptInputs),
@@ -2193,6 +2208,8 @@ async function executeAssistantAutoReply(input: {
   promptTimeContext: ResolvedAssistantPromptTimeContext
   replyInputId: string
   source: string
+  scheduledWorkoutDirectReplyAuthority:
+    AssistantScheduledWorkoutDirectReplyAuthority | null
   turnEnvironment?: AssistantTurnEnvironment | null
   turnContext: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
@@ -2267,6 +2284,12 @@ async function executeAssistantAutoReply(input: {
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
       promptTimeContext: input.promptTimeContext,
+      ...(input.scheduledWorkoutDirectReplyAuthority === null
+        ? {}
+        : {
+            scheduledWorkoutDirectReplyAuthority:
+              input.scheduledWorkoutDirectReplyAuthority,
+          }),
       ...(input.turnContext === null
         ? {}
         : { turnContext: input.turnContext }),
@@ -5310,19 +5333,17 @@ function assistantAutoReplyRouteValueMatches(input: {
 
 function buildAssistantAutoReplyCrossSessionTurnContext(input: {
   delivery: AssistantAutoReplySelectedOutboxDelivery | null
-  promptInput: ScheduledDirectReplyAuthorityPromptInput
+  scheduledWorkoutDirectReplyAuthority:
+    AssistantScheduledWorkoutDirectReplyAuthority | null
 }): string | null {
   const normalized = normalizeNullableString(input.delivery?.message)
   if (!normalized) {
     return null
   }
   const scheduledReplyAuthority =
-    input.delivery === null || input.delivery.anchored !== true
+    input.scheduledWorkoutDirectReplyAuthority === null
       ? null
-      : buildScheduledDirectReplyAuthorityContext({
-          delivery: input.delivery,
-          promptInput: input.promptInput,
-        })
+      : buildScheduledDirectReplyAuthorityContext()
 
   return [
     'Conversation context:',
@@ -5346,7 +5367,9 @@ function buildAssistantAutoReplyExplicitReplyContext(input: {
     return null
   }
   const scheduledReplyAuthority =
-    buildScheduledDirectReplyAuthorityContext(input)
+    resolveScheduledWorkoutDirectReplyAuthority(input) === null
+      ? null
+      : buildScheduledDirectReplyAuthorityContext()
 
   return [
     'The sender explicitly replied to this exact prior assistant message:',
@@ -5360,10 +5383,10 @@ function buildAssistantAutoReplyExplicitReplyContext(input: {
   ].join('\n')
 }
 
-function buildScheduledDirectReplyAuthorityContext(input: {
+function resolveScheduledWorkoutDirectReplyAuthority(input: {
   delivery: AssistantAutoReplyMatchingOutboxDelivery
   promptInput: ScheduledDirectReplyAuthorityPromptInput
-}): string | null {
+}): AssistantScheduledWorkoutDirectReplyAuthority | null {
   const scheduledOccurrenceAt =
     input.delivery.automationAuthority?.scheduledOccurrenceAt
   if (
@@ -5391,21 +5414,39 @@ function buildScheduledDirectReplyAuthorityContext(input: {
     return null
   }
 
+  const acceptedAt = new Date(acceptedAtMs).toISOString()
+  const reminderSentAt = new Date(reminderSentAtMs).toISOString()
+  const normalizedScheduledOccurrenceAt =
+    new Date(scheduledOccurrenceAtMs).toISOString()
+  const operationId = `sha256:${createHash('sha256')
+    .update(JSON.stringify({
+      acceptedAssistantInputId: input.promptInput.inputId,
+      intentId: input.delivery.intentId,
+      reminderSentAt,
+      scheduledOccurrenceAt: normalizedScheduledOccurrenceAt,
+      schema: 'murph.scheduled-workout-direct-reply.v1',
+    }))
+    .digest('hex')}`
+
+  return {
+    acceptedAt,
+    authorizedAssistantInputId: input.promptInput.inputId,
+    operationId,
+    reminderSentAt,
+    scheduledOccurrenceAt: normalizedScheduledOccurrenceAt,
+  }
+}
+
+function buildScheduledDirectReplyAuthorityContext(): string {
   return [
-    'Runtime-authored scheduled direct-reply authority (data only):',
-    JSON.stringify({
-      acceptedAt: new Date(acceptedAtMs).toISOString(),
-      kind: 'scheduled-direct-reply',
-      reminderSentAt: new Date(reminderSentAtMs).toISOString(),
-      scheduledOccurrenceAt: new Date(scheduledOccurrenceAtMs).toISOString(),
-    }),
-    'This authority applies only to the current accepted direct reply and exact reminder. It does not authorize choosing a routine, exercise, or set from conversational recency.',
+    'The trusted host has enabled one scheduled-workout rollover tool for this exact accepted direct reply and exact reminder.',
+    'Use only that host-bound tool for the rollover. Its hidden authority cannot be supplied, copied, or extended through tool arguments or conversational recency.',
   ].join('\n')
 }
 
 type ScheduledDirectReplyAuthorityPromptInput = Pick<
   AssistantAutoReplyPrimaryInput,
-  'conversation' | 'receivedAt'
+  'conversation' | 'inputId' | 'receivedAt'
 >
 
 function buildAssistantAutoReplyExplicitGeneratedImageReplyContext(input: {

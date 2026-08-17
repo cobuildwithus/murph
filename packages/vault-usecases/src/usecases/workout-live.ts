@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto'
-
 import {
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutExercise,
@@ -47,7 +45,6 @@ import {
   findActiveLiveWorkouts,
   findLiveWorkoutRolloverState,
   findLiveWorkoutsForMemberAction,
-  normalizeExerciseName,
   normalizeLiveWorkoutActivityType,
   normalizeLiveWorkoutId,
   normalizeOptionalText,
@@ -659,6 +656,7 @@ interface LogLiveWorkoutSetLockOptions {
   durationAt?: string
   lastMemberActionId?: string
   rejectLoggedCorrection?: boolean
+  scheduledRolloverOperationId?: string
 }
 
 async function logLiveWorkoutSetWithLockHeld(
@@ -699,6 +697,7 @@ async function logLiveWorkoutSetWithLockHeld(
     update.exercises,
     options.lastMemberActionId,
     options.durationAt,
+    options.scheduledRolloverOperationId,
   )
 }
 
@@ -855,16 +854,11 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
   const preparedStart = scheduledWorkout === null
     ? await prepareScheduledLiveWorkoutStart(input)
     : null
-  const actionIds = deriveScheduledLiveWorkoutActionIds({
-    input,
-    planWorkout: scheduledWorkout ?? preparedStart!.workout,
-    setPatch,
-  })
   const boundStart = preparedStart === null
     ? null
-    : bindScheduledLiveWorkoutAction(
+    : bindScheduledLiveWorkoutOperation(
         preparedStart,
-        actionIds.scheduled,
+        input.operationId,
       )
 
   if (previousWorkout.endedAt === undefined) {
@@ -885,7 +879,7 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
         vault: input.vault,
         workoutId: previousShown.entity.id,
       },
-      { lastMemberActionId: actionIds.previous },
+      { scheduledRolloverOperationId: input.operationId },
     )
   } else {
     if (previousWorkout.endedAt !== previousEndedAt) {
@@ -894,10 +888,12 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
         'The prior workout completion does not match this rollover.',
       )
     }
-    if (previousWorkout.lastMemberActionId !== actionIds.previous) {
+    if (
+      previousWorkout.scheduledRolloverOperationId !== input.operationId
+    ) {
       throw new VaultCliError(
         'command_failed',
-        'The prior workout was not closed by this scheduled rollover action.',
+        'The prior workout was not closed by this scheduled rollover operation.',
       )
     }
 
@@ -940,9 +936,9 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
     input,
     `Workout ${targetShown.entity.id}`,
   )
-  assertScheduledLiveWorkoutAction(
+  assertScheduledLiveWorkoutOperation(
     targetWorkout,
-    actionIds.scheduled,
+    input.operationId,
     `Workout ${targetShown.entity.id}`,
   )
   const target = prepareLiveWorkoutSetUpdate(targetWorkout, {
@@ -972,8 +968,8 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
     },
     {
       durationAt: input.acceptedAt,
-      lastMemberActionId: actionIds.scheduled,
       rejectLoggedCorrection: true,
+      scheduledRolloverOperationId: input.operationId,
     },
   )
 }
@@ -1002,6 +998,16 @@ function normalizeScheduledLiveWorkoutSetInput(
     throw new VaultCliError(
       'invalid_option',
       'Scheduled workout exercise order must be a positive integer.',
+    )
+  }
+  const operationId = requireNonEmptyText(
+    input.operationId,
+    'Scheduled workout rollover operation id is required.',
+  )
+  if (!/^sha256:[a-f0-9]{64}$/u.test(operationId)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Scheduled workout rollover operation id is invalid.',
     )
   }
 
@@ -1039,6 +1045,7 @@ function normalizeScheduledLiveWorkoutSetInput(
       'Scheduled workout exercise name is required.',
     ),
     previousWorkoutId,
+    operationId,
     reminderSentAt,
     routineId,
     scheduledOccurrenceAt,
@@ -1069,13 +1076,13 @@ async function prepareScheduledLiveWorkoutStart(
   return prepared
 }
 
-function bindScheduledLiveWorkoutAction(
+function bindScheduledLiveWorkoutOperation(
   prepared: PreparedLiveWorkoutStart,
-  actionId: string,
+  operationId: string,
 ): PreparedLiveWorkoutStart {
   const workout = workoutSessionSchema.parse({
     ...prepared.workout,
-    lastMemberActionId: actionId,
+    scheduledRolloverOperationId: operationId,
   })
   return {
     draft: { ...prepared.draft, workout },
@@ -1083,15 +1090,15 @@ function bindScheduledLiveWorkoutAction(
   }
 }
 
-function assertScheduledLiveWorkoutAction(
+function assertScheduledLiveWorkoutOperation(
   workout: WorkoutSession,
-  actionId: string,
+  operationId: string,
   label: string,
 ): void {
-  if (workout.lastMemberActionId !== actionId) {
+  if (workout.scheduledRolloverOperationId !== operationId) {
     throw new VaultCliError(
       'command_failed',
-      `${label} was not started by this scheduled rollover action.`,
+      `${label} was not started by this scheduled rollover operation.`,
     )
   }
 }
@@ -1163,89 +1170,6 @@ function resolveScheduledRolloverPreviousEndedAt(input: {
   return new Date(endedAtMs).toISOString()
 }
 
-function deriveScheduledLiveWorkoutActionIds(input: {
-  input: NormalizedScheduledLiveWorkoutSetInput
-  planWorkout: WorkoutSession
-  setPatch: Partial<WorkoutSet>
-}): { previous: string; scheduled: string } {
-  const material = JSON.stringify({
-    acceptedAt: input.input.acceptedAt,
-    exerciseName: normalizeExerciseName(input.input.exerciseName),
-    exerciseOrder: input.input.exerciseOrder,
-    plan: projectScheduledLiveWorkoutPlan(
-      input.planWorkout,
-      input.input,
-      input.setPatch,
-    ),
-    previousWorkoutId: input.input.previousWorkoutId,
-    reminderSentAt: input.input.reminderSentAt,
-    result: input.setPatch,
-    routineId: input.input.routineId,
-    scheduledOccurrenceAt: input.input.scheduledOccurrenceAt,
-    setOrder: input.input.setOrder,
-  })
-  return {
-    previous: deriveScheduledLiveWorkoutMarker(material, 'previous'),
-    scheduled: deriveScheduledLiveWorkoutMarker(material, 'scheduled'),
-  }
-}
-
-function deriveScheduledLiveWorkoutMarker(
-  material: string,
-  role: 'previous' | 'scheduled',
-): string {
-  const hex = createHash('sha256')
-    .update(`scheduled-live-workout-rollover:v1:${role}:${material}`)
-    .digest('hex')
-    .slice(0, 32)
-    .split('')
-  hex[12] = '5'
-  hex[16] = ((Number.parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16)
-  return memberActionIdV1Schema.parse(
-    `${hex.slice(0, 8).join('')}-${hex.slice(8, 12).join('')}-${hex.slice(12, 16).join('')}-${hex.slice(16, 20).join('')}-${hex.slice(20).join('')}`,
-  )
-}
-
-function projectScheduledLiveWorkoutPlan(
-  workout: WorkoutSession,
-  input: NormalizedScheduledLiveWorkoutSetInput,
-  setPatch: Partial<WorkoutSet>,
-) {
-  return {
-    exercises: workout.exercises
-      .slice()
-      .sort((left, right) => left.order - right.order)
-      .map((exercise) => ({
-        groupId: exercise.groupId ?? null,
-        mode: exercise.mode ?? null,
-        name: exercise.name,
-        note: exercise.note ?? null,
-        order: exercise.order,
-        sets: exercise.sets
-          .slice()
-          .sort((left, right) => left.order - right.order)
-          .map((set) => ({
-            order: set.order,
-            type:
-              exercise.order === input.exerciseOrder &&
-              normalizeExerciseName(exercise.name) ===
-                normalizeExerciseName(input.exerciseName) &&
-              set.order === input.setOrder &&
-              setPatch.type !== undefined
-                ? setPatch.type
-                : set.type ?? null,
-          })),
-        sourceExerciseId: exercise.sourceExerciseId ?? null,
-        unitOverride: exercise.unitOverride ?? null,
-      })),
-    routineId: workout.routineId ?? null,
-    routineName: workout.routineName ?? null,
-    sessionNote: workout.sessionNote ?? null,
-    sourceApp: workout.sourceApp ?? null,
-    startedAt: workout.startedAt ?? null,
-  }
-}
-
 export async function clearLiveWorkoutSet(input: ClearLiveWorkoutSetInput) {
   return withLiveWorkoutMutationLock(input.vault, () =>
     clearLiveWorkoutSetWithLockHeld(input),
@@ -1291,6 +1215,7 @@ export async function finishLiveWorkout(input: FinishLiveWorkoutInput) {
 
 interface FinishLiveWorkoutLockOptions {
   lastMemberActionId?: string
+  scheduledRolloverOperationId?: string
 }
 
 async function finishLiveWorkoutWithLockHeld(
@@ -1330,6 +1255,11 @@ async function finishLiveWorkoutWithLockHeld(
   ]
   if (options.lastMemberActionId !== undefined) {
     set.push(`workout.lastMemberActionId=${options.lastMemberActionId}`)
+  }
+  if (options.scheduledRolloverOperationId !== undefined) {
+    set.push(
+      `workout.scheduledRolloverOperationId=${options.scheduledRolloverOperationId}`,
+    )
   }
 
   return editWorkoutRecord({

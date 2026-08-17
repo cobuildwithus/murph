@@ -86,6 +86,7 @@ export interface LogScheduledLiveWorkoutSetInput
   acceptedAt: string
   exerciseName: string
   exerciseOrder: number
+  operationId: string
   previousWorkoutId: string
   reminderSentAt: string
   routineId: string

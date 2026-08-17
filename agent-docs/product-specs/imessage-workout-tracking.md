@@ -186,12 +186,15 @@ explicit-finish rule. The scheduled occurrence must belong to an active
 canonical automation revision, its exact provider-accepted reminder must be the
 native reply target in a direct conversation, and the accepted inbound reply
 must arrive in order. Occurrence-to-delivery and delivery-to-reply are each
-bounded to one hour. Runtime exposes only those three timestamps as
-`scheduled-direct-reply` data; automation identity and provider message identity
-do not enter the model prompt. The exact reminder and current reply must still
-uniquely establish a canonical saved-routine id, exercise name and
-order, existing set order, and at least one member-stated numeric actual.
-Conversational recency is not authority.
+bounded to one hour. Runtime retains those timestamps in engine-owned authority
+bound to the exact accepted input and one stable opaque operation id. None of
+the timestamps, automation identity, provider message
+identity, or operation identity enters the model prompt. The provider sees only
+that one host tool is available and must still supply a canonical saved-routine
+id, exercise name and order, existing set order, and at least one
+member-stated numeric actual. Conversational recency is not authority. The host
+injects the trusted timestamps and operation id after rechecking that the tool
+call still belongs to the exact direct accepted input.
 
 The existing live-workout mutation owner performs rollover under its canonical
 `events/live-workout-session` lock. It admits only the explicitly named prior
@@ -204,14 +207,16 @@ actuals, types, and notes, starts the saved routine at the scheduled
 occurrence with targetless actual placeholders, and writes only the exact
 authorized set at the accepted-reply time. Saved targets remain in the format.
 
-Rollover is one composite command, not assistant-authored finish/start/log
-sequencing. Deterministic per-session action markers on the two participating sessions
-let replay converge after a persisted close, start, or exact set write without
-a receipt, queue, schema, or second state owner. A pending prior coordinate,
-zero-set prior, stale or missing reply authority, note-only result,
-coordinate mismatch, more than one matching scheduled session, unrelated active
-workout, or marker mismatch rejects without closing, starting, correcting, or
-retargeting another workout. Historical sessions are not repaired.
+Rollover is one host-bound composite tool, not public CLI surface or
+assistant-authored finish/start/log sequencing. One dedicated scheduled-rollover
+operation receipt on the two participating sessions lets replay converge after
+a persisted close, start, or exact set write without overwriting the native
+member-action replay receipt, adding a queue, or creating a second state owner.
+A pending prior coordinate, zero-set prior, stale or missing reply authority,
+note-only result, coordinate mismatch, more than one matching scheduled
+session, unrelated active workout, or operation-receipt mismatch rejects
+without closing, starting, correcting, or retargeting another workout.
+Historical sessions are not repaired.
 
 ## Direct action loop
 

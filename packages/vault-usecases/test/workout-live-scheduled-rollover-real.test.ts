@@ -2,8 +2,14 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { workoutSessionSchema } from '@murphai/contracts'
+import {
+  type WorkoutLiveApplyMemberActionV1,
+  workoutSessionSchema,
+} from '@murphai/contracts'
 import { initializeVault } from '@murphai/core'
+import {
+  deriveWorkoutActionBinding,
+} from '@murphai/operator-config/workout-action-binding'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const faults = vi.hoisted(() => ({
@@ -14,8 +20,8 @@ const faults = vi.hoisted(() => ({
 
 const setsWorkoutEndedAt = (entry: string): boolean => entry.startsWith('workout.endedAt=')
 const setsWorkoutExercises = (entry: string): boolean => entry.startsWith('workout.exercises=')
-const setsWorkoutLastMemberActionId = (entry: string): boolean =>
-  entry.startsWith('workout.lastMemberActionId=')
+const setsScheduledRolloverOperationId = (entry: string): boolean =>
+  entry.startsWith('workout.scheduledRolloverOperationId=')
 
 vi.mock('../src/usecases/workout.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/usecases/workout.js')>()
@@ -26,7 +32,7 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
       if (
         faults.failAfterScheduledStart &&
         input.draft.workout?.startedAt === SCHEDULED_OCCURRENCE_AT &&
-        input.draft.workout.lastMemberActionId !== undefined
+        input.draft.workout.scheduledRolloverOperationId !== undefined
       ) {
         faults.failAfterScheduledStart = false
         throw new Error('injected failure after scheduled workout start')
@@ -38,7 +44,7 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
       if (
         faults.failAfterPreviousClose &&
         input.set?.some(setsWorkoutEndedAt) &&
-        input.set.some(setsWorkoutLastMemberActionId)
+        input.set.some(setsScheduledRolloverOperationId)
       ) {
         faults.failAfterPreviousClose = false
         throw new Error('injected failure after prior workout close')
@@ -46,7 +52,7 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
       if (
         faults.failAfterScheduledLog &&
         input.set?.some(setsWorkoutExercises) &&
-        input.set.some(setsWorkoutLastMemberActionId)
+        input.set.some(setsScheduledRolloverOperationId)
       ) {
         faults.failAfterScheduledLog = false
         throw new Error('injected failure after scheduled set log')
@@ -58,6 +64,7 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
 
 import {
   addStructuredWorkoutRecord,
+  applyLiveWorkoutMemberAction,
   logLiveWorkoutSet,
   logScheduledLiveWorkoutSet,
   saveWorkoutFormat,
@@ -73,6 +80,8 @@ const PRIOR_FINAL_ACTIVITY_AT = '2026-08-16T18:42:00.000Z'
 const SCHEDULED_OCCURRENCE_AT = '2026-08-17T18:00:00.000Z'
 const REMINDER_SENT_AT = '2026-08-17T18:00:05.000Z'
 const ACCEPTED_AT = '2026-08-17T18:07:00.000Z'
+const ROLLOVER_OPERATION_ID = `sha256:${'7'.repeat(64)}`
+const PRIOR_MEMBER_ACTION_ID = '2f1c1fdc-c7b0-4d90-b902-8e6295959243'
 
 const cleanupPaths: string[] = []
 
@@ -232,6 +241,7 @@ function scheduledInput(input: PreparedRolloverVault) {
     acceptedAt: ACCEPTED_AT,
     exerciseName: 'Chest-supported row',
     exerciseOrder: 1,
+    operationId: ROLLOVER_OPERATION_ID,
     previousWorkoutId: input.previousWorkoutId,
     reminderSentAt: REMINDER_SENT_AT,
     reps: 9,
@@ -248,11 +258,55 @@ function scheduledInput(input: PreparedRolloverVault) {
 describe('scheduled live-workout rollover', () => {
   it('preserves and truthfully closes the prior session, starts the exact plan, and converges across persisted failures', async () => {
     const prepared = await createRolloverVault()
+    const beforeAction = await showWorkoutRecord(
+      prepared.vault,
+      prepared.previousWorkoutId,
+    )
+    const beforeActionWorkout = parseShownWorkout(beforeAction)
+    const priorMemberAction = {
+      expectedWorkout: {
+        actionBinding: deriveWorkoutActionBinding(
+          prepared.previousWorkoutId,
+          beforeActionWorkout,
+        ),
+        exercises: [{
+          name: 'Split squat',
+          sets: [{ logged: true }, { logged: true }],
+        }],
+      },
+      kind: 'workout.live.apply',
+      mutations: [{
+        exerciseName: 'Split squat',
+        exercisePosition: 1,
+        expectedResult: {
+          kind: 'weight_reps',
+          reps: 8,
+          weight: 45,
+          weightUnit: 'lb',
+        },
+        kind: 'set.put',
+        result: {
+          kind: 'weight_reps',
+          reps: 7,
+          weight: 45,
+          weightUnit: 'lb',
+        },
+        setPosition: 2,
+      }],
+      version: 1,
+    } satisfies WorkoutLiveApplyMemberActionV1
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: PRIOR_FINAL_ACTIVITY_AT,
+      action: priorMemberAction,
+      actionId: PRIOR_MEMBER_ACTION_ID,
+      vault: prepared.vault,
+    })).resolves.toEqual({ status: 'applied' })
     const before = await showWorkoutRecord(
       prepared.vault,
       prepared.previousWorkoutId,
     )
     const beforeWorkout = parseShownWorkout(before)
+    expect(beforeWorkout.lastMemberActionId).toBe(PRIOR_MEMBER_ACTION_ID)
 
     faults.failAfterPreviousClose = true
     await expect(logScheduledLiveWorkoutSet(scheduledInput(prepared))).rejects.toThrow(
@@ -262,8 +316,10 @@ describe('scheduled live-workout rollover', () => {
       await showWorkoutRecord(prepared.vault, prepared.previousWorkoutId),
     )
     expect(afterCloseFailure.endedAt).toBe(PRIOR_FINAL_ACTIVITY_AT)
-    expect(afterCloseFailure.lastMemberActionId).toEqual(expect.any(String))
-    const previousActionMarker = afterCloseFailure.lastMemberActionId
+    expect(afterCloseFailure.lastMemberActionId).toBe(PRIOR_MEMBER_ACTION_ID)
+    expect(afterCloseFailure.scheduledRolloverOperationId).toBe(
+      ROLLOVER_OPERATION_ID,
+    )
     await expect(showActiveLiveWorkout({ vault: prepared.vault })).rejects.toThrow(
       'No active live workout',
     )
@@ -280,8 +336,10 @@ describe('scheduled live-workout rollover', () => {
     const startedWorkout = parseShownWorkout(afterStartFailure)
     expect(startedWorkout.startedAt).toBe(SCHEDULED_OCCURRENCE_AT)
     expect(startedWorkout.routineId).toBe(prepared.nextRoutineId)
-    expect(startedWorkout.lastMemberActionId).toEqual(expect.any(String))
-    expect(startedWorkout.lastMemberActionId).not.toBe(previousActionMarker)
+    expect(startedWorkout.lastMemberActionId).toBeUndefined()
+    expect(startedWorkout.scheduledRolloverOperationId).toBe(
+      ROLLOVER_OPERATION_ID,
+    )
     expect(startedWorkout.exercises[0]?.sets[1]).toEqual({ order: 2 })
 
     faults.failAfterScheduledLog = true
@@ -322,7 +380,10 @@ describe('scheduled live-workout rollover', () => {
     expect(afterLogFailure.entity.data.durationMinutes).toBe(7)
 
     const converged = await logScheduledLiveWorkoutSet(scheduledInput(prepared))
-    const replayed = await logScheduledLiveWorkoutSet(scheduledInput(prepared))
+    const replayed = await logScheduledLiveWorkoutSet({
+      ...scheduledInput(prepared),
+      type: undefined,
+    })
     expect(converged.entity.id).toBe(startedWorkoutId)
     expect(replayed.entity.id).toBe(startedWorkoutId)
 
@@ -338,6 +399,20 @@ describe('scheduled live-workout rollover', () => {
     expect(previousWorkout.routineId).toBe(beforeWorkout.routineId)
     expect(previousWorkout.routineName).toBe(beforeWorkout.routineName)
     expect(previousWorkout.sessionNote).toBe(beforeWorkout.sessionNote)
+    expect(previousWorkout.lastMemberActionId).toBe(PRIOR_MEMBER_ACTION_ID)
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: PRIOR_FINAL_ACTIVITY_AT,
+      action: priorMemberAction,
+      actionId: PRIOR_MEMBER_ACTION_ID,
+      vault: prepared.vault,
+    })).resolves.toEqual({ status: 'unchanged' })
+    const scheduledAfterNativeReplay = await showActiveLiveWorkout({
+      vault: prepared.vault,
+      workoutId: startedWorkoutId,
+    })
+    expect(parseShownWorkout(scheduledAfterNativeReplay).exercises).toEqual(
+      parseShownWorkout(replayed).exercises,
+    )
   })
 
   it('starts a later occurrence when the scheduled plan repeats the prior saved routine', async () => {

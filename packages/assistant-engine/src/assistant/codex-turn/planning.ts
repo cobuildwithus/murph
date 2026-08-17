@@ -903,6 +903,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
   })
+  const scheduledWorkoutDirectReplyAuthority =
+    input.hostedToolContext
+      ?.currentScheduledWorkoutDirectReplyAuthority?.() ?? null
+  const scheduledWorkoutInvocationScope =
+    input.hostedToolContext?.currentInvocationScope?.() ?? null
+  const scheduledWorkoutRolloverAvailable =
+    privateInteractiveProviderTurn &&
+    scheduledWorkoutDirectReplyAuthority !== null &&
+    scheduledWorkoutInvocationScope?.conversationScope === 'direct' &&
+    scheduledWorkoutInvocationScope.origin.kind === 'accepted_input' &&
+    scheduledWorkoutInvocationScope.origin.assistantInputId ===
+      scheduledWorkoutDirectReplyAuthority.authorizedAssistantInputId
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
   // Maintenance turns run without a delivery target. The room-model profile
@@ -981,6 +993,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
+        scheduledWorkoutRolloverAvailable,
         exerciseRoutineResponseCardsAvailable,
         telegramRichContentResponseCardsAvailable,
         groupChallengeResponseCardsAvailable,

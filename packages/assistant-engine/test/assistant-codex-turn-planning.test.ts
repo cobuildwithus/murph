@@ -2624,6 +2624,62 @@ describe('assistant Codex turn planning', () => {
     expect(privateTools.map((tool) => tool.name)).toContain(
       'attach_telegram_rich_content',
     )
+    expect(privateTools.map((tool) => tool.name)).not.toContain(
+      'log_scheduled_workout_set',
+    )
+    const scheduledWorkoutAuthority = {
+      acceptedAt: '2026-07-28T21:07:00.000Z',
+      authorizedAssistantInputId: `ain_${'6'.repeat(32)}`,
+      operationId: `sha256:${'a'.repeat(64)}`,
+      reminderSentAt: '2026-07-28T21:00:05.000Z',
+      scheduledOccurrenceAt: '2026-07-28T21:00:00.000Z',
+    }
+    const scheduledWorkoutHostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      currentInvocationScope: () => ({
+        conversationScope: 'direct',
+        origin: {
+          assistantInputId:
+            scheduledWorkoutAuthority.authorizedAssistantInputId,
+          kind: 'accepted_input',
+          sessionId: 'session-test',
+        },
+        originSessionId: 'session-test',
+      }),
+      currentScheduledWorkoutDirectReplyAuthority: () =>
+        scheduledWorkoutAuthority,
+    }
+    const exactScheduledWorkoutTools = await dynamicToolsFor({
+      hostedToolContext: scheduledWorkoutHostedToolContext,
+      input: {
+        ...createMessageInput(),
+        scheduledWorkoutDirectReplyAuthority: scheduledWorkoutAuthority,
+      },
+    })
+    expect(exactScheduledWorkoutTools.map((tool) => tool.name)).toContain(
+      'log_scheduled_workout_set',
+    )
+    const laterInputTools = await dynamicToolsFor({
+      hostedToolContext: {
+        ...scheduledWorkoutHostedToolContext,
+        currentInvocationScope: () => ({
+          conversationScope: 'direct',
+          origin: {
+            assistantInputId: `ain_${'7'.repeat(32)}`,
+            kind: 'accepted_input',
+            sessionId: 'session-test',
+          },
+          originSessionId: 'session-test',
+        }),
+      },
+      input: {
+        ...createMessageInput(),
+        scheduledWorkoutDirectReplyAuthority: scheduledWorkoutAuthority,
+      },
+    })
+    expect(laterInputTools.map((tool) => tool.name)).not.toContain(
+      'log_scheduled_workout_set',
+    )
     const privateSchema = JSON.stringify(privateTool!.inputSchema)
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')

@@ -109,6 +109,9 @@ import {
 import {
   MURPH_ASK_GROK_TOOL,
 } from './dynamic-tools/ask-grok.js'
+import {
+  MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL,
+} from './dynamic-tools/scheduled-workout-rollover.js'
 export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
 export type {
   AssistantStyleTurnSettingsOverlay,
@@ -127,6 +130,9 @@ export {
 } from './dynamic-tools/clinical-records.js'
 export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
 export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
+export {
+  MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL,
+} from './dynamic-tools/scheduled-workout-rollover.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 export const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -1482,6 +1488,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_AUTOMATION_TOOL,
   MURPH_DEVICE_TOOL,
+  MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -1559,6 +1566,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
+  scheduledWorkoutRolloverAvailable?: boolean | null
   exerciseRoutineResponseCardsAvailable?: boolean | null
   telegramRichContentResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
@@ -1592,6 +1600,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
     [MURPH_AUTOMATION_TOOL, defaultOff((a) => a.automationAvailable)],
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
+    [MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL, defaultOff((a) =>
+      a.scheduledWorkoutRolloverAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>

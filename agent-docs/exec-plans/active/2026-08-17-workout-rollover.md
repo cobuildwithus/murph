@@ -39,8 +39,10 @@ Updated: 2026-08-17
 
 - Technical constraints: keep one canonical workout source of truth; preserve
   the existing live-workout mutation lock; do not delete or rewrite logged
-  results; do not infer actual set values from plans; avoid new schemas, queues,
-  receipts, or compatibility machinery; keep failure exits recoverable.
+  results; do not infer actual set values from plans; avoid queues,
+  compatibility machinery, or a second state owner; keep the one demonstrated
+  scheduled-rollover replay receipt distinct from native member-action replay;
+  keep failure exits recoverable.
 - Product/process constraints: the scheduled occurrence and current accepted
   reply must uniquely identify the new workout and set; terse completion may
   advance only that coordinate; private production evidence and member identity
@@ -98,21 +100,32 @@ Updated: 2026-08-17
 - ReviewGPT authored the initial implementation patch. Parent inspection found
   and removed an unnecessary cross-routine restriction so a later occurrence of
   the same saved routine is also a valid rollover target.
-- Focused vault-usecase rollover proof passes 3 tests, including the repeated
-  routine regression. Focused CLI proof passes 4 tests, Assistant Engine proof
-  passes 305 tests, operator contract proof passes 23 tests, changelog proof
-  passes 45 tests, and affected package typechecks plus CLI package-shape and
-  generated-schema checks pass.
-- Complete first-provider request capture used the pinned real Codex App Server,
-  the repository scripted Responses endpoint, `gpt-5.6-terra`, low reasoning,
-  production code mode, identical synthetic direct/group replies, and
-  `gpt-tokenizer` 3.4.0 `o200k_harmony`. It serialized `include`, `input`,
-  `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and `tools` when
-  present, normalized temporary paths and UUIDs, and excluded model selection,
-  reasoning, storage, streaming, service tier, cache/client/account fields, and
-  transport metadata identically. Direct changed from 24,679 tokens / 113,324
-  UTF-8 bytes to 24,796 / 113,750 (+117 tokens, +0.4741%; +426 bytes,
-  +0.3759%). Group remained 21,213 tokens / 97,995 bytes (zero delta). The
-  direct delta is solely the runtime-authored reply authority in assembled input;
-  the changed deferred CLI schema and tracked-table skill body were absent from
-  the first request. Temporary capture code was removed after measurement.
+- The preliminary specialist pass on the first pushed candidate found that its
+  retry marker overwrote native workout-card action replay, model-visible
+  timestamps acted as effect authority, the composite public CLI conflicted
+  with the ordinary workout command contract, and the exact reply-to-card path
+  lacked one joined proof. All four findings were accepted. Remediation adds
+  one narrow optional scheduled-rollover receipt, binds one opaque operation id
+  to the exact accepted input in the host, replaces the public CLI with one
+  availability-scoped dynamic tool, and adds joined host-tool/vault/card proof.
+  The first specialist artifact could not formally attest model confirmation,
+  so the corrected pushed head still requires a fresh specialist pass.
+- Current focused proof passes 5 Assistant Engine files / 186 tests, 2 vault
+  files / 16 tests, 2 CLI files / 5 tests, the 23-test operator contract file,
+  and the 2 affected cron-runtime cases. Typecheck passes for Contracts,
+  Vault Usecases, Assistant Engine, and CLI; CLI build and generated schema/type
+  regeneration pass; `git diff --check` passes.
+- Corrected complete first-provider request capture compares frozen base
+  `17fa4a43091db5aa0d354bc26e4dacf908c26d80` with the current candidate using
+  the pinned real Codex App Server, repository scripted Responses endpoint,
+  `gpt-5.6-terra`, low reasoning, production code mode, and identical synthetic
+  direct/group reply inputs. `gpt-tokenizer` 3.4.0 `o200k_harmony` counted the
+  normalized serialization of present `include`, `input`, `instructions`,
+  `parallel_tool_calls`, `text`, `tool_choice`, and `tools` fields; model,
+  reasoning, storage, streaming, service-tier, cache/client/account, and
+  transport metadata were excluded identically. Direct changed from 28,792
+  tokens / 133,650 UTF-8 bytes to 29,067 / 134,851 (+275, +0.9551%; +1,201
+  bytes, +0.8986%): 53 tokens / 285 bytes are the short availability guidance,
+  and 222 tokens / 916 bytes are the deferred tool catalog/schema. Group stayed
+  byte-for-byte identical at 22,322 tokens / 103,903 bytes. Temporary capture
+  code and payloads were removed.
