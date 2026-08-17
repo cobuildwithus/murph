@@ -29,7 +29,10 @@ vi.mock("@/src/components/ui/alert", () => ({
 
 vi.mock("@base-ui/react/alert-dialog", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
-  const AlertDialogContext = React.createContext({
+  const AlertDialogContext = React.createContext<{
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
+  }>({
     onOpenChange: () => {},
     open: false,
   });
