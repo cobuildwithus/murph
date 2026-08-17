@@ -1745,7 +1745,7 @@ describe('monorepo release flow coverage audit', () => {
       'Every material behavior or ownership change is necessary',
     )
     expect(prDeepReviewPrompt).toContain(
-      'Every non-obvious affected surface is also disclosed',
+      'Every non-obvious affected surface is disclosed in the applicable',
     )
     expect(prDeepReviewPrompt).toContain(
       'applicable frontend and Product UX lenses own rendered proof',
