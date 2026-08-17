@@ -576,10 +576,13 @@ In active sponsorship management, reveal the apply action only after the payer
 selects a different maximum. Use the large primary button at full width on
 phones and label an increase as a review step, not as completed confirmation.
 The review opens a focus-safe responsive alert dialog with the current and new
-monthly maximums, the $5 refill behavior, and explicit `Keep current setup` and
-`Increase to $N` actions. Keep the dialog visible on failure with its action
-copy and error together. Use the same confirmation pattern for cancellation;
-never use a browser alert or confirm prompt for sponsorship changes.
+monthly maximums, the rule that $5 usage purchases happen only while automatic
+refills are active, and explicit `Keep current setup` and `Increase to $N`
+actions. Keep the dialog visible when the result cannot be confirmed, replace
+the secondary action with `Check current setup`, and make dismissal reload the
+authoritative state while retaining the primary retry. Use the same confirmation
+pattern for cancellation; never use a browser alert or confirm prompt for
+sponsorship changes.
 
 When group funding is fulfilled, switch from the payment-status composition to
 one confident success hierarchy: a compact sage confirmation mark and mono

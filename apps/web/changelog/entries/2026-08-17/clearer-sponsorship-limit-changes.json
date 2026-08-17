@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Clearer sponsorship limit changes",
     "summary": "When you raise a group’s monthly sponsorship limit, the review action is now easier to spot and the confirmation clearly shows the old and new maximum.",
-    "details": "Murph makes no change until you choose the new limit. If the update fails, the confirmation stays open so you can try again; canceling a sponsorship now uses the same in-page confirmation pattern.",
+    "details": "Murph makes no change until you choose the new limit. If Murph cannot confirm the result, the confirmation stays open so you can check the current setup or try again; canceling a sponsorship now uses the same in-page confirmation pattern.",
     "relevanceTags": ["groups", "funding", "accessibility"],
     "sourcePullRequests": [1955]
   }

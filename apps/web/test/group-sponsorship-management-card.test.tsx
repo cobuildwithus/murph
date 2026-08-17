@@ -4,6 +4,7 @@ import {
   act,
   createElement,
   type ButtonHTMLAttributes,
+  type HTMLAttributes,
   type ReactNode,
 } from "react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -26,24 +27,56 @@ vi.mock("@/src/components/ui/alert", () => ({
     createElement("h2", null, children),
 }));
 
-vi.mock("@/src/components/ui/alert-dialog", () => ({
-  AlertDialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
-    open ? createElement("section", null, children) : null,
-  AlertDialogAction: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) =>
-    createElement("button", { ...props, "data-slot": "alert-dialog-action" }, children),
-  AlertDialogCancel: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) =>
-    createElement("button", { ...props, "data-slot": "alert-dialog-cancel" }, children),
-  AlertDialogContent: ({ children }: { children?: ReactNode }) =>
-    createElement("div", null, children),
-  AlertDialogDescription: ({ children }: { children?: ReactNode }) =>
-    createElement("p", null, children),
-  AlertDialogFooter: ({ children }: { children?: ReactNode }) =>
-    createElement("footer", null, children),
-  AlertDialogHeader: ({ children }: { children?: ReactNode }) =>
-    createElement("header", null, children),
-  AlertDialogTitle: ({ children }: { children?: ReactNode }) =>
-    createElement("h2", null, children),
-}));
+vi.mock("@base-ui/react/alert-dialog", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  const AlertDialogContext = React.createContext({
+    onOpenChange: () => {},
+    open: false,
+  });
+
+  return {
+    AlertDialog: {
+      Backdrop: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => {
+        const context = React.useContext(AlertDialogContext);
+        return context.open ? createElement("div", props, children) : null;
+      },
+      Close: ({
+        children,
+        render: _render,
+        ...props
+      }: ButtonHTMLAttributes<HTMLButtonElement> & { render?: ReactNode }) => {
+        const context = React.useContext(AlertDialogContext);
+        void _render;
+        return createElement("button", {
+          ...props,
+          onClick: () => context.onOpenChange(false),
+        }, children);
+      },
+      Description: ({ children, ...props }: HTMLAttributes<HTMLParagraphElement>) =>
+        createElement("p", props, children),
+      Popup: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => {
+        const context = React.useContext(AlertDialogContext);
+        return context.open ? createElement("div", props, children) : null;
+      },
+      Portal: ({ children }: { children?: ReactNode }) => children,
+      Root: ({
+        children,
+        onOpenChange = () => {},
+        open = false,
+      }: {
+        children?: ReactNode;
+        onOpenChange?: (open: boolean) => void;
+        open?: boolean;
+      }) => createElement(
+        AlertDialogContext.Provider,
+        { value: { onOpenChange, open } },
+        children,
+      ),
+      Title: ({ children, ...props }: HTMLAttributes<HTMLHeadingElement>) =>
+        createElement("h2", props, children),
+    },
+  };
+});
 
 vi.mock("@/src/components/ui/choice-card", () => ({
   ChoiceCard: ({ title }: { title: ReactNode }) => createElement("span", null, title),
@@ -191,6 +224,9 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     expect(rendered.container.textContent).toContain(
       "This changes your monthly maximum from $10 to $20",
     );
+    expect(rendered.container.textContent).toContain(
+      "Murph makes $5 usage purchases only while automatic refills are active",
+    );
     assert.equal(fetchMock.mock.calls.length, 0);
 
     const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
@@ -215,7 +251,80 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
   }
 });
 
-test("keeps the confirmation open when a cap increase fails", async () => {
+test.each([
+  {
+    remainingCopy: "Resume automatic refills",
+    status: "paused" as const,
+  },
+  {
+    remainingCopy: "Automatic refills are paused until payment is fixed",
+    status: "recovery_required" as const,
+  },
+])("keeps a confirmed cap increase in the existing $status state", async ({
+  remainingCopy,
+  status,
+}) => {
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
+    json: async () => ({
+      management: { ...baseManagement, monthlyCapMinor: 2_000, status },
+    }),
+    ok: true,
+    init,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status },
+    },
+  ));
+  try {
+    const capButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Choose $20");
+    assert.ok(capButton);
+    await act(async () => {
+      capButton.click();
+    });
+
+    const applyButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review $20 limit");
+    assert.ok(applyButton);
+    await act(async () => {
+      applyButton.click();
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 0);
+    expect(rendered.container.textContent).toContain(
+      "Murph makes $5 usage purchases only while automatic refills are active",
+    );
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    await act(async () => {
+      confirmButton.click();
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
+      action: "change_cap",
+      authorizationId: AUTHORIZATION_ID,
+      confirmed: true,
+      monthlyCapMinor: 2_000,
+    });
+    expect(rendered.container.textContent).toContain(remainingCopy);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps an uncertain cap increase actionable and reloads on dismissal", async () => {
   const fetchMock = vi.fn(async () => ({
     json: async () => ({}),
     ok: false,
@@ -258,8 +367,22 @@ test("keeps the confirmation open when a cap increase fails", async () => {
     assert.equal(fetchMock.mock.calls.length, 1);
     expect(rendered.container.textContent).toContain("Increase limit to $20?");
     expect(rendered.container.textContent).toContain(
-      "That change didn’t go through. Try again.",
+      "We couldn’t confirm whether that change went through",
     );
+    expect(confirmButton.textContent).toBe("Increase to $20");
+
+    await act(async () => {
+      confirmButton.click();
+    });
+    assert.equal(fetchMock.mock.calls.length, 2);
+
+    const checkButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Check current setup");
+    assert.ok(checkButton);
+    await act(async () => {
+      checkButton.click();
+    });
+    expect(rendered.reload).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }
@@ -347,6 +470,54 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
       [...rendered.container.querySelectorAll("button")]
         .map((button) => button.textContent),
     ).not.toContain("Cancel sponsorship");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("reloads authoritative state after an uncertain cancellation", async () => {
+  const fetchMock = vi.fn(async () => {
+    throw new Error("Connection lost after request");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: baseManagement,
+    },
+  ));
+  try {
+    const cancelButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Cancel sponsorship");
+    assert.ok(cancelButton);
+    await act(async () => {
+      cancelButton.click();
+    });
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    await act(async () => {
+      confirmButton.click();
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "We couldn’t confirm whether that change went through",
+    );
+    expect(confirmButton.textContent).toBe("Cancel sponsorship");
+    const checkButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Check current setup");
+    assert.ok(checkButton);
+    await act(async () => {
+      checkButton.click();
+    });
+    expect(rendered.reload).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }

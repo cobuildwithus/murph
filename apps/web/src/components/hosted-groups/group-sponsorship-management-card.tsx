@@ -1,17 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/src/components/ui/alert-dialog";
 import { Button } from "@/src/components/ui/button";
 import {
   Alert,
@@ -358,6 +349,10 @@ export function GroupSponsorshipManagementCard({
         onConfirm={() => void confirmAction()}
         onOpenChange={(open) => {
           if (!open && !busy) {
+            if (error) {
+              window.location.reload();
+              return;
+            }
             setConfirmation(null);
           }
         }}
@@ -387,55 +382,66 @@ export function GroupSponsorshipManagementConfirmationDialog({
     : null;
 
   return (
-    <AlertDialog
+    <AlertDialogPrimitive.Root
       open={confirmation !== null}
       onOpenChange={onOpenChange}
     >
-      <AlertDialogContent
-        className="!bottom-[max(env(safe-area-inset-bottom),0.75rem)] !left-3 !right-3 !top-auto !w-auto !max-w-none !translate-x-0 !translate-y-0 gap-5 sm:!bottom-auto sm:!left-1/2 sm:!right-auto sm:!top-1/2 sm:!w-full sm:!max-w-md sm:!-translate-x-1/2 sm:!-translate-y-1/2"
-        data-component="group-sponsorship-management-confirmation"
-        inert={inert || undefined}
-      >
-        <AlertDialogHeader className="place-items-start text-left">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-            {isIncrease ? "Monthly limit" : "Monthly sponsorship"}
-          </p>
-          <AlertDialogTitle className="text-2xl/7 tracking-normal">
-            {isIncrease
-              ? `Increase limit to ${nextLimit}?`
-              : "Cancel monthly sponsorship?"}
-          </AlertDialogTitle>
-          <AlertDialogDescription className="max-w-[48ch]">
-            {isIncrease
-              ? `This changes your monthly maximum from ${formatMoney(confirmation.currentMonthlyCapMinor)} to ${nextLimit}. Murph can then make additional $5 usage purchases this period when the group needs more capacity.`
-              : "Future automatic refills will stop. Usage credit already purchased stays with the group."}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+      <AlertDialogPrimitive.Portal>
+        <AlertDialogPrimitive.Backdrop
+          className="fixed inset-0 isolate z-50 bg-foreground/25 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+          data-slot="alert-dialog-overlay"
+        />
+        <AlertDialogPrimitive.Popup
+          className="fixed bottom-[max(env(safe-area-inset-bottom),0.75rem)] left-3 right-3 z-50 grid w-auto gap-5 rounded-2xl bg-popover p-5 text-popover-foreground ring-1 ring-border duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2"
+          data-component="group-sponsorship-management-confirmation"
+          data-slot="alert-dialog-content"
+          inert={inert || undefined}
+        >
+          <header className="grid place-items-start gap-2 text-left">
+            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+              {isIncrease ? "Monthly limit" : "Monthly sponsorship"}
+            </p>
+            <AlertDialogPrimitive.Title className="font-serif text-2xl/7 font-semibold text-balance tracking-normal">
+              {isIncrease
+                ? `Increase limit to ${nextLimit}?`
+                : "Cancel monthly sponsorship?"}
+            </AlertDialogPrimitive.Title>
+            <AlertDialogPrimitive.Description className="max-w-[48ch] text-sm/6 text-pretty text-muted-foreground">
+              {isIncrease
+                ? `This changes your monthly maximum from ${formatMoney(confirmation.currentMonthlyCapMinor)} to ${nextLimit}. Murph makes $5 usage purchases only while automatic refills are active and the group needs more capacity.`
+                : "Future automatic refills will stop. Usage credit already purchased stays with the group."}
+            </AlertDialogPrimitive.Description>
+          </header>
 
-        {error ? (
-          <p role="alert" className="text-sm/6 text-destructive">
-            {error}
-          </p>
-        ) : null}
+          {error ? (
+            <p role="alert" className="text-sm/6 text-destructive">
+              We couldn’t confirm whether that change went through. Check your current setup or try again.
+            </p>
+          ) : null}
 
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy} size="lg">
-            Keep current setup
-          </AlertDialogCancel>
-          <AlertDialogAction
-            disabled={busy}
-            onClick={onConfirm}
-            size="lg"
-            variant={isIncrease ? "default" : "destructive"}
-          >
-            {busy ? <Spinner data-icon="inline-start" /> : null}
-            {busy
-              ? isIncrease ? "Updating limit" : "Canceling sponsorship"
-              : isIncrease ? `Increase to ${nextLimit}` : "Cancel sponsorship"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          <footer className="-mx-5 -mb-5 flex flex-col-reverse gap-2 rounded-b-2xl border-t border-border bg-muted/50 p-5 sm:flex-row sm:justify-end">
+            <AlertDialogPrimitive.Close
+              disabled={busy}
+              render={<Button size="lg" variant="outline" />}
+            >
+              {error ? "Check current setup" : "Keep current setup"}
+            </AlertDialogPrimitive.Close>
+            <Button
+              data-slot="alert-dialog-action"
+              disabled={busy}
+              onClick={onConfirm}
+              size="lg"
+              variant={isIncrease ? "default" : "destructive"}
+            >
+              {busy ? <Spinner data-icon="inline-start" /> : null}
+              {busy
+                ? isIncrease ? "Updating limit" : "Canceling sponsorship"
+                : isIncrease ? `Increase to ${nextLimit}` : "Cancel sponsorship"}
+            </Button>
+          </footer>
+        </AlertDialogPrimitive.Popup>
+      </AlertDialogPrimitive.Portal>
+    </AlertDialogPrimitive.Root>
   );
 }
 
