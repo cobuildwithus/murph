@@ -7,6 +7,7 @@ import {
   automationScheduleCronSchema,
   automationScheduleDailyLocalSchema,
   automationScheduleEverySchema,
+  automationScheduledReplySchema,
   automationTimeScheduleKindValues,
   automationTimeScheduleSchema,
   type AutomationRoute,
@@ -351,6 +352,7 @@ export const assistantOutboxAutomationAuthoritySchema = z
   .object({
     automationId: z.string().trim().min(1),
     expectedUpdatedAt: isoTimestampSchema,
+    scheduledReply: automationScheduledReplySchema.optional(),
     scheduledOccurrenceAt: isoTimestampSchema.optional(),
   })
   .strict()

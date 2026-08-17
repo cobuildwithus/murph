@@ -40,6 +40,13 @@ export const automationSupportKindValues = [
   "weekly_digest",
 ] as const;
 
+export const automationScheduledReplySchema = z
+  .object({
+    kind: z.literal("workout_rollover"),
+    routineId: z.string().regex(/^wfmt_[0-9A-Za-z]+$/u),
+  })
+  .strict();
+
 export const automationTimeScheduleKindValues = [
   "at",
   "every",
@@ -378,6 +385,7 @@ export const automationFrontmatterSchema = withContractMetadata(
       schedule: automationScheduleSchema,
       route: automationRouteSchema,
       assistantTargetOverride: automationAssistantTargetOverrideSchema.optional(),
+      scheduledReply: automationScheduledReplySchema.optional(),
       supportKind: z.enum(automationSupportKindValues).optional(),
       continuityPolicy: z.enum(automationContinuityPolicyValues),
       tags: z.array(z.string().min(1)).optional(),
@@ -406,6 +414,7 @@ export const automationScaffoldPayloadSchema = z
     instructions: z.string().min(1),
     route: automationRouteSchema,
     assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
+    scheduledReply: automationScheduledReplySchema.nullable().optional(),
     supportKind: z.enum(automationSupportKindValues).nullable().optional(),
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),
@@ -419,6 +428,7 @@ export const automationScaffoldPayloadSchema = z
 
 export type AutomationStatus = (typeof automationStatusValues)[number];
 export type AutomationContinuityPolicy = (typeof automationContinuityPolicyValues)[number];
+export type AutomationScheduledReply = z.infer<typeof automationScheduledReplySchema>;
 export type AutomationSupportKind = (typeof automationSupportKindValues)[number];
 export type AutomationTimeScheduleKind = (typeof automationTimeScheduleKindValues)[number];
 export type AutomationScheduleKind = (typeof automationScheduleKindValues)[number];

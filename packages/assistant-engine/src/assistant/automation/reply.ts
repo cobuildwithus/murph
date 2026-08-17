@@ -1553,8 +1553,14 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
   const latestCrossSessionDelivery = outboxContext.delivery
+  const exactReplyDelivery = outboxContext.replyTargetDelivery
   const scheduledWorkoutDirectReplyAuthority =
-    latestCrossSessionDelivery?.anchored === true
+    exactReplyDelivery !== null
+      ? resolveScheduledWorkoutDirectReplyAuthority({
+          delivery: exactReplyDelivery,
+          promptInput: primaryReplyInput,
+        })
+      : latestCrossSessionDelivery?.anchored === true
       ? resolveScheduledWorkoutDirectReplyAuthority({
           delivery: latestCrossSessionDelivery,
           promptInput: primaryReplyInput,
@@ -1623,6 +1629,11 @@ async function evaluateAssistantAutoReplyGroup(input: {
         )
       : explicitReplyContext?.hasExplicitReply === true
       ? null
+      : exactReplyDelivery !== null && exactReplyDelivery.message !== null
+      ? buildAssistantAutoReplyExplicitReplyContext({
+          delivery: exactReplyDelivery,
+          promptInput: primaryReplyInput,
+        })
       : buildAssistantAutoReplyCrossSessionTurnContext({
           delivery: latestCrossSessionDelivery,
           scheduledWorkoutDirectReplyAuthority,
@@ -5360,7 +5371,7 @@ function buildAssistantAutoReplyCrossSessionTurnContext(input: {
 
 function buildAssistantAutoReplyExplicitReplyContext(input: {
   delivery: AssistantAutoReplyMatchingOutboxDelivery
-  promptInput: AssistantAutoReplyPromptInput
+  promptInput: ScheduledDirectReplyAuthorityPromptInput
 }): string | null {
   const normalized = normalizeNullableString(input.delivery.message)
   if (!normalized) {
@@ -5389,8 +5400,10 @@ function resolveScheduledWorkoutDirectReplyAuthority(input: {
 }): AssistantScheduledWorkoutDirectReplyAuthority | null {
   const scheduledOccurrenceAt =
     input.delivery.automationAuthority?.scheduledOccurrenceAt
+  const scheduledReply = input.delivery.automationAuthority?.scheduledReply
   if (
     input.promptInput.conversation.threadIsDirect !== true ||
+    scheduledReply?.kind !== 'workout_rollover' ||
     !scheduledOccurrenceAt ||
     input.promptInput.receivedAt === null
   ) {
@@ -5423,6 +5436,7 @@ function resolveScheduledWorkoutDirectReplyAuthority(input: {
       acceptedAssistantInputId: input.promptInput.inputId,
       intentId: input.delivery.intentId,
       reminderSentAt,
+      routineId: scheduledReply.routineId,
       scheduledOccurrenceAt: normalizedScheduledOccurrenceAt,
       schema: 'murph.scheduled-workout-direct-reply.v1',
     }))
@@ -5433,6 +5447,7 @@ function resolveScheduledWorkoutDirectReplyAuthority(input: {
     authorizedAssistantInputId: input.promptInput.inputId,
     operationId,
     reminderSentAt,
+    routineId: scheduledReply.routineId,
     scheduledOccurrenceAt: normalizedScheduledOccurrenceAt,
   }
 }

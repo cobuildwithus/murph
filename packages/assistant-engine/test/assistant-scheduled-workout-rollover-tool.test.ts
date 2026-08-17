@@ -2,7 +2,6 @@ import { rm } from 'node:fs/promises'
 
 import { workoutSessionSchema } from '@murphai/contracts'
 import { initializeVault } from '@murphai/core'
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 import {
   logLiveWorkoutSet,
   saveWorkoutFormat,
@@ -15,7 +14,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
-  MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import type {
@@ -46,7 +44,7 @@ afterEach(async () => {
 })
 
 describe('scheduled workout rollover dynamic tool', () => {
-  it('rejects missing, group, and later-input authority before mutation, then rolls over and attaches the active workout card for the exact reply', async () => {
+  it('rejects missing, group, and later-input authority before mutation, then rolls over for the exact reply', async () => {
     const prepared = await createRolloverVault()
     const request = readToolRequest(
       MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL.name,
@@ -55,7 +53,6 @@ describe('scheduled workout rollover dynamic tool', () => {
         exerciseOrder: 1,
         previousWorkoutId: prepared.previousWorkoutId,
         reps: 9,
-        routineId: prepared.nextRoutineId,
         setOrder: 2,
         weight: 70,
         weightUnit: 'lb',
@@ -65,8 +62,8 @@ describe('scheduled workout rollover dynamic tool', () => {
 
     for (const context of [
       hostedToolContext(null, directScope(AUTHORIZED_INPUT_ID)),
-      hostedToolContext(authority(), groupScope(AUTHORIZED_INPUT_ID)),
-      hostedToolContext(authority(), directScope(LATER_INPUT_ID)),
+      hostedToolContext(authority(prepared.nextRoutineId), groupScope(AUTHORIZED_INPUT_ID)),
+      hostedToolContext(authority(prepared.nextRoutineId), directScope(LATER_INPUT_ID)),
     ]) {
       const denied = await executeTool(request, prepared.vaultRoot, context)
       expect(denied.rpcResult).toMatchObject({ success: false })
@@ -87,7 +84,10 @@ describe('scheduled workout rollover dynamic tool', () => {
     const logged = await executeTool(
       request,
       prepared.vaultRoot,
-      hostedToolContext(authority(), directScope(AUTHORIZED_INPUT_ID)),
+      hostedToolContext(
+        authority(prepared.nextRoutineId),
+        directScope(AUTHORIZED_INPUT_ID),
+      ),
     )
     expect(logged.rpcResult.success).toBe(true)
     expect(JSON.parse(logged.rpcResult.contentItems[0]!.text)).toMatchObject({
@@ -96,7 +96,6 @@ describe('scheduled workout rollover dynamic tool', () => {
         data: {
           workout: {
             routineId: prepared.nextRoutineId,
-            scheduledRolloverOperationId: authority().operationId,
           },
         },
       },
@@ -114,7 +113,9 @@ describe('scheduled workout rollover dynamic tool', () => {
     const activeWorkout = workoutSessionSchema.parse(active.entity.data.workout)
     expect(activeWorkout).toMatchObject({
       routineId: prepared.nextRoutineId,
-      scheduledRolloverOperationId: authority().operationId,
+      scheduledRolloverReceiptId: expect.stringMatching(
+        /^sha256:[a-f0-9]{64}$/u,
+      ),
       startedAt: SCHEDULED_OCCURRENCE_AT,
     })
     expect(activeWorkout.exercises[0]?.sets[1]).toMatchObject({
@@ -122,77 +123,6 @@ describe('scheduled workout rollover dynamic tool', () => {
       reps: 9,
       weight: 70,
       weightUnit: 'lb',
-    })
-
-    const card: AssistantResponseCard = {
-      footer: 'Reply with the exercise, set, and result to log or correct it.',
-      kind: 'compact_table',
-      subtitle: null,
-      title: 'Next Routine',
-      tracking: {
-        entityId: active.entity.id,
-        kind: 'workout',
-        snapshotAt: ACCEPTED_AT,
-      },
-      version: 1,
-      workout: {
-        exercises: [
-          {
-            name: 'Chest-supported row',
-            sets: [
-              { actual: null, status: 'pending', target: '60 lb × 12' },
-              { actual: '70 lb × 9', status: 'completed', target: '70 lb × 9' },
-            ],
-          },
-          {
-            name: 'Push-up',
-            sets: [{ actual: null, status: 'pending', target: '15 reps' }],
-          },
-        ],
-        state: 'active',
-        version: 1,
-      },
-    }
-    const cardRequest = readToolRequest(
-      MURPH_ATTACH_RESPONSE_CARD_TOOL.name,
-      { card },
-    )
-    expect(cardRequest.kind).toBe('attach-response-card')
-    const attached = await executeMurphDynamicToolRequest({
-      currentResponseCard: null,
-      currentResponseMedia: [],
-      env: {},
-      fetchImpl: fetch,
-      nextUsageOrdinal: () => 0,
-      privateDirectResponseCardAllowed: true,
-      progressDelivery: null,
-      request: cardRequest,
-      vaultRoot: prepared.vaultRoot,
-    })
-
-    expect(attached.rpcResult.success).toBe(true)
-    expect(attached.responseCardPatch?.card).toMatchObject({
-      editor: {
-        actionBinding: expect.any(String),
-        version: 1,
-      },
-      tracking: { entityId: active.entity.id },
-      workout: {
-        exercises: [
-          {
-            name: 'Chest-supported row',
-            sets: [
-              { actual: null, status: 'pending' },
-              { actual: '70 lb × 9', status: 'completed' },
-            ],
-          },
-          {
-            name: 'Push-up',
-            sets: [{ actual: null, status: 'pending' }],
-          },
-        ],
-        state: 'active',
-      },
     })
   })
 })
@@ -289,12 +219,13 @@ async function createRolloverVault(): Promise<{
   }
 }
 
-function authority(): AssistantScheduledWorkoutDirectReplyAuthority {
+function authority(routineId: string): AssistantScheduledWorkoutDirectReplyAuthority {
   return {
     acceptedAt: ACCEPTED_AT,
     authorizedAssistantInputId: AUTHORIZED_INPUT_ID,
     operationId: `sha256:${'a'.repeat(64)}`,
     reminderSentAt: REMINDER_SENT_AT,
+    routineId,
     scheduledOccurrenceAt: SCHEDULED_OCCURRENCE_AT,
   }
 }

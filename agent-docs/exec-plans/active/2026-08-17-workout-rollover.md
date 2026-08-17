@@ -110,22 +110,33 @@ Updated: 2026-08-17
   availability-scoped dynamic tool, and adds joined host-tool/vault/card proof.
   The first specialist artifact could not formally attest model confirmation,
   so the corrected pushed head still requires a fresh specialist pass.
-- Current focused proof passes 5 Assistant Engine files / 186 tests, 2 vault
-  files / 16 tests, 2 CLI files / 5 tests, the 23-test operator contract file,
-  and the 2 affected cron-runtime cases. Typecheck passes for Contracts,
-  Vault Usecases, Assistant Engine, and CLI; CLI build and generated schema/type
-  regeneration pass; `git diff --check` passes.
-- Corrected complete first-provider request capture compares frozen base
-  `17fa4a43091db5aa0d354bc26e4dacf908c26d80` with the current candidate using
+- The corrected specialist pass accepted three findings: bind replay to the
+  exact routine, coordinate, and result; distinguish workout reminders from
+  generic automations in persisted authority; and replace stitched mocks with
+  a real scripted provider boundary plus a generic-reminder negative. Final
+  ReviewGPT round 2 independently found the same replay defect, the missing
+  same-session exact-reply authority path, and two PR-description discrepancies.
+  The required anomaly retrospective was recorded before remediation. The
+  redesign stays within existing automation, reply, tool, and vault owners.
+- Current focused proof passes 4 Assistant Engine files / 388 tests, 3 real
+  Codex App Server scripted scenarios, and focused Contracts (16), Core (25),
+  Query (3), and Vault Usecases (3) tests. Typecheck passes for Contracts, Core,
+  Query, Vault Usecases, Operator Config, Assistant Engine, and Assistant
+  Runtime; contract schema regeneration and `git diff --check` pass. The local
+  product-experience recheck found no remaining product finding: an exact
+  direct reminder reply now rolls over and returns the canonical active card in
+  one provider turn, while stale, generic, ambiguous, and incomplete paths stay
+  fail-closed.
+- Complete first-provider request capture compares frozen base
+  `17fa4a43091db5aa0d354bc26e4dacf908c26d80` with the remediated candidate using
   the pinned real Codex App Server, repository scripted Responses endpoint,
   `gpt-5.6-terra`, low reasoning, production code mode, and identical synthetic
   direct/group reply inputs. `gpt-tokenizer` 3.4.0 `o200k_harmony` counted the
   normalized serialization of present `include`, `input`, `instructions`,
   `parallel_tool_calls`, `text`, `tool_choice`, and `tools` fields; model,
   reasoning, storage, streaming, service-tier, cache/client/account, and
-  transport metadata were excluded identically. Direct changed from 28,792
-  tokens / 133,650 UTF-8 bytes to 29,067 / 134,851 (+275, +0.9551%; +1,201
-  bytes, +0.8986%): 53 tokens / 285 bytes are the short availability guidance,
-  and 222 tokens / 916 bytes are the deferred tool catalog/schema. Group stayed
-  byte-for-byte identical at 22,322 tokens / 103,903 bytes. Temporary capture
-  code and payloads were removed.
+  transport metadata were excluded identically. Direct changed from 27,683
+  tokens / 128,658 UTF-8 bytes to 27,909 / 129,589 (+226, +0.8164%; +931 bytes,
+  +0.7236%), entirely from the generated code-mode catalog entry for the
+  availability-scoped rollover tool. Group stayed byte-for-byte identical at
+  24,256 tokens / 113,505 bytes. Temporary capture code was removed.

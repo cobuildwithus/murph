@@ -89,6 +89,7 @@ export interface AssistantScheduledWorkoutDirectReplyAuthority {
   authorizedAssistantInputId: string
   operationId: string
   reminderSentAt: string
+  routineId: string
   scheduledOccurrenceAt: string
 }
 

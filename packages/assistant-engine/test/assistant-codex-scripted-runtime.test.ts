@@ -11,6 +11,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import { workoutSessionSchema } from '@murphai/contracts'
 import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
@@ -33,6 +34,14 @@ import {
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import {
+  logLiveWorkoutSet,
+  saveWorkoutFormat,
+  showActiveLiveWorkout,
+  showWorkoutFormat,
+  showWorkoutRecord,
+  startLiveWorkout,
+} from '@murphai/vault-usecases/workouts'
 import type {
   AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -56,6 +65,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -279,7 +289,7 @@ interface ScriptedResponseRoute {
   usageInputTokens?: number
 }
 
-type ScriptedResponse = ScriptedResponseRoute & (
+type ScriptedStaticResponse = ScriptedResponseRoute & (
   | { text: string }
   | {
       commentaryAndFunctionCall: {
@@ -309,8 +319,14 @@ type ScriptedResponse = ScriptedResponseRoute & (
         name: string
         namespace?: string
       }
-    }
+  }
 )
+
+type ScriptedResponse =
+  | ScriptedStaticResponse
+  | ScriptedResponseRoute & {
+      responseFromRequest: (requestBody: string) => ScriptedStaticResponse
+    }
 
 function waitForDeferredExecResponses(): ScriptedResponse[] {
   return ['1', '2', '3'].flatMap((cellId) =>
@@ -591,6 +607,7 @@ async function requireScriptedStub(): Promise<ScriptedStub> {
 }
 
 afterEach(async () => {
+  vi.useRealTimers()
   await stopWarmCodexAppServer().catch(() => {})
 })
 
@@ -620,6 +637,246 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.threadId).toEqual(expect.any(String))
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('rolls a completed workout into the authorized routine and attaches its active card through the real provider tool path', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const vaultRoot = scenario.turnInput.workingDirectory
+    const priorStartedAt = '2026-08-16T18:00:00.000Z'
+    const priorFinalActivityAt = '2026-08-16T18:42:00.000Z'
+    const scheduledOccurrenceAt = '2026-08-17T18:00:00.000Z'
+    const reminderSentAt = '2026-08-17T18:00:05.000Z'
+    const acceptedAt = '2026-08-17T18:07:00.000Z'
+    const assistantInputId = `ain_${'6'.repeat(32)}`
+
+    await createIntegratedVaultServices().core.init({
+      requestId: 'scripted-scheduled-workout-rollover',
+      timezone: 'UTC',
+      vault: vaultRoot,
+    })
+    await saveWorkoutFormat({
+      payload: {
+        activityType: 'strength-training',
+        status: 'active',
+        template: {
+          exercises: [{
+            mode: 'bodyweight',
+            name: 'Split squat',
+            order: 1,
+            plannedSets: [{ order: 1, targetReps: 8 }],
+          }],
+        },
+        title: 'Prior Routine',
+      },
+      vault: vaultRoot,
+    })
+    await saveWorkoutFormat({
+      payload: {
+        activityType: 'strength-training',
+        status: 'active',
+        template: {
+          exercises: [{
+            mode: 'weight_reps',
+            name: 'Chest-supported row',
+            order: 1,
+            plannedSets: [{
+              order: 1,
+              targetReps: 9,
+              targetWeight: 70,
+              targetWeightUnit: 'lb',
+            }],
+            unitOverride: 'lb',
+          }],
+        },
+        title: 'Next Routine',
+      },
+      vault: vaultRoot,
+    })
+    const priorRoutine = await showWorkoutFormat(vaultRoot, 'prior-routine')
+    const nextRoutine = await showWorkoutFormat(vaultRoot, 'next-routine')
+    const prior = await startLiveWorkout({
+      routine: priorRoutine.entity.data.workoutFormatId,
+      startedAt: priorStartedAt,
+      vault: vaultRoot,
+    })
+    vi.useFakeTimers()
+    vi.setSystemTime(priorFinalActivityAt)
+    await logLiveWorkoutSet({
+      exerciseOrder: 1,
+      reps: 8,
+      requireExistingSet: true,
+      setOrder: 1,
+      vault: vaultRoot,
+      workoutId: prior.eventId,
+    })
+    vi.useRealTimers()
+
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            exerciseName: 'Chest-supported row',
+            exerciseOrder: 1,
+            previousWorkoutId: prior.eventId,
+            reps: 9,
+            setOrder: 1,
+            weight: 70,
+            weightUnit: 'lb',
+          },
+          name: 'log_scheduled_workout_set',
+          namespace: 'murph',
+        },
+        requestIncludes: ['log_scheduled_workout_set'],
+      },
+      {
+        responseFromRequest: (requestBody) => {
+          const rollover = readRecord(JSON.parse(
+            requireLatestFunctionCallTextResult(requestBody),
+          ))
+          const workout = readRecord(rollover?.workout)
+          const workoutId = readString(workout?.id)
+          const workoutTitle = readString(workout?.title)
+          if (!workoutId || !workoutTitle) {
+            throw new Error('Expected the logged workout identity.')
+          }
+          return {
+            functionCall: {
+              arguments: {
+                card: {
+                  footer: 'Reply with the exercise, set, and result to log or correct it.',
+                  kind: 'compact_table',
+                  subtitle: null,
+                  title: workoutTitle,
+                  tracking: {
+                    entityId: workoutId,
+                    kind: 'workout',
+                    snapshotAt: acceptedAt,
+                  },
+                  version: 1,
+                  workout: {
+                    exercises: [{
+                      name: 'Chest-supported row',
+                      sets: [{
+                        actual: '70 lb × 9',
+                        status: 'completed',
+                        target: '70 lb × 9',
+                      }],
+                    }],
+                    state: 'active',
+                    version: 1,
+                  },
+                },
+              },
+              name: 'attach_response_card',
+              namespace: 'murph',
+            },
+          }
+        },
+      },
+      { text: 'CARD_ATTACHED' },
+    )
+
+    const invocationScope = {
+      conversationScope: 'direct' as const,
+      origin: {
+        assistantInputId,
+        kind: 'accepted_input' as const,
+        sessionId: 'session-scripted-workout-rollover',
+      },
+      originSessionId: 'session-scripted-workout-rollover',
+    }
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [
+        MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL,
+        MURPH_ATTACH_RESPONSE_CARD_TOOL,
+      ],
+      groupConversation: false,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentAssistantInputId: () => assistantInputId,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        currentInvocationScope: () => invocationScope,
+        currentScheduledWorkoutDirectReplyAuthority: () => ({
+          acceptedAt,
+          authorizedAssistantInputId: assistantInputId,
+          operationId: `sha256:${'a'.repeat(64)}`,
+          reminderSentAt,
+          routineId: nextRoutine.entity.data.workoutFormatId,
+          scheduledOccurrenceAt,
+        }),
+        currentUserActionScope: () => null,
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'I completed set 1: 9 reps at 70 lb.',
+      vaultRoot,
+    })
+
+    const priorWorkout = workoutSessionSchema.parse(
+      (await showWorkoutRecord(vaultRoot, prior.eventId)).entity.data.workout,
+    )
+    expect(priorWorkout.endedAt).toBe(priorFinalActivityAt)
+    const active = await showActiveLiveWorkout({ vault: vaultRoot })
+    const activeWorkout = workoutSessionSchema.parse(active.entity.data.workout)
+    expect(activeWorkout).toMatchObject({
+      routineId: nextRoutine.entity.data.workoutFormatId,
+      scheduledRolloverReceiptId: expect.stringMatching(
+        /^sha256:[a-f0-9]{64}$/u,
+      ),
+      startedAt: scheduledOccurrenceAt,
+    })
+    expect(activeWorkout.exercises[0]?.sets[0]).toMatchObject({
+      order: 1,
+      reps: 9,
+      weight: 70,
+      weightUnit: 'lb',
+    })
+    expect(result.finalMessage).toContain('Next Routine')
+    expect(result.responseCard).toMatchObject({
+      title: 'Next Routine',
+      tracking: { entityId: active.entity.id, kind: 'workout' },
+      workout: {
+        exercises: [{
+          name: 'Chest-supported row',
+          sets: [{ actual: '70 lb × 9', status: 'completed' }],
+        }],
+        state: 'active',
+      },
+    })
+    expect(
+      scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.functionCallOutputs ?? [])
+        .join('\n'),
+    ).not.toContain('scheduledRolloverReceiptId')
+  })
+
+  it('does not expose scheduled workout rollover on a generic reminder reply', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue({
+      requestExcludes: ['log_scheduled_workout_set'],
+      text: 'Noted your sleep update.',
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        responseCardsAvailable: true,
+        scheduledWorkoutRolloverAvailable: false,
+      }),
+      groupConversation: false,
+      prompt: 'I slept 8 hours.',
+    })
+
+    expect(result.finalMessage).toBe('Noted your sleep update.')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
@@ -3547,9 +3804,10 @@ if (!tool) {
 } else {
   const result = await tools.murph__automation({
     action: "save",
-    instructions: "Send a short reminder.",
+    instructions: "Send the saved workout reminder.",
     schedule: { kind: "dailyLocal", localTime: "09:00" },
-    title: "Morning reminder",
+    scheduledReply: { kind: "workout_rollover", routineId: "wfmt_scripted" },
+    title: "Morning workout",
   });
   text(JSON.stringify({ found: true, foundGroup: Boolean(groupTool), result }));
 }
@@ -3618,9 +3876,13 @@ if (!tool) {
     expect(automationOutput).toContain('active')
     expect(automationRequests).toEqual([{
       action: 'save',
-      instructions: 'Send a short reminder.',
+      instructions: 'Send the saved workout reminder.',
       schedule: { kind: 'dailyLocal', localTime: '09:00' },
-      title: 'Morning reminder',
+      scheduledReply: {
+        kind: 'workout_rollover',
+        routineId: 'wfmt_scripted',
+      },
+      title: 'Morning workout',
     }])
     expect(result.finalMessage).toBe('NATIVE_DEFERRED_TOOL_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
@@ -10927,13 +11189,27 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     const scriptedResponseIndex = queuedResponses.findIndex((candidate) =>
       scriptedResponseMatchesRequest(candidate, requestBody)
     )
-    const scripted = scriptedResponseIndex >= 0
+    const queuedScripted = scriptedResponseIndex >= 0
       ? queuedResponses.splice(scriptedResponseIndex, 1)[0]
       : undefined
-    if (!scripted) {
+    if (!queuedScripted) {
       response.statusCode = 500
       response.end(JSON.stringify({
         error: 'scripted responses stub received a request without a queued response',
+      }))
+      return
+    }
+    let scripted: ScriptedStaticResponse
+    try {
+      scripted = 'responseFromRequest' in queuedScripted
+        ? queuedScripted.responseFromRequest(requestBody)
+        : queuedScripted
+    } catch (error) {
+      response.statusCode = 500
+      response.end(JSON.stringify({
+        error: error instanceof Error
+          ? error.message
+          : 'scripted dynamic response failed',
       }))
       return
     }
@@ -11210,6 +11486,35 @@ function readProviderToolOutputText(value: unknown): string | null {
     .map((item) => readString(item?.text))
     .filter((text): text is string => text !== null)
   return textItems.length > 0 ? textItems.join('\n') : null
+}
+
+function requireLatestFunctionCallTextResult(requestBody: string): string {
+  const body = readRecord(JSON.parse(requestBody))
+  const output = Array.isArray(body?.input)
+    ? body.input
+      .map(readRecord)
+      .filter((item) => item?.type === 'function_call_output')
+      .map((item) => item?.output)
+      .at(-1)
+    : undefined
+  const outputText = readProviderToolOutputText(output)
+  const rpcResult = outputText === null
+    ? null
+    : readRecord(JSON.parse(outputText))
+  if (outputText !== null && typeof rpcResult?.status === 'string') {
+    return outputText
+  }
+  const contentItems = Array.isArray(rpcResult?.contentItems)
+    ? rpcResult.contentItems.map(readRecord)
+    : []
+  const textResult = contentItems
+    .filter((item) => item?.type === 'inputText')
+    .map((item) => readString(item?.text))
+    .find((value): value is string => value !== null)
+  if (textResult === undefined) {
+    throw new Error('Expected a prior function call text result.')
+  }
+  return textResult
 }
 
 function writeScriptedSseResponse(input: {

@@ -1731,7 +1731,12 @@ function resolveAssistantCronOutboxAutomationAuthority(input: {
     automationId: input.job.source.automationId,
     expectedUpdatedAt: input.job.source.updatedAt,
     ...(input.trigger === 'scheduled'
-      ? { scheduledOccurrenceAt: input.occurrenceAt }
+      ? {
+          ...(input.job.source.scheduledReply == null
+            ? {}
+            : { scheduledReply: input.job.source.scheduledReply }),
+          scheduledOccurrenceAt: input.occurrenceAt,
+        }
       : {}),
   }
 }

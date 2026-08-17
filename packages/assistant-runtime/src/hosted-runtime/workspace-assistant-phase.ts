@@ -1540,6 +1540,9 @@ function createHostedAssistantAutomationTool(input: {
           ),
           route: currentRoute,
           schedule: request.schedule,
+          ...(request.scheduledReply === undefined
+            ? {}
+            : { scheduledReply: request.scheduledReply }),
           ...(request.slug ? { slug: request.slug } : {}),
           status,
           ...(request.summary === undefined ? {} : { summary: request.summary }),
@@ -1618,6 +1621,9 @@ function createHostedAssistantAutomationTool(input: {
           ? { route: currentRoute }
           : {}),
         ...(request.schedule === undefined ? {} : { schedule: request.schedule }),
+        ...(request.scheduledReply === undefined
+          ? {}
+          : { scheduledReply: request.scheduledReply }),
         ...(request.slug === undefined ? {} : { slug: request.slug }),
         ...(request.status === undefined ? {} : { status: request.status }),
         ...(request.summary === undefined ? {} : { summary: request.summary }),

@@ -727,7 +727,7 @@ export const workoutSessionSchema = z
     routineId: boundedString(1, 200).optional(),
     routineName: boundedString(1, 160).optional(),
     lastMemberActionId: z.string().length(36).uuid().optional(),
-    scheduledRolloverOperationId: patternedString(
+    scheduledRolloverReceiptId: patternedString(
       SHA256_DIGEST_PATTERN,
       71,
       71,

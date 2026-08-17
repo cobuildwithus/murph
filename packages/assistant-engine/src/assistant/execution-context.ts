@@ -18,6 +18,7 @@ import type {
   AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationSchedule,
+  AutomationScheduledReply,
   AutomationStatus,
   AutomationSupportKind,
 } from '@murphai/contracts'
@@ -178,6 +179,7 @@ export type AssistantHostedAutomationToolRequest =
       continuityPolicy?: AutomationContinuityPolicy
       instructions: string
       schedule: AutomationSchedule
+      scheduledReply?: AutomationScheduledReply | null
       slug?: string
       status?: AutomationStatus
       summary?: string | null
@@ -196,6 +198,7 @@ export type AssistantHostedAutomationToolRequest =
       lookup: string
       retargetToCurrentConversation?: boolean
       schedule?: AutomationSchedule
+      scheduledReply?: AutomationScheduledReply | null
       slug?: string
       status?: AutomationStatus
       summary?: string | null

@@ -203,7 +203,7 @@ export async function updateLiveWorkoutExercises(
   exercises: WorkoutExercise[],
   lastMemberActionId?: string,
   durationAt?: string,
-  scheduledRolloverOperationId?: string,
+  scheduledRolloverReceiptId?: string,
 ) {
   const update = validateLiveWorkoutExerciseUpdate(
     shown,
@@ -220,9 +220,9 @@ export async function updateLiveWorkoutExercises(
   if (lastMemberActionId !== undefined) {
     set.push(`workout.lastMemberActionId=${lastMemberActionId}`)
   }
-  if (scheduledRolloverOperationId !== undefined) {
+  if (scheduledRolloverReceiptId !== undefined) {
     set.push(
-      `workout.scheduledRolloverOperationId=${scheduledRolloverOperationId}`,
+      `workout.scheduledRolloverReceiptId=${scheduledRolloverReceiptId}`,
     )
   }
 

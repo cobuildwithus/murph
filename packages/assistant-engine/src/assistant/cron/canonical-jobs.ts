@@ -1,6 +1,7 @@
 import {
   normalizeIanaTimeZone,
   resolveSystemTimeZone,
+  type AutomationScheduledReply,
   type AutomationSupportKind,
 } from '@murphai/contracts'
 import { loadVault, upsertAutomation } from '@murphai/core'
@@ -59,6 +60,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   slug: string
   status: 'active' | 'paused'
   summary: string | null
+  scheduledReply?: AutomationScheduledReply | null
   supportKind: AutomationSupportKind | null
   tags: string[]
   timeZone: string | null
@@ -472,6 +474,7 @@ export function buildCanonicalAutomationUpsertInput(input: {
     | 'activeUntil'
     | 'assistantTargetOverride'
     | 'continuityPolicy'
+    | 'scheduledReply'
     | 'slug'
     | 'summary'
     | 'tags'
@@ -504,6 +507,7 @@ export function buildCanonicalAutomationUpsertInput(input: {
       input.assistantTargetOverride === undefined
         ? input.automation?.assistantTargetOverride ?? undefined
         : input.assistantTargetOverride,
+    scheduledReply: input.automation?.scheduledReply ?? undefined,
     continuityPolicy:
       input.continuityPolicy ?? input.automation?.continuityPolicy ?? 'preserve',
     activeUntil:
@@ -591,6 +595,7 @@ function normalizeCanonicalAssistantCronRecord(
     slug: record.slug,
     status: record.status,
     summary: record.summary,
+    scheduledReply: record.scheduledReply ?? null,
     supportKind: record.supportKind ?? null,
     tags: [...record.tags],
     timeZone:

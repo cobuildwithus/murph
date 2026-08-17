@@ -183,18 +183,22 @@ An active workout may have zero pending sets after the final result is logged; i
 
 One later scheduled-workout direct reply is the only exception to that ordinary
 explicit-finish rule. The scheduled occurrence must belong to an active
-canonical automation revision, its exact provider-accepted reminder must be the
-native reply target in a direct conversation, and the accepted inbound reply
-must arrive in order. Occurrence-to-delivery and delivery-to-reply are each
+canonical automation revision whose typed `scheduledReply` field names
+`workout_rollover` and one exact saved routine. Its exact provider-accepted
+reminder must be the native reply target in a direct conversation, and the
+accepted inbound reply must arrive in order. Exact reply attestation is
+independent of whether optional conversation context crosses sessions, so the
+same preserved conversation is the normal supported path. Occurrence-to-delivery and delivery-to-reply are each
 bounded to one hour. Runtime retains those timestamps in engine-owned authority
 bound to the exact accepted input and one stable opaque operation id. None of
 the timestamps, automation identity, provider message
 identity, or operation identity enters the model prompt. The provider sees only
-that one host tool is available and must still supply a canonical saved-routine
-id, exercise name and order, existing set order, and at least one
-member-stated numeric actual. Conversational recency is not authority. The host
-injects the trusted timestamps and operation id after rechecking that the tool
-call still belongs to the exact direct accepted input.
+that one host tool is available and must still supply the prior workout id,
+exercise name and order, existing set order, and at least one member-stated
+numeric actual. Conversational recency is not authority. The host injects the
+typed routine, trusted timestamps, and operation id after rechecking that the
+tool call still belongs to the exact direct accepted input. Generic reminders,
+including sleep reminders, carry no workout capability.
 
 The existing live-workout mutation owner performs rollover under its canonical
 `events/live-workout-session` lock. It admits only the explicitly named prior
@@ -209,9 +213,12 @@ authorized set at the accepted-reply time. Saved targets remain in the format.
 
 Rollover is one host-bound composite tool, not public CLI surface or
 assistant-authored finish/start/log sequencing. One dedicated scheduled-rollover
-operation receipt on the two participating sessions lets replay converge after
-a persisted close, start, or exact set write without overwriting the native
-member-action replay receipt, adding a queue, or creating a second state owner.
+semantic receipt on the two participating sessions binds the host operation,
+prior workout, typed routine occurrence, normalized exercise/set coordinate,
+and normalized result. It lets an exact replay converge after a persisted close,
+start, or set write while a changed routine, coordinate, result, or second tool
+call fails before mutation, without overwriting the native member-action replay
+receipt, adding a queue, or creating a second state owner.
 A pending prior coordinate, zero-set prior, stale or missing reply authority,
 note-only result, coordinate mismatch, more than one matching scheduled
 session, unrelated active workout, or operation-receipt mismatch rejects

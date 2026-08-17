@@ -2632,6 +2632,7 @@ describe('assistant Codex turn planning', () => {
       authorizedAssistantInputId: `ain_${'6'.repeat(32)}`,
       operationId: `sha256:${'a'.repeat(64)}`,
       reminderSentAt: '2026-07-28T21:00:05.000Z',
+      routineId: 'wfmt_authorized',
       scheduledOccurrenceAt: '2026-07-28T21:00:00.000Z',
     }
     const scheduledWorkoutHostedToolContext: AssistantHostedToolContext = {

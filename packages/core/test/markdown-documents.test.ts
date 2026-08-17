@@ -69,6 +69,35 @@ describe("markdown document primitives", () => {
     expect(reconcileAutomationSupportSeriesFromPackageRoot).toBeTypeOf("function");
   });
 
+  it("persists, preserves, and clears typed scheduled workout reply authority", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const scheduledReply = {
+      kind: "workout_rollover" as const,
+      routineId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    };
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({ scheduledReply }),
+    });
+    expect(created.record.scheduledReply).toEqual(scheduledReply);
+    expect(created.record.markdown).toContain("scheduledReply:");
+
+    const preserved = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      summary: "Keep the typed reply authority.",
+    });
+    expect(preserved.record.scheduledReply).toEqual(scheduledReply);
+
+    const cleared = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      scheduledReply: null,
+    });
+    expect(cleared.record.scheduledReply).toBeNull();
+    expect(cleared.record.markdown).not.toContain("scheduledReply:");
+  });
+
   it("rejects invalid automation assistant reasoning effort before writing", async () => {
     const vaultRoot = await makeVaultRoot();
     const invalidInput = JSON.parse(JSON.stringify({

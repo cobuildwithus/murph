@@ -413,13 +413,24 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('linq-msg-murph-target')
   })
 
-  it('adds bounded scheduled workout authority only to the exact accepted direct reply', async () => {
+  it('adds bounded scheduled workout authority to the exact accepted direct reply in the preserved conversation session', async () => {
     const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-08-07T21:00:05.000Z',
+        sessionId: 'session-scheduled-workout',
+      },
+    })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
       createOutboxMessage({
         automationAuthority: {
           automationId: 'automation-scheduled-workout',
           expectedUpdatedAt: '2026-08-07T20:00:00.000Z',
+          scheduledReply: {
+            kind: 'workout_rollover',
+            routineId: 'wfmt_authorized',
+          },
           scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
         },
         channel: 'linq',
@@ -463,6 +474,7 @@ describe('assistant auto-reply event-first path', () => {
         'ain_68686868686868686868686868686868',
       operationId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
       reminderSentAt: '2026-08-07T21:00:05.000Z',
+      routineId: 'wfmt_authorized',
       scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
     })
     expect(prompt).toContain('Completed the set.')
@@ -473,6 +485,50 @@ describe('assistant auto-reply event-first path', () => {
     expect(turnContext).not.toContain('2026-08-07T21:10:01.000Z')
   })
 
+  it('does not grant workout authority to an exact direct reply to a generic scheduled reminder', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationAuthority: {
+          automationId: 'automation-sleep-reminder',
+          expectedUpdatedAt: '2026-08-07T20:00:00.000Z',
+          scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
+        },
+        channel: 'linq',
+        intentId: 'intent-sleep-reminder-target',
+        message: 'Time to start winding down for sleep.',
+        providerMessageId: 'linq-msg-sleep-reminder-target',
+        sentAt: '2026-08-07T21:00:05.000Z',
+        sessionId: 'session-sleep-reminder',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_65656565656565656565656565656565',
+      messageId: 'linq-msg-sleep-reminder-reply',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      receivedAt: '2026-08-07T21:10:01.000Z',
+      replyToMessageId: 'linq-msg-sleep-reminder-target',
+      text: 'Done.',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(readSentInput().scheduledWorkoutDirectReplyAuthority).toBeUndefined()
+    expect(readSentInput().turnContext).not.toContain(
+      'scheduled-workout rollover tool',
+    )
+  })
+
   it('does not add scheduled workout authority to an unanchored direct follow-up', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
@@ -480,6 +536,10 @@ describe('assistant auto-reply event-first path', () => {
         automationAuthority: {
           automationId: 'automation-unanchored-workout',
           expectedUpdatedAt: '2026-08-07T20:00:00.000Z',
+          scheduledReply: {
+            kind: 'workout_rollover',
+            routineId: 'wfmt_authorized',
+          },
           scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
         },
         channel: 'linq',
@@ -530,6 +590,10 @@ describe('assistant auto-reply event-first path', () => {
         automationAuthority: {
           automationId: 'automation-stale-workout',
           expectedUpdatedAt: '2026-08-07T20:00:00.000Z',
+          scheduledReply: {
+            kind: 'workout_rollover',
+            routineId: 'wfmt_authorized',
+          },
           scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
         },
         channel: 'linq',
@@ -563,7 +627,7 @@ describe('assistant auto-reply event-first path', () => {
 
     const turnContext = readSentInput().turnContext ?? ''
     expect(turnContext).toContain(
-      'The assistant previously sent this message in the same conversation from another assistant run:',
+      'The sender explicitly replied to this exact prior assistant message:',
     )
     expect(turnContext).toContain('Scheduled workout reminder.')
     expect(turnContext).not.toContain('scheduled-workout rollover tool')
@@ -5412,6 +5476,10 @@ function createOutboxMessage(input: {
   automationAuthority?: {
     automationId: string
     expectedUpdatedAt: string
+    scheduledReply?: {
+      kind: 'workout_rollover'
+      routineId: string
+    }
     scheduledOccurrenceAt?: string
   }
   channel?: string

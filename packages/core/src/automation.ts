@@ -13,6 +13,7 @@ import {
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
+  automationScheduledReplySchema,
   automationStatusValues,
   automationSupportKindValues,
   buildAutomationSupportSeriesTag,
@@ -28,6 +29,7 @@ import {
   type AutomationRoute,
   type AutomationSchedule,
   type AutomationScheduleKind,
+  type AutomationScheduledReply,
   type AutomationScaffoldPayload as ContractAutomationScaffoldPayload,
   type AutomationStatus,
   type AutomationSupportKind,
@@ -100,6 +102,7 @@ export type {
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
+  AutomationScheduledReply,
   AutomationStatus,
   AutomationSupportKind,
 };
@@ -116,6 +119,7 @@ export interface AutomationRecord {
   schedule: AutomationSchedule;
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
+  scheduledReply: AutomationScheduledReply | null;
   supportKind: AutomationSupportKind | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
@@ -163,6 +167,7 @@ export interface PatchAutomationInput {
   now?: Date;
   route?: AutomationRoute;
   assistantTargetOverride?: AutomationAssistantTargetOverride | null;
+  scheduledReply?: AutomationScheduledReply | null;
   supportKind?: AutomationSupportKind | null;
   schedule?: AutomationSchedule;
   slug?: string;
@@ -296,6 +301,22 @@ function normalizeAutomationSupportKind(
   value: unknown,
 ): AutomationSupportKind | null {
   return optionalEnum(value, automationSupportKindValues, "supportKind") ?? null;
+}
+
+function normalizeAutomationScheduledReply(
+  value: unknown,
+): AutomationScheduledReply | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const parsed = automationScheduledReplySchema.safeParse(value);
+  if (!parsed.success) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "scheduledReply must identify one canonical workout rollover routine.",
+    );
+  }
+  return parsed.data;
 }
 
 function normalizeAutomationDeviceActivitySource(value: unknown): AutomationDeviceActivitySource | undefined {
@@ -774,6 +795,9 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
             record.assistantTargetOverride,
           ),
         }),
+    ...(record.scheduledReply === null
+      ? {}
+      : { scheduledReply: record.scheduledReply }),
     ...(record.supportKind === null ? {} : { supportKind: record.supportKind }),
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
@@ -820,6 +844,7 @@ function parseAutomationRecord(
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       attributes.assistantTargetOverride,
     ),
+    scheduledReply: normalizeAutomationScheduledReply(attributes.scheduledReply),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
@@ -978,6 +1003,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
       threadId: null,
     },
     assistantTargetOverride: null,
+    scheduledReply: null,
     supportKind: null,
     instructions: "Write the scheduled assistant instructions here.",
     summary: "Weekly scheduled assistant notification instructions.",
@@ -1087,6 +1113,10 @@ export async function patchAutomation(
         input.assistantTargetOverride === undefined
           ? existingRecord.assistantTargetOverride
           : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
+      scheduledReply:
+        input.scheduledReply === undefined
+          ? existingRecord.scheduledReply
+          : normalizeAutomationScheduledReply(input.scheduledReply),
       supportKind:
         input.supportKind === undefined
           ? existingRecord.supportKind
@@ -1668,6 +1698,10 @@ async function upsertAutomationWithLatestRegistry(
       input.assistantTargetOverride === undefined
         ? existingRecord?.assistantTargetOverride ?? null
         : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
+    scheduledReply:
+      input.scheduledReply === undefined
+        ? existingRecord?.scheduledReply ?? null
+        : normalizeAutomationScheduledReply(input.scheduledReply),
     supportKind:
       input.supportKind === undefined
         ? existingRecord?.supportKind ?? null
@@ -1743,6 +1777,7 @@ export function buildAutomationMarkdownPreview(
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       input.assistantTargetOverride,
     ),
+    scheduledReply: normalizeAutomationScheduledReply(input.scheduledReply),
     supportKind: normalizeAutomationSupportKind(input.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),

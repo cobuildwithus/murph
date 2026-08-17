@@ -63,6 +63,44 @@ describe("automation contract seams", () => {
     });
   });
 
+  it("accepts only a typed canonical workout scheduled-reply capability", () => {
+    expect(automationScaffoldPayloadSchema.parse({
+      instructions: "Send the saved workout reminder.",
+      route: {
+        channel: "linq",
+        deliveryTarget: "thread_123",
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: { everyMs: 86_400_000, kind: "every" },
+      scheduledReply: {
+        kind: "workout_rollover",
+        routineId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+      },
+      title: "Workout reminder",
+    }).scheduledReply).toEqual({
+      kind: "workout_rollover",
+      routineId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    });
+    expect(() => automationScaffoldPayloadSchema.parse({
+      instructions: "Send a reminder.",
+      route: {
+        channel: "linq",
+        deliveryTarget: "thread_123",
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: { everyMs: 86_400_000, kind: "every" },
+      scheduledReply: {
+        kind: "workout_rollover",
+        routineId: "not-a-workout-format",
+      },
+      title: "Reminder",
+    })).toThrow();
+  });
+
   it("rejects invalid recurring automation schedule time zones", () => {
     expect(() =>
       automationScheduleSchema.parse({

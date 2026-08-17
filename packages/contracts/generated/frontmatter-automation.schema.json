@@ -331,6 +331,24 @@
       },
       "additionalProperties": false
     },
+    "scheduledReply": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "workout_rollover"
+        },
+        "routineId": {
+          "type": "string",
+          "pattern": "^wfmt_[0-9A-Za-z]+$"
+        }
+      },
+      "required": [
+        "kind",
+        "routineId"
+      ],
+      "additionalProperties": false
+    },
     "supportKind": {
       "type": "string",
       "enum": [

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import {
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutExercise,
@@ -656,7 +658,7 @@ interface LogLiveWorkoutSetLockOptions {
   durationAt?: string
   lastMemberActionId?: string
   rejectLoggedCorrection?: boolean
-  scheduledRolloverOperationId?: string
+  scheduledRolloverReceiptId?: string
 }
 
 async function logLiveWorkoutSetWithLockHeld(
@@ -697,7 +699,7 @@ async function logLiveWorkoutSetWithLockHeld(
     update.exercises,
     options.lastMemberActionId,
     options.durationAt,
-    options.scheduledRolloverOperationId,
+    options.scheduledRolloverReceiptId,
   )
 }
 
@@ -854,11 +856,23 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
   const preparedStart = scheduledWorkout === null
     ? await prepareScheduledLiveWorkoutStart(input)
     : null
+  const receiptTarget = prepareLiveWorkoutSetUpdate(
+    scheduledWorkout ?? preparedStart!.workout,
+    {
+      ...input,
+      requireExistingSet: true,
+    },
+  )
+  const receiptId = deriveScheduledLiveWorkoutReceiptId({
+    exercise: receiptTarget.exercise,
+    input,
+    set: receiptTarget.parsedSet,
+  })
   const boundStart = preparedStart === null
     ? null
-    : bindScheduledLiveWorkoutOperation(
+    : bindScheduledLiveWorkoutReceipt(
         preparedStart,
-        input.operationId,
+        receiptId,
       )
 
   if (previousWorkout.endedAt === undefined) {
@@ -879,7 +893,7 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
         vault: input.vault,
         workoutId: previousShown.entity.id,
       },
-      { scheduledRolloverOperationId: input.operationId },
+      { scheduledRolloverReceiptId: receiptId },
     )
   } else {
     if (previousWorkout.endedAt !== previousEndedAt) {
@@ -889,11 +903,11 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
       )
     }
     if (
-      previousWorkout.scheduledRolloverOperationId !== input.operationId
+      previousWorkout.scheduledRolloverReceiptId !== receiptId
     ) {
       throw new VaultCliError(
         'command_failed',
-        'The prior workout was not closed by this scheduled rollover operation.',
+        'The prior workout was not closed for this exact scheduled rollover effect.',
       )
     }
 
@@ -936,9 +950,9 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
     input,
     `Workout ${targetShown.entity.id}`,
   )
-  assertScheduledLiveWorkoutOperation(
+  assertScheduledLiveWorkoutReceipt(
     targetWorkout,
-    input.operationId,
+    receiptId,
     `Workout ${targetShown.entity.id}`,
   )
   const target = prepareLiveWorkoutSetUpdate(targetWorkout, {
@@ -969,7 +983,7 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
     {
       durationAt: input.acceptedAt,
       rejectLoggedCorrection: true,
-      scheduledRolloverOperationId: input.operationId,
+      scheduledRolloverReceiptId: receiptId,
     },
   )
 }
@@ -1076,13 +1090,13 @@ async function prepareScheduledLiveWorkoutStart(
   return prepared
 }
 
-function bindScheduledLiveWorkoutOperation(
+function bindScheduledLiveWorkoutReceipt(
   prepared: PreparedLiveWorkoutStart,
-  operationId: string,
+  receiptId: string,
 ): PreparedLiveWorkoutStart {
   const workout = workoutSessionSchema.parse({
     ...prepared.workout,
-    scheduledRolloverOperationId: operationId,
+    scheduledRolloverReceiptId: receiptId,
   })
   return {
     draft: { ...prepared.draft, workout },
@@ -1090,17 +1104,55 @@ function bindScheduledLiveWorkoutOperation(
   }
 }
 
-function assertScheduledLiveWorkoutOperation(
+function assertScheduledLiveWorkoutReceipt(
   workout: WorkoutSession,
-  operationId: string,
+  receiptId: string,
   label: string,
 ): void {
-  if (workout.scheduledRolloverOperationId !== operationId) {
+  if (workout.scheduledRolloverReceiptId !== receiptId) {
     throw new VaultCliError(
       'command_failed',
-      `${label} was not started by this scheduled rollover operation.`,
+      `${label} was not started for this exact scheduled rollover effect.`,
     )
   }
+}
+
+function deriveScheduledLiveWorkoutReceiptId(input: {
+  exercise: WorkoutExercise
+  input: NormalizedScheduledLiveWorkoutSetInput
+  set: WorkoutSet
+}): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({
+      effect: {
+        exercise: {
+          name: input.exercise.name,
+          order: input.exercise.order,
+          sourceExerciseId: input.exercise.sourceExerciseId ?? null,
+        },
+        previousWorkoutId: input.input.previousWorkoutId,
+        routineId: input.input.routineId,
+        scheduledOccurrenceAt: input.input.scheduledOccurrenceAt,
+        set: {
+          addedWeightKg: input.set.addedWeightKg ?? null,
+          assistanceKg: input.set.assistanceKg ?? null,
+          bodyweightKg: input.set.bodyweightKg ?? null,
+          distanceMeters: input.set.distanceMeters ?? null,
+          durationSeconds: input.set.durationSeconds ?? null,
+          note: input.set.note ?? null,
+          order: input.set.order,
+          reps: input.set.reps ?? null,
+          rpe: input.set.rpe ?? null,
+          type: input.set.type ?? null,
+          weight: input.set.weight ?? null,
+          weightUnit: input.set.weightUnit ?? null,
+        },
+      },
+      operationId: input.input.operationId,
+      schema: 'murph.scheduled-workout-rollover-receipt.v1',
+    }))
+    .digest('hex')
+  return `sha256:${digest}`
 }
 
 function assertScheduledLiveWorkoutIdentity(
@@ -1215,7 +1267,7 @@ export async function finishLiveWorkout(input: FinishLiveWorkoutInput) {
 
 interface FinishLiveWorkoutLockOptions {
   lastMemberActionId?: string
-  scheduledRolloverOperationId?: string
+  scheduledRolloverReceiptId?: string
 }
 
 async function finishLiveWorkoutWithLockHeld(
@@ -1256,9 +1308,9 @@ async function finishLiveWorkoutWithLockHeld(
   if (options.lastMemberActionId !== undefined) {
     set.push(`workout.lastMemberActionId=${options.lastMemberActionId}`)
   }
-  if (options.scheduledRolloverOperationId !== undefined) {
+  if (options.scheduledRolloverReceiptId !== undefined) {
     set.push(
-      `workout.scheduledRolloverOperationId=${options.scheduledRolloverOperationId}`,
+      `workout.scheduledRolloverReceiptId=${options.scheduledRolloverReceiptId}`,
     )
   }
 

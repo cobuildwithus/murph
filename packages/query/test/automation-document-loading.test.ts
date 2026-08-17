@@ -36,6 +36,22 @@ afterEach(async () => {
 });
 
 describe("automation document loading", () => {
+  it("loads typed scheduled workout reply authority without inferring it from instructions", async () => {
+    const vaultRoot = await createVaultRoot();
+    await writeAutomationDocument(
+      vaultRoot,
+      "bank/automations/workout.md",
+      "Workout reminder",
+      "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    );
+
+    const records = await listAutomations(vaultRoot);
+    expect(records[0]?.scheduledReply).toEqual({
+      kind: "workout_rollover",
+      routineId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    });
+  });
+
   it("loads a bounded batch concurrently and keeps deterministic output order", async () => {
     const vaultRoot = await createVaultRoot();
     const relativePaths = Array.from(
@@ -150,6 +166,7 @@ async function writeAutomationDocument(
   vaultRoot: string,
   relativePath: string,
   title: string,
+  scheduledWorkoutRoutineId?: string,
 ): Promise<void> {
   const slug = path.basename(relativePath, ".md");
   await writeFile(
@@ -171,6 +188,13 @@ async function writeAutomationDocument(
       "  identityId: null",
       "  participantId: null",
       "  threadId: null",
+      ...(scheduledWorkoutRoutineId === undefined
+        ? []
+        : [
+            "scheduledReply:",
+            "  kind: workout_rollover",
+            `  routineId: ${scheduledWorkoutRoutineId}`,
+          ]),
       "createdAt: 2026-07-15T00:00:00.000Z",
       "updatedAt: 2026-07-15T00:00:00.000Z",
       "---",

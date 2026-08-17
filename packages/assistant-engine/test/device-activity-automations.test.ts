@@ -1737,6 +1737,7 @@ function createDeviceActivityAutomation(input: {
       ...(input.activityKind ? { activityKind: input.activityKind } : {}),
     },
     schemaVersion: 'murph.frontmatter.automation.v1',
+    scheduledReply: null,
     slug: automationId,
     status: 'active',
     summary: null,

@@ -7,6 +7,7 @@ import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import type {
   AutomationRoute,
   AutomationSchedule,
+  AutomationScheduledReply,
   AutomationSupportKind,
 } from '@murphai/contracts'
 import {
@@ -50,6 +51,7 @@ type MockAutomationRecord = {
   instructions: string
   route: AutomationRoute
   schedule: AutomationSchedule
+  scheduledReply?: AutomationScheduledReply | null
   relativePath?: string
   slug?: string
   status: 'active' | 'paused' | 'archived'
@@ -11293,7 +11295,7 @@ describe('assistant cron runtime orchestration', () => {
       automationId: 'automation-linq-pinned-mixed-route',
       continuityPolicy: 'preserve',
       createdAt: '2026-05-03T22:17:55.000Z',
-      instructions: 'Remind me to stand up.',
+      instructions: 'Send my saved workout reminder.',
       route: {
         channel: 'linq',
         deliverySource: {
@@ -11309,11 +11311,15 @@ describe('assistant cron runtime orchestration', () => {
         kind: 'dailyLocal',
         localTime: '00:00',
       },
-      slug: 'stand-up-reminder',
+      scheduledReply: {
+        kind: 'workout_rollover',
+        routineId: 'wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1',
+      },
+      slug: 'saved-workout-reminder',
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled'],
-      title: 'Stand Up Reminder',
+      title: 'Saved Workout Reminder',
       updatedAt: '2026-05-03T22:17:55.000Z',
     })
 
@@ -11368,6 +11374,10 @@ describe('assistant cron runtime orchestration', () => {
         outboxAutomationAuthority: {
           automationId: 'automation-linq-pinned-mixed-route',
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
+          scheduledReply: {
+            kind: 'workout_rollover',
+            routineId: 'wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1',
+          },
           scheduledOccurrenceAt: '2026-05-04T16:00:00.000Z',
         },
         participantId: 'participant-1',

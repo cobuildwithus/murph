@@ -10,6 +10,7 @@ import {
   automationDeviceActivitySourceValues,
   automationScheduleAtSchema,
   automationScheduleKindValues,
+  automationScheduledReplySchema,
   automationStatusValues,
   automationSupportKindValues,
   normalizeIanaTimeZone,
@@ -22,6 +23,7 @@ import {
   type AutomationRoute,
   type AutomationSchedule,
   type AutomationScheduleKind,
+  type AutomationScheduledReply,
   type AutomationStatus,
   type AutomationSupportKind,
 } from "@murphai/contracts";
@@ -48,6 +50,7 @@ export type {
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
+  AutomationScheduledReply,
   AutomationStatus,
   AutomationSupportKind,
 };
@@ -64,6 +67,7 @@ export interface AutomationQueryRecord {
   schedule: AutomationSchedule;
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
+  scheduledReply: AutomationScheduledReply | null;
   supportKind: AutomationSupportKind | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
@@ -158,6 +162,21 @@ function normalizeAutomationSupportKind(value: unknown): AutomationSupportKind |
     );
   }
   return value as AutomationSupportKind;
+}
+
+function normalizeAutomationScheduledReply(
+  value: unknown,
+): AutomationScheduledReply | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const parsed = automationScheduledReplySchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(
+      "scheduledReply must identify one canonical workout rollover routine.",
+    );
+  }
+  return parsed.data;
 }
 
 function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
@@ -511,6 +530,7 @@ function parseAutomationRecord(
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       attributes.assistantTargetOverride,
     ),
+    scheduledReply: normalizeAutomationScheduledReply(attributes.scheduledReply),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),

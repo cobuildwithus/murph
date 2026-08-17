@@ -1,4 +1,5 @@
 import * as z from '@murphai/contracts/zod-runtime'
+import { workoutSessionSchema } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { logScheduledLiveWorkoutSet } from '@murphai/vault-usecases/workouts'
 
@@ -15,7 +16,6 @@ import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const scheduledWorkoutRolloverArgumentsSchema = z.object({
   previousWorkoutId: z.string().regex(/^evt_[0-9A-Za-z]+$/u),
-  routineId: z.string().regex(/^wfmt_[0-9A-Za-z]+$/u),
   exerciseName: z.string().trim().min(1).max(160),
   exerciseOrder: z.number().int().positive(),
   setOrder: z.number().int().positive(),
@@ -36,7 +36,7 @@ export const MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL = {
   namespace: 'murph',
   name: 'log_scheduled_workout_set',
   description:
-    'Close one fully logged prior live workout, start the exact saved routine occurrence identified by the current direct reminder reply, and log one member-stated set result. This tool is offered only for the exact host-authorized root reply. Provide semantic workout coordinates and actuals only; timestamps, reply identity, and retry identity are bound by the host.',
+    'Close one fully logged prior live workout, start the exact saved routine occurrence bound to the current direct reminder reply, and log one member-stated set result. This tool is offered only for the exact host-authorized root reply. Provide the prior workout, semantic set coordinates, and actuals only; the scheduled routine, timestamps, reply identity, and retry identity are bound by the host.',
   inputSchema: z.toJSONSchema(scheduledWorkoutRolloverArgumentsSchema, {
     io: 'input',
   }),
@@ -64,7 +64,6 @@ export function readScheduledWorkoutRolloverDynamicToolRequest(input: {
     schema: scheduledWorkoutRolloverArgumentsSchema,
     schemaRootKeys: [
       'previousWorkoutId',
-      'routineId',
       'exerciseName',
       'exerciseOrder',
       'setOrder',
@@ -132,13 +131,28 @@ export async function executeScheduledWorkoutRolloverDynamicTool(input: {
       acceptedAt: input.authority.acceptedAt,
       operationId: input.authority.operationId,
       reminderSentAt: input.authority.reminderSentAt,
+      routineId: input.authority.routineId,
       scheduledOccurrenceAt: input.authority.scheduledOccurrenceAt,
     })
+    const verifiedWorkout = workoutSessionSchema.parse(
+      shown.entity.data.workout,
+    )
+    const {
+      scheduledRolloverReceiptId: _scheduledRolloverReceiptId,
+      ...providerWorkout
+    } = verifiedWorkout
+    void _scheduledRolloverReceiptId
     return scheduledWorkoutRolloverTextResult(
       true,
       JSON.stringify({
         status: 'logged',
-        workout: shown.entity,
+        workout: {
+          ...shown.entity,
+          data: {
+            ...shown.entity.data,
+            workout: providerWorkout,
+          },
+        },
       }),
     )
   } catch (error) {

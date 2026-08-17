@@ -20,8 +20,8 @@ const faults = vi.hoisted(() => ({
 
 const setsWorkoutEndedAt = (entry: string): boolean => entry.startsWith('workout.endedAt=')
 const setsWorkoutExercises = (entry: string): boolean => entry.startsWith('workout.exercises=')
-const setsScheduledRolloverOperationId = (entry: string): boolean =>
-  entry.startsWith('workout.scheduledRolloverOperationId=')
+const setsScheduledRolloverReceiptId = (entry: string): boolean =>
+  entry.startsWith('workout.scheduledRolloverReceiptId=')
 
 vi.mock('../src/usecases/workout.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/usecases/workout.js')>()
@@ -32,7 +32,7 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
       if (
         faults.failAfterScheduledStart &&
         input.draft.workout?.startedAt === SCHEDULED_OCCURRENCE_AT &&
-        input.draft.workout.scheduledRolloverOperationId !== undefined
+        input.draft.workout.scheduledRolloverReceiptId !== undefined
       ) {
         faults.failAfterScheduledStart = false
         throw new Error('injected failure after scheduled workout start')
@@ -44,7 +44,7 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
       if (
         faults.failAfterPreviousClose &&
         input.set?.some(setsWorkoutEndedAt) &&
-        input.set.some(setsScheduledRolloverOperationId)
+        input.set.some(setsScheduledRolloverReceiptId)
       ) {
         faults.failAfterPreviousClose = false
         throw new Error('injected failure after prior workout close')
@@ -52,7 +52,7 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
       if (
         faults.failAfterScheduledLog &&
         input.set?.some(setsWorkoutExercises) &&
-        input.set.some(setsScheduledRolloverOperationId)
+        input.set.some(setsScheduledRolloverReceiptId)
       ) {
         faults.failAfterScheduledLog = false
         throw new Error('injected failure after scheduled set log')
@@ -317,9 +317,21 @@ describe('scheduled live-workout rollover', () => {
     )
     expect(afterCloseFailure.endedAt).toBe(PRIOR_FINAL_ACTIVITY_AT)
     expect(afterCloseFailure.lastMemberActionId).toBe(PRIOR_MEMBER_ACTION_ID)
-    expect(afterCloseFailure.scheduledRolloverOperationId).toBe(
-      ROLLOVER_OPERATION_ID,
+    expect(afterCloseFailure.scheduledRolloverReceiptId).toMatch(
+      /^sha256:[a-f0-9]{64}$/u,
     )
+    await expect(showActiveLiveWorkout({ vault: prepared.vault })).rejects.toThrow(
+      'No active live workout',
+    )
+    await expect(logScheduledLiveWorkoutSet({
+      ...scheduledInput(prepared),
+      exerciseName: 'Split squat',
+      reps: 10,
+      routineId: beforeWorkout.routineId!,
+      setOrder: 1,
+      type: 'warmup',
+      weight: 35,
+    })).rejects.toThrow('exact scheduled rollover effect')
     await expect(showActiveLiveWorkout({ vault: prepared.vault })).rejects.toThrow(
       'No active live workout',
     )
@@ -337,10 +349,23 @@ describe('scheduled live-workout rollover', () => {
     expect(startedWorkout.startedAt).toBe(SCHEDULED_OCCURRENCE_AT)
     expect(startedWorkout.routineId).toBe(prepared.nextRoutineId)
     expect(startedWorkout.lastMemberActionId).toBeUndefined()
-    expect(startedWorkout.scheduledRolloverOperationId).toBe(
-      ROLLOVER_OPERATION_ID,
+    expect(startedWorkout.scheduledRolloverReceiptId).toBe(
+      afterCloseFailure.scheduledRolloverReceiptId,
     )
     expect(startedWorkout.exercises[0]?.sets[1]).toEqual({ order: 2 })
+    await expect(logScheduledLiveWorkoutSet({
+      ...scheduledInput(prepared),
+      reps: 12,
+      setOrder: 1,
+      type: 'warmup',
+      weight: 60,
+    })).rejects.toThrow('exact scheduled rollover effect')
+    expect(parseShownWorkout(
+      await showActiveLiveWorkout({
+        vault: prepared.vault,
+        workoutId: startedWorkoutId,
+      }),
+    ).exercises[0]?.sets[0]).toEqual({ order: 1, type: 'warmup' })
 
     faults.failAfterScheduledLog = true
     await expect(logScheduledLiveWorkoutSet(scheduledInput(prepared))).rejects.toThrow(
@@ -378,6 +403,16 @@ describe('scheduled live-workout rollover', () => {
       },
     ])
     expect(afterLogFailure.entity.data.durationMinutes).toBe(7)
+    await expect(logScheduledLiveWorkoutSet({
+      ...scheduledInput(prepared),
+      reps: 8,
+    })).rejects.toThrow('exact scheduled rollover effect')
+    expect(parseShownWorkout(
+      await showActiveLiveWorkout({
+        vault: prepared.vault,
+        workoutId: startedWorkoutId,
+      }),
+    ).exercises[0]?.sets[1]?.reps).toBe(9)
 
     const converged = await logScheduledLiveWorkoutSet(scheduledInput(prepared))
     const replayed = await logScheduledLiveWorkoutSet({
@@ -386,6 +421,13 @@ describe('scheduled live-workout rollover', () => {
     })
     expect(converged.entity.id).toBe(startedWorkoutId)
     expect(replayed.entity.id).toBe(startedWorkoutId)
+    await expect(logScheduledLiveWorkoutSet({
+      ...scheduledInput(prepared),
+      reps: 12,
+      setOrder: 1,
+      type: 'warmup',
+      weight: 60,
+    })).rejects.toThrow('exact scheduled rollover effect')
 
     const previous = await showWorkoutRecord(
       prepared.vault,
