@@ -158,10 +158,10 @@ export class HostedDeviceSyncPublicIngressService {
         onWebhookAccepted: async ({
           account,
           claimToken,
+          processingAttemptedAt,
           sourceAdmissionDeferred,
           traceId,
           webhook,
-          provider,
           now,
         }) => {
           const ownerId = await this.context.store.getConnectionOwnerId(account.id);
@@ -170,6 +170,7 @@ export class HostedDeviceSyncPublicIngressService {
             claimToken,
             now,
             ownerId,
+            processingAttemptedAt,
             registry: input.registry,
             sourceAdmissionDeferred,
             store: this.context.store,

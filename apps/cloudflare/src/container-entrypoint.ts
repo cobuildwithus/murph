@@ -44,7 +44,7 @@ import {
   readHostedRuntimeFailurePhaseCode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
+  drainHostedAssistantDeliveryControlPlaneWritesBestEffort,
   drainHostedRuntimeLogWritesBestEffort,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
 } from "@murphai/assistant-runtime/hosted-invocation";
@@ -1194,7 +1194,7 @@ function installHostedContainerProcessFatalHandlers(): void {
       // both. Neither promise ever rejects.
       void Promise.allSettled([
         reportHostedContainerFatalBestEffort({ error, stage }),
-        drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(),
+        drainHostedAssistantDeliveryControlPlaneWritesBestEffort(),
         drainHostedRuntimeLogWritesBestEffort(),
         drainHostedRuntimeDeferredUsageCompletionsBestEffort({
           closeActiveCaptures: true,

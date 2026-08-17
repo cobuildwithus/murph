@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-15
+Last verified: 2026-08-16
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -830,16 +830,20 @@ and then execs the build as the invoking user with the caller's environment,
 working directory, and stdio unchanged. In the current observe-only state it
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
 Vercel package build starts the parent Next process with a direct 1 GiB
-old-space flag and appends a 3.5 GiB old-space flag to `NODE_OPTIONS`. Node applies
-the direct flag to the parent; Next 16.3.0 rebuilds its non-isolated TypeScript
-worker options from the parent arguments followed by `NODE_OPTIONS`, so the
-mandatory generated-contract validation receives 3.5 GiB. Next removes the flag
-from isolated static workers. The same script owns the Vercel package build and
-CI memory-observation invocation. This bounds the compile parent without
-weakening validation, but only repeated forced-cold Standard previews prove the
-real Vercel boundary. The worker limit moved from 3 GiB to 3.5 GiB only after an
-exact cold generated-contract check succeeded at 3.5 GiB and deterministically
-exhausted the 3 GiB heap. A 2 GiB parent-bound candidate passed one forced-cold
+old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS` for the
+Webpack build worker. The same runner first performs route type generation and
+an explicit app-local generated-contract TypeScript check at 3.5 GiB, then marks
+only that prepared check complete before starting the Webpack build. Node
+applies the direct flag to the parent; Next 16.3.0 rebuilds non-isolated child
+options from the parent arguments followed by `NODE_OPTIONS`, so the sequential
+Webpack compiler workers receive 3 GiB while the separate TypeScript CLI child
+receives 3.5 GiB. Next removes the flag from isolated static workers. The same
+script owns the Vercel package build and the CI memory-observation invocation.
+This bounds the compile parent without weakening validation, but only repeated
+forced-cold Standard previews prove the real Vercel boundary. The generated-
+contract worker limit moved from 3 GiB to 3.5 GiB only after an exact cold check
+succeeded at 3.5 GiB and deterministically exhausted the 3 GiB heap. A 2 GiB
+parent-bound candidate passed one forced-cold
 preview but the next identical build was still killed by the 8 GB container
 OOM boundary. Single
 global 1 GiB and 1.5 GiB limits starved Next's generated-contract TypeScript
@@ -860,10 +864,14 @@ correction remains a boundary fix but was not sufficient capacity proof on
 Next 16.2.6. Production and Linux CI now use Next 16.3's supported Webpack
 fallback through the same shared production-build selector, with the isolated
 Webpack build worker and memory optimizations enabled. Interactive development
-and the dev-smoke lane remain on Turbopack. A cache-local compiler epoch removes
-only `.next/cache` when a restored cache predates the Webpack cutover and writes
-the epoch only after a successful Next build, so a failed cold build retries
-cold while later successful builds retain normal warm caching. The Workflow
+and the dev-smoke lane remain on Turbopack. `apps/web/README.md` § "Production
+build memory guard" is the single prose owner for the production build cache,
+epoch, and deadline contract. Warm restored Webpack caches were the trigger
+for the August 2026 steady-state 8 GB container OOM kills and silent compile
+hangs that followed the cutover. The verification implication here is that
+the verify lane intentionally builds with `VERCEL=1 VERCEL_ENV=preview`,
+which compiles Webpack cold but never arms the production-only build
+deadline. The Workflow
 integration runs through its native Next integration: exact-head CI proves the
 complete compile, type-validation, static-generation, and directive-discovery
 path, while focused Stripe and phone-call suites prove the existing

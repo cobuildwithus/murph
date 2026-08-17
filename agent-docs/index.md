@@ -276,14 +276,13 @@ provider-no-replay recovery, are jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
-Independent partial PlanetScale metric normalization, explicit unknown-family
-evidence when either expected connection-error port is missing, continued
-evaluation of available database signals, per-port baseline advancement with
-new/reset suppression, bounded safe connection-error confirmation with exact
-missing-port attempt and alert evidence, confirmation-only port baseline
-advancement, failed-check family/evidence alignment, conservative legacy-window
-provenance, parsed-observation retention across later retry failure,
-cross-scrape port composition without suppressing unsafe observations, and
+Independent partial PlanetScale metric normalization, sparse connection-error
+port acceptance without false monitoring pages, continued evaluation of
+available database signals, per-port baseline advancement with new/reset
+suppression, bounded confirmation when the whole connection-error family is
+absent, transient diagnostic missing-port evidence with rollback-compatible
+durable normalization, conservative legacy-window provenance,
+parsed-observation retention across later retry failure, and
 one-shot telemetry-only operator paging with unresolved-window coalescing,
 current-pressure priority including direct and pooled connection errors in one
 combined pre-first-page incident, post-ack recurrence suppression, durable

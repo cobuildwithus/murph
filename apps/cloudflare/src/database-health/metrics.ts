@@ -233,7 +233,7 @@ export function parsePlanetScaleDatabaseMetricObservation(
     : sumConnectionErrorsByPortAndRegion(connectionErrorPoints);
 
   const missingMetricSet = new Set<DatabaseHealthRequiredMetricName>();
-  if (readMissingConnectionErrorPorts(connectionErrorCounters).length > 0) {
+  if (connectionErrorCounters === null) {
     missingMetricSet.add(DATABASE_CONNECTION_ERROR_METRIC_NAME);
   }
   if (currentConnectionPoints.length === 0) {

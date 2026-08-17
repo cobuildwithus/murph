@@ -234,23 +234,23 @@ remains single-pass so available unsafe evidence pages without delay. The
 monitor retains every successfully parsed observation even when it contains no
 usable required family and its retry fails before parsing; `unavailable` is
 reserved for checks that produced no parsed observation. The
-connection-error family expects both ports, keyed by port and region so their
-series cannot collide. Missing either port keeps that family unknown. When a
-safe observation is otherwise complete, the monitor makes one confirmation
-scrape after one second. PlanetScale's [documented example Prometheus scrape
-configuration](https://planetscale.com/docs/postgres/monitoring/prometheus-postgres)
+connection-error family tracks both supported ports, keyed by port and region
+so their series cannot collide. Any observed supported port makes the family
+available. An absent port is diagnostic sparse label cardinality, not a
+collection failure. When a safe observation has the whole family absent, the
+monitor makes one confirmation scrape after one second. PlanetScale's
+[documented example Prometheus scrape configuration](https://planetscale.com/docs/postgres/monitoring/prometheus-postgres)
 uses 30 seconds, but that is not a provider freshness guarantee and does not
 justify another provider call. The monitor evaluates every available
 confirmation signal
-and composes complementary observed ports with the original complete
-gauge evidence. A safe still-incomplete confirmation contributes its observed
-counters to the original complete gauge evidence, so a port first seen there
-advances its baseline. Each observed port advances only its own usable baseline;
+and composes any recovered supported port with the original complete gauge
+evidence, so a port first seen there advances its baseline. Each observed port
+advances only its own usable baseline;
 an omitted port retains its prior baseline, and new or reset region series are
 suppressed independently. A failed confirmation retains the original
-incomplete observation, so absence never becomes zero, an old
-counter delta is never replayed, and two persistently incomplete checks still
-open the fallback monitoring incident. This keeps the existing maximum of two
+incomplete observation, so absence never becomes zero and an old counter delta
+is never replayed. Two checks with the whole family absent still open the
+fallback monitoring incident. This keeps the existing maximum of two
 observations and four provider requests; even two sequential ten-second fetch
 timeouts per observation plus the one-second wait remain below the two-minute
 run lease.
@@ -261,13 +261,16 @@ one-shot for one unresolved operator-notification window.
 Crossing the two-failure threshold records one bounded alert obligation in the
 existing incident row. The first two-check window counts incomplete versus
 unavailable observations, unions only canonical missing families, and sums
-parsed observations plus exact 5432/6432 omission counts from partial checks.
+parsed observations plus exact 5432/6432 omission counts from checks where the
+whole family was absent.
 It identifies the threshold time as the window end. A bounded per-sample evidence value preserves
-that provenance across restart. A failed check retains the connection-error
-family if any parsed observation omitted an expected port, even when its final
-selected observation is missing another family. Legacy evidence remains
-readable, and any window containing it reports unavailable port detail rather
-than presenting a partial ratio as exact. An older
+that provenance across restart. Structured warnings can retain a sparse-port
+omission during another collection failure, but durable evidence clears that
+diagnostic count unless the canonical connection-error family is missing. This
+preserves the legacy reader correlation invariant across rollback. Legacy
+evidence, including a single-port monitoring obligation, remains readable. Any
+window containing legacy evidence reports unavailable port detail
+rather than presenting a partial ratio as exact. An older
 pending page or connection-error priority cannot lose the obligation; recovery
 and another gap before acknowledgment coalesce into that same notification
 while the first threshold window remains authoritative. The obligation does

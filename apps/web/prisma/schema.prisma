@@ -1423,6 +1423,19 @@ model HostedGrowthDailySnapshot {
   @@map("hosted_growth_daily_snapshot")
 }
 
+/// Anonymous exact-once receipts for successful post-cutover conversational
+/// Telegram and email deliveries. The lookup key is a one-way digest over the
+/// authenticated member, channel, and durable outbox dedupe key; no member,
+/// target, thread, or provider identifier is retained.
+model HostedOutboundMessageVolumeReceipt {
+  receiptLookupKey String   @id @map("receipt_lookup_key") @db.VarChar(64)
+  channel          String   @db.VarChar(16)
+  recordedAt       DateTime @default(now()) @map("recorded_at")
+
+  @@index([recordedAt], map: "homvr_recorded_at_idx")
+  @@map("hosted_outbound_message_volume_receipt")
+}
+
 /// Anonymous company-wide growth totals that must outlive member-scoped rows.
 /// The top-up total starts from retained rows at tracker cutover; it is not a
 /// complete pre-cutover purchase ledger. The database constrains this model to

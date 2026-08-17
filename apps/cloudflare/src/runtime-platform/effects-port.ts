@@ -11,6 +11,7 @@ import {
   HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -389,6 +390,29 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
+          },
+          async recordOutboundMessageVolumeReceipt(request, context) {
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted outbound message-volume receipt recording",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted outbound message-volume receipt recording",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            const recordedAt = readOptionalStringField(payload, "recordedAt");
+            if (!recordedAt || !Number.isFinite(Date.parse(recordedAt))) {
+              throw new TypeError(
+                "Hosted outbound message-volume receipt response is invalid.",
+              );
+            }
+            return { recordedAt };
           },
         }
       : {}),

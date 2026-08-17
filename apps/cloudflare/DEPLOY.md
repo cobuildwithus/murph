@@ -145,6 +145,32 @@ image-plus-link and one text-plus-voice response, checkpoint both workspaces,
 and confirm Workers Observability contains no outbox quarantine or runner schema
 version failures.
 
+## Outbound Message-Volume Receipt Rollout
+
+Deploy the additive Web receipt migration and signed callback route first, then
+deploy Cloudflare/runner with `container_rollout=immediate`. Old runners do not
+write Telegram/email receipt markers, so a gradual runner rollout would create
+an unrecoverable counting gap even though delivery itself remains safe. Keep the
+Web table and callback route available until the new managed runner fingerprint
+is confirmed everywhere.
+
+This release advances Durable Object runner state to schema version 17 before
+creating an invocation, workspace snapshot, or container service. A version-16
+Worker rejects version 17 before it can wake a runner or read an encrypted
+workspace, so it cannot pass the new strict outbox receipt marker to a legacy
+parser and quarantine the intent. Version 17 is a hard Cloudflare/runner
+rollback floor after the release reaches a member's Durable Object. Do not roll
+Worker or runner below that floor; forward-fix on version 17 or newer. The
+additive Web table and callback may remain deployed during a Cloudflare repair.
+
+After deployment, verify the managed runner fingerprint, record one signed
+Telegram receipt and one signed email receipt, replay each exact dedupe key, and
+confirm the public total increments once per delivery. Check Workers
+Observability for receipt callback failures, outbox quarantine, and runner
+schema-version rejection. Also confirm an intentionally failed callback leaves
+a bounded assistant wake and succeeds after recovery without provider
+redispatch.
+
 ## Health-Data Consent Stop-Target Rollout
 
 Deploy the Cloudflare Worker that retains an exact user-control stop target
@@ -322,6 +348,19 @@ Deploy the first native response-card release as one Cloudflare Worker and
 runner bundle update with `container_rollout=immediate`. Before allowing card
 traffic, require managed-container smoke to report the exact new runner-bundle
 fingerprint and prove the updated assistant CLI surface.
+
+Treat backward compatibility as a permanent traffic gate for every iMessage
+app card. Linq capability is not decoder-version negotiation, so a new schema,
+discriminator, required field, stricter bound, or changed meaning must not emit
+while any previously released extension that can claim the card would reject
+it. App Store availability of a new reader does not retire older installed
+readers. Before enabling traffic, prove either that unknown clients receive the
+last readable envelope, that an explicit capability selects a compatible
+envelope, or that every earlier claiming extension already provides a complete
+non-interactive recovery for the unknown shape. Otherwise keep the producer on
+the prior schema or deterministic ordinary text. TestFlight, App Review,
+provider acceptance, delivery receipts, and proof on only the new build do not
+satisfy this gate.
 
 An expansion of an existing strict card version has a reader floor even when
 its discriminator is unchanged. For the V4 workout expansion above eight

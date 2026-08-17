@@ -692,6 +692,9 @@ export interface DispatchAssistantOutboxIntentInput {
     preparedDispatchToken: string
   }
   signal?: AbortSignal
+  // Hosted-only opt-in. Local transports have no central receipt owner and
+  // must not retain a pending marker that they cannot acknowledge.
+  trackMessageVolumeReceipt?: boolean
   vault: string
 }
 
@@ -1193,6 +1196,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       deliveryTransportIdempotent,
       intent: effectiveDispatchIntent,
       session: delivered.session ?? null,
+      trackMessageVolumeReceipt: input.trackMessageVolumeReceipt === true,
     })
     const deliveredOwnerIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
@@ -2371,6 +2375,105 @@ export async function markAssistantOutboxIntentSentById(input: {
   })
 }
 
+export function hasPendingAssistantOutboxMessageVolumeReceipt(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return (
+    intent.messageVolumeReceiptRecordedAt === null &&
+    intent.delivery !== null &&
+    assistantOutboxDeliveryCountsTowardMessageVolume({
+      delivery: intent.delivery,
+      intent,
+    })
+  )
+}
+
+export async function markAssistantOutboxMessageVolumeReceiptRecorded(input: {
+  channel: 'email' | 'telegram'
+  dedupeKey: string
+  intentId: string
+  recordedAt: string
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const intentPath = resolveAssistantOutboxIntentPath(
+      paths.outboxDirectory,
+      input.intentId,
+    )
+    const current = await readAssistantOutboxIntentAtPath(intentPath, {
+      vault: input.vault,
+    })
+    if (!current) {
+      return null
+    }
+    if (current.messageVolumeReceiptRecordedAt !== null) {
+      return current
+    }
+    if (
+      current.dedupeKey !== input.dedupeKey ||
+      current.delivery === null ||
+      current.delivery.channel.trim().toLowerCase() !== input.channel ||
+      !assistantOutboxDeliveryCountsTowardMessageVolume({
+        delivery: current.delivery,
+        intent: current,
+      })
+    ) {
+      return current
+    }
+
+    const recorded = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...current,
+        messageVolumeReceiptRecordedAt: input.recordedAt,
+        nextAttemptAt: null,
+      }),
+    )
+    await writeJsonFileAtomic(
+      intentPath,
+      sanitizeAssistantOutboxIntentForPersistence(recorded),
+    )
+    return recorded
+  })
+}
+
+export async function rescheduleAssistantOutboxMessageVolumeReceipt(input: {
+  dedupeKey: string
+  intentId: string
+  nextAttemptAt: string
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const intentPath = resolveAssistantOutboxIntentPath(
+      paths.outboxDirectory,
+      input.intentId,
+    )
+    const current = await readAssistantOutboxIntentAtPath(intentPath, {
+      vault: input.vault,
+    })
+    if (
+      !current ||
+      current.dedupeKey !== input.dedupeKey ||
+      !hasPendingAssistantOutboxMessageVolumeReceipt(current)
+    ) {
+      return current
+    }
+
+    const rescheduled = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...current,
+        nextAttemptAt: input.nextAttemptAt,
+      }),
+    )
+    await writeJsonFileAtomic(
+      intentPath,
+      sanitizeAssistantOutboxIntentForPersistence(rescheduled),
+    )
+    return rescheduled
+  })
+}
+
 function assertAssistantOutboxNativeReplyTarget(input: {
   channel: string | null
   nativeReplyRequested?: unknown
@@ -2555,8 +2658,16 @@ function buildAssistantOutboxDeliveredIntent(input: {
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   session: AssistantSession | null
+  trackMessageVolumeReceipt: boolean
 }): AssistantOutboxIntent {
   const sessionBinding = input.session?.binding ?? null
+  const messageVolumeReceiptRecordedAt =
+    input.intent.messageVolumeReceiptRecordedAt !== undefined
+      ? input.intent.messageVolumeReceiptRecordedAt
+      : input.trackMessageVolumeReceipt &&
+          assistantOutboxDeliveryCountsTowardMessageVolume(input)
+        ? null
+        : undefined
 
   return assistantOutboxIntentSchema.parse(
     sanitizeAssistantOutboxIntentForPersistence({
@@ -2567,9 +2678,36 @@ function buildAssistantOutboxDeliveredIntent(input: {
       delivery: input.delivery,
       deliveryTransportIdempotent: input.deliveryTransportIdempotent,
       identityId: sessionBinding?.identityId ?? input.intent.identityId,
+      ...(messageVolumeReceiptRecordedAt === undefined
+        ? {}
+        : { messageVolumeReceiptRecordedAt }),
       threadId: sessionBinding?.threadId ?? input.intent.threadId,
       threadIsDirect: sessionBinding?.threadIsDirect ?? input.intent.threadIsDirect,
     }),
+  )
+}
+
+function assistantOutboxDeliveryCountsTowardMessageVolume(input: {
+  delivery: AssistantChannelDelivery
+  intent: Pick<AssistantOutboxIntent, 'explicitTarget'>
+}): boolean {
+  if (input.delivery.kind === 'message-reaction') {
+    return false
+  }
+
+  const channel = input.delivery.channel.trim().toLowerCase()
+  if (channel === 'telegram') {
+    return true
+  }
+  if (channel !== 'email') {
+    return false
+  }
+
+  const target = parseHostedEmailThreadTarget(
+    input.intent.explicitTarget ?? input.delivery.target,
+  )
+  return !(
+    target?.targetKind === 'group' && target.recipientMemberId === null
   )
 }
 

@@ -477,23 +477,23 @@ Last verified: 2026-08-16
   collection increments the consecutive-failure state. A usable partial
   observation remains single-pass when any available signal is unsafe, so
   concrete evidence is evaluated without delay. The connection-error family
-  expects direct port 5432 and pooled application port 6432, keyed by port and
-  region so their counters cannot collide. Missing either expected port leaves
-  the family unknown. An observed port can still produce a positive
-  non-replayable condition; when every available signal is safe and only this
-  family is incomplete, the monitor waits one second before one confirmation
+  tracks direct port 5432 and pooled application port 6432, keyed by port and
+  region so their counters cannot collide. Any observed supported port makes
+  the family available. An absent port is diagnostic sparse label cardinality,
+  not a collection failure. An observed port can still produce a positive
+  non-replayable condition. When every available signal is safe and the whole
+  family is absent, the monitor waits one second before one confirmation
   scrape. PlanetScale's documented example 30-second Prometheus scrape
   configuration is not a freshness guarantee, so it does not justify a longer
   delay or another provider call. Every available confirmation signal is
   evaluated;
-  complementary observed ports can be composed with the original complete
+  any recovered supported port can be composed with the original complete
   gauge evidence, while a failed confirmation retains the original partial
-  observation. A safe still-incomplete confirmation contributes its observed
-  counters to the original complete gauge evidence so a port first observed by
-  confirmation advances its baseline. Each observed port replaces and advances
+  observation. A port first observed by confirmation advances its baseline.
+  Each observed port replaces and advances
   only its own usable series baseline, an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed. This makes
-  transient counter-family omission less noisy without converting unknown to
+  transient counter-family absence less noisy without converting unknown to
   zero, replaying an old delta, or weakening the two-check telemetry fallback.
   The confirmation retains the existing two-observation/four-request ceiling.
   Including two sequential ten-second fetch timeouts per observation, its
@@ -510,15 +510,17 @@ Last verified: 2026-08-16
   existing incident row. The represented first two-check window counts
   incomplete versus unavailable observations, unions only canonical missing
   families, and sums parsed observations plus exact 5432/6432 omission counts
-  from partial checks.
+  from checks where the whole family was absent.
   It uses the threshold time as its window end. One bounded evidence value on
   each existing sample
   preserves that aggregate provenance across restart. Legacy evidence without
   port detail remains readable; any window containing it reports unavailable
   port detail rather than presenting the detailed portion as an exact ratio.
-  Each failed check also retains the connection-error family whenever any of its
-  parsed observations omitted an expected port, keeping strict persistence
-  validation aligned with the operator diagnosis. The obligation survives an
+  Structured warnings can retain a sparse-port omission during another
+  collection failure, but durable evidence clears that diagnostic count unless
+  the canonical connection-error family is missing. This preserves the legacy
+  reader correlation invariant across rollback. Legacy single-port monitoring
+  obligations remain readable. The obligation survives an
   occupied pending-message slot,
   restart, recovery, and connection-error-only prioritization; only
   acknowledgment of a pending body that includes the monitoring condition
@@ -1271,11 +1273,21 @@ Last verified: 2026-08-16
   post-commit Temporal signal fails, the existing scheduled mailbox-handoff
   sweep selects one exact unconsumed `device-sync.wake` pointer per user and
   retries from mailbox truth without scanning dirty rows. A pending webhook
-  without that exact provider proof releases its trace claim and returns a retryable
-  not-ready response. Manual reconcile, due scheduling, ordinary queued jobs,
-  and sync-success promotion apply the same account phase gate. After a shared
-  account is `source_confirmed`, a new target source does
-  not move the account back into a pending phase. Its `DeviceConnectionSource`
+  without that exact provider proof releases its trace claim and returns a
+  retryable not-ready response while the current persisted setup remains live.
+  Each delivery uses the trace claim's single processing-attempt instant to
+  recheck that lifecycle. Once the same persisted setup is expired, a later
+  delivery completes only the existing trace before provider I/O and
+  acknowledges the event without dirty state, source admission, last-webhook
+  freshness, signal, mailbox, wake, job, canonical-health, or setup-state
+  mutation. After pending-setup classification, both hosted lock owners use the
+  frozen receipt only for established-event ordering: a current `connectedAt`
+  later than that receipt completes the trace before provider I/O or
+  source/dirty admission, preventing prior-connection work from inheriting
+  replacement authority. Manual reconcile, due scheduling, ordinary queued
+  jobs, and sync-success promotion apply the same account phase gate. After a
+  shared account is `source_confirmed`, a new target source does not move the
+  account back into a pending phase. Its `DeviceConnectionSource`
   remains `disconnected`, and source-attributed webhooks, dirty-state commit
   races, and provider pulls fail or exit without admitting target data until
   callback completion or the same provider-verified hosted webhook admission

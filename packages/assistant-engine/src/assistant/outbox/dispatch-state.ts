@@ -124,7 +124,15 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.intent)) {
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.intent,
+        ['sending'],
+        false,
+      )
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -137,6 +145,12 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
+        ...(input.intent.messageVolumeReceiptRecordedAt === undefined
+          ? {}
+          : {
+              messageVolumeReceiptRecordedAt:
+                input.intent.messageVolumeReceiptRecordedAt,
+            }),
         deliveryConfirmationPending:
           terminalConfirmationRequired || input.deliveryTransportIdempotent,
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
@@ -149,7 +163,9 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
               new Date(input.completedAt),
               baseIntent.attemptCount,
             )
-          : null,
+          : input.intent.messageVolumeReceiptRecordedAt === null
+            ? input.completedAt
+            : null,
         status: terminalConfirmationRequired ? 'retryable' : 'sending',
         delivery: input.delivery,
         lastError: createAssistantDeliveryConfirmationPendingError(),
@@ -303,7 +319,10 @@ export async function markAssistantOutboxIntentSent(input: {
         deliveryIdempotencyKey:
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: completedAt,
-        nextAttemptAt: null,
+        nextAttemptAt:
+          baseIntent.messageVolumeReceiptRecordedAt === null
+            ? baseIntent.nextAttemptAt ?? completedAt
+            : null,
         preparedDispatchToken: null,
         sentAt: completedAt,
         status: 'sent',

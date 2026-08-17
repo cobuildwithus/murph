@@ -329,6 +329,15 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   resolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
 }
 
+export interface HostedRuntimeOutboundMessageVolumeReceiptRequest {
+  channel: "email" | "telegram";
+  dedupeKey: string;
+}
+
+export interface HostedRuntimeOutboundMessageVolumeReceiptResult {
+  recordedAt: string;
+}
+
 export interface HostedRuntimeAssistantAskCompletionAuthority {
   answeredMailboxItemIds: readonly string[];
   assistantAskCompletionExpiresAt: string;
@@ -427,6 +436,10 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedPhoneCallResultDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
+  recordOutboundMessageVolumeReceipt?(
+    request: HostedRuntimeOutboundMessageVolumeReceiptRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeOutboundMessageVolumeReceiptResult>;
   sendEmail(request: HostedEmailSendRequest): Promise<HostedEmailSendResult | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,

@@ -814,7 +814,46 @@ mailbox receipt (`HostedMailboxItem.createdAt`) so a provider event delivered
 after the daily capture cannot later rewrite a completed day; provider event
 time remains payload/decryption and conversation evidence only. The date-keyed
 upsert makes
-same-day cron and ops-page retries idempotent. An attribution integrity failure
+same-day cron and ops-page retries idempotent. Public lifetime message volume
+stays in this existing growth projection rather than creating a separate
+analytics service. Successful Linq outbound remains owned by the Web delivery
+ledger. Successful conversational Telegram and email outbound remains owned by
+the runtime outbox: a newly delivered eligible intent carries a durable pending
+receipt marker, and a bounded best-effort signed Web-control callback records an
+anonymous SHA-256 lookup receipt keyed from the authenticated member, channel,
+and stable outbox dedupe key. One eligible outbox intent contributes one
+receipt regardless of provider chunk or message-id count. The receipt primary
+key makes retries, replay, and a crash after central commit count exactly once;
+a failed callback never changes provider delivery state. Pending receipts reuse
+the outbox intent's existing `nextAttemptAt` clock: the durable delivery write
+arms the first attempt, callback failure defers it by one bounded minute, and a
+successful callback clears both the marker and deadline. Sent pending receipts
+participate in the ordinary assistant wake projection without blocking later
+delivery on the same conversation boundary. Idle runtime passes scan at most
+eight due receipts, checkpoint that recovery pass, and preserve an immediate
+wake for any remainder, so a cold restore or a backlog converges without another
+mailbox item or user action. All recovery remains outside the foreground reply
+critical path and introduces no second queue or state owner. The strict persisted
+outbox marker advances hosted runner state schema to version 17 before any runner
+invocation. A version-16 Worker rejects that Durable Object state before it can
+restore and quarantine the newer outbox record, making version 17 the
+Cloudflare/runner rollback floor once deployed state is established. The
+Telegram/email receipt contribution excludes message reactions and ephemeral
+progress sends:
+neither is an outbox-backed conversational delivery, and those progress paths
+have no durable successful-delivery owner that can support truthful replay-safe
+accounting. The existing Linq ledger contribution remains unchanged.
+Group-email fanout counts one message for each successful recipient child and
+zero for the planning parent. The empty migration is the explicit
+Telegram/email cutover: no unavailable pre-cutover history is reconstructed.
+Growth snapshots count receipt rows by
+Web database `recorded_at` for `[prior_day_start, snapshot_date)`, while the live
+read begins inclusively at the latest snapshot date. A late acknowledgement
+therefore increases the live window monotonically and cannot rewrite a completed
+UTC day; the 5,000 historical base and all-channel inbound count remain
+unchanged.
+
+An attribution integrity failure
 is reported and creates null activity values only when no same-date row exists;
 on retry it leaves any existing activity values untouched while still updating
 the snapshot's revenue, member, and message aggregates. The cron returns a
@@ -1632,18 +1671,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
   never treated as zero. Unusable collections receive one bounded retry after
-  one second. The connection-error family retains the expected ports 5432
-  and 6432 as independent region-plus-port monotonic series. Missing either
-  port leaves that family unknown, while an observed port can still contribute
-  unsafe evidence. Usable partial collections stay single-pass whenever
-  available evidence is unsafe; a safe observation missing only part or all of
-  the connection-error family receives one bounded confirmation after one
-  second. PlanetScale's example 30-second Prometheus scrape configuration is
-  not treated as a freshness guarantee or a basis for more provider calls. The
-  confirmation's available signals are evaluated, complementary observed ports
+  one second. The connection-error family retains ports 5432 and 6432 as
+  independent region-plus-port monotonic series. Any observed supported port
+  makes the family available. An absent port is diagnostic sparse label
+  cardinality, not a collection failure, while an observed port can still
+  contribute unsafe evidence. A safe observation with the complete
+  connection-error family absent receives one bounded confirmation after one
+  second. Usable partial collections stay single-pass whenever available
+  evidence is unsafe. PlanetScale's example 30-second Prometheus scrape
+  configuration is not treated as a freshness guarantee or a basis for more
+  provider calls. The
+  confirmation's available signals are evaluated, any recovered supported port
   may join the original complete gauge evidence, and failure retains the
-  original incomplete observation. A still-incomplete confirmation contributes
-  any observed connection-error counters to that original gauge evidence. Each
+  original incomplete observation. Each
   observed port, including one first seen by confirmation, advances only its
   usable baseline; an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed so an old delta is
@@ -1654,12 +1694,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   reserved for a check with no parsed observation. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families, and sums parsed observations plus exact omission
-  counts for ports 5432/6432 from partial checks. It uses the threshold time as
-  the window end; one bounded
+  counts for ports 5432/6432 from checks where the whole family was absent. It uses the threshold
+  time as the window end; one bounded
   evidence value on each existing sample preserves that provenance across
-  restart. A failed check retains every family omitted by any of its parsed
-  observations, so its exact port evidence and canonical missing-family list
-  cannot diverge. If any sample in the two-check window predates detailed port
+  restart. Structured warnings can retain a sparse-port omission during another
+  collection failure, but durable evidence clears that diagnostic count unless
+  the canonical connection-error family is missing. This preserves the legacy
+  reader correlation invariant across rollback. Legacy single-port monitoring
+  obligations remain readable. If any sample in the
+  two-check window predates detailed port
   evidence, the aggregate keeps port detail unknown instead of presenting a
   partial ratio as exact. Structured collection warnings include the bounded
   parsed-observation count and per-port omission counts without raw provider
@@ -2576,14 +2619,26 @@ epoch, and disconnect fences. It then commits `source_confirmed`, source
 admission, the callback-equivalent source-scoped initial jobs, a mandatory
 mailbox handoff, dirty state, and trace completion in one locked transaction.
 The initial handoff is committed even when the connection is already dirty. A
-failed or ambiguous provider read leaves setup pending and retryable. After an
-account reaches
+failed or ambiguous provider read leaves setup pending and retryable. That
+retry lifetime is bounded by the current persisted setup lifecycle at each
+delivery attempt. The authenticated prepared receipt remains frozen for
+provider event semantics, freshness, dirty state, signals, and receipt
+timestamps; it is neither setup-epoch identity nor retry-lifetime authority.
+The trace claim's one processing-attempt instant is used at shared ingress and
+both hosted database-lock rechecks. An expired pending setup completes only the
+existing trace before provider I/O and terminates transport handling without
+source admission, freshness, dirty, signal, mailbox, wake, job,
+canonical-health, or setup-state effects. After pending-setup classification,
+both hosted lock owners use the frozen receipt only as established-event
+ordering evidence: when the current `connectedAt` is later, they complete the
+trace before provider I/O or source/dirty admission so prior-connection work
+cannot inherit replacement authority. After an account reaches
 `source_confirmed`, adding or retrying another Junction-backed source preserves
 that account and its established siblings. The target `DeviceConnectionSource`
 stays `disconnected` and its webhook and pull work remain inert until callback
 completion or the same provider-verified hosted admission reaches the runtime
-owner. Shared ingress
-chooses one closed account write policy for every persistence request:
+owner. Shared ingress chooses one closed account write policy for every
+persistence request:
 `replace` for an account reconnect or `preserve_established` for a
 source-scoped addition. Hosted Prisma and local SQLite apply the same shared
 established-account predicate inside their persistence transactions; neither
