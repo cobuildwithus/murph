@@ -146,6 +146,7 @@ test("Vercel owns the one Junction namespace read by cleanup and the candidate",
     { target: ["production"] },
     { customEnvironmentIds: ["env_other"] },
     { value: "" },
+    { value: "dev" },
   ]) {
     assert.throws(() => inspectVercelJunctionNamespaceVariable({
       customEnvironmentIds: ["env_e2e"],

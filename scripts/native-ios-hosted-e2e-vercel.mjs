@@ -15,6 +15,7 @@ import {
 
 const DEPLOY_TIMEOUT_MS = 25 * 60_000;
 const JUNCTION_NAMESPACE_ENV_KEY = "JUNCTION_CLIENT_USER_ID_NAMESPACE";
+const JUNCTION_NAMESPACE_ENV_VALUE = "e2e";
 
 export function inspectVercelCustomEnvironment(raw, { customEnvironmentId }) {
   assertRecord(raw, "Vercel custom environment");
@@ -42,7 +43,11 @@ export function inspectVercelJunctionNamespaceVariable(
       || raw.customEnvironmentIds[0] !== customEnvironmentId) {
     throw new Error("Vercel Junction namespace variable does not match the dedicated E2E target.");
   }
-  return requiredString(raw.value, "Vercel Junction namespace variable value");
+  const value = requiredString(raw.value, "Vercel Junction namespace variable value");
+  if (value !== JUNCTION_NAMESPACE_ENV_VALUE) {
+    throw new Error("Vercel Junction namespace variable does not match the dedicated E2E lane.");
+  }
+  return value;
 }
 
 export function inspectVercelDeployment(raw, expected) {
