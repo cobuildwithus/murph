@@ -48,12 +48,10 @@ export const LINQ_API_DEFAULT_TIMEOUT_MS = 10_000;
 const LINQ_API_SDK_BASE_URL = "https://linq-sdk.invalid";
 export const LINQ_API_DEFAULT_RESPONSE_MAX_BYTES = 256 * 1024;
 
-export type LinqApiFetch = {
-  bivarianceHack(
-    input: Parameters<typeof fetch>[0],
-    init?: Parameters<typeof fetch>[1],
-  ): ReturnType<typeof fetch>;
-}["bivarianceHack"];
+export type LinqApiFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
 
 type LinqApiClientState = {
   errorPayload: unknown;

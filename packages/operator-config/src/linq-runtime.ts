@@ -13,7 +13,6 @@ import {
 } from '@murphai/contracts'
 import type {
   AttachmentCreateParams,
-  AttachmentRetrieveResponse,
   CapabilityCheckIMessageParams,
   ChatCreateParams,
   ChatCreateResponse,
@@ -27,7 +26,6 @@ import type {
   WebhookEventType,
   WebhookSubscriptionCreateParams,
   WebhookSubscriptionCreateResponse,
-  WebhookSubscriptionListResponse,
 } from '@linqapp/sdk/resources'
 import type {
   MessageSendParams,
@@ -188,14 +186,12 @@ type LinqOperation =
   | 'check_imessage_capability'
   | 'create_webhook_subscription'
   | 'delete_message'
-  | 'list_webhook_subscriptions'
   | 'list_phone_numbers'
   | 'mark_read'
   | 'send_imessage_app_card'
   | 'send_message'
   | 'send_voice_memo'
   | 'set_message_reaction'
-  | 'retrieve_attachment'
   | 'typing_start'
   | 'typing_stop'
 
@@ -253,34 +249,27 @@ type LinqSafeRequestDetails = {
   timeoutMs?: number
 }
 
-export type LinqFetchResult = Omit<
-  Pick<
-    Awaited<ReturnType<typeof fetch>>,
-    'arrayBuffer' | 'body' | 'headers' | 'json' | 'ok' | 'status' | 'statusText' | 'text'
-  >,
-  'body' | 'headers' | 'statusText'
-> & {
+export interface LinqFetchResponse {
+  arrayBuffer(): Promise<ArrayBuffer>
   body?: ReadableStream<Uint8Array> | null
   headers?: ResponseHeadersLike | null
+  json(): Promise<unknown>
+  ok: boolean
+  status: number
   statusText?: string
+  text(): Promise<string>
 }
 
-export type LinqFetch = {
-  bivarianceHack(
-    input: Extract<Parameters<typeof fetch>[0], string>,
-    init: Omit<
-      Pick<
-        NonNullable<Parameters<typeof fetch>[1]>,
-        'body' | 'headers' | 'method' | 'redirect' | 'signal'
-      >,
-      'body' | 'headers' | 'method'
-    > & {
-      body?: string | Blob
-      headers?: Record<string, string>
-      method: string
-    },
-  ): Promise<LinqFetchResult>
-}['bivarianceHack']
+export type LinqFetch = (
+  input: string,
+  init: {
+    body?: string | Blob
+    headers?: Record<string, string>
+    method: string
+    redirect?: RequestRedirect
+    signal?: AbortSignal
+  },
+) => Promise<LinqFetchResponse>
 
 export interface ProbeLinqApiResult {
   ok: boolean
@@ -859,7 +848,7 @@ async function uploadLinqAttachmentBytes(
   let lastRetryableFailure: VaultCliError | null = null
 
   try {
-    await requestJsonWithRetry<void, LinqFetchResult>({
+    await requestJsonWithRetry<void, LinqFetchResponse>({
       createHttpError: async (response) => {
         const failure = await createLinqHttpError(
           response,
@@ -885,9 +874,10 @@ async function uploadLinqAttachmentBytes(
           timeout.signal.throwIfAborted()
         }
         try {
+          // provider-request-boundary-allow-next-line: linq-presigned-bytes
           return await fetchImplementation(uploadUrl, {
             body,
-            headers: normalizeLinqRequiredHeaders(input.requiredHeaders),
+            headers,
             method: 'PUT',
             redirect: 'error',
             signal: timeout.signal,
@@ -1509,76 +1499,6 @@ export async function createLinqWebhookSubscription(
   }
 }
 
-export async function listLinqWebhookSubscriptions(
-  dependencies: {
-    env?: NodeJS.ProcessEnv
-    fetchImplementation?: LinqFetch
-    signal?: AbortSignal
-    timeoutMs?: number
-  } = {},
-): Promise<WebhookSubscriptionListResponse> {
-  return await requestLinqSdk<WebhookSubscriptionListResponse>({
-    details: {
-      operation: 'list_webhook_subscriptions',
-      provider: 'linq',
-    },
-    env: dependencies.env ?? process.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    method: 'GET',
-    path: '/webhook-subscriptions',
-    request: (client, signal) => client.webhookSubscriptions.list({ signal }),
-    signal: dependencies.signal,
-    singleAttemptTimeoutMs: dependencies.timeoutMs,
-  })
-}
-
-export async function retrieveLinqAttachment(
-  input: { attachmentId: string },
-  dependencies: {
-    env?: NodeJS.ProcessEnv
-    fetchImplementation?: LinqFetch
-    signal?: AbortSignal
-    timeoutMs?: number
-  } = {},
-): Promise<AttachmentRetrieveResponse> {
-  const attachmentId = normalizeRequiredString(input.attachmentId, 'attachment id')
-  return await requestLinqSdk<AttachmentRetrieveResponse>({
-    details: {
-      operation: 'retrieve_attachment',
-      provider: 'linq',
-    },
-    env: dependencies.env ?? process.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    method: 'GET',
-    path: `/attachments/${encodeURIComponent(attachmentId)}`,
-    request: (client, signal) => client.attachments.retrieve(attachmentId, { signal }),
-    signal: dependencies.signal,
-    singleAttemptTimeoutMs: dependencies.timeoutMs,
-  })
-}
-
-export function readLinqRequestFailure(error: unknown): {
-  status: number | null
-  timedOut: boolean
-  transportFailure: boolean
-} | null {
-  if (
-    !(error instanceof VaultCliError)
-    || error.code !== 'LINQ_API_REQUEST_FAILED'
-    || error.context?.provider !== 'linq'
-  ) {
-    return null
-  }
-  const status = error.context.status
-  return {
-    status: typeof status === 'number' && Number.isSafeInteger(status)
-      ? status
-      : null,
-    timedOut: error.context.timedOut === true,
-    transportFailure: error.context.failureStage === 'transport',
-  }
-}
-
 type LinqHttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT'
 
 type LinqSdkErrorResponse = {
@@ -1723,7 +1643,7 @@ function resolveDefaultLinqFetch(): LinqFetch | null {
   if (typeof globalThis.fetch !== 'function') {
     return null
   }
-  return globalThis.fetch
+  return (input, init) => globalThis.fetch(input, init)
 }
 
 function createLinqSdkClient(input: {
@@ -1753,18 +1673,15 @@ function createLinqSdkFetch(input: {
 ) => Promise<Response> {
   return async (request, init) => {
     const url = mapLinqSdkRequestUrl(request, input.apiRoot)
-    const requestMethod = typeof init?.method === 'string'
-      ? init.method.trim()
-      : ''
     input.state.requestOrigin = readRequestOrigin(url)
-    let response: LinqFetchResult
+    let response: LinqFetchResponse
     try {
       response = await input.fetchImplementation.call(undefined, url, {
         ...(init?.body === null || init?.body === undefined
           ? {}
           : { body: normalizeLinqSdkRequestBody(init.body) }),
         headers: normalizeLinqSdkRequestHeaders(init?.headers),
-        method: requestMethod || 'GET',
+        method: normalizeNullableString(init?.method) ?? 'GET',
         ...(init?.signal ? { signal: init.signal } : {}),
       })
     } catch (error) {
@@ -1835,7 +1752,7 @@ function normalizeLinqSdkRequestHeaders(
 }
 
 async function bufferLinqSdkResponse(
-  response: LinqFetchResult,
+  response: LinqFetchResponse,
   state: LinqSdkAttemptState,
   maxResponseBytes: number,
 ): Promise<Response> {
@@ -2199,7 +2116,7 @@ function createLinqConfigurationError(
 }
 
 async function createLinqHttpError(
-  response: LinqFetchResult,
+  response: LinqFetchResponse,
   details: LinqSafeRequestDetails,
   method: LinqHttpMethod,
   path: string,
@@ -2620,16 +2537,9 @@ function createLinqAttachmentReservationResponseError(input: {
 }
 
 function normalizeLinqAttachmentUploadUrl(value: string): string {
-  const normalized = value.trim()
-  if (!normalized) {
-    throw new VaultCliError(
-      'LINQ_INVALID_INPUT',
-      'Linq attachment upload URL must be a valid HTTPS URL.',
-    )
-  }
   let parsed: URL
   try {
-    parsed = new URL(normalized)
+    parsed = new URL(normalizeRequiredString(value, 'attachment upload url'))
   } catch {
     throw new VaultCliError(
       'LINQ_INVALID_INPUT',
@@ -2649,17 +2559,7 @@ function normalizeLinqAttachmentUploadUrl(value: string): string {
       'Linq attachment upload URL must not include credentials or fragments.',
     )
   }
-  const normalizedHostname = parsed.hostname.toLowerCase().replace(/\.$/u, '')
-  const ipLiteral = normalizedHostname.startsWith('[') && normalizedHostname.endsWith(']')
-    ? normalizedHostname.slice(1, -1)
-    : normalizedHostname
-  if (
-    !normalizedHostname ||
-    normalizedHostname === 'localhost' ||
-    normalizedHostname.endsWith('.localhost') ||
-    normalizedHostname.endsWith('.local') ||
-    isIP(ipLiteral) !== 0
-  ) {
+  if (!isPublicLinqAttachmentUploadHost(parsed.hostname)) {
     throw new VaultCliError(
       'LINQ_INVALID_INPUT',
       'Linq attachment upload URL must use a public host.',
@@ -2667,6 +2567,23 @@ function normalizeLinqAttachmentUploadUrl(value: string): string {
   }
 
   return parsed.toString()
+}
+
+function isPublicLinqAttachmentUploadHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/u, '')
+  if (
+    !normalized ||
+    normalized === 'localhost' ||
+    normalized.endsWith('.localhost') ||
+    normalized.endsWith('.local')
+  ) {
+    return false
+  }
+
+  const ipLiteral = normalized.startsWith('[') && normalized.endsWith(']')
+    ? normalized.slice(1, -1)
+    : normalized
+  return isIP(ipLiteral) === 0
 }
 
 function parseLinqVoiceMemoResponse(input: {
@@ -2721,27 +2638,12 @@ function copyUint8ArrayToArrayBuffer(value: Uint8Array): ArrayBuffer {
 function normalizeLinqRequiredHeaders(
   headers: Record<string, string>,
 ): Record<string, string> {
-  const allowedHeaderNames = new Set([
-    'content-length',
-    'content-type',
-    'if-none-match',
-    'x-upload-token',
-  ])
   const normalized: Record<string, string> = {}
   for (const [key, value] of Object.entries(headers)) {
-    const normalizedKey = key.trim().toLowerCase()
-    if (!allowedHeaderNames.has(normalizedKey)) {
-      throw new VaultCliError(
-        'LINQ_INVALID_INPUT',
-        'Linq attachment upload header is not supported.',
-      )
-    }
-    const normalizedValue = value.trim()
-    if (!normalizedValue) {
-      throw new VaultCliError(
-        'LINQ_INVALID_INPUT',
-        'Linq attachment upload header value must be a non-empty string.',
-      )
+    const normalizedKey = normalizeNullableString(key)
+    const normalizedValue = normalizeNullableString(value)
+    if (!normalizedKey || normalizedValue === null) {
+      continue
     }
     normalized[normalizedKey] = normalizedValue
   }
@@ -2753,7 +2655,7 @@ function normalizeLinqRequiredHeaders(
     )
   }
 
-  return Object.freeze(normalized)
+  return normalized
 }
 
 function shouldRetryLinqTransportFailure(
@@ -2782,7 +2684,6 @@ async function waitForLinqRetryDelay(
 
 function sanitizeLinqPathForDiagnostics(path: string): string {
   return normalizeRequiredString(path, 'path')
-    .replace(/\/attachments\/[^/]+/gu, '/attachments/[attachment]')
     .replace(/\/chats\/[^/]+/gu, '/chats/[chat]')
     .replace(/\/messages\/[^/]+/gu, '/messages/[message]')
 }
@@ -2871,27 +2772,13 @@ function summarizeLinqJsonObjectShape(value: Record<string, unknown>): string {
 }
 
 function normalizeLinqBaseUrl(value: string): string {
-  const normalized = value.trim()
-  if (!normalized) {
-    throw new VaultCliError(
-      'LINQ_INVALID_INPUT',
-      'Linq base url must be a non-empty string.',
-    )
-  }
-  return normalized.replace(/\/+$/u, '')
+  return normalizeRequiredString(value, 'base url').replace(/\/+$/u, '')
 }
 
 function buildLinqRequestUrl(baseUrl: string, path: string): string {
   const url = new URL(normalizeLinqBaseUrl(baseUrl))
   const basePathname = url.pathname.replace(/\/+$/u, '')
-  const normalizedPath = path.trim()
-  if (!normalizedPath) {
-    throw new VaultCliError(
-      'LINQ_INVALID_INPUT',
-      'Linq path must be a non-empty string.',
-    )
-  }
-  const requestPathname = normalizedPath.replace(/^\/+/u, '')
+  const requestPathname = normalizeRequiredString(path, 'path').replace(/^\/+/u, '')
 
   url.pathname = `${basePathname}/${requestPathname}`
   url.search = ''

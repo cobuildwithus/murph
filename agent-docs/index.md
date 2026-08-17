@@ -108,23 +108,12 @@ The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
-The external-provider request guard, including its registered providers,
-structural presigned/internal/xAI exceptions, raw HTTP transport discovery,
-conditional-aware effective assignment and fetch invocation provenance, SDK
-fetch-adapter and handwritten wire-contract detection, literal dynamic-import
-transports and their exact namespace aliases, closed-member bound transport
-composition, set-valued alias-root member mutation closure, destructured/defaulted
-effective-value provenance, owner-specific digest-pinned transfer URL
-normalizers, digest-pinned adapter authority closure, one mutation-target
-expression authority with fail-closed parameter/`this`/immediate-or-awaited-call
-roots, and exact current failure inventory, is
+The external-provider request guard is an ownership check: registered providers
+use their official SDK, and unavoidable raw transports are confined to exact
+path-and-function owners with a one-call limit. Its policy and focused proof are
 specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
-The guard's transport classifier and provider-expression facts share that
-effective-value provenance, including conditional transport substitutions and
-mutated member projection through destructuring or `Object.assign`, instead of
-maintaining separate declaration-time container fallbacks.
 
 Personal-to-group projection convergence, including attempt-local foreground
 preemption, abort/shutdown admission before every scope, its single forwarded deadline, and

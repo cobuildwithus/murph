@@ -3,10 +3,6 @@ import {
   buildHostedExecutionSafeErrorDiagnostics,
 } from "@murphai/hosted-execution";
 import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
-import {
-  readLinqRequestFailure,
-  retrieveLinqAttachment,
-} from "@murphai/operator-config/linq-runtime";
 
 import type { NormalizedHostedAssistantRuntimeConfig } from "../models.ts";
 import {
@@ -848,50 +844,58 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
   fetchImplementation: typeof fetch;
   signal?: AbortSignal;
 }): Promise<HostedLinqAttachmentMetadataLookupResult> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, HOSTED_LINQ_ATTACHMENT_METADATA_TIMEOUT_MS);
+  const releaseRelay = input.signal ? relayAbortSignal(input.signal, controller) : () => {};
+
   try {
-    const payload = await retrieveLinqAttachment(
-      { attachmentId: input.attachmentId },
+    const response = await input.fetchImplementation(
+      new URL(`attachments/${encodeURIComponent(input.attachmentId)}`, `${input.apiBaseUrl}/`),
       {
-        env: {
-          LINQ_API_BASE_URL: input.apiBaseUrl,
-          LINQ_API_TOKEN: input.apiToken,
+        headers: {
+          authorization: `Bearer ${input.apiToken}`,
         },
-        fetchImplementation: input.fetchImplementation,
-        signal: input.signal,
-        timeoutMs: HOSTED_LINQ_ATTACHMENT_METADATA_TIMEOUT_MS,
+        method: "GET",
+        signal: controller.signal,
       },
     );
+    if (!response.ok) {
+      if (isRetryableHostedLinqAttachmentDownloadStatus(response.status)) {
+        throw new HostedLinqAttachmentDownloadError(
+          "metadata_http_status",
+          `Hosted Linq attachment metadata lookup failed with ${response.status} ${response.statusText}.`,
+          response.status,
+        );
+      }
+
+      return {
+        downloadLocator: null,
+        failureCode: "metadata_http_status",
+        status: response.status,
+      };
+    }
+
+    const payload = await response.json() as { download_url?: unknown; downloadUrl?: unknown };
     const downloadLocator = normalizeHostedAttachmentDownloadUrlField(
-      payload.download_url,
+      payload.download_url ?? payload.downloadUrl,
     );
     return {
       downloadLocator,
       failureCode: downloadLocator ? null : "metadata_empty_locator",
-      status: 200,
+      status: response.status,
     };
   } catch (error) {
     if (error instanceof HostedLinqAttachmentDownloadError) {
       throw error;
     }
-    const failure = readLinqRequestFailure(error);
-    if (failure?.status !== null && failure?.status !== undefined) {
-      if (isRetryableHostedLinqAttachmentDownloadStatus(failure.status)) {
-        throw new HostedLinqAttachmentDownloadError(
-          "metadata_http_status",
-          `Hosted Linq attachment metadata lookup failed with ${failure.status}.`,
-          failure.status,
-          { cause: error },
-        );
-      }
-      return {
-        downloadLocator: null,
-        failureCode: "metadata_http_status",
-        status: failure.status,
-      };
-    }
     if (
-      failure?.timedOut === true
+      timedOut
       && !input.signal?.aborted
+      && isAbortLikeHostedLinqAttachmentError(error)
     ) {
       throw new HostedLinqAttachmentDownloadError(
         "metadata_timeout",
@@ -901,11 +905,8 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
       );
     }
     if (
-      failure?.transportFailure === true
-      || (
-        !isAbortLikeHostedLinqAttachmentError(error)
-        && isHostedLinqTransientTransportError(error)
-      )
+      !isAbortLikeHostedLinqAttachmentError(error)
+      && isHostedLinqTransientTransportError(error)
     ) {
       throw new HostedLinqAttachmentDownloadError(
         "metadata_fetch_failed",
@@ -920,6 +921,9 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
       failureCode: classifyHostedLinqAttachmentMetadataError(error),
       status: null,
     };
+  } finally {
+    clearTimeout(timeout);
+    releaseRelay();
   }
 }
 

@@ -791,6 +791,7 @@ export async function sendHostedLinqAttachmentMessage(input: {
     }
 
     const uploadTimeout = AbortSignal.timeout(HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS);
+    // provider-request-boundary-allow-next-line: linq-presigned-bytes
     const uploadResponse = await fetch(uploadUrl, {
       body: new Uint8Array(input.bytes).buffer,
       headers: parseHostedLinqAttachmentUploadHeaders(created.required_headers),
@@ -999,22 +1000,11 @@ function parseHostedLinqAttachmentUploadHeaders(value: unknown): Record<string, 
   if (!value || typeof value !== "object") {
     return {};
   }
-  const allowedHeaderNames = new Set([
-    "content-length",
-    "content-type",
-    "if-none-match",
-    "x-upload-token",
-  ]);
   const headers: Record<string, string> = {};
   for (const [key, headerValue] of Object.entries(value as Record<string, unknown>)) {
-    const normalizedKey = key.trim().toLowerCase();
-    if (!allowedHeaderNames.has(normalizedKey)) {
-      throw new TypeError("attachment upload header is not supported by Linq.");
+    if (typeof headerValue === "string" && key.trim()) {
+      headers[key] = headerValue;
     }
-    if (typeof headerValue !== "string" || !headerValue.trim()) {
-      throw new TypeError("attachment upload header value must be a non-empty string.");
-    }
-    headers[normalizedKey] = headerValue.trim();
   }
   return headers;
 }

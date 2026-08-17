@@ -1,8 +1,11 @@
 import { createHmac, randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
+import {
+  createDeviceSyncRegistry,
+  createJunctionDeviceSyncProvider,
+} from "@murphai/device-syncd";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
-import { createConfiguredDeviceSyncRegistryFromConfigs } from "@murphai/device-syncd/config";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
@@ -134,16 +137,16 @@ async function createFixture(input: {
 function createJunctionRegistry(
   fetchImpl: typeof fetch,
 ): DeviceSyncRegistry {
-  return createConfiguredDeviceSyncRegistryFromConfigs({
-    junction: {
+  return createDeviceSyncRegistry([
+    createJunctionDeviceSyncProvider({
       apiKey: "sk_us_test_123",
       clientUserIdSecret: "prepared-webhook-client-user-secret",
       environment: "sandbox",
       fetchImpl,
       region: "us",
       webhookSecret: junctionWebhookSecret,
-    },
-  });
+    }),
+  ]);
 }
 
 function createIngressService(input: {

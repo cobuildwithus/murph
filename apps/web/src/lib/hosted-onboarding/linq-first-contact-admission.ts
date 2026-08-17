@@ -201,7 +201,7 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
     adminAPIKey: null,
     apiKey,
     baseURL: OPENAI_RESPONSES_BASE_URL,
-    fetch: createHostedFirstContactAdmissionOpenAiFetch(fetch, requestState),
+    fetch: createHostedLinqFirstContactAdmissionOpenAiFetch(fetch, requestState),
     logLevel: "off",
     maxRetries: 0,
     organization: null,
@@ -898,7 +898,7 @@ function readHostedLinqFirstContactAdmissionApiError(
   };
 }
 
-function createHostedFirstContactAdmissionOpenAiFetch(
+function createHostedLinqFirstContactAdmissionOpenAiFetch(
   fetchImpl: typeof fetch,
   state: HostedLinqFirstContactAdmissionOpenAiRequestState,
 ): typeof fetch {
@@ -907,7 +907,7 @@ function createHostedFirstContactAdmissionOpenAiFetch(
     init?: RequestInit,
   ): Promise<Response> => {
     try {
-      const response = await fetchImpl.call(undefined, request, init);
+      const response = await fetchImpl(request, init);
       if (!response.ok) {
         try {
           state.errorResponse = response.clone();

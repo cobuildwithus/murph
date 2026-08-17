@@ -561,147 +561,30 @@ Last verified: 2026-08-15
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - The public footer status read is a browser-to-incident.io technical-data boundary. Keep it on the fixed HTTPS status origin and fixed public summary path with no request body or query; retain the global `strict-origin` referrer policy and the exact-origin `connect-src` entry. Do not add account, page-path, query, fragment, prompt, health, message, cookie, or credential data to the request, and do not treat an empty public incident list as direct uptime proof. Keep incident.io and the technical metadata it receives disclosed in the public subprocessor register.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
-- External provider request params, nested params, and per-request options must
-  use installed official SDK types and must not contain object spread syntax or
-  `Object.assign`. Build the SDK-typed object first, then assign each optional
-  field explicitly; this preserves excess-property checking that TypeScript
-  otherwise loses across composed objects. `pnpm provider-requests:guard` scans
-  production JavaScript and TypeScript modules under `apps`, `packages`, and
-  `scripts`, including operational `.mjs` files, while excluding declarations,
-  generated output, fixtures, and tests. For the explicit provider registry it
-  preserves the SDK request-object checks, reports the global fetch primitive,
-  imported Node HTTP/HTTPS and Undici transports, explicit aliases, injected
-  fetch-call signatures, CommonJS `require`, literal dynamic `import()`,
-  TypeScript import-equals, direct invocation, and destructured transport
-  forms. Namespace identity follows bounded conditional, logical, sequence,
-  and copied aliases of web globals, dynamic imports, Node HTTP/HTTPS, and
-  Undici, retaining every possible namespace kind at one binding point without
-  crossing a lexical shadow or later definitive reassignment. Pre-bound transports stored in closed local object or
-  array members retain their bound request arguments through direct, `.call`,
-  and closed `.apply` invocation; spreads, conditional origins, member writes,
-  and `Object.assign` remain possible values and fail closed when any branch
-  carries provider transport provenance, including every chronologically
-  possible local alias root retained by a conditional assignment or expression.
-  One target-expression resolver owns direct-write and `Object.assign`
-  mutation matching plus the fail-closed opacity decision. It follows bounded
-  identifier/static-member and conditional/logical/sequence alternatives;
-  computed segments remain conservative wildcard matches. Parameters, `this`,
-  immediate or awaited calls, and every other unsupported target cannot prove
-  safety, so storing a provider-bound transport through one fails at the
-  mutation boundary. Destructured
-  declaration/assignment values, nested property paths, and defaults enter the
-  same binding census. Conditional benign transport substitution retains every
-  earlier possible transport, while a later definitive benign reassignment
-  remains authoritative. Destructuring or copying a mutated closed member reads
-  its indexed effective values rather than its declaration-time property, so
-  provider URL and transport facts do not disappear when a local configuration
-  or namespace is unpacked or copied. The guard also follows strict fetch-shaped
-  wrappers at their nearest lexical binding when they resolve to provider
-  literals or provider-configured URL data. One set-valued helper-value resolver
-  owns mapped caller parameters, chronological lexical variables, copied and
-  conditional/logical/sequence callable alternatives, function declarations,
-  arrows, function expressions, and object/array property steps. A mapped
-  parameter shadows an unrelated outer variable; a nested local declaration or
-  definitive assignment remains authoritative, while a conditional local write
-  retains the mapped parameter as an earlier possible value. Parameter,
-  function-declaration, and chronological-write candidates are compared in one
-  lexical decision before any value is selected, so a block declaration can
-  shadow a mapped parameter while an outer declaration cannot. Each selected
-  value retains its source reference paths and the call-site observation
-  position until ordered property projection is complete; later direct member
-  writes therefore remain visible through static computed destructuring.
-  Supported same-file calls resolve their direct-return values in that same
-  authority before ordered projection, so a call-produced object or array and
-  any member reference it returns cannot be discarded as raw call syntax.
-  Duplicate function declarations, nested functions, and recursive cycles are
-  excluded, and
-  file-level fallback hints are disabled inside the callee so a generic returned
-  `Request` cannot inherit an unrelated provider marker elsewhere in the module.
-  Static computed destructuring keys use exact property projection. Dynamic
-  computed keys retain the complete source value and every reachable nested
-  default as conservative wildcard possibilities. Opaque or spread-produced
-  values likewise retain the applicable default unless that step is proven
-  present and non-`undefined`. Root, exact-property, and wildcard-property
-  defaults enter one call-time provenance transition: the default expression
-  supplies its own reference paths and lexical position, while binding
-  chronology and property-mutation observation remain fixed at the helper call.
-  An exact internal property written after an opaque spread and a later
-  definitive internal callable reassignment remain authoritative. Untyped fetch parameters retain
-  their exact default expressions, and identifier reads resolve the nearest
-  chronological declaration or simple assignment in the variable's lexical
-  owner. Assignments reached only through conditional branches, short-circuit
-  expressions, switch cases, or loop bodies remain possible values and cannot
-  erase earlier provider provenance. Only exact one-hop wrappers that forward
-  each argument in place inherit transport identity. The guard resolves standard fetch `.call`
-  through the underlying transport target. It admits `.apply` argument
-  semantics only for a direct, closed array expression without a spread or
-  hole; mutable tuple identifiers fail closed. Opaque exact fetch-compatible
-  calls inside provider-specific SDK fetch adapters inherit the enclosing
-  callable or unambiguous single-provider file evidence, while provider-neutral
-  callbacks do not. The
-  lexical census includes destructured parameter shadows, property paths, and
-  types. Assigned CommonJS namespaces remain transports only while the nearest
-  declaration identity is unchanged. Provider facts follow exact properties in closed object/array
-  origin maps, statically recoverable fetch tuples, and exact fetch-compatible
-  provider-bound call targets without treating loose
-  `Request` handlers as HTTP transports. The guard reports only concrete low-level
-  handwritten wire contracts that
-  replace an SDK-owned request, response, fetch, transport, or client contract.
-  Provider-domain orchestration without a low-level effect is not a transport
-  boundary, but an SDK fetch adapter that executes an injected fetch remains a
-  reportable handwritten transport. When a local wrapper owns a reported
-  network boundary, its callers are not duplicated. Provider symbols, resolved
-  bindings, call arguments, and
-  hosts accumulate; a permissive provider label cannot erase simultaneous
-  required-provider evidence. File hints remain fallback-only, and genuinely
-  ambiguous dataflow names every matching provider. Findings are
-  deterministic `raw-provider-http` or `handwritten-provider-transport` entries
-  with file, line, column, and boundary. Raw HTTP remains allowed only through
-  the auditable provider/exception registry: opaque presigned GET/HEAD transfer
-  or PUT of an AST- or type-proven byte/stream body with no spread call init,
-  no credentials or only static
-  `credentials: "omit"` and either an allowlisted literal header set or a
-  direct call to a path-scoped audited transfer-header factory resolved to its
-  unique top-level declaration with an exact implementation digest; the URL
-  expression must also belong to one unique registered transfer owner whose
-  complete callable is digest-pinned, and a provider-named URL must resolve
-  through the URL normalizer registered on that exact owner, with both
-  implementations digest-pinned. The helper is not an independent transfer
-  capability; statically known internal or
-  unambiguous single-slash application traffic, plus `new URL` composition only
-  against the exact static `location.origin` owner;
-  registered providers without a verified provider-owned TypeScript SDK, and
-  the exact xAI Responses request carrying one `x_search` extension with storage
-  disabled, a direct static Responses URL literal, and direct closed request,
-  payload, and tool object shapes whose effective values cannot be replaced by
-  later assignment, property writes, spreads, computed or duplicate
-  properties, custom serialization, or prototype hooks. These are structural,
-  purpose-specific exceptions, not line- or provider-wide suppression; the
-  source comments do not suppress a finding. The xAI, transfer URL,
-  transfer-header, and streamed-R2 proofs are restricted to their audited owner
-  paths. An unavoidable SDK transport bridge is admitted only when its exact
-  path, provider, exact runtime SDK or SDK-owner import binding, raw transport
-  target, unique adapter function, and SDK-construction function match the
-  registry. A factory
-  adapter has exactly one reference outside its own body and that reference must
-  be inside the pinned SDK-construction function. The full source spans of both
-  functions and every authority-bearing URL, header, body, or origin helper are
-  SHA-256 pinned; a same-owner callback whose authority cannot be closed over a
-  small helper set pins the complete source file. A URL, init, response, helper,
-  duplicate-effect, import-binding, extra-consumer, or constructor-wiring change
-  therefore fails until that exact bridge is re-audited and the pins are
-  deliberately updated. The Resend and Exa SDK
-  overrides are separate path-scoped exceptions whose URL and direct closed
-  request init are structurally proved; aliases, helper mutation,
-  `Object.assign`, spreads, computed properties, and duplicate properties do
-  not enter those exceptions.
-  Register each newly verified provider SDK and host explicitly; the guard does
-  not claim coverage for an unregistered provider or a provider endpoint whose
-  dataflow has no registered host or provider identifier. The opt-in
+- External provider calls should use the installed official SDK whenever one
+  is registered. `pnpm provider-requests:guard` scans authored production
+  JavaScript and TypeScript under `apps`, `packages`, and `scripts` for direct
+  `fetch`, Node HTTP/HTTPS, Undici, and common fetch aliases at registered
+  provider boundaries. It uses Babel's parser and scope bindings; it does not
+  reimplement TypeScript, validate provider payloads, or duplicate runtime
+  request/response contracts.
+
+  Raw transport is allowed only in an exact path-and-function owner registered
+  by the guard: an official SDK fetch hook or override, an opaque presigned byte
+  transfer, the runtime-validated xAI `x_search` call, or an explicitly named
+  pre-existing provider boundary retained as migration debt. Every owner is limited
+  to one raw call, and SDK owners must retain their registered runtime import.
+  Static same-origin calls and providers with no verified TypeScript SDK remain
+  outside the ban. Comments never suppress findings.
+
+  This is an ownership/convention check, not a security sandbox. Register each
+  provider and host explicitly. It does not claim coverage for an unregistered
+  provider, deliberately obscured transport, or code with no registered host,
+  SDK import, provider-named owner, or provider-named path. Production runtime
+  validators remain authoritative for URL, headers, body, response, timeout,
+  retry, and credential rules. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
-  test-mode secret key and calls the real resume endpoint with a synthetic
-  missing Subscription, so parameter drift fails without creating, charging,
-  or mutating a Stripe resource.
+  test-mode key and a synthetic missing Subscription.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no

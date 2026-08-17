@@ -204,21 +204,24 @@ class HostedResendClient extends Resend {
     path: string,
     options: RequestInit = {},
   ): Promise<ResendResponse<T>> {
-    const requestPath = path === RESEND_EMAILS_PATH || path === RESEND_BATCH_EMAILS_PATH
-      ? path
-      : null;
-    if (requestPath === null) {
-      throw new Error("Unsupported Hosted Resend SDK request path.");
+    const requestInit: RequestInit = {
+      redirect: "error",
+      signal: this.requestSignal,
+    };
+
+    if (options.body !== undefined) {
+      requestInit.body = options.body;
     }
+    if (options.headers !== undefined) {
+      requestInit.headers = normalizeResendRequestHeaders(options.headers);
+    }
+    if (options.method !== undefined) {
+      requestInit.method = options.method;
+    }
+
     const response = await this.fetchImpl(
-      `${this.baseUrl}${requestPath}`,
-      {
-        body: options.body,
-        headers: normalizeResendRequestHeaders(options.headers),
-        method: options.method,
-        redirect: "error",
-        signal: this.requestSignal,
-      },
+      `${this.baseUrl}${path}`,
+      requestInit,
     );
 
     if (!response.ok) {
@@ -235,7 +238,7 @@ class HostedResendClient extends Resend {
     }
 
     const payload = normalizeHostedResendSuccessPayload(
-      requestPath,
+      path,
       await readResendJsonPayload(response),
     );
 
@@ -249,9 +252,7 @@ class HostedResendClient extends Resend {
   }
 }
 
-function normalizeResendRequestHeaders(
-  headers: HeadersInit | undefined,
-): Record<string, string> {
+function normalizeResendRequestHeaders(headers: HeadersInit): Record<string, string> {
   const source = new Headers(headers);
   const normalized: Record<string, string> = {};
   source.forEach((value, name) => {

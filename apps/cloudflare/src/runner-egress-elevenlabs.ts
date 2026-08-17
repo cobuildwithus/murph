@@ -14,23 +14,23 @@ const HOSTED_ELEVENLABS_MAX_ID_CHARS = 200;
 const HOSTED_ELEVENLABS_MUSIC_MIN_DURATION_MS = 3_000;
 const HOSTED_ELEVENLABS_MUSIC_MAX_DURATION_MS = 300_000;
 
-export interface HostedElevenLabsTtsRequestProjection {
+export interface HostedElevenLabsTtsRequestBody {
   characterCount: number;
   kind: "tts";
   modelId: HostedAiUsageAllowanceElevenLabsTtsPricedModel;
   upstreamBody: string;
 }
 
-export interface HostedElevenLabsMusicRequestProjection {
+export interface HostedElevenLabsMusicRequestBody {
   durationMs: number;
   kind: "music";
   modelId: HostedAiUsageAllowanceElevenLabsMusicPricedModel;
   upstreamBody: string;
 }
 
-export type HostedElevenLabsRequestProjection =
-  | HostedElevenLabsTtsRequestProjection
-  | HostedElevenLabsMusicRequestProjection;
+export type HostedElevenLabsRequestBody =
+  | HostedElevenLabsTtsRequestBody
+  | HostedElevenLabsMusicRequestBody;
 
 export function isAllowedElevenLabsRequest(
   request: Request,
@@ -64,7 +64,7 @@ export function parseHostedElevenLabsRequestBody(input: {
   body: ArrayBuffer;
   contentType: string | null;
   pathnameSuffix: string;
-}): HostedElevenLabsRequestProjection | null {
+}): HostedElevenLabsRequestBody | null {
   if (!isJsonContentType(input.contentType)) {
     return null;
   }
@@ -89,7 +89,7 @@ export function parseHostedElevenLabsRequestBody(input: {
 function parseHostedElevenLabsTtsRequestBody(input: {
   pathnameSuffix: string;
   record: Record<string, unknown>;
-}): HostedElevenLabsTtsRequestProjection | null {
+}): HostedElevenLabsTtsRequestBody | null {
   const voiceId = normalizeHostedElevenLabsString(
     decodeURIComponentSafe(input.pathnameSuffix.replace(/^\/v1\/text-to-speech\//u, "")),
     HOSTED_ELEVENLABS_MAX_ID_CHARS,
@@ -122,7 +122,7 @@ function parseHostedElevenLabsTtsRequestBody(input: {
 
 function parseHostedElevenLabsMusicRequestBody(
   record: Record<string, unknown>,
-): HostedElevenLabsMusicRequestProjection | null {
+): HostedElevenLabsMusicRequestBody | null {
   if (
     !hasExactKeys(record, [
       "force_instrumental",

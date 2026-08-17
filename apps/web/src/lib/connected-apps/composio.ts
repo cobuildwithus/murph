@@ -426,6 +426,13 @@ function createBoundedComposioFetch(fetchImpl: typeof fetch): typeof fetch {
   };
 }
 
+const COMPOSIO_REPEATED_LIST_QUERY_FIELDS = [
+  "connected_account_ids",
+  "statuses",
+  "toolkit_slugs",
+  "user_ids",
+] as const;
+
 // The generated client serializes arrays as comma-delimited values. Keep the
 // already-deployed repeated-key shape for this endpoint so installing the SDK
 // cannot alter account scoping or filtering at the provider boundary.
@@ -439,12 +446,7 @@ function preserveRepeatedComposioListQueryParams(
   }
 
   let changed = false;
-  for (const field of [
-    "connected_account_ids",
-    "statuses",
-    "toolkit_slugs",
-    "user_ids",
-  ] as const) {
+  for (const field of COMPOSIO_REPEATED_LIST_QUERY_FIELDS) {
     const values = url.searchParams.getAll(field);
     if (values.length !== 1 || !values[0]?.includes(",")) {
       continue;

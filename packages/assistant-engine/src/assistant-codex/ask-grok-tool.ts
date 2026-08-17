@@ -32,6 +32,7 @@ export interface AskGrokTurnState {
 
 export const ASK_GROK_MAX_PROVIDER_CALLS_PER_TURN = 3
 
+const XAI_RESPONSES_URL = 'https://api.x.ai/v1/responses'
 const ASK_GROK_MAX_OUTPUT_TOKENS = 2500
 const ASK_GROK_REQUEST_TIMEOUT_MS = 60_000
 // Bounds what one answer can add to resident thread context. Kept above the
@@ -117,7 +118,7 @@ export async function executeAskGrokTool(input: {
   )
   let payload: unknown
   try {
-    const response = await runtime.fetchImpl('https://api.x.ai/v1/responses', {
+    const response = await runtime.fetchImpl(XAI_RESPONSES_URL, {
       body: JSON.stringify({
         model: runtime.model,
         input: [

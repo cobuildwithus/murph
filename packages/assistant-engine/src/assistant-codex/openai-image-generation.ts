@@ -272,7 +272,7 @@ function createOpenAiImageSdkFetch(
     init?: RequestInit,
   ): Promise<Response> => {
     try {
-      const response = await fetchImpl.call(undefined, request, init)
+      const response = await fetchImpl(request, init)
       if (!response.ok) {
         try {
           state.errorResponse = response.clone()

@@ -134,7 +134,7 @@ export interface HostedGcpKmsSdkEncryptRequest {
   plaintextCrc32c: number;
 }
 
-export interface HostedGcpKmsSdkEncryptResult {
+export interface HostedGcpKmsSdkEncryptResponse {
   ciphertext: Uint8Array | null;
   ciphertextCrc32c: number | null;
   name: string | null;
@@ -150,7 +150,7 @@ export interface HostedGcpKmsSdkDecryptRequest {
   name: string;
 }
 
-export interface HostedGcpKmsSdkDecryptResult {
+export interface HostedGcpKmsSdkDecryptResponse {
   plaintext: Uint8Array | null;
   plaintextCrc32c: number | null;
   usedPrimary: boolean | null;
@@ -162,7 +162,7 @@ export interface HostedGcpKmsSdkAsymmetricSignRequest {
   name: string;
 }
 
-export interface HostedGcpKmsSdkAsymmetricSignResult {
+export interface HostedGcpKmsSdkAsymmetricSignResponse {
   name: string | null;
   signature: Uint8Array | null;
   signatureCrc32c: number | null;
@@ -175,7 +175,7 @@ export interface HostedGcpKmsSdkMacSignRequest {
   name: string;
 }
 
-export interface HostedGcpKmsSdkMacSignResult {
+export interface HostedGcpKmsSdkMacSignResponse {
   mac: Uint8Array | null;
   macCrc32c: number | null;
   name: string | null;
@@ -186,19 +186,19 @@ export interface HostedGcpKmsSdkTransport {
   asymmetricSign(
     request: HostedGcpKmsSdkAsymmetricSignRequest,
     options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkAsymmetricSignResult>;
+  ): Promise<HostedGcpKmsSdkAsymmetricSignResponse>;
   decrypt(
     request: HostedGcpKmsSdkDecryptRequest,
     options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkDecryptResult>;
+  ): Promise<HostedGcpKmsSdkDecryptResponse>;
   encrypt(
     request: HostedGcpKmsSdkEncryptRequest,
     options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkEncryptResult>;
+  ): Promise<HostedGcpKmsSdkEncryptResponse>;
   macSign(
     request: HostedGcpKmsSdkMacSignRequest,
     options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkMacSignResult>;
+  ): Promise<HostedGcpKmsSdkMacSignResponse>;
 }
 
 export interface HostedGcpKmsStaticCredentialConfiguration {
@@ -856,7 +856,7 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
   async encrypt(
     request: HostedGcpKmsSdkEncryptRequest,
     options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkEncryptResult> {
+  ): Promise<HostedGcpKmsSdkEncryptResponse> {
     const sdkRequest: protos.google.cloud.kms.v1.IEncryptRequest = {
       additionalAuthenticatedData: request.additionalAuthenticatedData,
       additionalAuthenticatedDataCrc32c: { value: request.additionalAuthenticatedDataCrc32c },
@@ -882,7 +882,7 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
   async decrypt(
     request: HostedGcpKmsSdkDecryptRequest,
     options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkDecryptResult> {
+  ): Promise<HostedGcpKmsSdkDecryptResponse> {
     const sdkRequest: protos.google.cloud.kms.v1.IDecryptRequest = {
       additionalAuthenticatedData: request.additionalAuthenticatedData,
       additionalAuthenticatedDataCrc32c: { value: request.additionalAuthenticatedDataCrc32c },
@@ -905,7 +905,7 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
   async asymmetricSign(
     request: HostedGcpKmsSdkAsymmetricSignRequest,
     options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkAsymmetricSignResult> {
+  ): Promise<HostedGcpKmsSdkAsymmetricSignResponse> {
     const sdkRequest: protos.google.cloud.kms.v1.IAsymmetricSignRequest = {
       digest: { sha256: request.digest },
       digestCrc32c: { value: request.digestCrc32c },
@@ -927,7 +927,7 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
   async macSign(
     request: HostedGcpKmsSdkMacSignRequest,
     options: HostedGcpKmsSdkCallOptions,
-  ): Promise<HostedGcpKmsSdkMacSignResult> {
+  ): Promise<HostedGcpKmsSdkMacSignResponse> {
     const sdkRequest: protos.google.cloud.kms.v1.IMacSignRequest = {
       data: request.data,
       dataCrc32c: { value: request.dataCrc32c },

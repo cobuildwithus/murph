@@ -26,7 +26,7 @@ const HOSTED_XAI_ALLOWED_X_SEARCH_TOOL_KEYS = new Set([
 const HOSTED_XAI_MAX_TOOL_HANDLES = 20;
 const HOSTED_XAI_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 
-export interface HostedXaiRequestProjection {
+export interface HostedXaiRequestBody {
   model: string;
 }
 
@@ -38,7 +38,7 @@ export interface HostedXaiRequestProjection {
 export function parseHostedXaiRequestBody(input: {
   body: ArrayBuffer;
   contentType: string | null;
-}): HostedXaiRequestProjection | null {
+}): HostedXaiRequestBody | null {
   if (!isJsonContentType(input.contentType)) {
     return null;
   }

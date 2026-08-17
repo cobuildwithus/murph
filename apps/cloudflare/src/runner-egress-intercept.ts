@@ -7,7 +7,7 @@ import {
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
   parseExaResearchScoutRequestBody,
-  type ExaResearchScoutSearchPlan,
+  type ExaResearchScoutRequestBody,
   type ExaResearchScoutParsedRequest,
 } from "@murphai/contracts";
 import {
@@ -3814,7 +3814,7 @@ function readHostedExaResearchScoutRequestBody(
 
 function buildHostedExaResearchScoutCanonicalRequest(
   input: ExaResearchScoutParsedRequest,
-): ExaResearchScoutSearchPlan {
+): ExaResearchScoutRequestBody {
   return "mode" in input.profile
     ? buildExaResearchScoutRequest({
         maxCandidates: input.numResults,
