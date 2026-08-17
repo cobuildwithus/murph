@@ -1093,12 +1093,12 @@ test("ConnectSourcesGrid requires account authentication before opening the Zepp
 
   assert.ok(
     rendered.container.querySelector(
-      'button[aria-label="Sign in to continue with Zepp / Amazfit"]',
+      'button[aria-label="Sign in to Murph"]',
     ),
   );
   assert.equal(
     rendered.container.querySelector(
-      'button[aria-label="Sign in to continue with Zepp / Amazfit"]',
+      'button[aria-label="Sign in to Murph"]',
     )?.textContent,
     "Sign in",
   );
@@ -2933,13 +2933,7 @@ test("SourceCard uses one sign-in action for every signed-out source type", asyn
       }),
     );
 
-    assert.match(
-      markup,
-      new RegExp(
-        `aria-label="Sign in to continue with ${escapeRegExp(source.name)}"`,
-        "u",
-      ),
-    );
+    assert.match(markup, /aria-label="Sign in to Murph"/u);
     assert.equal(markup.match(/>Sign in<\/button>/gu)?.length, 1);
     assert.doesNotMatch(markup, />Log in or sign up<\/button>/u);
     assert.doesNotMatch(markup, />Download app<\/a>/u);
@@ -2958,11 +2952,8 @@ test("connect source card design study renders the production action states", as
   assert.match(markup, /aria-label="Disconnect Garmin"/u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.match(markup, /aria-label="Connect Fitbit"/u);
-  assert.match(markup, /aria-label="Sign in to continue with Oura"/u);
-  assert.match(markup, /aria-label="Sign in to continue with Apple Health"/u);
-  assert.match(markup, /aria-label="Sign in to continue with Zepp \/ Amazfit"/u);
+  assert.equal(markup.match(/aria-label="Sign in to Murph"/gu)?.length, 4);
   assert.match(markup, /Dexcom connections are coming soon\./u);
-  assert.match(markup, /aria-label="Sign in to continue with Dexcom"/u);
   assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);
   assert.match(markup, /Peloton could not open\. Please try again\./u);
@@ -3242,7 +3233,7 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, />Sign in<\/button>/);
-  assert.match(markup, /Sign in to continue with Garmin/);
+  assert.match(markup, /aria-label="Sign in to Murph"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Garmin"/u);
   expectSettingResponseNotLoaded();
 });

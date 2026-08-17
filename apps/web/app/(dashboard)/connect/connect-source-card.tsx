@@ -162,7 +162,7 @@ export function SourceCard({
             ) : null}
             {!authenticated ? (
               <AuthButton
-                aria-label={`Sign in to continue with ${source.name}`}
+                aria-label="Sign in to Murph"
                 className="self-end"
               >
                 Sign in

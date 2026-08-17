@@ -72,6 +72,7 @@ describe("ChangelogPage", () => {
     for (const edition of firstPage.editions) {
       expect(markup).toContain(`id="edition-${edition.id}"`);
       expect(markup).toContain(renderToStaticMarkup(<>{edition.title}</>));
+      expect(markup).toContain(renderToStaticMarkup(<>{edition.summary}</>));
       for (const item of edition.items) {
         expect(markup).toContain(`id="${item.id}"`);
         expect(markup).toContain(`href="${buildChangelogItemPath(item.id)}"`);
