@@ -57,3 +57,11 @@ Updated: 2026-08-17
 - Passed the hosted-Web typecheck, including the repository-owned Health Commons and Prisma generation prerequisites.
 - Direct sitemap coverage proof is part of the focused test: one canonical host, no duplicate URLs, all published Health Commons routes present, and private/result/internal routes absent.
 - Passed all 13 frontend design-proof checker tests, including metadata-only helpers plus rendered-body, import, static viewport, and generated viewport controls; the checker reports no UI change for the exact task diff.
+
+## Round 3 change-shape retrospective
+
+- Trigger and attribution: the first-reviewed patch was 320 additions and 9 deletions; review and CI remediation added the rendered-route signature, metadata-export stripping, frontend proof classification, and guard tests alongside the original crawler host, sitemap, dashboard inheritance, canonical, and robots work.
+- Options considered: deletion or reversion restores the reproduced metadata-only CI false positive; splitting leaves this exact patch blocked until a prerequisite PR merges; shrinking already removed runtime dependencies and narrowed the exemption to metadata and `generateMetadata` only.
+- Decision: justified continuation. The existing frontend design-proof guard is the sole owner that misclassified the required route metadata edits, so correcting that owner is indivisible from completing the crawler fix truthfully.
+- Invariant proof: additions, deletions, component bodies, rendered imports, static viewport exports, and generated viewport exports remain frontend-affecting. The focused positive and negative controls and exact task-diff proof exercise the boundary.
+- Complexity accounting: no production service, runtime state, dependency, middleware, queue, compatibility path, or lifecycle was added; the broadened concept is one CI classifier inside its existing owner.
