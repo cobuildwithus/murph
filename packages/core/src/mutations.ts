@@ -32,7 +32,7 @@ import {
   eventRecordSchema,
   eventImportDecisionSchema,
   isWritableIsoDateTime,
-  reinterpretIsoTimestampInTimeZone,
+  resolveFloatingIsoTimestampInTimeZone,
   safeParseContract,
   sampleRecordSchema,
 } from "@murphai/contracts";
@@ -2326,98 +2326,126 @@ const JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE =
 const JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION =
   "junction-sparse-timeseries.floating-fallback.v2";
 
-function preserveJunctionFloatingFallbackTime(
-  existing: EventRecord,
+function resolveJunctionFloatingFallbackTime(
+  existing: EventRecord | undefined,
   incoming: EventRecord,
-): EventRecord {
+): EventRecord | null {
   if (
-    existing.externalRef?.system !== "junction"
-    || incoming.externalRef?.system !== "junction"
+    incoming.externalRef?.system !== "junction"
     || incoming.dataOrigin?.normalizerVersion
       !== JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
-    || existing.dataOrigin?.timestampSemantics !== "floating"
     || incoming.dataOrigin.timestampSemantics !== "floating"
-    || !deviceDataOriginSourceMatches(existing.dataOrigin, incoming.dataOrigin)
   ) {
     return incoming;
   }
 
-  if (!existing.timeZone || !incoming.timeZone) {
+  if (!incoming.timeZone) {
     return incoming;
   }
 
   // Junction documents Libre's +00:00 values as wall clocks, not instants.
-  // Once the event spine accepts a vault-zone interpretation, that existing
-  // canonical owner must not move merely because the member changes their
-  // current profile timezone. Reinterpret every corrected occurrence and
-  // interval endpoint independently: they can carry different offsets when the
-  // provider interval crosses a DST transition, so one start-derived shift
-  // cannot preserve the accepted wall-clock meaning.
-  const reinterpretedOccurrence = reinterpretIsoTimestampInTimeZone(
-    incoming.occurredAt,
-    incoming.timeZone,
-    existing.timeZone,
+  // The importer carries those raw wall values through a schema-valid transient
+  // event. Resolve them only after stable external identity lookup, so a matched
+  // row uses its event spine's accepted zone while a new row uses the incoming
+  // fallback zone. Each endpoint resolves independently across DST transitions.
+  const acceptedExisting = existing?.externalRef?.system === "junction"
+    && existing.dataOrigin?.timestampSemantics === "floating"
+    && deviceDataOriginSourceMatches(existing.dataOrigin, incoming.dataOrigin)
+    ? existing
+    : undefined;
+  const targetTimeZone = acceptedExisting?.timeZone ?? incoming.timeZone;
+  const startRaw = incoming.dataOrigin.observedAtRaw;
+  if (typeof startRaw !== "string") {
+    return incoming;
+  }
+  const resolvedOccurrence = resolveFloatingIsoTimestampInTimeZone(
+    startRaw,
+    targetTimeZone,
   );
-  const reinterpretedStart = incoming.kind === "intervention_session"
+  const resolvedStart = incoming.kind === "intervention_session"
     && typeof incoming.fields?.["start-at"] === "string"
-    ? reinterpretIsoTimestampInTimeZone(
+    ? resolveFloatingIsoTimestampInTimeZone(
         incoming.fields["start-at"],
-        incoming.timeZone,
-        existing.timeZone,
+        targetTimeZone,
       )
     : undefined;
-  const reinterpretedStartAt = reinterpretedStart?.timestamp;
-  const reinterpretedEndAt = incoming.kind === "intervention_session"
+  const resolvedStartAt = resolvedStart?.timestamp;
+  const resolvedEndAt = incoming.kind === "intervention_session"
     && typeof incoming.fields?.["end-at"] === "string"
-    ? reinterpretIsoTimestampInTimeZone(
+    ? resolveFloatingIsoTimestampInTimeZone(
         incoming.fields["end-at"],
-        incoming.timeZone,
-        existing.timeZone,
+        targetTimeZone,
       )?.timestamp
     : undefined;
   if (
-    !reinterpretedOccurrence
+    !resolvedOccurrence
     || (
       incoming.kind === "intervention_session"
       && (
-        !reinterpretedStartAt
-        || !reinterpretedEndAt
-        || Date.parse(reinterpretedEndAt) < Date.parse(reinterpretedStartAt)
+        !resolvedStartAt
+        || !resolvedEndAt
+        || Date.parse(resolvedEndAt) < Date.parse(resolvedStartAt)
       )
     )
   ) {
-    throw new VaultError(
-      "EVENT_FLOATING_TIME_REINTERPRETATION_FAILED",
-      "Junction floating interval cannot be interpreted unambiguously in its accepted timezone.",
-    );
+    return null;
   }
-  const reinterpretedInterventionFields = incoming.kind === "intervention_session"
+  const resolvedInterventionFields = incoming.kind === "intervention_session"
     && incoming.fields
     ? {
         ...incoming.fields,
-        ...(reinterpretedStartAt ? { "start-at": reinterpretedStartAt } : {}),
-        ...(reinterpretedEndAt ? { "end-at": reinterpretedEndAt } : {}),
+        ...(resolvedStartAt ? { "start-at": resolvedStartAt } : {}),
+        ...(resolvedEndAt ? { "end-at": resolvedEndAt } : {}),
       }
     : undefined;
-  const { timeZone: _incomingTimeZone, ...incomingWithoutTimeZone } = incoming;
   const canonicalOccurrence = incoming.kind === "intervention_session"
-    && reinterpretedStartAt
-    ? reinterpretedStartAt
-    : reinterpretedOccurrence.timestamp;
+    && resolvedStartAt
+    ? resolvedStartAt
+    : resolvedOccurrence.timestamp;
   const canonicalDayKey = incoming.kind === "intervention_session"
-    && reinterpretedStart
-    ? reinterpretedStart.dayKey
-    : reinterpretedOccurrence.dayKey;
+    && resolvedStart
+    ? resolvedStart.dayKey
+    : resolvedOccurrence.dayKey;
   return {
-    ...incomingWithoutTimeZone,
+    ...incoming,
     occurredAt: canonicalOccurrence,
-    recordedAt: existing.recordedAt,
+    recordedAt: acceptedExisting?.recordedAt ?? incoming.recordedAt,
     dayKey: canonicalDayKey,
-    ...(existing.timeZone ? { timeZone: existing.timeZone } : {}),
-    ...(incoming.kind === "intervention_session" && reinterpretedInterventionFields
-      ? { fields: reinterpretedInterventionFields }
+    timeZone: targetTimeZone,
+    ...(incoming.kind === "intervention_session" && resolvedInterventionFields
+      ? { fields: resolvedInterventionFields }
       : {}),
   };
+}
+
+function resolveJunctionFloatingFallbackEntries(
+  entries: readonly PreparedDeviceEventEntry[],
+  context: DeviceEventIdentityContext,
+): PreparedDeviceEventEntry[] {
+  return entries.flatMap((entry) => {
+    if (
+      entry.record.externalRef?.system !== "junction"
+      || entry.record.dataOrigin?.normalizerVersion
+        !== JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
+    ) {
+      return [entry];
+    }
+    const resolved = resolveDeviceEventIdentity(entry, context, { strict: true });
+    const indexedProviderMatch = resolved?.matchedEntries.find(
+      (match) => match.indexedMatch.record.id === resolved.latest?.id,
+    )?.indexedMatch ?? resolved?.matchedEntries[0]?.indexedMatch;
+    const canonicalRecord = resolveJunctionFloatingFallbackTime(
+      indexedProviderMatch?.indexedRecord,
+      entry.record,
+    );
+    return canonicalRecord
+      ? [{
+          ...entry,
+          relativePath: toEventLedgerFile(canonicalRecord.occurredAt),
+          record: canonicalRecord,
+        }]
+      : [];
+  });
 }
 
 function parseJunctionCompanionSyncVersion(version: string | undefined): number | undefined {
@@ -3078,19 +3106,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const indexedProviderMatch = matchedEntries.find(
       (match) => match.indexedMatch.record.id === latest.id,
     )?.indexedMatch ?? matchedEntries[0]?.indexedMatch;
-    if (indexedProviderMatch) {
-      const canonicalRecord = preserveJunctionFloatingFallbackTime(
-        indexedProviderMatch.indexedRecord,
-        entry.record,
-      );
-      if (canonicalRecord !== entry.record) {
-        entry = {
-          ...entry,
-          relativePath: toEventLedgerFile(canonicalRecord.occurredAt),
-          record: canonicalRecord,
-        };
-      }
-    }
     const matchesIndexedProviderContent = indexedProviderMatch !== undefined
       && deviceEventContentKey(indexedProviderMatch.indexedRecord)
         === deviceEventContentKey(entry.record);
@@ -5097,18 +5112,29 @@ export async function importDeviceBatch({
     ingestReceipt,
     provenance,
   });
-  const eventTargetShardPaths = [
-    ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
-  ].sort();
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
   const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
     dedupeWithinPlan: true,
   });
-  const eventIdentityContext = await buildDeviceEventIdentityContext(
+  const initialEventIdentityContext = await buildDeviceEventIdentityContext(
     vaultRoot,
     deviceBatchPlan.preparedEvents,
     deviceBatchPlan.authoritativeEventSets,
   );
+  deviceBatchPlan.preparedEvents = resolveJunctionFloatingFallbackEntries(
+    deviceBatchPlan.preparedEvents,
+    initialEventIdentityContext,
+  );
+  const eventIdentityContext: DeviceEventIdentityContext = {
+    index: initialEventIdentityContext.index,
+    legacyReservations: buildLegacyExternalRefReservations(
+      deviceBatchPlan.preparedEvents,
+      initialEventIdentityContext.index,
+    ),
+  };
+  const eventTargetShardPaths = [
+    ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
+  ].sort();
   const currentEventOwners = mapCurrentDeviceEventOwners(
     deviceBatchPlan.preparedEvents,
     eventIdentityContext,

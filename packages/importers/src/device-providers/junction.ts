@@ -2545,10 +2545,14 @@ function resolveJunctionSparseTimeseriesTimestamp(input: {
     if (startIsFloating !== endIsFloating) {
       return null;
     }
+    const explicitTimeZone = normalizeIanaTimeZone(
+      firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
+    );
     const timeZone = resolveJunctionFloatingTimestampTimeZone(
       input.entry,
       input.context.defaultTimeZone,
     );
+    const usesFallbackTimeZone = explicitTimeZone === null;
     const floatingStart = startRaw && startIsFloating && timeZone
       ? resolveFloatingIsoTimestampInTimeZone(startRaw, timeZone)
       : null;
@@ -2556,20 +2560,26 @@ function resolveJunctionSparseTimeseriesTimestamp(input: {
       ? resolveFloatingIsoTimestampInTimeZone(endRaw, timeZone)
       : null;
     const startAt = startIsFloating
-      ? floatingStart?.timestamp
+      ? usesFallbackTimeZone
+        ? normalizeTimestamp(startRaw)
+        : floatingStart?.timestamp
       : resolveSafeTimestamp(startRaw, input.sourceProviderSlug);
     const endAt = endIsFloating
-      ? floatingEnd?.timestamp
+      ? usesFallbackTimeZone
+        ? normalizeTimestamp(endRaw)
+        : floatingEnd?.timestamp
       : resolveSafeTimestamp(endRaw, input.sourceProviderSlug);
     if (!startAt || !endAt || Date.parse(endAt) < Date.parse(startAt)) {
       return null;
     }
-    const dayKey = floatingStart?.dayKey ?? resolveJunctionTimeseriesAggregateDayKey(
-      input.entry,
-      timestamp,
-      startAt,
-      input.context.defaultTimeZone,
-    );
+    const dayKey = usesFallbackTimeZone
+      ? extractIsoDatePrefix(startRaw)
+      : floatingStart?.dayKey ?? resolveJunctionTimeseriesAggregateDayKey(
+          input.entry,
+          timestamp,
+          startAt,
+          input.context.defaultTimeZone,
+        );
     if (!dayKey) {
       return null;
     }

@@ -280,7 +280,7 @@ test("Junction sparse clinical imports retain a deterministic bounded prefix", (
   assert.doesNotMatch(JSON.stringify(forward.evidenceParts), /clinical-row-/u);
 });
 
-test("Junction metabolic intervals admit one exact source-local instant and preserve real offsets", () => {
+test("Junction metabolic fallback intervals retain raw wall time until event-spine admission", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-11-02T00:00:00.000Z",
     timeseries: {
@@ -349,15 +349,17 @@ test("Junction metabolic intervals admit one exact source-local instant and pres
   assert.deepEqual(
     carbohydrates.map((event) => event.occurredAt).sort(),
     [
-      "2026-01-15T13:00:00.000Z",
+      "2026-01-15T08:00:00.000Z",
+      "2026-03-08T02:15:00.000Z",
+      "2026-11-01T01:15:00.000Z",
       "2026-11-01T05:15:00.000Z",
       "2026-11-01T06:15:00.000Z",
     ],
   );
-  assert.deepEqual(insulin.map((event) => event.occurredAt), ["2026-01-15T14:00:00.000Z"]);
-  assert.equal((payload.events ?? []).length, 4);
+  assert.deepEqual(insulin.map((event) => event.occurredAt), ["2026-01-15T09:00:00.000Z"]);
+  assert.equal((payload.events ?? []).length, 6);
   assert.equal(
-    carbohydrates.find((event) => event.occurredAt === "2026-01-15T13:00:00.000Z")
+    carbohydrates.find((event) => event.occurredAt === "2026-01-15T08:00:00.000Z")
       ?.dataOrigin?.normalizerVersion,
     "junction-sparse-timeseries.floating-fallback.v2",
   );
@@ -423,7 +425,7 @@ test("Junction id-less Libre metabolic identity ignores mutable vault timezone",
     central.map((event) => event.id),
   );
   assert.equal(new Set(eastern.map((event) => event.id)).size, 4);
-  assert.notDeepEqual(
+  assert.deepEqual(
     eastern.map((event) => event.occurredAt),
     central.map((event) => event.occurredAt),
   );
@@ -530,7 +532,13 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
       insulin: await readCanonicalEvent(first.insulin),
     };
 
-    assert.equal(replayResult.events.length, 0);
+    assert.equal(replayResult.events.length, 2);
+    assert.deepEqual(
+      replayResult.events.map((event) => event.id).sort(),
+      [first.carbohydrate?.id, first.insulin?.id].filter(
+        (id): id is string => typeof id === "string",
+      ).sort(),
+    );
     assert.equal(replay.carbohydrate?.id, first.carbohydrate?.id);
     assert.equal(replay.carbohydrate?.occurredAt, first.carbohydrate?.occurredAt);
     assert.equal(replay.carbohydrate?.timeZone, first.carbohydrate?.timeZone);
@@ -583,36 +591,72 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
     assert.equal(endCorrected.insulin.fields?.["start-at"], "2026-03-08T06:55:00.000Z");
     assert.equal(endCorrected.insulin.fields?.["end-at"], "2026-03-08T07:08:00.000Z");
 
-    await assert.rejects(
-      importSnapshot(buildSnapshot({
-        carbohydrateStart: "2026-01-15T08:02:00+00:00",
-        end: "2026-03-08T02:30:00+00:00",
-        importedAt: "2026-03-13T00:00:00.000Z",
-        insulinStart: "2026-03-08T01:55:00+00:00",
-        insulinAmount: 4,
-      })),
-      /cannot be interpreted unambiguously in its accepted timezone/u,
+    const invalidEndSnapshot = buildSnapshot({
+      carbohydrateStart: "2026-01-15T08:03:00+00:00",
+      end: "2026-03-08T02:30:00+00:00",
+      importedAt: "2026-03-13T00:00:00.000Z",
+      insulinStart: "2026-03-08T01:55:00+00:00",
+      insulinAmount: 4,
+    });
+    const invalidEnd = await importSnapshot(invalidEndSnapshot);
+    assert.equal(invalidEnd.applied, true);
+    assert.equal(
+      invalidEnd.events.some((event) =>
+        event.kind === "observation" && event.metric === "carbohydrates"
+      ),
+      true,
     );
-    await assert.rejects(
-      importSnapshot(buildSnapshot({
-        carbohydrateStart: "2026-01-15T08:02:00+00:00",
-        end: "2026-03-08T03:08:00+00:00",
-        importedAt: "2026-03-14T00:00:00.000Z",
-        insulinStart: "2026-03-08T02:30:00+00:00",
-        insulinAmount: 4,
-      })),
-      /cannot be interpreted unambiguously in its accepted timezone/u,
+    assert.equal(
+      invalidEnd.events.some((event) => event.kind === "intervention_session"),
+      false,
     );
-    await assert.rejects(
-      importSnapshot(buildSnapshot({
-        carbohydrateStart: "2026-01-15T08:02:00+00:00",
-        end: "2026-11-01T02:00:00+00:00",
-        importedAt: "2026-03-15T00:00:00.000Z",
-        insulinStart: "2026-11-01T01:30:00+00:00",
-        insulinAmount: 4,
-      })),
-      /cannot be interpreted unambiguously in its accepted timezone/u,
+    assert.ok(invalidEnd.ingestId);
+    const invalidEndIngest = await coreRuntime.readIntegrationIngestById(
+      vaultRoot,
+      invalidEnd.ingestId,
     );
+    assert.ok(invalidEndIngest);
+    assert.equal(
+      invalidEndIngest.record.outputs.events.some((event) =>
+        event.roles.some((role) => role.includes("insulin"))
+      ),
+      false,
+    );
+
+    const invalidStart = await importSnapshot(buildSnapshot({
+      carbohydrateStart: "2026-01-15T08:04:00+00:00",
+      end: "2026-03-08T03:08:00+00:00",
+      importedAt: "2026-03-14T00:00:00.000Z",
+      insulinStart: "2026-03-08T02:30:00+00:00",
+      insulinAmount: 4,
+    }));
+    assert.equal(
+      invalidStart.events.some((event) =>
+        event.kind === "observation" && event.metric === "carbohydrates"
+      ),
+      true,
+    );
+    assert.equal(
+      invalidStart.events.some((event) => event.kind === "intervention_session"),
+      false,
+    );
+
+    const overlapSnapshot = buildSnapshot({
+      carbohydrateStart: "2026-01-15T08:04:00+00:00",
+      end: "2026-11-01T02:00:00+00:00",
+      importedAt: "2026-03-15T00:00:00.000Z",
+      insulinStart: "2026-11-01T01:30:00+00:00",
+      insulinAmount: 4,
+    });
+    const invalidOverlap = await importSnapshot(overlapSnapshot);
+    assert.equal(
+      invalidOverlap.events.some((event) => event.kind === "intervention_session"),
+      false,
+    );
+    const invalidOverlapReplay = await importSnapshot(overlapSnapshot);
+    assert.equal(invalidOverlapReplay.applied, false);
+    assert.equal(invalidOverlapReplay.persistedEvidencePartCount, 0);
+
     const afterRejectedCorrection = await readCanonicalEvent(first.insulin);
     assert.equal(afterRejectedCorrection?.lifecycle?.revision, 3);
     if (afterRejectedCorrection?.kind !== "intervention_session") {
@@ -622,6 +666,141 @@ test("Junction Libre replays retain the canonical fallback-zone interpretation",
       afterRejectedCorrection.fields?.["end-at"],
       "2026-03-08T07:08:00.000Z",
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction Libre corrections resolve against the accepted event zone before DST admission", async () => {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-junction-libre-accepted-zone-"));
+  const buildSnapshot = (
+    importedAt: string,
+    data: readonly Record<string, unknown>[],
+  ) => ({
+    accountId: "junction-account-libre-accepted-zone",
+    importedAt,
+    timeseries: {
+      insulin_injection: grouped("freestyle_libre", "cgm", "libre-1", data),
+    },
+  });
+  const importSnapshot = (snapshot: Record<string, unknown>) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        snapshot,
+        vaultRoot,
+      },
+      { corePort: coreRuntime },
+    );
+  const insulinRows = (result: Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>) =>
+    result.events.filter((event) => event.kind === "intervention_session");
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      timezone: "America/Phoenix",
+    });
+    const first = await importSnapshot(buildSnapshot("2026-01-02T00:00:00.000Z", [
+      {
+        end: "2026-03-08T02:15:00+00:00",
+        id: "accepted-spring-gap",
+        start: "2026-03-08T02:10:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 4,
+      },
+      {
+        end: "2026-11-01T01:15:00+00:00",
+        id: "accepted-fall-overlap",
+        start: "2026-11-01T01:10:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 5,
+      },
+    ]));
+    assert.deepEqual(
+      insulinRows(first).map((event) => event.occurredAt).sort(),
+      ["2026-03-08T09:10:00.000Z", "2026-11-01T08:10:00.000Z"],
+    );
+
+    await coreRuntime.updateVaultSummary({
+      vaultRoot,
+      timezone: "America/New_York",
+    });
+    const corrected = await importSnapshot(buildSnapshot("2026-01-03T00:00:00.000Z", [
+      {
+        end: "2026-03-08T02:20:00+00:00",
+        id: "accepted-spring-gap",
+        start: "2026-03-08T02:10:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 6,
+      },
+      {
+        end: "2026-11-01T01:20:00+00:00",
+        id: "accepted-fall-overlap",
+        start: "2026-11-01T01:10:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 7,
+      },
+    ]));
+    const correctedRows = insulinRows(corrected);
+    assert.equal(correctedRows.length, 2);
+    assert.deepEqual(
+      correctedRows.map((event) => [
+        event.fields?.["dose-amount"],
+        event.fields?.["end-at"],
+        event.timeZone,
+        event.lifecycle?.revision,
+      ]).sort((left, right) => Number(left[0]) - Number(right[0])),
+      [
+        [6, "2026-03-08T09:20:00.000Z", "America/Phoenix", 2],
+        [7, "2026-11-01T08:20:00.000Z", "America/Phoenix", 2],
+      ],
+    );
+
+    const mixedSnapshot = buildSnapshot("2026-01-04T00:00:00.000Z", [
+      {
+        end: "2026-03-08T02:20:00+00:00",
+        id: "new-spring-gap",
+        start: "2026-03-08T02:15:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 8,
+      },
+      {
+        end: "2026-11-01T01:20:00+00:00",
+        id: "new-fall-overlap",
+        start: "2026-11-01T01:15:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 9,
+      },
+      {
+        end: "2026-01-15T08:05:00+00:00",
+        id: "new-ordinary",
+        start: "2026-01-15T08:00:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 10,
+      },
+    ]);
+    const mixed = await importSnapshot(mixedSnapshot);
+    const mixedRows = insulinRows(mixed);
+    assert.equal(mixed.applied, true);
+    assert.equal(mixedRows.length, 1);
+    assert.equal(mixedRows[0]?.fields?.["dose-amount"], 10);
+    assert.equal(mixedRows[0]?.occurredAt, "2026-01-15T13:00:00.000Z");
+    assert.ok(mixed.ingestId);
+    const mixedIngest = await coreRuntime.readIntegrationIngestById(vaultRoot, mixed.ingestId);
+    assert.ok(mixedIngest);
+    assert.equal(mixedIngest.record.outputs.events.length, 1);
+
+    const mixedReplay = await importSnapshot(mixedSnapshot);
+    assert.equal(mixedReplay.applied, false);
+    assert.equal(mixedReplay.persistedEvidencePartCount, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
