@@ -814,7 +814,46 @@ mailbox receipt (`HostedMailboxItem.createdAt`) so a provider event delivered
 after the daily capture cannot later rewrite a completed day; provider event
 time remains payload/decryption and conversation evidence only. The date-keyed
 upsert makes
-same-day cron and ops-page retries idempotent. An attribution integrity failure
+same-day cron and ops-page retries idempotent. Public lifetime message volume
+stays in this existing growth projection rather than creating a separate
+analytics service. Successful Linq outbound remains owned by the Web delivery
+ledger. Successful conversational Telegram and email outbound remains owned by
+the runtime outbox: a newly delivered eligible intent carries a durable pending
+receipt marker, and a bounded best-effort signed Web-control callback records an
+anonymous SHA-256 lookup receipt keyed from the authenticated member, channel,
+and stable outbox dedupe key. One eligible outbox intent contributes one
+receipt regardless of provider chunk or message-id count. The receipt primary
+key makes retries, replay, and a crash after central commit count exactly once;
+a failed callback never changes provider delivery state. Pending receipts reuse
+the outbox intent's existing `nextAttemptAt` clock: the durable delivery write
+arms the first attempt, callback failure defers it by one bounded minute, and a
+successful callback clears both the marker and deadline. Sent pending receipts
+participate in the ordinary assistant wake projection without blocking later
+delivery on the same conversation boundary. Idle runtime passes scan at most
+eight due receipts, checkpoint that recovery pass, and preserve an immediate
+wake for any remainder, so a cold restore or a backlog converges without another
+mailbox item or user action. All recovery remains outside the foreground reply
+critical path and introduces no second queue or state owner. The strict persisted
+outbox marker advances hosted runner state schema to version 17 before any runner
+invocation. A version-16 Worker rejects that Durable Object state before it can
+restore and quarantine the newer outbox record, making version 17 the
+Cloudflare/runner rollback floor once deployed state is established. The
+Telegram/email receipt contribution excludes message reactions and ephemeral
+progress sends:
+neither is an outbox-backed conversational delivery, and those progress paths
+have no durable successful-delivery owner that can support truthful replay-safe
+accounting. The existing Linq ledger contribution remains unchanged.
+Group-email fanout counts one message for each successful recipient child and
+zero for the planning parent. The empty migration is the explicit
+Telegram/email cutover: no unavailable pre-cutover history is reconstructed.
+Growth snapshots count receipt rows by
+Web database `recorded_at` for `[prior_day_start, snapshot_date)`, while the live
+read begins inclusively at the latest snapshot date. A late acknowledgement
+therefore increases the live window monotonically and cannot rewrite a completed
+UTC day; the 5,000 historical base and all-channel inbound count remain
+unchanged.
+
+An attribution integrity failure
 is reported and creates null activity values only when no same-date row exists;
 on retry it leaves any existing activity values untouched while still updating
 the snapshot's revenue, member, and message aggregates. The cron returns a
