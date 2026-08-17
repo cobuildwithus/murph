@@ -86,6 +86,7 @@ import {
 import {
   assertValidJunctionClientUserIdSecret,
   buildJunctionDeviceSyncRuntimeDescriptor,
+  normalizeJunctionClientUserIdNamespace,
   normalizeJunctionDeviceSyncRuntimeConfig,
 } from "../configured-provider-runtime-descriptors.ts";
 import {
@@ -554,6 +555,7 @@ export function createJunctionDeviceSyncProvider(
   const runtimeConfig = normalizeJunctionDeviceSyncRuntimeConfig(config);
   const client = new JunctionClient(toClientConfig(config));
   const {
+    clientUserIdNamespace,
     providerFilter,
     reconcileIntervalMs,
     summaryResources,
@@ -588,7 +590,11 @@ export function createJunctionDeviceSyncProvider(
       providerFilter,
       context.sourceProviderSlug,
     );
-    const clientUserId = buildJunctionClientUserId(config.clientUserIdSecret, ownerId);
+    const clientUserId = buildJunctionClientUserId(
+      config.clientUserIdSecret,
+      ownerId,
+      clientUserIdNamespace,
+    );
     const user = await client.createOrResolveUser(clientUserId);
     const linkToken = await client.createLinkToken({
       userId: user.userId,
@@ -634,7 +640,11 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    const clientUserId = buildJunctionClientUserId(config.clientUserIdSecret, ownerId);
+    const clientUserId = buildJunctionClientUserId(
+      config.clientUserIdSecret,
+      ownerId,
+      clientUserIdNamespace,
+    );
     const user = await client.createOrResolveUser(clientUserId);
 
     return {
@@ -6259,10 +6269,16 @@ function normalizeDiagnosticTimeseriesProbeDays(value: number | undefined): numb
   return Math.min(value, JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS);
 }
 
-export function buildJunctionClientUserId(secret: string, ownerId: string): string {
+export function buildJunctionClientUserId(
+  secret: string,
+  ownerId: string,
+  namespace?: string,
+): string {
   const normalizedSecret = assertValidJunctionClientUserIdSecret(secret);
+  const normalizedNamespace = normalizeJunctionClientUserIdNamespace(namespace);
   const digest = createHmac("sha256", normalizedSecret).update(ownerId).digest();
-  return `murph_${base32UrlEncode(digest)}`.slice(0, 32);
+  const prefix = normalizedNamespace ? `murph_${normalizedNamespace}_` : "murph_";
+  return `${prefix}${base32UrlEncode(digest)}`.slice(0, 32);
 }
 
 function resolveJunctionLinkDirectProvider(

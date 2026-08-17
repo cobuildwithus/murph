@@ -1634,10 +1634,30 @@ test("Junction client_user_id is deterministic, bounded, and owner-blinded", () 
 
   assert.equal(clientUserId.length, 32);
   assert.ok(clientUserId.startsWith("murph_"));
+  assert.equal(clientUserId, "murph_jnqpm4zu2il556kgyffrxngz26");
   assert.doesNotMatch(clientUserId, /owner|internal|123/u);
   assert.equal(
     clientUserId,
     buildJunctionClientUserId("junction-client-user-id-secret", "owner-internal-id-123"),
+  );
+
+  const namespacedClientUserId = buildJunctionClientUserId(
+    "junction-client-user-id-secret",
+    "owner-internal-id-123",
+    "e2e",
+  );
+  assert.equal(namespacedClientUserId.length, 32);
+  assert.ok(namespacedClientUserId.startsWith("murph_e2e_"));
+  assert.equal(namespacedClientUserId, "murph_e2e_jnqpm4zu2il556kgyffrxn");
+  assert.doesNotMatch(namespacedClientUserId, /owner|internal|123/u);
+  assert.notEqual(namespacedClientUserId, clientUserId);
+  assert.throws(
+    () => buildJunctionClientUserId(
+      "junction-client-user-id-secret",
+      "owner-internal-id-123",
+      "Native-iOS",
+    ),
+    /JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
   );
 });
 
@@ -8987,7 +9007,7 @@ test("Junction createLinkToken honors configured allowed Link hosts", async () =
   );
 });
 
-test("Junction beginConnection resolves or creates a user, returns Link URL, and seeds provider-config credentials", async () => {
+test("Junction beginConnection resolves or creates a namespaced user, returns Link URL, and seeds provider-config credentials", async () => {
   const requests: Array<{ body: unknown; headers: Headers; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const url = readUrl(input);
@@ -9008,7 +9028,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
     }
 
     throw new Error(`Unexpected request: ${url}`);
-  });
+  }, { clientUserIdNamespace: "e2e" });
 
   const started = await requireJunctionConnectionHandler(provider).beginConnection({
     state: "state-1",
@@ -9034,7 +9054,9 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.deepEqual(started.stateMetadata, undefined);
 
   const createUserBody = requests.find((request) => request.url.endsWith("/v2/user"))?.body;
-  assert.equal(typeof createUserBody === "object" && createUserBody !== null && "client_user_id" in createUserBody, true);
+  assert.deepEqual(createUserBody, {
+    client_user_id: "murph_e2e_jnqpm4zu2il556kgyffrxn",
+  });
   assert.doesNotMatch(JSON.stringify(createUserBody), /owner-internal-id-123/u);
 
   const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;

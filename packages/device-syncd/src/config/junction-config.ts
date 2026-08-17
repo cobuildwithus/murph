@@ -3,6 +3,7 @@ import { JUNCTION_ALLOWED_TIMESERIES_RESOURCES } from "@murphai/contracts";
 import {
   JUNCTION_API_BASE_URL_ENV_KEYS,
   JUNCTION_API_KEY_ENV_KEYS,
+  JUNCTION_CLIENT_USER_ID_NAMESPACE_ENV_KEYS,
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_ENV_ENV_KEYS,
   JUNCTION_PROVIDER_FILTER_ENV_KEYS,
@@ -59,6 +60,7 @@ export function readConfiguredJunctionDeviceSyncProviderConfig(
 
   const config = {
     apiKey,
+    clientUserIdNamespace: optionalEnv(env, JUNCTION_CLIENT_USER_ID_NAMESPACE_ENV_KEYS),
     clientUserIdSecret,
     environment: parseJunctionEnvironment(environment),
     region: parseJunctionRegion(region),
