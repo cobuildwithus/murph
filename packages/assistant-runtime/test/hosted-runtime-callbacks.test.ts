@@ -28,6 +28,9 @@ import {
   buildHostedActionApprovalCycleOwnerKey,
   buildHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
+import type {
+  HostedPhoneCallResultDeliveryOutcomeRequest,
+} from "@murphai/hosted-execution/phone-calls";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts";
 import {
@@ -3995,6 +3998,55 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects.map((effect) => effect.effectId)).toEqual([
       "intent_final",
     ]);
+  });
+
+  it("keeps tracked non-idempotent phone-call confirmation on its callback-only retry path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:02:00.000Z"));
+    const deliveryIdempotencyKey =
+      "phone-call-result:hpc_callback_retry:generation:3";
+    const intent = createPendingHostedDeliveryIntent({
+      delivery: createDelivery({
+        idempotencyKey: deliveryIdempotencyKey,
+        providerMessageId: "provider_phone_call_result",
+      }),
+      deliveryConfirmationPending: true,
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: false,
+      intentId: "intent_phone_call_result_callback_retry",
+      lastError: {
+        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        message: "delivery confirmation is still pending",
+      },
+      nextAttemptAt: "2026-04-08T00:02:00.000Z",
+      status: "retryable",
+    }) as AssistantOutboxIntent;
+    mocks.listAssistantOutboxIntents.mockResolvedValue([intent]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (candidate) => candidate.intentId === intent.intentId,
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toEqual([
+      expect.objectContaining({
+        deliveryPhase: "background_retry",
+        effectId: intent.intentId,
+        payload: expect.objectContaining({
+          idempotencyKey: deliveryIdempotencyKey,
+          transportIdempotent: false,
+        }),
+      }),
+    ]);
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date(),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:02:00.000Z");
+    vi.useRealTimers();
   });
 
   it("schedules concrete reaction confirmation without blocking a preferred later reply", async () => {
@@ -10117,6 +10169,583 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("records tracked phone-call result provider entry and success before returning the outcome", async () => {
+    const idempotencyKey =
+      "phone-call-result:hpc_result_delivery:generation:2";
+    const target = "telegram_result_delivery";
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: HOSTED_WAKE.wake.userId,
+      threadId: target,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      idempotencyKey,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        const delivery = await dependencies.sendTelegram({
+          idempotencyKey,
+          message: "The call is complete.",
+          replyToMessageId: null,
+          target,
+        });
+        const acceptedDelivery = createDelivery({
+          idempotencyKey,
+          providerMessageId: delivery.providerMessageId,
+          target,
+          targetKind: "thread",
+        });
+        await dispatchHooks?.confirmTerminalIntent?.({
+          intent: createPendingHostedDeliveryIntent({
+            delivery: acceptedDelivery,
+            deliveryConfirmationPending: true,
+            deliveryIdempotencyKey: idempotencyKey,
+            intentId: effect.effectId,
+            status: "retryable",
+          }) as AssistantOutboxIntent,
+          outcome: {
+            delivery: acceptedDelivery,
+            deliveryError: null,
+            status: "sent",
+          },
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        return createDispatchResult({
+          delivery: acceptedDelivery,
+          status: "sent",
+        });
+      },
+    );
+    const recordPhoneCallResultDeliveryOutcome = vi.fn(async () => undefined);
+    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+    const providerFetch = vi.fn<typeof fetch>(async () => Response.json({
+      ok: true,
+      result: { message_id: 701 },
+    }));
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+        recordPhoneCallResultDeliveryOutcome,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(recordPhoneCallResultDeliveryOutcome).toHaveBeenNthCalledWith(1, {
+      generation: 2,
+      phoneCallId: "hpc_result_delivery",
+      routeAuthority,
+      status: "sending",
+    }, { signal: null });
+    expect(recordPhoneCallResultDeliveryOutcome).toHaveBeenNthCalledWith(2, {
+      deliveryErrorCode: null,
+      generation: 2,
+      phoneCallId: "hpc_result_delivery",
+      status: "sent",
+    }, { signal: null });
+    expect(
+      recordPhoneCallResultDeliveryOutcome.mock.invocationCallOrder[0],
+    ).toBeLessThan(providerFetch.mock.invocationCallOrder[0] ?? 0);
+    expect(assertExternalThreadRouteAuthority).not.toHaveBeenCalled();
+  });
+
+  it("preserves a tracked phone-call result receipt when liveness fails after Telegram accepts it", async () => {
+    const abortController = new AbortController();
+    const idempotencyKey =
+      "phone-call-result:hpc_result_delivery:generation:6";
+    const target = "telegram_result_delivery";
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: HOSTED_WAKE.wake.userId,
+      threadId: target,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      idempotencyKey,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.sendTelegramMessage.mockImplementationOnce(
+      async (_request, dependencies) => {
+        await dependencies.fetchImplementation?.(
+          "https://telegram.example/bot-token/sendMessage",
+          { method: "POST" },
+        );
+        abortController.abort(
+          new Error("lease expired after Telegram accepted the result"),
+        );
+        return createDelivery({
+          idempotencyKey,
+          providerMessageId: "telegram_accepted_result",
+          target,
+          targetKind: "thread",
+        });
+      },
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        const delivery = await dependencies.sendTelegram({
+          idempotencyKey,
+          message: "The call is complete.",
+          replyToMessageId: null,
+          target,
+        });
+        const acceptedDelivery = createDelivery({
+          idempotencyKey,
+          providerMessageId: delivery.providerMessageId,
+          target,
+          targetKind: "thread",
+        });
+        await dispatchHooks?.confirmTerminalIntent?.({
+          intent: createPendingHostedDeliveryIntent({
+            delivery: acceptedDelivery,
+            deliveryConfirmationPending: true,
+            deliveryIdempotencyKey: idempotencyKey,
+            intentId: effect.effectId,
+            status: "retryable",
+          }) as AssistantOutboxIntent,
+          outcome: {
+            delivery: acceptedDelivery,
+            deliveryError: null,
+            status: "sent",
+          },
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        return createDispatchResult({
+          delivery: acceptedDelivery,
+          status: "sent",
+        });
+      },
+    );
+    const recordPhoneCallResultDeliveryOutcome = vi.fn(async () => undefined);
+    const providerFetch = vi.fn<typeof fetch>(async () => {
+      return Response.json({
+        ok: true,
+        result: { message_id: 706 },
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordPhoneCallResultDeliveryOutcome,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      signal: abortController.signal,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledOnce();
+    expect(recordPhoneCallResultDeliveryOutcome).toHaveBeenNthCalledWith(1, {
+      generation: 6,
+      phoneCallId: "hpc_result_delivery",
+      routeAuthority,
+      status: "sending",
+    }, { signal: abortController.signal });
+    expect(recordPhoneCallResultDeliveryOutcome).toHaveBeenNthCalledWith(2, {
+      deliveryErrorCode: null,
+      generation: 6,
+      phoneCallId: "hpc_result_delivery",
+      status: "sent",
+    }, { signal: abortController.signal });
+  });
+
+  it("keeps tracked phone-call result delivery retryable when provider-entry recording is unavailable", async () => {
+    const idempotencyKey =
+      "phone-call-result:hpc_result_delivery:generation:1";
+    const target = "telegram_result_delivery";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      idempotencyKey,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: {
+          channel: "telegram",
+          containerMemberId: HOSTED_WAKE.wake.userId,
+          threadId: target,
+        },
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendTelegram({
+          idempotencyKey,
+          message: "The call is complete.",
+          replyToMessageId: null,
+          target,
+        });
+        throw new Error("unreachable after missing delivery recorder");
+      },
+    );
+    const providerFetch = vi.fn<typeof fetch>();
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority: vi.fn(async () => undefined),
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_PHONE_CALL_RESULT_DELIVERY_OUTCOME_UNAVAILABLE",
+      context: expect.objectContaining({ retryable: true }),
+    });
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("revalidates and resumes when provider-entry recording committed but its response was lost", async () => {
+    const idempotencyKey =
+      "phone-call-result:hpc_result_delivery:generation:5";
+    const target = "telegram_result_delivery";
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: HOSTED_WAKE.wake.userId,
+      threadId: target,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      idempotencyKey,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(
+      async ({ dependencies }) => {
+        const delivery = await dependencies.sendTelegram({
+          idempotencyKey,
+          message: "The call is complete.",
+          replyToMessageId: null,
+          target,
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            idempotencyKey,
+            providerMessageId: delivery.providerMessageId,
+            target,
+            targetKind: "thread",
+          }),
+          status: "sent",
+        });
+      },
+    );
+    let providerEntryAttempts = 0;
+    const recordPhoneCallResultDeliveryOutcome = vi.fn(
+      async (request: HostedPhoneCallResultDeliveryOutcomeRequest) => {
+        if (request.status === "sending") {
+          providerEntryAttempts += 1;
+          if (providerEntryAttempts === 1) {
+            throw new VaultCliError(
+              "HOSTED_CALLBACK_RESPONSE_LOST",
+              "The committed callback response was lost.",
+              { retryable: true },
+            );
+          }
+        }
+      },
+    );
+    const providerFetch = vi.fn<typeof fetch>(async () => Response.json({
+      ok: true,
+      result: { message_id: 702 },
+    }));
+    const drain = () => drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordPhoneCallResultDeliveryOutcome,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    await expect(drain()).rejects.toMatchObject({
+      code: "ASSISTANT_PHONE_CALL_RESULT_DELIVERY_OUTCOME_RECORDING_FAILED",
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+
+    await expect(drain()).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(recordPhoneCallResultDeliveryOutcome.mock.calls.filter(
+      ([request]) => request.status === "sending",
+    )).toHaveLength(2);
+  });
+
+  it("returns a tracked result to pending when exact Telegram route authority is revoked before provider entry", async () => {
+    const idempotencyKey =
+      "phone-call-result:hpc_result_delivery:generation:3";
+    const target = "telegram_result_delivery";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      idempotencyKey,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: {
+          channel: "telegram",
+          containerMemberId: HOSTED_WAKE.wake.userId,
+          threadId: target,
+        },
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        try {
+          await dependencies.sendTelegram({
+            idempotencyKey,
+            message: "The call is complete.",
+            replyToMessageId: null,
+            target,
+          });
+          throw new Error("unreachable after route revocation");
+        } catch (error) {
+          const deliveryError = mocks.normalizeAssistantDeliveryError(error);
+          const intent = createPendingHostedDeliveryIntent({
+            deliveryConfirmationPending: true,
+            deliveryIdempotencyKey: idempotencyKey,
+            intentId: effect.effectId,
+            lastError: deliveryError,
+            status: "retryable",
+          }) as AssistantOutboxIntent;
+          await dispatchHooks?.confirmTerminalIntent?.({
+            intent,
+            outcome: {
+              delivery: null,
+              deliveryError,
+              status: "failed",
+            },
+            vault: HOSTED_WAKE.vaultRoot,
+          });
+          return createDispatchResult({
+            ...intent,
+            status: "failed",
+          }, deliveryError);
+        }
+      },
+    );
+    const routeError = new VaultCliError(
+      "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      "The Telegram route was revoked.",
+      { retryable: false },
+    );
+    const recordPhoneCallResultDeliveryOutcome = vi.fn(
+      async (request: HostedPhoneCallResultDeliveryOutcomeRequest) => {
+        if (request.status === "sending") {
+          throw routeError;
+        }
+      },
+    );
+    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+    const providerFetch = vi.fn<typeof fetch>();
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+        recordPhoneCallResultDeliveryOutcome,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+        deliveryStatus: "failed",
+      }),
+    ]);
+
+    expect(recordPhoneCallResultDeliveryOutcome).toHaveBeenCalledWith({
+      deliveryErrorCode: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      generation: 3,
+      phoneCallId: "hpc_result_delivery",
+      status: "failed",
+    }, { signal: null });
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(assertExternalThreadRouteAuthority).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      deliveryErrorCode: "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
+      expectedStatus: "failed" as const,
+      outboxStatus: "failed",
+    },
+    {
+      deliveryErrorCode: "HOSTED_PROVIDER_FETCH_UNAVAILABLE",
+      expectedStatus: "failed" as const,
+      outboxStatus: "failed",
+    },
+    {
+      deliveryErrorCode: "ASSISTANT_TELEGRAM_TOKEN_REQUIRED",
+      expectedStatus: "failed" as const,
+      outboxStatus: "failed",
+    },
+    {
+      deliveryErrorCode: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      expectedStatus: "failed" as const,
+      outboxStatus: "failed",
+    },
+    {
+      deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      expectedStatus: "failed_ambiguous" as const,
+      outboxStatus: "abandoned",
+    },
+  ])("records tracked phone-call $outboxStatus outcomes on the exact generation", async ({
+    deliveryErrorCode,
+    expectedStatus,
+    outboxStatus,
+  }) => {
+    const effect = createEffect({
+      idempotencyKey:
+        "phone-call-result:hpc_result_delivery:generation:4",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dispatchHooks }) => {
+        const deliveryError = {
+          code: deliveryErrorCode,
+          message: "bounded delivery failure",
+        };
+        const intent = createPendingHostedDeliveryIntent({
+          deliveryConfirmationPending: true,
+          deliveryIdempotencyKey:
+            "phone-call-result:hpc_result_delivery:generation:4",
+          intentId: effect.effectId,
+          lastError: deliveryError,
+          status: "retryable",
+        }) as AssistantOutboxIntent;
+        await dispatchHooks?.confirmTerminalIntent?.({
+          intent,
+          outcome: {
+            delivery: null,
+            deliveryError,
+            status: expectedStatus,
+          },
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        return createDispatchResult({
+          ...intent,
+          status: outboxStatus,
+        }, deliveryError);
+      },
+    );
+    const recordPhoneCallResultDeliveryOutcome = vi.fn(async () => undefined);
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordPhoneCallResultDeliveryOutcome,
+      }),
+      forwardedEnv: {},
+      platformEnv: {},
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryErrorCode,
+        deliveryStatus: expectedStatus === "failed"
+          ? "failed"
+          : "failed_ambiguous",
+      }),
+    ]);
+
+    expect(recordPhoneCallResultDeliveryOutcome).toHaveBeenCalledWith({
+      deliveryErrorCode,
+      generation: 4,
+      phoneCallId: "hpc_result_delivery",
+      status: expectedStatus,
+    }, { signal: null });
   });
 
   it("records a successful Telegram message-volume receipt only after durable delivery persistence", async () => {

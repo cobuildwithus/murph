@@ -45,6 +45,7 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+  HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -7151,6 +7152,54 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         providerMessageId: "linq_message_sent",
       }),
     );
+  });
+
+  it("write-fences phone-call result delivery outcomes through direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
+      );
+      return Response.json({ ok: true, recorded: true, status: "delivered" });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const recordOutcome =
+      platform.effectsPort.recordPhoneCallResultDeliveryOutcome;
+    if (!recordOutcome) {
+      throw new Error("Expected hosted phone-call result delivery outcome effect.");
+    }
+
+    await recordOutcome({
+      deliveryErrorCode: null,
+      generation: 2,
+      phoneCallId: "hpc_result_delivery",
+      status: "sent",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "direct phone-call result delivery request",
+    );
+    expect(request.url).toBe(
+      `https://web.example.test${HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH}`,
+    );
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    await expect(request.clone().json()).resolves.toEqual({
+      deliveryErrorCode: null,
+      generation: 2,
+      phoneCallId: "hpc_result_delivery",
+      status: "sent",
+    });
   });
 
   it("write-fences anonymous outbound message-volume receipts through direct web-control", async () => {

@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { readFile, rename as renameFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +8,7 @@ import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS } from '../src/assistant/outbox/retry-policy.ts'
+import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intents.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
@@ -812,6 +813,106 @@ describe('assistant outbox thresholds', () => {
     })
   })
 
+  it('keeps a tracked provider receipt callback-replayable when its first checkpoint write fails', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-15T13:00:00.000Z'))
+    const deliveryIdempotencyKey =
+      'phone-call-result:hpc_checkpoint_recovery:generation:1'
+    let checkpointIntentPath: string | null = null
+    let providerDelivered = false
+    let failNextPostSendCheckpoint = true
+    const rename = vi.fn(async (...args: Parameters<typeof renameFile>) => {
+      if (
+        providerDelivered &&
+        failNextPostSendCheckpoint &&
+        args[1] === checkpointIntentPath
+      ) {
+        failNextPostSendCheckpoint = false
+        throw Object.assign(new Error('checkpoint write unavailable'), {
+          code: 'EIO',
+        })
+      }
+      return renameFile(...args)
+    })
+    const deliverAssistantMessageOverBinding = vi.fn(async () => {
+      providerDelivered = true
+      vi.setSystemTime(new Date('2026-08-15T13:00:30.000Z'))
+      return {
+        delivery: createDelivery({
+          idempotencyKey: deliveryIdempotencyKey,
+          providerMessageId: 'provider-phone-call-checkpoint-recovery',
+          sentAt: '2026-08-15T13:00:00.000Z',
+        }),
+        deliveryTransportIdempotent: false,
+        session: null,
+      }
+    })
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+      rename,
+    })
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-phone-call-checkpoint-recovery-',
+    )
+    const seeded = await createIntent(outbox, vaultRoot, {
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: false,
+      explicitTarget: 'telegram-call-result',
+      threadId: 'telegram-call-result',
+    })
+    checkpointIntentPath = resolveAssistantOutboxIntentPath(
+      paths.outboxDirectory,
+      seeded.intentId,
+    )
+    const confirmTerminalIntent = vi.fn()
+      .mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date(Date.now() + 45_000))
+        throw new Error('terminal callback deadline elapsed')
+      })
+      .mockResolvedValueOnce(undefined)
+    const dispatchHooks = {
+      confirmTerminalIntent,
+      requiresTerminalConfirmation: ({ intent }: {
+        intent: { deliveryIdempotencyKey: string | null }
+      }) => intent.deliveryIdempotencyKey === deliveryIdempotencyKey,
+    }
+
+    const first = await outbox.dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      force: true,
+      intentId: seeded.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(failNextPostSendCheckpoint).toBe(false)
+    expect(first.intent).toMatchObject({
+      delivery: expect.objectContaining({
+        providerMessageId: 'provider-phone-call-checkpoint-recovery',
+      }),
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+    })
+    expect(Date.parse(first.intent.nextAttemptAt ?? '')).toBeGreaterThan(
+      Date.parse('2026-08-15T13:01:15.000Z'),
+    )
+    expect(confirmTerminalIntent).toHaveBeenCalledOnce()
+
+    vi.setSystemTime(new Date(first.intent.nextAttemptAt!))
+    const restarted = await outbox.dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      intentId: seeded.intentId,
+      now: new Date(first.intent.nextAttemptAt!),
+      vault: vaultRoot,
+    })
+
+    expect(restarted.intent).toMatchObject({
+      deliveryConfirmationPending: false,
+      status: 'sent',
+    })
+    expect(deliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    expect(confirmTerminalIntent).toHaveBeenCalledTimes(2)
+  })
+
   it('preserves failed turn receipts after a later successful send', async () => {
     const deliverAssistantMessageOverBinding = vi.fn(async () => ({
       delivery: createDelivery({
@@ -1287,7 +1388,7 @@ describe('assistant outbox thresholds', () => {
 async function loadOutboxModule(options: {
   deliverAssistantMessageOverBinding?: (...args: never[]) => Promise<unknown>
   readFile?: (filePath: string, encoding: 'utf8') => Promise<string>
-  rename?: (...args: never[]) => Promise<unknown>
+  rename?: typeof renameFile
   saveAssistantSession?: (...args: never[]) => Promise<unknown>
 } = {}) {
   vi.resetModules()
@@ -1349,6 +1450,8 @@ async function createIntent(
   overrides: Partial<{
     channel: string
     createdAt: string
+    deliveryIdempotencyKey: string | null
+    deliveryTransportIdempotent: boolean
     explicitTarget: string | null
     identityId: string
     message: string
@@ -1364,6 +1467,8 @@ async function createIntent(
   return outbox.createAssistantOutboxIntent({
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
+    deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: overrides.deliveryTransportIdempotent,
     explicitTarget: overrides.explicitTarget ?? null,
     identityId: overrides.identityId ?? 'participant-1',
     message: overrides.message ?? 'assistant outbox threshold coverage',

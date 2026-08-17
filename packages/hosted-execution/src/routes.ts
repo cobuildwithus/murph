@@ -62,6 +62,8 @@ export const HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH =
   "/api/internal/hosted-runtime/linq-egress/engagement";
 export const HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH =
   "/api/internal/hosted-runtime/linq-egress/delivery";
+export const HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH =
+  "/api/internal/hosted-runtime/phone-call-result/delivery";
 export const HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH =
   "/api/internal/hosted-runtime/message-volume/outbound-receipt";
 

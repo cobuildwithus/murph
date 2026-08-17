@@ -26,6 +26,9 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
+  parseHostedPhoneCallResultDeliveryKey,
+} from "@murphai/hosted-execution/phone-calls";
+import {
   buildHostedVaultShareProjectionScopeKey,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -5773,7 +5776,10 @@ async function runSystemMailboxMaintenancePhase(input: {
   const systemMailboxDeliveryEffectsForDispatch =
     phaseInput.foregroundCausalOnly === true
       ? systemMailboxDeliveryEffects.filter(
-          (effect) => effect.payload.transportIdempotent === true,
+          (effect) => effect.payload.transportIdempotent === true
+            || parseHostedPhoneCallResultDeliveryKey(
+              effect.payload.idempotencyKey,
+            ) !== null,
         )
       : systemMailboxDeliveryEffects;
   const deferredSystemMailboxDeliveryWakeAt =

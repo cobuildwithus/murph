@@ -87,6 +87,7 @@ import type {
   HostedRuntimeLinqDeliveryPosture,
 } from "@murphai/hosted-execution/routes";
 import type {
+  HostedPhoneCallResultDeliveryOutcomeRequest,
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
@@ -429,6 +430,10 @@ type HostedRuntimeEffectsPortBase = {
   ): Promise<string | null>;
   recordLinqDeliveryOutcome?(
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
+  recordPhoneCallResultDeliveryOutcome?(
+    request: HostedPhoneCallResultDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   recordOutboundMessageVolumeReceipt?(

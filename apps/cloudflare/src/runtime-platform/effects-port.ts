@@ -12,6 +12,7 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+  HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -366,6 +367,25 @@ export function createCloudflareEffectsPort(input: {
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
               path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+          },
+          async recordPhoneCallResultDeliveryOutcome(request, context) {
+            const description =
+              "Hosted phone call result delivery outcome recording";
+            await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description,
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description,
+                workspaceCheckpointBridge:
+                  input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,

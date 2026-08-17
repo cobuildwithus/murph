@@ -199,6 +199,11 @@ export interface AssistantOutboxDispatchHooks {
     intent: AssistantOutboxIntent
     vault: string
   }) => Promise<void>
+  confirmTerminalIntent?: (input: {
+    intent: AssistantOutboxIntent
+    outcome: AssistantOutboxTerminalOutcome
+    vault: string
+  }) => Promise<void>
   persistDeliveredIntent?: (input: {
     delivery: AssistantChannelDelivery
     intent: AssistantOutboxIntent
@@ -222,12 +227,28 @@ export interface AssistantOutboxDispatchHooks {
     intent: AssistantOutboxIntent
     vault: string
   }) => Promise<AssistantChannelDelivery | null>
+  requiresTerminalConfirmation?: (input: {
+    intent: AssistantOutboxIntent
+    vault: string
+  }) => boolean
   shouldRethrowDispatchError?: (input: {
     error: unknown
     intent: AssistantOutboxIntent
     vault: string
   }) => boolean
 }
+
+export type AssistantOutboxTerminalOutcome =
+  | {
+      delivery: AssistantChannelDelivery
+      deliveryError: null
+      status: 'sent'
+    }
+  | {
+      delivery: AssistantChannelDelivery | null
+      deliveryError: AssistantDeliveryError
+      status: 'failed' | 'failed_ambiguous'
+    }
 
 export type DeliverAssistantOutboxMessageResult =
   | {
@@ -700,6 +721,24 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       throw new Error(`Assistant outbox intent ${input.intentId} was not found.`)
     }
 
+    const pendingTerminalConfirmation =
+      readAssistantOutboxPendingTerminalConfirmation({
+        dispatchHooks: input.dispatchHooks,
+        intent,
+        vault: input.vault,
+      })
+    if (
+      pendingTerminalConfirmation &&
+      shouldBeginAssistantOutboxDispatch(intent, now, input.force === true)
+    ) {
+      return {
+        action: 'confirm-terminal' as const,
+        intent,
+        intentPath,
+        outcome: pendingTerminalConfirmation,
+      }
+    }
+
     if (input.allowPreparedSending === true && intent.status === 'sending') {
       if (
         !input.preparedDispatch ||
@@ -722,6 +761,14 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       return {
         action: 'skip' as const,
         intent,
+      }
+    }
+
+    if (shouldFailClosedAssistantOutboxStaleSendingIntent(intent)) {
+      return {
+        action: 'recover-stale-non-idempotent' as const,
+        intent,
+        intentPath,
       }
     }
 
@@ -750,14 +797,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     ) {
       return {
         action: 'retry-exhausted' as const,
-        intent,
-        intentPath,
-      }
-    }
-
-    if (shouldFailClosedAssistantOutboxStaleSendingIntent(intent)) {
-      return {
-        action: 'recover-stale-non-idempotent' as const,
         intent,
         intentPath,
       }
@@ -818,6 +857,21 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     }
   })
 
+  if (prepared.action === 'confirm-terminal') {
+    const confirmedIntent = await confirmAssistantOutboxTerminalIntent({
+      dispatchHooks: input.dispatchHooks,
+      intent: prepared.intent,
+      intentPath: prepared.intentPath,
+      outcome: prepared.outcome,
+      vault: input.vault,
+    })
+    return {
+      intent: confirmedIntent,
+      deliveryError: confirmedIntent.lastError,
+      session: null,
+    }
+  }
+
   if (prepared.action === 'skip') {
     await repairAssistantOutboxReceiptForIntent({
       intent: prepared.intent,
@@ -855,15 +909,33 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       }
     }
 
-    const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
-      error: createAssistantDeliveryRetryExhaustedError(prepared.intent.lastError),
-      failedAt: now,
+    const retryExhaustedError =
+      createAssistantDeliveryRetryExhaustedError(prepared.intent.lastError)
+    const failedIntent = assistantOutboxIntentRequiresTerminalConfirmation({
+      dispatchHooks: input.dispatchHooks,
       intent: prepared.intent,
-      intentPath: prepared.intentPath,
-      onlyCurrentStatuses: ['retryable', 'sending'],
-      status: 'failed',
       vault: input.vault,
     })
+      ? await finalizeAssistantOutboxTerminalFailure({
+          deliveryMayHaveSucceeded: false,
+          deliveryTransportIdempotent:
+            prepared.intent.deliveryTransportIdempotent,
+          dispatchHooks: input.dispatchHooks,
+          error: retryExhaustedError,
+          failedAt: now,
+          intent: prepared.intent,
+          intentPath: prepared.intentPath,
+          vault: input.vault,
+        })
+      : await markAssistantOutboxIntentMirrorTerminal({
+          error: retryExhaustedError,
+          failedAt: now,
+          intent: prepared.intent,
+          intentPath: prepared.intentPath,
+          onlyCurrentStatuses: ['retryable', 'sending'],
+          status: 'failed',
+          vault: input.vault,
+        })
     return {
       intent: failedIntent,
       deliveryError: failedIntent.lastError,
@@ -896,6 +968,12 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
   }
 
   if (prepared.action === 'recover-stale-non-idempotent') {
+    const terminalConfirmationRequired =
+      assistantOutboxIntentRequiresTerminalConfirmation({
+        dispatchHooks: input.dispatchHooks,
+        intent: prepared.intent,
+        vault: input.vault,
+      })
     const recoveredDelivery =
       (await input.dispatchHooks?.resolveDeliveredIntent?.({
         intent: prepared.intent,
@@ -903,36 +981,69 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       })) ??
       resolvePersistedAssistantOutboxDelivery(prepared.intent)
     if (recoveredDelivery) {
-      const sentIntent = await markAssistantOutboxIntentSent({
-        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
-          delivery: recoveredDelivery,
-          intent: prepared.intent,
-        }),
+      const completedAt = resolveRecoveredAssistantOutboxDeliveryCompletedAt({
         delivery: recoveredDelivery,
         intent: prepared.intent,
-        intentPath: prepared.intentPath,
-        vault: input.vault,
       })
+      const sentIntent = terminalConfirmationRequired
+        ? await finalizeAssistantOutboxTerminalDelivery({
+            completedAt,
+            delivery: recoveredDelivery,
+            dispatchHooks: input.dispatchHooks,
+            intent: prepared.intent,
+            intentPath: prepared.intentPath,
+            vault: input.vault,
+          })
+        : await markAssistantOutboxIntentSent({
+            completedAt,
+            delivery: recoveredDelivery,
+            intent: prepared.intent,
+            intentPath: prepared.intentPath,
+            vault: input.vault,
+          })
 
       return {
         intent: sentIntent,
-        deliveryError: null,
+        deliveryError: sentIntent.status === 'sent' ? null : sentIntent.lastError,
         session: null,
       }
     }
 
-    const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
-      error: createAssistantDeliveryAmbiguousError(
-        new Error(
-          'Stale non-idempotent outbound delivery had no persisted delivery to reconcile after restart.',
-        ),
-      ),
-      failedAt: now,
-      intent: prepared.intent,
-      intentPath: prepared.intentPath,
-      status: 'failed',
-      vault: input.vault,
-    })
+    const staleDeliveryError = new Error(
+      'Stale non-idempotent outbound delivery had no persisted delivery to reconcile after restart.',
+    )
+    const ambiguousError = terminalConfirmationRequired &&
+        prepared.intent.channel === 'telegram'
+      ? Object.assign(
+          new VaultCliError(
+            'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+            staleDeliveryError.message,
+          ),
+          {
+            deliveryMayHaveSucceeded: true as const,
+            retryable: false as const,
+          },
+        )
+      : createAssistantDeliveryAmbiguousError(staleDeliveryError)
+    const failedIntent = terminalConfirmationRequired
+      ? await finalizeAssistantOutboxTerminalFailure({
+          deliveryMayHaveSucceeded: true,
+          deliveryTransportIdempotent: false,
+          dispatchHooks: input.dispatchHooks,
+          error: ambiguousError,
+          failedAt: now,
+          intent: prepared.intent,
+          intentPath: prepared.intentPath,
+          vault: input.vault,
+        })
+      : await markAssistantOutboxIntentMirrorTerminal({
+          error: ambiguousError,
+          failedAt: now,
+          intent: prepared.intent,
+          intentPath: prepared.intentPath,
+          status: 'failed',
+          vault: input.vault,
+        })
 
     return {
       intent: failedIntent,
@@ -948,6 +1059,12 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
   let preparedDispatchReserved = false
   let dispatchFailureOwnerIntent = dispatchIntent
   let effectiveDispatchIntent = dispatchIntent
+  const terminalConfirmationRequired =
+    assistantOutboxIntentRequiresTerminalConfirmation({
+      dispatchHooks: input.dispatchHooks,
+      intent: dispatchIntent,
+      vault: input.vault,
+    })
 
   try {
     const reconciledDelivery =
@@ -980,7 +1097,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
         error: createAssistantDeliveryConfirmationPendingError(),
         intentPath: dispatchIntentPath,
-        scheduledAt: new Date(),
         sending: dispatchIntent,
         vault: input.vault,
       })
@@ -1009,6 +1125,9 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         vault: input.vault,
       }))
     if (authorityError) {
+      if (terminalConfirmationRequired) {
+        throw authorityError
+      }
       const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
         error: authorityError,
         // `now` may be the earlier drain-selection timestamp. Authority is
@@ -1096,13 +1215,14 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         deliveryTransportIdempotent,
         intent: deliveredIntent,
         intentPath: dispatchIntentPath,
+        terminalConfirmationRequired,
         vault: input.vault,
       })
     if (
       !assistantOutboxIntentMatchesDispatchOwner(
         durableDeliveredIntent,
         deliveredOwnerIntent,
-        ['sending'],
+        terminalConfirmationRequired ? ['retryable'] : ['sending'],
         false,
       )
     ) {
@@ -1124,13 +1244,27 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       vault: input.vault,
     })
     preparedDispatchReserved = false
-    const sentIntent = await markAssistantOutboxIntentSent({
-      completedAt,
-      delivery,
-      intent: deliveredOwnerIntent,
-      intentPath: dispatchIntentPath,
-      vault: input.vault,
-    })
+    const pendingTerminalConfirmation =
+      readAssistantOutboxPendingTerminalConfirmation({
+        dispatchHooks: input.dispatchHooks,
+        intent: durableDeliveredIntent,
+        vault: input.vault,
+      })
+    const sentIntent = pendingTerminalConfirmation
+      ? await confirmAssistantOutboxTerminalIntent({
+          dispatchHooks: input.dispatchHooks,
+          intent: durableDeliveredIntent,
+          intentPath: dispatchIntentPath,
+          outcome: pendingTerminalConfirmation,
+          vault: input.vault,
+        })
+      : await markAssistantOutboxIntentSent({
+          completedAt,
+          delivery,
+          intent: deliveredOwnerIntent,
+          intentPath: dispatchIntentPath,
+          vault: input.vault,
+        })
     if (!sentIntent.delivery || !sameAssistantChannelDelivery(sentIntent.delivery, delivery)) {
       return {
         intent: sentIntent,
@@ -1140,7 +1274,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     }
     return {
       intent: sentIntent,
-      deliveryError: null,
+      deliveryError: sentIntent.status === 'sent' ? null : sentIntent.lastError,
       session: delivered.session ?? null,
     }
   } catch (error) {
@@ -1180,15 +1314,201 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       failedAt: new Date(),
       intentPath: dispatchIntentPath,
       sending: dispatchFailureOwnerIntent,
+      terminalConfirmationRequired,
       vault: input.vault,
     })
 
+    const pendingTerminalConfirmation =
+      readAssistantOutboxPendingTerminalConfirmation({
+        dispatchHooks: input.dispatchHooks,
+        intent: failedIntent,
+        vault: input.vault,
+      })
+    const confirmedIntent = pendingTerminalConfirmation
+      ? await confirmAssistantOutboxTerminalIntent({
+          dispatchHooks: input.dispatchHooks,
+          intent: failedIntent,
+          intentPath: dispatchIntentPath,
+          outcome: pendingTerminalConfirmation,
+          vault: input.vault,
+        })
+      : failedIntent
+
     return {
-      intent: failedIntent,
-      deliveryError: failedIntent.lastError,
+      intent: confirmedIntent,
+      deliveryError: confirmedIntent.lastError,
       session: null,
     }
   }
+}
+
+function assistantOutboxIntentRequiresTerminalConfirmation(input: {
+  dispatchHooks: AssistantOutboxDispatchHooks | undefined
+  intent: AssistantOutboxIntent
+  vault: string
+}): boolean {
+  return input.dispatchHooks?.confirmTerminalIntent !== undefined &&
+    input.dispatchHooks.requiresTerminalConfirmation?.({
+      intent: input.intent,
+      vault: input.vault,
+    }) === true
+}
+
+function readAssistantOutboxPendingTerminalConfirmation(input: {
+  dispatchHooks: AssistantOutboxDispatchHooks | undefined
+  intent: AssistantOutboxIntent
+  vault: string
+}): AssistantOutboxTerminalOutcome | null {
+  if (
+    !input.intent.deliveryConfirmationPending ||
+    !assistantOutboxIntentRequiresTerminalConfirmation(input)
+  ) {
+    return null
+  }
+
+  const deliveryError = input.intent.lastError
+  if (
+    deliveryError &&
+    deliveryError.code !== 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
+  ) {
+    return {
+      delivery: input.intent.delivery,
+      deliveryError,
+      status: deliveryError.code === 'ASSISTANT_DELIVERY_AMBIGUOUS'
+        ? 'failed_ambiguous'
+        : 'failed',
+    }
+  }
+
+  return input.intent.delivery
+    ? {
+        delivery: input.intent.delivery,
+        deliveryError: null,
+        status: 'sent',
+      }
+    : null
+}
+
+async function confirmAssistantOutboxTerminalIntent(input: {
+  dispatchHooks: AssistantOutboxDispatchHooks | undefined
+  intent: AssistantOutboxIntent
+  intentPath: string
+  outcome: AssistantOutboxTerminalOutcome
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  const confirmTerminalIntent = input.dispatchHooks?.confirmTerminalIntent
+  if (!confirmTerminalIntent) {
+    return input.intent
+  }
+
+  try {
+    await confirmTerminalIntent({
+      intent: input.intent,
+      outcome: input.outcome,
+      vault: input.vault,
+    })
+  } catch {
+    return rescheduleAssistantOutboxConfirmationRetry({
+      error:
+        input.intent.lastError ??
+        createAssistantDeliveryConfirmationPendingError(),
+      intentPath: input.intentPath,
+      sending: input.intent,
+      vault: input.vault,
+    })
+  }
+
+  if (input.outcome.status === 'sent') {
+    return markAssistantOutboxIntentSent({
+      completedAt: input.intent.updatedAt,
+      delivery: input.outcome.delivery,
+      intent: input.intent,
+      intentPath: input.intentPath,
+      vault: input.vault,
+    })
+  }
+
+  return markAssistantOutboxIntentMirrorTerminal({
+    error: input.outcome.deliveryError,
+    failedAt: new Date(),
+    intent: input.intent,
+    intentPath: input.intentPath,
+    onlyCurrentStatuses: ['retryable', 'sending'],
+    status: input.outcome.status === 'failed_ambiguous'
+      ? 'abandoned'
+      : 'failed',
+    vault: input.vault,
+  })
+}
+
+async function finalizeAssistantOutboxTerminalFailure(input: {
+  deliveryMayHaveSucceeded: boolean
+  deliveryTransportIdempotent: boolean
+  dispatchHooks: AssistantOutboxDispatchHooks | undefined
+  error: unknown
+  failedAt: Date
+  intent: AssistantOutboxIntent
+  intentPath: string
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  const pendingIntent = await updateAssistantOutboxAfterDispatchFailure({
+    deliveryMayHaveSucceeded: input.deliveryMayHaveSucceeded,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    error: input.error,
+    failedAt: input.failedAt,
+    intentPath: input.intentPath,
+    sending: input.intent,
+    terminalConfirmationRequired: true,
+    vault: input.vault,
+  })
+  const outcome = readAssistantOutboxPendingTerminalConfirmation({
+    dispatchHooks: input.dispatchHooks,
+    intent: pendingIntent,
+    vault: input.vault,
+  })
+  return outcome
+    ? confirmAssistantOutboxTerminalIntent({
+        dispatchHooks: input.dispatchHooks,
+        intent: pendingIntent,
+        intentPath: input.intentPath,
+        outcome,
+        vault: input.vault,
+      })
+    : pendingIntent
+}
+
+async function finalizeAssistantOutboxTerminalDelivery(input: {
+  completedAt: string
+  delivery: AssistantChannelDelivery
+  dispatchHooks: AssistantOutboxDispatchHooks | undefined
+  intent: AssistantOutboxIntent
+  intentPath: string
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  const pendingIntent =
+    await persistAssistantOutboxIntentDeliveryPendingConfirmation({
+      completedAt: input.completedAt,
+      delivery: input.delivery,
+      deliveryTransportIdempotent: input.intent.deliveryTransportIdempotent,
+      intent: input.intent,
+      intentPath: input.intentPath,
+      terminalConfirmationRequired: true,
+      vault: input.vault,
+    })
+  const outcome = readAssistantOutboxPendingTerminalConfirmation({
+    dispatchHooks: input.dispatchHooks,
+    intent: pendingIntent,
+    vault: input.vault,
+  })
+  return outcome
+    ? confirmAssistantOutboxTerminalIntent({
+        dispatchHooks: input.dispatchHooks,
+        intent: pendingIntent,
+        intentPath: input.intentPath,
+        outcome,
+        vault: input.vault,
+      })
+    : pendingIntent
 }
 
 function assistantOutboxIntentMatchesPreparedDispatch(
@@ -2355,6 +2675,7 @@ function buildAssistantOutboxDeliveredIntent(input: {
       actorId: sessionBinding?.actorId ?? input.intent.actorId,
       bindingDelivery: sessionBinding?.delivery ?? input.intent.bindingDelivery,
       channel: sessionBinding?.channel ?? input.intent.channel,
+      delivery: input.delivery,
       deliveryTransportIdempotent: input.deliveryTransportIdempotent,
       identityId: sessionBinding?.identityId ?? input.intent.identityId,
       ...(messageVolumeReceiptRecordedAt === undefined

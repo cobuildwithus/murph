@@ -116,6 +116,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   intentPath: string
+  terminalConfirmationRequired?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -140,6 +141,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       return current
     }
     const baseIntent = current ?? input.intent
+    const terminalConfirmationRequired = input.terminalConfirmationRequired === true
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
@@ -149,17 +151,22 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
               messageVolumeReceiptRecordedAt:
                 input.intent.messageVolumeReceiptRecordedAt,
             }),
-        deliveryConfirmationPending: input.deliveryTransportIdempotent,
+        deliveryConfirmationPending:
+          terminalConfirmationRequired || input.deliveryTransportIdempotent,
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
         preparedDispatchToken: baseIntent.preparedDispatchToken,
         deliveryIdempotencyKey:
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: input.completedAt,
-        nextAttemptAt:
-          input.intent.messageVolumeReceiptRecordedAt === null
+        nextAttemptAt: terminalConfirmationRequired
+          ? buildAssistantOutboxRetryTimestamp(
+              new Date(input.completedAt),
+              baseIntent.attemptCount,
+            )
+          : input.intent.messageVolumeReceiptRecordedAt === null
             ? input.completedAt
             : null,
-        status: 'sending',
+        status: terminalConfirmationRequired ? 'retryable' : 'sending',
         delivery: input.delivery,
         lastError: createAssistantDeliveryConfirmationPendingError(),
       }),
@@ -379,6 +386,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   failedAt: Date
   intentPath: string
   sending: AssistantOutboxIntent
+  terminalConfirmationRequired?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const linqPartialDelivery = readLinqPartialDeliveryFromError({
@@ -457,7 +465,16 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const retryExhausted = retryRequested &&
       !input.deliveryMayHaveSucceeded &&
       isAssistantOutboxRetryBudgetExhausted(baseIntent)
-    const retryable = retryRequested && !retryExhausted
+    const terminalConfirmationPending =
+      input.terminalConfirmationRequired === true &&
+      (
+        abandonedDelivery ||
+        retryExhausted ||
+        !retryRequested ||
+        (input.deliveryMayHaveSucceeded && input.sending.delivery !== null)
+      )
+    const retryable = (retryRequested && !retryExhausted) ||
+      terminalConfirmationPending
     const deliveryError = retryExhausted
       ? sanitizeAssistantDeliveryErrorForPersistence(
           createAssistantDeliveryRetryExhaustedError(input.error),
@@ -474,15 +491,16 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
           stableLinqPartialDelivery ??
           current?.delivery ??
           input.sending.delivery,
-        deliveryConfirmationPending:
-          recoverableLinqRichLinkPartial ||
-          preserveNonConfirmableLinqRichLinkCheckpoint
-          ? false
-          : abandonedDelivery || retryExhausted
-          ? false
-          : input.deliveryMayHaveSucceeded
-            ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
-            : false,
+        deliveryConfirmationPending: terminalConfirmationPending
+          ? true
+          : recoverableLinqRichLinkPartial ||
+              preserveNonConfirmableLinqRichLinkCheckpoint
+            ? false
+            : abandonedDelivery || retryExhausted
+              ? false
+              : input.deliveryMayHaveSucceeded
+                ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
+                : false,
         deliveryTransportIdempotent: abandonedDelivery
           ? false
           : input.deliveryMayHaveSucceeded
@@ -491,7 +509,13 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
                 input.sending.deliveryTransportIdempotent),
         updatedAt: failedAt,
         nextAttemptAt,
-        status: abandonedDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
+        status: terminalConfirmationPending
+          ? 'retryable'
+          : abandonedDelivery
+            ? 'abandoned'
+            : retryable
+              ? 'retryable'
+              : 'failed',
         lastError: deliveryError,
       }),
     )
@@ -921,7 +945,6 @@ function readNonEmptyStringArray(value: unknown): string[] | null {
 export async function rescheduleAssistantOutboxConfirmationRetry(input: {
   error: AssistantDeliveryError
   intentPath: string
-  scheduledAt: Date
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
@@ -930,7 +953,14 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.sending,
+        ['sending', 'retryable'],
+      )
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -939,14 +969,16 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
       return current
     }
     const baseIntent = current ?? input.sending
-    const scheduledAt = input.scheduledAt.toISOString()
+    const scheduledAt = new Date()
     const retryIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
-        deliveryConfirmationPending: baseIntent.deliveryTransportIdempotent,
-        updatedAt: scheduledAt,
+        deliveryConfirmationPending:
+          baseIntent.deliveryConfirmationPending ||
+          baseIntent.deliveryTransportIdempotent,
+        updatedAt: scheduledAt.toISOString(),
         nextAttemptAt: buildAssistantOutboxRetryTimestamp(
-          input.scheduledAt,
+          scheduledAt,
           baseIntent.attemptCount,
         ),
         status: 'retryable',

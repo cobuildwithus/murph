@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-13
+Last verified: 2026-08-16
 ## Local Frog Autofix
 
 Murph's optional local Frog repair loop is an operator-owned macOS process, not
@@ -898,6 +898,33 @@ advances; authority-owner unavailability keeps the ordinary same-item retry.
 There is no payload rewrite, replacement append, cursor rewind, migration, or
 second reconciliation owner.
 
+Tracked direct phone-call results use the Web-owned `HostedPhoneCall` row as
+their only durable delivery owner and are intentionally Telegram-only. The row
+stores one generation-scoped delivery disposition; a transaction advances a
+pending result to a queued generation with the matching mailbox append. The
+runtime then reports provider entry and terminal outcome through its existing
+signed, write-fenced Web control plane before checkpointing. Mailbox, outbox,
+journal, and Temporal state are transport and wake machinery, never delivery
+truth. Safe pre-provider route loss returns the row to pending for a new
+generation; provider success, definitive failure, and may-have-succeeded
+failure become terminal delivered, failed, or ambiguous dispositions. One
+route loss observed after that generation already crossed provider entry is
+also ambiguous, never permission to resend onto a new route. One
+terminal callback re-arms one oldest member-local obligation, so retention
+expiry cannot fabricate completion and recovery adds no queue or scheduler.
+The call result commits before its deterministic hook is signaled. That hook is
+only a latency hint: after the existing bounded active retry window, the same
+pre-armed per-call Workflow uses a 30-minute first durable timer and then a
+24-hour low-frequency timer to re-read its exact call row. A dropped hook can
+therefore delay recovery but cannot erase an accepted result or create another
+Workflow.
+The encrypted result itself owns the bounded optional direct-transfer follow-up
+policy, so same-version stored recovery cannot lose that obligation. A
+reader-only Web release must accept that field before this writer activates;
+after the first policy write, reader-plus-writer Web is the operational rollback
+floor independently of generation state. Group transfer authority is disabled
+at both normalization boundaries and is outside this policy evolution.
+
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 
 ### Canonical Automation Support Lifecycles
@@ -1045,7 +1072,26 @@ enter runner env, prompts, diagnostics, or workspace state. Transfer numbers are
 resolved server-side from verified hosted member identity when the brief allows a
 live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
 call for request-key idempotency, provider call id, status, bounded call brief,
-and final analysis. Briefs and results are encrypted before persistence with the
+and final analysis. A direct Linq or Telegram call also stores only the bounded
+initiating channel enum, never a phone number or thread identifier. Web resolves
+that exact current direct route before provider dispatch and resolves the same
+channel again immediately before entering the provider. Exact request-key
+replays read the durable call before mutable route admission, so route removal
+cannot turn an already-started call into a definitive no-call result. When the
+asynchronous result is ready, Web binds the current direct thread as egress
+authority on the queued notification; provider entry revalidates that authority
+so a later route removal or rebind cannot disclose the result to a stale chat.
+The existing phone-call reconciliation workflow keeps an analyzed result
+pending until its deduped mailbox notification is durable, and a restored direct
+route signals the newest affected call without falling back to another surface.
+Its deterministic hook is a best-effort fast path; durable timers on that same
+Workflow re-derive an accepted pending result from `HostedPhoneCall` if the
+signal is dropped.
+Group calls keep the
+channel null and continue to use their durable thread-container authority.
+Request-key replay compares the stored channel exactly, including legacy null,
+so a retry cannot change the eventual result audience. Briefs and results are
+encrypted before persistence with the
 control-domain hosted secure-box lane and AAD bound to the member, table, row,
 field, and scope; only provider/status/timestamp identifiers remain operational
 metadata. During account deletion, the member is suspended before `apps/web`
