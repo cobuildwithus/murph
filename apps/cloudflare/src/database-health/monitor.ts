@@ -6,12 +6,15 @@ import {
 import {
   advanceConnectionErrorCounterBaseline,
   calculateConnectionErrorDeltas,
+  DATABASE_CONNECTION_ERROR_METRIC_NAME,
+  DATABASE_CONNECTION_ERROR_PORTS,
   DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
   DatabaseMetricsParseError,
   evaluateDatabaseMetricSnapshot,
-  hasExpectedConnectionErrorPorts,
   parsePlanetScaleDatabaseMetricObservation,
+  readMissingConnectionErrorPorts,
   requireCompleteDatabaseMetricSnapshot,
+  type DatabaseConnectionErrorCollectionEvidence,
   type DatabaseConnectionErrorDeltas,
   type DatabaseHealthCondition,
   type DatabaseHealthRequiredMetricName,
@@ -34,9 +37,6 @@ const DATABASE_HEALTH_RUN_LEASE_MS = 2 * 60 * 1_000;
 const DATABASE_HEALTH_SAMPLE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const DATABASE_HEALTH_FETCH_TIMEOUT_MS = 10_000;
 const DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS = 1_000;
-const CONNECTION_ERROR_METRIC_NAME =
-  "planetscale_edge_postgres_connection_errors_total" satisfies
-    DatabaseHealthRequiredMetricName;
 const PLANETSCALE_DISCOVERY_BODY_LIMIT_BYTES = 256 * 1_024;
 const PLANETSCALE_METRICS_BODY_LIMIT_BYTES = 2 * 1_024 * 1_024;
 const PLANETSCALE_DISCOVERY_TARGET_LIMIT = 64;
@@ -233,6 +233,12 @@ type DatabaseHealthCollectedSample =
     status: "failed";
   };
 
+interface DatabaseMetricCollection {
+  attempts: number;
+  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence;
+  observation: DatabaseMetricObservation;
+}
+
 type DatabaseConnectionErrorCondition = Extract<
   DatabaseHealthCondition,
   {
@@ -333,7 +339,11 @@ export class DatabaseHealthMonitor {
     const previousConnectionErrorCounterBaseline =
       this.store.readLatestConnectionErrorCounterBaseline();
     try {
-      const observation = await this.collectMetricObservation(
+      const {
+        attempts,
+        connectionErrorEvidence,
+        observation,
+      } = await this.collectMetricObservation(
         previousConnectionErrorCounterBaseline,
       );
       const observedConnectionErrorCounters =
@@ -345,6 +355,12 @@ export class DatabaseHealthMonitor {
         )
         : (previousConnectionErrorCounterBaseline ?? {});
       if (observation.missingMetrics.length > 0) {
+        const monitoringMissingMetrics = [...observation.missingMetrics];
+        const durableConnectionErrorEvidence =
+          buildDurableConnectionErrorEvidence({
+            connectionErrorEvidence,
+            missingMetrics: monitoringMissingMetrics,
+          });
         const connectionErrorDeltas =
           observedConnectionErrorCounters === null
             ? null
@@ -361,15 +377,18 @@ export class DatabaseHealthMonitor {
         const failures = priorFailures + 1;
         if (failures >= MONITORING_FAILURE_ALERT_COUNT) {
           conditions.push({
+            connectionErrorEvidence: durableConnectionErrorEvidence,
             failures,
             kind: "monitoring_unavailable",
-            missingMetrics: observation.missingMetrics,
+            missingMetrics: monitoringMissingMetrics,
           });
         }
         console.warn("Database health metrics collection failed.", {
+          attempts,
+          connectionErrorEvidence,
           failureCode: "required_metrics_missing",
           failures,
-          missingMetrics: observation.missingMetrics,
+          missingMetrics: monitoringMissingMetrics,
         });
         return {
           connectionErrorCounterBaseline,
@@ -380,7 +399,8 @@ export class DatabaseHealthMonitor {
           failures,
           monitoringEvidence: {
             availability: "incomplete",
-            missingMetrics: observation.missingMetrics,
+            connectionErrorEvidence: durableConnectionErrorEvidence,
+            missingMetrics: monitoringMissingMetrics,
           },
           snapshot: observation.snapshot,
           status: "failed",
@@ -420,10 +440,16 @@ export class DatabaseHealthMonitor {
       const failures = priorFailures + 1;
       const conditions: DatabaseHealthCondition[] =
         failures >= MONITORING_FAILURE_ALERT_COUNT
-          ? [{ failures, kind: "monitoring_unavailable", missingMetrics }]
+          ? [{
+            connectionErrorEvidence: emptyConnectionErrorCollectionEvidence(),
+            failures,
+            kind: "monitoring_unavailable",
+            missingMetrics,
+          }]
           : [];
       console.warn("Database health metrics collection failed.", {
         attempts: 2,
+        connectionErrorEvidence: emptyConnectionErrorCollectionEvidence(),
         failureCode,
         failures,
         missingMetrics,
@@ -437,6 +463,7 @@ export class DatabaseHealthMonitor {
         failures,
         monitoringEvidence: {
           availability: "unavailable",
+          connectionErrorEvidence: emptyConnectionErrorCollectionEvidence(),
           missingMetrics: [],
         },
         snapshot: null,
@@ -448,82 +475,100 @@ export class DatabaseHealthMonitor {
   private async collectMetricObservation(
     previousConnectionErrorCounterBaseline:
       Readonly<Record<string, number>> | null,
-  ): Promise<DatabaseMetricObservation> {
+  ): Promise<DatabaseMetricCollection> {
+    let attempts = 1;
+    const parsedObservations: DatabaseMetricObservation[] = [];
     let observation: DatabaseMetricObservation;
     try {
       observation = await this.collectMetricObservationOnce();
+      parsedObservations.push(observation);
     } catch {
       await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
-      return await this.collectMetricObservationOnce();
+      attempts += 1;
+      const retryObservation = await this.collectMetricObservationOnce();
+      return buildDatabaseMetricCollection({
+        attempts,
+        observation: retryObservation,
+        parsedObservations: [retryObservation],
+      });
     }
     if (!hasUsableDatabaseHealthMetric(observation)) {
       await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
-      return await this.collectMetricObservationOnce();
+      attempts += 1;
+      try {
+        const retryObservation = await this.collectMetricObservationOnce();
+        parsedObservations.push(retryObservation);
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation: retryObservation,
+          parsedObservations,
+        });
+      } catch {
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation,
+          parsedObservations,
+        });
+      }
     }
-    const observationConnectionErrorDeltas =
-      observation.snapshot.connectionErrorCounters === null
-        ? null
-        : calculateConnectionErrorDeltas(
-          observation.snapshot.connectionErrorCounters,
-          previousConnectionErrorCounterBaseline,
-        );
-    if (
-      !shouldConfirmMissingConnectionErrors(
+    if (!shouldConfirmMissingConnectionErrors(observation)) {
+      return buildDatabaseMetricCollection({
+        attempts,
         observation,
-        observationConnectionErrorDeltas,
-      )
-    ) {
-      return observation;
+        parsedObservations,
+      });
     }
 
     await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
+    attempts += 1;
     try {
       const confirmation = await this.collectMetricObservationOnce();
-      const confirmedObservation = composeConnectionErrorConfirmation(
-        observation,
-        confirmation,
-      );
-      const confirmedCounters =
-        confirmedObservation.snapshot.connectionErrorCounters;
+      parsedObservations.push(confirmation);
+      const confirmationCounters =
+        confirmation.snapshot.connectionErrorCounters;
       if (
         evaluateDatabaseMetricSnapshot(
-          confirmedObservation.snapshot,
+          confirmation.snapshot,
           null,
         ).length > 0
       ) {
-        return confirmedObservation;
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation: confirmation,
+          parsedObservations,
+        });
       }
-      if (
-        confirmedCounters !== null
-        && hasExpectedConnectionErrorPorts(confirmedCounters)
-      ) {
-        if (confirmedObservation.missingMetrics.length === 0) {
-          return confirmedObservation;
-        }
-        return {
-          missingMetrics: observation.missingMetrics.filter(
-            (name) => name !== CONNECTION_ERROR_METRIC_NAME,
-          ),
+      if (confirmationCounters === null) {
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation,
+          parsedObservations,
+        });
+      }
+      if (confirmation.missingMetrics.length === 0) {
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation: confirmation,
+          parsedObservations,
+        });
+      }
+      return buildDatabaseMetricCollection({
+        attempts,
+        observation: {
+          missingMetrics: [],
           snapshot: {
             ...observation.snapshot,
-            connectionErrorCounters: confirmedCounters,
+            connectionErrorCounters: confirmationCounters,
           },
-        };
-      }
-      const confirmedConnectionErrorDeltas = confirmedCounters === null
-        ? null
-        : calculateConnectionErrorDeltas(
-          confirmedCounters,
-          previousConnectionErrorCounterBaseline,
-        );
-      return evaluateDatabaseMetricSnapshot(
-        confirmedObservation.snapshot,
-        confirmedConnectionErrorDeltas,
-      ).length > 0
-        ? confirmedObservation
-        : observation;
+        },
+        parsedObservations,
+      });
     } catch {
-      return observation;
+      return buildDatabaseMetricCollection({
+        attempts,
+        observation,
+        parsedObservations,
+      });
     }
   }
 
@@ -572,6 +617,8 @@ export class DatabaseHealthMonitor {
         observations: [priorEvidence, sample.monitoringEvidence],
       });
       Object.assign(currentMonitoringCondition, {
+        connectionErrorEvidence:
+          monitoringAlertObligation.connectionErrorEvidence,
         incompleteChecks: monitoringAlertObligation.incompleteChecks,
         missingMetrics: monitoringAlertObligation.missingMetrics,
         unavailableChecks: monitoringAlertObligation.unavailableChecks,
@@ -623,6 +670,8 @@ export class DatabaseHealthMonitor {
         alertState.monitoringAlertObligation;
       const monitoringConditionForAdmission = monitoringAlertObligation
         ? {
+          connectionErrorEvidence:
+            monitoringAlertObligation.connectionErrorEvidence,
           failures: monitoringAlertObligation.failures,
           incompleteChecks: monitoringAlertObligation.incompleteChecks,
           kind: "monitoring_unavailable" as const,
@@ -1222,7 +1271,10 @@ function formatMonitoringUnavailableCondition(
   const unavailableChecks = condition.unavailableChecks
     ?? (condition.missingMetrics.length > 0 ? 0 : condition.failures);
   const missingMetricLabels = condition.missingMetrics.map(
-    (name) => DATABASE_METRIC_ALERT_LABELS[name],
+    (name) => formatMissingMetricLabel(
+      name,
+      condition.connectionErrorEvidence,
+    ),
   );
   const details = [
     observedAtMs === null
@@ -1254,6 +1306,35 @@ function formatMonitoringUnavailableCondition(
   )} checks${detailEvidence}`;
 }
 
+function formatMissingMetricLabel(
+  name: DatabaseHealthRequiredMetricName,
+  connectionErrorEvidence:
+    DatabaseConnectionErrorCollectionEvidence | null | undefined,
+): string {
+  const label = DATABASE_METRIC_ALERT_LABELS[name];
+  if (name !== DATABASE_CONNECTION_ERROR_METRIC_NAME) {
+    return label;
+  }
+  if (
+    !connectionErrorEvidence
+    || connectionErrorEvidence.parsedAttempts === 0
+  ) {
+    return `${label} (missing port detail unavailable)`;
+  }
+  const missingPortCounts = DATABASE_CONNECTION_ERROR_PORTS.flatMap((port) => {
+    const attempts = connectionErrorEvidence.missingPortAttempts[port];
+    return attempts > 0
+      ? [`${port} in ${attempts}/${connectionErrorEvidence.parsedAttempts}`]
+      : [];
+  });
+  if (missingPortCounts.length === 0) {
+    return `${label} (missing port detail unavailable)`;
+  }
+  return `connection errors (missing-port counts across parsed observations: ${
+    missingPortCounts.join("; ")
+  })`;
+}
+
 function buildMonitoringAlertObligation(input: {
   checkedAtMs: number;
   failures: number;
@@ -1269,8 +1350,31 @@ function buildMonitoringAlertObligation(input: {
   const observedMissingMetrics = new Set(
     input.observations.flatMap((observation) => observation.missingMetrics),
   );
+  const connectionErrorEvidence = input.observations.some(
+    (observation) => observation.connectionErrorEvidence === null,
+  )
+    ? null
+    : input.observations.reduce(
+      (combined, observation) => {
+        const evidence = observation.connectionErrorEvidence;
+        if (evidence === null) {
+          return combined;
+        }
+        return {
+          missingPortAttempts: {
+            "5432": combined.missingPortAttempts["5432"]
+              + evidence.missingPortAttempts["5432"],
+            "6432": combined.missingPortAttempts["6432"]
+              + evidence.missingPortAttempts["6432"],
+          },
+          parsedAttempts: combined.parsedAttempts + evidence.parsedAttempts,
+        };
+      },
+      emptyConnectionErrorCollectionEvidence(),
+    );
   return {
     checkedAtMs: input.checkedAtMs,
+    connectionErrorEvidence,
     failures: input.failures,
     incompleteChecks,
     missingMetrics: DATABASE_HEALTH_REQUIRED_METRIC_NAMES.filter(
@@ -1385,6 +1489,54 @@ async function waitForDatabaseHealthRetry(delayMs: number): Promise<void> {
   await scheduler.wait(delayMs);
 }
 
+function buildDatabaseMetricCollection(input: {
+  attempts: number;
+  observation: DatabaseMetricObservation;
+  parsedObservations: readonly DatabaseMetricObservation[];
+}): DatabaseMetricCollection {
+  const missingPortAttempts: Record<
+    (typeof DATABASE_CONNECTION_ERROR_PORTS)[number],
+    number
+  > = { "5432": 0, "6432": 0 };
+  for (const observation of input.parsedObservations) {
+    for (
+      const port of readMissingConnectionErrorPorts(
+        observation.snapshot.connectionErrorCounters,
+      )
+    ) {
+      missingPortAttempts[port] += 1;
+    }
+  }
+  return {
+    attempts: input.attempts,
+    connectionErrorEvidence: {
+      missingPortAttempts,
+      parsedAttempts: input.parsedObservations.length,
+    },
+    observation: input.observation,
+  };
+}
+
+function emptyConnectionErrorCollectionEvidence():
+  DatabaseConnectionErrorCollectionEvidence {
+  return {
+    missingPortAttempts: { "5432": 0, "6432": 0 },
+    parsedAttempts: 0,
+  };
+}
+
+function buildDurableConnectionErrorEvidence(input: {
+  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence;
+  missingMetrics: readonly DatabaseHealthRequiredMetricName[];
+}): DatabaseConnectionErrorCollectionEvidence {
+  return input.missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+    ? input.connectionErrorEvidence
+    : {
+      missingPortAttempts: { "5432": 0, "6432": 0 },
+      parsedAttempts: input.connectionErrorEvidence.parsedAttempts,
+    };
+}
+
 function hasUsableDatabaseHealthMetric(
   observation: DatabaseMetricObservation,
 ): boolean {
@@ -1394,45 +1546,14 @@ function hasUsableDatabaseHealthMetric(
 
 function shouldConfirmMissingConnectionErrors(
   observation: DatabaseMetricObservation,
-  connectionErrorDeltas: DatabaseConnectionErrorDeltas | null,
 ): boolean {
   return observation.missingMetrics.length === 1
-    && observation.missingMetrics[0] === CONNECTION_ERROR_METRIC_NAME
+    && observation.missingMetrics[0]
+      === DATABASE_CONNECTION_ERROR_METRIC_NAME
     && evaluateDatabaseMetricSnapshot(
       observation.snapshot,
-      connectionErrorDeltas,
+      null,
     ).length === 0;
-}
-
-function composeConnectionErrorConfirmation(
-  observation: DatabaseMetricObservation,
-  confirmation: DatabaseMetricObservation,
-): DatabaseMetricObservation {
-  const originalCounters = observation.snapshot.connectionErrorCounters;
-  const confirmationCounters = confirmation.snapshot.connectionErrorCounters;
-  const connectionErrorCounters = confirmationCounters === null
-    ? originalCounters
-    : advanceConnectionErrorCounterBaseline(
-      confirmationCounters,
-      originalCounters,
-    );
-  const hasCompleteConnectionErrors = connectionErrorCounters !== null
-    && hasExpectedConnectionErrorPorts(connectionErrorCounters);
-  const missingMetricSet = new Set(confirmation.missingMetrics);
-  if (hasCompleteConnectionErrors) {
-    missingMetricSet.delete(CONNECTION_ERROR_METRIC_NAME);
-  } else {
-    missingMetricSet.add(CONNECTION_ERROR_METRIC_NAME);
-  }
-  return {
-    missingMetrics: DATABASE_HEALTH_REQUIRED_METRIC_NAMES.filter(
-      (name) => missingMetricSet.has(name),
-    ),
-    snapshot: {
-      ...confirmation.snapshot,
-      connectionErrorCounters,
-    },
-  };
 }
 
 async function readBoundedResponseText(

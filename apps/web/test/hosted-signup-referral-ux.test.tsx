@@ -38,8 +38,11 @@ describe("hosted signup referral UX", () => {
 
   it("keeps stable links out of indexes while preserving same-origin claim proof", async () => {
     const page = await import("../app/r/[referralCode]/page");
+    const metadata = await page.generateMetadata({
+      params: Promise.resolve({ referralCode: "stable_referral" }),
+    });
 
-    expect(page.metadata).toMatchObject({
+    expect(metadata).toMatchObject({
       referrer: "strict-origin",
       robots: {
         follow: false,

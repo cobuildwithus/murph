@@ -101,15 +101,12 @@ export class HostedDeviceSyncPublicIngressService {
       registry: input.registry,
       store: input.store,
       hooks: {
-        // Hosted source lifecycle is admitted under the same consent/app/
-        // connection transaction as receipt, dirty state, and trace completion.
-        onConnectionSourceObserved: ({ eventType, sourceProviderSlug }) =>
-          normalizeJunctionProviderSlug(sourceProviderSlug)
-            === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-            && (
-              eventType === "provider.connection.created"
-              || eventType === "provider.connection.updated"
-            )
+        // Provider-authored Junction events can trigger exact-source
+        // verification. Hosted admission still commits only after the provider
+        // confirms access under the consent/app/connection/source fences.
+        onConnectionSourceObserved: ({ account, sourceProviderSlug }) =>
+          account.provider === "junction"
+            && normalizeJunctionProviderSlug(sourceProviderSlug) !== null
             ? { sourceAdmissionDeferred: true }
             : undefined,
         onConnectionEstablished: async ({
@@ -162,6 +159,7 @@ export class HostedDeviceSyncPublicIngressService {
           account,
           claimToken,
           processingAttemptedAt,
+          sourceAdmissionDeferred,
           traceId,
           webhook,
           now,
@@ -174,6 +172,7 @@ export class HostedDeviceSyncPublicIngressService {
             ownerId,
             processingAttemptedAt,
             registry: input.registry,
+            sourceAdmissionDeferred,
             store: this.context.store,
             traceId,
             webhook,

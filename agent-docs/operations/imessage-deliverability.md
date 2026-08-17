@@ -96,7 +96,7 @@ body in these diagnostics.
 
 ## Assistant response cards
 
-Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The general attachment tool serves explicit current private-direct requests, exact private-direct scheduled turns whose saved instructions explicitly request a card, and the managed meal closeout; it remains unavailable in groups. Occurrence authority alone is not card intent. A card replaces the whole final response, so it is eligible only when that card alone completely satisfies the current request. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.
+Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The general semantic attachment tool serves explicit current private-direct requests, exact private-direct scheduled turns whose saved instructions explicitly request a card, and the managed meal closeout; it remains unavailable in groups. Telegram-only presentation tools may be available in authenticated direct and group Telegram turns, but Linq group behavior stays unchanged. Occurrence authority alone is not card intent. A card replaces the whole final response, so it is eligible only when that card alone completely satisfies the current request. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.
 
 Exercise routines use a dedicated attachment tool only to keep both Codex tool
 schemas below the provider compaction limit. It creates the same outbox card

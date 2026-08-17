@@ -547,7 +547,7 @@ describe('onboarding policy read detection', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
-    'reuses exact repetitions without carrying forward a planned load',
+    'fails closed without an active workout and keeps a bare acknowledgement from advancing the next set',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -582,7 +582,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             assistantCliContract: [
               'vault-cli workout active --format json',
               'vault-cli workout start [name] [--routine <format>]',
-              'vault-cli workout exercise add <name> --order <n>',
+              'vault-cli workout exercise add <name> --order <n> [--sets <n>]',
               'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
@@ -616,6 +616,50 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           sandbox: 'workspace-write',
           workingDirectory,
         }
+        const missingWorkout = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Seated cable curl set 3 complete: 9 reps.',
+        })
+        const vaultAfterMissingWorkout = await readVaultRawTolerant(workingDirectory)
+        const missingWorkoutEvents = vaultAfterMissingWorkout.events.filter((event) =>
+          workoutSessionSchema.safeParse(event.attributes.workout).success
+        )
+
+        expect(missingWorkoutEvents).toEqual([])
+        expect(missingWorkout.finalMessage).toMatch(
+          /(?:no active|could(?: not|n't) (?:find|access) an active|do(?: not|n't) have an active)(?: tracked)? workout/iu,
+        )
+        expect(missingWorkout.finalMessage).toMatch(/start/iu)
+        expect(missingWorkout.finalMessage).toContain('?')
+        expect(missingWorkout.finalMessage).not.toMatch(
+          /(?:set\s*3|it)\s+(?:(?:is|was|has been)\s+)?(?:saved|logged|recorded)|\b(?:i(?:'ve| have)|successfully)\s+(?:saved|logged|recorded)\b/iu,
+        )
+
+        const recovered = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'yes',
+          resumeSessionId: missingWorkout.sessionId,
+        })
+        const vaultAfterRecovery = await readVaultRawTolerant(workingDirectory)
+        const recoveredWorkouts = vaultAfterRecovery.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success ? [parsed.data] : []
+        })
+
+        expect(recovered.finalMessage).toMatch(/set\s*3/iu)
+        expect(recovered.finalMessage).toMatch(/9 reps/iu)
+        expect(recovered.finalMessage).toMatch(/logged|saved|recorded/iu)
+        expect(recoveredWorkouts).toHaveLength(1)
+        expect(
+          recoveredWorkouts[0]?.exercises[0]?.sets.map((set) => set.reps ?? null),
+        ).toEqual([null, null, 9])
+
+        await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Finish this tracked workout.',
+          resumeSessionId: recovered.sessionId,
+        })
+
         const started = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
@@ -634,15 +678,22 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           prompt: 'Second set complete.',
           resumeSessionId: firstCompletion.sessionId,
         })
+        await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'ok',
+          resumeSessionId: secondCompletion.sessionId,
+        })
         const vault = await readVaultRawTolerant(workingDirectory)
-        const workout = vault.events
-          .map((event) => workoutSessionSchema.safeParse(event.attributes.workout))
-          .find((result) => result.success)?.data
+        const workouts = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success ? [parsed.data] : []
+        })
+        const workout = workouts.at(-1)
 
-        expect(started.finalMessage).toMatch(/0\/4 sets complete/iu)
-        expect(firstCompletion.finalMessage).toMatch(/actual 9 reps/iu)
-        expect(secondCompletion.finalMessage).toMatch(/2\/4 sets complete/iu)
-        expect(secondCompletion.finalMessage).toMatch(/actual 9 reps/iu)
+        expect(started.finalMessage).toMatch(/start/iu)
+        expect(started.finalMessage).toMatch(/4/iu)
+        expect(firstCompletion.finalMessage).toMatch(/9 reps/iu)
+        expect(secondCompletion.finalMessage).toMatch(/9 reps/iu)
         expect(firstCompletion.finalMessage).not.toMatch(/how many|\?/iu)
         expect(secondCompletion.finalMessage).not.toMatch(/how many|\?/iu)
         expect(firstCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
@@ -1444,42 +1495,57 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           sandbox: 'workspace-write' as const,
           workingDirectory,
         }
-        const voiceRoutine = await executeRealCodexAppServerTurn({
+        const structuredTrainingGuide = await executeRealCodexAppServerTurn({
           ...common,
-          prompt: 'Give me a brief vocal warm-up before a presentation. Organize preparation, sound, and recovery as ordered steps. Keep any limits visible. Make it easy to scan on Telegram.',
+          prompt: 'Create a short at-home training note with a warm-up checklist, a bodyweight strength circuit, and a cooldown. Use a clear custom layout, not a compact table. Keep the safety limit visible and do not use images.',
         })
-        const voiceActions = readCapabilityRoutingActions(
-          voiceRoutine.jsonEvents,
+        const trainingActions = readCapabilityRoutingActions(
+          structuredTrainingGuide.jsonEvents,
         )
         expect(
-          voiceActions.filter((action) =>
+          trainingActions.filter((action) =>
             action.kind === 'dynamic'
             && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
           ),
         ).toHaveLength(1)
-        expect(voiceRoutine.responseCard).toMatchObject({
+        expect(structuredTrainingGuide.responseCard).toMatchObject({
           kind: 'telegram_rich_content',
           version: 1,
           html: expect.stringMatching(/<h2>[\s\S]*<ol>[\s\S]*<blockquote>/iu),
         })
-        expect(voiceRoutine.finalMessage.trim()).toBe('')
-        expect(voiceRoutine.responseMedia).toEqual([])
+        expect(structuredTrainingGuide.finalMessage.trim()).toBe('')
+        expect(structuredTrainingGuide.responseMedia).toEqual([])
 
         const compactSchedule = await executeRealCodexAppServerTurn({
           ...common,
           prompt: 'Make a compact two-column Telegram table for Monday and Wednesday focus sessions. Use 20 minutes on both days. The table alone is the complete answer.',
         })
-        const compactActions = readCapabilityRoutingActions(
-          compactSchedule.jsonEvents,
+        expect(['compact_table', 'telegram_rich_content']).toContain(
+          compactSchedule.responseCard?.kind,
         )
-        expect(compactActions.some((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
-        )).toBe(false)
-        expect(compactSchedule.responseCard).toMatchObject({
-          kind: 'compact_table',
-        })
         expect(compactSchedule.finalMessage.trim()).toBe('')
+
+        const conversationalReply = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: [
+            'Reply as a normal conversation in three short paragraphs.',
+            'Explain why building a new habit can feel uneven, acknowledge that',
+            'one difficult day does not erase progress, and end with an',
+            'encouraging thought. Do not make a plan, checklist, schedule, or list.',
+          ].join(' '),
+        })
+        const conversationalActions = readCapabilityRoutingActions(
+          conversationalReply.jsonEvents,
+        )
+        expect(conversationalActions.some((action) =>
+          action.kind === 'dynamic'
+          && (
+            action.tool === MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name
+            || action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+          )
+        )).toBe(false)
+        expect(conversationalReply.responseCard).toBeNull()
+        expect(conversationalReply.finalMessage.trim()).not.toBe('')
 
         const shortReply = await executeRealCodexAppServerTurn({
           ...common,

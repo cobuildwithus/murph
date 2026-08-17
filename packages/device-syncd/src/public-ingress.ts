@@ -1647,39 +1647,25 @@ export class DeviceSyncPublicIngress {
     if (
       account.status === "active"
       && isDeviceSyncConnectionSetupPending(account)
+      && isDeviceSyncConnectionSetupExpiredAt(account, claimedAt)
     ) {
-      if (isDeviceSyncConnectionSetupExpiredAt(account, claimedAt)) {
-        this.logger.warn?.("Ignoring webhook side effects for expired incomplete device sync setup.", {
-          provider: provider.provider,
-          accountId: account.id,
-          eventType: webhook.eventType,
-          traceId,
-        });
-        await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
-        return {
-          accepted: true,
-          duplicate: false,
-          provider: provider.provider,
-          eventType: webhook.eventType,
-          traceId,
-        };
-      }
-
-      this.logger.warn?.("Delaying webhook side effects until device sync setup is confirmed.", {
+      this.logger.warn?.("Ignoring webhook side effects for expired incomplete device sync setup.", {
         provider: provider.provider,
         accountId: account.id,
         eventType: webhook.eventType,
         traceId,
       });
-      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
-      throw deviceSyncError({
-        code: "WEBHOOK_ACCOUNT_NOT_READY",
-        message: "Device sync setup must finish before webhook side effects can be accepted.",
-        retryable: true,
-        httpStatus: 503,
-      });
+      await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: provider.provider,
+        eventType: webhook.eventType,
+        traceId,
+      };
     }
 
+    let sourceAdmissionDeferred = false;
     try {
       // A dirty row proves only that import invalidation is queued. Await exact-
       // source lifecycle work before dirty coalescing can complete this trace.
@@ -1699,6 +1685,12 @@ export class DeviceSyncPublicIngress {
             provider,
             now,
           });
+          sourceAdmissionDeferred = Boolean(
+            sourceObservation
+            && "sourceAdmissionDeferred" in sourceObservation
+            && sourceObservation.sourceAdmissionDeferred === true
+            && this.hooks.onWebhookAccepted,
+          );
           if (
             sourceObservation
             && "sourceRegistrationRemoved" in sourceObservation
@@ -1715,6 +1707,7 @@ export class DeviceSyncPublicIngress {
           }
           if (
             account.status === "active"
+            && !isDeviceSyncConnectionSetupPending(account)
             && (
               !sourceObservation
               || !("sourceAdmissionCommitted" in sourceObservation)
@@ -1738,6 +1731,7 @@ export class DeviceSyncPublicIngress {
 
       if (
         account.status === "active"
+        && !isDeviceSyncConnectionSetupPending(account)
         && webhook.acceptanceMode === "level_dirty_hint"
       ) {
         const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
@@ -1761,6 +1755,26 @@ export class DeviceSyncPublicIngress {
     } catch (error) {
       await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
       throw error;
+    }
+
+    if (
+      account.status === "active"
+      && isDeviceSyncConnectionSetupPending(account)
+      && !sourceAdmissionDeferred
+    ) {
+      this.logger.warn?.("Delaying webhook side effects until device sync setup is confirmed.", {
+        provider: provider.provider,
+        accountId: account.id,
+        eventType: webhook.eventType,
+        traceId,
+      });
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
+      throw deviceSyncError({
+        code: "WEBHOOK_ACCOUNT_NOT_READY",
+        message: "Device sync setup must finish before webhook side effects can be accepted.",
+        retryable: true,
+        httpStatus: 503,
+      });
     }
 
     switch (account.status) {
@@ -1808,6 +1822,7 @@ export class DeviceSyncPublicIngress {
         account,
         claimToken,
         processingAttemptedAt: claimedAt,
+        sourceAdmissionDeferred,
         traceId,
         webhook,
         provider,

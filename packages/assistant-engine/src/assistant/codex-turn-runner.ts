@@ -1,6 +1,11 @@
-import type {
-  AssistantSession,
+import {
+  assistantReasoningEffortValues,
+  type AssistantReasoningEffort,
+  type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  DEFAULT_MURPH_CODEX_REASONING_EFFORT,
+} from '@murphai/operator-config/assistant/provider-config'
 import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
@@ -392,6 +397,7 @@ function emitCodexPlanTraceEvent(input: {
   onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
   codexContinuation: string
   providerRequestOrdinal: number | null
+  reasoningEffort?: AssistantReasoningEffort | null
   routePlanningDiagnostics: AssistantRoutePlanningDiagnostics
   resumeCodexThreadIdPresent: boolean
   workingDirectory: string
@@ -408,6 +414,9 @@ function emitCodexPlanTraceEvent(input: {
         type: ASSISTANT_PROVIDER_PLAN_TRACE_TYPE,
         codexContinuation: input.codexContinuation,
         providerRequestOrdinal: input.providerRequestOrdinal,
+        ...(input.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: input.reasoningEffort }),
         routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
         dynamicToolCount: input.routePlanningDiagnostics.dynamicToolCount,
         messageTargetingAvailable:
@@ -473,11 +482,18 @@ async function executeAssistantCodexAttempt(input: {
     rawToolEvents: [] as readonly unknown[],
     runtimeIssueInputs: [] as readonly AssistantRuntimeIssueInput[],
   }
+  const reasoningEffort =
+    normalizeNullableString(attemptPlan.route.providerOptions.reasoningEffort)
+    ?? DEFAULT_MURPH_CODEX_REASONING_EFFORT
+  const traceReasoningEffort = assistantReasoningEffortValues.find(
+    (candidate) => candidate === reasoningEffort,
+  )
 
   emitCodexPlanTraceEvent({
     onTraceEvent: executionPlan.input.onTraceEvent,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    reasoningEffort: traceReasoningEffort,
     routePlanningDiagnostics: attemptPlan.routePlan.planningDiagnostics,
     resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
@@ -590,7 +606,7 @@ async function executeAssistantCodexAttempt(input: {
         oss: attemptPlan.route.providerOptions.oss,
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
-        reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
+        reasoningEffort,
         sandbox:
           nativeCapabilitiesRestrictedTurn ||
           readOnlyAutomationTurn ||
