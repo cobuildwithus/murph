@@ -1,0 +1,26 @@
+name: ReviewGPT outbox snapshot
+
+on:
+  push:
+    branches:
+      - fix/assistant-outbox-exact-lookups
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archive exact branch source
+        run: git archive --format=tar.gz --output=murph-source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: murph-outbox-source
+          path: murph-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
