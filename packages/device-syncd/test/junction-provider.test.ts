@@ -19049,13 +19049,17 @@ test("Junction workout_stream carries the owning day when retryable failure prec
   assert.deepEqual(harness.streamRequests, ["workout-1"]);
 });
 
-test("Junction workout_stream carries exact progress with its retryable provider failure", async () => {
+test("Junction workout_stream carries exact progress and bounded context with its retryable provider failure", async () => {
   const importedWorkoutIds: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1", "workout-2"],
     streamResponse: (workoutId) => workoutId === "workout-2"
-      ? new Response(JSON.stringify({ error: "temporary provider failure" }), {
-          status: 503,
+      ? new Response(JSON.stringify({
+          error: "temporary provider failure",
+          privatePayloadMarker: "raw-workout-payload-must-not-escape",
+          workoutId,
+        }), {
+          status: 500,
           headers: {
             "Content-Type": "application/json",
             "Retry-After": "0",
@@ -19086,6 +19090,13 @@ test("Junction workout_stream carries exact progress with its retryable provider
       assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.ok(error.failure instanceof DeviceSyncError);
       assert.equal(error.failure.retryable, true);
+      assert.equal(error.failure.details?.status, 500);
+      assert.equal(error.failure.details?.requestCandidateAliasSource, "id");
+      assert.equal(error.failure.details?.requestCandidateCount, 2);
+      assert.equal(error.failure.details?.requestCandidateOrdinal, 2);
+      const serializedDetails = JSON.stringify(error.failure.details);
+      assert.equal(serializedDetails.includes("workout-2"), false);
+      assert.equal(serializedDetails.includes("raw-workout-payload-must-not-escape"), false);
       assert.deepEqual(readJunctionWorkoutProgressIdentities({
         workoutStreamCursor: error.workoutStreamCursor,
       }), [junctionWorkoutCandidateIdentity("workout-1")]);
