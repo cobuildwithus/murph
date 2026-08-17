@@ -907,16 +907,26 @@ function createIntegratedCoreServices(): CoreWriteServices {
 function createIntegratedImporterServices(): ImporterServices {
   return {
     async importDocument(input) {
-      const { vault, file, title, occurredAt, note, source } = input
+      const { vault, file, title, occurredAt, note, source, reuseExact } = input
       const importers = await loadImporterRuntime()
-      const result = await importers.importDocument({
-        filePath: file,
-        vaultRoot: vault,
-        title,
-        occurredAt,
-        note,
-        source,
-      })
+      let result: Awaited<ReturnType<typeof importers.importDocument>>
+      try {
+        result = await importers.importDocument({
+          filePath: file,
+          vaultRoot: vault,
+          title,
+          occurredAt,
+          note,
+          source,
+          reuseExact,
+        })
+      } catch (error) {
+        throw toVaultCliError(error, {
+          DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
+          RAW_MANIFEST_INVALID: { code: 'conflict' },
+          RAW_REFERENCE_MISSING: { code: 'conflict' },
+        })
+      }
 
       return {
         vault,
@@ -926,6 +936,7 @@ function createIntegratedImporterServices(): ImporterServices {
         documentId: result.documentId,
         eventId: result.event.id,
         lookupId: result.documentId,
+        created: result.created,
       }
     },
     async importSamplesCsv(input) {
@@ -1020,6 +1031,29 @@ function createIntegratedQueryServices(): QueryServices {
       to?: string
     }) {
       return listDocumentsUseCase(input)
+    },
+    async resolveWorkoutImportStatusForRawSource(input: CommandContext & { rawRef: string }) {
+      const core = await loadCoreRuntime()
+      let status: Awaited<ReturnType<typeof core.resolveWorkoutSourceImportStatus>>
+      try {
+        status = await core.resolveWorkoutSourceImportStatus({
+          vaultRoot: input.vault,
+          rawRef: input.rawRef,
+        })
+      } catch (error) {
+        throw toVaultCliError(error, {
+          DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
+          EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE: { code: 'conflict' },
+          EVENT_BATCH_SOURCE_RAW_REF_MISSING: { code: 'conflict' },
+          RAW_MANIFEST_INVALID: { code: 'conflict' },
+          RAW_REFERENCE_MISSING: { code: 'conflict' },
+        })
+      }
+      return {
+        vault: input.vault,
+        rawRef: input.rawRef,
+        status,
+      }
     },
     async showDocumentManifest(input: CommandContext & {
       id: string

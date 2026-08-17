@@ -65,11 +65,12 @@ Current providers:
   of treating provider-local day or session fragments as complete facts. The four dense resources retain the bounded
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
-  per-reading evidence and the existing long summary-history backfill window.
+  per-reading evidence and the fixed 180-day extended-history window.
 - Seven sparse clinical and safety resources are product-default labels: FEV1,
   FVC, heart-rate alerts, inhaler usage, peak expiratory flow, sleep-apnea
-  alerts, and falls. Each resource is fetched in a one-day unit with at most
-  128 provider records and retains at most 100 deterministic canonical facts;
+  alerts, and falls. They retain the generic bounded timeseries horizon and are
+  fetched in one-day units with at most 128 provider records, retaining at most
+  100 deterministic canonical facts;
   an overflow leaves only a compact count marker. The source lifecycle epoch
   is checked again after each provider read so a reconnect retries the same
   resource/day instead of importing a stale response. Stable provider row IDs
@@ -88,7 +89,8 @@ Current providers:
   labels. The production provider assembly
   still enables the exhaustive exact code-owned registry; member overlays and
   environment variables cannot widen or narrow it. These four resources retain
-  bounded 30-day fetch chunks. `fat` remains the public resource name while the
+  the fixed 180-day extended-history window in bounded 30-day fetch chunks.
+  `fat` remains the public resource name while the
   client requests Junction's `body_fat` path.
 - `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
   that same code-owned production set. ECG voltage uses one-day grouped windows capped at
@@ -219,13 +221,19 @@ that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
 
-Junction timeseries use one exhaustive static history policy. Dense daily
-aggregates keep the bounded 14-day initial window. Advertised AFib burden, VO2
-max, heart-rate recovery, body and basal temperatures, sleep-breathing
-disturbance, caffeine, water, mindfulness, carbohydrates, and insulin injections
-use the summary-history window, 180 days by default. The existing source-scoped
-sparse-history jobs fetch policy-sized one- or 30-day chunks, serialize per
-account, and record terminal coverage in compact
+Junction timeseries use one exhaustive static history policy. Dense/default
+resources, ECG voltage, workout streams, and ordinary full-timeseries collection
+keep the generic bounded initial window (14 days by default, configurable through
+`timeseriesBackfillDays`). The existing extended set—`afib_burden`,
+`basal_body_temperature`, `blood_pressure`, `body_temperature`,
+`body_temperature_delta`, `caffeine`, `heart_rate_recovery_one_minute`,
+`mindfulness_minutes`, `note`, `sleep_breathing_disturbance`, `vo2_max`, `water`,
+`weight`, `body_mass_index`, `carbohydrates`, `fat`, `insulin_injection`,
+`lean_body_mass`, and `waist_circumference`—always starts with an explicit
+180-day window independent of both the generic timeseries window and
+`summaryBackfillDays`. The existing source-scoped sparse-history jobs fetch
+policy-sized one- or 30-day chunks, serialize per account, and record terminal
+coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,

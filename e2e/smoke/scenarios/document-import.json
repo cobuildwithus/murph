@@ -1,6 +1,6 @@
 {
   "id": "document-import",
-  "command": "vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note \"...\"] [--source <source>] [--request-id <id>]",
+  "command": "vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note \"...\"] [--source <source>] [--reuse-exact] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/sample-imports/documents/visit-summary.md",

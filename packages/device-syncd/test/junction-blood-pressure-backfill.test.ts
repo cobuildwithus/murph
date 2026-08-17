@@ -65,6 +65,16 @@ const SPARSE_BODY_HISTORY_RESOURCES = [
   "lean_body_mass",
   "waist_circumference",
 ] as const;
+const EXTENDED_HISTORY_RESOURCES = [
+  ...SPARSE_DAILY_HISTORY_RESOURCES,
+  "blood_pressure",
+  "note",
+  ...SPARSE_BODY_HISTORY_RESOURCES,
+  "carbohydrates",
+  "insulin_injection",
+] as const;
+const EXTENDED_HISTORY_WINDOW_START = "2025-12-13T00:00:00.000Z";
+const EXTENDED_HISTORY_EXECUTION_FIXTURE_DAYS = 30;
 const SOURCE_DISCONNECT_FENCE_CODES = [
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -208,8 +218,9 @@ async function createSourceConnection(
   });
 }
 
-function createScheduledBloodPressureJob(
+function createScheduledResourceJob(
   provider: ReturnType<typeof createProvider>,
+  resource: string,
   input: {
     firstSeenAt?: string;
     metadata?: Record<string, unknown>;
@@ -226,11 +237,47 @@ function createScheduledBloodPressureJob(
         sourceProviderSlug,
         input.firstSeenAt ?? NOW,
         input.status ?? "connected",
+        { [resource]: true },
       )],
     }),
     input.now ?? NOW,
   );
-  return findBloodPressureJob(requireValue(scheduled).jobs);
+  return findResourceJob(requireValue(scheduled).jobs, resource);
+}
+
+function withHistoricalFixtureDays(
+  job: DeviceSyncJobInput,
+  days: number,
+): DeviceSyncJobInput {
+  const windowEnd = job.payload?.windowEnd;
+  if (typeof windowEnd !== "string") {
+    throw new TypeError("Historical fixture should have a window end.");
+  }
+  const windowStart = new Date(
+    Date.parse(windowEnd) - days * 24 * 60 * 60 * 1_000,
+  ).toISOString();
+
+  return {
+    ...job,
+    payload: {
+      ...job.payload,
+      historicalWindowStart: windowStart,
+      windowStart,
+    },
+  };
+}
+
+function createScheduledBloodPressureJob(
+  provider: ReturnType<typeof createProvider>,
+  input: Parameters<typeof createScheduledResourceJob>[2] = {},
+): DeviceSyncJobInput {
+  // Execution/retry tests below retain their compact 30-day fixture while the
+  // raw scheduler horizon is asserted independently. Keep the scheduler-issued
+  // dedupe identity so continuation tests still prove identity preservation.
+  return withHistoricalFixtureDays(
+    createScheduledResourceJob(provider, "blood_pressure", input),
+    EXTENDED_HISTORY_EXECUTION_FIXTURE_DAYS,
+  );
 }
 
 function toJobRecord(input: DeviceSyncJobInput, index: number): DeviceSyncJobRecord {
@@ -768,19 +815,19 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
     ),
     false,
   );
-  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const bloodPressure = createScheduledResourceJob(provider, "blood_pressure");
   const admittedBloodPressure = toJobRecord(bloodPressure, 2);
   admittedBloodPressure.dedupeKey = `hosted-device-sync:${"a".repeat(64)}`;
 
   assert.equal(bloodPressure.availableAt, NOW);
   assert.deepEqual(bloodPressure.payload, {
     historicalBackfill: true,
-    historicalWindowStart: "2026-05-12T00:00:00.000Z",
+    historicalWindowStart: EXTENDED_HISTORY_WINDOW_START,
     resource: "blood_pressure",
     resourceCategory: "timeseries",
     sourceLifecycleEpoch: 1,
     sourceProviderSlug: "omron",
-    windowStart: "2026-05-12T00:00:00.000Z",
+    windowStart: EXTENDED_HISTORY_WINDOW_START,
     windowEnd: BACKFILL_WINDOW_END,
   });
 
@@ -821,19 +868,19 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
   const bloodPressureRequests = requests.filter(
     (request) => request.resource === "blood_pressure",
   );
-  assert.equal(executionCount, 30);
-  assert.equal(bloodPressureRequests.length, 30);
-  assert.equal(bloodPressureRequests[0]?.start, "2026-05-12T00:00:00.000Z");
+  assert.equal(executionCount, 180);
+  assert.equal(bloodPressureRequests.length, 180);
+  assert.equal(bloodPressureRequests[0]?.start, EXTENDED_HISTORY_WINDOW_START);
   assert.equal(bloodPressureRequests.at(-1)?.end, BACKFILL_WINDOW_END);
   const retry = findBloodPressureJob(result.scheduledJobs ?? []);
   assert.equal(retry.availableAt, "2026-06-11T12:15:00.000Z");
   assert.equal(retry.dedupeKey, admittedBloodPressure.dedupeKey);
   assert.equal(retry.payload?.emptyBackfillAttempts, 1);
-  assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
-  assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+  assert.equal(retry.payload?.historicalWindowStart, EXTENDED_HISTORY_WINDOW_START);
+  assert.equal(retry.payload?.windowStart, EXTENDED_HISTORY_WINDOW_START);
 });
 
-test("covered Link reconnects retain bounded blood-pressure catch-up", async () => {
+test("covered Link reconnects retain the configured bounded window for ordinary timeseries", async () => {
   for (const timeseriesBackfillDays of [14, 21]) {
     const requests: TimeseriesRequest[] = [];
     const importedSnapshots: unknown[] = [];
@@ -872,8 +919,15 @@ test("covered Link reconnects retain bounded blood-pressure catch-up", async () 
     const bloodPressureRequests = requests.filter(
       (request) => request.resource === "blood_pressure",
     );
+    const boundedStressRequests = requests.filter(
+      (request) => request.resource === "stress_level",
+    );
 
     assert.equal(bloodPressureRequests.length, timeseriesBackfillDays);
+    // Calendar aggregates run only for globally closed provider days. At this
+    // 00:05Z callback seam, the final day in the generic half-open window is
+    // still open across the admitted UTC offsets.
+    assert.equal(boundedStressRequests.length, timeseriesBackfillDays - 1);
     assert.equal(
       bloodPressureRequests[0]?.start,
       timeseriesBackfillDays === 14
@@ -881,6 +935,12 @@ test("covered Link reconnects retain bounded blood-pressure catch-up", async () 
         : "2026-05-22",
     );
     assert.equal(bloodPressureRequests.at(-1)?.end, "2026-06-11");
+    assert.equal(boundedStressRequests[0]?.start, bloodPressureRequests[0]?.start);
+    assert.equal(
+      boundedStressRequests.every((request) => request.start === request.end),
+      true,
+    );
+    assert.equal(boundedStressRequests.at(-1)?.end, "2026-06-10");
     assert.equal(
       bloodPressureRequests.some((request) =>
         request.start !== null && request.start < "2026-06-05"
@@ -1037,9 +1097,9 @@ test("an existing source receives one migration anchored to its first-seen windo
   const bloodPressure = findBloodPressureJob(scheduled.jobs);
 
   assert.equal(bloodPressure.availableAt, NOW);
-  assert.equal(bloodPressure.payload?.historicalWindowStart, "2026-04-20T00:00:00.000Z");
+  assert.equal(bloodPressure.payload?.historicalWindowStart, "2025-11-21T00:00:00.000Z");
   assert.equal(bloodPressure.payload?.sourceProviderSlug, "omron");
-  assert.equal(bloodPressure.payload?.windowStart, "2026-04-20T00:00:00.000Z");
+  assert.equal(bloodPressure.payload?.windowStart, "2025-11-21T00:00:00.000Z");
   assert.equal(bloodPressure.payload?.windowEnd, "2026-05-20T00:00:00.000Z");
 
   const completed = createScheduledJobs(
@@ -2399,16 +2459,19 @@ test("maximum source projection uses one shared snapshot while retaining exact-s
   const createScheduledJobs = requireValue(
     requireValue(provider.jobExecutor).createScheduledJobs,
   );
-  const job = requireValue(Array.from({ length: 33 }, (_, offset) =>
-    createScheduledJobs(
-      createStoredAccount({ sources }),
-      new Date(Date.parse(NOW) + offset * 60 * 60_000).toISOString(),
-    ).jobs.find((candidate) =>
-      candidate.kind === "resource"
-      && candidate.payload?.resource === "caffeine"
-      && candidate.payload?.sourceProviderSlug === "omron"
-    )
-  ).find((candidate) => candidate !== undefined));
+  const job = withHistoricalFixtureDays(
+    requireValue(Array.from({ length: 33 }, (_, offset) =>
+      createScheduledJobs(
+        createStoredAccount({ sources }),
+        new Date(Date.parse(NOW) + offset * 60 * 60_000).toISOString(),
+      ).jobs.find((candidate) =>
+        candidate.kind === "resource"
+        && candidate.payload?.resource === "caffeine"
+        && candidate.payload?.sourceProviderSlug === "omron"
+      )
+    ).find((candidate) => candidate !== undefined)),
+    EXTENDED_HISTORY_EXECUTION_FIXTURE_DAYS,
+  );
   const targetSlug = String(job.payload?.sourceProviderSlug);
   const sourceReads: string[] = [];
   let importCalls = 0;
@@ -2542,7 +2605,10 @@ test("a sparse daily aggregate completes when several readings reduce to one eve
     resourceAvailabilitySummary,
   )];
   const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
-  const caffeine = findResourceJob(scheduled.jobs, "caffeine");
+  const caffeine = withHistoricalFixtureDays(
+    findResourceJob(scheduled.jobs, "caffeine"),
+    2,
+  );
   const { result } = await executeImmediateResourceContinuations({
     context: createJobContext(),
     job: toJobRecord(caffeine, 1),
@@ -2699,12 +2765,15 @@ test("retryable sparse-body delivery failure preserves the retry obligation", as
     "connected",
     availability,
   );
-  const scheduled = findResourceJob(
-    requireValue(requireValue(provider.jobExecutor).createScheduledJobs)(
-      createStoredAccount({ sources: [source] }),
-      NOW,
-    ).jobs,
-    "fat",
+  const scheduled = withHistoricalFixtureDays(
+    findResourceJob(
+      requireValue(requireValue(provider.jobExecutor).createScheduledJobs)(
+        createStoredAccount({ sources: [source] }),
+        NOW,
+      ).jobs,
+      "fat",
+    ),
+    EXTENDED_HISTORY_EXECUTION_FIXTURE_DAYS,
   );
   const failure = deviceSyncError({
     code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
@@ -2762,7 +2831,10 @@ test("a sparse daily aggregate retries a date with a malformed sibling", async (
     { caffeine: true },
   )];
   const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
-  const caffeine = findResourceJob(scheduled.jobs, "caffeine");
+  const caffeine = withHistoricalFixtureDays(
+    findResourceJob(scheduled.jobs, "caffeine"),
+    2,
+  );
   const firstPass = await executeImmediateResourceContinuations({
     context: createJobContext({ importedSnapshots }),
     drainCalendarJobs: false,
@@ -2876,7 +2948,10 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
     const historicalSnapshots: unknown[] = [];
     const historical = await executeImmediateResourceContinuations({
       context: createJobContext({ importedSnapshots: historicalSnapshots }),
-      job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+      job: toJobRecord(
+        withHistoricalFixtureDays(findResourceJob(scheduled.jobs, "caffeine"), 2),
+        1,
+      ),
       provider,
       resource: "caffeine",
     });
@@ -2947,10 +3022,14 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
     { caffeine: true },
   )];
   const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const scheduledJob = withHistoricalFixtureDays(
+    findResourceJob(scheduled.jobs, "caffeine"),
+    2,
+  );
   const exhausted = toJobRecord({
-    ...findResourceJob(scheduled.jobs, "caffeine"),
+    ...scheduledJob,
     payload: {
-      ...findResourceJob(scheduled.jobs, "caffeine").payload,
+      ...scheduledJob.payload,
       emptyBackfillAttempts: 4,
     },
   }, 1);
@@ -3065,7 +3144,10 @@ test("sparse history completion resolves supported source aliases", async () => 
       { caffeine: true },
     )];
     const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
-    const scheduledJob = findResourceJob(scheduled.jobs, "caffeine");
+    const scheduledJob = withHistoricalFixtureDays(
+      findResourceJob(scheduled.jobs, "caffeine"),
+      2,
+    );
     assert.equal(scheduledJob.payload?.sourceProviderSlug, "apple_health_kit");
     const completed = await executeImmediateResourceContinuations({
       context: createJobContext(),
@@ -3123,7 +3205,10 @@ test("successful upstream pull with no sparse rows completes after one scan", as
   const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
   const completed = await executeImmediateResourceContinuations({
     context: createJobContext(),
-    job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+    job: toJobRecord(
+      withHistoricalFixtureDays(findResourceJob(scheduled.jobs, "caffeine"), 2),
+      1,
+    ),
     provider,
     resource: "caffeine",
   });
@@ -3158,7 +3243,10 @@ test("unavailable upstream status cannot certify zero-row sparse history", async
   const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
   const first = await executeImmediateResourceContinuations({
     context: createJobContext(),
-    job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+    job: toJobRecord(
+      withHistoricalFixtureDays(findResourceJob(scheduled.jobs, "caffeine"), 2),
+      1,
+    ),
     provider,
     resource: "caffeine",
   });
@@ -3287,7 +3375,10 @@ test("a persistently malformed sparse day exhausts only its bounded day retry", 
     { caffeine: true },
   )];
   const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
-  let job = toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1);
+  let job = toJobRecord(
+    withHistoricalFixtureDays(findResourceJob(scheduled.jobs, "caffeine"), 1),
+    1,
+  );
   let now = NOW;
   let finalResult: ProviderJobResult | null = null;
 
@@ -3579,23 +3670,23 @@ test("a Link reconnect cannot narrow or certify an older persisted-source window
     false,
   );
 
-  const schedulerJob = createScheduledBloodPressureJob(provider, {
+  const schedulerJob = createScheduledResourceJob(provider, "blood_pressure", {
     firstSeenAt: persistedFirstSeenAt,
     now: callbackAt,
   });
   assert.equal(schedulerJob.availableAt, callbackAt);
   assert.deepEqual(schedulerJob.payload, {
     historicalBackfill: true,
-    historicalWindowStart: "2026-02-18T00:00:00.000Z",
+    historicalWindowStart: "2025-09-21T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
     sourceLifecycleEpoch: 1,
     sourceProviderSlug: "omron",
     windowEnd: "2026-03-20T00:00:00.000Z",
-    windowStart: "2026-02-18T00:00:00.000Z",
+    windowStart: "2025-09-21T00:00:00.000Z",
   });
   assert.equal(
-    createScheduledBloodPressureJob(provider, {
+    createScheduledResourceJob(provider, "blood_pressure", {
       firstSeenAt: persistedFirstSeenAt,
       now: "2026-06-13T00:05:00.000Z",
     }).dedupeKey,
@@ -3608,7 +3699,7 @@ test("a Link reconnect cannot narrow or certify an older persisted-source window
     provider,
   });
   assertHistoryCoverage(completed.metadataPatch, "omron", "blood_pressure");
-  assert.equal(requests[0]?.start, "2026-02-18T00:00:00.000Z");
+  assert.equal(requests[0]?.start, "2025-09-21T00:00:00.000Z");
   assert.equal(requests.at(-1)?.end, "2026-03-20T00:00:00.000Z");
 
   const afterCoverage = requireValue(provider.jobExecutor).createScheduledJobs?.(
@@ -3647,7 +3738,7 @@ test("completed source coverage does not certify a sibling source", () => {
 
   assert.equal(bloodPressureJobs.length, 1);
   assert.equal(bloodPressureJobs[0]?.payload?.sourceProviderSlug, "withings");
-  assert.equal(bloodPressureJobs[0]?.payload?.historicalWindowStart, "2026-05-02T00:00:00.000Z");
+  assert.equal(bloodPressureJobs[0]?.payload?.historicalWindowStart, "2025-12-03T00:00:00.000Z");
   assert.equal(bloodPressureJobs[0]?.payload?.windowEnd, "2026-06-01T00:00:00.000Z");
 });
 
@@ -3703,7 +3794,7 @@ test("the scheduler waits for persisted blood-pressure capability", () => {
   assert.equal(bloodPressureJobs[0]?.payload?.sourceProviderSlug, "omron");
   assert.equal(
     bloodPressureJobs[0]?.payload?.historicalWindowStart,
-    "2026-02-18T00:00:00.000Z",
+    "2025-09-21T00:00:00.000Z",
   );
 });
 
@@ -3979,8 +4070,8 @@ test("existing source obligations keep independent windows and queue identities"
     job.payload?.historicalWindowStart,
     job.payload?.windowEnd,
   ]), [
-    ["omron", "2026-04-01T00:00:00.000Z", "2026-05-01T00:00:00.000Z"],
-    ["withings", "2026-05-02T00:00:00.000Z", "2026-06-01T00:00:00.000Z"],
+    ["omron", "2025-11-02T00:00:00.000Z", "2026-05-01T00:00:00.000Z"],
+    ["withings", "2025-12-03T00:00:00.000Z", "2026-06-01T00:00:00.000Z"],
   ]);
 });
 
@@ -5798,13 +5889,24 @@ test("repeated SDK setup does not create unscoped blood-pressure history work", 
   }
 });
 
-test("an explicit Junction timeseries backfill window still governs blood pressure", async () => {
-  const provider = createProvider({
-    requests: [],
-    timeseriesBackfillDays: 5,
-  });
-  const bloodPressure = createScheduledBloodPressureJob(provider);
+test("extended Junction history always starts with 180 days independently of the generic timeseries window", () => {
+  for (const timeseriesBackfillDays of [undefined, 14] as const) {
+    for (const resource of EXTENDED_HISTORY_RESOURCES) {
+      const provider = createProvider({
+        requests: [],
+        summaryBackfillDays: 30,
+        timeseriesResources: [resource],
+        ...(timeseriesBackfillDays === undefined ? {} : { timeseriesBackfillDays }),
+      });
+      const job = createScheduledResourceJob(provider, resource);
 
-  assert.equal(bloodPressure.payload?.windowStart, "2026-06-06T00:00:00.000Z");
-  assert.equal(bloodPressure.payload?.windowEnd, BACKFILL_WINDOW_END);
+      assert.equal(
+        job.payload?.historicalWindowStart,
+        EXTENDED_HISTORY_WINDOW_START,
+        `${resource} should retain the extended history horizon`,
+      );
+      assert.equal(job.payload?.windowStart, EXTENDED_HISTORY_WINDOW_START);
+      assert.equal(job.payload?.windowEnd, BACKFILL_WINDOW_END);
+    }
+  }
 });

@@ -56,6 +56,7 @@ const AUTH_ACTION_PATTERN = new RegExp(
 );
 const NEGATIVE_AUTH_ACTION_PATTERN =
   /\b(?:cancel|decline|deny|disallow|do not|don't|not now|reject|skip)\b/iu;
+const WHOOP_RENDERED_GRANT_PATTERN = /^\s*grant\s*$/iu;
 const TRUSTED_AUTHORIZATION_DOMAINS = [
   "junction.com",
   "tryvital.io",
@@ -238,7 +239,11 @@ async function completeExternalAuthorization(
       }
 
       await checkRequiredConsentCheckboxes(page);
-      const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
+      const clicked = await clickFirstVisibleAction(
+        page,
+        AUTH_ACTIONS,
+        config.source,
+      );
       if (clicked) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
@@ -358,30 +363,127 @@ async function checkRequiredConsentCheckboxes(page: Page): Promise<void> {
 async function clickFirstVisibleAction(
   page: Page,
   names: readonly RegExp[],
+  source: BrowserConfig["source"],
 ): Promise<boolean> {
   for (const name of names) {
     for (const role of ["button", "link"] as const) {
       const controls = page.getByRole(role, { name });
+      const negativeControls = page.getByRole(role, {
+        name: NEGATIVE_AUTH_ACTION_PATTERN,
+      });
       for (let index = 0; index < await controls.count(); index += 1) {
         const control = controls.nth(index);
-        if (await readAuthorizationActionState(control) !== "enabled") {
+        if (
+          await hasNegativeAccessibleName(control, negativeControls)
+          || await readAuthorizationActionState(control) !== "enabled"
+        ) {
           continue;
         }
-        await control.click();
+        await clickAuthorizationControl(control);
         return true;
       }
     }
   }
-  return false;
+
+  return source === "whoop" && await clickWhoopRenderedGrant(page);
+}
+
+async function clickWhoopRenderedGrant(page: Page): Promise<boolean> {
+  // WHOOP documents its consent action as a rendered "GRANT" button, while the
+  // live button can expose a different accessible name. Element handles bind
+  // discovery, safety checks, and the click to one exact element; a rerender
+  // detaches that handle instead of rebinding approved text to another control.
+  const grantButtons = page.getByRole("button").filter({
+    hasText: WHOOP_RENDERED_GRANT_PATTERN,
+  });
+  const negativeButtons = page.getByRole("button", {
+    name: NEGATIVE_AUTH_ACTION_PATTERN,
+  });
+  const candidates = await grantButtons.elementHandles();
+  const hasNegativeAccessibleName = async (
+    candidate: (typeof candidates)[number],
+  ): Promise<boolean> => {
+    const currentNegatives = await negativeButtons.elementHandles();
+    try {
+      for (const negative of currentNegatives) {
+        const matches = await candidate.evaluate(
+          (candidateElement, negativeElement) =>
+            candidateElement === negativeElement,
+          negative,
+        ).catch(() => null);
+        if (matches === null || matches) return true;
+      }
+      return false;
+    } finally {
+      await Promise.all(currentNegatives.map((handle) =>
+        handle.dispose().catch(() => undefined)
+      ));
+    }
+  };
+
+  try {
+    for (const candidate of candidates) {
+      const renderedText = await candidate.innerText().catch(() => "");
+      if (
+        !WHOOP_RENDERED_GRANT_PATTERN.test(renderedText)
+        || await hasNegativeAccessibleName(candidate)
+        || !await candidate.isVisible().catch(() => false)
+        || !await candidate.isEnabled().catch(() => false)
+      ) {
+        continue;
+      }
+      const currentText = await candidate.innerText().catch(() => "");
+      if (
+        !WHOOP_RENDERED_GRANT_PATTERN.test(currentText)
+        || await hasNegativeAccessibleName(candidate)
+      ) {
+        continue;
+      }
+      await clickAuthorizationControl(candidate);
+      return true;
+    }
+    return false;
+  } finally {
+    await Promise.all(candidates.map((handle) =>
+      handle.dispose().catch(() => undefined)
+    ));
+  }
+}
+
+async function clickAuthorizationControl(
+  control: Pick<Locator, "click">,
+): Promise<void> {
+  try {
+    await control.click();
+  } catch (error) {
+    const category = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout"
+      : "other";
+    throw new Error(`Authorization action failed (${category}).`);
+  }
+}
+
+async function hasNegativeAccessibleName(
+  control: Locator,
+  negativeControls: Locator,
+): Promise<boolean> {
+  return await control.and(negativeControls).count().catch(() => 1) > 0;
+}
+
+async function readAuthorizationActionText(
+  control: Locator,
+): Promise<string> {
+  const [ariaLabel, innerText] = await Promise.all([
+    control.getAttribute("aria-label").catch(() => null),
+    control.innerText().catch(() => ""),
+  ]);
+  return [ariaLabel, innerText].filter(Boolean).join(" ");
 }
 
 async function readAuthorizationActionState(
   control: Locator,
 ): Promise<"disabled" | "enabled" | null> {
-  const actionText = [
-    await control.getAttribute("aria-label").catch(() => null),
-    await control.innerText().catch(() => ""),
-  ].filter(Boolean).join(" ");
+  const actionText = await readAuthorizationActionText(control);
   if (
     NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
     || !await control.isVisible().catch(() => false)

@@ -6507,18 +6507,28 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   const schedulerJob = findScheduledHistoryJob("2026-04-03T00:00:00.000Z");
   assert.deepEqual(schedulerJob.payload, {
     historicalBackfill: true,
-    historicalWindowStart: "2026-03-18T00:00:00.000Z",
+    historicalWindowStart: "2025-09-21T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
     sourceLifecycleEpoch: 1,
     sourceProviderSlug: "garmin",
     windowEnd: "2026-03-20T00:00:00.000Z",
-    windowStart: "2026-03-18T00:00:00.000Z",
+    windowStart: "2025-09-21T00:00:00.000Z",
   });
   assert.equal(
     findScheduledHistoryJob("2026-04-04T00:00:00.000Z").dedupeKey,
     schedulerJob.dedupeKey,
   );
+  // Keep this webhook/lifecycle execution proof intentionally small; the raw
+  // scheduler payload above independently proves the fixed 180-day horizon.
+  const twoDayExecutionJob = {
+    ...schedulerJob,
+    payload: {
+      ...schedulerJob.payload,
+      historicalWindowStart: "2026-03-18T00:00:00.000Z",
+      windowStart: "2026-03-18T00:00:00.000Z",
+    },
+  };
 
   const updateCases = [
     {
@@ -6565,8 +6575,8 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       }),
     }),
     {
-      ...createJob("resource", schedulerJob.payload ?? {}),
-      dedupeKey: schedulerJob.dedupeKey ?? null,
+      ...createJob("resource", twoDayExecutionJob.payload ?? {}),
+      dedupeKey: twoDayExecutionJob.dedupeKey ?? null,
     },
   );
   const scheduledFollowUp = scheduledResult.scheduledJobs?.find((job) =>
@@ -7543,6 +7553,55 @@ test("Junction provider cleanup deregisters only the requested source", async ()
       url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/fitbit",
     },
   ]);
+});
+
+test("Junction provider proves source access only from explicit active statuses", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    assert.equal(
+      readUrl(input),
+      "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    );
+    return createJsonResponse({
+      data: [
+        { slug: "source_connected", status: "connected" },
+        { slug: "source_active", status: "active" },
+        { slug: "source_available", status: "available" },
+        { slug: "source_ok", status: "ok" },
+        { slug: "source_unknown", status: "unknown" },
+        { slug: "source_missing" },
+        { slug: "source_unrecognized", status: "settling" },
+        { slug: "source_error", status: "error" },
+        { slug: "source_failed", status: "failed" },
+        { slug: "source_disconnected", status: "disconnected" },
+        { slug: "source_revoked", status: "revoked" },
+        { slug: "source_inactive", status: "inactive" },
+      ],
+    });
+  });
+  const isSourceAccessActive = requireValue(
+    provider.connectionHandler?.isSourceAccessActive,
+  );
+
+  for (const slug of [
+    "source_connected",
+    "source_active",
+    "source_available",
+    "source_ok",
+  ]) {
+    assert.equal(await isSourceAccessActive(createAccount(), slug), true);
+  }
+  for (const slug of [
+    "source_unknown",
+    "source_missing",
+    "source_unrecognized",
+    "source_error",
+    "source_failed",
+    "source_disconnected",
+    "source_revoked",
+    "source_inactive",
+  ]) {
+    assert.equal(await isSourceAccessActive(createAccount(), slug), false);
+  }
 });
 
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
@@ -9286,6 +9345,15 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
     sourceConnection.initialJobs?.[0]?.dedupeKey,
     connection.initialJobs?.[0]?.dedupeKey,
   );
+  const sourceRecoveryWork = requireJunctionConnectionHandler(provider)
+    .buildSourceConnectionWork?.({
+      now: "2026-04-03T00:00:00.000Z",
+      sourceProviderSlug: "fitbit",
+    });
+  assert.deepEqual(sourceRecoveryWork, {
+    initialJobs: sourceConnection.initialJobs,
+    nextReconcileAt: sourceConnection.nextReconcileAt,
+  });
 
   // Every initial job crosses the configured-manifest boundary inside the OAuth
   // callback handler before the connection is persisted. An undeclared payload
@@ -11813,8 +11881,6 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
     }
     throw new Error(`Unexpected request: ${url.toString()}`);
   }, {
-    summaryBackfillDays: 2,
-    timeseriesBackfillDays: 2,
     timeseriesResources: ["caffeine"],
   });
   const sourceRecord = createConnectionSource({
@@ -11846,6 +11912,17 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
     ),
     "Junction should schedule extended caffeine history.",
   );
+  // Keep this continuation proof intentionally small; the scheduler's fixed
+  // 180-day extended horizon is covered independently in the owner-policy test.
+  const twoDayInitialJob = {
+    ...initialJob,
+    payload: {
+      ...initialJob.payload,
+      historicalWindowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    },
+  };
   const acceptedDays: string[] = [];
   const context = createJunctionJobContext({
     account: createAccount({ sources: [source] }),
@@ -11873,7 +11950,7 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
   const firstResult = await executeJunctionJob(
     provider,
     context,
-    createJobFromInput(initialJob),
+    createJobFromInput(twoDayInitialJob),
   );
   const preciseContinuation = requireValue(
     firstResult.scheduledJobs?.find((job) =>

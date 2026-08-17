@@ -29,6 +29,7 @@ import {
   DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
   isDeviceSyncDisconnectInProgress,
   isHistoricalResetIncompleteDeviceSyncAccount,
@@ -42,6 +43,7 @@ import {
   type HostedExecutionDeviceSyncJobHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
@@ -57,6 +59,7 @@ import {
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   prepareHostedMailboxItemAppendCrypto,
   type AppendHostedMailboxItemResult,
+  type PreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import {
   runWithFreshHostedDomainRootUnwrapCache,
@@ -77,7 +80,6 @@ import { readHostedHealthDataConsentState } from "../legal/consent";
 import {
   buildHostedDeviceSyncWake,
 } from "./wake";
-import { COMPANION_APPLE_HEALTH_SOURCE_PROVIDER } from "./companion";
 import {
   HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -1365,14 +1367,190 @@ function connectionChangedDuringDisconnectError(): never {
   });
 }
 
+type HostedDeviceSyncConnectionEstablishedAccount = {
+  connectedAt: string;
+  id: string;
+  provider: string;
+  scopes: string[];
+  status: PublicDeviceSyncAccount["status"];
+};
+
+function buildHostedDeviceSyncConnectionEstablishedWake(input: {
+  account: HostedDeviceSyncConnectionEstablishedAccount;
+  connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
+  now: string;
+  ownerId: string;
+}): HostedExecutionDeviceSyncWake {
+  const hint = {
+    jobs: normalizeHostedDeviceSyncJobHints({
+      connectionId: input.account.id,
+      expectedConnectedAt: input.account.connectedAt,
+      jobs: input.connection.initialJobs ?? [],
+      occurredAt: input.now,
+      provider: input.account.provider,
+      reason: "connected",
+    }),
+    nextReconcileAt: input.connection.nextReconcileAt ?? null,
+    occurredAt: input.now,
+    scopes: input.account.scopes,
+  } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
+  return buildHostedDeviceSyncWake({
+    connectionId: input.account.id,
+    expectedConnectedAt: input.account.connectedAt,
+    hint,
+    occurredAt: input.now,
+    provider: input.account.provider,
+    source: "connection-established",
+    userId: input.ownerId,
+  });
+}
+
+async function commitHostedDeviceSyncConnectionEstablishedTx(input: {
+  account: HostedDeviceSyncConnectionEstablishedAccount;
+  connectionStartedAt?: string | null;
+  currentConnectionRecord?: HostedConnectionRecord;
+  currentSource?: HostedConnectionSourceAdmissionCandidate;
+  sourceProviderSlug?: string | null;
+  connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
+  now: string;
+  ownerId: string;
+  preparedMailbox?: PreparedHostedMailboxItemAppendCrypto;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+  wake: HostedExecutionDeviceSyncWake;
+}): Promise<AppendHostedMailboxItemResult> {
+  // Prepared-webhook admission passes the connection row and semantic source
+  // already revalidated under this same lock. Native completion still reads.
+  const currentConnectionAccount = input.currentConnectionRecord
+    ? null
+    : await input.store.getConnectionForUser(
+        input.ownerId,
+        input.account.id,
+        input.tx,
+      );
+  const currentConnection = input.currentConnectionRecord
+    ? {
+        connectedAt: input.currentConnectionRecord.connectedAt.toISOString(),
+        metadata: mapHostedConnectionRecord(input.currentConnectionRecord).metadata,
+        status: normalizeHostedDeviceSyncLifecycleStatus(
+          input.currentConnectionRecord.status,
+        ),
+      }
+    : currentConnectionAccount;
+  if (
+    !currentConnection
+    || currentConnection.status !== input.account.status
+    || currentConnection.connectedAt !== input.account.connectedAt
+  ) {
+    throw deviceSyncError({
+      code: "CONNECTION_ESTABLISHMENT_STALE",
+      message: "Device connection changed during completion. Start the connection again.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  const linkedSource = resolveHostedJunctionLinkedSource({
+    account: input.account,
+    sourceProviderSlug: input.sourceProviderSlug ?? null,
+  });
+  if (linkedSource) {
+    const currentSource = input.currentSource
+      ? {
+          ...input.currentSource,
+          lastSeenAt: input.currentSource.lastSeenAt.toISOString(),
+        }
+      : resolveHostedJunctionConnectionSource(
+          await input.store.listConnectionSources(input.account.id, input.tx),
+          linkedSource.sourceProviderSlug,
+        );
+    const sourceAdmission = decideJunctionSourceCallbackAdmission({
+      connectionStartedAt: input.connectionStartedAt,
+      currentSource: currentSource ?? null,
+    });
+    if (sourceAdmission === "reject") {
+      throw connectionEstablishmentStaleError();
+    }
+    let advancedLifecycleEpoch: number | undefined;
+    if (sourceAdmission === "advance_lifecycle") {
+      if (!currentSource) {
+        throw connectionEstablishmentStaleError();
+      }
+      advancedLifecycleEpoch = nextHostedSourceLifecycleEpoch(
+        currentSource.lifecycleEpoch,
+      );
+      const reopenedMetadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+        metadata: currentConnection.metadata,
+        providerSlug: linkedSource.sourceProviderSlug,
+      });
+      if (input.currentConnectionRecord) {
+        await input.store.syncDurableConnectionMetadata(
+          input.account.id,
+          reopenedMetadata,
+          input.tx,
+        );
+      } else {
+        if (!currentConnectionAccount) {
+          connectionEstablishmentStaleError();
+        }
+        await input.store.syncDurableConnectionState({
+          ...currentConnectionAccount,
+          metadata: reopenedMetadata,
+        }, input.tx);
+      }
+    }
+    await input.store.upsertConnectionSource({
+      connectionId: input.account.id,
+      sourceInstanceKey: currentSource?.sourceInstanceKey
+        ?? linkedSource.sourceInstanceKey,
+      sourceProviderSlug: currentSource?.sourceProviderSlug
+        ?? linkedSource.sourceProviderSlug,
+      status: "connected",
+      ...(advancedLifecycleEpoch !== undefined
+        ? { lifecycleEpoch: advancedLifecycleEpoch }
+        : currentSource
+          ? { lifecycleEpoch: currentSource.lifecycleEpoch }
+          : {}),
+      firstSeenAt: input.now,
+      lastSeenAt: input.now,
+      tx: input.tx,
+    });
+  }
+
+  await input.store.createSignal({
+    userId: input.ownerId,
+    connectionId: input.account.id,
+    provider: input.account.provider,
+    kind: "connected",
+    occurredAt: input.now,
+    nextReconcileAt: input.connection.nextReconcileAt ?? null,
+    createdAt: input.now,
+    tx: input.tx,
+  });
+
+  const mailboxAppend = input.preparedMailbox
+    ? await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+        envelope: input.wake,
+        prepared: input.preparedMailbox,
+        tx: input.tx,
+      })
+    : await appendHostedMailboxEnvelopeTx({
+        envelope: input.wake,
+        tx: input.tx,
+      });
+  if (mailboxAppend.dedupeConflict) {
+    throw deviceSyncError({
+      code: "CONNECTION_ESTABLISHMENT_WORK_CONFLICT",
+      message: "Device connection completion conflicted with existing initial work. Start the connection again.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  return mailboxAppend;
+}
+
 export async function handleHostedDeviceSyncConnectionEstablished(input: {
-  account: {
-    connectedAt: string;
-    id: string;
-    provider: string;
-    scopes: string[];
-    status: PublicDeviceSyncAccount["status"];
-  };
+  account: HostedDeviceSyncConnectionEstablishedAccount;
   connectionStartedAt?: string | null;
   sourceProviderSlug?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
@@ -1390,121 +1568,21 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     });
   }
 
-  const hint = {
-    jobs: normalizeHostedDeviceSyncJobHints({
-      connectionId: input.account.id,
-      expectedConnectedAt: input.account.connectedAt,
-      jobs: input.connection.initialJobs ?? [],
-      occurredAt: input.now,
-      provider: input.account.provider,
-      reason: "connected",
-    }),
-    nextReconcileAt: input.connection.nextReconcileAt ?? null,
-    occurredAt: input.now,
-    scopes: input.account.scopes,
-  } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
-  const wake = buildHostedDeviceSyncWake({
-    connectionId: input.account.id,
-    expectedConnectedAt: input.account.connectedAt,
-    hint,
-    occurredAt: input.now,
-    provider: input.account.provider,
-    source: "connection-established",
-    userId: ownerId,
+  const wake = buildHostedDeviceSyncConnectionEstablishedWake({
+    account: input.account,
+    connection: input.connection,
+    now: input.now,
+    ownerId,
   });
   const mailboxAppend = await input.store.withHealthDataAdmissionLock(
     ownerId,
     input.account.id,
-    async (tx) => {
-      const current = await input.store.getConnectionForUser(ownerId, input.account.id, tx);
-      if (
-        !current
-        || current.status !== input.account.status
-        || current.connectedAt !== input.account.connectedAt
-      ) {
-        throw deviceSyncError({
-          code: "CONNECTION_ESTABLISHMENT_STALE",
-          message: "Device connection changed during completion. Start the connection again.",
-          retryable: false,
-          httpStatus: 409,
-        });
-      }
-
-      const linkedSource = resolveHostedJunctionLinkedSource({
-        account: input.account,
-        sourceProviderSlug: input.sourceProviderSlug ?? null,
-      });
-      if (linkedSource) {
-        const currentSource = resolveHostedJunctionConnectionSource(
-          await input.store.listConnectionSources(input.account.id, tx),
-          linkedSource.sourceProviderSlug,
-        );
-        const sourceAdmission = decideJunctionSourceCallbackAdmission({
-          connectionStartedAt: input.connectionStartedAt,
-          currentSource: currentSource ?? null,
-        });
-        if (sourceAdmission === "reject") {
-          throw connectionEstablishmentStaleError();
-        }
-        let advancedLifecycleEpoch: number | undefined;
-        if (sourceAdmission === "advance_lifecycle") {
-          if (!currentSource) {
-            throw connectionEstablishmentStaleError();
-          }
-          advancedLifecycleEpoch = nextHostedSourceLifecycleEpoch(
-            currentSource.lifecycleEpoch,
-          );
-          await input.store.syncDurableConnectionState({
-            ...current,
-            metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
-              metadata: current.metadata,
-              providerSlug: linkedSource.sourceProviderSlug,
-            }),
-          }, tx);
-        }
-        await input.store.upsertConnectionSource({
-          connectionId: input.account.id,
-          sourceInstanceKey: currentSource?.sourceInstanceKey
-            ?? linkedSource.sourceInstanceKey,
-          sourceProviderSlug: currentSource?.sourceProviderSlug
-            ?? linkedSource.sourceProviderSlug,
-          status: "connected",
-          ...(advancedLifecycleEpoch !== undefined
-            ? { lifecycleEpoch: advancedLifecycleEpoch }
-            : currentSource
-              ? { lifecycleEpoch: currentSource.lifecycleEpoch }
-              : {}),
-          firstSeenAt: input.now,
-          lastSeenAt: input.now,
-          tx,
-        });
-      }
-
-      await input.store.createSignal({
-        userId: ownerId,
-        connectionId: input.account.id,
-        provider: input.account.provider,
-        kind: "connected",
-        occurredAt: input.now,
-        nextReconcileAt: input.connection.nextReconcileAt ?? null,
-        createdAt: input.now,
-        tx,
-      });
-
-      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-        envelope: wake,
-        tx,
-      });
-      if (mailboxAppend.dedupeConflict) {
-        throw deviceSyncError({
-          code: "CONNECTION_ESTABLISHMENT_WORK_CONFLICT",
-          message: "Device connection completion conflicted with existing initial work. Start the connection again.",
-          retryable: false,
-          httpStatus: 409,
-        });
-      }
-      return mailboxAppend;
-    },
+    (tx) => commitHostedDeviceSyncConnectionEstablishedTx({
+      ...input,
+      ownerId,
+      tx,
+      wake,
+    }),
   );
 
   if (
@@ -1723,11 +1801,15 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     connectedAt: string;
     id: string;
     provider: string;
+    scopes?: string[];
+    status?: PublicDeviceSyncAccount["status"];
   };
   claimToken: string;
   now: string;
   ownerId: string | null;
+  processingAttemptedAt: string;
   registry?: DeviceSyncRegistry;
+  sourceAdmissionDeferred?: boolean;
   store: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
   webhook: DeviceSyncIngressWebhook;
@@ -1759,17 +1841,20 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     webhookReceivedAt: input.now,
   });
-  const sourceObservation = await prepareHostedWebhookSourceObservation({
-    ...input,
-    ownerId,
-    provider: input.account.provider,
-    traceId,
-  });
+  const sourceObservation = input.sourceAdmissionDeferred === true
+    ? await prepareHostedWebhookSourceObservation({
+        ...input,
+        ownerId,
+        provider: input.account.provider,
+        traceId,
+      })
+    : { kind: "not_required" } as const;
   if (sourceObservation.kind === "terminal") {
     return;
   }
   const resolvedSourceObservation = sourceObservation.kind === "provider_read"
       ? await resolveHostedWebhookSourceObservation({
+          now: input.now,
           preparation: sourceObservation,
           store: input.store,
         })
@@ -1785,10 +1870,13 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     dirtyResources,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
+    processingAttemptedAt: input.processingAttemptedAt,
     provider: input.account.provider,
     resourceCategory,
+    scopes: input.account.scopes ?? [],
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     sourceObservation: resolvedSourceObservation,
+    status: input.account.status ?? "active",
     store: input.store,
     claimToken: input.claimToken,
     traceId,
@@ -1800,6 +1888,9 @@ type HostedWebhookSourceObservationPreparation =
   | { kind: "not_required" }
   | { kind: "terminal" }
   | {
+      buildSourceConnectionWork: NonNullable<
+        DeviceConnectionHandler["buildSourceConnectionWork"]
+      >;
       isSourceAccessActive: NonNullable<DeviceConnectionHandler["isSourceAccessActive"]>;
       kind: "provider_read";
       source: HostedConnectionSourceAdmissionCandidate;
@@ -1811,6 +1902,7 @@ async function prepareHostedWebhookSourceObservation(input: {
   claimToken: string;
   now: string;
   ownerId: string;
+  processingAttemptedAt: string;
   provider: string;
   registry?: DeviceSyncRegistry;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -1818,13 +1910,7 @@ async function prepareHostedWebhookSourceObservation(input: {
   webhook: DeviceSyncIngressWebhook;
 }): Promise<HostedWebhookSourceObservationPreparation> {
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.webhook.sourceProviderSlug);
-  const isSourceRegistrationEvent = input.provider === "junction"
-    && sourceProviderSlug === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-    && (
-      input.webhook.eventType === "provider.connection.created"
-      || input.webhook.eventType === "provider.connection.updated"
-    );
-  if (!isSourceRegistrationEvent || !sourceProviderSlug) {
+  if (input.provider !== "junction" || !sourceProviderSlug) {
     return { kind: "not_required" };
   }
 
@@ -1847,22 +1933,25 @@ async function prepareHostedWebhookSourceObservation(input: {
           || current.provider !== input.provider
           || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
           || current.connectedAt.toISOString() !== input.account.connectedAt
-          || current.connectedAt.getTime() > Date.parse(input.now)
           || current.providerApplicationId !== null
           || current.providerApplicationRevision !== null
         ) {
           await completeHostedWebhookTraceTx(input, tx);
           return { kind: "terminal" };
         }
-        if (isDeviceSyncConnectionSetupPending({
+        const setup = {
+          setupExpiresAt: current.setupExpiresAt?.toISOString() ?? null,
           setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
-        })) {
-          throw deviceSyncError({
-            code: "WEBHOOK_ACCOUNT_NOT_READY",
-            message: "Device sync setup changed before webhook work could be admitted.",
-            retryable: true,
-            httpStatus: 503,
-          });
+        };
+        const setupPending = isDeviceSyncConnectionSetupPending(setup);
+        if (setupPending) {
+          if (isDeviceSyncConnectionSetupExpiredAt(setup, input.processingAttemptedAt)) {
+            await completeHostedWebhookTraceTx(input, tx);
+            return { kind: "terminal" };
+          }
+        } else if (current.connectedAt.getTime() > Date.parse(input.now)) {
+          await completeHostedWebhookTraceTx(input, tx);
+          return { kind: "terminal" };
         }
 
         const matchingSources = await input.store.listConnectionSourceAdmissionCandidates({
@@ -1898,11 +1987,12 @@ async function prepareHostedWebhookSourceObservation(input: {
           await completeHostedWebhookTraceTx(input, tx);
           return { kind: "terminal" };
         }
-        const isSourceAccessActive = input.registry
+        const connectionHandler = input.registry
           ?.get("junction")
-          ?.connectionHandler
-          ?.isSourceAccessActive;
-        if (!isSourceAccessActive) {
+          ?.connectionHandler;
+        const isSourceAccessActive = connectionHandler?.isSourceAccessActive;
+        const buildSourceConnectionWork = connectionHandler?.buildSourceConnectionWork;
+        if (!isSourceAccessActive || !buildSourceConnectionWork) {
           throw deviceSyncError({
             code: "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE",
             message: "Current device source registration could not be reconciled. Retry shortly.",
@@ -1911,6 +2001,7 @@ async function prepareHostedWebhookSourceObservation(input: {
           });
         }
         return {
+          buildSourceConnectionWork,
           isSourceAccessActive,
           kind: "provider_read",
           source,
@@ -1933,9 +2024,11 @@ async function prepareHostedWebhookSourceObservation(input: {
 }
 
 async function resolveHostedWebhookSourceObservation(input: {
+  now: string;
   preparation: Extract<HostedWebhookSourceObservationPreparation, { kind: "provider_read" }>;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<{
+  connectionWork: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   source: HostedConnectionSourceAdmissionCandidate;
   sourceAccessActive: boolean;
   storedConnection: HostedConnectionRecord;
@@ -1952,12 +2045,17 @@ async function resolveHostedWebhookSourceObservation(input: {
     });
   }
 
+  const sourceAccessActive = await input.preparation.isSourceAccessActive(
+    storedAccount,
+    input.preparation.source.sourceProviderSlug,
+  );
   return {
+    connectionWork: input.preparation.buildSourceConnectionWork({
+      now: input.now,
+      sourceProviderSlug: input.preparation.source.sourceProviderSlug,
+    }),
     source: input.preparation.source,
-    sourceAccessActive: await input.preparation.isSourceAccessActive(
-      storedAccount,
-      input.preparation.source.sourceProviderSlug,
-    ),
+    sourceAccessActive,
     storedConnection: input.preparation.storedConnection,
   };
 }
@@ -2537,15 +2635,19 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   eventType: string;
   expectedConnectedAt: string;
   occurredAt: string;
+  processingAttemptedAt: string;
   provider: string;
   resourceCategory?: string | null;
+  scopes: string[];
   sourceProviderSlug: string | null;
   sourceObservation: {
+    connectionWork: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
     source: HostedConnectionSourceAdmissionCandidate;
     sourceAccessActive: boolean;
     storedConnection: HostedConnectionRecord;
   } | null;
   store: PrismaDeviceSyncControlPlaneStore;
+  status: PublicDeviceSyncAccount["status"];
   traceId: string | null;
   userId: string;
 }
@@ -2553,7 +2655,15 @@ interface HostedDeviceSyncWebhookAdmissionInput {
 async function persistHostedDeviceSyncWebhookAccepted(
   input: HostedDeviceSyncWebhookAdmissionInput,
 ): Promise<void> {
-  let result: { wakeMailboxItemId: string | null };
+  // Registration recovery already commits the callback-equivalent connected
+  // signal/mailbox; its wake also drains the durable dirty record.
+  const sourceEstablishmentOwnsWebhookHandoff = input.sourceObservation !== null
+    && input.provider === "junction"
+    && (
+      input.eventType === "provider.connection.created"
+      || input.eventType === "provider.connection.updated"
+    );
+  let result: { wakeMailboxItemIds: string[] };
   try {
     result = await runWithHostedDeviceSyncPreparedWriteReplan(async () => {
       const hasPayloadResources = input.dirtyResources.some(
@@ -2566,9 +2676,8 @@ async function persistHostedDeviceSyncWebhookAccepted(
         const status = await inspectHostedDeviceSyncWebhookAdmissionTx(
           input,
           tx,
-          { commitSourceAdmission: false },
         );
-        if (status === "completed") {
+        if (status.kind === "completed") {
           return { status } as const;
         }
         return {
@@ -2586,8 +2695,8 @@ async function persistHostedDeviceSyncWebhookAccepted(
         memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
       },
     );
-      if (initialAdmission.status === "completed") {
-        return { wakeMailboxItemId: null };
+      if (initialAdmission.status.kind === "completed") {
+        return { wakeMailboxItemIds: [] };
       }
 
       const preparedDirty = hasPayloadResources
@@ -2602,8 +2711,26 @@ async function persistHostedDeviceSyncWebhookAccepted(
           userId: input.userId,
         })
       : null;
+      const sourceConnectionAccount = input.sourceObservation
+        ? {
+            connectedAt: input.expectedConnectedAt,
+            id: input.connectionId,
+            provider: input.provider,
+            scopes: input.scopes,
+            status: input.status,
+          } satisfies HostedDeviceSyncConnectionEstablishedAccount
+        : null;
+      const sourceConnectionWake = sourceConnectionAccount && input.sourceObservation
+        ? buildHostedDeviceSyncConnectionEstablishedWake({
+            account: sourceConnectionAccount,
+            connection: input.sourceObservation.connectionWork,
+            now: input.acceptedAt,
+            ownerId: input.userId,
+          })
+        : null;
       const preparedMailbox = (
-      preparedDirty?.shouldRequestWake ?? initialAdmission.shouldPrepareWake
+      input.sourceObservation !== null
+      || (preparedDirty?.shouldRequestWake ?? initialAdmission.shouldPrepareWake)
     )
       ? await prepareHostedMailboxItemAppendCrypto({
           prisma: input.store.prisma,
@@ -2619,10 +2746,46 @@ async function persistHostedDeviceSyncWebhookAccepted(
           const finalAdmission = await inspectHostedDeviceSyncWebhookAdmissionTx(
             input,
             tx,
-            { commitSourceAdmission: true },
           );
-          if (finalAdmission === "completed") {
-            return { wakeMailboxItemId: null };
+          if (finalAdmission.kind === "completed") {
+            return { wakeMailboxItemIds: [] };
+          }
+
+          const wakeMailboxItemIds: string[] = [];
+          if (input.sourceObservation) {
+            if (
+              !preparedMailbox
+              || !sourceConnectionAccount
+              || !sourceConnectionWake
+              || !finalAdmission.currentConnectionRecord
+              || !finalAdmission.currentSource
+            ) {
+              throw createHostedDeviceSyncDirtyPreparationMismatchError();
+            }
+            const sourceMailboxAppend = await commitHostedDeviceSyncConnectionEstablishedTx({
+              account: sourceConnectionAccount,
+              connection: input.sourceObservation.connectionWork,
+              connectionStartedAt: input.sourceObservation.source.lastSeenAt.toISOString(),
+              currentConnectionRecord: finalAdmission.currentConnectionRecord,
+              currentSource: finalAdmission.currentSource,
+              now: input.acceptedAt,
+              ownerId: input.userId,
+              preparedMailbox,
+              sourceProviderSlug: input.sourceObservation.source.sourceProviderSlug,
+              store: input.store,
+              tx,
+              wake: sourceConnectionWake,
+            });
+            wakeMailboxItemIds.push(sourceMailboxAppend.item.id);
+            if (finalAdmission.setupPending) {
+              await tx.deviceConnection.update({
+                where: { id: input.connectionId },
+                data: {
+                  setupExpiresAt: null,
+                  setupPhase: "source_confirmed",
+                },
+              });
+            }
           }
 
           // Every accepted hint merges into dirty state so coalesced timing remains
@@ -2654,8 +2817,10 @@ async function persistHostedDeviceSyncWebhookAccepted(
           }
           await completeHostedWebhookTraceTx(input, tx);
 
-          let wakeMailboxItemId: string | null = null;
-          if (dirtyUpdate.shouldRequestWake) {
+          if (
+            dirtyUpdate.shouldRequestWake
+            && !sourceEstablishmentOwnsWebhookHandoff
+          ) {
             if (!preparedMailbox) {
               throw createHostedDeviceSyncDirtyPreparationMismatchError();
             }
@@ -2698,11 +2863,14 @@ async function persistHostedDeviceSyncWebhookAccepted(
                 retryable: true,
               });
             }
-            wakeMailboxItemId = mailboxAppend.item.id;
+            wakeMailboxItemIds.push(mailboxAppend.item.id);
           }
           if (
-            input.acceptanceMode !== "level_dirty_hint"
-            || dirtyUpdate.shouldRequestWake
+            !sourceEstablishmentOwnsWebhookHandoff
+            && (
+              input.acceptanceMode !== "level_dirty_hint"
+              || dirtyUpdate.shouldRequestWake
+            )
           ) {
             await input.store.createSignal({
               userId: input.userId,
@@ -2719,7 +2887,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
             });
           }
 
-          return { wakeMailboxItemId };
+          return { wakeMailboxItemIds };
         },
         {
           memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
@@ -2739,18 +2907,26 @@ async function persistHostedDeviceSyncWebhookAccepted(
     throw error;
   }
 
-  if (result.wakeMailboxItemId) {
-    await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
+  for (const mailboxItemId of new Set(result.wakeMailboxItemIds)) {
+    await startHostedDeviceSyncWakeWorkflow(mailboxItemId, {
       failureMode: "best_effort",
     });
   }
 }
 
+type HostedDeviceSyncWebhookAdmissionStatus =
+  | { kind: "completed" }
+  | {
+      currentConnectionRecord: HostedConnectionRecord | null;
+      currentSource: HostedConnectionSourceAdmissionCandidate | null;
+      kind: "ready";
+      setupPending: boolean;
+    };
+
 async function inspectHostedDeviceSyncWebhookAdmissionTx(
   input: HostedDeviceSyncWebhookAdmissionInput,
   tx: HostedPrismaTransactionClient,
-  options: { commitSourceAdmission: boolean },
-): Promise<"completed" | "ready"> {
+): Promise<HostedDeviceSyncWebhookAdmissionStatus> {
   const sourceCredentialCurrent = input.sourceObservation
     ? await input.store.getConnectionRecordForUser(
         input.userId,
@@ -2765,6 +2941,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       provider: true,
       providerApplicationId: true,
       providerApplicationRevision: true,
+      setupExpiresAt: true,
       setupPhase: true,
       status: true,
       userId: true,
@@ -2776,10 +2953,9 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     || current.provider !== input.provider
     || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
     || current.connectedAt.toISOString() !== input.expectedConnectedAt
-    || current.connectedAt.getTime() > Date.parse(input.acceptedAt)
   ) {
     await completeHostedWebhookTraceTx(input, tx);
-    return "completed";
+    return { kind: "completed" };
   }
   // The hosted webhook endpoint authenticates only the shared/operator
   // provider application. A provider-account row may have been rebound to
@@ -2792,18 +2968,31 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     || current.providerApplicationRevision !== null
   ) {
     await completeHostedWebhookTraceTx(input, tx);
-    return "completed";
+    return { kind: "completed" };
   }
-  if (isDeviceSyncConnectionSetupPending({
+  const setup = {
+    setupExpiresAt: current.setupExpiresAt?.toISOString() ?? null,
     setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
-  })) {
-    throw deviceSyncError({
-      code: "WEBHOOK_ACCOUNT_NOT_READY",
-      message: "Device sync setup changed before webhook work could be committed.",
-      retryable: true,
-      httpStatus: 503,
-    });
+  };
+  const setupPending = isDeviceSyncConnectionSetupPending(setup);
+  if (setupPending) {
+    if (isDeviceSyncConnectionSetupExpiredAt(setup, input.processingAttemptedAt)) {
+      await completeHostedWebhookTraceTx(input, tx);
+      return { kind: "completed" };
+    }
+    if (!input.sourceObservation) {
+      throw deviceSyncError({
+        code: "WEBHOOK_ACCOUNT_NOT_READY",
+        message: "Device sync setup changed before webhook work could be committed.",
+        retryable: true,
+        httpStatus: 503,
+      });
+    }
+  } else if (current.connectedAt.getTime() > Date.parse(input.acceptedAt)) {
+    await completeHostedWebhookTraceTx(input, tx);
+    return { kind: "completed" };
   }
+  let currentSource: HostedConnectionSourceAdmissionCandidate | null = null;
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (sourceProviderSlug) {
     const matchingSources = await input.store.listConnectionSourceAdmissionCandidates({
@@ -2836,8 +3025,16 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
         input.sourceObservation.source,
         source,
       )) {
+        if (input.acceptanceMode === "durable_webhook_work") {
+          throw deviceSyncError({
+            code: "WEBHOOK_SOURCE_NOT_READY",
+            message: "Device source authority changed while webhook work was prepared. Retry shortly.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
         await completeHostedWebhookTraceTx(input, tx);
-        return "completed";
+        return { kind: "completed" };
       }
       if (!input.sourceObservation.sourceAccessActive) {
         throw deviceSyncError({
@@ -2847,28 +3044,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
           httpStatus: 503,
         });
       }
-      if (options.commitSourceAdmission) {
-        const currentMetadata = mapHostedConnectionRecord(sourceCredentialCurrent).metadata;
-        await input.store.syncDurableConnectionMetadata(
-          input.connectionId,
-          clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
-            metadata: currentMetadata,
-            providerSlug: sourceProviderSlug,
-          }),
-          tx,
-        );
-        await input.store.upsertConnectionSource({
-          connectionId: input.connectionId,
-          sourceInstanceKey: source.sourceInstanceKey,
-          sourceProviderSlug,
-          status: "connected",
-          lifecycleEpoch: nextHostedSourceLifecycleEpoch(source.lifecycleEpoch),
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSeenAt: nextHostedSourceLifecycleAt(source.lastSeenAt.toISOString()),
-          tx,
-        });
-      }
+      currentSource = source;
     } else {
       if (!source) {
         throw deviceSyncError({
@@ -2893,11 +3069,16 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
           });
         }
         await completeHostedWebhookTraceTx(input, tx);
-        return "completed";
+        return { kind: "completed" };
       }
     }
   }
-  return "ready";
+  return {
+    currentConnectionRecord: sourceCredentialCurrent,
+    currentSource,
+    kind: "ready",
+    setupPending,
+  };
 }
 
 function hostedConnectionSourceAdmissionMatchesProof(

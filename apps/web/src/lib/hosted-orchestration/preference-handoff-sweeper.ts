@@ -191,6 +191,7 @@ function createHostedPreferenceHandoffCandidateStore(
             ON "lane_counter"."user_id" = "item"."user_id"
             AND "lane_counter"."lane" = "item"."lane"
           WHERE "item"."kind" IN (
+              'device-sync.wake',
               'health.daily-metric.reported',
               'runtime.browser-vault-refresh-requested',
               'runtime.maintenance-requested'

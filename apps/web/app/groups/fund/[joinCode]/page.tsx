@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
@@ -60,7 +59,6 @@ import {
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -74,14 +72,7 @@ type GroupFundingSearchParams = {
   usagePurchase?: string | string[] | undefined;
 };
 
-export const metadata: Metadata = {
-  ...createMurphPageMetadata({
-    title: "Sponsor Murph in this chat",
-    description:
-      "Keep the group talking and make the thank-you unnecessarily entertaining.",
-  }),
-  robots: { follow: false, index: false },
-};
+export { generateMetadata } from "./page-metadata";
 
 export default async function GroupFundingPage({
   params,

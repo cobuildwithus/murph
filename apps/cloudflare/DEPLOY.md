@@ -323,6 +323,19 @@ runner bundle update with `container_rollout=immediate`. Before allowing card
 traffic, require managed-container smoke to report the exact new runner-bundle
 fingerprint and prove the updated assistant CLI surface.
 
+Treat backward compatibility as a permanent traffic gate for every iMessage
+app card. Linq capability is not decoder-version negotiation, so a new schema,
+discriminator, required field, stricter bound, or changed meaning must not emit
+while any previously released extension that can claim the card would reject
+it. App Store availability of a new reader does not retire older installed
+readers. Before enabling traffic, prove either that unknown clients receive the
+last readable envelope, that an explicit capability selects a compatible
+envelope, or that every earlier claiming extension already provides a complete
+non-interactive recovery for the unknown shape. Otherwise keep the producer on
+the prior schema or deterministic ordinary text. TestFlight, App Review,
+provider acceptance, delivery receipts, and proof on only the new build do not
+satisfy this gate.
+
 An expansion of an existing strict card version has a reader floor even when
 its discriminator is unchanged. For the V4 workout expansion above eight
 exercises or eight sets per exercise, release the native reader first, deploy
@@ -380,6 +393,25 @@ written. After that write, the new runner bundle is a hard rollback floor for
 that workspace because an older strict reader can quarantine the retained
 intent. Forward-fix on this bundle or newer. Monitor `outbox.intent.quarantined`,
 strict outbox parse failures, and stale runner fingerprints after rollout.
+
+## Telegram Group Presentation-Card Audience Rollout
+
+This release expands the strict audience rule for the existing
+`exercise_routine` and `telegram_rich_content` card kinds. Deploy the runner
+bundle with `container_rollout=immediate`. Before group-card authoring is
+considered converged, require managed-container smoke to report the exact new
+runner-bundle fingerprint.
+
+The preceding runner remains a safe rollback only before the first Telegram
+group presentation-card intent or hosted effect is persisted. After that write,
+the audience-capable bundle is the hard rollback floor. The preceding strict
+readers reject the non-direct card, and an old outbox reader can move a retained
+intent into quarantine. Forward-fix on the compatible bundle or newer.
+
+After rollout, monitor `outbox.intent.quarantined`, strict response-card parse
+failures, and stale runner fingerprints. Restore a quarantined intent only after
+the compatible bundle is live, then confirm that the restored card reaches the
+same authenticated Telegram group.
 
 Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq

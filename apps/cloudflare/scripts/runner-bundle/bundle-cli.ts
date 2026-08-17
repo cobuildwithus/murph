@@ -88,6 +88,8 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // The combined reviewed summary-completeness and bounded workout-feature graph
 // measured 9,188,582 B on the same Linux CI lane; it extends the existing
 // device-sync, importer, and query packages without adding a package.
+// The reviewed Telegram rich-response work measured 9,159,100 B in the Linux
+// deploy lane on 2026-08-16; it grows that same graph without adding a package.
 // The static startup closure measured 24,950 B. Keep total output inside a
 // narrow 32 KiB allowance and static startup inside an 8 KiB allowance. If a
 // violation fires, investigate the listed largest inputs first; only raise the
