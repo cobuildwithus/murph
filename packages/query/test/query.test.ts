@@ -36,6 +36,7 @@ import {
   listGeneticVariants,
   listExperiments,
   listJournalEntries,
+  listCanonicalObservationMetricEntries,
   lookupEntityById,
   readVault,
   readVaultRawTolerant,
@@ -559,6 +560,150 @@ test("wearable source health reports sleep-window metrics for session-only provi
     assert.deepEqual(sourceHealth[0]?.metricsContributed, [
       "sessionMinutes",
       "timeInBedMinutes",
+    ]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("canonical observation reads preserve every same-day metabolic record", async () => {
+  const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+  if (!testTempRoot) {
+    throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+  }
+  const vaultRoot = await mkdtemp(path.join(testTempRoot, "query-metabolic-metrics-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    const observations = [
+      {
+        id: "evt_carbohydrates_03",
+        metric: "carbohydrates",
+        observationGrain: "sample",
+        occurredAt: "2026-04-22T17:00:00.000Z",
+        provider: "freestyle_libre",
+        unit: "g",
+        value: 35,
+      },
+      {
+        id: "evt_carbohydrates_02",
+        metric: "carbohydrates",
+        observationGrain: "sample",
+        occurredAt: "2026-04-22T12:00:00.000Z",
+        provider: "freestyle_libre",
+        unit: "g",
+        value: 20,
+      },
+      {
+        id: "evt_carbohydrates_01",
+        metric: "carbohydrates",
+        observationGrain: "sample",
+        occurredAt: "2026-04-22T08:00:00.000Z",
+        provider: "freestyle_libre",
+        unit: "g",
+        value: 10,
+      },
+      {
+        id: "evt_glucose_sd_01",
+        metric: "glucose-standard-deviation",
+        observationGrain: "summary",
+        occurredAt: "2026-04-22T23:45:00.000Z",
+        provider: "dexcom",
+        unit: "mg/dL",
+        value: 18.5,
+      },
+      {
+        id: "evt_glucose_cv_01",
+        metric: "glucose-coefficient-of-variation",
+        observationGrain: "summary",
+        occurredAt: "2026-04-22T23:45:00.000Z",
+        provider: "dexcom",
+        unit: "%",
+        value: 16.2,
+      },
+    ];
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      observations.map((observation) => JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: observation.id,
+        kind: "observation",
+        occurredAt: observation.occurredAt,
+        recordedAt: "2026-04-23T12:00:00.000Z",
+        dayKey: "2026-04-22",
+        source: "device",
+        title: observation.metric,
+        metric: observation.metric,
+        observationGrain: observation.observationGrain,
+        value: observation.value,
+        unit: observation.unit,
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: observation.provider,
+          originConfidence: "high",
+        },
+        externalRef: {
+          system: "junction",
+          resourceType: `junction-${observation.metric}`,
+          resourceId: observation.id,
+        },
+      })).join("\n").concat("\n"),
+      "utf8",
+    );
+
+    const entries = await listCanonicalObservationMetricEntries(vaultRoot, {
+      from: "2026-04-22",
+      limit: null,
+      metrics: [
+        "carbohydrates",
+        "glucose-standard-deviation",
+        "glucose-coefficient-of-variation",
+      ],
+      to: "2026-04-22",
+    });
+
+    assert.deepEqual(entries, [
+      {
+        eventId: "evt_glucose_cv_01",
+        metric: "glucose-coefficient-of-variation",
+        occurredAt: "2026-04-22T23:45:00.000Z",
+        source: "device",
+        unit: "%",
+        value: 16.2,
+      },
+      {
+        eventId: "evt_glucose_sd_01",
+        metric: "glucose-standard-deviation",
+        occurredAt: "2026-04-22T23:45:00.000Z",
+        source: "device",
+        unit: "mg/dL",
+        value: 18.5,
+      },
+      {
+        eventId: "evt_carbohydrates_03",
+        metric: "carbohydrates",
+        occurredAt: "2026-04-22T17:00:00.000Z",
+        source: "device",
+        unit: "g",
+        value: 35,
+      },
+      {
+        eventId: "evt_carbohydrates_02",
+        metric: "carbohydrates",
+        occurredAt: "2026-04-22T12:00:00.000Z",
+        source: "device",
+        unit: "g",
+        value: 20,
+      },
+      {
+        eventId: "evt_carbohydrates_01",
+        metric: "carbohydrates",
+        occurredAt: "2026-04-22T08:00:00.000Z",
+        source: "device",
+        unit: "g",
+        value: 10,
+      },
     ]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

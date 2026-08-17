@@ -3831,7 +3831,7 @@ test("live blood-pressure capability gates provider egress and terminal coverage
   );
 });
 
-test("live capability loss preserves carried history evidence until authority recovers", async () => {
+test("live capability loss preserves evidence while clean recovery clears legacy count-only ambiguity", async () => {
   const unavailableStates: MutableProviderState[] = [
     {
       resourceAvailability: { activity: true, blood_pressure: false },
@@ -3911,30 +3911,14 @@ test("live capability loss preserves carried history evidence until authority re
       activity: true,
       blood_pressure: true,
     };
-    const empty = await requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
-      toJobRecord(continuation, index + 10),
-    );
-    const stillRecoverable = findBloodPressureJob(empty.scheduledJobs ?? []);
-
-    assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
-    assert.equal(stillRecoverable.dedupeKey, evidenceBearing.dedupeKey);
-    assert.equal(stillRecoverable.payload?.historicalProviderRecordsSeen, true);
-    assert.equal(stillRecoverable.payload?.windowStart, "2026-02-19T00:00:00.000Z");
-
-    records.push({
-      id: `bp-after-live-authority-recovery-${index}`,
-      timestamp: "2026-03-15T08:30:00.000Z",
-      systolic: 121,
-      diastolic: 79,
-    });
-    const { result: completed } = await executeImmediateBloodPressureContinuations({
-      context: createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
-      job: toJobRecord(stillRecoverable, index + 20),
+    const { result: empty } = await executeImmediateBloodPressureContinuations({
+      context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+      job: toJobRecord(continuation, index + 10),
       provider,
     });
-    assert.equal(completed.scheduledJobs?.length ?? 0, 1);
-    assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+
+    assertHistoryCoverage(empty.metadataPatch, "omron", "blood_pressure");
+    assert.equal(empty.scheduledJobs?.length ?? 0, 0);
   }
 
   const canonicalState: MutableProviderState = {

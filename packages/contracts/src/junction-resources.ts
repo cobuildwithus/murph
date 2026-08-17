@@ -24,6 +24,7 @@ export interface JunctionTimeseriesResourcePolicy {
   readonly fetchChunkDays: number;
   readonly fetchMode?: JunctionTimeseriesFetchMode;
   readonly historyWindow: JunctionTimeseriesHistoryWindow;
+  readonly maxCanonicalRecordsPerWindow?: number;
   readonly maxRecordsPerWindow?: number;
   readonly maxSamplesPerRecord?: number;
   readonly maxSamplesPerWindow?: number;
@@ -69,20 +70,20 @@ export const JUNCTION_TIMESERIES_RESOURCE_POLICIES = Object.freeze([
   { resource: "heartrate", enabledByDefault: true, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
   { resource: "weight", enabledByDefault: true, normalizationMode: "sparse_reading", historyWindow: "summary_history", fetchChunkDays: 1 },
   { resource: "body_mass_index", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
-  { resource: "carbohydrates", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "carbohydrates", enabledByDefault: true, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30, maxCanonicalRecordsPerWindow: 3_000, maxSamplesPerWindow: 3_840 },
   { resource: "fat", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
-  { resource: "forced_expiratory_volume_1", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
-  { resource: "forced_vital_capacity", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
-  { resource: "heart_rate_alert", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
-  { resource: "inhaler_usage", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
-  { resource: "insulin_injection", enabledByDefault: false, normalizationMode: "sparse_intervention", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "forced_expiratory_volume_1", enabledByDefault: true, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 1, maxCanonicalRecordsPerWindow: 100, maxSamplesPerWindow: 128 },
+  { resource: "forced_vital_capacity", enabledByDefault: true, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 1, maxCanonicalRecordsPerWindow: 100, maxSamplesPerWindow: 128 },
+  { resource: "heart_rate_alert", enabledByDefault: true, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 1, maxCanonicalRecordsPerWindow: 100, maxSamplesPerWindow: 128 },
+  { resource: "inhaler_usage", enabledByDefault: true, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 1, maxCanonicalRecordsPerWindow: 100, maxSamplesPerWindow: 128 },
+  { resource: "insulin_injection", enabledByDefault: true, normalizationMode: "sparse_intervention", historyWindow: "summary_history", fetchChunkDays: 30, maxCanonicalRecordsPerWindow: 3_000, maxSamplesPerWindow: 3_840 },
   { resource: "lean_body_mass", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
-  { resource: "peak_expiratory_flow_rate", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
-  { resource: "sleep_apnea_alert", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "peak_expiratory_flow_rate", enabledByDefault: true, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 1, maxCanonicalRecordsPerWindow: 100, maxSamplesPerWindow: 128 },
+  { resource: "sleep_apnea_alert", enabledByDefault: true, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 1, maxCanonicalRecordsPerWindow: 100, maxSamplesPerWindow: 128 },
   { resource: "waist_circumference", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
   { resource: "calories_basal", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
   { resource: "daylight_exposure", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
-  { resource: "fall", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "fall", enabledByDefault: true, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 1, maxCanonicalRecordsPerWindow: 100, maxSamplesPerWindow: 128 },
   { resource: "floors_climbed", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
   { resource: "handwashing", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
   { resource: "stand_duration", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },

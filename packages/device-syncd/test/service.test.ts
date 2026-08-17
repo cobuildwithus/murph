@@ -2092,6 +2092,192 @@ test("device sync service supplies the vault timezone to Junction jobs", async (
   }
 });
 
+test("Junction lifecycle supersession retries one webhook resource job with normal backoff", async () => {
+  let now = new Date("2030-04-03T12:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-lifecycle-retry");
+  let requestCount = 0;
+  const importedRecordCounts: number[] = [];
+  const requestedWindows: Array<{ windowEnd: string | null; windowStart: string | null }> = [];
+  let advanceLifecycle: (() => void) | null = null;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const snapshot = input.snapshot as {
+          timeseries?: { heart_rate_alert?: unknown[] };
+        };
+        importedRecordCounts.push(snapshot.timeseries?.heart_rate_alert?.length ?? 0);
+        return { events: [{ kind: "measurement" }] };
+      },
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["heart_rate_alert"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-lifecycle-retry") {
+          return createJsonResponse({
+            providers: [{
+              id: "provider-garmin-1",
+              name: "Garmin",
+              resource_availability: { heart_rate_alert: true },
+              slug: "garmin",
+              status: "connected",
+            }],
+          });
+        }
+        if (
+          url.pathname
+            !== "/v2/timeseries/junction-lifecycle-retry/heart_rate_alert/grouped"
+        ) {
+          throw new Error(`Unexpected Junction lifecycle retry request: ${url.toString()}`);
+        }
+        requestCount += 1;
+        const windowStart = url.searchParams.get("start_date");
+        requestedWindows.push({
+          windowEnd: url.searchParams.get("end_date"),
+          windowStart,
+        });
+        advanceLifecycle?.();
+        advanceLifecycle = null;
+        const day = windowStart?.slice(0, 10) ?? "2026-04-01";
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: Array.from({ length: 80 }, (_value, index) => ({
+                end: `${day}T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:30.000Z`,
+                id: `heart-alert-lifecycle-retry-${day}-${index}`,
+                start: `${day}T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00.000Z`,
+                type: "irregular_rhythm",
+                unit: "count",
+                value: 1,
+              })),
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-lifecycle-retry",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const sourceInput = {
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected" as const,
+      resourceAvailabilitySummary: { heart_rate_alert: true },
+      firstSeenAt: "2026-04-01T00:00:00.000Z",
+      lastSeenAt: "2030-04-03T11:59:00.000Z",
+    };
+    store.upsertConnectionSource({ ...sourceInput, lifecycleEpoch: 1 });
+    advanceLifecycle = () => {
+      store.upsertConnectionSource({
+        ...sourceInput,
+        lifecycleEpoch: 2,
+        lastSeenAt: now.toISOString(),
+      });
+    };
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        eventType: "historical.data.heart_rate_alert.created",
+        objectId: "heart-alert-lifecycle-retry",
+        occurredAt: "2026-04-02T10:01:00.000Z",
+        resource: "heart_rate_alert",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      maxAttempts: 5,
+    });
+
+    assert.equal((await service.runWorkerOnce())?.id, job.id);
+    const retry = store.getJobById(job.id);
+    assert.ok(retry);
+    assert.equal(retry.status, "queued");
+    assert.equal(retry.attempts, 1);
+    assert.equal(retry.lastErrorCode, "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED");
+    assert.equal(
+      retry.availableAt,
+      new Date(now.getTime() + computeRetryDelayMs(1)).toISOString(),
+    );
+    assert.equal(requestCount, 1);
+    assert.deepEqual(importedRecordCounts, []);
+    assert.deepEqual(
+      readJobsForAccountForTesting(store, account.id).map((candidate) => candidate.id),
+      [job.id],
+    );
+    assert.equal(await service.runWorkerOnce(), null);
+
+    now = new Date(retry.availableAt);
+    assert.equal((await service.runWorkerOnce())?.id, job.id);
+    const completed = store.getJobById(job.id);
+    assert.ok(completed);
+    assert.equal(completed.status, "succeeded");
+    assert.equal(completed.attempts, 2);
+    assert.equal(requestCount, 2);
+    assert.deepEqual(importedRecordCounts, [80]);
+    const persistedJobs = readJobsForAccountForTesting(store, account.id);
+    assert.equal(persistedJobs.length, 2);
+    const followUpRow = persistedJobs.find((candidate) => candidate.id !== job.id);
+    assert.ok(followUpRow);
+    const followUp = store.getJobById(followUpRow.id);
+    assert.ok(followUp);
+    assert.equal(followUp.status, "queued");
+    assert.equal(followUp.payload.windowStart, "2026-04-02T00:00:00.000Z");
+    assert.equal(followUp.payload.windowEnd, "2026-04-03T00:00:00.000Z");
+
+    assert.equal((await service.runWorkerOnce())?.id, followUp.id);
+    assert.equal(store.getJobById(followUp.id)?.status, "succeeded");
+    assert.equal(requestCount, 3);
+    assert.deepEqual(importedRecordCounts, [80, 80]);
+    assert.deepEqual(requestedWindows, [
+      {
+        windowEnd: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+      {
+        windowEnd: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+      {
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+    ]);
+  } finally {
+    close();
+  }
+});
+
 test.each(["resource"] as const)(
   "Junction workout-stream %s failures keep exact progress on one cumulatively retried job",
   async (jobKind: JunctionWorkoutStreamServiceJobKind) => {

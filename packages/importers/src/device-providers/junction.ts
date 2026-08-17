@@ -8,8 +8,10 @@ import {
   JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
   JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   MEAL_MICRONUTRIENT_KEYS,
+  normalizeIanaTimeZone,
   parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
+  resolveFloatingIsoTimestampInTimeZone,
   serializeCompanionHrvRmssdObservation,
   type CompanionHrvRmssdAdmissionId,
   toLocalDayKey,
@@ -313,6 +315,8 @@ const FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
   "freestyle-libre",
   "freestyle_libre",
 ]);
+const JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION =
+  "junction-sparse-timeseries.floating-fallback.v2";
 const RAW_SOURCE_IDENTIFIER_KEYS = new Set([
   "sourcename",
   "sourcedeviceid",
@@ -1030,6 +1034,7 @@ interface JunctionDailyTimeseriesAggregate {
   resourceContext: ResourceContext;
   sampleCount: number;
   sum: number;
+  sumSquares: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   temporalFeatureInputSuppressed?: boolean;
   temporalFeatureResult?: JunctionTemporalFeatureResult;
@@ -1781,8 +1786,9 @@ function buildJunctionMealFallbackIdentityDisambiguators(input: {
 
 interface JunctionDailyTimeseriesObservationDescriptor {
   metric: string;
-  statistic: "mean" | "min" | "max" | "sum";
+  statistic: "coefficient_of_variation" | "max" | "mean" | "min" | "standard_deviation" | "sum";
   title: string;
+  unit?: string;
 }
 
 interface JunctionDailyTimeseriesDescriptor {
@@ -1966,6 +1972,8 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
       { metric: "glucose", statistic: "mean", title: "Junction glucose average" },
       { metric: "lowest-glucose", statistic: "min", title: "Junction glucose minimum" },
       { metric: "highest-glucose", statistic: "max", title: "Junction glucose maximum" },
+      { metric: "glucose-standard-deviation", statistic: "standard_deviation", title: "Junction glucose standard deviation" },
+      { metric: "glucose-coefficient-of-variation", statistic: "coefficient_of_variation", title: "Junction glucose coefficient of variation", unit: "%" },
     ],
     unit: "mg/dL",
     valuePaths: JUNCTION_GLUCOSE_VALUE_PATHS,
@@ -2612,6 +2620,7 @@ function pushJunctionSparseTimeseriesRecords(
     record: JunctionSparseTimeseriesRecord;
     resourceContext: ResourceContext;
     semanticContentKey: string;
+    timeZone?: string;
     timestamp: ReturnType<typeof resolveRecordTimestamp>;
   }> = [];
 
@@ -2630,32 +2639,28 @@ function pushJunctionSparseTimeseriesRecords(
       continue;
     }
 
-    const record = parseJunctionSparseTimeseriesRecord(entry, resource, descriptor);
-    if (!record) {
+    const parsedRecord = parseJunctionSparseTimeseriesRecord(entry, resource, descriptor);
+    if (!parsedRecord) {
       continue;
     }
 
-    const timestamp = resolveRecordTimestamp(
-      { ...entry, observedAtRaw: record.observedAtRaw },
+    const resolvedTimestamp = resolveJunctionSparseTimeseriesTimestamp({
       context,
-      resourceContext.sourceProviderSlug,
-    );
-    const occurredAt = timestamp.occurredAt ?? timestamp.recordedAt;
-    const dayKey = resolveJunctionTimeseriesAggregateDayKey(
       entry,
-      timestamp,
-      occurredAt,
-      context.defaultTimeZone,
-    );
-    if (!occurredAt || !dayKey) {
+      record: parsedRecord,
+      resource,
+      sourceProviderSlug: resourceContext.sourceProviderSlug,
+    });
+    if (!resolvedTimestamp) {
       continue;
     }
+    const { dayKey, occurredAt, record, timeZone, timestamp } = resolvedTimestamp;
 
     candidates.push({
       dayKey,
       entry,
       identityHash: buildJunctionSparseTimeseriesIdentityHash({
-        record,
+        record: parsedRecord,
         resource,
         resourceContext,
         resourceSlug,
@@ -2673,6 +2678,7 @@ function pushJunctionSparseTimeseriesRecords(
         resourceSlug,
         timestamp,
       }),
+      timeZone,
       timestamp,
     });
   }
@@ -2697,8 +2703,53 @@ function pushJunctionSparseTimeseriesRecords(
       .map(([identityHash]) => identityHash),
   );
   const seenRecordIdentityHashes = new Set<string>();
+  const uniqueCandidates = candidates.filter((candidate) => {
+    if (
+      conflictingProviderIdentityHashes.has(candidate.identityHash)
+      || seenRecordIdentityHashes.has(candidate.identityHash)
+    ) {
+      return false;
+    }
+    seenRecordIdentityHashes.add(candidate.identityHash);
+    return true;
+  });
+  const maximumRecords = resolveJunctionTimeseriesResourcePolicy(resource)
+    ?.maxCanonicalRecordsPerWindow;
+  const retainedCandidates = maximumRecords === undefined
+    ? uniqueCandidates
+    : [...uniqueCandidates]
+        .sort((left, right) =>
+          left.occurredAt.localeCompare(right.occurredAt)
+          || left.identityHash.localeCompare(right.identityHash)
+          || left.semanticContentKey.localeCompare(right.semanticContentKey)
+        )
+        .slice(0, maximumRecords);
 
-  for (const candidate of candidates) {
+  if (maximumRecords !== undefined && uniqueCandidates.length > maximumRecords) {
+    const role = `${baseArtifactRole}:bounded-overflow`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          {
+            schema: "junction.sparse_timeseries_overflow.v1",
+            provider: "junction",
+            resource,
+            validatedRecordCount: uniqueCandidates.length,
+            retainedRecordCount: retainedCandidates.length,
+            droppedRecordCount: uniqueCandidates.length - retainedCandidates.length,
+            status: "bounded_overflow",
+          },
+        ),
+        "timeseries_reading",
+      ),
+    );
+  }
+
+  for (const candidate of retainedCandidates) {
     const {
       dayKey,
       entry,
@@ -2706,16 +2757,14 @@ function pushJunctionSparseTimeseriesRecords(
       occurredAt,
       record,
       resourceContext,
+      timeZone,
       timestamp,
     } = candidate;
-    if (
-      conflictingProviderIdentityHashes.has(identityHash)
-      || seenRecordIdentityHashes.has(identityHash)
-    ) {
-      continue;
-    }
-    seenRecordIdentityHashes.add(identityHash);
-
+    const usesFloatingFallbackTimeZone = isJunctionSparseFloatingFallbackTimeZone({
+      entry,
+      resource,
+      timestamp,
+    });
     const role = `${baseArtifactRole}:${dayKey}:${identityHash}`;
     pushEvidencePart(
       context.evidenceParts,
@@ -2732,12 +2781,13 @@ function pushJunctionSparseTimeseriesRecords(
             sourceProviderSlug: resourceContext.sourceProviderSlug,
             sourceType: resourceContext.origin.sourceType,
             sourceInstanceId: resourceContext.origin.sourceInstanceId,
-            providerRowId: record.providerRowId,
             observedAtRaw: record.observedAtRaw,
-            occurredAt,
+            occurredAt: usesFloatingFallbackTimeZone ? undefined : occurredAt,
             recordedAt: timestamp.recordedAt,
-            startAt: record.startAt,
-            endAt: record.endAt,
+            startAt: usesFloatingFallbackTimeZone ? undefined : record.startAt,
+            endAt: usesFloatingFallbackTimeZone ? undefined : record.endAt,
+            startAtRaw: usesFloatingFallbackTimeZone ? stringId(entry.start) : undefined,
+            endAtRaw: usesFloatingFallbackTimeZone ? stringId(entry.end) : undefined,
             value: record.value,
             unit: record.unit,
             upstreamUnit: record.upstreamUnit,
@@ -2767,7 +2817,11 @@ function pushJunctionSparseTimeseriesRecords(
         dayKey,
         observedAtRaw: record.observedAtRaw,
       }),
-      { normalizerVersion: "junction-sparse-timeseries.v1" },
+      {
+        normalizerVersion: usesFloatingFallbackTimeZone
+          ? JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
+          : "junction-sparse-timeseries.v1",
+      },
     );
 
     if (descriptor.kind === "insulin") {
@@ -2782,6 +2836,7 @@ function pushJunctionSparseTimeseriesRecords(
         occurredAt,
         recordedAt: timestamp.recordedAt,
         dayKey,
+        timeZone,
         source: "device",
         title: descriptor.title,
         tags: insulinTags.length > 0 ? [...new Set(insulinTags)] : undefined,
@@ -2817,6 +2872,7 @@ function pushJunctionSparseTimeseriesRecords(
       occurredAt,
       recordedAt: timestamp.recordedAt,
       dayKey,
+      timeZone,
       source: "device",
       title: descriptor.title,
       tags: alertTag ? [alertTag] : undefined,
@@ -2831,6 +2887,121 @@ function pushJunctionSparseTimeseriesRecords(
       },
     }));
   }
+}
+
+function resolveJunctionSparseTimeseriesTimestamp(input: {
+  context: NormalizationContext;
+  entry: PlainObject;
+  record: JunctionSparseTimeseriesRecord;
+  resource: string;
+  sourceProviderSlug: string;
+}): {
+  dayKey: string;
+  occurredAt: string;
+  record: JunctionSparseTimeseriesRecord;
+  timeZone?: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+} | null {
+  const timestamp = resolveRecordTimestamp(
+    { ...input.entry, observedAtRaw: input.record.observedAtRaw },
+    input.context,
+    input.sourceProviderSlug,
+  );
+  const metabolicInterval = input.resource === "carbohydrates"
+    || input.resource === "insulin_injection";
+  const startRaw = metabolicInterval ? stringId(input.entry.start) : undefined;
+  const endRaw = metabolicInterval ? stringId(input.entry.end) : undefined;
+  const startIsFloating = startRaw
+    ? isJunctionSourceLocalFloatingTimestamp(startRaw, input.sourceProviderSlug)
+    : false;
+  const endIsFloating = endRaw
+    ? isJunctionSourceLocalFloatingTimestamp(endRaw, input.sourceProviderSlug)
+    : false;
+
+  if (metabolicInterval && (startIsFloating || endIsFloating)) {
+    if (startIsFloating !== endIsFloating) {
+      return null;
+    }
+    const explicitTimeZone = normalizeIanaTimeZone(
+      firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
+    );
+    const timeZone = resolveJunctionFloatingTimestampTimeZone(
+      input.entry,
+      input.context.defaultTimeZone,
+    );
+    const usesFallbackTimeZone = explicitTimeZone === null;
+    const floatingStart = startRaw && startIsFloating && timeZone
+      ? resolveFloatingIsoTimestampInTimeZone(startRaw, timeZone)
+      : null;
+    const floatingEnd = endRaw && endIsFloating && timeZone
+      ? resolveFloatingIsoTimestampInTimeZone(endRaw, timeZone)
+      : null;
+    const startAt = startIsFloating
+      ? usesFallbackTimeZone
+        ? normalizeTimestamp(startRaw)
+        : floatingStart?.timestamp
+      : resolveSafeTimestamp(startRaw, input.sourceProviderSlug);
+    const endAt = endIsFloating
+      ? usesFallbackTimeZone
+        ? normalizeTimestamp(endRaw)
+        : floatingEnd?.timestamp
+      : resolveSafeTimestamp(endRaw, input.sourceProviderSlug);
+    if (!startAt || !endAt || Date.parse(endAt) < Date.parse(startAt)) {
+      return null;
+    }
+    const dayKey = usesFallbackTimeZone
+      ? extractIsoDatePrefix(startRaw)
+      : floatingStart?.dayKey ?? resolveJunctionTimeseriesAggregateDayKey(
+          input.entry,
+          timestamp,
+          startAt,
+          input.context.defaultTimeZone,
+        );
+    if (!dayKey) {
+      return null;
+    }
+    return stripUndefined({
+      dayKey,
+      occurredAt: startAt,
+      record: { ...input.record, startAt, endAt },
+      timeZone,
+      timestamp: withTimestampOverride(timestamp, {
+        occurredAt: startAt,
+        dayKey,
+        observedAtRaw: startRaw,
+      }),
+    });
+  }
+
+  const occurredAt = timestamp.occurredAt ?? timestamp.recordedAt;
+  const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+    input.entry,
+    timestamp,
+    occurredAt,
+    input.context.defaultTimeZone,
+  );
+  if (!occurredAt || !dayKey) {
+    return null;
+  }
+  return stripUndefined({
+    dayKey,
+    occurredAt,
+    record: input.record,
+    timeZone: firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
+    timestamp,
+  });
+}
+
+function isJunctionSparseFloatingFallbackTimeZone(input: {
+  entry: PlainObject;
+  resource: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+}): boolean {
+  return (input.resource === "carbohydrates" || input.resource === "insulin_injection")
+    && input.timestamp.timestampSemantics === "floating"
+    && normalizeIanaTimeZone(
+      firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
+    ) === null;
 }
 
 function parseJunctionSparseTimeseriesRecord(
@@ -3302,7 +3473,7 @@ function pushJunctionDailyTimeseriesObservations(
       pushJunctionDailyTimeseriesObservation(context, aggregate, {
         metric: observation.metric,
         title: observation.title,
-        unit: descriptor.unit,
+        unit: observation.unit ?? descriptor.unit,
         value: junctionDailyTimeseriesStatisticValue(aggregate, observation.statistic),
       });
     }
@@ -3327,7 +3498,28 @@ function junctionDailyTimeseriesStatisticValue(
       return aggregate.sum;
     case "mean":
       return aggregate.sum / aggregate.sampleCount;
+    case "standard_deviation":
+      return junctionDailyTimeseriesStandardDeviation(aggregate);
+    case "coefficient_of_variation":
+      return junctionDailyTimeseriesCoefficientOfVariation(aggregate);
   }
+}
+
+function junctionDailyTimeseriesStandardDeviation(
+  aggregate: JunctionDailyTimeseriesAggregate,
+): number {
+  const mean = aggregate.sum / aggregate.sampleCount;
+  return Math.sqrt(Math.max(
+    0,
+    aggregate.sumSquares / aggregate.sampleCount - mean * mean,
+  ));
+}
+
+function junctionDailyTimeseriesCoefficientOfVariation(
+  aggregate: JunctionDailyTimeseriesAggregate,
+): number {
+  const mean = aggregate.sum / aggregate.sampleCount;
+  return mean === 0 ? 0 : junctionDailyTimeseriesStandardDeviation(aggregate) / mean * 100;
 }
 
 function buildJunctionTimeseriesFidelityRecordKey(input: {
@@ -3849,6 +4041,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         resourceContext,
         sampleCount: 1,
         sum: value,
+        sumSquares: value * value,
         timestamp,
         timeZone,
       });
@@ -3865,6 +4058,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         assertJunctionTimeseriesSourceDayBound(fidelityResource, existing.sampleCount);
       }
       existing.sum += value;
+      existing.sumSquares += value * value;
       if (legacyDayKey && legacyDayKey !== dayKey) {
         existing.legacyDayKeys.add(legacyDayKey);
       }
@@ -3939,6 +4133,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
             resourceContext,
             sampleCount: 0,
             sum: 0,
+            sumSquares: 0,
             timestamp,
             timeZone: sourceDay.timeZone,
           };
@@ -4114,6 +4309,18 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             maxValue: aggregate.authoritativeEmptyCalendarSet
               ? undefined
               : roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
+            standardDeviationValue: resource === "glucose"
+                && !aggregate.authoritativeEmptyCalendarSet
+              ? roundJunctionDailyAggregateValue(
+                  junctionDailyTimeseriesStandardDeviation(aggregate),
+                )
+              : undefined,
+            coefficientOfVariationPercent: resource === "glucose"
+                && !aggregate.authoritativeEmptyCalendarSet
+              ? roundJunctionDailyAggregateValue(
+                  junctionDailyTimeseriesCoefficientOfVariation(aggregate),
+                )
+              : undefined,
             sumValue: JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource)?.retainSumValue === true
               && !aggregate.authoritativeEmptyCalendarSet
               ? roundJunctionTimeseriesAggregateValue(resource, aggregate.sum)
@@ -9085,7 +9292,9 @@ function resolveRecordTimestamp(
   const rawObservedAt = firstStringFromPaths(entry, timestampPaths);
   const localCalendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
   const explicitSemantics = firstTimestampSemantics(entry);
-  const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);
+  const hasSourceSpecificFloatingTime = rawObservedAt
+    ? isJunctionSourceLocalFloatingTimestamp(rawObservedAt, sourceProviderSlug)
+    : hasFloatingTimestampSourceProvider(sourceProviderSlug);
   const timestampSemantics = hasSourceSpecificFloatingTime
     ? "floating"
     : explicitSemantics ?? inferTimestampSemantics(rawObservedAt);
@@ -9566,10 +9775,22 @@ function normalizeTimestamp(value: unknown): string | undefined {
   return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
 }
 
+function resolveJunctionFloatingTimestampTimeZone(
+  entry: PlainObject,
+  defaultTimeZone: string | undefined,
+): string | undefined {
+  return normalizeIanaTimeZone(
+    firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+  ) ?? normalizeIanaTimeZone(defaultTimeZone) ?? undefined;
+}
+
 function resolveSafeTimestamp(value: unknown, sourceProviderSlug?: string): string | undefined {
   const raw = typeof value === "string" ? value.trim() : value;
 
-  if (typeof raw === "string" && hasFloatingTimestampSourceProvider(sourceProviderSlug)) {
+  if (
+    typeof raw === "string"
+    && isJunctionSourceLocalFloatingTimestamp(raw, sourceProviderSlug)
+  ) {
     return undefined;
   }
 
@@ -9583,6 +9804,17 @@ function resolveSafeTimestamp(value: unknown, sourceProviderSlug?: string): stri
 function hasFloatingTimestampSourceProvider(sourceProviderSlug: string | undefined): boolean {
   const normalized = normalizeJunctionSourceProviderSlug(sourceProviderSlug);
   return normalized ? FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS.has(normalized) : false;
+}
+
+function isJunctionSourceLocalFloatingTimestamp(
+  value: string,
+  sourceProviderSlug: string | undefined,
+): boolean {
+  if (!hasFloatingTimestampSourceProvider(sourceProviderSlug)) {
+    return false;
+  }
+  const semantics = inferTimestampSemantics(value);
+  return semantics === "floating" || /(?:z|[+-]00:?00)$/iu.test(value.trim());
 }
 
 function inferTimestampSemantics(value: string | undefined): TimestampSemantics | undefined {
