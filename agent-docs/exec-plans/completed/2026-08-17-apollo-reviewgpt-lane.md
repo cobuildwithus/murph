@@ -1,6 +1,6 @@
 # Add the Apollo ReviewGPT browser lane
 
-Status: active
+Status: completed
 Created: 2026-08-17
 Updated: 2026-08-17
 
@@ -81,3 +81,4 @@ Updated: 2026-08-17
   visible-window launch, and live CDP `9454` proof.
 - Privacy-safe diff review, preliminary coverage ReviewGPT, required CI, and
   current-base merge-tree proof.
+Completed: 2026-08-17
