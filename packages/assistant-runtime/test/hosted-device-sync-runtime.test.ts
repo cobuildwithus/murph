@@ -13351,16 +13351,21 @@ describe("hosted device-sync runtime", () => {
         && record.metric.startsWith("stress-")
         && record.metric !== "stress-level"
       ), true);
+      for (let ordinaryDrain = 0; ordinaryDrain < 10; ordinaryDrain += 1) {
+        const queuedContinuation = readJobsForAccount(service, localAccountId).find((job) =>
+          job.kind === "reconcile" && job.status === "queued"
+        );
+        if (queuedContinuation === undefined) {
+          break;
+        }
+        const drained = await service.runWorkerOnce();
+        assert.equal(drained?.kind, "reconcile");
+      }
+      const ordinaryPopulated = await liveRecords();
+      assert.equal(ordinaryPopulated.some((record) => eventHasMetric(record, "stress-level")), true);
       assert.equal((await service.runWorkerOnce())?.kind, "resource");
       currentNow = new Date(Date.parse(initialNow) + 1).toISOString();
       assert.equal((await service.runWorkerOnce())?.kind, "resource");
-      for (let ordinaryDrain = 0; ordinaryDrain < 10; ordinaryDrain += 1) {
-        const drained = await service.runWorkerOnce();
-        if (drained === null) {
-          break;
-        }
-        assert.equal(drained.kind, "reconcile");
-      }
       const populated = await liveRecords();
       assert.equal(populated.some((record) => eventHasMetric(record, "stress-level")), true);
       await rebuildQueryProjection(vaultRoot);
@@ -13973,11 +13978,13 @@ describe("hosted device-sync runtime", () => {
       );
       const yieldedJobs = readJobsForAccount(service, localAccountId);
       assert.equal(yieldedJobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length, 1);
+      const retainedTemporalJobs = yieldedJobs.filter((job) =>
+        job.kind === "resource" && job.status === "queued"
+      );
+      assert.ok(retainedTemporalJobs.length > 0);
+      assert.equal(retainedTemporalJobs.every((job) => job.priority === 30), true);
 
       failurePhase = "recovered";
-      assert.equal((await service.runWorkerOnce())?.kind, "resource");
-      await assert.rejects(readCanonicalEventRecords(vaultRoot), /VAULT_FILE_MISSING|Missing required file/u);
-
       for (let ordinaryDrain = 0; ordinaryDrain < 10; ordinaryDrain += 1) {
         const queuedContinuation = readJobsForAccount(service, localAccountId).find((job) =>
           job.kind === "reconcile" && job.status === "queued"
@@ -14025,6 +14032,9 @@ describe("hosted device-sync runtime", () => {
       failurePhase = "recovered";
       assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
       assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      for (const _retainedTemporalJob of retainedTemporalJobs) {
+        assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      }
       const recoveredRecords = await readCanonicalEventRecords(vaultRoot);
       for (const firstRecord of firstSpo2) {
         assert.deepEqual(
@@ -14046,8 +14056,10 @@ describe("hosted device-sync runtime", () => {
       assert.equal(recoveredRecords.filter((record) => eventHasMetric(record, "water")).length, 2);
       // The retained-lease checkpoint prevents the already-terminal stress
       // resource from replaying after the later caffeine request is aborted.
+      // The separately retained caffeine resource still executes once after
+      // its ordinary retry and converges through the stable canonical id.
       assert.equal(stressRequestCount, 3);
-      assert.equal(caffeineRequestCount, 2);
+      assert.equal(caffeineRequestCount, 3);
       assert.equal(waterRequestCount, 1);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
