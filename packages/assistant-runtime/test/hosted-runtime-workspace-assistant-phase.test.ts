@@ -2395,6 +2395,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         errorCode: "runtime_error",
         errorMessagePresent: true,
+        failureEventOrigin: "idle_maintenance",
         idleMaintenanceFailed: true,
         retryAt: "2026-04-27T00:00:30.000Z",
         safeErrorMessage: "Hosted execution runtime failed.",

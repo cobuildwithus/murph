@@ -31,10 +31,15 @@ export interface JunctionElectrocardiogramVoltageReductionLimits {
   readonly maxSamples: number;
 }
 
+export type JunctionWorkoutStreamCandidateAliasSource =
+  | (typeof WORKOUT_IDS)[number]
+  | "multiple_equal";
+
 export interface JunctionWorkoutStreamCandidate {
   readonly identity: string;
   readonly summary: PlainObject;
   readonly workoutId: string;
+  readonly workoutIdAliasSource: JunctionWorkoutStreamCandidateAliasSource;
 }
 
 export interface JunctionWorkoutStreamReductionInput {
@@ -99,14 +104,18 @@ export function selectJunctionWorkoutStreamCandidates(
   records.forEach((value, index) => {
     const summary = record(value, `workout index ${index}`);
     const workoutId = consistentId(summary, WORKOUT_IDS, "workout index");
+    const workoutIdAliases = WORKOUT_IDS.filter((path) => firstString(summary, [path]));
+    const workoutIdAliasSource = workoutIdAliases.length > 1
+      ? "multiple_equal"
+      : workoutIdAliases[0];
     const provider = resolveJunctionOrigin(summary).sourceProviderSlug;
-    if (!workoutId || !provider) invalid("workout index lacked identity");
+    if (!workoutId || !provider || !workoutIdAliasSource) invalid("workout index lacked identity");
     const key = buildJunctionBoundedFeatureIdentity("workout_stream", summary);
     const existing = selected.get(key);
     if (existing && stableStringify(existing.summary) !== stableStringify(summary)) {
       invalid(`workout index contained conflicting workout ${workoutId}`);
     }
-    selected.set(key, { identity: key, summary, workoutId });
+    selected.set(key, { identity: key, summary, workoutId, workoutIdAliasSource });
   });
   if (selected.size > maxWorkouts) {
     invalid(`workout index exceeded ${maxWorkouts} workouts`);

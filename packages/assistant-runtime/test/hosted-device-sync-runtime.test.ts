@@ -5679,7 +5679,7 @@ describe("hosted device-sync runtime", () => {
         store.claimDueJob("lease-expired-worker", "2026-04-04T10:00:00.000Z", 60_000)?.id,
         retainedJob.id,
       );
-      assert.equal(
+      assert.deepEqual(
         store.failJobIfOwned(
           retainedJob.id,
           "lease-expired-worker",
@@ -5689,7 +5689,12 @@ describe("hosted device-sync runtime", () => {
           null,
           false,
         ),
-        true,
+        {
+          attempts: 1,
+          disposition: "dead",
+          maxAttempts: 1,
+          remainingAttempts: 0,
+        },
       );
       assert.equal(store.getJobById(retainedJob.id)?.status, "dead");
       state.pendingDirtyPayloadJobs.push({
@@ -10329,7 +10334,7 @@ describe("hosted device-sync runtime", () => {
       const claimed = firstStore.claimDueJob("worker_exact_recovery", occurredAt, 60_000);
       assert.ok(claimed);
       assert.equal(claimed.attempts, 1);
-      assert.equal(firstStore.failJobIfOwned(
+      assert.deepEqual(firstStore.failJobIfOwned(
         claimed.id,
         "worker_exact_recovery",
         occurredAt,
@@ -10337,7 +10342,12 @@ describe("hosted device-sync runtime", () => {
         "retryable",
         retryAt,
         true,
-      ), true);
+      ), {
+        attempts: 1,
+        disposition: "queued",
+        maxAttempts: 5,
+        remainingAttempts: 4,
+      });
 
       const recovery = resolveHostedDeviceSyncWakeRecovery({
         service: firstService,
