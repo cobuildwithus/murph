@@ -162,13 +162,13 @@ export function inspectJunctionAppleHealthConnection(raw) {
   return true;
 }
 
-export async function proveRunPostconditions(startedAtMs) {
+export async function proveRunPostconditions(startedAtMs, junctionClientUserIdNamespace) {
   const privy = await findPrivyTestUser();
   if (!privy) throw new Error("Privy E2E principal was not created by the native journey.");
   inspectFreshPrivyPrincipal(privy, { observedAtMs: Date.now(), startedAtMs });
   console.log("::notice::native-ios-e2e stage=privy_postcondition result=success");
 
-  const config = e2eIdentityConfig();
+  const config = e2eIdentityConfig(junctionClientUserIdNamespace);
   const rawMember = await readDedicatedMemberRecord(config);
   if (!rawMember) throw new Error("Native E2E journey did not create the dedicated hosted member.");
   const member = inspectDedicatedMemberIdentity(rawMember, { testPhone: config.testPhone });
@@ -178,8 +178,8 @@ export async function proveRunPostconditions(startedAtMs) {
   console.log("::notice::native-ios-e2e stage=junction_apple_health_postcondition result=success");
 }
 
-export async function cleanupE2e() {
-  const config = e2eCleanupConfig();
+export async function cleanupE2e(junctionClientUserIdNamespace) {
+  const config = e2eCleanupConfig(junctionClientUserIdNamespace);
   const junction = await listNamespacedJunctionUser(config);
   if (junction) await deleteJunctionUser(junction.userId, config.junctionApiKey);
   if (await listNamespacedJunctionUser(config)) {
@@ -199,7 +199,7 @@ export async function cleanupE2e() {
   console.log(`::notice::native-ios-e2e stage=privy_cleanup result=${privy ? "success" : "absent"}`);
 }
 
-function e2eCleanupConfig() {
+function e2eCleanupConfig(junctionClientUserIdNamespace) {
   const directDatabaseUrl = requiredEnv("NATIVE_IOS_E2E_DIRECT_DATABASE_URL");
   const junctionTeamId = requiredEnv("NATIVE_IOS_E2E_JUNCTION_TEAM_ID").toLowerCase();
   assertUuid(junctionTeamId, "NATIVE_IOS_E2E_JUNCTION_TEAM_ID");
@@ -211,15 +211,15 @@ function e2eCleanupConfig() {
     directDatabaseUrl,
     junctionApiKey: requiredEnv("NATIVE_IOS_E2E_JUNCTION_API_KEY"),
     junctionClientUserIdNamespace: normalizeJunctionClientUserIdNamespace(
-      requiredEnv("NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_NAMESPACE"),
+      junctionClientUserIdNamespace,
     ),
     junctionTeamId,
   };
 }
 
-function e2eIdentityConfig() {
+function e2eIdentityConfig(junctionClientUserIdNamespace) {
   return {
-    ...e2eCleanupConfig(),
+    ...e2eCleanupConfig(junctionClientUserIdNamespace),
     junctionClientUserIdSecret: requiredEnv("NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET"),
     testPhone: requireE164(requiredEnv("NATIVE_IOS_E2E_PRIVY_TEST_PHONE")),
   };
@@ -407,7 +407,7 @@ function assertUuid(value, label) {
   if (!UUID_PATTERN.test(value)) throw new Error(`${label} must be a UUID.`);
 }
 
-function normalizeJunctionClientUserIdNamespace(namespace) {
+export function normalizeJunctionClientUserIdNamespace(namespace) {
   const normalizedNamespace = namespace.trim();
   if (!normalizedNamespace) return "";
   if (!/^[a-z][a-z0-9]{0,7}$/u.test(normalizedNamespace)) {

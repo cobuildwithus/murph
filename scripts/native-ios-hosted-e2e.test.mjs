@@ -36,6 +36,7 @@ import {
   inspectRetirableE2eDeployment,
   inspectVercelCustomEnvironment,
   inspectVercelDeployment,
+  inspectVercelJunctionNamespaceVariable,
 } from "./native-ios-hosted-e2e-vercel.mjs";
 
 const SHA = "a".repeat(40);
@@ -122,6 +123,63 @@ test("Vercel custom environment proof binds the dedicated id and slug", () => {
       ...mutation,
     }, { customEnvironmentId: "env_e2e" }), /dedicated E2E target/u);
   }
+});
+
+test("Vercel owns the one Junction namespace read by cleanup and the candidate", async () => {
+  assert.equal(inspectVercelJunctionNamespaceVariable({
+    customEnvironmentIds: ["env_e2e"],
+    decrypted: true,
+    id: "env_var_e2e_namespace",
+    key: "JUNCTION_CLIENT_USER_ID_NAMESPACE",
+    target: ["preview"],
+    type: "plain",
+    value: "e2e",
+  }, {
+    customEnvironmentId: "env_e2e",
+    environmentVariableId: "env_var_e2e_namespace",
+  }), "e2e");
+  for (const mutation of [
+    { id: "env_var_other" },
+    { key: "JUNCTION_CLIENT_USER_ID_SECRET" },
+    { type: "sensitive" },
+    { decrypted: false },
+    { target: ["production"] },
+    { customEnvironmentIds: ["env_other"] },
+    { value: "" },
+  ]) {
+    assert.throws(() => inspectVercelJunctionNamespaceVariable({
+      customEnvironmentIds: ["env_e2e"],
+      decrypted: true,
+      id: "env_var_e2e_namespace",
+      key: "JUNCTION_CLIENT_USER_ID_NAMESPACE",
+      target: ["preview"],
+      type: "plain",
+      value: "e2e",
+      ...mutation,
+    }, {
+      customEnvironmentId: "env_e2e",
+      environmentVariableId: "env_var_e2e_namespace",
+    }), /Junction namespace variable/u);
+  }
+
+  const workflow = await readFile(
+    path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID/u);
+  assert.doesNotMatch(workflow, /NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_NAMESPACE/u);
+
+  const controller = await readFile(
+    path.join(REPO_ROOT, "scripts", "native-ios-hosted-e2e.mjs"),
+    "utf8",
+  );
+  const runPrStart = controller.indexOf("async function runPr(args)");
+  const namespaceRead = controller.indexOf("readE2eJunctionClientUserIdNamespace()", runPrStart);
+  const lifecycleStart = controller.indexOf("await runPrLifecycle", runPrStart);
+  assert.ok(
+    runPrStart >= 0 && namespaceRead > runPrStart && lifecycleStart > namespaceRead,
+    "the Vercel namespace preflight must finish before cleanup, retirement, deployment, or dispatch",
+  );
 });
 
 test("Vercel proof binds project, custom environment, ref, and exact PR SHA", () => {
@@ -380,9 +438,9 @@ test("cleanup ownership enumerates the namespace before and after deletion", asy
     path.join(REPO_ROOT, "scripts", "native-ios-hosted-e2e-identity.mjs"),
     "utf8",
   );
-  const cleanupStart = identitySource.indexOf("export async function cleanupE2e()");
-  const cleanupConfigStart = identitySource.indexOf("function e2eCleanupConfig()", cleanupStart);
-  const identityConfigStart = identitySource.indexOf("function e2eIdentityConfig()", cleanupConfigStart);
+  const cleanupStart = identitySource.indexOf("export async function cleanupE2e(junctionClientUserIdNamespace)");
+  const cleanupConfigStart = identitySource.indexOf("function e2eCleanupConfig(junctionClientUserIdNamespace)", cleanupStart);
+  const identityConfigStart = identitySource.indexOf("function e2eIdentityConfig(junctionClientUserIdNamespace)", cleanupConfigStart);
   const cleanupSource = identitySource.slice(cleanupStart, cleanupConfigStart);
   const cleanupConfigSource = identitySource.slice(cleanupConfigStart, identityConfigStart);
   assert.ok(cleanupStart >= 0 && cleanupConfigStart > cleanupStart && identityConfigStart > cleanupConfigStart);
@@ -402,7 +460,7 @@ test("cleanup ownership enumerates the namespace before and after deletion", asy
     cleanupConfigSource,
     /NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET|NATIVE_IOS_E2E_PRIVY_TEST_PHONE/u,
   );
-  assert.match(
+  assert.doesNotMatch(
     cleanupConfigSource,
     /NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
   );
