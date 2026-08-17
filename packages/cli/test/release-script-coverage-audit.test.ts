@@ -1718,6 +1718,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('at least 3,000 lines')
     expect(prDeepReviewPrompt).toContain('This is neither an automatic merge rejection')
     expect(prDeepReviewPrompt).toContain('do not emit a standalone Invariant Violation')
+    expect(prDeepReviewPrompt).toMatch(
+      /For this category, only report a finding when merging the PR would\s+cause concrete, realistically reachable, material production harm/u,
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /A contract\s+mismatch or theoretical concern is evidence, not a finding, unless it\s+establishes that harm/u,
+    )
     expect(prDeepReviewPrompt).toContain('current scale, event volume,')
     expect(prDeepReviewPrompt).toContain('never assume hypothetical future or internet')
     expect(prDeepReviewPrompt).toMatch(
@@ -1744,8 +1750,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain(
       'Every material behavior or ownership change is necessary',
     )
-    expect(prDeepReviewPrompt).toContain(
-      'Every non-obvious affected surface is disclosed in the applicable',
+    expect(prDeepReviewPrompt).toMatch(
+      /Every non-obvious affected surface is(?: also)?\s+disclosed/u,
     )
     expect(prDeepReviewPrompt).toContain(
       'applicable frontend and Product UX lenses own rendered proof',
@@ -1856,7 +1862,7 @@ describe('monorepo release flow coverage audit', () => {
       'A different-lane retry must use a fresh',
     )
     expect(prReviewGptLoop).toContain('zero accepted findings')
-    expect(prReviewGptLoop).toContain('non-obvious surface is')
+    expect(prReviewGptLoop).toMatch(/non-obvious\s+affected\s+surfaces/iu)
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
     expect(prReviewGptLoop).toContain('disclosure-only finding')
     expect(prReviewGptLoop).toContain('retry the same substantive round number')
@@ -1916,8 +1922,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain(
       'Prompt-primary PRs still run the preliminary specialist prompt',
     )
-    expect(agentsGuide).toContain(
-      'One preliminary `completion-specialists` ReviewGPT pass applies',
+    expect(agentsGuide).toMatch(
+      /One preliminary `completion-specialists` ReviewGPT pass\s+applies the relevant Product UX, prompt, frontend, and coverage lenses together/u,
     )
     expect(agentWorkflowRouting).toContain(
       'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
@@ -2025,8 +2031,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).not.toContain(
       'User experience (when applicable)',
     )
-    expect(completionWorkflow).toContain('affected people, material')
-    expect(completionWorkflow).toContain('difference from the approved plan')
+    expect(prDeepReviewPrompt).toContain('expected timing class and longest')
+    expect(prDeepReviewPrompt).toContain(
+      'without requiring an unrelated new inbound action',
+    )
     expect(completionWorkflow).toContain('direct journey proof')
     expect(completionWorkflow).toContain('Add a **Risks** section only when')
     expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
