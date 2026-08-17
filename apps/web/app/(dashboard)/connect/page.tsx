@@ -1,9 +1,8 @@
 import ConnectPageContent, {
   type ConnectPageSearchParams,
-  metadata,
 } from "./connect-page-content";
 
-export { metadata };
+export { metadata } from "./connect-page-metadata";
 
 export default function ConnectPage({
   searchParams,

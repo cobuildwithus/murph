@@ -6,9 +6,14 @@ import {
   workoutTemplateSchema,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  deriveWorkoutActionBinding,
+  deriveWorkoutSetRemovalBinding,
+} from '@murphai/operator-config/workout-action-binding'
 
 import {
   buildLiveWorkoutSessionFromTemplate,
+  buildLiveWorkoutCardEditor,
   hasLoggedWorkoutSet,
   isActiveLiveWorkout,
   LIVE_WORKOUT_SOURCE_APP,
@@ -21,6 +26,335 @@ import {
 } from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
+  test('projects exact editable field families from canonical set state', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [
+        {
+          name: 'Bench press',
+          order: 1,
+          mode: 'weight_reps',
+          unitOverride: 'lb',
+          sets: [
+            { order: 1, reps: 8 },
+            { order: 2, weight: 0, weightUnit: 'kg' },
+            { order: 3 },
+          ],
+        },
+        {
+          name: 'Push-up',
+          order: 2,
+          mode: 'bodyweight',
+          sets: [{ note: 'Slow tempo', order: 1 }],
+        },
+      ],
+    })
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [
+        {
+          name: 'Bench press',
+          sets: [
+            { status: 'completed' as const, target: null, actual: 'old' },
+            { status: 'completed' as const, target: null, actual: 'old' },
+            { status: 'pending' as const, target: '185 lb × 8', actual: null },
+          ],
+        },
+        {
+          name: 'Push-up',
+          sets: [{ status: 'completed' as const, target: null, actual: 'old' }],
+        },
+      ],
+    }
+
+    assert.deepEqual(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), {
+      editor: {
+        actionBinding: deriveWorkoutActionBinding('evt_test_workout', workout),
+        version: 1,
+        setRemovalBinding: deriveWorkoutSetRemovalBinding(
+          'evt_test_workout',
+          workout.exercises,
+        ),
+        exercises: [
+          {
+            unitOverride: 'lb',
+            sets: [
+              {
+                logged: true,
+                result: {
+                  kind: 'weight_reps',
+                  reps: 8,
+                  weight: null,
+                  weightUnit: null,
+                },
+              },
+              {
+                logged: true,
+                result: {
+                  kind: 'weight_reps',
+                  reps: null,
+                  weight: 0,
+                  weightUnit: 'kg',
+                },
+              },
+              { logged: false, result: null },
+            ],
+          },
+          {
+            unitOverride: null,
+            sets: [{
+              logged: true,
+              result: { kind: 'note', note: 'Slow tempo' },
+            }],
+          },
+        ],
+      },
+      workout: {
+        version: 1,
+        state: 'active',
+        exercises: [
+          {
+            name: 'Bench press',
+            sets: [
+              { status: 'completed', target: null, actual: '8 reps' },
+              { status: 'completed', target: null, actual: '0 kg' },
+              { status: 'pending', target: '185 lb × 8', actual: null },
+            ],
+          },
+          {
+            name: 'Push-up',
+            sets: [{ status: 'completed', target: null, actual: 'Slow tempo' }],
+          },
+        ],
+      },
+    })
+  })
+
+  test('keeps hidden canonical notes out of the editable projection', () => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Plank',
+        sets: [{ status: 'completed' as const, target: null, actual: 'Logged' }],
+      }],
+    }
+    const workoutForNote = (note: string) => workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        name: 'Plank',
+        order: 1,
+        sets: [{ note, order: 1 }],
+      }],
+    })
+
+    assert.deepEqual(
+      buildLiveWorkoutCardEditor({
+        presentation,
+        workout: workoutForNote('n'.repeat(40)),
+        workoutId: 'evt_test_workout',
+      })?.editor.exercises[0]?.sets[0]?.result,
+      { kind: 'note', note: 'n'.repeat(40) },
+    )
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout: workoutForNote('n'.repeat(41)),
+      workoutId: 'evt_test_workout',
+    }), null)
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout: workoutForNote('n'.repeat(400)),
+      workoutId: 'evt_test_workout',
+    }), null)
+  })
+
+  test('changes the editor action binding after a member action', () => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Push-up',
+        sets: [{ status: 'pending' as const, target: null, actual: null }],
+      }],
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      lastMemberActionId: '2f1c1fdc-c7b0-4d90-b902-8e6295959243',
+      exercises: [{
+        name: 'Push-up',
+        order: 1,
+        sets: [{ order: 1 }],
+      }],
+    })
+    const earlierWorkout = structuredClone(workout)
+    delete earlierWorkout.lastMemberActionId
+
+    assert.equal(
+      buildLiveWorkoutCardEditor({
+        presentation,
+        workout,
+        workoutId: 'evt_test_workout',
+      })?.editor.actionBinding,
+      deriveWorkoutActionBinding(
+        'evt_test_workout',
+        workout,
+      ),
+    )
+    assert.notEqual(
+      deriveWorkoutActionBinding('evt_test_workout', earlierWorkout),
+      deriveWorkoutActionBinding(
+        'evt_test_workout',
+        workout,
+      ),
+    )
+  })
+
+  test('keeps coordinate-indistinguishable duplicate exercises on the read-only card', () => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [8, 12].map((reps) => ({
+        name: 'Single-arm row',
+        sets: [{
+          status: 'completed' as const,
+          target: null,
+          actual: `${reps} reps`,
+        }],
+      })),
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [8, 12].map((reps, index) => ({
+        mode: 'bodyweight' as const,
+        name: 'Single-arm row',
+        order: index + 1,
+        sets: [{ order: 1, reps }],
+      })),
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
+
+    const disambiguated = structuredClone(workout)
+    disambiguated.exercises[0]!.groupId = 'left'
+    disambiguated.exercises[1]!.groupId = 'right'
+    assert.notEqual(buildLiveWorkoutCardEditor({
+      presentation,
+      workout: disambiguated,
+      workoutId: 'evt_test_workout',
+    }), null)
+  })
+
+  test.each([
+    { label: 'duration', set: { durationSeconds: 60 } },
+    {
+      label: 'distance and duration',
+      set: { distanceMeters: 500, durationSeconds: 120 },
+    },
+    { label: 'RPE', set: { rpe: 8 } },
+    { label: 'bodyweight', set: { bodyweightKg: 80, reps: 8 } },
+    { label: 'assisted bodyweight', set: { assistanceKg: 20, reps: 8 } },
+    { label: 'weighted bodyweight', set: { addedWeightKg: 10, reps: 8 } },
+    { label: 'reps with note', set: { note: 'Slow tempo', reps: 8 } },
+    { label: 'note with set unit', set: { note: 'Slow tempo', weightUnit: 'kg' as const } },
+    { label: 'weight and reps with RPE', set: { reps: 8, rpe: 8, weight: 100 } },
+  ])('keeps a canonical $label result on the read-only card', ({ set }) => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Exercise',
+        sets: [{ status: 'completed' as const, target: null, actual: 'Exact result' }],
+      }],
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        name: 'Exercise',
+        order: 1,
+        sets: [{ ...set, order: 1 }],
+      }],
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
+    assert.equal(presentation.exercises[0]?.sets[0]?.actual, 'Exact result')
+  })
+
+  test('keeps a pending set with an unprojected unit on the read-only card', () => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Exercise',
+        sets: [{ status: 'pending' as const, target: '8 reps', actual: null }],
+      }],
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        name: 'Exercise',
+        order: 1,
+        sets: [{ order: 1, weightUnit: 'kg' }],
+      }],
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
+  })
+
+  test.each([
+    'assisted_bodyweight',
+    'weighted_bodyweight',
+    'duration',
+    'cardio',
+  ] as const)('keeps a pending %s exercise on the read-only card', (mode) => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Exercise',
+        sets: [{ status: 'pending' as const, target: null, actual: null }],
+      }],
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        mode,
+        name: 'Exercise',
+        order: 1,
+        sets: [{ order: 1 }],
+      }],
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
+  })
+
   test('starts saved routines as active sessions with unlogged placeholders', () => {
     const template = workoutTemplateSchema.parse({
       routineNote: 'Push day',

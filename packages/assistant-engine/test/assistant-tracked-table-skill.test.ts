@@ -89,6 +89,9 @@ describe('assistant tracked workout table skill', () => {
     expect(matches[0]?.triggerHint).toContain('structured tracker')
     expect(matches[0]?.triggerHint).toContain('live workout log')
     expect(matches[0]?.triggerHint).toContain('start or resume a live workout')
+    expect(matches[0]?.triggerHint).toContain(
+      'continues a live-workout exchange with a short follow-up',
+    )
     expect(matches[0]?.triggerHint).toContain('updated/refreshed table')
   })
 
@@ -103,6 +106,9 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(strengthSkill).toContain('put a workout log in a table')
     expect(strengthSkill).toContain('start or resume a canonical live workout')
+    expect(strengthSkill).toContain(
+      'continues one with a short follow-up',
+    )
     expect(strengthSkill).toContain('instead of Markdown table syntax')
   })
 
@@ -115,6 +121,7 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('vault-cli workout start')
     expect(skill).toContain('vault-cli workout active')
     expect(skill).toContain('vault-cli workout exercise add')
+    expect(skill).toContain('[--sets <n>]')
     expect(skill).toContain('vault-cli workout set log')
     expect(skill).toContain('vault-cli workout set clear')
     expect(skill).toContain('vault-cli workout finish')
@@ -211,7 +218,58 @@ describe('assistant tracked workout table skill', () => {
       'any claimed planned targets cannot be verified from their matching format',
     )
     expect(skill).toContain(
-      'the bounded card contract cannot represent the workout',
+      "The card tool's validation of the actual encoded envelope is authoritative",
+    )
+    expect(skill).toContain(
+      'Never ask the member to delete, merge, or simplify canonical workout data merely to fit the presentation',
+    )
+    expect(skill).toContain(
+      "the complete card is rejected by the card tool's actual encoded-envelope validation",
+    )
+    expect(skill).toContain(
+      'Do not preempt that validation from an estimated exercise or set count',
+    )
+  })
+
+  it('keeps bare acknowledgements from advancing or inventing a workout set', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill).toContain(
+      'A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion',
+    )
+    expect(skill).toContain(
+      'never advance to another set from that acknowledgement',
+    )
+    expect(skill).toContain(
+      'Keep the last set coordinate the member explicitly identified',
+    )
+    expect(skill).toContain(
+      'Do not start a workout to reconcile a prior assistant claim or confirmation',
+    )
+    expect(skill).toContain(
+      'do not claim that any set was saved',
+    )
+    expect(skill).not.toContain('or clearly began a workout')
+    expect(skill).toContain(
+      'the member accepts the exact bounded recovery offer below',
+    )
+    expect(skill).toContain(
+      'create only enough pending set coordinates through the named set',
+    )
+    expect(skill).toContain(
+      'the same response must then ask one bounded recovery question',
+    )
+    expect(skill).toContain(
+      'Do not stop after the no-active statement',
+    )
+    expect(skill).toContain(
+      'A contextual affirmative answer to that exact offer authorizes only the proposed start and exact set write',
+    )
+    expect(skill).toContain(
+      'If an active workout now exists, do not retarget the accepted recovery',
     )
   })
 

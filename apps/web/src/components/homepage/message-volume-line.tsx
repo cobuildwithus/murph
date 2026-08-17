@@ -8,10 +8,18 @@ import {
   MESSAGE_VOLUME_ENDPOINT,
 } from "@/src/lib/message-volume";
 
-export function useMessageVolumeTotal(): number {
+export function useMessageVolumeTotal({
+  enabled = true,
+}: {
+  enabled?: boolean;
+} = {}): number {
   const [total, setTotal] = useState(HOSTED_MESSAGE_VOLUME_BASE);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     let cancelled = false;
     void fetch(MESSAGE_VOLUME_ENDPOINT)
       .then((response) => (response.ok ? response.json() : null))
@@ -26,13 +34,17 @@ export function useMessageVolumeTotal(): number {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
-  return total;
+  return enabled ? total : HOSTED_MESSAGE_VOLUME_BASE;
 }
 
-export function MessageVolumeCount() {
-  const total = useMessageVolumeTotal();
+export function MessageVolumeCount({
+  enabled = true,
+}: {
+  enabled?: boolean;
+} = {}) {
+  const total = useMessageVolumeTotal({ enabled });
 
   return <>{formatMessageVolume(total)}</>;
 }

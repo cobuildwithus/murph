@@ -26,7 +26,7 @@ export default async function Page({
   return (
     <>
       <DesignPage activeTab={activeTab} />
-      <SiteFooter />
+      <SiteFooter vitalsMode="synthetic" />
     </>
   );
 }

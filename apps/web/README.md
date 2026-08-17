@@ -447,6 +447,38 @@ build; a 30-second caller does not remain compatible with the 40-second web
 deadline, so do not roll Cloudflare back below 45 seconds while that web build
 is active.
 
+The encrypted phone-call result reader accepts an optional bounded completion
+policy as a consumer-first schema release. This reader-only release must deploy
+before any Web version writes that policy. The reader-only release continues to
+emit the legacy result shape; it is a compatible consumer prerequisite, not a
+safe active producer after writer activation. After the production alias serves
+this reader, the first writer cutover must pause new phone-call admission and
+wait the platform's full configured start-route lifetime so every previously
+admitted request either exits or exposes its durable call and Workflow. Keep
+analyzed-result webhook ingress live while every result-capable provider call
+and every phone-call reconciliation Workflow pinned to any pre-writer
+deployment, including this reader-only release, settles. Then freeze that result
+ingress, wait its full configured route lifetime, and re-prove zero provider
+calls, pre-writer Workflows, or other legacy-producer executions before the
+writer activates. Resume ingress and admission only after that reader-plus-writer
+release is current. Vercel Workflow runs retain the deployment that started
+them, so elapsed route lifetime alone is not Workflow drain proof. No execution
+capable of invoking a legacy result producer may survive the first policy write.
+Tracked and generationless manual direct transfers share the later writer;
+group normalization disables transfer authority and is outside this policy
+evolution. After writer activation, the first release that both reads and
+writes the durable policy is the operational rollback floor. A lower release
+may consume existing policy-bearing results, but must not produce new transfer
+results. An emergency below-floor rollback must pause new phone-call admission
+and drain the full configured start-route lifetime first. Keep analyzed-result
+webhook ingress live while every result-capable provider call and
+deployment-pinned reconciliation run settles. Then freeze and drain result
+ingress, re-prove zero legacy-producer execution, and transition. A zero count
+of non-null
+result-notification-channel rows proves only
+generation-state compatibility; it cannot prove encrypted-result compatibility.
+Prefer a compatible forward deployment.
+
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
@@ -1597,11 +1629,12 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 The production build launches the parent Next process explicitly through Node
 with `--max-old-space-size=1024` while appending
 `--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
-precedence in the parent. Next 16.3 reconstructs its non-isolated TypeScript
-worker options from the parent arguments followed by `NODE_OPTIONS`, so the
-mandatory generated-contract validation receives the 3 GiB limit. Next removes
-that option from its isolated static workers. The existing caller options are
-preserved. The shared script is used by the Vercel package build and the CI
+precedence in the parent. Next 16.3 reconstructs non-isolated child options
+from the parent arguments followed by `NODE_OPTIONS`, so the sequential Webpack
+compiler workers receive the 3 GiB limit and the later generated-contract
+TypeScript validation child inherits the same limit. Next removes that option
+from its isolated static workers. The existing caller options are preserved.
+The shared script is used by the Vercel package build and the CI
 memory-observation lane. This bounds the compile parent without starving the
 later validation worker or changing the compiled application. Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
@@ -1615,10 +1648,31 @@ from selecting the isolated build worker automatically. The hosted local-
 development wrapper remains on Turbopack and rejects an explicit Webpack flag.
 The production runner also owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
-compilation and writes the epoch only after Next succeeds. This gives the
-Turbopack-to-Webpack rollout one cold build without permanently disabling warm
-Webpack caching; bump the epoch only when a proven compiler/cache transition
-requires another invalidation.
+compilation and writes the epoch only after Next succeeds. Production Webpack
+compiles are additionally cold-cache by policy: the runner removes
+`.next/cache/webpack` before every compile, and because that removal precedes
+the only Next invocation and aborts the build on failure, a restored warm
+Webpack cache can never reach the compiler regardless of what an earlier
+deployment uploaded. Warm restored Webpack caches on Vercel's 8 GB Standard builder
+were the trigger for the August 2026 steady-state OOM kills and silent
+compile hangs; only the cold path is proven. Other cache subtrees such as SWC
+remain warm. On Vercel production builds (`VERCEL=1` with
+`VERCEL_ENV=production`), `scripts/vercel-build.sh` arms a 15-minute
+whole-build deadline (`MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS=900000`) that the
+package-build process owner, `scripts/run-with-host-verification-slot.mjs`,
+enforces on the one detached process group it already creates: at the deadline
+it TERMs the entire group, force-kills survivors with KILL (each phase bounded
+by a 30-second grace, so a leader that exits mid-grace hands surviving
+descendants to one fresh grace before their KILL), waits until the group has
+fully exited, and returns exit 124 with an explicit
+diagnostic. Because the deadline owns the whole group, a wedged Webpack
+compiler worker descendant is terminated too, and an externally cancelled
+build is reaped with the same escalation instead of orphaning the compile.
+Either way a wedged compile fails the build in minutes instead of occupying
+the deploy queue until Vercel's 45-minute ceiling. Local and CI verify
+invocations build
+with `VERCEL_ENV=preview` and never arm the deadline. Bump the epoch only
+when a proven compiler/cache transition requires another full invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions

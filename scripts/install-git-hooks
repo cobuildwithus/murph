@@ -4,6 +4,35 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
 state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
+lock_file="$state_dir/lock"
+lock_wait_seconds=180
+mkdir -p "$state_dir"
+
+if [[ "${MURPH_WORKTREE_GUARD_LOCK_HELD:-0}" != 1 ]]; then
+  printf 'install-git-hooks: waiting up to %s seconds for the storage guard lock\n' \
+    "$lock_wait_seconds" >&2
+  set +e
+  if command -v flock >/dev/null 2>&1; then
+    flock -w "$lock_wait_seconds" "$lock_file" \
+      env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0"
+    lock_status=$?
+  elif command -v lockf >/dev/null 2>&1; then
+    lockf -t "$lock_wait_seconds" "$lock_file" \
+      env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0"
+    lock_status=$?
+  else
+    set -e
+    printf 'install-git-hooks: flock or lockf is required for serialization\n' >&2
+    exit 1
+  fi
+  set -e
+  if (( lock_status != 0 )); then
+    printf 'install-git-hooks: serialized hook installation failed within %s seconds\n' \
+      "$lock_wait_seconds" >&2
+  fi
+  exit "$lock_status"
+fi
+
 primary_worktree="$(
   git -C "$repo_root" worktree list --porcelain |
     awk '$1 == "worktree" && !found { print substr($0, 10); found = 1 }'
@@ -15,20 +44,59 @@ if [[ -z "$primary_worktree" || ! -x "$primary_worktree/.githooks/pre-commit" ]]
 fi
 
 desired_hooks_path="$primary_worktree/.githooks"
-guard_config="$state_dir/gitconfig"
+legacy_guard_config="$state_dir/gitconfig"
+guard_config="$state_dir/gitconfig.current"
 tmp_config="$guard_config.tmp.$$"
-mkdir -p "$state_dir"
 : >"$tmp_config"
 git config --file "$tmp_config" core.hooksPath "$desired_hooks_path"
 mv "$tmp_config" "$guard_config"
 
-# Keep a harmless legacy value in the main config, then append our included
-# value after it. Historical prepare scripts may rewrite the legacy value, but
-# Git continues to resolve the later branch-independent include.
-git -C "$repo_root" config --local core.hooksPath .githooks
-git -C "$repo_root" config --local --fixed-value --unset-all include.path "$guard_config" \
-  2>/dev/null || true
-git -C "$repo_root" config --local --add include.path "$guard_config"
+# Publish the current include last in one native Git lock-file transaction.
+# The distinct path is deliberate: the exact pre-lock installer can only unset
+# and rewrite its historical include while this current authority stays live.
+git_config="$common_dir/config"
+git_config_lock="$git_config.lock"
+config_lock_wait_seconds=180
+config_lock_held=0
+
+cleanup_git_config_lock() {
+  if (( config_lock_held == 1 )); then
+    rm -f -- "$git_config_lock"
+  fi
+}
+trap cleanup_git_config_lock EXIT
+trap 'exit 1' HUP INT TERM
+
+config_lock_deadline=$((SECONDS + config_lock_wait_seconds))
+while ! (set -o noclobber; : >"$git_config_lock") 2>/dev/null; do
+  if (( SECONDS >= config_lock_deadline )); then
+    printf 'install-git-hooks: Git config remained locked for %s seconds\n' \
+      "$config_lock_wait_seconds" >&2
+    exit 1
+  fi
+  sleep 1
+done
+config_lock_held=1
+
+cp -p "$git_config" "$git_config_lock"
+git config --file "$git_config_lock" core.hooksPath .githooks
+unset_locked_include() {
+  local include_path="$1" unset_status
+  set +e
+  git config --file "$git_config_lock" --fixed-value --unset-all \
+    include.path "$include_path" 2>/dev/null
+  unset_status=$?
+  set -e
+  if (( unset_status != 0 && unset_status != 5 )); then
+    return "$unset_status"
+  fi
+}
+unset_locked_include "$legacy_guard_config"
+unset_locked_include "$guard_config"
+git config --file "$git_config_lock" --add include.path "$guard_config"
+mv "$git_config_lock" "$git_config"
+config_lock_held=0
+trap - EXIT HUP INT TERM
 
 # Initialize the machine-local authorization baseline before a raw worktree can
 # reach the shared hook for the first time.

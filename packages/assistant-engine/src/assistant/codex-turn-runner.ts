@@ -1,11 +1,18 @@
-import type {
-  AssistantSession,
+import {
+  assistantReasoningEffortValues,
+  type AssistantReasoningEffort,
+  type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  DEFAULT_MURPH_CODEX_REASONING_EFFORT,
+} from '@murphai/operator-config/assistant/provider-config'
 import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
@@ -13,9 +20,6 @@ import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
-import {
-  resolveHostedAiUsageTokenPricingBasis,
-} from '@murphai/hosted-execution/runtime-control'
 import {
   hasHostedCodexModelCatalogFlexTier,
 } from '../assistant-codex/config.js'
@@ -36,6 +40,9 @@ import type {
   AssistantProviderUsage,
   AssistantProviderUsageDraft,
 } from './providers/types.js'
+import {
+  resolveCodexAssistantProviderTokenPricingBasis,
+} from './providers/helpers.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
 import {
   recordAssistantRuntimeIssueInputsBestEffort,
@@ -390,6 +397,7 @@ function emitCodexPlanTraceEvent(input: {
   onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
   codexContinuation: string
   providerRequestOrdinal: number | null
+  reasoningEffort?: AssistantReasoningEffort | null
   routePlanningDiagnostics: AssistantRoutePlanningDiagnostics
   resumeCodexThreadIdPresent: boolean
   workingDirectory: string
@@ -406,6 +414,9 @@ function emitCodexPlanTraceEvent(input: {
         type: ASSISTANT_PROVIDER_PLAN_TRACE_TYPE,
         codexContinuation: input.codexContinuation,
         providerRequestOrdinal: input.providerRequestOrdinal,
+        ...(input.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: input.reasoningEffort }),
         routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
         dynamicToolCount: input.routePlanningDiagnostics.dynamicToolCount,
         messageTargetingAvailable:
@@ -471,11 +482,18 @@ async function executeAssistantCodexAttempt(input: {
     rawToolEvents: [] as readonly unknown[],
     runtimeIssueInputs: [] as readonly AssistantRuntimeIssueInput[],
   }
+  const reasoningEffort =
+    normalizeNullableString(attemptPlan.route.providerOptions.reasoningEffort)
+    ?? DEFAULT_MURPH_CODEX_REASONING_EFFORT
+  const traceReasoningEffort = assistantReasoningEffortValues.find(
+    (candidate) => candidate === reasoningEffort,
+  )
 
   emitCodexPlanTraceEvent({
     onTraceEvent: executionPlan.input.onTraceEvent,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    reasoningEffort: traceReasoningEffort,
     routePlanningDiagnostics: attemptPlan.routePlan.planningDiagnostics,
     resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
@@ -567,6 +585,11 @@ async function executeAssistantCodexAttempt(input: {
       !restrictedOneShotTurn &&
       !nativeCapabilitiesRestrictedTurn &&
       !groupEmailTurn
+    const hostedLocalTestProviderTurn =
+      attemptPlan.route.providerOptions.modelProvider ===
+        HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID ||
+      attemptPlan.route.providerOptions.modelProvider ===
+        HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy:
@@ -583,7 +606,7 @@ async function executeAssistantCodexAttempt(input: {
         oss: attemptPlan.route.providerOptions.oss,
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
-        reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
+        reasoningEffort,
         sandbox:
           nativeCapabilitiesRestrictedTurn ||
           readOnlyAutomationTurn ||
@@ -698,7 +721,9 @@ async function executeAssistantCodexAttempt(input: {
               : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : ordinaryHostedWorkspaceTurn
-                ? MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
+                ? hostedLocalTestProviderTurn
+                  ? null
+                  : MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
                 : null,
         ...(restrictedOneShotTurn
           ? { processLifetime: 'one-shot' as const }
@@ -991,9 +1016,9 @@ function resolveCodexAttemptServiceTier(input: {
   if (!input.executionContext?.hosted) {
     return null
   }
-  if (resolveHostedAiUsageTokenPricingBasis({
+  if (resolveCodexAssistantProviderTokenPricingBasis({
     model: input.routeModel,
-    providerName: input.routeModelProvider,
+    modelProvider: input.routeModelProvider,
     serviceTier: input.requestedServiceTier,
   }) !== 'openai-flex') {
     return null

@@ -12,6 +12,10 @@ import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
+import {
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
 
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'features.apps': false,
@@ -164,6 +168,9 @@ import type {
   AssistantRouteTurnPlan,
 } from '../src/assistant/codex-turn/planning.ts'
 import {
+  resolveAutomationAssistantTargetOverrideForTarget,
+} from '../src/assistant/automation/target-override.ts'
+import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -183,6 +190,7 @@ import type {
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionResult,
 } from '../src/assistant/providers/types.ts'
+import type { AssistantProviderTraceEvent } from '../src/assistant/provider-traces.ts'
 import type {
   AssistantHostedImageCompletionEffectRestriction,
   AssistantTurnSharedPlan,
@@ -595,6 +603,146 @@ describe('Codex model catalog', () => {
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
   })
 
+  it('emits only the final provider reasoning effort after routing overrides resolve', async () => {
+    const baseAutomationTarget = createAssistantModelTarget({
+      model: 'gpt-5.6-terra',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
+      reasoningEffort: 'low',
+    })
+    if (!baseAutomationTarget) {
+      throw new Error('Expected a managed-automation base target.')
+    }
+    const managedAutomationOverride =
+      resolveAutomationAssistantTargetOverrideForTarget(
+        { reasoningEffort: 'high' },
+        baseAutomationTarget,
+      )
+    if (managedAutomationOverride?.reasoningEffort !== 'high') {
+      throw new Error('Expected the managed-automation reasoning override.')
+    }
+    expect(managedAutomationOverride).toEqual({
+      reasoningEffort: 'high',
+    })
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+
+    for (const {
+      expectedReasoningEffort,
+      routeProviderOptions,
+      turnTrigger,
+    } of [
+      {
+        expectedReasoningEffort: 'high',
+        routeProviderOptions: {
+          reasoningEffort: managedAutomationOverride.reasoningEffort,
+        },
+        turnTrigger: 'automation-cron',
+      },
+      {
+        expectedReasoningEffort: 'low',
+        routeProviderOptions: { reasoningEffort: null },
+        turnTrigger: 'manual-ask',
+      },
+    ] as const) {
+      const route = createRoute({
+        providerOptions: routeProviderOptions,
+      })
+      const session = createAssistantSession({
+        providerOptions: route.providerOptions,
+      })
+      const traceEvents: AssistantProviderTraceEvent[] = []
+      const onTraceEvent = vi.fn((event: AssistantProviderTraceEvent) => {
+        traceEvents.push(event)
+      })
+      const input = {
+        onTraceEvent,
+        prompt: 'Reply with the planned result.',
+        turnTrigger,
+        vault: '/vaults/test',
+      } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+
+      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+        activeTurnSteering: null,
+        executionContext: { hosted: null },
+        input,
+        profile: {
+          promptProfile: 'conversation',
+          toolProfile: 'provider-turn',
+          threadScope: 'session-thread',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-15',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        sharedPlan: createSharedPlan(),
+        turnId: 'turn-provider-plan-reasoning-effort',
+      } satisfies AssistantCodexTurnExecutionPlan)
+      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+        attemptCount: 1,
+        route,
+        routePlan: {
+          assistantContractFingerprint: 'a'.repeat(64),
+          assistantCliContract: null,
+          cliEnv: {},
+          codexContinuation: {
+            kind: 'explicit-structured-history',
+          } satisfies AssistantCodexContinuation,
+          developerInstructions: null,
+          diagnosticsPolicy: {
+            environment: 'hosted',
+            privateIssueCaptureEnabled: false,
+            surface: null,
+          },
+          dynamicTools: [],
+          onboardingGuidanceInjected: false,
+          planningDiagnostics: createRoutePlanningDiagnostics(),
+          promptCacheMetadata: null,
+          resume: null,
+          sessionContext: undefined,
+          systemPrompt: null,
+          turnContextPrompt: null,
+          workingDirectory: '/work',
+        } satisfies AssistantRouteTurnPlan,
+        session,
+      } satisfies AssistantCodexAttemptPlan)
+
+      await expect(executeCodexTurnWithRecovery({
+        input,
+        plan: createSharedPlan(),
+        resolvedSession: session,
+        route,
+        turnCreatedAt: '2026-08-15T00:00:00.000Z',
+        turnId: 'turn-provider-plan-reasoning-effort',
+      })).resolves.toMatchObject({ kind: 'succeeded' })
+
+      expect(
+        providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
+          ?.providerConfig,
+      ).toMatchObject({
+        reasoningEffort: expectedReasoningEffort,
+      })
+      const planTrace = traceEvents
+        .map((event) => event.rawEvent as Record<string, unknown>)
+        .find((rawEvent) => rawEvent?.type === 'assistant.provider.plan')
+      expect(planTrace).toMatchObject({
+        schema: 'murph.assistant-provider-plan-diagnostics.v1',
+        type: 'assistant.provider.plan',
+        reasoningEffort: expectedReasoningEffort,
+      })
+      expect(planTrace).not.toHaveProperty('providerConfig')
+      expect(JSON.stringify(planTrace)).not.toContain('Reply with the planned result.')
+      expect(JSON.stringify(planTrace)).not.toContain('/vaults/test')
+    }
+  })
+
   it('propagates a singular response card through the provider turn result', async () => {
     const route = createRoute()
     const session = createAssistantSession({
@@ -925,7 +1073,7 @@ describe('Codex model catalog', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+    const executionPlan: AssistantCodexTurnExecutionPlan = {
       activeTurnSteering,
       executionContext: {
         hosted: {
@@ -951,7 +1099,10 @@ describe('Codex model catalog', () => {
       route,
       sharedPlan: createSharedPlan(),
       turnId: 'turn-completion-native-authority',
-    } satisfies AssistantCodexTurnExecutionPlan)
+    }
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(
+      executionPlan,
+    )
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
       attemptCount: 1,
       route,
@@ -1063,6 +1214,33 @@ describe('Codex model catalog', () => {
       runtimeWorkspaceRoots: ['/work'],
     })
     expect(foregroundProviderInput).not.toHaveProperty('processLifetime')
+
+    for (const modelProvider of [
+      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+    ]) {
+      route.providerOptions.modelProvider = modelProvider
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mockClear()
+
+      const localProviderOutcome = await executeCodexTurnWithRecovery({
+        input,
+        plan: createSharedPlan(),
+        resolvedSession: session,
+        route,
+        turnCreatedAt: '2026-08-10T00:02:00.000Z',
+        turnId: `turn-${modelProvider}-workspace-sandbox`,
+      })
+
+      expect(localProviderOutcome.kind).toBe('succeeded')
+      const localProviderInput =
+        providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+      expect(localProviderInput?.providerConfig).toMatchObject({
+        modelProvider,
+        sandbox: 'danger-full-access',
+      })
+      expect(localProviderInput?.permissions).toBeNull()
+      expect(localProviderInput?.runtimeWorkspaceRoots).toEqual(['/work'])
+    }
   })
 
   it('keeps only song generation while denying native creative-notification capabilities', async () => {
@@ -1204,7 +1382,11 @@ describe('Codex model catalog', () => {
   })
 
   it('runs immutable room-model maintenance as a one-shot tool-only permission turn', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
@@ -1227,7 +1409,12 @@ describe('Codex model catalog', () => {
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnSteering: null,
-      executionContext: { hosted: null },
+      executionContext: {
+        hosted: {
+          memberId: 'member-room-model-maintenance',
+          userEnvKeys: [],
+        },
+      },
       hostedToolContext: null,
       input,
       profile: {
@@ -1308,7 +1495,11 @@ describe('Codex model catalog', () => {
   })
 
   it('keeps memory maintenance one-shot and isolated from reminder tools', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        modelProvider: HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
@@ -1441,7 +1632,11 @@ describe('Codex model catalog', () => {
   })
 
   it('keeps onboarding goal check-ins on a vault-readable but mutation-denied turn', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
@@ -1686,13 +1881,13 @@ describe('Codex model catalog', () => {
     expect(providerInput?.groupConversation).toBe(true)
   })
 
-  it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
+  it('drops unsupported rich user parts and keeps flex for the hosted-local OpenAI route', async () => {
     const providerScopeEvents: string[] = []
     const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.6-terra' })
     const route = createRoute({
       providerOptions: {
         model: 'gpt-5.6-terra',
-        modelProvider: 'hosted-openai',
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       },
     })
     const session = createAssistantSession({

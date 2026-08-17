@@ -1,5 +1,3 @@
-import type { Metadata } from "next";
-
 import {
   HostedSignupReferralLanding,
   type HostedSignupReferralLandingState,
@@ -14,21 +12,10 @@ import {
   logHostedOnboardingRouteFailure,
 } from "@/src/lib/hosted-onboarding/http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+
+export { generateMetadata } from "./page-metadata";
 
 export const dynamic = "force-dynamic";
-
-export const metadata: Metadata = {
-  ...createMurphPageMetadata({
-    description: "Join Murph, your private health assistant.",
-    title: "Join Murph",
-  }),
-  referrer: "strict-origin",
-  robots: {
-    follow: false,
-    index: false,
-  },
-};
 
 export default async function HostedSignupReferralPage(props: {
   params: Promise<{ referralCode: string }>;

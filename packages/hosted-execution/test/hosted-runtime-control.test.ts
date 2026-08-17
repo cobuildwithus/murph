@@ -242,6 +242,8 @@ describe("hosted runtime control contracts", () => {
       "environment-voice.captured",
       "health.daily-metric.reported",
       "meal-photo.captured",
+      "member.action.requested",
+      "member.action.completed",
       "vault-share.delivery",
       "vault-share.revoke",
       "group-newsletter.email-needed",
@@ -2492,12 +2494,35 @@ describe("hosted runtime control contracts", () => {
       redactedJson: {
         importedCount: 2,
         messageReactionsAvailable: true,
+        reasoningEffort: "low",
         retryable: false,
       },
       workspaceVersion: "5",
     };
 
     expect(parseHostedRuntimeLogEntry(entry)).toEqual(entry);
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        reasoningEffort: "high",
+      },
+    }).redactedJson).toEqual({
+      reasoningEffort: "high",
+    });
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        reasoningEffort: null,
+      },
+    }).redactedJson).toEqual({
+      reasoningEffort: null,
+    });
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        reasoningEffort: "member-specific-private-value",
+      },
+    })).toThrow(/known reasoning effort or null/u);
     expect(parseHostedRuntimeLogRequest({
       entries: [entry],
     })).toEqual({

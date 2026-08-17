@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-14
+Last verified: 2026-08-16
 
 ## Decision
 
@@ -24,7 +24,9 @@ The live ownership split is:
   appends one deterministic `device-sync.wake` mailbox handoff if the connection
   transitioned from clean to dirty, and completes trace acceptance in the same
   transaction. The post-commit Temporal signal carries only the mailbox pointer.
-  There is no periodic dirty-row recovery sweep.
+  There is no periodic dirty-row recovery sweep. The existing scheduled
+  mailbox-handoff sweep may re-signal one exact unconsumed `device-sync.wake`
+  pointer per user after a failed first signal; it does not scan dirty state.
   The runtime pulls pending dirty rows through the required signed dirty-pending
   callback and acks checkpoint-safe handoff through the required dirty-ack
   callback.
@@ -1580,8 +1582,10 @@ The same existing `provider_started` phase breakdown may subdivide
 readiness, input selection, pass setup, candidate scan, group/operation scope,
 terminal evidence, session preflight, cross-session context, prompt preparation,
 and service handoff. When present, those ten values sum exactly to their parent;
-outbox and receipt-scan timings remain nested within cross-session context, and
-the subdivision adds no I/O or awaited reporting work. The emitter omits a
+outbox timing remains nested within cross-session context. Route-scoped
+cross-session consumption reads one exact route record and at most one exact
+pending receipt; it never inventories receipts on this foreground path. The
+subdivision adds no reporting I/O or awaited reporting work. The emitter omits a
 partial or non-additive subdivision, and Web's best-effort parser drops the
 malformed phase breakdown without losing the core provider-start milestone.
 The complete subdivision is emitted only when the provider-producing group is
@@ -2293,8 +2297,12 @@ state or mutating restored assistant recovery while Web and Temporal remain the
 usage-policy and durable-reconciliation owners.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
-workspace read/readiness steps are capped by the remaining budget. Accepted
-background invocations begin their pending I/O before acceptance; Durable Object
+workspace read/readiness steps are capped by the remaining budget. Fresh starts
+give authoritative container readiness at most 20 seconds within that remaining
+command budget before the existing fence cleanup and `retry_later` path runs.
+This matches the runner readiness ceiling without weakening invalidated-shell
+or destroy-settlement checks. Accepted background invocations begin their
+pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
@@ -3095,20 +3103,46 @@ the existing outbox authority resolver also reads canonical onboarding state
 at external provider entry, making completed state terminally stale and
 unreadable state retryable without adding another delivery owner.
 
-The `checkpoint.snapshot_plan`, `checkpoint.snapshot_started`, and
-`checkpoint.snapshot_finished` events record the bounded
-`handledConversationMailboxItemCount` and
-`handledConversationFrontierSelected`, never the item identifiers. The count is
+Successful v2 snapshot lifecycle retention has one owner:
+`checkpoint.snapshot_finished`. It carries the bounded request shape, legacy
+materialization plan counts, timing, file-count, and byte metrics known at
+completion, including `handledConversationMailboxItemCount` and
+`handledConversationFrontierSelected`, but never item identifiers. The count is
 batch-volume context only. The frontier boolean reports whether the selected
 batch contains the exact conversation row immediately after Web's last
-contiguous consumed floor. Plan, start, and failure events prove local selection
-only; they do not claim that Web received the request. A finished event also
-records `webCheckpointAccepted`. When that value and the frontier boolean are
-both true, the accepted Web checkpoint carried the exact blocking row; when an
-accepted finished event has a false frontier boolean, the gap remains in runtime
+contiguous consumed floor. The finished event also records
+`webCheckpointAccepted`. When that value and the frontier boolean are both true,
+the accepted Web checkpoint carried the exact blocking row; when an accepted
+finished event has a false frontier boolean, the gap remains in runtime
 selection, mapping, or batch rotation. The fields never imply that exact-row
 stamping or the contiguous floor advanced; durable consumption remains that
 proof.
+
+The retained fleet path selects no `checkpoint.snapshot_plan` or
+`checkpoint.snapshot_started` event. After v2 snapshot construction acquires
+its canonical lock, each attempt selects at most one best-effort terminal
+event: `checkpoint.snapshot_finished` after completion,
+`checkpoint.snapshot_failed` for a failure, or
+`checkpoint.snapshot_preempted` only when the caught failure is the exact
+runtime-wake interruption. Each non-success event carries the last reached
+fixed `snapshotStage`: `plan`, `session`, `archive`, `upload`, or `checkpoint`.
+These events prove local progress only; they do not claim that Web accepted a
+checkpoint.
+
+Runtime logs remain lossy observability. Finished and preempted info events use
+the bounded process-global best-effort queue; failure warning/error events
+bypass that verbose queue but still swallow log-endpoint failure, and a runtime
+interruption never waits for their completion. Failure before canonical-lock
+acquisition, process termination, queue overflow, an unavailable log port, or a
+failed log write can therefore leave no terminal row. Row absence is never
+checkpoint or failure evidence.
+Dashboard and fleet-query migration must therefore use
+`checkpoint.snapshot_finished` as the success owner across both historical and
+new data, use the failed/preempted terminal codes for non-success outcomes, and
+ignore plan/start rows rather than unioning lifecycle codes. Because the
+finished owner already existed, successful-volume queries need no backfill;
+there is no historical lifecycle backfill.
+
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
 conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A

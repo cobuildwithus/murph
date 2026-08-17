@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT handoff wake expires before the repo response timeout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1818'
 ---
 
 ## Expected Behavior

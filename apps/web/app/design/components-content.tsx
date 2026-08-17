@@ -163,7 +163,11 @@ import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
-import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
+import {
+  HostedAccountDeletionErrorAlert,
+  HostedAccountDeletionStatus,
+} from "@/src/components/settings/hosted-data-privacy-settings";
+import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
   EnvironmentCaptureCard,
@@ -1135,7 +1139,16 @@ export function ComponentsContent() {
         <Section title="Input OTP">
           <div className="grid gap-2">
             <Label htmlFor="otp-ds">Verification code</Label>
-            <InputOTP id="otp-ds" maxLength={6} autoComplete="one-time-code">
+            <InputOTP
+              id="otp-ds"
+              maxLength={6}
+              autoComplete="one-time-code"
+              data-1p-ignore
+              data-bwignore="true"
+              data-form-type="other"
+              data-lpignore="true"
+              pushPasswordManagerStrategy="none"
+            >
               <InputOTPGroup>
                 <InputOTPSlot index={0} className="size-11 bg-card text-base" />
                 <InputOTPSlot index={1} className="size-11 bg-card text-base" />
@@ -1387,6 +1400,16 @@ export function ComponentsContent() {
           <div className="grid gap-4 lg:grid-cols-2">
             <HostedAccountDeletionStatus cleanupPending={false} />
             <HostedAccountDeletionStatus cleanupPending />
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Account Deletion Recovery Alert">
+          <div className="max-w-md">
+            <HostedAccountDeletionErrorAlert
+              message={HOSTED_STRIPE_EFFECT_PENDING_MESSAGE}
+            />
           </div>
         </Section>
 

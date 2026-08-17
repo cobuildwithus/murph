@@ -20,6 +20,11 @@ import {
   processAssistantAutoReplyGroup,
 } from '../src/assistant/automation/reply.ts'
 import {
+  maintainAssistantAutoReplyRouteStateAtPaths,
+  readAssistantAutoReplyRouteState,
+  resolveAssistantAutoReplyOutboxExactRoute,
+} from '../src/assistant/automation/cross-session-route-state.ts'
+import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
 } from '../src/assistant/automation/evidence.ts'
 import {
@@ -38,6 +43,7 @@ import {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
 } from '../src/assistant/channels/runtime.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 
 const replyEventPathMocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
@@ -118,6 +124,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  vi.useRealTimers()
   vi.clearAllMocks()
   await Promise.all(tempRoots.splice(0).map((root) =>
     rm(root, { force: true, recursive: true }),
@@ -1247,6 +1254,8 @@ describe('assistant auto-reply event-first path', () => {
       terminalRetry: true,
     },
   ])('binds an accepted generated image $label', async ({ terminalRetry }) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime('2030-08-07T21:09:00.000Z')
     const vault = await createTempVault()
     const media = {
       alt: 'Generated image',
@@ -1371,7 +1380,7 @@ describe('assistant auto-reply event-first path', () => {
 
         linkAttemptCount += 1
         linkIdempotencyKeys.push(idempotencyKey)
-        if (linkAttemptCount <= 3) {
+        if (linkAttemptCount <= (terminalRetry ? 3 : 6)) {
           return new Response(JSON.stringify({
             error: 'rich-link endpoint temporarily unavailable',
           }), {
@@ -1419,6 +1428,10 @@ describe('assistant auto-reply event-first path', () => {
     if (!persistedPartial) {
       throw new Error('expected persisted retryable generated-image delivery')
     }
+    const firstAcceptedAt = persistedPartial.delivery?.sentAt
+    if (!firstAcceptedAt) {
+      throw new Error('expected accepted generated-image delivery time')
+    }
     expect(persistedPartial.delivery).toMatchObject({
       providerMessageEffects: [{
         carriesIntentMedia: true,
@@ -1448,6 +1461,7 @@ describe('assistant auto-reply event-first path', () => {
       Date.parse(nextAttemptAt) - 1_000,
     ).toISOString()
     if (terminalRetry) {
+      vi.setSystemTime(nextAttemptAt)
       const terminal = await dispatchAssistantOutboxIntent({
         dependencies: { sendLinq },
         intentId: intent.intentId,
@@ -1503,13 +1517,101 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.resolveAssistantSession).toHaveBeenCalled()
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     if (!terminalRetry) {
-      const recovered = await dispatchAssistantOutboxIntent({
+      const route = resolveAssistantAutoReplyOutboxExactRoute(persistedPartial)
+      if (!route) {
+        throw new Error('expected exact Linq route for accepted media delivery')
+      }
+      const consumedReceipt = createConsumedCrossSessionReceipt({
+        intentId: intent.intentId,
+        updatedAt: replyOccurredAt,
+      })
+      replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+        consumedReceipt,
+      ])
+      await completeAutoReplyRouteMigration(vault)
+      expect(await readAssistantAutoReplyRouteState({
+        routeDigest: route.digest,
+        vault,
+      })).toEqual({
+        kind: 'ready',
+        settledThrough: {
+          intentId: intent.intentId,
+          sentAt: firstAcceptedAt,
+        },
+      })
+
+      const repeatedPartialAt = new Date(
+        Date.parse(firstAcceptedAt) + 30_000,
+      ).toISOString()
+      vi.setSystemTime(repeatedPartialAt)
+      const repeatedPartial = await dispatchAssistantOutboxIntent({
         dependencies: { sendLinq },
         intentId: intent.intentId,
         now: new Date(nextAttemptAt),
         vault,
       })
+      expect(repeatedPartial.intent.status).toBe('retryable')
+      expect(repeatedPartial.intent.updatedAt).toBe(repeatedPartialAt)
+      expect(repeatedPartial.intent.delivery?.sentAt).toBe(firstAcceptedAt)
+      const repeatedNextAttemptAt = repeatedPartial.intent.nextAttemptAt
+      if (!repeatedNextAttemptAt) {
+        throw new Error('expected repeated generated-image retry wake time')
+      }
+      replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+        repeatedPartial.intent,
+        otherDelivery,
+      ])
+      await completeAutoReplyRouteMigration(vault)
+      expect(await readAssistantAutoReplyRouteState({
+        routeDigest: route.digest,
+        vault,
+      })).toEqual({
+        kind: 'ready',
+        settledThrough: {
+          intentId: intent.intentId,
+          sentAt: firstAcceptedAt,
+        },
+      })
+
+      const successfulDeliveryAt = repeatedNextAttemptAt
+      vi.setSystemTime(successfulDeliveryAt)
+      const processTerminated = new Error(
+        'simulated process termination after durable delivery persistence',
+      )
+      await expect(dispatchAssistantOutboxIntent({
+        dependencies: { sendLinq },
+        dispatchHooks: {
+          persistDeliveredIntent: async () => {
+            throw processTerminated
+          },
+          shouldRethrowDispatchError: ({ error }) => error === processTerminated,
+        },
+        intentId: intent.intentId,
+        now: new Date(repeatedNextAttemptAt),
+        vault,
+      })).rejects.toBe(processTerminated)
+      const interrupted = await readAssistantOutboxIntent(vault, intent.intentId)
+      expect(interrupted).toMatchObject({
+        deliveryConfirmationPending: true,
+        status: 'sending',
+        updatedAt: successfulDeliveryAt,
+      })
+      expect(interrupted?.delivery?.sentAt).toBe(firstAcceptedAt)
+
+      const staleRecoveryAt = new Date(
+        Date.parse(successfulDeliveryAt) + 10 * 60 * 1_000,
+      ).toISOString()
+      vi.setSystemTime(staleRecoveryAt)
+      const recovered = await dispatchAssistantOutboxIntent({
+        dependencies: { sendLinq },
+        intentId: intent.intentId,
+        now: new Date(staleRecoveryAt),
+        vault,
+      })
       expect(recovered.intent.status).toBe('sent')
+      expect(recovered.intent.sentAt).toBe(successfulDeliveryAt)
+      expect(recovered.intent.updatedAt).toBe(successfulDeliveryAt)
+      expect(recovered.intent.delivery?.sentAt).toBe(firstAcceptedAt)
       expect(recovered.intent.delivery).toMatchObject({
         providerMessageEffects: [
           {
@@ -1527,17 +1629,93 @@ describe('assistant auto-reply event-first path', () => {
           'linq-msg-retryable-generated-image-link',
         ],
       })
+
+      replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+        recovered.intent,
+        otherDelivery,
+      ])
+      await completeAutoReplyRouteMigration(vault)
+      expect(await readAssistantAutoReplyRouteState({
+        routeDigest: route.digest,
+        vault,
+      })).toEqual({
+        kind: 'ready',
+        settledThrough: {
+          intentId: intent.intentId,
+          sentAt: firstAcceptedAt,
+        },
+      })
+
+      replyEventPathMocks.sendAssistantMessage.mockClear()
+      await processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context: createReplyContext(createLinqGroupCandidate({
+          inputId: 'ain_21212121212121212121212121212121',
+          messageId: 'linq-msg-unanchored-after-link-retry',
+          occurredAt: new Date(
+            Date.parse(successfulDeliveryAt) + 10_000,
+          ).toISOString(),
+          text: 'A later unanchored follow-up.',
+        })),
+        enabledChannels: ['linq'],
+        inboxServices: createInboxServices(),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault,
+      })
+      const unanchoredRetryInput = readSentInput()
+      expect(unanchoredRetryInput).not.toHaveProperty('turnContext')
+      expect(unanchoredRetryInput.receiptMetadata ?? {}).not.toHaveProperty(
+        AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+      )
+
+      const newDeliveryAt = new Date(
+        Date.parse(successfulDeliveryAt) + 20_000,
+      ).toISOString()
+      const newDelivery = createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-new-after-retryable-generated-avatar',
+        message: 'genuinely new context after the completed retry',
+        providerMessageId: 'linq-msg-new-after-generated-image-retry',
+        sentAt: newDeliveryAt,
+        sessionId: 'session-new-after-retryable-generated-avatar',
+        target: 'thread-1',
+      })
+      replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+        recovered.intent,
+        newDelivery,
+      ])
+      replyEventPathMocks.sendAssistantMessage.mockClear()
+      await processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context: createReplyContext(createLinqGroupCandidate({
+          inputId: 'ain_22222222222222222222222222222223',
+          messageId: 'linq-msg-unanchored-after-new-delivery',
+          occurredAt: new Date(
+            Date.parse(newDeliveryAt) + 10_000,
+          ).toISOString(),
+          text: 'What about the new update?',
+        })),
+        enabledChannels: ['linq'],
+        inboxServices: createInboxServices(),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault,
+      })
+      expect(readSentInput().turnContext).toContain(
+        'genuinely new context after the completed retry',
+      )
     }
     expect(acceptedPrimaryIds).toEqual(
       new Set(['linq-msg-retryable-generated-image-primary']),
     )
     expect(primaryAcceptanceCount).toBe(1)
-    expect(primaryIdempotencyKeys).toHaveLength(2)
+    expect(primaryIdempotencyKeys).toHaveLength(terminalRetry ? 2 : 3)
     expect(new Set(primaryIdempotencyKeys).size).toBe(1)
-    expect(linkIdempotencyKeys).toHaveLength(terminalRetry ? 3 : 4)
+    expect(linkIdempotencyKeys).toHaveLength(terminalRetry ? 3 : 7)
     expect(new Set(linkIdempotencyKeys).size).toBe(1)
-    expect(attachmentCount).toBe(2)
-    expect(loadVaultImage).toHaveBeenCalledTimes(2)
+    expect(attachmentCount).toBe(terminalRetry ? 2 : 3)
+    expect(loadVaultImage).toHaveBeenCalledTimes(terminalRetry ? 2 : 3)
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
@@ -3002,6 +3180,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session-future',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -3058,6 +3237,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session_automation',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -3083,6 +3263,99 @@ describe('assistant auto-reply event-first path', () => {
     }))
   })
 
+  it('injects prior delivery context for an actor-less direct Telegram route', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        actorId: null,
+        channel: 'telegram',
+        intentId: 'intent-signup-welcome',
+        message: 'Welcome to the direct chat.',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-activation',
+        threadIsDirect: true,
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    const candidate = createAssistantInputCandidate({
+      actorId: null,
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'telegram',
+      text: 'What can you help me with?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain('Welcome to the direct chat.')
+  })
+
+  it('does not inject prior delivery context for an actor-less direct email route', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        actorId: null,
+        channel: 'email',
+        intentId: 'intent-actorless-email',
+        message: 'Context from an actor-less email route.',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-email',
+        threadIsDirect: true,
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    const candidate = createAssistantInputCandidate({
+      actorId: null,
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'email',
+      text: 'What did you send?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext ?? '').not.toContain(
+      'Context from an actor-less email route.',
+    )
+    expect(sendInput.receiptMetadata).not.toHaveProperty(
+      AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+    )
+  })
+
   it('injects cross-session context across provider and local clock skew', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
@@ -3100,6 +3373,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session-automation',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -3146,6 +3420,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session-automation',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -3517,6 +3792,7 @@ describe('assistant auto-reply event-first path', () => {
         target: 'opaque-delivery-target',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -3564,6 +3840,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session-automation',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       accountId: 'telegram-account-1',
       occurredAt: '2026-04-08T00:10:00.000Z',
@@ -3611,6 +3888,7 @@ describe('assistant auto-reply event-first path', () => {
         threadId: null,
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       accountId: 'lid_linq_identity_1',
       occurredAt: '2026-04-08T00:10:00.000Z',
@@ -3687,6 +3965,7 @@ describe('assistant auto-reply event-first path', () => {
         threadId: 'thread-1',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -3717,12 +3996,14 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('serialized target context')
 
     replyEventPathMocks.sendAssistantMessage.mockClear()
+    const consumedVault = await createTempVault()
     replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
       createConsumedCrossSessionReceipt({
         intentId: 'intent-hosted-email',
         updatedAt: '2026-04-08T00:10:30.000Z',
       }),
     ])
+    await completeAutoReplyRouteMigration(consumedVault)
     const nextCandidate = createAssistantInputCandidate({
       inputId: 'ain_22222222222222222222222222222222',
       occurredAt: '2026-04-08T00:11:00.000Z',
@@ -3744,7 +4025,7 @@ describe('assistant auto-reply event-first path', () => {
       inboxServices: createInboxServices(),
       requestId: null,
       sessionMaxAgeMs: null,
-      vault,
+      vault: consumedVault,
     })
 
     const nextSendInput =
@@ -3753,6 +4034,62 @@ describe('assistant auto-reply event-first path', () => {
     expect(nextSendInput.deliveryKind).toBe('thread')
     expect(nextSendInput).not.toHaveProperty('deliveryTarget')
     expect(nextSendInput).not.toHaveProperty('turnContext')
+  })
+
+  it('fails closed for unanchored legacy wildcard matches without one exact route partition', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        actorId: 'actor-1',
+        intentId: 'intent-wildcard-route-a',
+        message: 'route A context',
+        sentAt: '2026-04-08T00:04:00.000Z',
+        sessionId: 'session-automation-a',
+      }),
+      createOutboxMessage({
+        actorId: 'actor-2',
+        intentId: 'intent-wildcard-route-b',
+        message: 'route B context',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation-b',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      actorId: null,
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'email',
+      text: 'What was that?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['email'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput).not.toHaveProperty('turnContext')
+    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
   it('does not repeat consumed cross-session context or replay older deliveries', async () => {
@@ -3784,6 +4121,7 @@ describe('assistant auto-reply event-first path', () => {
         updatedAt: '2026-04-08T00:06:30.000Z',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -4160,6 +4498,73 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('reminder that user replied to')
   })
 
+  it('resolves a direct anchored reaction from a persisted delivery completion checkpoint', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    const sentShape = createOutboxMessage({
+      channel: 'linq',
+      intentId: 'intent-direct-completion-checkpoint',
+      message: 'direct reminder with a persisted delivery checkpoint',
+      providerMessageId: 'linq-msg-direct-completion-checkpoint',
+      sentAt: '2026-04-08T12:00:00.000Z',
+      sessionId: 'session-automation',
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([{
+      ...sentShape,
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: true,
+      sentAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T12:00:01.000Z',
+    }])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T12:00:02.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'reaction-event-direct-completion-checkpoint',
+        threadId: 'thread-1',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        affirmativeReaction: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-direct-completion-checkpoint',
+        service: 'iMessage',
+      },
+      text: 'Reacted with a like reaction.',
+      threadIsDirect: true,
+    })
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result).toMatchObject({
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain(
+      'direct reminder with a persisted delivery checkpoint',
+    )
+  })
+
   it('selects cross-session context from the newest grouped Linq input with a native reply target, not the oldest grouped input', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
@@ -4271,6 +4676,7 @@ describe('assistant auto-reply event-first path', () => {
         updatedAt: '2026-04-08T00:06:30.000Z',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -4298,7 +4704,56 @@ describe('assistant auto-reply event-first path', () => {
 
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sendInput).not.toHaveProperty('turnContext')
-    expect(replyEventPathMocks.listAssistantTurnReceipts).toHaveBeenCalled()
+    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
+  })
+
+  it('never calls receipt inventory for steady-state unanchored resolution after one-time migration', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        intentId: 'intent-steady-state-context',
+        message: 'steady-state reminder',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    const executionContext = {
+      hosted: {
+        memberId: 'member-test',
+        userEnvKeys: [],
+      },
+    }
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createAssistantInputCandidate({
+        inputId: 'ain_11111111111111111111111111111111',
+        occurredAt: '2026-04-08T00:10:00.000Z',
+        optionalInboxCaptureId: null,
+        source: 'email',
+        text: 'Follow-up',
+        threadIsDirect: true,
+      })),
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['email'],
+      executionContext,
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain('steady-state reminder')
+    expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
   it('skips receipts in hosted queue-only mode when no outbox context exists', async () => {
@@ -4531,6 +4986,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session-automation',
       }),
     ])
+    await completeAutoReplyRouteMigration(vault)
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
@@ -4692,6 +5148,7 @@ function readSentPrompt(): string {
 
 function createAssistantInputCandidate(input: {
   accountId?: string | null
+  actorId?: string | null
   actorIsSelf?: boolean
   groupRunningBit?: AssistantInputCandidate['event']['groupRunningBit']
   inputId?: string
@@ -4715,7 +5172,7 @@ function createAssistantInputCandidate(input: {
     : input.receivedAt
   const conversation: AssistantInputConversationRef = {
     accountId: input.accountId === undefined ? 'identity-1' : input.accountId,
-    actorId: 'actor-1',
+    actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
     actorIsSelf: input.actorIsSelf ?? false,
     source: input.source,
     threadId: 'thread-1',
@@ -4808,6 +5265,7 @@ function createOutboxMessage(input: {
   status?: 'pending' | 'sent'
   target?: string
   threadId?: string | null
+  threadIsDirect?: boolean | null
   turnId?: string
 }) {
   const status = input.status ?? 'sent'
@@ -4849,6 +5307,9 @@ function createOutboxMessage(input: {
     sessionId: input.sessionId,
     status,
     threadId: input.threadId === undefined ? providerThreadId : input.threadId,
+    threadIsDirect: input.threadIsDirect === undefined
+      ? true
+      : input.threadIsDirect,
     turnId: input.turnId ?? `turn-${input.intentId}`,
   }
 }
@@ -4875,6 +5336,22 @@ function createConsumedCrossSessionReceipt(input: {
     ],
     updatedAt: input.updatedAt,
   }
+}
+
+async function completeAutoReplyRouteMigration(vault: string): Promise<void> {
+  const [outboxIntents, receipts] = await Promise.all([
+    replyEventPathMocks.listAssistantOutboxIntents(),
+    replyEventPathMocks.listAssistantTurnReceipts(),
+  ])
+  await maintainAssistantAutoReplyRouteStateAtPaths({
+    outboxIntents,
+    outboxTrusted: true,
+    paths: resolveAssistantStatePaths(vault),
+    receipts,
+    receiptsTrusted: true,
+  })
+  replyEventPathMocks.listAssistantOutboxIntents.mockClear()
+  replyEventPathMocks.listAssistantTurnReceipts.mockClear()
 }
 
 function createInboxServices(

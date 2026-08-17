@@ -231,6 +231,21 @@ export async function enqueueHostedSystemMailboxItem(input: {
   ) {
     await bootstrapHostedMemberContext(input.vaultRoot, input.wake);
   }
+  if (
+    routeAction === "apply-member-activation"
+    && input.wake.kind === "member.activated"
+    && !input.wake.initialGroupRoomModelMarkdown
+    && !input.wake.signupWelcome
+  ) {
+    // Member context is the complete effect for an activation without room
+    // setup or a welcome delivery. Finish it in the importing canonical write
+    // instead of creating a second no-op queue item that can trail the first
+    // foreground conversation until another owner starts.
+    return {
+      reasonCode: "system_mailbox.activation_bootstrapped",
+      status: "imported",
+    };
+  }
   const nextItem: HostedSystemMailboxPendingItem = {
     attemptCount: 0,
     itemId: input.item.item.id,
@@ -936,6 +951,7 @@ function readHostedSystemMailboxRouteAction(
     item.route.action === "apply-member-activation"
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "apply-member-preferences"
+    || item.route.action === "apply-member-action"
     || item.route.action === "dispatch-assistant-notification"
     || item.route.action === "run-assistant-ask"
     || item.route.action === "continue-assistant-ask"
@@ -1031,7 +1047,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
     }
     case "clinical-records.outcome-recorded": {
       const port = input.runtime.platform.clinicalRecordsPort;
-      if (!port) {
+      if (!port?.recordOutcome) {
         throw new Error(
           "Hosted clinical records outcome checkpoint requires a configured clinical records port.",
         );
@@ -1077,6 +1093,23 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         );
       }
       await deleteEnvironmentVoice(input.record.audioKey);
+      return {
+        nextWakeAt: null,
+        recorded: 1,
+        stillDirty: false,
+      };
+    }
+    case "member-action.outcome-recorded": {
+      const port = input.runtime.platform.mailboxPort;
+      if (!port?.recordMemberActionOutcome) {
+        throw new Error(
+          "Hosted member-action outcome checkpoint requires a configured mailbox port.",
+        );
+      }
+      await port.recordMemberActionOutcome(
+        input.record.outcome,
+        input.signal ? { signal: input.signal } : undefined,
+      );
       return {
         nextWakeAt: null,
         recorded: 1,

@@ -390,6 +390,16 @@ export function resolveAssistantTurnReceiptPath(
   })
 }
 
+export async function readAssistantTurnReceiptAtPaths(
+  paths: AssistantStatePaths,
+  turnId: string,
+): Promise<AssistantTurnReceipt | null> {
+  return await readAssistantTurnReceiptAtPath(
+    paths,
+    resolveAssistantTurnReceiptPath(paths, turnId),
+  )
+}
+
 async function readAssistantTurnReceiptAtPath(
   paths: AssistantStatePaths,
   receiptPath: string,

@@ -611,6 +611,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
   const importSpy = vi
     .spyOn(services.importers, 'importDocument')
     .mockResolvedValue({
+      created: true,
       vault: vaultRoot,
       sourceFile: '/tmp/document-source.md',
       rawFile: '/tmp/document-source.raw',
@@ -634,6 +635,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     occurredAt: undefined,
     note: undefined,
     source: undefined,
+    reuseExact: false,
   })
 
   const mealAdd = await getGroupCommandRun<{
@@ -686,6 +688,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
   const fakeImporters: ImportersRuntime = {
     async importDocument() {
       return {
+        created: true,
         raw: {
           relativePath: 'raw/document-source.raw',
         },

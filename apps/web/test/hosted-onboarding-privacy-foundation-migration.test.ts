@@ -160,6 +160,12 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberBillingRef: [
     'memberId String @unique @map("member_id")',
+    'stripeEffectClaimId String? @map("stripe_effect_claim_id")',
+    'stripeEffectKind String? @map("stripe_effect_kind")',
+    'stripeEffectTargetPlanCode String? @map("stripe_effect_target_plan_code")',
+    'stripeEffectClaimedAt DateTime? @map("stripe_effect_claimed_at")',
+    'stripeEffectExecutionId String? @map("stripe_effect_execution_id")',
+    'stripeEffectExecutionStartedAt DateTime? @map("stripe_effect_execution_started_at")',
     'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
     'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
     'stripeCustomerLookupKey String? @unique @map("stripe_customer_lookup_key")',
@@ -917,11 +923,19 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const stripeEffectCompatibilityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260812150000_stripe_effect_compatibility_cutover/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const queryShapeMigrationEntries = new Set([
       "20260812030000_hosted_stripe_activation_result_pointer",
       "20260812030100_group_email_message_volume_indexes",
       "20260812030200_whoop_capacity_index",
       "20260812030300_referral_handoff_indexes",
+      "20260812050000_hosted_sensitive_action_transient_retention_index",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
@@ -1109,11 +1123,21 @@ describe("hosted Prisma baseline migration", () => {
       "20260812033000_family_owner_snapshot_pending_invite_index",
       "20260812070000_hosted_linq_live_invite_source_ref",
       "20260812120000_hosted_runtime_latency_candidate_indexes",
+      "20260812150000_stripe_effect_compatibility_cutover",
       "20260813120000_group_current_sender_clarification",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
       expect.arrayContaining([...queryShapeMigrationEntries]),
+    );
+    expect(stripeEffectCompatibilityMigrationSql).toContain(
+      'ALTER TABLE "hosted_member_billing_ref"',
+    );
+    expect(stripeEffectCompatibilityMigrationSql).toContain(
+      'ALTER TABLE "hosted_account_group_billing_ref"',
+    );
+    expect(stripeEffectCompatibilityMigrationSql).not.toMatch(
+      /UPDATE|CREATE\s+(?:UNIQUE\s+)?INDEX|NOT\s+NULL/iu,
     );
     expect(hostedPendingGroupSetupMigrationSql).toContain(
       'CREATE TABLE "hosted_pending_group_setup"',

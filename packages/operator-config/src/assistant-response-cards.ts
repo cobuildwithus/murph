@@ -9,10 +9,14 @@ import {
   MURPH_PRODUCT_ORIGIN,
   assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
+  assistantResponseCardMatchesConversationAudience,
   buildWorkoutSessionAppCardEnvelopeV4,
+  buildWorkoutSessionAppCardEnvelopeV6,
   challengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
+  compactTableResponseCardAuthoringV1Schema,
   compactTableResponseCardV1Schema,
+  compactTableWorkoutSemanticResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
   exerciseRoutineResponseCardV1Schema,
@@ -30,6 +34,7 @@ import {
   type ChallengeStandingsResponseCardV1,
   type CompactTableGenericResponseCardV1,
   type CompactTableResponseCardV1,
+  type CompactTableWorkoutResponseCardV1,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
@@ -96,6 +101,7 @@ export type LinqIMessageAppLayout = {
 }
 
 export {
+  assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
   assistantResponseCardV1Bounds,
   buildWorkoutSessionAppCardEnvelopeV4,
@@ -163,8 +169,11 @@ export const assistantResponseCardAuthoringSchema: z.ZodType<
   AssistantResponseCard
 > = z.union([
   dailyNutritionResponseCardV2AuthoringSchema,
-  compactTableResponseCardV1Schema,
+  compactTableResponseCardAuthoringV1Schema,
 ])
+
+export const assistantWorkoutResponseCardSemanticSchema =
+  compactTableWorkoutSemanticResponseCardV1Schema
 
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
@@ -207,6 +216,24 @@ export function renderAssistantResponseCardText(
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
+}
+
+export function renderAssistantWorkoutResponseCardText(
+  card: CompactTableWorkoutResponseCardV1,
+): string {
+  return renderCompactTableResponseCardText(
+    assistantWorkoutResponseCardSemanticSchema.parse(card),
+    false,
+  )
+}
+
+export function renderAssistantWorkoutResponseCardTranscriptText(
+  card: CompactTableWorkoutResponseCardV1,
+): string {
+  return renderCompactTableResponseCardText(
+    assistantWorkoutResponseCardSemanticSchema.parse(card),
+    true,
+  )
 }
 
 /**
@@ -356,7 +383,7 @@ export function buildLinqIMessageAppCardImageUrl(
   const encoded = parsed.kind === 'daily_nutrition'
     ? encodeDailyNutritionAppCardPayload(parsed)
     : parsed.kind === 'compact_table'
-      ? encodeCompactTableAppCardPayload(parsed)
+      ? encodeCompactTableAppCardPayload(parsed, false)
       : encodeChallengeStandingsAppCardPayload(
           buildIdentityFreeChallengeStandingsImageCard(parsed),
         )
@@ -417,7 +444,7 @@ function encodeDailyNutritionAppCardPayload(
 export function encodeCompactTableAppCardUrl(
   card: CompactTableResponseCardV1,
 ): string {
-  return encodeAppCardEnvelopeUrl(encodeCompactTableAppCardPayload(card))
+  return encodeAppCardEnvelopeUrl(encodeCompactTableAppCardPayload(card, true))
 }
 
 export function encodeWorkoutSessionAppCardUrl(
@@ -429,15 +456,16 @@ export function encodeWorkoutSessionAppCardUrl(
       'Expected a compact table with workout session detail.',
     )
   }
-  return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed))
+  return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed, true))
 }
 
 function encodeCompactTableAppCardPayload(
   card: CompactTableResponseCardV1,
+  includeActionBinding: boolean,
 ): string {
   const parsed = compactTableResponseCardV1Schema.parse(card)
   if ('workout' in parsed) {
-    return encodeWorkoutSessionAppCardPayload(parsed)
+    return encodeWorkoutSessionAppCardPayload(parsed, includeActionBinding)
   }
 
   const { tracking: _tracking, ...presentationCard } = parsed
@@ -498,14 +526,24 @@ function buildIdentityFreeChallengeStandingsImageCard(
 
 function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
+  includeActionBinding: boolean,
 ): string {
   return encodeAppCardEnvelopePayload(
-    buildWorkoutSessionAppCardEnvelopeV4({
-      title: card.title,
-      subtitle: card.subtitle,
-      footer: card.footer,
-      workout: card.workout,
-    }),
+    includeActionBinding
+      && card.editor !== undefined
+      ? buildWorkoutSessionAppCardEnvelopeV6({
+          editor: card.editor,
+          title: card.title,
+          subtitle: card.subtitle,
+          footer: card.footer,
+          workout: card.workout,
+        })
+      : buildWorkoutSessionAppCardEnvelopeV4({
+          title: card.title,
+          subtitle: card.subtitle,
+          footer: card.footer,
+          workout: card.workout,
+        }),
   )
 }
 
@@ -515,7 +553,8 @@ function encodeAppCardEnvelopePayload(
     | AppCardEnvelopeV2
     | AppCardEnvelopeV3
     | AppCardEnvelopeV5
-    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>,
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>,
 ): string {
   return Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')
@@ -1420,10 +1459,14 @@ function createAssistantResponseCardJsonSchema() {
       {
         oneOf: [
           {
+            properties: { workout: false },
             required: ['rowHeader', 'columns', 'rows'],
           },
           {
             properties: {
+              columns: false,
+              rowHeader: false,
+              rows: false,
               subtitle: { type: 'null' },
               tracking: { type: 'object' },
             },

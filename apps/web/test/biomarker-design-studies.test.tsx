@@ -127,7 +127,7 @@ test("screenshot categories keep the production studies available without one gi
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Browser Vault progressive loading transitions",
+    "Browser Vault progressive loading and biomarker result detail transitions",
   );
   expect(sectionsMarkup).toContain(
     'data-design-section="browser-vault-loading-transitions"',
@@ -316,6 +316,12 @@ test("home screenshot studies keep their footer preview inert", () => {
   expect(routeMarkup).toContain('id="design-site-footer-preview"');
   expect(routeMarkup).toContain('data-design-section="homepage-footer"');
   expect(routeMarkup).toContain("inert=");
+
+  const sectionsSource = readFileSync(
+    new URL("../app/design/sections-content.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(sectionsSource.match(/vitalsMode="synthetic"/g)).toHaveLength(1);
 });
 
 test("biomarker preparing study reassures members and previews the index structure", () => {

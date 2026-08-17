@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT help advertises unsupported negative artifact flags'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1808'
 ---
 
 ## What happened

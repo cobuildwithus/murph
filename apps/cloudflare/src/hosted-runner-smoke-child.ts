@@ -777,7 +777,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
       : []),
     'model_provider = "openai"',
     'model_reasoning_effort = "low"',
-    "model_auto_compact_token_limit = 164000",
+    "model_auto_compact_token_limit = 132000",
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
     // Mirror the hosted runtime config: non-login shells so the smoke probe

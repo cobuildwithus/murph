@@ -252,6 +252,22 @@ Every PR includes:
   `Changelog: updated` and its item IDs, or `Changelog: not applicable` with a
   concrete reason. The changelog guard validates this section.
 
+Use this form when the changelog changed:
+
+```markdown
+## Changelog
+- Changelog: updated
+- Items: 2026-08-09 · stable-item-id
+```
+
+Use this form when members cannot see the change:
+
+```markdown
+## Changelog
+- Changelog: not applicable
+- Reason: Internal workflow and review tooling only.
+```
+
 Add a **Risks** section only when the changed path needs it. Include the
 smallest useful details for the applicable risk:
 

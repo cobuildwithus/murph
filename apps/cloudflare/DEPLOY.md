@@ -321,8 +321,16 @@ Observability.
 Deploy the first native response-card release as one Cloudflare Worker and
 runner bundle update with `container_rollout=immediate`. Before allowing card
 traffic, require managed-container smoke to report the exact new runner-bundle
-fingerprint and prove the updated assistant CLI surface. There is no Web
-deployment dependency.
+fingerprint and prove the updated assistant CLI surface.
+
+An expansion of an existing strict card version has a reader floor even when
+its discriminator is unchanged. For the V4 workout expansion above eight
+exercises or eight sets per exercise, release the native reader first, deploy
+the shared Web parser/static image route second, then deploy the Worker and
+runner together with `container_rollout=immediate`. Before expanded authoring,
+require the exact runner fingerprint and a successful fetch of an expanded V4
+static image from the deployed Web artifact. Keep that Web version available
+while any expanded immutable image URL can still be fetched.
 
 Ordinary outbox records and hosted delivery side effects omit the optional
 `card` field. A new Worker with an old runner is therefore safe for ordinary
@@ -334,6 +342,14 @@ The prior bundle remains a safe rollback only before the first card-bearing
 value exists. After that point, the new bundle is the hard rollback floor for
 workspaces, checkpoints, retained outbox intents, and side effects. Forward-fix
 on that bundle or newer rather than restoring an older reader.
+
+For the within-V4 bound expansion, the prior Web and runner bundles remain safe
+only before the first expanded V4 card is sent or persisted. After that point,
+do not roll either reader below the expanded bound. Forward-fix, and if an old
+local runner already quarantined an expanded intent, explicitly restore that
+intent only after the compatible bundle is live. Monitor for
+`outbox.intent.quarantined`, strict response-card parse failures, stale runner
+fingerprints, and failed expanded static-image fetches.
 
 ## Exercise Routine Response-Card Rollout
 
@@ -364,6 +380,25 @@ written. After that write, the new runner bundle is a hard rollback floor for
 that workspace because an older strict reader can quarantine the retained
 intent. Forward-fix on this bundle or newer. Monitor `outbox.intent.quarantined`,
 strict outbox parse failures, and stale runner fingerprints after rollout.
+
+## Telegram Group Presentation-Card Audience Rollout
+
+This release expands the strict audience rule for the existing
+`exercise_routine` and `telegram_rich_content` card kinds. Deploy the runner
+bundle with `container_rollout=immediate`. Before group-card authoring is
+considered converged, require managed-container smoke to report the exact new
+runner-bundle fingerprint.
+
+The preceding runner remains a safe rollback only before the first Telegram
+group presentation-card intent or hosted effect is persisted. After that write,
+the audience-capable bundle is the hard rollback floor. The preceding strict
+readers reject the non-direct card, and an old outbox reader can move a retained
+intent into quarantine. Forward-fix on the compatible bundle or newer.
+
+After rollout, monitor `outbox.intent.quarantined`, strict response-card parse
+failures, and stale runner fingerprints. Restore a quarantined intent only after
+the compatible bundle is live, then confirm that the restored card reaches the
+same authenticated Telegram group.
 
 Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
@@ -1203,12 +1238,16 @@ authorization; do not bypass it to recover an invalid split-host environment.
 Device-webhook burst transport requires a main Queue and DLQ named from the
 deployed Worker (`<worker>-device-webhooks` and
 `<worker>-device-webhooks-dlq`). Create both before deploying the Worker config.
-Deploy the Queue-capable Worker and the Web batch-admission callback before
-setting Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout
-gate. Start with one provider and prove Queue depth returns to zero, no DLQ rows
-appear, and Web admission stays serial before expanding. To roll back, clear the
-Web gate first, drain the main Queue through the still-deployed consumer, retain
-the encrypted DLQ for bounded recovery, and remove the consumer/bindings last.
+Keep Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout gate
+empty while deploying the callback and consumer. Deploy Web first: an old
+Worker sends callbacks of at most 25 entries, which the new Web reader accepts.
+Then deploy the Queue-capable Worker, which may send up to 100 entries; deploying
+that Worker against old Web would make callbacks above 25 fail closed and retry.
+Start with one provider and prove Queue depth returns to zero, no DLQ rows
+appear, no more than four independent account lanes run, and each account stays
+serial before expanding. To roll back, clear the Web gate first, drain the main
+Queue through the still-deployed consumer, retain the encrypted DLQ for bounded
+recovery, and remove the consumer/bindings last.
 During Cloudflare automation-key rotation, keep the prior private key as
 `decrypt_only` until Web uses the new public key and both the main Queue and
 encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ

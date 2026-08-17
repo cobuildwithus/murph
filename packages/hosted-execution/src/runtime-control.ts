@@ -167,6 +167,8 @@ export const HOSTED_MAILBOX_KINDS = [
   "environment-voice.captured",
   "health.daily-metric.reported",
   "meal-photo.captured",
+  "member.action.requested",
+  "member.action.completed",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_RETIRED_MAILBOX_KINDS,
@@ -717,6 +719,14 @@ export interface HostedMailboxPayloadSecureBoxAad {
   sequence: HostedMailboxPayloadCryptoMetadata["laneSeq"];
   table: "hosted_mailbox_item";
 }
+
+// Prepared account-deletion mailbox payloads are sealed before their durable
+// ordering sequence exists. The terminal database transaction allocates that
+// sequence together with the row insert, while this marker selects the
+// sequence-independent AAD in both Web and runtime decoders.
+export const HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX = "hmp2:";
+export const HOSTED_MAILBOX_PREPARED_PAYLOAD_AAD_SEQUENCE =
+  "prepared-before-sequence-v2";
 
 export function buildHostedMailboxPayloadScope(
   payloadStorage: HostedMailboxPayloadStorage,
