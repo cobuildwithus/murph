@@ -589,7 +589,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source capabilities, availability, actions, and disconnect lifecycle">
+      <StudySection title="Connect source signed-out actions, capabilities, availability, and disconnect lifecycle">
         <ConnectSourceCardStudy
           androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
         />
