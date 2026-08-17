@@ -833,6 +833,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH",
+      "HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
@@ -851,6 +852,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH).toBe(
       "/api/internal/hosted-mailbox/member-action-outcome",
+    );
+    expect(routeModule.HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH).toBe(
+      "/api/internal/hosted-runtime/message-volume/outbound-receipt",
     );
     expect(routeModule.HOSTED_RUNTIME_USAGE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/usage/record",
