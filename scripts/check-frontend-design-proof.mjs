@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { parse } from "@babel/parser";
 
 const DESIGN_CATALOG_PATHS = new Set([
   "apps/web/app/design/components-content.tsx",
@@ -8,6 +9,21 @@ const DESIGN_CATALOG_PATHS = new Set([
 ]);
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
 const GITHUB_MARKDOWN_URL = "https://api.github.com/markdown";
+const NON_RENDERED_ROUTE_EXPORTS = new Set([
+  "generateMetadata",
+  "generateViewport",
+  "metadata",
+  "viewport",
+]);
+const AST_LOCATION_KEYS = new Set([
+  "end",
+  "extra",
+  "innerComments",
+  "leadingComments",
+  "loc",
+  "start",
+  "trailingComments",
+]);
 
 function isFrontendUiPath(filePath) {
   if (filePath.startsWith("apps/web/app/design/")) {
@@ -37,8 +53,122 @@ function isFrontendUiPath(filePath) {
   );
 }
 
-function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
-  const uiPaths = changedPaths.filter(isFrontendUiPath);
+function renderedRouteSignature(source) {
+  const sourceFile = parse(source, {
+    plugins: ["jsx", "typescript"],
+    sourceType: "module",
+  });
+  const renderedStatements = sourceFile.program.body.filter(
+    (statement) => statement.type !== "ImportDeclaration"
+      && !isNonRenderedRouteExport(statement),
+  );
+  const renderedIdentifiers = collectIdentifiers(renderedStatements);
+  const imports = sourceFile.program.body
+    .filter((statement) => statement.type === "ImportDeclaration")
+    .map((statement) => importSignature(statement, renderedIdentifiers))
+    .filter(Boolean);
+  return JSON.stringify({ imports, statements: normalizeAst(renderedStatements) });
+}
+
+function isNonRenderedRouteExport(statement) {
+  if (statement.type !== "ExportNamedDeclaration") {
+    return false;
+  }
+  const declaration = statement.declaration;
+  if (declaration?.type === "FunctionDeclaration") {
+    return declaration.id
+      ? NON_RENDERED_ROUTE_EXPORTS.has(declaration.id.name)
+      : false;
+  }
+  if (declaration?.type === "VariableDeclaration") {
+    return declaration.declarations.every((variable) =>
+      variable.id.type === "Identifier"
+        && NON_RENDERED_ROUTE_EXPORTS.has(variable.id.name)
+    );
+  }
+  return statement.specifiers.length > 0 && statement.specifiers.every(
+    (specifier) => specifier.exported.type === "Identifier"
+      && NON_RENDERED_ROUTE_EXPORTS.has(specifier.exported.name),
+  );
+}
+
+function collectIdentifiers(nodes) {
+  const identifiers = new Set();
+  const visit = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    if (node.type === "Identifier") {
+      identifiers.add(node.name);
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+      } else {
+        visit(value);
+      }
+    }
+  };
+  for (const node of nodes) {
+    visit(node);
+  }
+  return identifiers;
+}
+
+function importSignature(statement, usedIdentifiers) {
+  const moduleName = statement.source.value;
+  if (statement.specifiers.length === 0) {
+    return { moduleName, sideEffect: true };
+  }
+  let defaultImport = null;
+  let namespaceImport = null;
+  const namedImports = [];
+  for (const specifier of statement.specifiers) {
+    if (!usedIdentifiers.has(specifier.local.name)) {
+      continue;
+    }
+    if (specifier.type === "ImportDefaultSpecifier") {
+      defaultImport = specifier.local.name;
+    } else if (specifier.type === "ImportNamespaceSpecifier") {
+      namespaceImport = specifier.local.name;
+    } else {
+      namedImports.push({
+        imported: specifier.imported.name ?? specifier.imported.value,
+        local: specifier.local.name,
+        typeOnly: specifier.importKind === "type",
+      });
+    }
+  }
+  if (!defaultImport && !namespaceImport && namedImports.length === 0) {
+    return null;
+  }
+  return {
+    defaultImport,
+    moduleName,
+    namedImports,
+    namespaceImport,
+  };
+}
+
+function normalizeAst(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeAst);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !AST_LOCATION_KEYS.has(key))
+      .map(([key, entry]) => [key, normalizeAst(entry)]),
+  );
+}
+
+function validateFrontendDesignProof({
+  changedPaths,
+  prBodyHtml,
+  uiPaths = changedPaths.filter(isFrontendUiPath),
+}) {
   if (uiPaths.length === 0) {
     return { required: false };
   }
@@ -203,6 +333,34 @@ function readChangedPaths(baseSha, headSha) {
     .filter(Boolean);
 }
 
+function readFrontendUiPaths(baseSha, headSha, changedPaths) {
+  return changedPaths.filter((filePath) => {
+    if (!isFrontendUiPath(filePath)) {
+      return false;
+    }
+    if (!filePath.startsWith("apps/web/app/") || !filePath.endsWith(".tsx")) {
+      return true;
+    }
+    const baseSource = readRevisionFile(baseSha, filePath);
+    const headSource = readRevisionFile(headSha, filePath);
+    if (baseSource === null || headSource === null) {
+      return true;
+    }
+    return renderedRouteSignature(baseSource) !== renderedRouteSignature(headSource);
+  });
+}
+
+function readRevisionFile(revision, filePath) {
+  try {
+    return execFileSync("git", ["show", `${revision}:${filePath}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
   const baseSha = process.env.MURPH_PR_BASE_SHA?.trim();
   const headSha = process.env.MURPH_PR_HEAD_SHA?.trim();
@@ -214,13 +372,15 @@ async function main() {
   }
 
   const changedPaths = readChangedPaths(baseSha, headSha);
-  if (!changedPaths.some(isFrontendUiPath)) {
+  const uiPaths = readFrontendUiPaths(baseSha, headSha, changedPaths);
+  if (uiPaths.length === 0) {
     console.log("No user-facing hosted Web UI changes detected.");
     return;
   }
   const result = validateFrontendDesignProof({
     changedPaths,
     prBodyHtml: await renderPrBody(prBody),
+    uiPaths,
   });
   if (result.errors.length > 0) {
     console.error("Frontend design proof is incomplete:");
@@ -251,8 +411,10 @@ export {
   findRenderedListItem,
   isFrontendUiPath,
   readChangedPaths,
+  readFrontendUiPaths,
   readRenderedSection,
   renderPrBody,
+  renderedRouteSignature,
   renderedText,
   validateFrontendDesignProof,
 };

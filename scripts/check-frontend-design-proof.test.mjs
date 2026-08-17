@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 
 import {
   isFrontendUiPath,
+  renderedRouteSignature,
   validateFrontendDesignProof,
 } from "./check-frontend-design-proof.mjs";
 
@@ -59,6 +60,50 @@ test("detects user-facing app and shared component UI paths", () => {
   assert.equal(
     isFrontendUiPath("apps/web/test/hosted-group-funding-page.test.tsx"),
     false,
+  );
+});
+
+test("ignores route metadata edits without hiding rendered UI edits", () => {
+  const baseSource = `
+import type { Metadata } from "next";
+import { Panel } from "@/src/components/panel";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+
+export const metadata: Metadata = createMurphPageMetadata({ title: "Settings" });
+
+export default function Page() {
+  return <Panel label="Settings" />;
+}
+`;
+  const metadataOnlySource = `
+import type { Metadata } from "next";
+import { Panel } from "@/src/components/panel";
+import {
+  createMurphPageMetadata,
+  MURPH_NOINDEX_PAGE_ROBOTS,
+} from "@/src/lib/site-metadata";
+
+export const metadata: Metadata = createMurphPageMetadata({
+  robots: MURPH_NOINDEX_PAGE_ROBOTS,
+  title: "Settings",
+});
+
+export default function Page() {
+  return <Panel label="Settings" />;
+}
+`;
+  const renderedChangeSource = metadataOnlySource.replace(
+    'label="Settings"',
+    'label="Account settings"',
+  );
+
+  assert.equal(
+    renderedRouteSignature(baseSource),
+    renderedRouteSignature(metadataOnlySource),
+  );
+  assert.notEqual(
+    renderedRouteSignature(baseSource),
+    renderedRouteSignature(renderedChangeSource),
   );
 });
 
