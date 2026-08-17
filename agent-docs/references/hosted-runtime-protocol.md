@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-14
+Last verified: 2026-08-16
 
 ## Decision
 
@@ -24,7 +24,9 @@ The live ownership split is:
   appends one deterministic `device-sync.wake` mailbox handoff if the connection
   transitioned from clean to dirty, and completes trace acceptance in the same
   transaction. The post-commit Temporal signal carries only the mailbox pointer.
-  There is no periodic dirty-row recovery sweep.
+  There is no periodic dirty-row recovery sweep. The existing scheduled
+  mailbox-handoff sweep may re-signal one exact unconsumed `device-sync.wake`
+  pointer per user after a failed first signal; it does not scan dirty state.
   The runtime pulls pending dirty rows through the required signed dirty-pending
   callback and acks checkpoint-safe handoff through the required dirty-ack
   callback.

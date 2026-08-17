@@ -212,6 +212,7 @@ describe.skipIf(!runPostgresProof)(
                   },
                   claimToken,
                   now: receipt.receivedAt.toISOString(),
+                  processingAttemptedAt: receipt.receivedAt.toISOString(),
                   ownerId,
                   store,
                   traceId: receipt.traceId,

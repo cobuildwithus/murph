@@ -27,6 +27,23 @@ export const MURPH_DEFAULT_OPEN_GRAPH_IMAGE = {
   width: 1200,
 } as const;
 
+/**
+ * Reference to a dedicated 1200x630 OG image route. Pass the result through
+ * `openGraph.images` AND `twitter.images`: `createMurphPageMetadata` injects
+ * the site default otherwise, and that explicit default also defeats Next's
+ * file-convention inheritance, so child routes of an OG-bearing parent must
+ * pass the parent's image through here or they fall back to the homepage card.
+ */
+export function createMurphOgImageRef(input: { alt: string; url: string }) {
+  return {
+    alt: input.alt,
+    height: 630,
+    type: "image/png",
+    url: input.url,
+    width: 1200,
+  } as const;
+}
+
 export function withMurphOpenGraphDefaults(
   openGraph: OpenGraphMetadata,
 ): OpenGraphMetadata {

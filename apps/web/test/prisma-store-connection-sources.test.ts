@@ -46,9 +46,15 @@ type MutableSignalRecord = {
   createdAt: Date;
 };
 
-function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
+function createSourceStore(
+  seed: MutableConnectionSourceRecord[] = [],
+  options: { connectionProvider?: string } = {},
+) {
   const records = new Map<string, MutableConnectionSourceRecord>();
   const signals: MutableSignalRecord[] = [];
+  const deviceConnectionFindUnique = vi.fn(async () => ({
+    provider: options.connectionProvider ?? "junction",
+  }));
   const deviceConnectionUpdate = vi.fn(async () => {
     throw new Error("source projection writes must not mutate device connection metadata");
   });
@@ -265,6 +271,7 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
 
   const prisma = {
     deviceConnection: {
+      findUnique: deviceConnectionFindUnique,
       update: deviceConnectionUpdate,
     },
     deviceConnectionSource: {
@@ -283,6 +290,7 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
   });
 
   return {
+    deviceConnectionFindUnique,
     deviceConnectionUpdate,
     deleteMany,
     findMany,
@@ -777,7 +785,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     if (!canonicalKey) {
       throw new Error("Expected a canonical Apple Health source key.");
     }
-    const { findMany, store } = createSourceStore([
+    const { deviceConnectionFindUnique, findMany, store } = createSourceStore([
       createSourceRecord({
         connectionId,
         firstSeenAt: new Date("2026-03-24T00:00:00.000Z"),
@@ -813,6 +821,48 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       status: "disconnected",
     })]);
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 5 }));
+
+    await expect(store.listConnectionSources({
+      connectionId,
+      sourceProviderSlug: "apple_healthkit",
+    })).resolves.toEqual([expect.objectContaining({
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "opaque-established-apple-health",
+      sourceProviderSlug: "apple_health_kit",
+      status: "disconnected",
+    })]);
+    expect(deviceConnectionFindUnique).toHaveBeenCalledOnce();
+    expect(deviceConnectionFindUnique).toHaveBeenCalledWith({
+      select: { provider: true },
+      where: { id: connectionId },
+    });
+  });
+
+  it("keeps source-filtered physical instances separate for a non-Junction parent", async () => {
+    const { deviceConnectionFindUnique, store } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_oura_connected",
+        sourceInstanceKey: "src_oura_ring_a",
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+      createSourceRecord({
+        id: "dcs_oura_disconnected",
+        sourceInstanceKey: "src_oura_ring_b",
+        sourceProviderSlug: "oura",
+        status: "disconnected",
+      }),
+    ], { connectionProvider: "oura" });
+
+    await expect(store.listConnectionSources({
+      connectionId: "dsc_parent",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual([
+      expect.objectContaining({ sourceInstanceKey: "src_oura_ring_a" }),
+      expect.objectContaining({ sourceInstanceKey: "src_oura_ring_b" }),
+    ]);
+    expect(deviceConnectionFindUnique).toHaveBeenCalledOnce();
   });
 
   it("marks all non-disconnected sources for one parent connection disconnected", async () => {

@@ -41,5 +41,8 @@ jobs:
       - name: Guard hosted Stripe billing CI boundary
         run: pnpm hosted-billing:ci-guard
 
+      - name: Test native iOS hosted E2E control contract
+        run: node --test scripts/native-ios-hosted-e2e.test.mjs
+
       - name: Check tracked private/build artifacts
         run: pnpm no-js
