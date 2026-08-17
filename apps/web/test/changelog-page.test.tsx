@@ -81,16 +81,21 @@ describe("ChangelogPage", () => {
       expect(markup).not.toContain(`id="edition-${edition.id}"`);
     }
 
-    const correctedEdition = firstPage.editions.find(
+    const correctedEdition = listChangelogEditions().find(
       (edition) => edition.id === "2026-08-10",
     );
     expect(correctedEdition).toBeDefined();
     if (!correctedEdition) {
       throw new TypeError(
-        "The current archive must include the corrected edition.",
+        "The changelog archive must include the corrected edition.",
       );
     }
-    expect(markup).toContain(
+    const correctedEditionMarkup = renderToStaticMarkup(
+      await ChangelogPage({
+        searchParams: Promise.resolve({ edition: correctedEdition.id }),
+      }),
+    );
+    expect(correctedEditionMarkup).toContain(
       renderToStaticMarkup(<>{correctedEdition.summary}</>),
     );
     expect(correctedEdition.summary).toContain("Training shows saved workouts");
