@@ -700,6 +700,10 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
+    const sourceConnectionWork = buildSourceConnectionWork({
+      now: context.now,
+      sourceProviderSlug: context.sourceProviderSlug,
+    });
     return {
       externalAccountId,
       displayName: "Junction",
@@ -709,8 +713,7 @@ export function createJunctionDeviceSyncProvider(
         providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
       },
       setupPhase: "link_returned",
-      initialJobs: buildInitialJobs(context.now, context.sourceProviderSlug),
-      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+      ...sourceConnectionWork,
     };
   }
 
@@ -812,7 +815,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return (await client.listUserProviders(userId)).some((provider) =>
-      mapJunctionSourceStatus(provider.status) !== "disconnected"
+      mapJunctionSourceStatus(provider.status) === "connected"
       && (
         normalizeProviderSlug(provider.origin.sourceProviderSlug)
         ?? normalizeProviderSlug(provider.slug)
@@ -4734,6 +4737,16 @@ export function createJunctionDeviceSyncProvider(
     ];
   }
 
+  function buildSourceConnectionWork(input: {
+    now: string;
+    sourceProviderSlug: string | null | undefined;
+  }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt"> {
+    return {
+      initialJobs: buildInitialJobs(input.now, input.sourceProviderSlug),
+      nextReconcileAt: addMilliseconds(input.now, reconcileIntervalMs),
+    };
+  }
+
   return {
     provider: "junction",
     descriptor: buildJunctionDeviceSyncRuntimeDescriptor(config),
@@ -4743,6 +4756,7 @@ export function createJunctionDeviceSyncProvider(
     },
     connectionHandler: {
       beginConnection,
+      buildSourceConnectionWork,
       completeConnection,
       isSourceAccessActive,
       revokeAccess,

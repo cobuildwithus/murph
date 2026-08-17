@@ -3413,6 +3413,99 @@ describe('assistant auto-reply event-first path', () => {
     }))
   })
 
+  it('injects prior delivery context for an actor-less direct Telegram route', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        actorId: null,
+        channel: 'telegram',
+        intentId: 'intent-signup-welcome',
+        message: 'Welcome to the direct chat.',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-activation',
+        threadIsDirect: true,
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    const candidate = createAssistantInputCandidate({
+      actorId: null,
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'telegram',
+      text: 'What can you help me with?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain('Welcome to the direct chat.')
+  })
+
+  it('does not inject prior delivery context for an actor-less direct email route', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        actorId: null,
+        channel: 'email',
+        intentId: 'intent-actorless-email',
+        message: 'Context from an actor-less email route.',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-email',
+        threadIsDirect: true,
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    const candidate = createAssistantInputCandidate({
+      actorId: null,
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'email',
+      text: 'What did you send?',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext ?? '').not.toContain(
+      'Context from an actor-less email route.',
+    )
+    expect(sendInput.receiptMetadata).not.toHaveProperty(
+      AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+    )
+  })
+
   it('injects cross-session context across provider and local clock skew', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
@@ -5466,6 +5559,7 @@ function createOutboxMessage(input: {
   status?: 'pending' | 'sent'
   target?: string
   threadId?: string | null
+  threadIsDirect?: boolean | null
   turnId?: string
 }) {
   const status = input.status ?? 'sent'
@@ -5516,6 +5610,9 @@ function createOutboxMessage(input: {
     sessionId: input.sessionId,
     status,
     threadId: input.threadId === undefined ? providerThreadId : input.threadId,
+    threadIsDirect: input.threadIsDirect === undefined
+      ? true
+      : input.threadIsDirect,
     turnId: input.turnId ?? `turn-${input.intentId}`,
   }
 }

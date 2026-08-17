@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-08-14
+Last verified: 2026-08-15
 
 ## Current Repo Checks
 
@@ -42,7 +42,7 @@ Last verified: 2026-08-14
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-dirty-reconnect-ack-postgres.test.ts` | Opt-in real-PostgreSQL proof for mixed-version reconnect classification versus dirty-payload acknowledgement. Run after migrations. | Acknowledgement-first makes reconnect wait on the dirty marker before legacy decryption; reconnect-first retains the marker through classification while acknowledgement waits; both schedules complete without a marker/payload deadlock and leave the replacement active with processed work drained. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-dirty-account-deletion-concurrency.test.ts` | Opt-in real-PostgreSQL proof for device dirty-state and OAuth callback/disconnect ownership versus account deletion. Run after migrations. | Existing dirty-state cases retain their lock-order proof. OAuth cases show an owner suspension waiting behind an unconsumed callback prevents provider work; a provider-success claim survives admission expiry, the global expiry sweep, and callback replay both before and after suspension before ambiguous revocation ownership transfers to a token-bearing failed connection; failure marking and credential clearing cannot supersede an unresolved refresh lease; refresh-first ordering makes suspension wait and exit before setting `suspendedAt`, while suspension-first ordering makes refresh admission wait and reject before taking the connection lock or starting provider work; after refresh commits v2, cleanup retains and rereads v2 while stale-v1 clearing fails and only exact-v2 confirmed revocation can clear it; ordinary disconnect retains exact encrypted OAuth authority when the registry omits its revoke hook and after an ambiguous revoke, while a confirmed retry alone clears that generation and sets credential kind `none`; a hydrated `none` row skips provider cleanup and completes locally; provider-config revoke failure preserves the credential plus connected sources in nonterminal state, and a confirmed retry alone clears that exact config and disconnects its sources; consent withdrawal selects a legacy disconnected non-none row, counts an ambiguous provider-config revoke as failed, retries that same generation without another consent event, exact-clears on confirmed success, terminalizes child sources on both fail-then-success and first-attempt success, and skips a disconnected `none` sibling; foreign-owner/provider discard cannot mutate the row and exact discard cannot remove a consumed claim; and exact callback-epoch finalization neither deletes a replacement claim nor survives a forced transaction rollback. The terminal authority helper waits for both connection-token and source-status writers before taking its exact snapshot. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-db-spike-resilience-postgres.test.ts` | Opt-in real-PostgreSQL replay for the 2026-08-10 device-sync database spike and the maximum-cardinality runtime-apply path. The suite rejects non-loopback database URLs and requires the current migrations. | Exactly 1,641 compact-only synthetic webhook receipts retain their original 120-second distribution and 31-receipt peak while a compressed 31-wide admission lane overlaps 20 runtime snapshots and 40 foreground reads. That proof caps the application pool at 15, samples PostgreSQL sessions, proves no dirty crypto capability is prepared, uses the canonical final dirty owner, asserts two exact max-one/minimal source-admission projections per receipt, completes every trace and signal without an avoidable stale-preparation response, advances the receipt timestamp monotonically, and drains dirty state without production data. A second replay applies 100 no-op connection updates while 40 foreground reads share a two-connection pool; it proves one owner-filtered set connection read, no prepared source hydration, 100 serial live connection/source reads, no writes, and no PostgreSQL session count above the configured pool maximum. |
-| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-prepared-webhook-authority-postgres.test.ts` | Opt-in real-PostgreSQL proof for delayed prepared Junction webhook authority revalidation through the production-composed hosted ingress service. The suite rejects non-loopback database URLs and requires the current migrations. | A real Svix-signed Apple Health source-registration event is verified and prepared once, then consumed through the actual Junction registry and hosted Prisma store. Consent revocation during source cleanup terminally completes only the claimed trace without provider I/O, receipt/source mutation, dirty state, signals, or mailbox work. A source epoch superseding the first admission phase during the one provider read is retained by the second locked revalidation with the same trace-only terminal result. |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-prepared-webhook-authority-postgres.test.ts` | Opt-in real-PostgreSQL proof for delayed prepared Junction webhook authority revalidation through the production-composed hosted ingress service. The suite rejects non-loopback database URLs and requires the current migrations. | A real Svix-signed daily data event for a pending setup passes through the Junction parser, live exact-source check, hosted Prisma admission, setup confirmation, source receipt, encrypted dirty payload, callback-equivalent source-scoped initial jobs, encrypted mailbox handoff, runtime signal, and trace completion even when dirty state already exists. An exact source with ambiguous provider status leaves setup and source unchanged, creates no dirty work or signal, and releases the trace for retry. Concurrent callback-equivalent source admission superseding the live proof makes durable daily data retry, then replay persists its exact encrypted payload once before trace completion without a second provider read. A real Svix-signed Apple Health source-registration event is also verified and prepared once. Consent revocation during source cleanup terminally completes only the claimed trace without provider I/O, receipt/source mutation, dirty state, signals, or mailbox work. A source epoch superseding a rehydratable registration event during the one provider read retains the newer state and terminally settles that hint. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/initial-onboarding-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for initial-onboarding rollout compatibility and first-writer-wins serialization. The suite rejects non-loopback database URLs and runs after migrations. | The exact migration SQL backfills existing rows, its temporary default completes a legacy omitted-column insert, the current explicit-null insert stays pending, and independent Web-save/iOS-skip Prisma transactions serialize in both controlled winner orderings without loser preference overwrite |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for deterministic hosted usage replay. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A first writer holds an uncommitted deterministic usage row while an exact concurrent replay waits; both transactions complete after release and the ledger retains one immutable row |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof that the accepted-attempt recheck cooldown elects one owner. The claim replaced a runtime-log-row election, so exactly-one-winner is now PostgreSQL conditional-update semantics rather than application logic. Runs in the hosted E2E PostgreSQL job after migrations. | Two concurrent claims at the same logical time yield exactly one winner; a claim at the cooldown boundary is denied; a claim past the boundary succeeds |
@@ -391,10 +391,16 @@ supported provider credential.
   `memory.swap.max`, or `memory.oom.group`. The Vercel package build gives the
   parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
   `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.3.0
-  rebuilds its non-isolated TypeScript worker options from the parent arguments
-  followed by `NODE_OPTIONS`, while removing the flag from isolated static
-  workers. The same script owns the Vercel package build and CI memory-
-  observation invocation. The split reduces the compile-parent peak without
+  rebuilds non-isolated child options from the parent arguments followed by
+  `NODE_OPTIONS`, so the sequential Webpack compiler workers receive 3 GiB and
+  the later generated-contract TypeScript validation child inherits the same
+  limit, while isolated static workers have the flag removed. The same script
+  owns the Vercel package build and CI memory-observation invocation.
+  `apps/web/README.md` § "Production build memory guard" is the single prose
+  owner for the mutable production build cache, epoch, and deadline contract.
+  The CI-relevant fact is that the verify lane's `VERCEL=1 VERCEL_ENV=preview`
+  build shape compiles Webpack cold without arming the production-only build
+  deadline. The split reduces the compile-parent peak without
   weakening generated-contract validation, while repeated forced-cold Standard
   previews remain the real Vercel acceptance proof. A 2 GiB parent-bound
   candidate passed one forced-cold Standard preview but the next identical
@@ -424,12 +430,11 @@ supported provider credential.
   Webpack build worker and memory optimizations because Workflow contributes
   Webpack configuration. Three consecutive forced-cold Webpack previews, a
   later integration preview, and the final corrected head previously completed
-  on the Standard builder without OOM. A versioned `.next/cache` epoch clears an
-  incompatible restored cache
-  until one Webpack build succeeds and then preserves ordinary warm caching.
-  The epoch is owned by the shared production runner and changes only after a
-  proven compiler/cache transition; missing or mismatched stamps fail toward a
-  cold build instead of trusting cross-compiler state.
+  on the Standard builder without OOM. The shared production runner owns the
+  versioned `.next/cache` epoch and the per-build cold-Webpack-cache policy;
+  see `apps/web/README.md` § "Production build memory guard" for the exact
+  contract. Missing or mismatched stamps fail toward a cold build instead of
+  trusting cross-compiler state.
   Exact-head CI proves the complete compile, type-validation, static-generation,
   and directive-discovery path,
   while focused Stripe and phone-call suites prove the existing
@@ -624,13 +629,21 @@ supported provider credential.
 - `apps/cloudflare/test/database-health-{metrics,monitor,store,worker}.test.ts`
   and `apps/cloudflare/test/workers/database-health-e2e.test.ts` cover the
   independent PlanetScale/Linq database-health plane. The tests prove strict
-  per-family metric normalization, explicit unknowns when either expected
-  connection-error port is missing, collision-free region-plus-port series,
+  per-family metric normalization, healthy sparse connection-error port
+  cardinality without false monitoring pages, collision-free region-plus-port
+  series,
   continued evaluation of available signals, positive 5432 and 6432 deltas,
   and independent reset/new-series suppression across complete and partial
   samples. They also prove per-port baseline advancement with omitted-port
-  retention, one bounded confirmation for a safe connection-error-family
-  omission, multi-family confirmation rejection, cross-scrape port composition,
+  retention, one bounded confirmation when the whole connection-error family
+  is absent, confirmation-only port baseline advancement, transient diagnostic
+  port evidence with legacy-reader-compatible durable normalization,
+  alternating sparse-port observations, legacy single-port obligation parsing,
+  and
+  conservative legacy-plus-detailed window formatting,
+  retention of an all-family-missing parsed observation across retry transport
+  failure with exact window ratios and immutable restart delivery,
+  multi-family confirmation rejection, cross-scrape port composition,
   immediate unsafe-signal paging before that confirmation, unsafe confirmation
   paging without losing the complementary baseline, failed-confirmation
   retention, positive recovered-counter deltas, persistent-gap telemetry

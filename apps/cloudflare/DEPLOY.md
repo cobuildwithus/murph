@@ -381,6 +381,25 @@ that workspace because an older strict reader can quarantine the retained
 intent. Forward-fix on this bundle or newer. Monitor `outbox.intent.quarantined`,
 strict outbox parse failures, and stale runner fingerprints after rollout.
 
+## Telegram Group Presentation-Card Audience Rollout
+
+This release expands the strict audience rule for the existing
+`exercise_routine` and `telegram_rich_content` card kinds. Deploy the runner
+bundle with `container_rollout=immediate`. Before group-card authoring is
+considered converged, require managed-container smoke to report the exact new
+runner-bundle fingerprint.
+
+The preceding runner remains a safe rollback only before the first Telegram
+group presentation-card intent or hosted effect is persisted. After that write,
+the audience-capable bundle is the hard rollback floor. The preceding strict
+readers reject the non-direct card, and an old outbox reader can move a retained
+intent into quarantine. Forward-fix on the compatible bundle or newer.
+
+After rollout, monitor `outbox.intent.quarantined`, strict response-card parse
+failures, and stale runner fingerprints. Restore a quarantined intent only after
+the compatible bundle is live, then confirm that the restored card reaches the
+same authenticated Telegram group.
+
 Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
 cards can still fetch their immutable image.

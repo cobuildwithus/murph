@@ -9,6 +9,7 @@ import {
   MURPH_PRODUCT_ORIGIN,
   assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
+  assistantResponseCardMatchesConversationAudience,
   buildWorkoutSessionAppCardEnvelopeV4,
   buildWorkoutSessionAppCardEnvelopeV6,
   challengeStandingsResponseCardV1Schema,
@@ -100,6 +101,7 @@ export type LinqIMessageAppLayout = {
 }
 
 export {
+  assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
   assistantResponseCardV1Bounds,
   buildWorkoutSessionAppCardEnvelopeV4,
