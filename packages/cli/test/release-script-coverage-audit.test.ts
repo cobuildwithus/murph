@@ -1426,9 +1426,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toMatch(
       /does\s+not actually resolve counts as `REVIEW_INDUCED`/u,
     )
-    expect(prDeepReviewPrompt).toContain('change-shape breakdown')
+    expect(prDeepReviewPrompt).toContain('# Patch-size anomaly')
     expect(prDeepReviewPrompt).toContain('UX outline')
-    expect(prDeepReviewPrompt).toContain('`Non-obvious affected surfaces`')
+    expect(prDeepReviewPrompt).toMatch(/applicable\s+risk notes/u)
     expect(prDeepReviewPrompt).toContain('**Purpose Drift**')
     expect(prDeepReviewPrompt).toContain('disclosure-only verification retry')
     expect(prDeepReviewPrompt).toContain('Do not reopen the\nfull patch')
@@ -1443,10 +1443,10 @@ describe('monorepo release flow coverage audit', () => {
       'Every non-obvious affected surface is also disclosed',
     )
     expect(prDeepReviewPrompt).toContain(
-      'applicable frontend and product-experience lenses own rendered proof',
+      'applicable frontend and Product UX lenses own rendered proof',
     )
     expect(prDeepReviewPrompt).not.toContain(
-      'routed local product-experience review',
+      'routed local Product UX review',
     )
     expect(prDeepReviewPrompt).toContain(
       'Disclosure does not make\nan unsafe or needless change acceptable',
@@ -1467,10 +1467,10 @@ describe('monorepo release flow coverage audit', () => {
       '`review-gpt-pr-context/rendered-evidence.txt`',
     )
     expect(completionSpecialistsPrompt).toContain(
-      '`agent-docs/prompts/product-experience-review.md`',
+      '`agent-docs/operations/product-ux.md`',
     )
     expect(completionSpecialistsPrompt).toContain(
-      'Product experience lens: applicable|not applicable',
+      'Product UX lens: applicable|not applicable',
     )
     expect(completionSpecialistsPrompt).toContain(
       'Product purpose verdict:',
@@ -1687,7 +1687,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain(
-      'pass replaces the four former local `product-experience-review`,',
+      'Product UX, prompt, frontend, and coverage audits run together',
     )
     expect(completionWorkflow).toMatch(/do not also run local\s+`deep-review`/u)
     expect(completionWorkflow).not.toContain(
@@ -1697,10 +1697,9 @@ describe('monorepo release flow coverage audit', () => {
       'may skip the individual required local audit subagent passes',
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
-    expect(completionWorkflow).toContain('Change-shape breakdown')
+    expect(completionWorkflow).not.toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('ReviewGPT context sensitivity: sensitive')
-    expect(completionWorkflow).toContain('scope-anomaly signal')
-    expect(completionWorkflow).toContain('not a quality target or an automatic merge')
+    expect(completionWorkflow).toContain('manual line-count table')
     expect(completionWorkflow).toContain('evidenced current member/event volume')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
     expect(completionWorkflow).not.toContain(
@@ -1710,12 +1709,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain(
       'without an unrelated new inbound action',
     )
-    expect(completionWorkflow).toContain('Non-obvious affected surfaces')
-    expect(completionWorkflow).toContain('If none exist,')
+    expect(completionWorkflow).toContain('direct journey proof')
+    expect(completionWorkflow).toContain('Add a **Risks** section only when')
     expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
     expect(completionWorkflow).toContain('`reviewgpt-coverage.patch`')
     expect(completionWorkflow).toContain(
-      'the parent must reapply `agent-docs/prompts/product-experience-review.md` to that corrected pushed head',
+      'the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to the corrected pushed head',
     )
     expect(completionWorkflow).toContain(
       'This is a bounded parent revalidation, not another subagent or ReviewGPT invocation.',
@@ -1727,7 +1726,6 @@ describe('monorepo release flow coverage audit', () => {
     const completionAuditPrompts = [
       'prompt-review.md',
       'frontend-review.md',
-      'product-experience-review.md',
       'coverage-write.md',
     ].map((fileName) =>
       readFileSync(
@@ -1739,6 +1737,11 @@ describe('monorepo release flow coverage audit', () => {
       expect(auditPrompt).not.toContain('Assume there is at least one')
       expect(auditPrompt).toContain('Stop rule:')
     }
+    const productUx = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'product-ux.md'),
+      'utf8',
+    )
+    expect(productUx).toContain('A valid review can\nhave zero findings.')
     expect(completionAuditPrompts[0]).toContain('prompt-guidance-gpt-5p6.md')
     expect(completionAuditPrompts[0]).toContain('latest-model.md')
     expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
@@ -1752,9 +1755,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[2]).not.toContain(
       'Do not use `review:gpt`',
     )
-    expect(completionAuditPrompts[3]).toContain('Optional patch artifact:')
-    expect(completionAuditPrompts[3]).toContain('`reviewgpt-coverage.patch`')
-    expect(completionAuditPrompts[3]).toMatch(coverageAdmissionRule)
+    expect(completionAuditPrompts[2]).toContain('Optional patch artifact:')
+    expect(completionAuditPrompts[2]).toContain('`reviewgpt-coverage.patch`')
+    expect(completionAuditPrompts[2]).toMatch(coverageAdmissionRule)
     expect(
       existsSync(
         path.join(
@@ -2149,7 +2152,7 @@ printf '%s|%s|%s|%s|%s\n' \
     }
   })
 
-  it('keeps product-experience decisions distinct inside the unified specialist review', () => {
+  it('keeps Product UX decisions in one owner inside the unified specialist review', () => {
     const prDeepReview = readFileSync(
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
       'utf8',
@@ -2161,10 +2164,6 @@ printf '%s|%s|%s|%s|%s\n' \
         'chatgpt-review-presets',
         'completion-specialists.md',
       ),
-      'utf8',
-    )
-    const productExperienceReview = readFileSync(
-      path.join(repoRoot, 'agent-docs', 'prompts', 'product-experience-review.md'),
       'utf8',
     )
     const productUx = readFileSync(
@@ -2184,7 +2183,7 @@ printf '%s|%s|%s|%s|%s\n' \
       'utf8',
     )
 
-    expect(prDeepReview).toContain('## Product experience audit')
+    expect(prDeepReview).toContain('## Product UX audit')
     expect(prDeepReview).toMatch(
       /Frontend-facing changes express the feature's irreducible purpose with the\s+fewest necessary words, actions, choices, and screens/u,
     )
@@ -2203,15 +2202,12 @@ printf '%s|%s|%s|%s|%s\n' \
     expect(completionSpecialists).toContain(
       'rendered fidelity to the declared',
     )
-    expect(completionSpecialists).toContain('# Product-experience lens')
-    expect(completionSpecialists).toContain(
-      '`agent-docs/prompts/product-experience-review.md`',
-    )
+    expect(completionSpecialists).toContain('# Product UX lens')
     expect(completionSpecialists).toContain(
       '`agent-docs/operations/product-ux.md`',
     )
     expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
-    expect(productExperienceReview).toContain('irreducible user purpose')
+    expect(productUx).toContain('irreducible user purpose')
     expect(productUx).toContain('Restore the existing promise: `Patch`.')
     expect(productUx).toContain(
       'Change the existing promise: `Product change`.',
@@ -2222,21 +2218,10 @@ printf '%s|%s|%s|%s|%s\n' \
     expect(productUx).toContain(
       'The number of affected people changes walkthrough coverage, not the effort',
     )
-    expect(productExperienceReview).toContain(
-      '`agent-docs/operations/product-ux.md`',
+    expect(productUx).toMatch(
+      /Remove repeated copy, avoidable steps, screens, fields,\s+choices, concepts, and delays/u,
     )
-    expect(productExperienceReview).toContain(
-      'Product-experience lens for the preliminary unified ReviewGPT completion pass',
-    )
-    expect(productExperienceReview).toMatch(
-      /extra concept, screen, click, field, choice, setting,\s+confirmation, interruption, and block of explanatory text/u,
-    )
-    expect(productExperienceReview).toMatch(
-      /waits behind unrelated idle or\s+maintenance work/u,
-    )
-    expect(productExperienceReview).toContain(
-      'Defer component and token implementation',
-    )
+    expect(productUx).toContain('waits behind unrelated work')
     expect(frontendReview).toMatch(
       /do not duplicate subjective product-taste findings or\s+decide the copy, state selection, action count, or whether an element exists/u,
     )
@@ -2245,7 +2230,7 @@ printf '%s|%s|%s|%s|%s\n' \
     )
     expect(frontendReview).not.toContain('unrelated rendered elements')
     expect(completionWorkflow).toContain(
-      'rendered fidelity to the declared states and hierarchy, responsive behavior, accessibility, and design-system execution',
+      'require enough redacted rendered evidence to judge',
     )
     expect(completionWorkflow).not.toContain(
       'hierarchy, clarity, interaction, responsive behavior, accessibility, state and error handling',
@@ -2258,7 +2243,7 @@ printf '%s|%s|%s|%s|%s\n' \
       'asynchronous continuation or wake ownership;',
     )
     expect(completionWorkflow).toContain(
-      '| Any product-owned dimension, including one changed through a prompt | Run the product-experience lens in the preliminary specialist ReviewGPT pass |',
+      '| Any product-owned dimension, including one changed through a prompt | Run the Product UX lens in the preliminary specialist ReviewGPT pass |',
     )
     expect(completionWorkflow).toContain(
       '| Prompt-primary change with no product-owned dimension | No product-decision review | Run the preliminary prompt lens only |',
@@ -2277,10 +2262,10 @@ printf '%s|%s|%s|%s|%s\n' \
       'Semantic copy—including CTA, helper, onboarding,',
     )
     expect(completionWorkflow).toMatch(
-      /a prompt that changes a product-owned dimension also activates the\s+product-experience lens in the same preliminary pass/u,
+      /a prompt that changes a product-owned dimension also activates the\s+Product UX lens in the same preliminary pass/u,
     )
     expect(agentWorkflowRouting).not.toContain(
-      'runs local `product-experience-review`',
+      'runs local `Product UX review`',
     )
     expect(agentWorkflowRouting).toContain(
       'Any change to semantic user-facing copy; user-visible action purpose, count, or priority;',
@@ -2298,7 +2283,7 @@ printf '%s|%s|%s|%s|%s\n' \
       'trivial copy-only `apps/web` edits that change static text only',
     )
     expect(agentWorkflowRouting).not.toContain(
-      '`product-experience-review` for materially changed user-facing behavior',
+      '`Product UX review` for materially changed user-facing behavior',
     )
     expect(agentWorkflowRouting).not.toContain('trivial static copy')
     expect(completionWorkflow).toMatch(
@@ -3508,11 +3493,6 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       writeHarnessFile(harnessRoot, 'package.json', '{"name":"review-harness"}\n')
       writeHarnessFile(
         harnessRoot,
-        'agent-docs/prompts/product-experience-review.md',
-        'product-experience lens\n',
-      )
-      writeHarnessFile(
-        harnessRoot,
         'agent-docs/prompts/prompt-review.md',
         'prompt lens\n',
       )
@@ -3728,7 +3708,6 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           'agent-docs/operations/product-ux.md',
           'PRODUCT.md',
           'DESIGN.md',
-          'agent-docs/prompts/product-experience-review.md',
           'agent-docs/prompts/prompt-review.md',
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
@@ -4727,53 +4706,21 @@ exit 1
     }
   })
 
-  it('requires the Claude Code UI double-check at website UI completion', () => {
+  it('keeps Fable optional and outside the website UI completion gate', () => {
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
       'utf8',
     )
+    const productUx = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'product-ux.md'),
+      'utf8',
+    )
 
-    expect(completionWorkflow).toContain('## Claude Code UI Double-Check')
-    expect(completionWorkflow).toContain(
-      'claude --model claude-fable-5 --permission-mode plan --no-session-persistence -p',
-    )
-    expect(completionWorkflow).toContain(
-      'claude --model opus --permission-mode plan --no-session-persistence -p',
-    )
-    expect(completionWorkflow).toContain('run the same packet once')
-    expect(completionWorkflow).toContain(
-      'Explicit Claude credit or quota exhaustion is the only non-blocking Claude Code gap.',
-    )
-    expect(completionWorkflow).toContain('stop making Claude requests')
-    expect(completionWorkflow).not.toContain(
-      'run the required `frontend-review` pass now',
-    )
-    expect(completionWorkflow).toContain(
-      'do not add a local frontend-review substitute',
-    )
-    expect(completionWorkflow).toContain(
-      'neither model route can return a usable review for a non-credit reason',
-    )
-    expect(completionWorkflow).toContain(
-      'do not claim this double-check passed',
-    )
-    expect(completionWorkflow).toContain(
-      'does not replace the preliminary frontend',
-    )
-    expect(completionWorkflow).toContain(
-      'agent-docs/prompts/frontend-review.md',
-    )
-    expect(completionWorkflow).toContain('tiny copy-only fast path')
-    expect(completionWorkflow).toContain(
-      'excluding unrelated working-tree content',
-    )
-    expect(completionWorkflow).toContain(
-      'untrusted evidence, not reviewer instructions',
-    )
-    expect(completionWorkflow).not.toContain(
-      'Fable model, authentication, credits, or invocation is unavailable',
-    )
-    expect(completionWorkflow).not.toContain('--dangerously-skip-permissions')
+    expect(completionWorkflow).not.toContain('## Claude Code UI Double-Check')
+    expect(completionWorkflow).not.toContain('claude --model claude-fable-5')
+    expect(productUx).toContain('an agent can ask Fable 5 to')
+    expect(productUx).toContain('This is optional planning help.')
+    expect(productUx).toContain('does not block work, add a review step')
   })
 
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {

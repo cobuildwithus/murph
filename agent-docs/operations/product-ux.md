@@ -1,6 +1,6 @@
 # Product UX
 
-Last verified: 2026-08-15
+Last verified: 2026-08-17
 
 ## Purpose
 
@@ -9,8 +9,8 @@ includes what the person sees, reads, understands, does, publishes, reveals,
 and receives. It also includes whether the result helps that person.
 
 Plan this experience before code. Walk it again after code, before expensive
-technical review. The existing product-experience review checks the result.
-Do not add another review pass.
+technical review. The preliminary Product UX lens checks the same plan and
+walkthrough. Do not add another review pass.
 
 A technically correct change is not complete when a supported person gets a
 confusing, unwanted, repetitive, incomplete, or low-value result. A smaller
@@ -83,6 +83,10 @@ Use repository and product knowledge before asking the user. Do not ask for an
 answer that the current evidence already provides. Ask only questions whose
 answers can change a product decision. Stop when the remaining uncertainty
 cannot change the useful outcome, scope, or safe behavior.
+
+For a genuinely important or complex Feature, an agent can ask Fable 5 to
+challenge the plan when it is available. This is optional planning help. It
+does not block work, add a review step, or require a separate report.
 
 Do not copy private feedback, exact scenarios, names, or identifying details
 into repository files, tests, prompts, PR text, or review packets.
@@ -159,18 +163,22 @@ before code.
 These examples show how to select journeys. They are not fixed personas or an
 exhaustive checklist.
 
-- A member has a long connected-data history, but one useful evidence type is
-  missing or unsupported. Do not treat an empty result as proof that no useful
-  result exists. Distinguish absent evidence, incomplete import, weak coverage,
-  and a genuine lack of signal. Prove the minimum useful result for both rich
-  and partial histories.
+- Two members ask for the same data-derived result. One has a long, complete
+  history. The other has sparse or partially imported data. The first should
+  receive evidence-backed value. The second should receive an honest limit or
+  recovery step. A non-empty result alone is not proof of value.
 - A group change can affect a person with no groups, one relevant group, or
-  several possible groups. Add separate journeys only when membership, role,
-  channel, selection, consent, cost, disclosure, presentation, or delivery
-  changes the experience.
-- A rich message can look correct in a preview and still fail in ordinary use.
-  Walk the normal request through content selection, routing, delivery, and the
-  final client on each affected channel.
+  several groups across different channels and contexts. Add separate journeys
+  only when channel, selection, role, audience, consent, cost, presentation, or
+  delivery changes.
+- Two members ask for the same advice. Murph has relevant history and context
+  for one, but knows little about the other. Use known facts for the first.
+  State the limit or ask a useful question for the second. The same generic
+  answer is not good UX for both.
+- A page can look complete on a wide screen while a narrow screen hides the
+  main value below labels or supporting detail. Put the useful result and next
+  action first. Inspect loading, empty, partial, error, and recovery states too.
+  One polished state does not prove the complete experience.
 
 ### Proof Path
 
@@ -262,10 +270,47 @@ candidate.
 
 ## Review Ownership
 
-The existing preliminary product-experience lens reads the Product UX Plan and
-Walkthrough. The plan is a claim, not proof. The reviewer challenges missing
-affected people and checks what each person sees, reads, understands, does,
-publishes, reveals, and receives.
+The preliminary Product UX lens reads this document, the Product UX Plan, the
+Walkthrough, the applicable product spec, and the direct evidence. It is
+review-only. It reports findings and does not edit files or create a patch.
+
+Start by stating the irreducible user purpose in one sentence. Name the
+smallest complete experience that fulfills it. The plan is a claim, not proof.
+Challenge missing affected people. Check what each person sees, reads,
+understands, does, publishes, reveals, and receives from the ordinary entry to
+the last boundary that defines the promise.
+
+`Asynchronous` is not a complete experience or timing contract. An accepted or
+internally completed request still fails when the person gets no truthful
+feedback, waits behind unrelated work, receives the result too late, or never
+receives it. Judge the real continuation owner, expected wait, final delivery,
+failure, and recovery.
+
+Look for safe deletion. Remove repeated copy, avoidable steps, screens, fields,
+choices, concepts, and delays when the same outcome stays clear, accessible,
+consensual, trustworthy, and controllable. Do not trade consent, authority,
+decline, undo, pause, revoke, or recovery for fewer interface elements.
+
+Review only problems caused or materially worsened by the change. Mention a
+pre-existing problem only when the changed outcome cannot ship correctly
+without resolving it. Ground every finding in the changed production path,
+rendered evidence, or a production-faithful direct scenario. A valid review can
+have zero findings.
+
+Use these finding levels:
+
+- `high`: the main goal is unreachable, abandoned, sent to the wrong person or
+  context, unsafe, misleading, or blocked by a normal state;
+- `material`: the goal remains reachable, but ordinary timing, feedback,
+  ordering, permission, recovery, comprehension, or interaction friction makes
+  the result meaningfully worse; and
+- `experience collapse`: the same outcome needs materially fewer words, steps,
+  screens, choices, concepts, or delays. Name what to delete and prove that the
+  reduced experience keeps clarity, access, consent, trust, and control.
+
+Do not report taste, isolated pixel polish, minor copy preference, or a
+hypothetical edge case. Report material evidence gaps separately. Stop when the
+changed journeys and directly affected states have evidence-backed outcomes.
 
 Technical review then checks whether the implementation is safe and correct.
 It must not replace the Product UX decision or infer product value from tests

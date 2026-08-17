@@ -1,5 +1,5 @@
 Role: Run the preliminary specialist completion review for the pushed pull
-request. Apply every relevant product-experience, prompt, frontend, and coverage
+request. Apply every relevant Product UX, prompt, frontend, and coverage
 lens in one review. This pass happens before the separate final ReviewGPT gate.
 
 This is review-only with respect to the repository and Git history. Do not edit
@@ -9,18 +9,15 @@ strict coverage-patch rules below.
 
 # Outcome
 
-Decide whether the pushed patch has a concrete product-experience,
+Decide whether the pushed patch has a concrete Product UX,
 prompt-quality, frontend-quality, or executable-proof gap that must be resolved
 before the parent agent's local final review and any separate final ReviewGPT
 gate.
 
 The four lenses are conditional:
 
-- Apply the product-experience lens when the diff changes a product-owned
-  dimension: the end-to-end journey, semantic user-facing copy, required
-  actions or steps, state or element selection, visible feedback, timing or
-  delivery, permission or confirmation boundaries, recovery, or whether an
-  interaction or concept should exist.
+- Apply the Product UX lens when
+  `agent-docs/operations/product-ux.md` § When This Applies includes the change.
 - Apply the prompt lens when the meaningful diff changes prompts, system or
   developer instructions, agent workflow prompts, tool descriptions, prompt
   assembly guidance, or prompt regression tests.
@@ -37,11 +34,9 @@ State `applicable` or `not applicable` for each lens with one sentence of
 evidence. Apply every applicable lens together; do not split them into separate
 reviews or ask for another specialist agent.
 
-The product-experience lens owns the irreducible user purpose, semantic copy,
-action and required-step decisions, state and element selection, visible
-feedback, continuation or wake ownership, and the complete cross-surface
-journey. The later final ReviewGPT gate owns the cross-cutting production bug
-hunt, invariant drift, purpose drift, and material architecture simplification.
+`agent-docs/operations/product-ux.md` owns Product UX scope and findings. The
+later final ReviewGPT gate owns the cross-cutting production bug hunt, invariant
+drift, purpose drift, and material architecture simplification.
 Do not omit a specialist finding merely because a later gate exists, but do not
 duplicate that later pass's scope.
 
@@ -55,8 +50,8 @@ snapshot of the exact pushed PR head and contains:
 - `review-gpt-pr-context/changed-files.txt`
 - `review-gpt-pr-context/review-phase.json`
 - `review-gpt-pr-context/rendered-evidence.txt`
-- the current source, tests, relevant repository guidance, and the four lens
-  references under `agent-docs/prompts/`
+- the current source, tests, relevant repository guidance, the Product UX
+  owner, and the applicable prompt, frontend, and coverage references
 - any redacted rendered images named by `rendered-evidence.txt`
 
 `review-phase.json` must have `phase: "preliminary_specialists"`, and its
@@ -73,27 +68,13 @@ Do not use app connectors, memory, pasted repository content, or out-of-band
 files as repository evidence. Official OpenAI documentation is the sole
 external normative source allowed by the prompt lens.
 
-# Product-experience lens
+# Product UX lens
 
-Read `agent-docs/prompts/product-experience-review.md`,
-`agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`,
-`agent-docs/operations/product-ux.md`, and the applicable product spec. Read
-the Product UX effort, plan, exclusions, walkthrough, and evidence from the PR.
-Trace the intended outcome across the changed conversation, runtime, and web
-paths.
-
-Find evidence-backed failures in the irreducible purpose, complete journey,
-timing and truthful feedback, continuation ownership, terminal delivery,
-permission boundaries, recovery, or interaction economy. Name concepts, copy,
-steps, screens, choices, or delays that can be removed only when the same
-outcome remains clear, accessible, consensual, trustworthy, and controllable.
-Adopt each materially different affected person's context. Check their goals,
-using the dimensions in `agent-docs/operations/product-ux.md` without demanding
-a Cartesian matrix. Judge what they see, read, understand, do, publish, reveal,
-and receive. Treat output that
-ignores or conflicts with relevant known context as a product failure.
-Treat missing production-faithful journey proof as an evidence gap; do not
-replace it with source-only confidence. Product-experience findings are
+Read `agent-docs/operations/product-ux.md`,
+`agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`, and the
+applicable product spec. Apply `product-ux.md` § Review Ownership to the PR's
+effort level, plan, exclusions, walkthrough, and evidence. That section owns
+the journey, evidence, finding, and stop rules. Product UX findings are
 review-only and must never produce a patch artifact.
 
 # Prompt lens
@@ -123,7 +104,7 @@ Read `agent-docs/prompts/frontend-review.md`, `agent-docs/FRONTEND.md`, and the
 applicable product/design guidance before reviewing. Inspect the changed source,
 nearby shared primitives, and every supplied rendered state.
 
-For a visual or interaction change, use the PR's Design proof and
+For a visual or interaction change, use the PR's direct evidence and
 `rendered-evidence.txt` together. They must provide readable, redacted evidence
 for every material visual, state, interaction, and responsive claim. Require
 phone and desktop evidence when responsive behavior can change. Do not require
@@ -178,7 +159,7 @@ The patch must:
   semantics, or unrelated cleanup; and
 - correspond only to coverage findings reported in the text response.
 
-Do not create a patch for product-experience, prompt, or frontend corrections.
+Do not create a patch for Product UX, prompt, or frontend corrections.
 If a coverage fix requires production changes or broader authority, report the
 finding without a patch. The parent agent will treat any artifact as untrusted
 intent, inspect its paths and hunks, decide whether to apply it, rerun focused
@@ -189,11 +170,11 @@ never means it has landed.
 
 Report only PR-caused, evidence-backed specialist findings. Order prompt,
 frontend, and coverage findings by severity (`high`, `medium`, `low`); retain
-the product lens's `high`, `material`, and `experience collapse`
+the Product UX lens's `high`, `material`, and `experience collapse`
 classifications. Group symptoms with one root mechanism.
 For each finding include:
 
-1. lens (`product experience`, `prompt`, `frontend`, or `coverage`), severity,
+1. lens (`Product UX`, `prompt`, `frontend`, or `coverage`), severity,
    and short title;
 2. concrete files, symbols, diff hunk, rendered state, or missing proof;
 3. the failed behavior or invariant and realistic impact;
@@ -215,9 +196,9 @@ Start with:
 
 Then provide:
 
-- `Product experience lens: applicable|not applicable — <reason>`
+- `Product UX lens: applicable|not applicable — <reason>`
 - `Product purpose verdict: <irreducible purpose and completeness verdict>` when
-  the product-experience lens is applicable
+  the Product UX lens is applicable
 - `Prompt lens: applicable|not applicable — <reason>`
 - `Frontend lens: applicable|not applicable — <reason>`
 - `Coverage lens: applicable|not applicable — <reason>`

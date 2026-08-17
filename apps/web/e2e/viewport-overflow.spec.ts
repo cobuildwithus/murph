@@ -601,7 +601,7 @@ test("home onboarding steps keep equal cards across dashboard widths", async ({
   });
 
   const response = await page.goto(
-    "/design?tab=sections#home-onboarding-steps",
+    "/screenshots/home#home-onboarding-steps",
     { waitUntil: "load" },
   );
   expect(response?.status(), "onboarding study should respond 200").toBe(200);
@@ -824,7 +824,7 @@ for (const width of [768, 1280] as const) {
     });
 
     const response = await page.goto(
-      "/design?tab=sections#personal-usage-credit-owner",
+      "/screenshots/account#personal-usage-credit-owner",
       { waitUntil: "load" },
     );
     expect(response?.status(), "design owner study should respond 200").toBe(200);

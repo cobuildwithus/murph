@@ -18,27 +18,19 @@ Do not create a second workflow here. In particular:
 For any user-facing `apps/web` UI change, run the app and look at the change
 before calling it complete, then attach the rendered evidence that the changed
 states and risks need. Follow `agent-docs/operations/product-ux.md`; there is no
-screenshot quota. This is the existing `/design` catalog rule in
-`agent-docs/operations/agent-workflow-routing.md`; it is repeated here because it
-is the step most often skipped. Green tests and a typecheck are not evidence that
-a screen renders correctly. Secondary worktrees must isolate ports, database, and
-Next dist dir first, per `agent-docs/operations/hosted-local-worktree-dev.md`.
+screenshot quota. Use the real page for journey proof. Use `/screenshots` only
+for a difficult or reusable presentation state with synthetic data. Green tests
+and a typecheck are not evidence that a screen renders correctly. Secondary
+worktrees must isolate ports, database, and Next dist dir first, per
+`agent-docs/operations/hosted-local-worktree-dev.md`.
 
 ## Write the whole PR body when you open the PR
 
-`agent-docs/operations/completion-workflow.md` defines the required PR body. Every
-`Required:` section is mandatory on the first push, not something to backfill after
-a reviewer asks: why this PR exists, user goal, Product UX, invariants,
-non-obvious affected surfaces, preliminary specialist lenses, the five-row
-change-shape table, and the design proof — plus deployment skew when the PR
-touches a deploy boundary.
-
-CI mechanically enforces only the design proof, so the other sections are the ones
-that silently go missing. Do not let a green pipeline stand in for the contract:
-if a section does not apply, write `None` or `Not applicable` with a one-line
-reason rather than dropping the heading. Reviewers read the body to decide what to
-hold the diff against, and an absent invariants or affected-surfaces section costs
-a full review round.
+`agent-docs/operations/completion-workflow.md` defines the PR body. Keep it
+short: why and outcome, Product UX result, direct evidence, and changelog. Add a
+Risks section only when the diff touches a special invariant, hidden owner,
+provider-input boundary, database fanout, or deploy boundary. Do not copy the
+work plan or add empty sections to make the PR look complete.
 
 ## Run ReviewGPT immediately, never queue it
 

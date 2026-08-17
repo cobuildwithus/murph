@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-15
+Last verified: 2026-08-17
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -581,21 +581,15 @@ pushes use `pnpm verify:acceptance`.
 Capture authenticated, fixture-safe `/labs` proof at each viewport where the
 changed result can differ, without putting a real query or ZIP in a durable
 artifact. Complete the preliminary
-ReviewGPT product-experience/prompt/frontend/coverage pass, the review-only
-Fable or Opus UI pass, and the separate final ReviewGPT gate before handoff.
+ReviewGPT Product UX/prompt/frontend/coverage pass and the separate final
+ReviewGPT gate before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
-The pull-request body proof workflow requires the four concrete `Architecture
-and reuse` bullets on every PR. It validates rendered GitHub Markdown so hidden
-comments, code blocks, and raw HTML cannot satisfy the requirement.
-
 For every user-facing `apps/web` UI diff, verification also includes
-`pnpm test:frontend-design-proof`, a production-component update on
-`/design?tab=components` or a composed-section update on
-`/design?tab=sections`, and evidence matched to the changed visual, state,
-interaction, and responsive risk. The pull-request workflow repeats the policy
-check against the final base-to-head diff and PR body. Inspect phone and desktop
+`pnpm test:frontend-evidence` and evidence matched to the changed visual,
+state, interaction, and responsive risk. The pull-request workflow repeats the
+evidence check against the final base-to-head diff and PR body. Inspect phone and desktop
 when responsive behavior can change; do not add a viewport only to meet a
 quota. Prefer an attached in-app Browser for visual proof, then use the
 repository-installed Playwright runtime when no tab is attached or the
@@ -604,6 +598,11 @@ be judged after the applicable fallback. When screenshots add proof, crop them
 to the changed component or section and inspect them at native resolution. Do
 not use a long full-page capture that makes review text smaller than the
 rendered UI.
+
+Use `/screenshots` only for difficult or reusable presentation states. Its
+pages render real production components with synthetic props, no live data, no
+live requests, and inert controls. They prove presentation only. Use the real
+product path for complete journey proof.
 
 ## Scoped Verification Mode
 

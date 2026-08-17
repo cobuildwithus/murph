@@ -276,7 +276,7 @@ review_gpt_register_dir_preset "pr-review" "$review_gpt_pr_review_prompt_file" \
   "deep-pr-review" \
   "pr-bugs-and-architecture"
 review_gpt_register_dir_preset "completion-specialists" "completion-specialists.md" \
-  "Preliminary combined product-experience, prompt, frontend, and coverage review for an exact pushed PR head." \
+  "Preliminary combined Product UX, prompt, frontend, and coverage review for an exact pushed PR head." \
   "completion-review" \
   "specialist-review" \
   "prompt-frontend-coverage"
