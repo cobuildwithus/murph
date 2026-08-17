@@ -59,7 +59,7 @@ export const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
 export const JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionNoteHistoryBackfillCoverage";
 const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION = 1;
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION = 2;
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX =
   `m${JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION}|`;
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY = 64;
@@ -80,6 +80,12 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS = Object.freeze([
   "note",
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
   "weight",
+  "fat",
+  "body_mass_index",
+  "lean_body_mass",
+  "waist_circumference",
+  "carbohydrates",
+  "insulin_injection",
 ] as const);
 export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.freeze([
   ["note", 2] as const,
@@ -87,6 +93,12 @@ export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.
     (resource) => [resource, 1] as const,
   ),
   ["weight", 1] as const,
+  ["fat", 1] as const,
+  ["body_mass_index", 1] as const,
+  ["lean_body_mass", 1] as const,
+  ["waist_circumference", 1] as const,
+  ["carbohydrates", 1] as const,
+  ["insulin_injection", 1] as const,
 ]);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
   ["blood_pressure", 1],
@@ -419,6 +431,20 @@ export interface JunctionExtendedTimeseriesHistoryCoverageUpdate {
   value: string;
 }
 
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS =
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.slice(0, 13);
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_MATRIX_BYTE_LENGTH = Math.ceil(
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY
+    * JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length
+    / 8,
+);
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_RESOURCE_SLOT_COUNT =
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length - 2;
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_MATRIX_BYTE_LENGTH = Math.ceil(
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY
+    * JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_RESOURCE_SLOT_COUNT
+    / 8,
+);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH = Math.ceil(
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY
     * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
@@ -437,7 +463,7 @@ if (
   || JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.size
     !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
   || JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length
-    + JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH * 2
+    + Math.ceil(JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH * 4 / 3)
     > DEVICE_SYNC_METADATA_MAX_STRING_LENGTH
 ) {
   throw new TypeError("Junction extended-history coverage exceeds its fixed metadata matrix.");
@@ -600,7 +626,7 @@ export function canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfill
     );
     if (
       matrixVersion !== null
-      && matrixVersion !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
+      && matrixVersion > JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
     ) {
       return false;
     }
@@ -679,26 +705,94 @@ function encodeJunctionLegacyExtendedTimeseriesHistoryCoverage(
 function readJunctionExtendedTimeseriesHistoryCoverageMatrix(
   value: unknown,
 ): JunctionExtendedTimeseriesHistoryCoverageMatrix | null {
-  if (
-    typeof value !== "string"
-    || !value.startsWith(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX)
-    || value.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length
-      + JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH * 2
+  if (typeof value !== "string") {
+    return null;
+  }
+  if (value.startsWith("m1|")) {
+    const hex = value.slice(3);
+    if (
+      hex.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_MATRIX_BYTE_LENGTH * 2
+      || !/^[0-9a-f]+$/u.test(hex)
+    ) {
+      return null;
+    }
+    const legacyBytes = new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_MATRIX_BYTE_LENGTH);
+    for (let index = 0; index < legacyBytes.length; index += 1) {
+      legacyBytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+    }
+    const current = createEmptyJunctionExtendedTimeseriesHistoryCoverageMatrix();
+    for (
+      let sourceSlot = 0;
+      sourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY;
+      sourceSlot += 1
+    ) {
+      for (
+        let resourceSlot = 0;
+        resourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length;
+        resourceSlot += 1
+      ) {
+        const legacyBitIndex = sourceSlot
+          * JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length
+          + resourceSlot;
+        if (hasJunctionExtendedTimeseriesHistoryCoverageBit(legacyBytes, legacyBitIndex)) {
+          setJunctionExtendedTimeseriesHistoryCoverageBit(
+            current.bytes,
+            sourceSlot * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
+              + resourceSlot,
+          );
+        }
+      }
+    }
+    return current;
+  }
+  if (!value.startsWith(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX)) {
+    return null;
+  }
+  const encoded = value.slice(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length);
+  if (!/^[A-Za-z0-9_-]+$/u.test(encoded) || encoded.includes("=")) {
+    return null;
+  }
+  const decoded = Buffer.from(encoded, "base64url");
+  if (decoded.toString("base64url") !== encoded) {
+    return null;
+  }
+  if (decoded.length === JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH) {
+    return {
+      bytes: new Uint8Array(decoded),
+      version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION,
+    };
+  }
+  if (decoded.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_MATRIX_BYTE_LENGTH) {
+    return null;
+  }
+
+  // A deployment of the preceding body-resource matrix may briefly emit this
+  // shorter m2 shape. Re-index its existing bits and leave the two appended
+  // metabolic slots clear; the next write upgrades the scalar to this width.
+  const current = createEmptyJunctionExtendedTimeseriesHistoryCoverageMatrix();
+  for (
+    let sourceSlot = 0;
+    sourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY;
+    sourceSlot += 1
   ) {
-    return null;
+    for (
+      let resourceSlot = 0;
+      resourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_RESOURCE_SLOT_COUNT;
+      resourceSlot += 1
+    ) {
+      const previousBitIndex = sourceSlot
+        * JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_RESOURCE_SLOT_COUNT
+        + resourceSlot;
+      if (hasJunctionExtendedTimeseriesHistoryCoverageBit(decoded, previousBitIndex)) {
+        setJunctionExtendedTimeseriesHistoryCoverageBit(
+          current.bytes,
+          sourceSlot * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
+            + resourceSlot,
+        );
+      }
+    }
   }
-  const hex = value.slice(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length);
-  if (!/^[0-9a-f]+$/u.test(hex)) {
-    return null;
-  }
-  const bytes = new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
-  }
-  return {
-    bytes,
-    version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION,
-  };
+  return current;
 }
 
 function readJunctionExtendedTimeseriesHistoryCoverageMatrixVersion(
@@ -724,10 +818,45 @@ function encodeJunctionExtendedTimeseriesHistoryCoverageMatrix(
   ) {
     return null;
   }
-  const encoded = `${JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX}${[...coverage.bytes]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")}`;
+  const legacyBytes = projectJunctionExtendedTimeseriesHistoryCoverageToV1(coverage.bytes);
+  const encoded = legacyBytes
+    ? `m1|${[...legacyBytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`
+    : `${JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX}${
+      Buffer.from(coverage.bytes).toString("base64url")
+    }`;
   return encoded.length <= DEVICE_SYNC_METADATA_MAX_STRING_LENGTH ? encoded : null;
+}
+
+function projectJunctionExtendedTimeseriesHistoryCoverageToV1(
+  bytes: Uint8Array,
+): Uint8Array | null {
+  const legacyBytes = new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_MATRIX_BYTE_LENGTH);
+  for (
+    let sourceSlot = 0;
+    sourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY;
+    sourceSlot += 1
+  ) {
+    for (
+      let resourceSlot = 0;
+      resourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length;
+      resourceSlot += 1
+    ) {
+      const bitIndex = sourceSlot * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
+        + resourceSlot;
+      if (!hasJunctionExtendedTimeseriesHistoryCoverageBit(bytes, bitIndex)) {
+        continue;
+      }
+      if (resourceSlot >= JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length) {
+        return null;
+      }
+      setJunctionExtendedTimeseriesHistoryCoverageBit(
+        legacyBytes,
+        sourceSlot * JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length
+          + resourceSlot,
+      );
+    }
+  }
+  return legacyBytes;
 }
 
 function readJunctionExtendedTimeseriesHistoryCoverageFacts(

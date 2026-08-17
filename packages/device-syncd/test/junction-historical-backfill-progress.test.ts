@@ -22,6 +22,7 @@ import {
 
 const WINDOW_START = "2025-12-20T00:00:00.000Z";
 const WINDOW_END = "2026-03-20T00:00:00.000Z";
+const DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE = `m1|4010${"00".repeat(102)}`;
 
 describe("Junction extended-history coverage reset", () => {
   it("removes only the selected source and resource matrix bit", () => {
@@ -67,7 +68,7 @@ describe("Junction extended-history coverage reset", () => {
   });
 
   it("leaves malformed and future matrix encodings unchanged", () => {
-    const current = addCoverage({}, "apple_health_kit", "weight");
+    const current = addCoverage({}, "apple_health_kit", "caffeine");
     const matrixKey = Object.keys(current)[0];
     const matrixValue = matrixKey ? current[matrixKey] : null;
     expect(typeof matrixValue).toBe("string");
@@ -76,23 +77,23 @@ describe("Junction extended-history coverage reset", () => {
     }
     const future = {
       ...current,
-      [matrixKey]: matrixValue.replace(/^m1\|/u, "m2|"),
+      [matrixKey]: matrixValue.replace(/^m1\|/u, "m3|"),
     };
     const malformed = { [matrixKey]: "not-a-coverage-matrix" };
 
     expect(removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata: future,
       providerSlug: "apple_health_kit",
-      resource: "weight",
+      resource: "caffeine",
       version: 1,
     })).toBeNull();
     expect(removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata: malformed,
       providerSlug: "apple_health_kit",
-      resource: "weight",
+      resource: "caffeine",
       version: 1,
     })).toBeNull();
-    expect(future[matrixKey]).toBe(matrixValue.replace(/^m1\|/u, "m2|"));
+    expect(future[matrixKey]).toBe(matrixValue.replace(/^m1\|/u, "m3|"));
     expect(malformed[matrixKey]).toBe("not-a-coverage-matrix");
   });
 });
@@ -221,7 +222,7 @@ describe("Junction extended timeseries history coverage", () => {
       1,
     )).toBe(false);
     expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      { junctionBloodPressureHistoryBackfillCoverage: `m2|${"0".repeat(192)}` },
+      { junctionBloodPressureHistoryBackfillCoverage: `m3|${"0".repeat(192)}` },
       "caffeine",
       1,
     )).toBe(false);
@@ -240,6 +241,55 @@ describe("Junction extended timeseries history coverage", () => {
       "note",
       2,
     )).toBe(true);
+  });
+
+  it("preserves deployed m1 weight coverage while promoting each new body coordinate", () => {
+    const deployed = {
+      junctionBloodPressureHistoryBackfillCoverage:
+        DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE,
+    };
+    expect(DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE).toHaveLength(211);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      deployed,
+      "whoop_v2",
+      "caffeine",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      deployed,
+      "whoop_v2",
+      "weight",
+      1,
+    )).toBe(true);
+
+    for (const resource of [
+      "fat",
+      "body_mass_index",
+      "lean_body_mass",
+      "waist_circumference",
+    ] as const) {
+      const migrated = addCoverage(deployed, "whoop_v2", resource);
+      expect(migrated.junctionBloodPressureHistoryBackfillCoverage).toMatch(/^m2\|/u);
+      expect(migrated.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(206);
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        migrated,
+        "whoop_v2",
+        "caffeine",
+        1,
+      )).toBe(true);
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        migrated,
+        "whoop_v2",
+        "weight",
+        1,
+      )).toBe(true);
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        migrated,
+        "whoop_v2",
+        resource,
+        1,
+      )).toBe(true);
+    }
   });
 
   it("unions unpublished local resource bits without losing hosted coverage", () => {
@@ -268,6 +318,43 @@ describe("Junction extended timeseries history coverage", () => {
     }
   });
 
+  it("zero-extends the pre-metabolic m2 matrix on its next write", () => {
+    const previousBytes = new Uint8Array(136);
+    previousBytes[1] = 1 << 3; // source slot 0 (whoop), resource slot 11 (water)
+    const previous = {
+      junctionBloodPressureHistoryBackfillCoverage:
+        `m2|${Buffer.from(previousBytes).toString("base64url")}`,
+    };
+
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      previous,
+      "whoop_v2",
+      "water",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      previous,
+      "whoop_v2",
+      "carbohydrates",
+      1,
+    )).toBe(false);
+
+    const upgraded = addCoverage(previous, "whoop_v2", "carbohydrates");
+    expect(upgraded.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(206);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      upgraded,
+      "whoop_v2",
+      "water",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      upgraded,
+      "whoop_v2",
+      "carbohydrates",
+      1,
+    )).toBe(true);
+  });
+
   it("fits every supported source and extended resource in one metadata scalar", () => {
     const resources = [
       "blood_pressure",
@@ -282,6 +369,13 @@ describe("Junction extended timeseries history coverage", () => {
       "sleep_breathing_disturbance",
       "vo2_max",
       "water",
+      "weight",
+      "fat",
+      "body_mass_index",
+      "lean_body_mass",
+      "waist_circumference",
+      "carbohydrates",
+      "insulin_injection",
     ] as const;
     let metadata: Record<string, unknown> = {};
 
@@ -294,7 +388,7 @@ describe("Junction extended timeseries history coverage", () => {
     expect(Object.keys(metadata)).toEqual([
       "junctionBloodPressureHistoryBackfillCoverage",
     ]);
-    expect(metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(211);
+    expect(metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(206);
     for (const { providerSlug } of JUNCTION_CONNECT_SOURCE_TARGETS) {
       for (const resource of resources) {
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -321,6 +415,13 @@ describe("Junction extended timeseries history coverage", () => {
       "sleep_breathing_disturbance",
       "vo2_max",
       "water",
+      "weight",
+      "fat",
+      "body_mass_index",
+      "lean_body_mass",
+      "waist_circumference",
+      "carbohydrates",
+      "insulin_injection",
     ] as const;
     let hostedMetadata: Record<string, unknown> = {};
     let localMetadata: Record<string, unknown> = {};
@@ -341,7 +442,7 @@ describe("Junction extended timeseries history coverage", () => {
       localMetadata,
     });
     expect(result.preservedLocalProgress).toBe(true);
-    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(211);
+    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(206);
     for (const { providerSlug } of JUNCTION_CONNECT_SOURCE_TARGETS) {
       for (const resource of resources) {
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -400,6 +501,33 @@ describe("Junction extended timeseries history coverage", () => {
       "caffeine",
       1,
     )).toBe(true);
+  });
+
+  it("upgrades deployed m1 through its existing slot in a full metadata envelope", () => {
+    const existing = {
+      ...Object.fromEntries(
+        Array.from({ length: 15 }, (_, index) => [`capacityFact${index}`, index]),
+      ),
+      junctionBloodPressureHistoryBackfillCoverage:
+        DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE,
+    };
+    const update = requireCoverageUpdate(existing, "whoop_v2", "fat");
+    const merged = mergeStoredDeviceSyncMetadataPatch(existing, {
+      [update.metadataKey]: update.value,
+    });
+
+    expect(update.metadataKey).toBe("junctionBloodPressureHistoryBackfillCoverage");
+    expect(Object.keys(existing)).toHaveLength(16);
+    expect(Object.keys(merged)).toHaveLength(16);
+    expect(Object.keys(existing).every((key) => Object.hasOwn(merged, key))).toBe(true);
+    for (const resource of ["caffeine", "weight", "fat"] as const) {
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        merged,
+        "whoop_v2",
+        resource,
+        1,
+      )).toBe(true);
+    }
   });
 
   it("rejects a full metadata envelope without a reusable coverage slot", () => {
