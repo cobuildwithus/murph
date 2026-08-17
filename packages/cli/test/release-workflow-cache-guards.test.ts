@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const workflowsDir = path.join(repoRoot, '.github', 'workflows')
@@ -95,7 +96,10 @@ describe('GitHub Actions cache trust-boundary guards', () => {
 
       for (const [description, pattern] of forbiddenPatterns) {
         if (pattern.test(workflow)) {
-          if (isAllowedHostSupportTypeScriptCache(file, workflow, description)) {
+          if (
+            isAllowedHostSupportTypeScriptCache(file, workflow, description)
+            || isAllowedNativeIosHostedE2eHandoff(file, workflow, description)
+          ) {
             continue
           }
           findings.push(`${file}: ${description}`)
@@ -104,6 +108,48 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     }
 
     expect(findings).toEqual([])
+  })
+
+  it('allows only the native iOS E2E handoff that keeps PR code outside the secret runner', () => {
+    const workflow = readFileSync(
+      path.join(workflowsDir, 'native-ios-hosted-e2e.yml'),
+      'utf8',
+    )
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(true)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'release.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow.replace('- Repo Hygiene', '- Release'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow.replace(
+          'ref: ${{ github.event.repository.default_branch }}',
+          () => 'ref: ${{ needs.select-pr.outputs.head_ref }}',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
   })
 })
 
@@ -180,4 +226,80 @@ function isAllowedHostSupportTypeScriptCache(
   }
 
   return false
+}
+
+function isAllowedNativeIosHostedE2eHandoff(
+  file: string,
+  workflow: string,
+  description: string,
+): boolean {
+  if (
+    file !== 'native-ios-hosted-e2e.yml'
+    || description !== 'workflow_run handoff trigger'
+  ) {
+    return false
+  }
+
+  const parsedWorkflow: unknown = parse(workflow)
+  if (!isRecord(parsedWorkflow)) {
+    return false
+  }
+
+  const triggers = parsedWorkflow.on
+  if (!isRecord(triggers)) {
+    return false
+  }
+
+  const workflowRun = triggers.workflow_run
+  if (!isRecord(workflowRun)) {
+    return false
+  }
+
+  const jobs = parsedWorkflow.jobs
+  if (!isRecord(jobs)) {
+    return false
+  }
+
+  const prLive = jobs['pr-live']
+  if (!isRecord(prLive) || !hasTrustedControlPlaneCheckout(prLive.steps)) {
+    return false
+  }
+
+  return (
+    isStringArray(workflowRun.workflows, ['Repo Hygiene'])
+    && isStringArray(workflowRun.types, ['completed'])
+    && workflow.includes('PR head changed before live E2E.')
+    && workflow.includes('node scripts/native-ios-hosted-e2e.mjs pr')
+    && workflow.includes('PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}')
+    && workflow.includes('NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}')
+    && workflow.includes("description='Selected PR requires a reviewed same-repository human-authored head.'")
+  )
+}
+
+function hasTrustedControlPlaneCheckout(value: unknown): boolean {
+  if (!Array.isArray(value)) {
+    return false
+  }
+
+  const checkoutStep = value.find((step) =>
+    isRecord(step) && step.name === 'Checkout trusted control plane'
+  )
+  if (!isRecord(checkoutStep)) {
+    return false
+  }
+
+  const checkoutWith = checkoutStep.with
+  return isRecord(checkoutWith)
+    && checkoutWith.ref === '${{ github.event.repository.default_branch }}'
+    && checkoutWith['persist-credentials'] === false
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringArray(value: unknown, expected: readonly string[]): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && value.every((item, index) => item === expected[index])
 }

@@ -43,6 +43,7 @@ import {
   looksLikePrivateAssistantRoutePlaceholder,
 } from './assistant/current-delivery-route.js'
 import {
+  assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
 } from './assistant-response-cards.js'
 
@@ -1060,13 +1061,13 @@ export const assistantOutboxIntentSchema = z
       })
     }
 
-    if (
-      intent.card?.kind === 'challenge_standings' &&
-      !(
-        intent.threadIsDirect === false &&
-        intent.channel?.trim().toLowerCase() === 'linq'
-      )
-    ) {
+    if (intent.card?.kind === 'challenge_standings' && !(
+      assistantResponseCardMatchesConversationAudience({
+        card: intent.card,
+        channel: intent.channel,
+        threadIsDirect: intent.threadIsDirect,
+      })
+    )) {
       context.addIssue({
         code: 'custom',
         message:
@@ -1077,7 +1078,11 @@ export const assistantOutboxIntentSchema = z
     if (
       intent.card !== null &&
       intent.card.kind !== 'challenge_standings' &&
-      intent.threadIsDirect !== true
+      !assistantResponseCardMatchesConversationAudience({
+        card: intent.card,
+        channel: intent.channel,
+        threadIsDirect: intent.threadIsDirect,
+      })
     ) {
       context.addIssue({
         code: 'custom',

@@ -3675,6 +3675,11 @@
                             "device",
                             "derived"
                           ]
+                        },
+                        "reuseExact": {
+                          "default": false,
+                          "description": "Reuse one live document with verified identical bytes instead of creating another document.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -3734,6 +3739,24 @@
                   }
                 },
                 "manifest": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "workout-import-status": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -9108,6 +9131,11 @@
                           "default": false,
                           "description": "Apply the import. Without this flag the command only reports what it would create, skip, or update.",
                           "type": "boolean"
+                        },
+                        "sourceRawRefOnce": {
+                          "description": "Reject the whole batch if any workout has ever referenced this raw source. Every row must be an externalRef-free activity_session that references the same source.",
+                          "type": "string",
+                          "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
                         }
                       }
                     }

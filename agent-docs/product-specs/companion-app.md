@@ -1,6 +1,6 @@
 # Native Companion Apps (Health Sync)
 
-Last verified: 2026-08-12
+Last verified: 2026-08-15
 
 Current iOS distribution status: approved for the App Store. The canonical
 public listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
@@ -346,6 +346,26 @@ Out of scope for the public v1: chat surfaces, vault UI, direct WHOOP BLE,
 widgets, Live Activities, watchOS, Android. The overnight PRV capability is an
 internal beta and does not expand the App Store surface until its authorization,
 privacy, signed-device, and paired-ECG gates pass.
+
+### Automated native acceptance
+
+Auth/control/device-sync changes use the protected cross-repository acceptance
+lane documented in `agent-docs/references/testing-ci-map.md`. The required PR
+proof runs the normally compiled iOS app on an Apple simulator against the exact
+PR SHA deployed as a real hosted/minified Web build, with the dedicated real
+non-production Privy test account/OTP, real companion admission/legal consent and
+sign-in-token persistence, real Junction sandbox SDK calls, and the real iOS
+HealthKit permission UI. Mocked, fixture, hosted-local, or hermetic coverage
+cannot replace that gate. Native completion alone is insufficient: before
+cleanup, trusted orchestration proves the fixed Privy principal was created in
+this run and the corresponding real Junction sandbox user reports a connected
+`apple_health_kit` provider. Before native dispatch it also proves the exact
+candidate origin succeeds anonymously without deployment-protection credentials.
+The protected runner owns `orchestrator_owned_reset`: retire only lane-owned E2E
+deployments, enumerate the lane-exclusive Junction sandbox team, delete its sole
+production-derived or orphaned lane user and prove the team empty, reset only the
+isolated E2E database, then delete only the fixed Privy user. Production canary
+mode uses an existing identity and is non-destructive.
 
 ### App Store review requirements (verified June 2026)
 
