@@ -153,6 +153,7 @@ const wearableWorkoutFeatureSchema = z.object({
 })
 
 const wearableActivitySummarySchema = z.object({
+  activityAverageHeartRate: wearableResolvedMetricSchema.optional(),
   activityScore: wearableResolvedMetricSchema.optional(),
   activeCalories: wearableResolvedMetricSchema.optional(),
   activityMinutes: wearableResolvedMetricSchema.optional(),
@@ -176,6 +177,7 @@ const wearableActivitySummarySchema = z.object({
   lowestHeartRate: wearableResolvedMetricSchema.optional(),
   maxHeartRate: wearableResolvedMetricSchema.optional(),
   mediumActivityMinutes: wearableResolvedMetricSchema.optional(),
+  minimumHeartRate: wearableResolvedMetricSchema.optional(),
   notes: z.array(z.string()).optional(),
   percentRecorded: wearableResolvedMetricSchema.optional(),
   sessionCount: wearableResolvedMetricSchema.optional(),
