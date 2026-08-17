@@ -589,15 +589,17 @@ route or new missions are disabled.
 Personal and owner-seat Family usage-credit checkout returns reconcile against
 the authenticated beneficiary's existing aggregate meter without opening a
 success confirmation. Expose the fulfilled transition through one visually
-hidden polite status announcement, but do not add a post-purchase messaging
-handoff. Keep those returns visually quiet while payment is confirming and
+hidden polite status region that is mounted before reconciliation and receives
+the verified result once, but do not add a post-purchase messaging handoff.
+Keep those returns visually quiet while payment is confirming and
 after fulfillment; if the bounded status check fails, remains unresolved, or
 reports a terminal failure, open only the compact payment-recovery dialog with
 its safe check/retry and close actions. Another active Family member and
 former-member recovery keep one compact target-specific result because their
-meter is not present. Those off-meter results remain visible until Close owns
-their terminal refresh. Group funding keeps its separately owned fulfillment
-receipt and Messages handoff.
+meter is not present. The Family roster owns an exact returned member's status
+without requiring Manage to be opened, and those off-meter results remain
+visible until Close owns their terminal refresh. Group funding keeps its
+separately owned fulfillment receipt and Messages handoff.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a

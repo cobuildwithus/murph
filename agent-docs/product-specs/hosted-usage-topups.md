@@ -468,14 +468,16 @@ The browser renders only server-read status:
 
 Personal and owner-seat Family success returns keep the dialog visually quiet
 while the authenticated beneficiary's existing usage meter refreshes. Their
-fulfilled transition exposes one visually hidden polite status announcement
-for assistive technology, but no visible success modal or post-purchase
-messaging handoff. Failed or exhausted reconciliation opens the compact
-recovery dialog. Another active Family member and former-member recovery keep a
-compact target-specific result visible because Settings does not render that
-beneficiary's usage meter; the result's Close action owns terminal refresh so
-the confirmation cannot disappear before the payer dismisses it. Group funding
-retains its separately owned receipt and Messages handoff.
+fulfilled transition updates one visually hidden polite status region that was
+already mounted before reconciliation, but shows no visible success modal or
+post-purchase messaging handoff. Failed or exhausted reconciliation opens the
+compact recovery dialog. Another active Family member and former-member
+recovery keep a compact target-specific result visible because Settings does
+not render that beneficiary's usage meter. The Family roster mounts the exact
+active member's returned-purchase owner independently of its Manage dialog;
+the result's Close action owns terminal refresh so the confirmation cannot
+disappear before the payer dismisses it. Group funding retains its separately
+owned receipt and Messages handoff.
 
 A success query parameter is never proof of payment. Settings polls a bounded
 authenticated purchase-status endpoint and refreshes its server projection. It

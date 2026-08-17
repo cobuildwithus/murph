@@ -1227,6 +1227,71 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
   }
 });
 
+test("HostedFamilyManager owns an active member's exact return without opening Manage", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const activePurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_active_return00",
+    retryAllowed: false,
+    status: "fulfilled" as const,
+  };
+  const purchaseReturn = {
+    kind: "success" as const,
+    purchaseId: activePurchase.purchaseId,
+  };
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: [
+        ...props.members,
+        {
+          isOwner: false,
+          joinedAtIso: "2026-07-10T00:00:00.000Z",
+          label: "Family member",
+          memberId: "member_family",
+          pendingPlanCode: null,
+          planCode: "edge" as const,
+        },
+      ],
+      usageTopUpActiveMemberId: "member_family",
+      usageTopUpActivePurchase: activePurchase,
+      usageTopUpPurchaseReturn: purchaseReturn,
+      usageTopUpReturnMemberId: "member_family",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const returnOwnerCalls = mocks.usageTopUpDialogProps.mock.calls
+      .map(([callProps]) => callProps)
+      .filter(
+        (callProps) =>
+          callProps.targetLabel === "Family member" &&
+          callProps.purchaseReturn === purchaseReturn,
+      );
+    expect(returnOwnerCalls).toHaveLength(1);
+    const returnOwner = returnOwnerCalls[0];
+    assert.ok(returnOwner);
+    expect(returnOwner).toMatchObject({
+      activePurchase,
+      checkoutUrl:
+        "/api/settings/billing/family/members/member_family/usage-credit/checkout",
+      deferTerminalRefreshUntilClose: true,
+      offers: [],
+      purchaseReturn,
+      scope: "family",
+      targetLabel: "Family member",
+    });
+    assert.equal("quietSuccessfulReturn" in returnOwner, false);
+    assert.equal(container.querySelector('[data-dialog-open="true"]'), null);
+  } finally {
+    await cleanup();
+  }
+});
+
 
 function baseFamilyManagerProps() {
   return {

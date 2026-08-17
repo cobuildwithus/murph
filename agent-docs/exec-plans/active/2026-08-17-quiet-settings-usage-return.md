@@ -6,15 +6,18 @@ Updated: 2026-08-17
 
 ## Goal
 
-- Remove the transient personal and Family "Usage added" confirmation from
-  `/settings`. Successful checkout returns reconcile in the background and
-  refresh the existing usage meter; only a failed or unresolved return opens a
-  compact recovery dialog.
+- Remove the transient personal and owner-seat Family "Usage added"
+  confirmation from `/settings`. Successful checkout returns reconcile in the
+  background and refresh the existing usage meter; only a failed or unresolved
+  return opens compact recovery. Keep one close-owned compact result when the
+  funded Family member's meter is not present on the payer's page.
 
 ## Success criteria
 
-- A successful personal or Family usage-credit return never renders the
-  fulfilled confirmation or messaging-channel choices on Settings.
+- A successful personal or owner-seat Family usage-credit return never renders
+  the fulfilled confirmation or messaging-channel choices on Settings.
+- Another active or former Family member's exact return is owned outside the
+  broader Manage dialog and shows only one close-owned compact result.
 - Failed, canceled, or unconfirmed returns retain an accessible recovery path
   with the existing safe retry/status actions.
 - Group funding keeps its separately owned fulfilled contribution handoff.
@@ -49,6 +52,13 @@ Updated: 2026-08-17
    Mitigation: activate quiet return behavior only for Settings personal and
    Family callers; retain the group-only Messages handoff and cover it in the
    focused suite.
+3. Risk: An active Family member's return has no mounted controller after the
+   payer lands back on the closed roster.
+   Mitigation: mount one exact status owner independently of Manage and keep
+   all plan and purchase controls inside Manage.
+4. Risk: a conditionally inserted populated live region is not announced.
+   Mitigation: mount the empty polite status owner before reconciliation and
+   update that same node only after verified fulfillment.
 
 ## Tasks
 
@@ -69,6 +79,9 @@ Updated: 2026-08-17
   poll.
 - Remove personal and Family post-purchase messaging options entirely. They do
   not advance the payment outcome and caused the oversized transient modal.
+- Keep off-meter Family return ownership distinct from the Manage dialog. The
+  roster supplies the member label, while the existing top-up controller still
+  owns polling, query cleanup, compact result presentation, and close refresh.
 
 ## Verification
 

@@ -705,14 +705,16 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
 
   return (
     <>
-      {quietSuccessfulReturn && fulfilledConfirmation && statusContent ? (
+      {props.quietSuccessfulReturn ? (
         <p
           className="sr-only"
           role="status"
           aria-atomic="true"
           aria-live="polite"
         >
-          {statusContent.title}. {statusContent.message}
+          {quietSuccessfulReturn && fulfilledConfirmation && statusContent
+            ? `${statusContent.title}. ${statusContent.message}`
+            : ""}
         </p>
       ) : null}
       <Dialog

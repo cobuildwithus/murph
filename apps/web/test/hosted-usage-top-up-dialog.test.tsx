@@ -4974,7 +4974,10 @@ test("keeps a lagging successful Settings return quiet through fulfillment", asy
     assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
     assert.equal(hasButton(rendered.container, "Resume checkout"), false);
     assert.equal(hasButton(rendered.container, "Cancel checkout"), false);
-    assert.equal(rendered.container.querySelector('[role="status"]'), null);
+    const status = rendered.container.querySelector('[role="status"]');
+    assert.ok(status);
+    assert.equal(status.getAttribute("aria-live"), "polite");
+    assert.equal(status.textContent, "");
 
     await act(async () => {
       vi.advanceTimersByTime(1_250);
@@ -4982,8 +4985,9 @@ test("keeps a lagging successful Settings return quiet through fulfillment", asy
     });
 
     assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+    assert.equal(rendered.container.querySelector('[role="status"]'), status);
     assert.match(
-      rendered.container.querySelector('[role="status"]')?.textContent ?? "",
+      status.textContent ?? "",
       /Usage added\. Your available usage has been updated\./,
     );
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
