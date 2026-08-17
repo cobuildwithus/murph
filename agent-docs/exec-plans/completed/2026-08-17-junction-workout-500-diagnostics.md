@@ -89,3 +89,6 @@ disposition after each failed attempt.
   unchanged.
 - The two directly affected assistant-runtime test files pass all 396 tests,
   and the assistant-runtime owner typecheck remains green after remediation.
+Status: completed
+Updated: 2026-08-17
+Completed: 2026-08-17
