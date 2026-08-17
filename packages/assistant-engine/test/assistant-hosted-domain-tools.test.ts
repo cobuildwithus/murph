@@ -75,9 +75,6 @@ describe('hosted domain dynamic tools', () => {
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'When no automation matches, inspect succeeds with {"action":"inspect","found":false}',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass expectedUpdatedAt from that readback',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(

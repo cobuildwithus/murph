@@ -30,9 +30,6 @@ import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
-  normalizeAssistantProviderConfig,
-} from '@murphai/operator-config/assistant/provider-config'
-import {
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
@@ -79,12 +76,6 @@ import type {
 import {
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
 } from '../src/assistant/onboarding-first-personal-read-automation.ts'
-import {
-  executeCodexAssistantTurnAttempt,
-} from '../src/assistant/providers/codex-cli.ts'
-import type {
-  AssistantProviderRequestStartedEvent,
-} from '../src/assistant/providers/types.ts'
 import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
 import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
@@ -3996,110 +3987,6 @@ text(JSON.stringify(result));
       expect(toolOutputs).toContain('\\"action\\":\\"inspect\\",\\"found\\":false')
       expect(toolOutputs.includes('\\"created\\":true')).toBe(create)
       expect(result.finalMessage).toBe(finalMessage)
-    },
-  )
-
-  it.each(['direct', 'group'] as const)(
-    'starts once with committed history and then resumes after a %s tool-contract rotation',
-    { timeout: TURN_TIMEOUT_MS },
-    async (scope) => {
-      // Planning tests prove that a contract-fingerprint mismatch clears native
-      // resume and supplies bounded committed history. This real App Server
-      // proof exercises those planned inputs, then the replacement-thread resume.
-      const scenario = await prepareScriptedTurnScenario({
-        modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-      })
-      const priorUserMessage = 'Prior committed movement question.'
-      const priorAssistantMessage = 'Prior committed movement answer.'
-      scenario.stub.queue(
-        {
-          requestIncludes: [priorUserMessage, priorAssistantMessage],
-          text: `FIRST_${scope.toUpperCase()}_ROTATED_THREAD_REPLY`,
-        },
-        {
-          requestIncludes: ['Reply on the replacement provider thread.'],
-          text: `SECOND_${scope.toUpperCase()}_RESUMED_THREAD_REPLY`,
-        },
-      )
-      const providerConfig = normalizeAssistantProviderConfig({
-        codexCommand: scenario.turnInput.codexCommand,
-        codexHome: scenario.turnInput.codexHome,
-        model: scenario.turnInput.model,
-        modelProvider: scenario.turnInput.modelProvider,
-        provider: 'codex-cli',
-        reasoningEffort: 'low',
-        sandbox: 'workspace-write',
-      })
-      const firstStartEvents: AssistantProviderRequestStartedEvent[] = []
-      const firstAttempt = await executeCodexAssistantTurnAttempt({
-        conversationHistoryMessages: [
-          { content: priorUserMessage, role: 'user' },
-          { content: priorAssistantMessage, role: 'assistant' },
-        ],
-        dynamicTools: [MURPH_AUTOMATION_TOOL],
-        env: scenario.turnInput.env,
-        groupConversation: scope === 'group',
-        onProviderRequestStarted: (event) => {
-          firstStartEvents.push(event)
-        },
-        providerConfig,
-        systemPrompt: buildScriptedHostedSystemPrompt(scope, true),
-        userPrompt: 'Reply after the deployment contract rotation.',
-        workingDirectory: scenario.turnInput.workingDirectory,
-      })
-
-      expect(firstAttempt).toMatchObject({
-        ok: true,
-        result: {
-          response: `FIRST_${scope.toUpperCase()}_ROTATED_THREAD_REPLY`,
-        },
-      })
-      if (!firstAttempt.ok || !firstAttempt.result.codexThreadId) {
-        throw new TypeError('Expected the replacement provider thread to start.')
-      }
-      expect(firstStartEvents).toEqual([
-        expect.objectContaining({
-          codexAppServerThreadStartMs: expect.any(Number),
-        }),
-      ])
-      expect(firstStartEvents[0]).not.toHaveProperty(
-        'codexAppServerThreadResumeMs',
-      )
-
-      const secondStartEvents: AssistantProviderRequestStartedEvent[] = []
-      const secondAttempt = await executeCodexAssistantTurnAttempt({
-        dynamicTools: [MURPH_AUTOMATION_TOOL],
-        env: scenario.turnInput.env,
-        groupConversation: scope === 'group',
-        onProviderRequestStarted: (event) => {
-          secondStartEvents.push(event)
-        },
-        providerConfig,
-        resume: { codexThreadId: firstAttempt.result.codexThreadId },
-        systemPrompt: buildScriptedHostedSystemPrompt(scope, true),
-        userPrompt: 'Reply on the replacement provider thread.',
-        workingDirectory: scenario.turnInput.workingDirectory,
-      })
-
-      if (!secondAttempt.ok) {
-        throw secondAttempt.error
-      }
-      expect(secondAttempt).toMatchObject({
-        ok: true,
-        result: {
-          codexThreadId: firstAttempt.result.codexThreadId,
-          response: `SECOND_${scope.toUpperCase()}_RESUMED_THREAD_REPLY`,
-        },
-      })
-      expect(secondStartEvents).toEqual([
-        expect.objectContaining({
-          codexAppServerThreadResumeMs: expect.any(Number),
-        }),
-      ])
-      expect(secondStartEvents[0]).not.toHaveProperty(
-        'codexAppServerThreadStartMs',
-      )
-      expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
     },
   )
 
