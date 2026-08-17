@@ -1736,7 +1736,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toMatch(/applicable\s+risk notes/u)
     expect(prDeepReviewPrompt).toContain('**Purpose Drift**')
     expect(prDeepReviewPrompt).toContain('disclosure-only verification retry')
-    expect(prDeepReviewPrompt).toContain('Do not reopen the\nfull patch')
+    expect(prDeepReviewPrompt).toMatch(/Do not reopen the\s+full patch/u)
     expect(prDeepReviewPrompt).toContain(
       'may select only the narrow retry scope defined above',
     )
