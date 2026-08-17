@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 import {
   getOnboardingStepActionClass,
@@ -13,13 +14,14 @@ function StudyAction({
   primary?: boolean;
 }) {
   return (
-    <a
+    <Link
       className={getOnboardingStepActionClass(primary)}
       href="/screenshots/home"
+      prefetch={false}
     >
       {children}
       <ArrowRight className="size-4" />
-    </a>
+    </Link>
   );
 }
 
