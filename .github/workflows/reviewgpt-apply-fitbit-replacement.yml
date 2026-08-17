@@ -22,7 +22,8 @@ jobs:
           BRANCH_NAME: reviewgpt/simplify-fitbit-google-health
         run: |
           set -euo pipefail
-          gzip -dc reviewgpt-simplify-fitbit-google-health.patch.gz > /tmp/replacement.patch
+          base64 --decode reviewgpt-simplify-fitbit-google-health.patch.gz \
+            | gzip -dc > /tmp/replacement.patch
           git checkout --detach "$BASE_SHA"
           git apply --index --binary /tmp/replacement.patch
           git diff --cached --check
