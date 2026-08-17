@@ -279,17 +279,17 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
     expect(state).not.toHaveProperty(retiredBrowserVaultRefreshProjection);
   });
 
-  it("blocks the previous runner before it can read a version-16 workspace", () => {
+  it("blocks the previous runner before it can read a version-17 workspace", () => {
     const readWorkspace = vi.fn();
-    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(16);
+    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(17);
     expect(() => {
       assertRunnerStateSchemaVersionSupported({
         observedVersion: RUNNER_STATE_SCHEMA_VERSION,
-        supportedVersion: 15,
+        supportedVersion: 16,
       });
       readWorkspace();
     }).toThrow(
-      "Hosted runner Durable Object schema version 16 is newer than supported version 15.",
+      "Hosted runner Durable Object schema version 17 is newer than supported version 16.",
     );
     expect(readWorkspace).not.toHaveBeenCalled();
   });

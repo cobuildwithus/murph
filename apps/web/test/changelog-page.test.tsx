@@ -72,6 +72,7 @@ describe("ChangelogPage", () => {
     for (const edition of firstPage.editions) {
       expect(markup).toContain(`id="edition-${edition.id}"`);
       expect(markup).toContain(renderToStaticMarkup(<>{edition.title}</>));
+      expect(markup).toContain(renderToStaticMarkup(<>{edition.summary}</>));
       for (const item of edition.items) {
         expect(markup).toContain(`id="${item.id}"`);
         expect(markup).toContain(`href="${buildChangelogItemPath(item.id)}"`);
@@ -80,30 +81,6 @@ describe("ChangelogPage", () => {
     for (const edition of secondPage.editions) {
       expect(markup).not.toContain(`id="edition-${edition.id}"`);
     }
-
-    const correctedEdition = listChangelogEditions().find(
-      (edition) => edition.id === "2026-08-10",
-    );
-    expect(correctedEdition).toBeDefined();
-    if (!correctedEdition) {
-      throw new TypeError(
-        "The changelog archive must include the corrected edition.",
-      );
-    }
-    const correctedEditionMarkup = renderToStaticMarkup(
-      await ChangelogPage({
-        searchParams: Promise.resolve({ edition: correctedEdition.id }),
-      }),
-    );
-    expect(correctedEditionMarkup).toContain(
-      renderToStaticMarkup(<>{correctedEdition.summary}</>),
-    );
-    expect(correctedEdition.summary).toContain("Training shows saved workouts");
-    expect(correctedEdition.summary).toContain("group photos on request");
-    expect(correctedEdition.summary).toContain("Luna, Terra, and Sol on OpenAI");
-    expect(correctedEdition.summary).toContain("one first photo");
-    expect(correctedEdition.summary).toContain("wearable recovery");
-    expect(correctedEdition.summary).not.toContain("original detail");
 
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);

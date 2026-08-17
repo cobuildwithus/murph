@@ -15,7 +15,7 @@ function StudyAction({
   return (
     <a
       className={getOnboardingStepActionClass(primary)}
-      href="/design?tab=sections"
+      href="/screenshots/home"
     >
       {children}
       <ArrowRight className="size-4" />

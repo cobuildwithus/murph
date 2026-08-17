@@ -1439,10 +1439,11 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
-    assert.match(productionNextBuildScript, /next_child_old_space_mb=3072/u);
+    assert.match(productionNextBuildScript, /build_worker_old_space_mb=3072/u);
+    assert.match(productionNextBuildScript, /typecheck_old_space_mb=3584/u);
     assert.match(
       productionNextBuildScript,
-      /build_cache_epoch=webpack-next-16\.3-v2-cold-webpack/u,
+      /build_cache_epoch=webpack-next-16\.3-v3-prepared-typecheck-cold-webpack/u,
     );
     assert.match(productionNextBuildScript, /webpack_cache_dir=\.next\/cache\/webpack/u);
     assert.match(
