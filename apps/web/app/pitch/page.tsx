@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphPageMetadata,
+  MURPH_NOINDEX_PAGE_ROBOTS,
+} from "@/src/lib/site-metadata";
 
 import { PitchDeck } from "./pitch-deck";
 
@@ -18,6 +21,7 @@ export const metadata: Metadata = createMurphPageMetadata({
     "Murph turns group chats into health challenges. The AI referee for step bets, sleep experiments, and friend challenges across iMessage, WhatsApp, and Telegram.",
   openGraph: { images: [PITCH_OPEN_GRAPH_IMAGE] },
   twitter: { images: [PITCH_OPEN_GRAPH_IMAGE] },
+  robots: MURPH_NOINDEX_PAGE_ROBOTS,
 });
 
 export default function Page() {
