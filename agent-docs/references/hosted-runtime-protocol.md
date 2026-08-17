@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-14
+Last verified: 2026-08-16
 
 ## Decision
 
@@ -24,7 +24,9 @@ The live ownership split is:
   appends one deterministic `device-sync.wake` mailbox handoff if the connection
   transitioned from clean to dirty, and completes trace acceptance in the same
   transaction. The post-commit Temporal signal carries only the mailbox pointer.
-  There is no periodic dirty-row recovery sweep.
+  There is no periodic dirty-row recovery sweep. The existing scheduled
+  mailbox-handoff sweep may re-signal one exact unconsumed `device-sync.wake`
+  pointer per user after a failed first signal; it does not scan dirty state.
   The runtime pulls pending dirty rows through the required signed dirty-pending
   callback and acks checkpoint-safe handoff through the required dirty-ack
   callback.
@@ -101,7 +103,8 @@ Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
 `assistant.ask.completed` mailbox items. After each append, Web first signals
 Temporal and then starts the existing payloadless direct `ensure-processing`
-latency hint; the hint has no retry or durable authority. The group runtime may
+latency hint; the hint may make one deadline-bounded retry after an explicit
+`retry_later`, but has no durable authority. The group runtime may
 answer one request in a separate read-only one-shot Codex child while its
 resident foreground assistant continues to own writes and sends. The mailbox
 remains the only durable queue and operation state; Cloudflare gains no second
@@ -1457,8 +1460,15 @@ orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. Linq webhook ingress and Assistant Ask request/completion append
 handlers may additionally fire one best-effort direct
-`ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
-message payload). Linq first proves the committed known-checkpoint owner and
+`ensure-processing` request (Vercel OIDC, no message payload). The post-response
+helper waits for the real accepted-or-retry outcome, stays inside a 29-second
+outer deadline, and may make exactly one retry only when the returned
+`retryAt` plus a minimum command/response window still fits that deadline.
+The relational latency phase records the final parsed direct result kind and,
+only for `runtime_processing_accepted`, its bounded action and runtime attempt
+id. Retry reasons and raw errors stay out of the trace; Cloudflare structured
+logs carry retry reasons under the direct orchestration attempt id.
+Linq first proves the committed known-checkpoint owner and
 canonical live active access; Assistant Ask first completes its normal
 server-bound append checks. Web always awaits the applicable Temporal
 `signalWithStart`; only after Temporal accepts that durable signal does Web
@@ -2302,6 +2312,21 @@ This matches the runner readiness ceiling without weakening invalidated-shell
 or destroy-settlement checks. Accepted background invocations begin their
 pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
+Container readiness receives at most 15 wall-clock seconds, including time
+queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
+allows one absolute five-second fail-closed cleanup deadline shared by the
+pre-destroy state read and destroy settlement, and its caller-side guard keeps
+a separate one-second margin. If the container RPC settles
+with a timeout or transport failure, the fresh fence is compare-cleared as
+before. If cleanup remains unsettled at its deadline or only the outer guard
+elapses, Cloudflare preserves the fresh fence: the lifecycle RPC has not proved
+that cleanup is safe, and the existing startup-grace convergence path remains
+the sole recovery owner.
+When a shorter command budget applies, readiness receives the smaller of 15
+seconds and the remaining command time minus the one-second caller guard. The
+cleanup allowance is not subtracted up front: a healthy 7–8 second cold start
+can still succeed under the default ten-second command, while cleanup that
+cannot fit causes the outer guard to preserve the fence.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
 same-version runtime fence whose child is missing remains protected by the
@@ -3101,20 +3126,46 @@ the existing outbox authority resolver also reads canonical onboarding state
 at external provider entry, making completed state terminally stale and
 unreadable state retryable without adding another delivery owner.
 
-The `checkpoint.snapshot_plan`, `checkpoint.snapshot_started`, and
-`checkpoint.snapshot_finished` events record the bounded
-`handledConversationMailboxItemCount` and
-`handledConversationFrontierSelected`, never the item identifiers. The count is
+Successful v2 snapshot lifecycle retention has one owner:
+`checkpoint.snapshot_finished`. It carries the bounded request shape, legacy
+materialization plan counts, timing, file-count, and byte metrics known at
+completion, including `handledConversationMailboxItemCount` and
+`handledConversationFrontierSelected`, but never item identifiers. The count is
 batch-volume context only. The frontier boolean reports whether the selected
 batch contains the exact conversation row immediately after Web's last
-contiguous consumed floor. Plan, start, and failure events prove local selection
-only; they do not claim that Web received the request. A finished event also
-records `webCheckpointAccepted`. When that value and the frontier boolean are
-both true, the accepted Web checkpoint carried the exact blocking row; when an
-accepted finished event has a false frontier boolean, the gap remains in runtime
+contiguous consumed floor. The finished event also records
+`webCheckpointAccepted`. When that value and the frontier boolean are both true,
+the accepted Web checkpoint carried the exact blocking row; when an accepted
+finished event has a false frontier boolean, the gap remains in runtime
 selection, mapping, or batch rotation. The fields never imply that exact-row
 stamping or the contiguous floor advanced; durable consumption remains that
 proof.
+
+The retained fleet path selects no `checkpoint.snapshot_plan` or
+`checkpoint.snapshot_started` event. After v2 snapshot construction acquires
+its canonical lock, each attempt selects at most one best-effort terminal
+event: `checkpoint.snapshot_finished` after completion,
+`checkpoint.snapshot_failed` for a failure, or
+`checkpoint.snapshot_preempted` only when the caught failure is the exact
+runtime-wake interruption. Each non-success event carries the last reached
+fixed `snapshotStage`: `plan`, `session`, `archive`, `upload`, or `checkpoint`.
+These events prove local progress only; they do not claim that Web accepted a
+checkpoint.
+
+Runtime logs remain lossy observability. Finished and preempted info events use
+the bounded process-global best-effort queue; failure warning/error events
+bypass that verbose queue but still swallow log-endpoint failure, and a runtime
+interruption never waits for their completion. Failure before canonical-lock
+acquisition, process termination, queue overflow, an unavailable log port, or a
+failed log write can therefore leave no terminal row. Row absence is never
+checkpoint or failure evidence.
+Dashboard and fleet-query migration must therefore use
+`checkpoint.snapshot_finished` as the success owner across both historical and
+new data, use the failed/preempted terminal codes for non-success outcomes, and
+ignore plan/start rows rather than unioning lifecycle codes. Because the
+finished owner already existed, successful-volume queries need no backfill;
+there is no historical lifecycle backfill.
+
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
 conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A

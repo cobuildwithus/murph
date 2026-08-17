@@ -67,6 +67,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(),
   readAssistantInputEvent: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
@@ -155,6 +156,8 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
     mocks.drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch:
     mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault:
+    mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault,
   resetHostedPreparedAssistantDeliveryEffects:
     mocks.resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
@@ -591,6 +594,7 @@ beforeEach(() => {
     PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE,
   );
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
+  mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault.mockResolvedValue(0);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
   mocks.readAssistantAutomationState.mockResolvedValue({
     autoReply: [],
@@ -1922,6 +1926,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+  });
+
+  it("checkpoints due message-volume receipt recovery without a system mailbox item", async () => {
+    mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault.mockResolvedValueOnce(1);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:01:00.000Z",
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(
+      mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault,
+    ).toHaveBeenCalledWith({
+      effectsPort: expect.objectContaining({
+        recordOutboundMessageVolumeReceipt: expect.any(Function),
+      }),
+      now: new Date("2026-04-27T00:00:00.000Z"),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      progressed: true,
+    }));
   });
 
   it("keeps browser-vault refresh control work behind fresh conversation input", async () => {
@@ -14066,6 +14097,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -14479,6 +14511,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
@@ -14653,6 +14686,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -14709,6 +14743,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -14776,6 +14811,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: true,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -15009,6 +15045,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [deliveryIntentId],
       vaultRoot: "/tmp/murph-vault",
@@ -15051,16 +15088,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it.each([
     {
       dedupeKey:
-        "assistant.notification.requested:phone-call-result:phone_call_telegram",
-      label: "phone-call result",
+        "assistant.notification.requested:phone-call-result:phone_call_telegram:generation:1",
+      dispatchesBeforeIdle: true,
+      label: "generation-scoped phone-call result",
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_manual_telegram",
+      dispatchesBeforeIdle: false,
+      label: "generationless manual phone-call result",
     },
     {
       dedupeKey:
         "assistant.notification.requested:usage-referral-reward:referral_telegram",
+      dispatchesBeforeIdle: false,
       label: "usage-referral reward",
     },
-  ])("defers an exact Telegram $label to the checkpoint-gated outbox", async ({
+  ])("routes an exact Telegram $label through its durability boundary", async ({
     dedupeKey,
+    dispatchesBeforeIdle,
   }) => {
     const now = "2026-04-27T00:03:00.000Z";
     const completionItem = createExternalCompletionSystemMailboxItem({
@@ -15103,7 +15149,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
     ]);
-    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(now);
+    if (dispatchesBeforeIdle) {
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+        preparedDispatches: [],
+      });
+    } else {
+      mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(now);
+    }
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [],
@@ -15116,34 +15168,57 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [],
       preferredIntentIds: [deliveryIntentId],
       vaultRoot: "/tmp/murph-vault",
     });
-    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledWith({
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(
-      mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
-    ).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "system_mailbox_receipt",
-      nextWakeAt: now,
-      progressed: true,
-      redactedStatus: expect.objectContaining({
-        hostedOutboxPendingDeliveryEffects: 1,
-      }),
-    }));
-    expect(result.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
+    if (dispatchesBeforeIdle) {
+      expect(mocks.resolveHostedAssistantOutboxNextWakeAt).not.toHaveBeenCalled();
+      expect(
+        mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+      ).toHaveBeenCalledWith({
+        assistantDeliveryEffects: [deliveryEffect],
+        vaultRoot: "/tmp/murph-vault",
+      });
+      expect(result).toEqual(expect.objectContaining({
+        afterCheckpointKeepsForegroundImportLoop: true,
+        checkpointReason: "outbox_sending",
+        progressed: true,
+      }));
+    } else {
+      expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledWith({
+        vaultRoot: "/tmp/murph-vault",
+      });
+      expect(
+        mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+      ).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "system_mailbox_receipt",
+        nextWakeAt: now,
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxPendingDeliveryEffects: 1,
+        }),
+      }));
+      expect(result.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
+    }
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "system_mailbox_receipt",
-      nextWakeAt: now,
-      nextWakeReason: "assistant",
-    }));
+    if (dispatchesBeforeIdle) {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+      }));
+    } else {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "system_mailbox_receipt",
+        nextWakeAt: now,
+        nextWakeReason: "assistant",
+      }));
+    }
   });
 
   it("keeps managed setup out of a causal-only exact delivery pass", async () => {
@@ -15184,6 +15259,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
+        messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [pendingEffectsItem.wake.effectId],
         preferredIntentIds: [],
         vaultRoot: "/tmp/murph-vault",
@@ -15333,6 +15409,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -15464,6 +15541,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
+        messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [effectId],
         preferredIntentIds: [],
         vaultRoot,
@@ -15596,6 +15674,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredEffectIds: [pendingEffectsItem.wake.effectId],
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
@@ -15693,6 +15772,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
+        messageVolumeReceiptPort: expect.any(Object),
         preferredEffectIds: [scenario.effectId],
         preferredIntentIds: [],
         vaultRoot: scenario.vaultRoot,
@@ -18906,6 +18986,9 @@ function createPhaseInput(input: {
       },
       effectsPort: {
         readRawEmailMessage: vi.fn(async () => null),
+        recordOutboundMessageVolumeReceipt: vi.fn(async () => ({
+          recordedAt: "2026-04-27T00:00:00.000Z",
+        })),
         sendEmail: vi.fn(async () => undefined),
       },
       ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),
@@ -18943,6 +19026,9 @@ function createPhaseInput(input: {
         },
         effectsPort: {
           readRawEmailMessage: vi.fn(async () => null),
+          recordOutboundMessageVolumeReceipt: vi.fn(async () => ({
+            recordedAt: "2026-04-27T00:00:00.000Z",
+          })),
           sendEmail: vi.fn(async () => undefined),
         },
         ...(input.runtimeGroupToolPort ? { groupToolPort: input.runtimeGroupToolPort } : {}),

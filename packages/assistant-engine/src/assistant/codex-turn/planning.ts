@@ -523,12 +523,27 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const telegramPresentationResponseCardsAvailable =
+    resolvedChannel?.trim().toLowerCase() === 'telegram' &&
+    (
+      responseCardsAvailable ||
+      (
+        authenticatedGroupChatRuntime &&
+        input.profile.promptProfile === 'conversation' &&
+        input.profile.toolProfile === 'provider-turn' &&
+        (
+          scheduledInvocationScope !== null ||
+          (
+            ordinaryInboundTurn &&
+            input.input.scheduledInvocationAuthority == null
+          )
+        )
+      )
+    )
   const exerciseRoutineResponseCardsAvailable =
-    responseCardsAvailable &&
-    resolvedChannel?.trim().toLowerCase() === 'telegram'
+    telegramPresentationResponseCardsAvailable
   const telegramRichContentResponseCardsAvailable =
-    responseCardsAvailable &&
-    resolvedChannel?.trim().toLowerCase() === 'telegram'
+    telegramPresentationResponseCardsAvailable
   const groupChallengeResponseCardsAvailable =
     authenticatedGroupChatRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&

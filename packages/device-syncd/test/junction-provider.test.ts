@@ -7479,6 +7479,55 @@ test("Junction provider cleanup deregisters only the requested source", async ()
   ]);
 });
 
+test("Junction provider proves source access only from explicit active statuses", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    assert.equal(
+      readUrl(input),
+      "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    );
+    return createJsonResponse({
+      data: [
+        { slug: "source_connected", status: "connected" },
+        { slug: "source_active", status: "active" },
+        { slug: "source_available", status: "available" },
+        { slug: "source_ok", status: "ok" },
+        { slug: "source_unknown", status: "unknown" },
+        { slug: "source_missing" },
+        { slug: "source_unrecognized", status: "settling" },
+        { slug: "source_error", status: "error" },
+        { slug: "source_failed", status: "failed" },
+        { slug: "source_disconnected", status: "disconnected" },
+        { slug: "source_revoked", status: "revoked" },
+        { slug: "source_inactive", status: "inactive" },
+      ],
+    });
+  });
+  const isSourceAccessActive = requireValue(
+    provider.connectionHandler?.isSourceAccessActive,
+  );
+
+  for (const slug of [
+    "source_connected",
+    "source_active",
+    "source_available",
+    "source_ok",
+  ]) {
+    assert.equal(await isSourceAccessActive(createAccount(), slug), true);
+  }
+  for (const slug of [
+    "source_unknown",
+    "source_missing",
+    "source_unrecognized",
+    "source_error",
+    "source_failed",
+    "source_disconnected",
+    "source_revoked",
+    "source_inactive",
+  ]) {
+    assert.equal(await isSourceAccessActive(createAccount(), slug), false);
+  }
+});
+
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
   assert.deepEqual(normalizeJunctionProviderFilter(["oura", "withings"]), ["oura", "withings"]);
 
@@ -9145,6 +9194,15 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
     sourceConnection.initialJobs?.[0]?.dedupeKey,
     connection.initialJobs?.[0]?.dedupeKey,
   );
+  const sourceRecoveryWork = requireJunctionConnectionHandler(provider)
+    .buildSourceConnectionWork?.({
+      now: "2026-04-03T00:00:00.000Z",
+      sourceProviderSlug: "fitbit",
+    });
+  assert.deepEqual(sourceRecoveryWork, {
+    initialJobs: sourceConnection.initialJobs,
+    nextReconcileAt: sourceConnection.nextReconcileAt,
+  });
 
   // Every initial job crosses the configured-manifest boundary inside the OAuth
   // callback handler before the connection is persisted. An undeclared payload
@@ -18313,6 +18371,69 @@ test("Junction workout_stream diagnostics use one bounded index read and serial 
   assert.equal(requests.filter((url) => url.includes("/v2/timeseries/workouts/")).length, 32);
   assert.equal(requests.some((url) => url.includes("/workout_stream/grouped")), false);
   assert.equal(maximumActiveStreams, 1);
+});
+
+test("Junction workout_stream skips malformed metric cardinality without blocking valid workouts", async () => {
+  const importedSnapshots: unknown[] = [];
+  const warningCodes: string[] = [];
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2", "workout-3"],
+    streamResponse: (workoutId) => createJsonResponse(
+      workoutId === "workout-1"
+        ? {
+            time: [1_775_131_200, 1_775_133_000],
+            heartrate: [100, 160],
+            distance: [0],
+          }
+        : workoutId === "workout-2"
+          ? {
+              time: [1_775_131_200, 1_775_133_000],
+              heartrate: [105],
+              distance: [0, 5_100],
+            }
+          : {
+              time: [1_775_131_200, 1_775_133_000],
+              heartrate: [105, 165],
+              distance: [0, 5_100],
+            },
+    ),
+  });
+
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn: (_message, metadata) => {
+          if (typeof metadata?.errorCode === "string") warningCodes.push(metadata.errorCode);
+        },
+      },
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2", "workout-3"]);
+  const workoutIds = importedSnapshots.flatMap((snapshot) => {
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return [];
+    const timeseries = Reflect.get(snapshot, "timeseries");
+    if (!timeseries || typeof timeseries !== "object" || Array.isArray(timeseries)) return [];
+    const features = Reflect.get(timeseries, "workout_stream");
+    if (!Array.isArray(features)) return [];
+    return features.map((feature) => {
+      assert.ok(feature && typeof feature === "object" && !Array.isArray(feature));
+      const workoutId = Reflect.get(feature, "workoutId");
+      assert.equal(typeof workoutId, "string");
+      return workoutId;
+    });
+  });
+  assert.deepEqual(workoutIds, ["workout-3"]);
+  assert.deepEqual(warningCodes, [
+    "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+    "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+  ]);
 });
 
 test("Junction workout_stream hard call bound is 100 index pages plus 32 serial streams", async () => {

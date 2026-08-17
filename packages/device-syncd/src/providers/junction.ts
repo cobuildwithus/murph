@@ -700,6 +700,10 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
+    const sourceConnectionWork = buildSourceConnectionWork({
+      now: context.now,
+      sourceProviderSlug: context.sourceProviderSlug,
+    });
     return {
       externalAccountId,
       displayName: "Junction",
@@ -709,8 +713,7 @@ export function createJunctionDeviceSyncProvider(
         providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
       },
       setupPhase: "link_returned",
-      initialJobs: buildInitialJobs(context.now, context.sourceProviderSlug),
-      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+      ...sourceConnectionWork,
     };
   }
 
@@ -812,7 +815,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return (await client.listUserProviders(userId)).some((provider) =>
-      mapJunctionSourceStatus(provider.status) !== "disconnected"
+      mapJunctionSourceStatus(provider.status) === "connected"
       && (
         normalizeProviderSlug(provider.origin.sourceProviderSlug)
         ?? normalizeProviderSlug(provider.slug)
@@ -4258,6 +4261,18 @@ export function createJunctionDeviceSyncProvider(
         continue;
       }
 
+      if (feature === undefined) {
+        input.context.logger.warn?.("Skipping Junction workout with unaligned metric cardinality.", {
+          errorCode: "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+          provider: "junction",
+          resource: "workout_stream",
+          resourceCategory: "timeseries",
+        });
+        completedIdentities.add(candidate.identity);
+        madeProgress = true;
+        continue;
+      }
+
       try {
         const preparedImport = await prepareJunctionImportSnapshot(
           input.context,
@@ -4722,6 +4737,16 @@ export function createJunctionDeviceSyncProvider(
     ];
   }
 
+  function buildSourceConnectionWork(input: {
+    now: string;
+    sourceProviderSlug: string | null | undefined;
+  }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt"> {
+    return {
+      initialJobs: buildInitialJobs(input.now, input.sourceProviderSlug),
+      nextReconcileAt: addMilliseconds(input.now, reconcileIntervalMs),
+    };
+  }
+
   return {
     provider: "junction",
     descriptor: buildJunctionDeviceSyncRuntimeDescriptor(config),
@@ -4731,6 +4756,7 @@ export function createJunctionDeviceSyncProvider(
     },
     connectionHandler: {
       beginConnection,
+      buildSourceConnectionWork,
       completeConnection,
       isSourceAccessActive,
       revokeAccess,
@@ -4771,12 +4797,15 @@ async function fetchJunctionTimeseriesWindow(
     const candidates = await listJunctionWorkoutStreamCandidates(junctionClient, input);
     const features: unknown[] = [];
     for (const candidate of candidates) {
-      features.push(await fetchJunctionWorkoutStreamFeature(
+      const feature = await fetchJunctionWorkoutStreamFeature(
         junctionClient,
         candidate,
         maxSamples,
         input.signal ?? null,
-      ));
+      );
+      if (feature !== undefined) {
+        features.push(feature);
+      }
     }
     return features;
   }
@@ -4828,7 +4857,7 @@ async function fetchJunctionWorkoutStreamFeature(
   maxSamples: number,
   signal: AbortSignal | null,
   collectionWorkLimit?: JunctionCollectionWorkLimit,
-): Promise<unknown> {
+): Promise<unknown | undefined> {
   const stream = await junctionClient.getWorkoutStream({
     collectionWorkLimit,
     signal,

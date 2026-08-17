@@ -303,7 +303,14 @@ legacy unknown counts as chart gaps rather than zeros. Once message tracking has
 unavailable day also ends the exact cumulative line until the missing evidence
 is reconciled; later known daily bars may still render. State that the daily
 message total combines inbound messages across supported channels with tracked
-Linq replies. Give each keyboard-enabled chart one visible focus surface named
+successful Linq, Telegram, and email outbound messages. Telegram and email
+begin at their explicit post-cutover receipt date; do not imply reconstructed
+older history. For group email, count each successfully sent recipient
+child once and the recipient-planning parent zero times. For the new
+Telegram/email contribution, exclude reactions and ephemeral progress updates;
+the total must follow durable outbox-backed conversational delivery ownership
+rather than infer provider success. Keep the existing Linq ledger contribution
+unchanged. Give each keyboard-enabled chart one visible focus surface named
 by its heading. Keep acquisition and revenue snapshots after the message charts.
 End the grid with **Monthly revenue**: restrained sage bars where each bar
 estimates one UTC month from the month's latest snapshot MRR plus fulfilled

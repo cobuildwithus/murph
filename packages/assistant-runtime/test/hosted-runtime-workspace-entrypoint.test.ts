@@ -7940,8 +7940,14 @@ describe("hosted workspace runtime entrypoint", () => {
   const externalCompletionDeliveryScenarios = [
     {
       dedupeKey:
-        "assistant.notification.requested:phone-call-result:phone_call_real_path",
-      label: "phone-call result",
+        "assistant.notification.requested:phone-call-result:phone_call_real_path:generation:1",
+      label: "generation-scoped phone-call result",
+      privateCompletion: false,
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_manual_real_path",
+      label: "generationless manual phone-call result",
       privateCompletion: false,
     },
     {
@@ -7988,6 +7994,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const events: string[] = [];
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const logRequests: HostedRuntimeLogRequest[] = [];
       const mailboxItems: HostedMailboxItem[] = [];
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
       const privateAskExecutionRelease = createDeferred<void>();
@@ -7998,6 +8005,9 @@ describe("hosted workspace runtime entrypoint", () => {
             "assistant.notification.requested:",
             "",
           );
+      const phoneCallResultUsesForegroundDurabilityBarrier =
+        transport.channel === "telegram"
+        && completion.label === "generation-scoped phone-call result";
       const requestId = `aask_req_${"a".repeat(64)}`;
       let activeVaultRoot = vaultRoot;
       let assistantPhaseCalls = 0;
@@ -8018,6 +8028,26 @@ describe("hosted workspace runtime entrypoint", () => {
             || (transport.channel === "telegram" && url.endsWith("/sendMessage"))
           )
         ) {
+          if (
+            transport.channel === "telegram"
+            && phoneCallResultUsesForegroundDurabilityBarrier
+          ) {
+            assert.ok(
+              checkpointRequests.some((request) =>
+                request.reason === "canonical_runtime_commit"
+              ),
+              events.join(","),
+            );
+            assert.ok(
+              logRequests.flatMap((request) => request.entries).some((entry) =>
+                entry.eventCode === "checkpoint.runtime_residue_deferred"
+                && entry.redactedJson?.checkpointPhase === "assistant"
+                && entry.redactedJson.checkpointReason === "outbox_sending"
+              ),
+              events.join(","),
+            );
+            assert.equal(events.includes("snapshot:idle_shutdown"), false);
+          }
           providerDispatchWasForegroundCausal =
             currentPhaseIsForegroundCausal;
           events.push(`provider.send:${deliveryKey}`);
@@ -8105,12 +8135,13 @@ describe("hosted workspace runtime entrypoint", () => {
                 `attempt_synthetic_external_completion_real_${
                   completion.privateCompletion
                     ? "private"
-                    : completion.label === "phone-call result"
+                    : completion.label === "generation-scoped phone-call result"
                       ? "phone"
                       : "referral"
                 }_${transport.channel}`,
               idleCheckpointDelayMs:
-                completion.privateCompletion && transport.channel === "linq"
+                (completion.privateCompletion && transport.channel === "linq")
+                || phoneCallResultUsesForegroundDurabilityBarrier
                   ? 180_000
                   : 200,
               leaseGeneration: "7",
@@ -8136,6 +8167,17 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             async importItem(item) {
               events.push(`mailbox.importItem:${item.item.id}`);
+              if (item.item.kind === "conversation.message") {
+                return {
+                  assistantInputId: await stageAssistantInputEventForMailboxItem({
+                    channel: "telegram",
+                    item: item.item,
+                    threadId: transport.target,
+                    vaultRoot: activeVaultRoot,
+                  }),
+                  status: "imported",
+                };
+              }
               if (item.item.kind === "assistant.ask.requested") {
                 return await enqueueHostedSystemMailboxItem({
                   item,
@@ -8155,12 +8197,16 @@ describe("hosted workspace runtime entrypoint", () => {
                     deliveryDispatchMode: "queue-only",
                     deliveryDedupeToken: deliveryKey,
                     deliveryIdempotencyKey: deliveryKey,
-                    ...(transport.channel === "linq"
+                    ...((
+                      transport.channel === "linq"
                       && !completion.privateCompletion
+                    ) || phoneCallResultUsesForegroundDurabilityBarrier
                       ? {
                           externalThreadRouteAuthority: {
-                            accountLookupKey: "linq-account-key",
-                            channel: "linq" as const,
+                            ...(transport.channel === "linq"
+                              ? { accountLookupKey: "linq-account-key" }
+                              : {}),
+                            channel: transport.channel,
                             containerMemberId: TEST_USER_ID,
                             threadId: transport.target,
                           },
@@ -8242,6 +8288,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   events,
                   items: mailboxItems,
                 }),
+                logRequests,
                 workspacePort: createWorkspacePort({
                   checkpointRequests,
                   events,
@@ -8283,12 +8330,23 @@ describe("hosted workspace runtime entrypoint", () => {
                     `provider.record:${request.providerThreadId ?? request.target}`,
                   );
                 },
+                async recordPhoneCallResultDeliveryOutcome(request) {
+                  assert.equal(
+                    completion.label,
+                    "generation-scoped phone-call result",
+                  );
+                  assert.equal(request.generation, 1);
+                  assert.equal(request.phoneCallId, "phone_call_real_path");
+                  events.push(`phone-result.outcome:${request.status}`);
+                },
                 async sendEmail() {},
               },
               providerFetch,
             },
             runtimeWakeSignal,
-            ...(completion.privateCompletion && transport.channel === "linq"
+            ...(
+              (completion.privateCompletion && transport.channel === "linq")
+              || phoneCallResultUsesForegroundDurabilityBarrier
               ? { shutdownSignal: privateProductionDelayShutdown.signal }
               : {}),
             async runAssistantPhase(input) {
@@ -8331,6 +8389,15 @@ describe("hosted workspace runtime entrypoint", () => {
                       lane: "system",
                       laneSeq: "1",
                     }));
+                    if (phoneCallResultUsesForegroundDurabilityBarrier) {
+                      mailboxItems.push(createMailboxItem({
+                        dedupeKey: "conversation:phone-result-priority:1",
+                        id: "mailbox_item_phone_result_priority_1",
+                        kind: "conversation.message",
+                        lane: "conversation",
+                        laneSeq: "1",
+                      }));
+                    }
                     runtimeWakeSignal.notify();
                   }, 0);
                 }
@@ -8339,10 +8406,35 @@ describe("hosted workspace runtime entrypoint", () => {
                   progressed: true,
                 };
               }
-              if (assistantPhaseCalls === 2) {
+              if (
+                phoneCallResultUsesForegroundDurabilityBarrier
+                && assistantPhaseCalls >= 2
+                && assistantPhaseCalls <= 4
+              ) {
+                assert.equal(input.foregroundCausalOnly, false);
+                if (assistantPhaseCalls < 4) {
+                  const conversationOrdinal = assistantPhaseCalls;
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey:
+                      `conversation:phone-result-priority:${conversationOrdinal}`,
+                    id: `mailbox_item_phone_result_priority_${conversationOrdinal}`,
+                    kind: "conversation.message",
+                    lane: "conversation",
+                    laneSeq: String(conversationOrdinal),
+                  }));
+                  runtimeWakeSignal.notify();
+                }
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              const externalCompletionPhase =
+                phoneCallResultUsesForegroundDurabilityBarrier ? 5 : 2;
+              if (assistantPhaseCalls === externalCompletionPhase) {
                 assert.equal(input.foregroundCausalOnly, true);
               }
-              if (assistantPhaseCalls === 2) {
+              if (assistantPhaseCalls === externalCompletionPhase) {
                 const pendingSystemMailbox =
                   (await readHostedSystemMailboxState(activeVaultRoot)).pending;
                 assert.deepEqual(
@@ -8373,8 +8465,13 @@ describe("hosted workspace runtime entrypoint", () => {
                 `outbox.after-phase:${outboxStatuses.join("|")}`,
               );
               if (
-                completion.privateCompletion
-                && transport.channel === "linq"
+                (
+                  (
+                    completion.privateCompletion
+                    && transport.channel === "linq"
+                  )
+                  || phoneCallResultUsesForegroundDurabilityBarrier
+                )
                 && outboxStatuses.includes("sent")
               ) {
                 privateProductionDelayShutdown.abort(
@@ -8392,6 +8489,72 @@ describe("hosted workspace runtime entrypoint", () => {
           5_000,
           () => events.join(","),
         );
+        if (phoneCallResultUsesForegroundDurabilityBarrier) {
+          await withRealTimeout(
+            runHostedWorkspaceRuntimeJobInProcess(
+              createWorkspaceRuntimeJobInput({
+                platformEnv: {
+                  TELEGRAM_BOT_TOKEN: "synthetic-telegram-token",
+                },
+                resolvedConfig: {
+                  channelCapabilities: {
+                    emailSendReady: false,
+                    telegramBotConfigured: true,
+                  },
+                  deviceSync: null,
+                  managedAutoReplyChannels: [{
+                    capabilityReady: true,
+                    channel: "telegram",
+                    memberChannel: "telegram",
+                  }],
+                },
+                request: {
+                  attemptId:
+                    "attempt_synthetic_phone_result_terminal_restart",
+                  idleCheckpointDelayMs: 1,
+                  leaseGeneration: "8",
+                  userId: TEST_USER_ID,
+                  workspaceVersion: "0",
+                },
+              }),
+              {
+                async createCheckpointSnapshot() {
+                  return {
+                    snapshotRef: createBundleRef({
+                      hash: "9".repeat(64),
+                      key:
+                        "users/bundles/member-synthetic/"
+                        + "phone-result-terminal-restart.bundle.json",
+                      size: 512,
+                    }),
+                  };
+                },
+                async importItem() {
+                  throw new Error(
+                    "Terminal phone-result restart should not import mailbox work.",
+                  );
+                },
+                platform: {
+                  ...createPlatform({
+                    mailboxPort: createMailboxPort({ events: [], items: [] }),
+                    workspacePort: createWorkspacePort({
+                      checkpointRequests: [],
+                      events: [],
+                      workspace: createWorkspaceState({ version: "0" }),
+                    }),
+                  }),
+                  providerFetch,
+                },
+                async runAssistantPhase(input) {
+                  return await runHostedWorkspaceAssistantPhase(input);
+                },
+                vaultRoot: activeVaultRoot,
+              },
+            ),
+            5_000,
+            () => events.join(","),
+          );
+        }
         const providerEvent = `provider.send:${deliveryKey}`;
         if (completion.privateCompletion) {
           const consentedAskInput =
@@ -8421,7 +8584,10 @@ describe("hosted workspace runtime entrypoint", () => {
           );
         }
 
-        if (transport.channel === "telegram") {
+        if (
+          transport.channel === "telegram"
+          && !phoneCallResultUsesForegroundDurabilityBarrier
+        ) {
           const finalIntents = await listAssistantOutboxIntents(activeVaultRoot);
           const telegramDiagnostics = JSON.stringify(
             finalIntents.map((intent) => ({
@@ -8457,6 +8623,44 @@ describe("hosted workspace runtime entrypoint", () => {
           1,
           events.join(","),
         );
+        if (phoneCallResultUsesForegroundDurabilityBarrier) {
+          assert.ok(
+            requireEventIndex(events, "phone-result.outcome:sending")
+              < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, providerEvent)
+              < requireEventIndex(events, "phone-result.outcome:sent"),
+            events.join(","),
+          );
+          for (const ordinal of [1, 2, 3]) {
+            assert.ok(
+              requireEventIndex(
+                events,
+                `mailbox.importItem:mailbox_item_phone_result_priority_${ordinal}`,
+              ) < requireEventIndex(events, "outbox.after-phase:pending"),
+              events.join(","),
+            );
+          }
+          assert.ok(
+            requireEventIndex(events, "outbox.after-phase:pending")
+              < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, providerEvent)
+              < requireEventIndex(events, "outbox.after-phase:sent"),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, providerEvent)
+              < requireEventIndex(events, "snapshot:idle_shutdown"),
+            events.join(","),
+          );
+          assert.ok(assistantPhaseCalls >= 3);
+          return;
+        }
         assert.ok(
           requireEventIndex(events, "outbox.after-phase:sending")
             < requireEventIndex(events, providerEvent),
@@ -35665,6 +35869,278 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("fresh due assistant wake supersedes a stale carried device-sync wake under a pending checkpoint", async () => {
+    // Incident shape (2026-08-15): a workspace restores with a stale,
+    // already-past device-sync.reconcile wake. While runtime state is dirty
+    // with pending durable effects (a delivered reply's consume acks), a
+    // foreground pass arms a fresh due assistant wake (a just-scheduled
+    // reminder's canonical assistant-now). The pre-checkpoint preserve branch
+    // previously returned the stale carried token over that fresh due wake,
+    // so the checkpoint disarmed the reminder and the workspace stayed
+    // dormant until unrelated inbound activity.
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const staleDeviceWakeAt = new Date(Date.now() - 9 * 60 * 60 * 1_000).toISOString();
+    const freshDueWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const foregroundAfterCheckpointGate = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_stale_supersede_001",
+        laneSeq: "1",
+      }),
+    ];
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {};
+    });
+    let assistantPass = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_stale_supersede",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "3",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/stale-supersede.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id !== "mailbox_item_entrypoint_stale_supersede_001") {
+              return { status: "imported" };
+            }
+            return {
+              afterCheckpoint: async () => {
+                events.push("mailbox.afterCheckpoint:start");
+                await foregroundAfterCheckpointGate.promise;
+                events.push("mailbox.afterCheckpoint:done");
+                return {
+                  attachmentEvidenceUpdated: true,
+                  kind: "inbox_projection",
+                  projectionUpdated: true,
+                  reasonCode: null,
+                  status: "succeeded",
+                };
+              },
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleDeviceWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPass += 1;
+            events.push(`assistant:${assistantPass}`);
+
+            if (assistantPass === 1) {
+              // The delivered-reply pass: a causal-only-style lane re-emits
+              // the restored stale device wake it carried (PR #914 lanes only
+              // tighten, so a preserved device token flows back out of the
+              // pass result) and leaves pending durable effects so runtime
+              // state stays dirty (checkpoint pending) for the next pass —
+              // the incident interleaving.
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: durableEffect,
+                  checkpointReason: "system_mailbox_receipt",
+                }),
+                checkpointReason: "system_mailbox_receipt",
+                nextWakeAt: staleDeviceWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+              };
+            }
+
+            if (assistantPass === 2) {
+              // The reminder pass: arms a fresh, already-due assistant wake
+              // while the stale device token is still the carried projection.
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: freshDueWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            // The service pass for the due assistant wake must observe the
+            // fresh value, never the resurrected stale device timestamp.
+            assert.equal(input.workspace?.nextWakeAt, freshDueWakeAt);
+            assert.equal(input.workspace?.nextWakeReason, "assistant");
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true,
+            };
+          },
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+
+      await waitUntil(() => {
+        assert.equal(events.includes("mailbox.afterCheckpoint:start"), true, events.join(","));
+      }, 10_000);
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_stale_supersede_002",
+        laneSeq: "2",
+      }));
+      runtimeWakeSignal.notify();
+      await waitUntil(() => {
+        assert.equal(events.includes("assistant:2"), true);
+      });
+      foregroundAfterCheckpointGate.resolve();
+
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
+      );
+
+      const persistedWakes = checkpointRequests.map((request) => [
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]);
+      assert.ok(
+        persistedWakes.every(([wakeAt]) => wakeAt !== staleDeviceWakeAt),
+        `stale device wake resurrected into a checkpoint: ${JSON.stringify(persistedWakes)}`,
+      );
+      assert.ok(
+        persistedWakes.some(([wakeAt, reason]) =>
+          wakeAt === freshDueWakeAt && reason === "assistant"
+        ),
+        `fresh due assistant wake missing from checkpoints: ${JSON.stringify(persistedWakes)}`,
+      );
+      assert.equal(assistantPass, 3, events.join(","));
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      foregroundAfterCheckpointGate.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("carried due device-sync wake is preserved verbatim when the pass observes no due work", async () => {
+    // Without a fresh due observation, the carried due token keeps its exact
+    // timestamp and reason so checkpoint-gate identity stays stable and the
+    // orchestrator's device-sync branch still owns servicing it.
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const staleDeviceWakeAt = new Date(Date.now() - 9 * 60 * 60 * 1_000).toISOString();
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_stale_device_wake_preserved",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "3",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/stale-device-wake-preserved.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_stale_device_wake_002",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleDeviceWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      // Depending on whether the idle checkpoint or the import reconciliation
+      // lands first, the carried token is either preserved or replaced by the
+      // pass's own (null) authority. The invariant: a surviving carried due
+      // token keeps its exact timestamp and reason — never re-stamped to a
+      // fresh clock reading, never re-labelled to another reason.
+      const observedWakes = [
+        ...checkpointRequests.map((request) => [
+          request.nextWakeAt ?? null,
+          request.nextWakeReason ?? null,
+        ]),
+        [result.nextWakeAt, result.nextWakeAt === null ? null : "device-sync.reconcile"],
+      ];
+      for (const [wakeAt, reason] of observedWakes) {
+        assert.ok(
+          wakeAt === null
+            || (wakeAt === staleDeviceWakeAt && reason === "device-sync.reconcile"),
+          `carried due token was re-stamped or re-labelled: ${wakeAt}:${reason}`,
+        );
+      }
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not dirty-checkpoint a consumed alarm wake when the assistant phase ends idle", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -37592,6 +38068,7 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 
 async function stageAssistantInputEventForMailboxItem(input: {
   causalSeq?: string;
+  channel?: "linq" | "telegram";
   item: HostedMailboxItem;
   lane?: "conversation" | "system";
   sessionId?: string;
@@ -37599,6 +38076,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
   threadIsDirect?: boolean;
   vaultRoot: string;
 }): Promise<string> {
+  const channel = input.channel ?? "linq";
   const text = "entrypoint hosted mailbox input";
   const threadId = input.threadId ?? "thread_1";
   const staged = await upsertAssistantInputEvent({
@@ -37618,18 +38096,18 @@ async function stageAssistantInputEventForMailboxItem(input: {
         actorId: "actor_1",
         actorIsSelf: false,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-        source: "linq",
+        source: channel,
         threadId,
         threadIsDirect: input.threadIsDirect ?? true,
       },
       occurredAt: input.item.occurredAt,
       receivedAt: input.item.createdAt,
       replyTarget: {
-        channel: "linq",
+        channel,
         messageId: `msg_${input.item.id}`,
         threadId,
       },
-      ...(input.threadIsDirect === false
+      ...(channel === "linq" && input.threadIsDirect === false
         ? {
             sourceMetadata: {
               externalThreadRouteAuthorityPresent: true,

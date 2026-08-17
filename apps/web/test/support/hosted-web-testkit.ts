@@ -324,6 +324,7 @@ interface HostedIngressLatencyForTestPrismaClient {
       runtimeAttemptId: string | null;
       runtimePhaseStartedAt: Date | null;
       source: string;
+      temporalSignalAcceptedAt: Date | null;
       workspaceRestoreDoneAt: Date | null;
     }>;
     update(args: unknown): Promise<{
@@ -861,6 +862,7 @@ export interface HostedIngressLatencyTraceForTest {
   runnerJobAcceptedAt: string | null;
   runtimeAttemptId: string | null;
   runtimePhaseStartedAt: string | null;
+  temporalSignalAcceptedAt: string | null;
   workspaceRestoreDoneAt: string | null;
 }
 
@@ -1483,6 +1485,30 @@ export async function readHostedVaultShareProjectionCiphertextForTest(input: {
   });
 }
 
+export async function seedHostedWorkspaceWakeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+  wakeAt: Date | string;
+  wakeReason: string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const result = await deps.prisma.hostedWorkspace.updateMany({
+      data: {
+        nextWakeAt: new Date(input.wakeAt),
+        nextWakeReason: input.wakeReason,
+      },
+      where: {
+        userId: input.userId,
+      },
+    });
+    if (result.count !== 1) {
+      throw new Error(
+        "Hosted-local workspace wake seed requires exactly one existing workspace.",
+      );
+    }
+  });
+}
+
 export async function seedHostedWorkspaceInboxMediaRetentionWakeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   userId: string;
@@ -2050,6 +2076,8 @@ export async function readHostedIngressLatencyTraceForTest(input: {
       runnerJobAcceptedAt: parsed.runnerJobAcceptedAt ?? null,
       runtimeAttemptId: parsed.runtimeAttemptId ?? null,
       runtimePhaseStartedAt: parsed.runtimePhaseStartedAt ?? null,
+      temporalSignalAcceptedAt:
+        row.temporalSignalAcceptedAt?.toISOString() ?? null,
       workspaceRestoreDoneAt: parsed.workspaceRestoreDoneAt ?? null,
     };
   });

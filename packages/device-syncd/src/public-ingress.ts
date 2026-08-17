@@ -1,6 +1,7 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
+  isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
   isDeviceSyncSourceAdmitted,
   isEstablishedDeviceSyncConnection,
@@ -1508,6 +1509,8 @@ export class DeviceSyncPublicIngress {
     const now = prepared.receivedAt;
     const traceId = prepared.traceId;
     const claimToken = generateStateCode();
+    // One delivery-attempt instant owns trace leasing and pending-setup lifetime
+    // checks. The frozen receipt below remains provider event semantics.
     const claimedAt = toIsoTimestamp(new Date());
     const webhook = toIngressWebhook({
       ...prepared,
@@ -1641,6 +1644,28 @@ export class DeviceSyncPublicIngress {
       });
     }
 
+    if (
+      account.status === "active"
+      && isDeviceSyncConnectionSetupPending(account)
+      && isDeviceSyncConnectionSetupExpiredAt(account, claimedAt)
+    ) {
+      this.logger.warn?.("Ignoring webhook side effects for expired incomplete device sync setup.", {
+        provider: provider.provider,
+        accountId: account.id,
+        eventType: webhook.eventType,
+        traceId,
+      });
+      await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: provider.provider,
+        eventType: webhook.eventType,
+        traceId,
+      };
+    }
+
+    let sourceAdmissionDeferred = false;
     try {
       // A dirty row proves only that import invalidation is queued. Await exact-
       // source lifecycle work before dirty coalescing can complete this trace.
@@ -1660,6 +1685,12 @@ export class DeviceSyncPublicIngress {
             provider,
             now,
           });
+          sourceAdmissionDeferred = Boolean(
+            sourceObservation
+            && "sourceAdmissionDeferred" in sourceObservation
+            && sourceObservation.sourceAdmissionDeferred === true
+            && this.hooks.onWebhookAccepted,
+          );
           if (
             sourceObservation
             && "sourceRegistrationRemoved" in sourceObservation
@@ -1729,6 +1760,7 @@ export class DeviceSyncPublicIngress {
     if (
       account.status === "active"
       && isDeviceSyncConnectionSetupPending(account)
+      && !sourceAdmissionDeferred
     ) {
       this.logger.warn?.("Delaying webhook side effects until device sync setup is confirmed.", {
         provider: provider.provider,
@@ -1789,6 +1821,8 @@ export class DeviceSyncPublicIngress {
       const acceptedResult = await onWebhookAccepted?.({
         account,
         claimToken,
+        processingAttemptedAt: claimedAt,
+        sourceAdmissionDeferred,
         traceId,
         webhook,
         provider,
