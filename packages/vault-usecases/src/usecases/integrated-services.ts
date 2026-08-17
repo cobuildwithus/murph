@@ -252,6 +252,7 @@ function compactWearableValue(value: unknown): CompactWearableValue {
         && key !== "providers"
         && key !== "signals"
         && key !== "points"
+        && key !== "splits"
       ) {
         continue
       }
@@ -322,6 +323,14 @@ function compactWearableResolvedMetric(metric: Record<string, unknown>): Compact
 }
 
 function compactWearableArrayLimitForKey(key: string): number {
+  if (key === "workoutFeatures") {
+    return 32
+  }
+
+  if (key === "splits") {
+    return 64
+  }
+
   if (key === "signals") {
     return COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT
   }
@@ -1400,7 +1409,10 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
-      const rawItems = await query.summarizeWearableActivityRuntime(input.vault, normalized.queryFilters)
+      const rawItems = await query.summarizeWearableActivityRuntime(
+        input.vault,
+        normalized.queryFilters,
+      )
       const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
 
       return {

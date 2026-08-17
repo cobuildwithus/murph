@@ -2382,15 +2382,36 @@ function pushJunctionWorkoutStreamFeature(
   }
 
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
-  const timestamp = withTimestampOverride(baseTimestamp, {
+  const workoutDayKey = firstStringFromPaths(entry, ["workoutDayKey"]);
+  const timestamp = {
+    ...baseTimestamp,
     occurredAt,
-    dayKey: extractIsoDatePrefix(occurredAt) ?? baseTimestamp.dayKey,
+    dayKey: workoutDayKey,
     observedAtRaw: stringId(startRaw) ?? occurredAt,
-  });
+  };
   const durationSeconds = firstNonNegativeNumberFromPaths(entry, ["durationSeconds"]);
   const distanceMeters = firstNonNegativeNumberFromPaths(entry, ["distanceMeters"]);
   const averageHeartRate = firstNonNegativeNumberFromPaths(entry, ["averageHeartRate"]);
   const maxHeartRate = firstNonNegativeNumberFromPaths(entry, ["maxHeartRate"]);
+  const firstHalfAverageHeartRate = firstNonNegativeNumberFromPaths(
+    entry,
+    ["firstHalfAverageHeartRate"],
+  );
+  const secondHalfAverageHeartRate = firstNonNegativeNumberFromPaths(
+    entry,
+    ["secondHalfAverageHeartRate"],
+  );
+  const averageCadence = firstNonNegativeNumberFromPaths(entry, ["averageCadence"]);
+  const maxCadence = firstNonNegativeNumberFromPaths(entry, ["maxCadence"]);
+  const cadenceUnit = firstStringFromPaths(entry, ["cadenceUnit"]);
+  const averagePower = firstNonNegativeNumberFromPaths(entry, ["averagePower"]);
+  const maxPower = firstNonNegativeNumberFromPaths(entry, ["maxPower"]);
+  const averageSpeed = firstNonNegativeNumberFromPaths(entry, ["averageSpeed"]);
+  const maxSpeed = firstNonNegativeNumberFromPaths(entry, ["maxSpeed"]);
+  const sport = firstStringFromPaths(entry, ["sport"]);
+  const workoutTags = sport
+    ? [`workout-sport-${trimSlugToLength(slugify(sport, "workout"), 60)}`]
+    : undefined;
   const measurements = [
     ...(durationSeconds === undefined
       ? []
@@ -2404,18 +2425,52 @@ function pushJunctionWorkoutStreamFeature(
     ...(maxHeartRate === undefined
       ? []
       : [{ metric: "max-heart-rate", value: maxHeartRate, unit: "bpm" }]),
+    ...(firstHalfAverageHeartRate === undefined
+      ? []
+      : [{
+          metric: "first-half-average-workout-heart-rate",
+          value: firstHalfAverageHeartRate,
+          unit: "bpm",
+        }]),
+    ...(secondHalfAverageHeartRate === undefined
+      ? []
+      : [{
+          metric: "second-half-average-workout-heart-rate",
+          value: secondHalfAverageHeartRate,
+          unit: "bpm",
+        }]),
+    ...(averageCadence === undefined || !cadenceUnit
+      ? []
+      : [{ metric: "average-workout-cadence", value: averageCadence, unit: cadenceUnit }]),
+    ...(maxCadence === undefined || !cadenceUnit
+      ? []
+      : [{ metric: "max-workout-cadence", value: maxCadence, unit: cadenceUnit }]),
+    ...(averagePower === undefined
+      ? []
+      : [{ metric: "average-workout-power", value: averagePower, unit: "watt" }]),
+    ...(maxPower === undefined
+      ? []
+      : [{ metric: "max-workout-power", value: maxPower, unit: "watt" }]),
+    ...(averageSpeed === undefined
+      ? []
+      : [{ metric: "average-workout-speed", value: averageSpeed, unit: "mps" }]),
+    ...(maxSpeed === undefined
+      ? []
+      : [{ metric: "max-workout-speed", value: maxSpeed, unit: "mps" }]),
   ];
   if (measurements.length === 0) {
     return;
   }
 
-  context.events.push(stripUndefined({
+  const emittedEvents: DeviceEventPayload[] = [];
+  emittedEvents.push(stripUndefined({
     kind: "measurement",
     occurredAt,
     recordedAt: timestamp.recordedAt,
     dayKey: timestamp.dayKey,
     source: "device",
     title: "Junction workout stream features",
+    tags: workoutTags,
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(
       resourceContext,
@@ -2426,6 +2481,83 @@ function pushJunctionWorkoutStreamFeature(
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
     fields: { measurements },
   }));
+
+  const splits = Array.isArray(entry.splits)
+    ? entry.splits.flatMap((value) => {
+        const split = asPlainObject(value);
+        return split ? [split] : [];
+      })
+    : [];
+  for (const split of splits) {
+    const splitIndex = finiteNumber(split.index);
+    const splitEndedAt = normalizeTimestamp(firstValueFromPaths(split, ["endedAt"]));
+    const splitDistance = firstNonNegativeNumberFromPaths(split, ["distanceMeters"]);
+    const splitDuration = firstNonNegativeNumberFromPaths(split, ["durationSeconds"]);
+    if (
+      splitIndex === undefined
+      || !Number.isSafeInteger(splitIndex)
+      || !splitEndedAt
+      || splitDistance === undefined
+      || splitDuration === undefined
+    ) {
+      continue;
+    }
+    const splitCadence = firstNonNegativeNumberFromPaths(split, ["averageCadence"]);
+    const splitCadenceUnit = firstStringFromPaths(split, ["cadenceUnit"]);
+    const splitHeartRate = firstNonNegativeNumberFromPaths(split, ["averageHeartRate"]);
+    const splitPower = firstNonNegativeNumberFromPaths(split, ["averagePower"]);
+    const splitMeasurements = [
+      { metric: "workout-split-duration", value: splitDuration, unit: "seconds" },
+      { metric: "workout-split-distance", value: splitDistance, unit: "meter" },
+      ...(splitHeartRate === undefined
+        ? []
+        : [{ metric: "average-workout-split-heart-rate", value: splitHeartRate, unit: "bpm" }]),
+      ...(splitCadence === undefined || !splitCadenceUnit
+        ? []
+        : [{
+            metric: "average-workout-split-cadence",
+            value: splitCadence,
+            unit: splitCadenceUnit,
+          }]),
+      ...(splitPower === undefined
+        ? []
+        : [{ metric: "average-workout-split-power", value: splitPower, unit: "watt" }]),
+    ];
+    emittedEvents.push(stripUndefined({
+      kind: "measurement",
+      occurredAt: splitEndedAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey: timestamp.dayKey,
+      source: "device",
+      title: `Junction workout split ${splitIndex}`,
+      tags: workoutTags,
+      evidenceRoles: resourceContext.evidenceRoles,
+      externalRef: makeJunctionExternalRef(
+        resourceContext,
+        entry,
+        timestamp,
+        `workout-stream-split-${splitIndex}`,
+      ),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: { measurements: splitMeasurements },
+    }));
+  }
+
+  context.events.push(...emittedEvents);
+  const version = junctionExternalRefVersion(resourceContext, entry);
+  const identity = emittedEvents[0]?.externalRef;
+  if (version && identity) {
+    context.authoritativeEventSets.push({
+      system: identity.system,
+      resourceType: identity.resourceType,
+      resourceId: identity.resourceId,
+      version,
+      facetPrefixes: ["workout-stream-feature", "workout-stream-split"],
+      currentFacets: emittedEvents.flatMap((event) =>
+        event.externalRef?.facet ? [event.externalRef.facet] : []
+      ),
+    });
+  }
 }
 
 function normalizeJunctionBoundedTimeseriesFeatures(
@@ -8247,6 +8379,13 @@ function junctionExternalRefVersion(
   resourceContext: ResourceContext,
   entry: PlainObject,
 ): string | undefined {
+  if (
+    resourceContext.identityKind === "timeseries"
+    && resourceContext.resource === "workout_stream"
+    && entry.schema === JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA
+  ) {
+    return normalizeTimestamp(firstValueFromPaths(entry, ["version"]));
+  }
   if (
     resourceContext.sourceProviderSlug !== "apple-health-kit"
     || resourceContext.origin.sourceType !== "companion-whoop-metadata-unverified"
