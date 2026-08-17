@@ -25,6 +25,7 @@ import {
 } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
+import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAiUsageActivitySnapshot } from "@/src/lib/hosted-execution/usage-activity-types";
 import {
@@ -568,6 +569,9 @@ function DesignSponsorshipState(props: {
 
 function PersonalUsageCreditOwnerStudy() {
   const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
+  const [returnPreview, setReturnPreview] = useState<
+    "failed" | "family" | "former" | null
+  >(null);
 
   return (
     <div
@@ -705,6 +709,84 @@ function PersonalUsageCreditOwnerStudy() {
               usageTopUpOffers={[]}
             />
           </div>
+        ) : null}
+      </div>
+      <div
+        className="flex flex-col gap-3"
+        data-design-state="usage-return-dialogs"
+      >
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Compact return recovery and Family confirmation
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <Button
+            variant="outline"
+            onClick={() => setReturnPreview("failed")}
+          >
+            Preview failed recovery
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setReturnPreview("family")}
+          >
+            Preview Family member completion
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setReturnPreview("former")}
+          >
+            Preview former member completion
+          </Button>
+        </div>
+        {returnPreview === "failed" ? (
+          <HostedUsageTopUpDialog
+            activePurchase={{
+              offerCode: "usage_10_usd",
+              purchaseId: "hucp_design_failed_return",
+              retryAllowed: false,
+              status: "payment_failed",
+            }}
+            inert
+            initialOpen
+            offers={[]}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+            quietSuccessfulReturn
+            scope="personal"
+          />
+        ) : null}
+        {returnPreview === "family" ? (
+          <HostedUsageTopUpDialog
+            activePurchase={{
+              offerCode: "usage_10_usd",
+              purchaseId: "hucp_design_family_return",
+              retryAllowed: false,
+              status: "fulfilled",
+            }}
+            deferTerminalRefreshUntilClose
+            inert
+            initialOpen
+            offers={[]}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+            scope="family"
+            targetLabel="Family member"
+          />
+        ) : null}
+        {returnPreview === "former" ? (
+          <HostedUsageTopUpDialog
+            activePurchase={{
+              offerCode: "usage_10_usd",
+              purchaseId: "hucp_design_former_return",
+              retryAllowed: false,
+              status: "fulfilled",
+            }}
+            deferTerminalRefreshUntilClose
+            inert
+            initialOpen
+            offers={[]}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+            scope="family"
+            targetLabel="a former family member"
+          />
         ) : null}
       </div>
     </div>

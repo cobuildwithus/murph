@@ -832,7 +832,11 @@ describe("HostedBillingSettings", () => {
       usageTopUpInitialOpen: true,
     }));
 
-    assert.doesNotMatch(markup, /Usage added/);
+    assert.match(
+      markup,
+      /class="sr-only" role="status"[^>]*>Usage added\. Your available usage has been updated\.<\/p>/,
+    );
+    assert.doesNotMatch(markup, /role="dialog"/);
     assert.match(markup, /55% used/);
     assert.match(markup, /45% remaining/);
     assert.doesNotMatch(markup, /Text Murph/);

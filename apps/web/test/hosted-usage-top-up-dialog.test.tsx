@@ -4445,6 +4445,7 @@ test("keeps a recovery-only terminal return visible until the owner closes it", 
         kind: "success",
         purchaseId: "hucp_inactive_return",
       },
+      renderPurchaseDetails: createElement("p", null, "Purchase details"),
       scope: "family",
       targetLabel: "this former family member",
     }),
@@ -4472,12 +4473,70 @@ test("keeps a recovery-only terminal return visible until the owner closes it", 
       rendered.container.textContent ?? "",
       /The available usage for this former family member has been updated\./,
     );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Purchase details/);
+    assert.match(
+      rendered.container.querySelector('[role="dialog"]')?.className ?? "",
+      /sm:max-w-md/,
+    );
     assert.equal(
       Array.from(rendered.container.querySelectorAll("button")).some(
         (button) => button.textContent?.includes("Add usage"),
       ),
       false,
     );
+    expect(mocks.routerRefresh).not.toHaveBeenCalled();
+
+    await clickButton(rendered.container, rendered.window, "Close");
+
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("shows a compact target-specific result for another active Family member", async () => {
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_family_member_return",
+        retryAllowed: false,
+        status: "fulfilled",
+      },
+      deferTerminalRefreshUntilClose: true,
+      initialOpen: true,
+      offers: [],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      renderPurchaseDetails: createElement("p", null, "Purchase details"),
+      scope: "family",
+      targetLabel: "Family member",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Usage added for Family member/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /The available usage for Family member has been updated\./,
+    );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Purchase details/);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
+    assert.match(
+      rendered.container.querySelector('[role="dialog"]')?.className ?? "",
+      /sm:max-w-md/,
+    );
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     expect(mocks.routerRefresh).not.toHaveBeenCalled();
 
     await clickButton(rendered.container, rendered.window, "Close");
@@ -4859,8 +4918,15 @@ test("reconciles a fulfilled Settings return without presenting a confirmation",
     });
 
     assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added/);
+    const status = rendered.container.querySelector('[role="status"]');
+    assert.ok(status);
+    assert.equal(status.getAttribute("aria-live"), "polite");
+    assert.match(
+      status.textContent ?? "",
+      /Usage added\. Your available usage has been updated\./,
+    );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }
@@ -4908,6 +4974,7 @@ test("keeps a lagging successful Settings return quiet through fulfillment", asy
     assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
     assert.equal(hasButton(rendered.container, "Resume checkout"), false);
     assert.equal(hasButton(rendered.container, "Cancel checkout"), false);
+    assert.equal(rendered.container.querySelector('[role="status"]'), null);
 
     await act(async () => {
       vi.advanceTimersByTime(1_250);
@@ -4915,7 +4982,11 @@ test("keeps a lagging successful Settings return quiet through fulfillment", asy
     });
 
     assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added/);
+    assert.match(
+      rendered.container.querySelector('[role="status"]')?.textContent ?? "",
+      /Usage added\. Your available usage has been updated\./,
+    );
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();

@@ -209,6 +209,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("0% used");
   expect(sectionsMarkup).toContain("Successful top-up return");
   expect(sectionsMarkup).toContain("Preview quiet refresh");
+  expect(sectionsMarkup).toContain("Preview failed recovery");
+  expect(sectionsMarkup).toContain("Preview Family member completion");
+  expect(sectionsMarkup).toContain("Preview former member completion");
   expect(sectionsMarkup).toContain("Add usage to continue");
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
@@ -293,7 +296,10 @@ test("design page routes the biomarker studies through the dedicated sections ta
     new URL("../app/design/group-usage-funding-study.tsx", import.meta.url),
     "utf8",
   );
-  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(1);
+  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(4);
+  expect(groupFundingStudySource).toContain('returnPreview === "failed"');
+  expect(groupFundingStudySource).toContain('returnPreview === "family"');
+  expect(groupFundingStudySource).toContain('returnPreview === "former"');
   expect(groupFundingStudySource).toContain(
     "<GroupSponsorshipManagementCard",
   );

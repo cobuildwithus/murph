@@ -586,13 +586,18 @@ current balance. Keep the existing Murph conversation handoff beside the
 Missions heading, and hide it when the member has no supported conversation
 route or new missions are disabled.
 
-Personal and Family usage-credit checkout returns reconcile against the
-existing aggregate meter without opening a success confirmation. Do not add a
-post-purchase messaging handoff. Keep the return visually quiet while payment
-is confirming and after fulfillment; if the bounded status check fails,
-remains unresolved, or reports a terminal failure, open only the compact
-payment-recovery dialog with its safe check/retry and close actions. Group
-funding keeps its separately owned fulfillment receipt and Messages handoff.
+Personal and owner-seat Family usage-credit checkout returns reconcile against
+the authenticated beneficiary's existing aggregate meter without opening a
+success confirmation. Expose the fulfilled transition through one visually
+hidden polite status announcement, but do not add a post-purchase messaging
+handoff. Keep those returns visually quiet while payment is confirming and
+after fulfillment; if the bounded status check fails, remains unresolved, or
+reports a terminal failure, open only the compact payment-recovery dialog with
+its safe check/retry and close actions. Another active Family member and
+former-member recovery keep one compact target-specific result because their
+meter is not present. Those off-meter results remain visible until Close owns
+their terminal refresh. Group funding keeps its separately owned fulfillment
+receipt and Messages handoff.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a

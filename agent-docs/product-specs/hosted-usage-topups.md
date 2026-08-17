@@ -101,10 +101,12 @@ An eligible paid Pulse or Edge member can:
 4. Explicitly authorize the selected amount. Murph charges one canonical saved
    card when available; otherwise Stripe Checkout collects card details or
    verification.
-5. Return to Settings with an honest pending state while webhook fulfillment
-   completes.
-6. See fulfilled credit move that same usage bar immediately without exposing
-   an exact balance.
+5. Return to Settings while bounded browser reconciliation observes webhook
+   fulfillment; the browser never treats the success URL as payment proof.
+6. For personal and owner-seat Family credit, see fulfilled credit move the
+   authenticated beneficiary's existing usage bar without a success dialog or
+   exact balance. For another active or former Family member, see one concise
+   target-specific result because that beneficiary's meter is not present.
 7. If usage was blocked, have pending accepted work become runnable after the
    verified grant restores capacity.
 8. Continue using that credit after an included-usage reset until the credit is
@@ -463,6 +465,17 @@ The browser renders only server-read status:
 | Fulfilled | **Usage added.** |
 | Payment failed | **The payment did not complete. No usage was added.** |
 | Reconciliation delayed | **Your payment is still being confirmed. You can safely leave this page.** |
+
+Personal and owner-seat Family success returns keep the dialog visually quiet
+while the authenticated beneficiary's existing usage meter refreshes. Their
+fulfilled transition exposes one visually hidden polite status announcement
+for assistive technology, but no visible success modal or post-purchase
+messaging handoff. Failed or exhausted reconciliation opens the compact
+recovery dialog. Another active Family member and former-member recovery keep a
+compact target-specific result visible because Settings does not render that
+beneficiary's usage meter; the result's Close action owns terminal refresh so
+the confirmation cannot disappear before the payer dismisses it. Group funding
+retains its separately owned receipt and Messages handoff.
 
 A success query parameter is never proof of payment. Settings polls a bounded
 authenticated purchase-status endpoint and refreshes its server projection. It

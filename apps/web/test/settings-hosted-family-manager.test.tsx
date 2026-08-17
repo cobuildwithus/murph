@@ -1146,8 +1146,9 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
         activePurchase,
         checkoutUrl:
           "/api/settings/billing/family/members/member_family/usage-credit/checkout",
+        deferTerminalRefreshUntilClose: true,
         offers: [],
-        quietSuccessfulReturn: true,
+        quietSuccessfulReturn: false,
         scope: "family",
         targetLabel: "Family member",
       }),
@@ -1168,6 +1169,7 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
         activePurchase: null,
         checkoutUrl:
           "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+        deferTerminalRefreshUntilClose: false,
         offers: [],
         quietSuccessfulReturn: true,
         scope: "family",
@@ -1210,7 +1212,6 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
           "/api/settings/billing/family/members/member_former/usage-credit/checkout",
         deferTerminalRefreshUntilClose: true,
         offers: [],
-        quietSuccessfulReturn: true,
         scope: "family",
         targetLabel: "a former family member",
       }),
@@ -1220,6 +1221,7 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
       .find((callProps) => callProps.targetLabel === "a former family member");
     assert.ok(formerMountProps);
     assert.equal("contactOptions" in formerMountProps, false);
+    assert.equal("quietSuccessfulReturn" in formerMountProps, false);
   } finally {
     await cleanup();
   }

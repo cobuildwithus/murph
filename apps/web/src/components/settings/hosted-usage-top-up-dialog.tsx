@@ -190,22 +190,28 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const quietSuccessfulReturn =
     props.quietSuccessfulReturn === true &&
     (returnedFromSuccessfulCheckout || fulfilledConfirmation);
-  const returnNeedsRecovery = Boolean(
-    quietSuccessfulReturn &&
-      purchase &&
-      (purchase.checkoutError ||
-        purchase.selectionConflict ||
-        purchase.targetConflict ||
-        purchase.status === "expired" ||
-        purchase.status === "payment_failed" ||
-        purchase.poll.kind === "failed" ||
-        (purchase.poll.kind === "exhausted" &&
-          (purchase.status === null ||
-            shouldPollPurchaseStatus(purchase.status)))),
+  const purchaseNeedsRecovery = Boolean(
+    purchase &&
+    (purchase.checkoutError ||
+      purchase.selectionConflict ||
+      purchase.targetConflict ||
+      purchase.status === "expired" ||
+      purchase.status === "payment_failed" ||
+      purchase.poll.kind === "failed" ||
+      (purchase.poll.kind === "exhausted" &&
+        (purchase.status === null || shouldPollPurchaseStatus(purchase.status)))),
   );
+  const returnNeedsRecovery = quietSuccessfulReturn && purchaseNeedsRecovery;
   const presentedOpen =
     controller.state.open &&
     (!quietSuccessfulReturn || returnNeedsRecovery);
+  const compactFamilyConfirmation =
+    fulfilledConfirmation &&
+    props.scope === "family" &&
+    !quietSuccessfulReturn;
+  const compactStatusPresentation =
+    (props.scope !== "group" && purchaseNeedsRecovery) ||
+    compactFamilyConfirmation;
   const capacityConflict = selection?.capacityConflict === true;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
@@ -229,7 +235,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             ? `Add usage for ${familyTarget}`
             : "Add usage";
   const headerDescription = purchase
-    ? showGroupMessagesAction && statusContent
+    ? compactStatusPresentation
+      ? null
+      : showGroupMessagesAction && statusContent
       ? statusContent.message
       : purchase.targetConflict
         ? "Manage the unfinished checkout before starting one for this usage destination."
@@ -276,7 +284,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         <div className="flex flex-col gap-5">
           {!showGroupMessagesAction ? (
             <div
-              className="rounded-2xl border border-border bg-muted/30 p-5"
+              className={
+                compactStatusPresentation
+                  ? undefined
+                  : "rounded-2xl border border-border bg-muted/30 p-5"
+              }
               role="status"
               aria-live="polite"
             >
@@ -285,7 +297,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               </p>
             </div>
           ) : null}
-          {showGroupMessagesAction || returnNeedsRecovery
+          {showGroupMessagesAction || compactStatusPresentation
             ? null
             : props.renderPurchaseDetails}
           <FieldError>{purchase.checkoutError}</FieldError>
@@ -692,78 +704,95 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   }
 
   return (
-    <Dialog
-      open={presentedOpen}
-      onOpenChange={controller.handleOpenChange}
-    >
-      {canShowTrigger ? (
-        <DialogTrigger
-          render={
-            <Button
-              type="button"
-              size={
-                props.triggerSize ?? (props.scope === "group" ? "xl" : "lg")
-              }
-              variant={
-                props.triggerVariant ??
-                (props.scope === "group" ? "default" : "outline")
-              }
-              className={cn(
-                props.scope === "group" ? "w-full" : undefined,
-                props.triggerClassName,
-              )}
-              aria-label={
-                familyTarget
-                  ? `${triggerLabel} for ${familyTarget}`
-                  : undefined
-              }
-            />
-          }
+    <>
+      {quietSuccessfulReturn && fulfilledConfirmation && statusContent ? (
+        <p
+          className="sr-only"
+          role="status"
+          aria-atomic="true"
+          aria-live="polite"
         >
-          {triggerLabel}
-        </DialogTrigger>
+          {statusContent.title}. {statusContent.message}
+        </p>
       ) : null}
-      <DialogContent
-        ref={scrollContentRef}
-        data-inert={props.inert ? "true" : undefined}
-        inert={props.inert ? true : undefined}
-        className={cn(
-          "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
-          showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
-          returnNeedsRecovery && "sm:max-w-md",
-        )}
-        initialFocus={titleRef}
+      <Dialog
+        open={presentedOpen}
+        onOpenChange={controller.handleOpenChange}
       >
-        <DialogHeader className={cn("pr-10", showGroupMessagesAction && "gap-4")}>
-          {confirmationIndicator}
-          <DialogTitle
-            ref={titleRef}
-            tabIndex={-1}
-            className={cn(
-              "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
-              showGroupMessagesAction &&
-                "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em] sm:text-5xl",
-            )}
-          >
-            {headerTitle}
-          </DialogTitle>
-          <DialogDescription
-            className={
-              headerDescription
-                ? cn(
-                    "max-w-md text-base leading-6",
-                    showGroupMessagesAction &&
-                      "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
-                  )
-                : "sr-only"
+        {canShowTrigger ? (
+          <DialogTrigger
+            render={
+              <Button
+                type="button"
+                size={
+                  props.triggerSize ??
+                  (props.scope === "group" ? "xl" : "lg")
+                }
+                variant={
+                  props.triggerVariant ??
+                  (props.scope === "group" ? "default" : "outline")
+                }
+                className={cn(
+                  props.scope === "group" ? "w-full" : undefined,
+                  props.triggerClassName,
+                )}
+                aria-label={
+                  familyTarget
+                    ? `${triggerLabel} for ${familyTarget}`
+                    : undefined
+                }
+              />
             }
           >
-            {headerDescription ?? "Choose a usage amount."}
-          </DialogDescription>
-        </DialogHeader>
-        {screenContent}
-      </DialogContent>
-    </Dialog>
+            {triggerLabel}
+          </DialogTrigger>
+        ) : null}
+        <DialogContent
+          ref={scrollContentRef}
+          data-inert={props.inert ? "true" : undefined}
+          inert={props.inert ? true : undefined}
+          className={cn(
+            "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
+            showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
+            compactStatusPresentation && "sm:max-w-md",
+          )}
+          initialFocus={titleRef}
+        >
+          <DialogHeader
+            className={cn("pr-10", showGroupMessagesAction && "gap-4")}
+          >
+            {confirmationIndicator}
+            <DialogTitle
+              ref={titleRef}
+              tabIndex={-1}
+              className={cn(
+                "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
+                showGroupMessagesAction &&
+                  "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em] sm:text-5xl",
+              )}
+            >
+              {headerTitle}
+            </DialogTitle>
+            <DialogDescription
+              className={
+                headerDescription
+                  ? cn(
+                      "max-w-md text-base leading-6",
+                      showGroupMessagesAction &&
+                        "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
+                    )
+                  : "sr-only"
+              }
+            >
+              {headerDescription ??
+                statusContent?.message ??
+                "Choose a usage amount."}
+            </DialogDescription>
+          </DialogHeader>
+          {screenContent}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

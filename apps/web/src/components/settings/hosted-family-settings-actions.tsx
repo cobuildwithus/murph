@@ -661,7 +661,6 @@ export function HostedFamilyManager(props: {
                     ? props.usageTopUpPurchaseReturn
                     : null
                 }
-                quietSuccessfulReturn
                 scope="family"
                 targetLabel="a former family member"
               />
@@ -957,6 +956,9 @@ export function HostedFamilyManager(props: {
                     : null
                 }
                 checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}/usage-credit/checkout`}
+                deferTerminalRefreshUntilClose={
+                  pendingAction.id !== props.payerMemberId
+                }
                 offers={props.usageTopUpActivePurchase ? [] : props.usageTopUpOffers ?? []}
                 payerMemberId={props.payerMemberId}
                 purchaseReturn={
@@ -964,7 +966,7 @@ export function HostedFamilyManager(props: {
                     ? props.usageTopUpPurchaseReturn
                     : null
                 }
-                quietSuccessfulReturn
+                quietSuccessfulReturn={pendingAction.id === props.payerMemberId}
                 scope="family"
                 targetLabel={pendingAction.label}
                 triggerClassName="w-full"
