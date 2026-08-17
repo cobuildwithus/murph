@@ -27,6 +27,7 @@ For ordinary live logging, use the targeted workout commands below. Do not recon
 - Resolve: `vault-cli workout active` or `vault-cli workout active --workout-id <evt_id>`.
 - Add an exercise: `vault-cli workout exercise add <name> --order <n> [--sets <n>]`.
 - Log or correct a set: `vault-cli workout set log [exercise]`.
+- Scheduled direct-reply rollover: `vault-cli workout set log-scheduled <exercise>` with the exact prior workout id, saved routine id, exercise order, set order, and runtime-authored occurrence, delivery, and accepted-reply timestamps.
 - Undo one set without shifting later set numbers: `vault-cli workout set clear [exercise] --set-order <n>`.
 - Finish: `vault-cli workout finish`.
 
@@ -42,7 +43,15 @@ A target is not a completed set. When a table needs planned targets, read the re
 4. Treat the successful command result as the verification read. Acknowledge only what that returned record proves.
 5. After every verified private workout mutation that changes the snapshot—including an ordinary set log, correction, clear, exercise addition, start, resume, or finish—build and attach the refreshed structured workout card as the complete response on a supported private card route. Do not send a text-only acknowledgement or companion prose.
 6. Use `workout set log` again to correct a set. Use `workout set clear` for “undo that set,” “I didn’t do it,” or an accidental log. Clearing preserves the placeholder and later set numbering.
-7. Finish only when the member explicitly says they are done, asks to finish, or unmistakably closes the session. `workout finish` records `endedAt` and final elapsed duration; it does not invent missing set values.
+7. Finish only when the member explicitly says they are done, asks to finish, or unmistakably closes the session, except for the narrow scheduled direct-reply rollover below. `workout finish` records `endedAt` and final elapsed duration; it does not invent missing set values.
+
+## Scheduled direct-reply rollover
+
+A new scheduled workout reminder creates one narrow exception to explicit finish intent. Use it only when the current direct message is an accepted native reply to the exact reminder and the prompt contains fresh `scheduled-direct-reply` runtime authority. The exact reminder plus current reply must uniquely identify one distinct saved routine, one exercise name and canonical order, one existing set order, and at least one numeric actual result stated by the member. Read the current canonical workout and the saved routine; use their exact `evt_*` and `wfmt_*` ids. Never select the routine, exercise, or set from conversational recency.
+
+The prior workout must be the sole active Murph live workout, must contain at least one set, and every existing set coordinate must already contain a logged result. Zero pending coordinates do not ordinarily finish a workout; they authorize rollover only at this boundary. Run `vault-cli workout set log-scheduled <exercise>` with `--previous-workout-id`, `--routine-id`, `--exercise-order`, `--set-order`, `--scheduled-occurrence-at`, `--reminder-sent-at`, `--accepted-at`, and only the actual fields stated in the current reply. The command preserves the prior event and all of its exercise, set, result, note, and routine data; closes it at its persisted final activity duration rather than the later reply time; starts the distinct saved routine at the scheduled occurrence; and logs only the exact authorized set. Planned targets remain plan data and are never copied into actuals.
+
+Do not use rollover for a group message, an unquoted or non-native reply, missing or stale runtime authority, a reminder delivered or answered more than one hour from its preceding authority timestamp, a pending prior set, a zero-set prior workout, the same routine, a missing actual result, an inexact or ambiguous coordinate, more than one matching scheduled session, or any unrelated active workout. Do not split it into ordinary finish/start/log commands. Let the composite command fail closed so its existing live-workout lock and persisted per-session action markers can converge an interrupted replay without retargeting.
 
 A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion. Keep the last set coordinate the member explicitly identified. If that exact coordinate still needs an actual result, ask one narrow question about it. If its canonical result already matches, treat the acknowledgement as a conversation-only no-op; never advance to another set from that acknowledgement. The sole exception is a contextual affirmative that directly accepts the exact bounded missing-workout recovery offer below.
 

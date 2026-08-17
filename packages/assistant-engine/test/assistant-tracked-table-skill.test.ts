@@ -123,6 +123,11 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('vault-cli workout exercise add')
     expect(skill).toContain('[--sets <n>]')
     expect(skill).toContain('vault-cli workout set log')
+    expect(skill).toContain('vault-cli workout set log-scheduled')
+    expect(skill).toContain('scheduled-direct-reply')
+    expect(skill).toContain('The prior workout must be the sole active Murph live workout')
+    expect(skill).toContain('closes it at its persisted final activity duration rather than the later reply time')
+    expect(skill).toContain('Do not split it into ordinary finish/start/log commands')
     expect(skill).toContain('vault-cli workout set clear')
     expect(skill).toContain('vault-cli workout finish')
     expect(skill).toContain(

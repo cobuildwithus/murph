@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import {
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutExercise,
@@ -30,18 +32,24 @@ import {
   type FinishLiveWorkoutInput,
   type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
+  type LogScheduledLiveWorkoutSetInput,
   type StartLiveWorkoutInput,
   buildLiveWorkoutCardEditor,
   buildLiveWorkoutSessionFromTemplate,
   elapsedDurationMinutes,
   hasLoggedWorkoutSet,
+  hasLoggedWorkoutSetActualResult,
 } from './workout-live-model.js'
 import {
+  type WorkoutShowResult,
   assertTargetableLiveWorkout,
   compactSetPatch,
   findActiveLiveWorkouts,
+  findLiveWorkoutRolloverState,
   findLiveWorkoutsForMemberAction,
+  normalizeExerciseName,
   normalizeLiveWorkoutActivityType,
+  normalizeLiveWorkoutId,
   normalizeOptionalText,
   normalizeWorkoutTimestamp,
   optionalString,
@@ -78,6 +86,7 @@ export async function readLiveWorkoutCardEditor(input: {
 
 const MAX_LIVE_WORKOUT_EXERCISES = 100
 const MAX_LIVE_WORKOUT_SETS_PER_EXERCISE = 150
+const SCHEDULED_LIVE_WORKOUT_AUTHORITY_MAX_AGE_MS = 60 * 60 * 1000
 
 export async function applyLiveWorkoutMemberAction(
   input: ApplyLiveWorkoutMemberActionInput,
@@ -464,13 +473,6 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
 }
 
 async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
-  const routineLookup =
-    input.routine === undefined
-      ? undefined
-      : requireNonEmptyText(
-          input.routine,
-          'Workout routine lookup is required.',
-        )
   const active = await findActiveLiveWorkouts(input.vault)
   if (active.length > 0) {
     throw new VaultCliError(
@@ -479,6 +481,30 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
       { activeWorkoutIds: active.map((entry) => entry.entity.id) },
     )
   }
+
+  const prepared = await prepareLiveWorkoutStart(input)
+  return addStructuredWorkoutRecord({
+    vault: input.vault,
+    draft: prepared.draft,
+  })
+}
+
+interface PreparedLiveWorkoutStart {
+  draft: Parameters<typeof addStructuredWorkoutRecord>[0]['draft']
+  workout: WorkoutSession
+}
+
+async function prepareLiveWorkoutStart(
+  input: StartLiveWorkoutInput,
+  durationAt = new Date().toISOString(),
+): Promise<PreparedLiveWorkoutStart> {
+  const routineLookup =
+    input.routine === undefined
+      ? undefined
+      : requireNonEmptyText(
+          input.routine,
+          'Workout routine lookup is required.',
+        )
 
   const startedAt = normalizeWorkoutTimestamp(
     input.startedAt ?? new Date().toISOString(),
@@ -489,7 +515,7 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
   const activityTypeOverride = normalizeOptionalText(input.activityType)
   const durationMinutes = elapsedDurationMinutes(
     startedAt,
-    new Date().toISOString(),
+    durationAt,
   )
   if (routineLookup !== undefined) {
     const routine = await showWorkoutFormat(input.vault, routineLookup)
@@ -512,8 +538,7 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
       `Workout routine "${routineTitle}"`,
     )
 
-    return addStructuredWorkoutRecord({
-      vault: input.vault,
+    return {
       draft: {
         occurredAt: startedAt,
         source: 'manual',
@@ -526,7 +551,8 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
         durationMinutes,
         workout,
       },
-    })
+      workout,
+    }
   }
 
   const title = name ?? 'Workout'
@@ -536,8 +562,7 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
     ...(note ? { sessionNote: note } : {}),
     exercises: [],
   })
-  return addStructuredWorkoutRecord({
-    vault: input.vault,
+  return {
     draft: {
       occurredAt: startedAt,
       source: 'manual',
@@ -549,7 +574,8 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
       durationMinutes,
       workout,
     },
-  })
+    workout,
+  }
 }
 
 export async function showActiveLiveWorkout(input: LiveWorkoutLookupInput) {
@@ -629,11 +655,67 @@ export async function logLiveWorkoutSet(input: LogLiveWorkoutSetInput) {
   )
 }
 
-async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
-  const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
+interface LogLiveWorkoutSetLockOptions {
+  durationAt?: string
+  lastMemberActionId?: string
+  rejectLoggedCorrection?: boolean
+}
+
+async function logLiveWorkoutSetWithLockHeld(
+  input: LogLiveWorkoutSetInput,
+  options: LogLiveWorkoutSetLockOptions = {},
+) {
   const shown = await resolveLiveWorkout(input, { requireActive: true })
   const workout = parseShownWorkout(shown)
   assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  const update = prepareLiveWorkoutSetUpdate(workout, input)
+  if (
+    update.currentSet &&
+    JSON.stringify(update.currentSet) === JSON.stringify(update.parsedSet)
+  ) {
+    return shown
+  }
+  if (
+    options.rejectLoggedCorrection &&
+    update.currentSet &&
+    hasLoggedWorkoutSet(update.currentSet)
+  ) {
+    throw new VaultCliError(
+      'command_failed',
+      'The scheduled workout set already contains a different result.',
+    )
+  }
+
+  if (update.setIndex >= 0) {
+    update.exercise.sets[update.setIndex] = update.parsedSet
+  } else {
+    update.exercise.sets.push(update.parsedSet)
+    update.exercise.sets.sort((left, right) => left.order - right.order)
+  }
+  update.exercises[update.exerciseIndex] = update.exercise
+  return updateLiveWorkoutExercises(
+    shown,
+    workout,
+    update.exercises,
+    options.lastMemberActionId,
+    options.durationAt,
+  )
+}
+
+interface PreparedLiveWorkoutSetUpdate {
+  currentSet: WorkoutSet | undefined
+  exercise: WorkoutExercise
+  exerciseIndex: number
+  exercises: WorkoutExercise[]
+  parsedSet: WorkoutSet
+  setIndex: number
+}
+
+function prepareLiveWorkoutSetUpdate(
+  workout: WorkoutSession,
+  input: LogLiveWorkoutSetInput,
+): PreparedLiveWorkoutSetUpdate {
+  const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
   const exercises = structuredClone(workout.exercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!
@@ -671,18 +753,504 @@ async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
   if (!hasLoggedWorkoutSet(parsedSet)) {
     throw new VaultCliError('invalid_option', 'Log at least one set value or note.')
   }
-  if (currentSet && JSON.stringify(currentSet) === JSON.stringify(parsedSet)) {
-    return shown
+  return {
+    currentSet,
+    exercise,
+    exerciseIndex,
+    exercises,
+    parsedSet,
+    setIndex,
+  }
+}
+
+export async function logScheduledLiveWorkoutSet(
+  input: LogScheduledLiveWorkoutSetInput,
+) {
+  return withLiveWorkoutMutationLock(input.vault, () =>
+    logScheduledLiveWorkoutSetWithLockHeld(input),
+  )
+}
+
+interface NormalizedScheduledLiveWorkoutSetInput
+  extends Omit<
+    LogScheduledLiveWorkoutSetInput,
+    | 'acceptedAt'
+    | 'exerciseName'
+    | 'previousWorkoutId'
+    | 'reminderSentAt'
+    | 'routineId'
+    | 'scheduledOccurrenceAt'
+    | 'setOrder'
+  > {
+  acceptedAt: string
+  exerciseName: string
+  previousWorkoutId: string
+  reminderSentAt: string
+  routineId: string
+  scheduledOccurrenceAt: string
+  setOrder: number
+}
+
+async function logScheduledLiveWorkoutSetWithLockHeld(
+  rawInput: LogScheduledLiveWorkoutSetInput,
+) {
+  const input = normalizeScheduledLiveWorkoutSetInput(rawInput)
+  const setPatch = compactSetPatch(input)
+  if (!hasLoggedWorkoutSetActualResult(setPatch)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Scheduled workout rollover requires a member-stated actual set result.',
+    )
   }
 
-  if (setIndex >= 0) {
-    exercise.sets[setIndex] = parsedSet
-  } else {
-    exercise.sets.push(parsedSet)
-    exercise.sets.sort((left, right) => left.order - right.order)
+  const previousShown = await resolveLiveWorkout(
+    {
+      vault: input.vault,
+      workoutId: input.previousWorkoutId,
+    },
+    { allowCompleted: true, requireActive: false },
+  )
+  const previousWorkout = parseShownWorkout(previousShown)
+  assertTargetableLiveWorkout(
+    previousWorkout,
+    `Workout ${previousShown.entity.id}`,
+  )
+  const previousEndedAt = resolveScheduledRolloverPreviousEndedAt({
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt,
+    shown: previousShown,
+    workout: previousWorkout,
+  })
+  if (previousWorkout.routineId === input.routineId) {
+    throw new VaultCliError(
+      'invalid_operation',
+      'Scheduled workout rollover requires a distinct saved routine.',
+    )
   }
-  exercises[exerciseIndex] = exercise
-  return updateLiveWorkoutExercises(shown, workout, exercises)
+
+  const rolloverState = await findLiveWorkoutRolloverState({
+    routineId: input.routineId,
+    startedAt: input.scheduledOccurrenceAt,
+    vault: input.vault,
+  })
+  const { active, scheduled: scheduledCandidates } = rolloverState
+  if (active.length > 1) {
+    throw new VaultCliError(
+      'command_failed',
+      'Multiple active live workouts prevent scheduled rollover.',
+      { activeWorkoutIds: active.map((entry) => entry.entity.id) },
+    )
+  }
+  if (scheduledCandidates.length > 1) {
+    throw new VaultCliError(
+      'command_failed',
+      'Multiple workouts match the scheduled rollover target.',
+    )
+  }
+
+  let scheduledShown = scheduledCandidates[0] ?? null
+  let scheduledWorkout = scheduledShown
+    ? parseShownWorkout(scheduledShown)
+    : null
+  if (scheduledShown !== null && scheduledWorkout !== null) {
+    assertScheduledLiveWorkoutIdentity(
+      scheduledWorkout,
+      input,
+      `Workout ${scheduledShown.entity.id}`,
+    )
+  }
+
+  const preparedStart = scheduledWorkout === null
+    ? await prepareScheduledLiveWorkoutStart(input)
+    : null
+  const actionIds = deriveScheduledLiveWorkoutActionIds({
+    input,
+    planWorkout: scheduledWorkout ?? preparedStart!.workout,
+    setPatch,
+  })
+  const boundStart = preparedStart === null
+    ? null
+    : bindScheduledLiveWorkoutAction(
+        preparedStart,
+        actionIds.scheduled,
+      )
+
+  if (previousWorkout.endedAt === undefined) {
+    if (
+      active.length !== 1 ||
+      active[0]!.entity.id !== previousShown.entity.id ||
+      scheduledShown !== null
+    ) {
+      throw new VaultCliError(
+        'command_failed',
+        'The active workout changed before scheduled rollover.',
+      )
+    }
+
+    await finishLiveWorkoutWithLockHeld(
+      {
+        endedAt: previousEndedAt,
+        vault: input.vault,
+        workoutId: previousShown.entity.id,
+      },
+      { lastMemberActionId: actionIds.previous },
+    )
+  } else {
+    if (previousWorkout.endedAt !== previousEndedAt) {
+      throw new VaultCliError(
+        'command_failed',
+        'The prior workout completion does not match this rollover.',
+      )
+    }
+    if (previousWorkout.lastMemberActionId !== actionIds.previous) {
+      throw new VaultCliError(
+        'command_failed',
+        'The prior workout was not closed by this scheduled rollover action.',
+      )
+    }
+
+    const scheduledIsActive =
+      scheduledWorkout !== null && scheduledWorkout.endedAt === undefined
+    if (
+      active.length !== (scheduledIsActive ? 1 : 0) ||
+      (scheduledIsActive &&
+        active[0]!.entity.id !== scheduledShown!.entity.id)
+    ) {
+      throw new VaultCliError(
+        'command_failed',
+        'Another live workout is active; scheduled rollover was not retargeted.',
+      )
+    }
+  }
+
+  if (scheduledShown === null) {
+    const started = await addStructuredWorkoutRecord({
+      vault: input.vault,
+      draft: boundStart!.draft,
+    })
+    scheduledShown = await resolveLiveWorkout(
+      { vault: input.vault, workoutId: started.eventId },
+      { requireActive: true },
+    )
+    scheduledWorkout = parseShownWorkout(scheduledShown)
+  }
+
+  const targetShown = scheduledShown
+  const targetWorkout = scheduledWorkout
+  if (targetShown === null || targetWorkout === null) {
+    throw new VaultCliError(
+      'command_failed',
+      'Scheduled workout rollover did not produce one canonical target.',
+    )
+  }
+  assertScheduledLiveWorkoutIdentity(
+    targetWorkout,
+    input,
+    `Workout ${targetShown.entity.id}`,
+  )
+  assertScheduledLiveWorkoutAction(
+    targetWorkout,
+    actionIds.scheduled,
+    `Workout ${targetShown.entity.id}`,
+  )
+  const target = prepareLiveWorkoutSetUpdate(targetWorkout, {
+    ...input,
+    requireExistingSet: true,
+    workoutId: targetShown.entity.id,
+  })
+  const targetMatches =
+    target.currentSet !== undefined &&
+    JSON.stringify(target.currentSet) === JSON.stringify(target.parsedSet)
+
+  if (targetWorkout.endedAt !== undefined) {
+    if (!targetMatches) {
+      throw new VaultCliError(
+        'command_failed',
+        'The completed scheduled workout does not contain the authorized set result.',
+      )
+    }
+    return targetShown
+  }
+
+  return logLiveWorkoutSetWithLockHeld(
+    {
+      ...input,
+      requireExistingSet: true,
+      workoutId: targetShown.entity.id,
+    },
+    {
+      durationAt: input.acceptedAt,
+      lastMemberActionId: actionIds.scheduled,
+      rejectLoggedCorrection: true,
+    },
+  )
+}
+
+function normalizeScheduledLiveWorkoutSetInput(
+  input: LogScheduledLiveWorkoutSetInput,
+): NormalizedScheduledLiveWorkoutSetInput {
+  const previousWorkoutId = normalizeLiveWorkoutId(input.previousWorkoutId)
+  if (previousWorkoutId === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Previous workout id is required for scheduled rollover.',
+    )
+  }
+  const routineId = requireNonEmptyText(
+    input.routineId,
+    'Scheduled workout routine id is required.',
+  )
+  if (!/^wfmt_[0-9A-Za-z]+$/u.test(routineId)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Scheduled workout routine id must be a canonical wfmt_* identifier.',
+    )
+  }
+  if (!Number.isInteger(input.exerciseOrder) || input.exerciseOrder < 1) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Scheduled workout exercise order must be a positive integer.',
+    )
+  }
+
+  const scheduledOccurrenceAt = normalizeWorkoutTimestamp(
+    input.scheduledOccurrenceAt,
+    'scheduledOccurrenceAt',
+  )
+  const reminderSentAt = normalizeWorkoutTimestamp(
+    input.reminderSentAt,
+    'reminderSentAt',
+  )
+  const acceptedAt = normalizeWorkoutTimestamp(input.acceptedAt, 'acceptedAt')
+  const occurrenceMs = Date.parse(scheduledOccurrenceAt)
+  const reminderSentMs = Date.parse(reminderSentAt)
+  const acceptedMs = Date.parse(acceptedAt)
+  if (
+    reminderSentMs < occurrenceMs ||
+    acceptedMs < reminderSentMs ||
+    reminderSentMs - occurrenceMs >
+      SCHEDULED_LIVE_WORKOUT_AUTHORITY_MAX_AGE_MS ||
+    acceptedMs - reminderSentMs >
+      SCHEDULED_LIVE_WORKOUT_AUTHORITY_MAX_AGE_MS
+  ) {
+    throw new VaultCliError(
+      'invalid_operation',
+      'Scheduled workout reply authority is stale or out of order.',
+    )
+  }
+
+  return {
+    ...input,
+    acceptedAt,
+    exerciseName: requireNonEmptyText(
+      input.exerciseName,
+      'Scheduled workout exercise name is required.',
+    ),
+    previousWorkoutId,
+    reminderSentAt,
+    routineId,
+    scheduledOccurrenceAt,
+    setOrder: requireLiveWorkoutSetOrder(input.setOrder),
+  }
+}
+
+async function prepareScheduledLiveWorkoutStart(
+  input: NormalizedScheduledLiveWorkoutSetInput,
+): Promise<PreparedLiveWorkoutStart> {
+  const prepared = await prepareLiveWorkoutStart(
+    {
+      routine: input.routineId,
+      startedAt: input.scheduledOccurrenceAt,
+      vault: input.vault,
+    },
+    input.acceptedAt,
+  )
+  assertScheduledLiveWorkoutIdentity(
+    prepared.workout,
+    input,
+    'Scheduled workout routine',
+  )
+  prepareLiveWorkoutSetUpdate(prepared.workout, {
+    ...input,
+    requireExistingSet: true,
+  })
+  return prepared
+}
+
+function bindScheduledLiveWorkoutAction(
+  prepared: PreparedLiveWorkoutStart,
+  actionId: string,
+): PreparedLiveWorkoutStart {
+  const workout = workoutSessionSchema.parse({
+    ...prepared.workout,
+    lastMemberActionId: actionId,
+  })
+  return {
+    draft: { ...prepared.draft, workout },
+    workout,
+  }
+}
+
+function assertScheduledLiveWorkoutAction(
+  workout: WorkoutSession,
+  actionId: string,
+  label: string,
+): void {
+  if (workout.lastMemberActionId !== actionId) {
+    throw new VaultCliError(
+      'command_failed',
+      `${label} was not started by this scheduled rollover action.`,
+    )
+  }
+}
+
+function assertScheduledLiveWorkoutIdentity(
+  workout: WorkoutSession,
+  input: NormalizedScheduledLiveWorkoutSetInput,
+  label: string,
+): void {
+  if (
+    workout.sourceApp !== LIVE_WORKOUT_SOURCE_APP ||
+    workout.routineId !== input.routineId ||
+    workout.startedAt !== input.scheduledOccurrenceAt
+  ) {
+    throw new VaultCliError(
+      'command_failed',
+      `${label} does not match the scheduled rollover target.`,
+    )
+  }
+  assertTargetableLiveWorkout(workout, label)
+}
+
+function resolveScheduledRolloverPreviousEndedAt(input: {
+  scheduledOccurrenceAt: string
+  shown: WorkoutShowResult
+  workout: WorkoutSession
+}): string {
+  const setCount = input.workout.exercises.reduce(
+    (count, exercise) => count + exercise.sets.length,
+    0,
+  )
+  if (
+    setCount === 0 ||
+    input.workout.exercises.some((exercise) =>
+      exercise.sets.some((set) => !hasLoggedWorkoutSet(set)),
+    )
+  ) {
+    throw new VaultCliError(
+      'invalid_operation',
+      'The prior live workout still has pending set coordinates.',
+    )
+  }
+  if (!input.workout.startedAt) {
+    throw new VaultCliError(
+      'contract_invalid',
+      'The prior live workout is missing its start timestamp.',
+    )
+  }
+  const durationMinutes = input.shown.entity.data.durationMinutes
+  if (
+    typeof durationMinutes !== 'number' ||
+    !Number.isInteger(durationMinutes) ||
+    durationMinutes < 1
+  ) {
+    throw new VaultCliError(
+      'contract_invalid',
+      'The prior live workout is missing its canonical duration.',
+    )
+  }
+
+  const startedAtMs = Date.parse(input.workout.startedAt)
+  const endedAtMs = startedAtMs + durationMinutes * 60_000
+  if (endedAtMs >= Date.parse(input.scheduledOccurrenceAt)) {
+    throw new VaultCliError(
+      'invalid_operation',
+      'The scheduled occurrence is not later than the prior workout activity.',
+    )
+  }
+  return new Date(endedAtMs).toISOString()
+}
+
+function deriveScheduledLiveWorkoutActionIds(input: {
+  input: NormalizedScheduledLiveWorkoutSetInput
+  planWorkout: WorkoutSession
+  setPatch: Partial<WorkoutSet>
+}): { previous: string; scheduled: string } {
+  const material = JSON.stringify({
+    acceptedAt: input.input.acceptedAt,
+    exerciseName: normalizeExerciseName(input.input.exerciseName),
+    exerciseOrder: input.input.exerciseOrder,
+    plan: projectScheduledLiveWorkoutPlan(
+      input.planWorkout,
+      input.input,
+      input.setPatch,
+    ),
+    previousWorkoutId: input.input.previousWorkoutId,
+    reminderSentAt: input.input.reminderSentAt,
+    result: input.setPatch,
+    routineId: input.input.routineId,
+    scheduledOccurrenceAt: input.input.scheduledOccurrenceAt,
+    setOrder: input.input.setOrder,
+  })
+  return {
+    previous: deriveScheduledLiveWorkoutMarker(material, 'previous'),
+    scheduled: deriveScheduledLiveWorkoutMarker(material, 'scheduled'),
+  }
+}
+
+function deriveScheduledLiveWorkoutMarker(
+  material: string,
+  role: 'previous' | 'scheduled',
+): string {
+  const hex = createHash('sha256')
+    .update(`scheduled-live-workout-rollover:v1:${role}:${material}`)
+    .digest('hex')
+    .slice(0, 32)
+    .split('')
+  hex[12] = '5'
+  hex[16] = ((Number.parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16)
+  return memberActionIdV1Schema.parse(
+    `${hex.slice(0, 8).join('')}-${hex.slice(8, 12).join('')}-${hex.slice(12, 16).join('')}-${hex.slice(16, 20).join('')}-${hex.slice(20).join('')}`,
+  )
+}
+
+function projectScheduledLiveWorkoutPlan(
+  workout: WorkoutSession,
+  input: NormalizedScheduledLiveWorkoutSetInput,
+  setPatch: Partial<WorkoutSet>,
+) {
+  return {
+    exercises: workout.exercises
+      .slice()
+      .sort((left, right) => left.order - right.order)
+      .map((exercise) => ({
+        groupId: exercise.groupId ?? null,
+        mode: exercise.mode ?? null,
+        name: exercise.name,
+        note: exercise.note ?? null,
+        order: exercise.order,
+        sets: exercise.sets
+          .slice()
+          .sort((left, right) => left.order - right.order)
+          .map((set) => ({
+            order: set.order,
+            type:
+              exercise.order === input.exerciseOrder &&
+              normalizeExerciseName(exercise.name) ===
+                normalizeExerciseName(input.exerciseName) &&
+              set.order === input.setOrder &&
+              setPatch.type !== undefined
+                ? setPatch.type
+                : set.type ?? null,
+          })),
+        sourceExerciseId: exercise.sourceExerciseId ?? null,
+        unitOverride: exercise.unitOverride ?? null,
+      })),
+    routineId: workout.routineId ?? null,
+    routineName: workout.routineName ?? null,
+    sessionNote: workout.sessionNote ?? null,
+    sourceApp: workout.sourceApp ?? null,
+    startedAt: workout.startedAt ?? null,
+  }
 }
 
 export async function clearLiveWorkoutSet(input: ClearLiveWorkoutSetInput) {
@@ -728,7 +1296,14 @@ export async function finishLiveWorkout(input: FinishLiveWorkoutInput) {
   )
 }
 
-async function finishLiveWorkoutWithLockHeld(input: FinishLiveWorkoutInput) {
+interface FinishLiveWorkoutLockOptions {
+  lastMemberActionId?: string
+}
+
+async function finishLiveWorkoutWithLockHeld(
+  input: FinishLiveWorkoutInput,
+  options: FinishLiveWorkoutLockOptions = {},
+) {
   const shown = await resolveLiveWorkout(input, {
     requireActive: input.workoutId === undefined,
     allowCompleted: input.workoutId !== undefined,
@@ -756,12 +1331,17 @@ async function finishLiveWorkoutWithLockHeld(input: FinishLiveWorkoutInput) {
   }
   const durationMinutes = elapsedDurationMinutes(workout.startedAt, endedAt)
 
+  const set = [
+    `workout.endedAt=${JSON.stringify(endedAt)}`,
+    `durationMinutes=${durationMinutes}`,
+  ]
+  if (options.lastMemberActionId !== undefined) {
+    set.push(`workout.lastMemberActionId=${options.lastMemberActionId}`)
+  }
+
   return editWorkoutRecord({
     vault: input.vault,
     lookup: shown.entity.id,
-    set: [
-      `workout.endedAt=${JSON.stringify(endedAt)}`,
-      `durationMinutes=${durationMinutes}`,
-    ],
+    set,
   })
 }

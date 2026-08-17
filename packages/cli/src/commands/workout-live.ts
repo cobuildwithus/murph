@@ -10,6 +10,7 @@ import {
   clearLiveWorkoutSet,
   finishLiveWorkout,
   logLiveWorkoutSet,
+  logScheduledLiveWorkoutSet,
   showActiveLiveWorkout,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
@@ -21,6 +22,16 @@ const workoutIdOption = z
   .describe(
     'Optional canonical workout id. Omit it only when exactly one live workout is active.',
   )
+
+const requiredWorkoutIdOption = z
+  .string()
+  .regex(/^evt_[0-9A-Za-z]+$/u)
+  .describe('Canonical prior workout id from the current live-workout read.')
+
+const requiredRoutineIdOption = z
+  .string()
+  .regex(/^wfmt_[0-9A-Za-z]+$/u)
+  .describe('Canonical saved workout-format id identified by the exact reminder.')
 
 const exerciseIdOption = z
   .string()
@@ -273,6 +284,71 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         exerciseOrder: options.exerciseOrder,
         setOrder: options.setOrder,
         requireExistingSet: options.requireExistingSet,
+        type: options.type,
+        note: options.note,
+        reps: options.reps,
+        weight: options.weight,
+        weightUnit: options.weightUnit,
+        durationSeconds: options.durationSeconds,
+        distanceMeters: options.distanceMeters,
+        rpe: options.rpe,
+        bodyweightKg: options.bodyweightKg,
+        assistanceKg: options.assistanceKg,
+        addedWeightKg: options.addedWeightKg,
+      })
+    },
+  })
+
+  set.command('log-scheduled', {
+    description:
+      'Atomically roll a completed-but-open prior session into one exact scheduled routine set.',
+    args: z.object({
+      exercise: z
+        .string()
+        .min(1)
+        .max(160)
+        .describe('Exact exercise name identified by the scheduled reminder.'),
+    }),
+    hint:
+      'Use only from runtime-authored authority on the current accepted direct reply. The command refuses stale authority, pending prior sets, ambiguous coordinates, unrelated active workouts, and missing actual results.',
+    options: withBaseOptions({
+      previousWorkoutId: requiredWorkoutIdOption,
+      routineId: requiredRoutineIdOption,
+      exerciseOrder: requiredExerciseOrderOption,
+      setOrder: requiredSetOrderOption,
+      scheduledOccurrenceAt: isoTimestampSchema.describe(
+        'Exact scheduled occurrence timestamp from runtime-authored reply authority.',
+      ),
+      reminderSentAt: isoTimestampSchema.describe(
+        'Exact reminder delivery timestamp from runtime-authored reply authority.',
+      ),
+      acceptedAt: isoTimestampSchema.describe(
+        'Exact accepted reply timestamp from runtime-authored reply authority.',
+      ),
+      type: z.enum(['normal', 'warmup', 'dropset', 'failure']).optional(),
+      note: z.string().min(1).max(400).optional(),
+      reps: z.number().int().nonnegative().optional(),
+      weight: z.number().nonnegative().optional(),
+      weightUnit: z.enum(['lb', 'kg']).optional(),
+      durationSeconds: z.number().int().nonnegative().optional(),
+      distanceMeters: z.number().nonnegative().optional(),
+      rpe: z.number().min(0).max(10).optional(),
+      bodyweightKg: z.number().nonnegative().optional(),
+      assistanceKg: z.number().nonnegative().optional(),
+      addedWeightKg: z.number().nonnegative().optional(),
+    }),
+    output: showResultSchema,
+    async run({ args, options }) {
+      return logScheduledLiveWorkoutSet({
+        vault: options.vault,
+        previousWorkoutId: options.previousWorkoutId,
+        routineId: options.routineId,
+        exerciseName: args.exercise,
+        exerciseOrder: options.exerciseOrder,
+        setOrder: options.setOrder,
+        scheduledOccurrenceAt: options.scheduledOccurrenceAt,
+        reminderSentAt: options.reminderSentAt,
+        acceptedAt: options.acceptedAt,
         type: options.type,
         note: options.note,
         reps: options.reps,

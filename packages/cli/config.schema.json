@@ -6156,6 +6156,120 @@
                             }
                           }
                         },
+                        "log-scheduled": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "previousWorkoutId": {
+                                  "type": "string",
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical prior workout id from the current live-workout read."
+                                },
+                                "routineId": {
+                                  "type": "string",
+                                  "pattern": "^wfmt_[0-9A-Za-z]+$",
+                                  "description": "Canonical saved workout-format id identified by the exact reminder."
+                                },
+                                "exerciseOrder": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "description": "One-based exercise order within the live workout."
+                                },
+                                "setOrder": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "description": "One-based set order. Read the active workout and pass it explicitly."
+                                },
+                                "scheduledOccurrenceAt": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                                  "description": "Exact scheduled occurrence timestamp from runtime-authored reply authority."
+                                },
+                                "reminderSentAt": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                                  "description": "Exact reminder delivery timestamp from runtime-authored reply authority."
+                                },
+                                "acceptedAt": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                                  "description": "Exact accepted reply timestamp from runtime-authored reply authority."
+                                },
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "normal",
+                                    "warmup",
+                                    "dropset",
+                                    "failure"
+                                  ]
+                                },
+                                "note": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 400
+                                },
+                                "reps": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "weight": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "weightUnit": {
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "durationSeconds": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "distanceMeters": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "rpe": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 10
+                                },
+                                "bodyweightKg": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "assistanceKg": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "addedWeightKg": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              }
+                            }
+                          }
+                        },
                         "clear": {
                           "type": "object",
                           "additionalProperties": false,

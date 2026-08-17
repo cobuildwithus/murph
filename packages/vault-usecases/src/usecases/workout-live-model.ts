@@ -74,6 +74,24 @@ export interface LogLiveWorkoutSetInput
   addedWeightKg?: number
 }
 
+export interface LogScheduledLiveWorkoutSetInput
+  extends Omit<
+    LogLiveWorkoutSetInput,
+    | 'exerciseId'
+    | 'exerciseName'
+    | 'exerciseOrder'
+    | 'requireExistingSet'
+    | 'workoutId'
+  > {
+  acceptedAt: string
+  exerciseName: string
+  exerciseOrder: number
+  previousWorkoutId: string
+  reminderSentAt: string
+  routineId: string
+  scheduledOccurrenceAt: string
+}
+
 export interface ClearLiveWorkoutSetInput
   extends LiveWorkoutLookupInput,
     LiveWorkoutExerciseLookup {
@@ -112,6 +130,21 @@ export function isActiveLiveWorkout(workout: WorkoutSession): boolean {
 export function hasLoggedWorkoutSet(set: WorkoutSet): boolean {
   return (
     typeof set.note === 'string' ||
+    typeof set.reps === 'number' ||
+    typeof set.weight === 'number' ||
+    typeof set.durationSeconds === 'number' ||
+    typeof set.distanceMeters === 'number' ||
+    typeof set.rpe === 'number' ||
+    typeof set.bodyweightKg === 'number' ||
+    typeof set.assistanceKg === 'number' ||
+    typeof set.addedWeightKg === 'number'
+  )
+}
+
+export function hasLoggedWorkoutSetActualResult(
+  set: Partial<WorkoutSet>,
+): boolean {
+  return (
     typeof set.reps === 'number' ||
     typeof set.weight === 'number' ||
     typeof set.durationSeconds === 'number' ||

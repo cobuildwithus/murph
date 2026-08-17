@@ -1035,7 +1035,11 @@ export async function executeClaimedAssistantCronJob(
               pendingDeliveryIntentId = intentId
             },
             outboxAutomationAuthority:
-              resolveAssistantCronOutboxAutomationAuthority(input.job),
+              resolveAssistantCronOutboxAutomationAuthority({
+                job: input.job,
+                occurrenceAt,
+                trigger: input.trigger,
+              }),
             outboxExternalThreadRouteAuthority:
               authorizedDelivery.externalThreadRouteAuthority,
             participantId: claimedJob.target.participantId,
@@ -1703,10 +1707,15 @@ async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
   }
 }
 
-function resolveAssistantCronOutboxAutomationAuthority(
-  job: ResolvedAssistantCronJob,
-): AssistantOutboxIntent['automationAuthority'] {
-  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
+function resolveAssistantCronOutboxAutomationAuthority(input: {
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
+  trigger: AssistantCronTrigger
+}): AssistantOutboxIntent['automationAuthority'] {
+  if (
+    input.job.kind !== 'canonical' ||
+    input.job.source.kind !== 'automation'
+  ) {
     return null
   }
 
@@ -1714,13 +1723,16 @@ function resolveAssistantCronOutboxAutomationAuthority(
   // It intentionally does not inherit active automation lifecycle authority;
   // active jobs always carry their exact revision even when the first provider
   // attempt is immediate, because a transient failure can still enter outbox.
-  if (job.source.status !== 'active') {
+  if (input.job.source.status !== 'active') {
     return null
   }
 
   return {
-    automationId: job.source.automationId,
-    expectedUpdatedAt: job.source.updatedAt,
+    automationId: input.job.source.automationId,
+    expectedUpdatedAt: input.job.source.updatedAt,
+    ...(input.trigger === 'scheduled'
+      ? { scheduledOccurrenceAt: input.occurrenceAt }
+      : {}),
   }
 }
 

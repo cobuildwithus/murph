@@ -351,6 +351,7 @@ export const assistantOutboxAutomationAuthoritySchema = z
   .object({
     automationId: z.string().trim().min(1),
     expectedUpdatedAt: isoTimestampSchema,
+    scheduledOccurrenceAt: isoTimestampSchema.optional(),
   })
   .strict()
 

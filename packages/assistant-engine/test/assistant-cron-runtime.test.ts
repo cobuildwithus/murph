@@ -11368,6 +11368,7 @@ describe('assistant cron runtime orchestration', () => {
         outboxAutomationAuthority: {
           automationId: 'automation-linq-pinned-mixed-route',
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
+          scheduledOccurrenceAt: '2026-05-04T16:00:00.000Z',
         },
         participantId: 'participant-1',
         threadId: 'thread-1',
@@ -11473,6 +11474,7 @@ describe('assistant cron runtime orchestration', () => {
         outboxAutomationAuthority: {
           automationId: 'automation-kl-pending-sent',
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
+          scheduledOccurrenceAt: '2026-05-04T16:00:00.000Z',
         },
       }),
     )

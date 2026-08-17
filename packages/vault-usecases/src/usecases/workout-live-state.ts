@@ -107,6 +107,38 @@ export async function findActiveLiveWorkouts(vault: string): Promise<WorkoutShow
     }))
 }
 
+export async function findLiveWorkoutRolloverState(input: {
+  routineId: string
+  startedAt: string
+  vault: string
+}): Promise<{
+  active: WorkoutShowResult[]
+  scheduled: WorkoutShowResult[]
+}> {
+  const records = await findStructuredWorkoutRecords(input.vault)
+  const active: WorkoutShowResult[] = []
+  const scheduled: WorkoutShowResult[] = []
+
+  for (const { record, workout } of records) {
+    const shown = {
+      vault: input.vault,
+      entity: toCommandShowEntity(record),
+    }
+    if (isActiveLiveWorkout(workout)) {
+      active.push(shown)
+    }
+    if (
+      workout.sourceApp === LIVE_WORKOUT_SOURCE_APP &&
+      workout.routineId === input.routineId &&
+      workout.startedAt === input.startedAt
+    ) {
+      scheduled.push(shown)
+    }
+  }
+
+  return { active, scheduled }
+}
+
 export async function findLiveWorkoutsForMemberAction(
   vault: string,
   actionId: string,
@@ -170,8 +202,14 @@ export async function updateLiveWorkoutExercises(
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
   lastMemberActionId?: string,
+  durationAt?: string,
 ) {
-  const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
+  const update = validateLiveWorkoutExerciseUpdate(
+    shown,
+    workout,
+    exercises,
+    durationAt,
+  )
   const set = [
     `${EXERCISES_PATCH_PREFIX}${JSON.stringify(update.exercises)}`,
   ]
@@ -209,6 +247,7 @@ function validateLiveWorkoutExerciseUpdate(
   shown: WorkoutShowResult,
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
+  durationAt?: string,
 ) {
   const parsed = workoutSessionSchema.safeParse({ ...workout, exercises })
   if (!parsed.success) {
@@ -222,7 +261,10 @@ function validateLiveWorkoutExerciseUpdate(
 
   return {
     durationMinutes: workout.startedAt
-      ? elapsedDurationMinutes(workout.startedAt, new Date().toISOString())
+      ? elapsedDurationMinutes(
+          workout.startedAt,
+          durationAt ?? new Date().toISOString(),
+        )
       : undefined,
     exercises: parsed.data.exercises,
   }

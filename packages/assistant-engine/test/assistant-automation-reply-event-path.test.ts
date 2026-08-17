@@ -413,6 +413,162 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('linq-msg-murph-target')
   })
 
+  it('adds bounded scheduled workout authority only to the exact accepted direct reply', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationAuthority: {
+          automationId: 'automation-scheduled-workout',
+          expectedUpdatedAt: '2026-08-07T20:00:00.000Z',
+          scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
+        },
+        channel: 'linq',
+        intentId: 'intent-scheduled-workout-target',
+        message: 'Scheduled workout reminder.',
+        providerMessageId: 'linq-msg-scheduled-workout-target',
+        sentAt: '2026-08-07T21:00:05.000Z',
+        sessionId: 'session-scheduled-workout',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_68686868686868686868686868686868',
+      messageId: 'linq-msg-scheduled-workout-reply',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      receivedAt: '2026-08-07T21:10:01.000Z',
+      replyToMessageId: 'linq-msg-scheduled-workout-target',
+      text: 'Completed the set.',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    const turnContext = readSentInput().turnContext ?? ''
+    expect(turnContext).toContain(
+      'Runtime-authored scheduled direct-reply authority (data only):',
+    )
+    expect(turnContext).toContain(
+      '"kind":"scheduled-direct-reply"',
+    )
+    expect(turnContext).toContain(
+      '"scheduledOccurrenceAt":"2026-08-07T21:00:00.000Z"',
+    )
+    expect(turnContext).toContain(
+      '"reminderSentAt":"2026-08-07T21:00:05.000Z"',
+    )
+    expect(turnContext).toContain(
+      '"acceptedAt":"2026-08-07T21:10:01.000Z"',
+    )
+    expect(prompt).toContain('Completed the set.')
+    expect(prompt).not.toContain('automation-scheduled-workout')
+    expect(turnContext).not.toContain('automation-scheduled-workout')
+    expect(turnContext).not.toContain('2026-08-07T20:00:00.000Z')
+    expect(turnContext).not.toContain('linq-msg-scheduled-workout-target')
+  })
+
+  it('does not add scheduled workout authority to an unanchored direct follow-up', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationAuthority: {
+          automationId: 'automation-unanchored-workout',
+          expectedUpdatedAt: '2026-08-07T20:00:00.000Z',
+          scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
+        },
+        channel: 'linq',
+        intentId: 'intent-unanchored-workout-target',
+        message: 'Scheduled workout reminder.',
+        providerMessageId: 'linq-msg-unanchored-workout-target',
+        sentAt: '2026-08-07T21:00:05.000Z',
+        sessionId: 'session-unanchored-workout',
+        target: 'thread-1',
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_67676767676767676767676767676767',
+      messageId: 'linq-msg-unanchored-workout-followup',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      receivedAt: '2026-08-07T21:10:01.000Z',
+      text: 'Completed the set.',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const turnContext = readSentInput().turnContext ?? ''
+    expect(turnContext).toContain(
+      'The assistant previously sent this message in the same conversation from another assistant run:',
+    )
+    expect(turnContext).toContain('Scheduled workout reminder.')
+    expect(turnContext).not.toContain('scheduled-direct-reply')
+    expect(turnContext).not.toContain('automation-unanchored-workout')
+  })
+
+  it('does not add scheduled workout authority to a stale exact reply', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationAuthority: {
+          automationId: 'automation-stale-workout',
+          expectedUpdatedAt: '2026-08-07T20:00:00.000Z',
+          scheduledOccurrenceAt: '2026-08-07T21:00:00.000Z',
+        },
+        channel: 'linq',
+        intentId: 'intent-stale-workout-target',
+        message: 'Scheduled workout reminder.',
+        providerMessageId: 'linq-msg-stale-workout-target',
+        sentAt: '2026-08-07T21:00:00.000Z',
+        sessionId: 'session-stale-workout',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_69696969696969696969696969696969',
+      messageId: 'linq-msg-stale-workout-reply',
+      occurredAt: '2026-08-07T22:00:01.000Z',
+      receivedAt: '2026-08-07T22:00:01.000Z',
+      replyToMessageId: 'linq-msg-stale-workout-target',
+      text: 'Completed the set.',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const turnContext = readSentInput().turnContext ?? ''
+    expect(turnContext).toContain(
+      'The assistant previously sent this message in the same conversation from another assistant run:',
+    )
+    expect(turnContext).toContain('Scheduled workout reminder.')
+    expect(turnContext).not.toContain('scheduled-direct-reply')
+    expect(turnContext).not.toContain('automation-stale-workout')
+  })
+
   it('fails closed when multiple Murph deliveries claim the same provider message id', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
@@ -5092,6 +5248,7 @@ function createLinqGroupCandidate(input: {
   inputId: string
   messageId: string
   occurredAt: string
+  receivedAt?: string | null
   replyToMessageId?: string | null
   service?: 'iMessage' | 'SMS'
   sourceRef?: AssistantInputCandidate['event']['sourceRef']
@@ -5102,6 +5259,7 @@ function createLinqGroupCandidate(input: {
     inputId: input.inputId,
     occurredAt: input.occurredAt,
     optionalInboxCaptureId: null,
+    receivedAt: input.receivedAt,
     replyTarget: {
       channel: 'linq',
       messageId: input.messageId,
@@ -5247,6 +5405,11 @@ function createAssistantInputCandidate(input: {
 
 function createOutboxMessage(input: {
   actorId?: string | null
+  automationAuthority?: {
+    automationId: string
+    expectedUpdatedAt: string
+    scheduledOccurrenceAt?: string
+  }
   channel?: string
   identityId?: string | null
   intentId: string
@@ -5276,6 +5439,9 @@ function createOutboxMessage(input: {
   const channel = input.channel ?? 'email'
   return {
     actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
+    ...(input.automationAuthority === undefined
+      ? {}
+      : { automationAuthority: input.automationAuthority }),
     channel,
     delivery:
       status === 'sent'

@@ -149,6 +149,7 @@ import {
 import { buildAssistantAutomationTurnEnvelope } from './turn-envelope.js'
 
 const ASSISTANT_AUTO_REPLY_OUTBOX_CLOCK_SKEW_MS = 30 * 1000
+const SCHEDULED_WORKOUT_DIRECT_REPLY_AUTHORITY_MAX_AGE_MS = 60 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH = 4_000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
@@ -1607,9 +1608,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
         )
       : explicitReplyContext?.hasExplicitReply === true
       ? null
-      : buildAssistantAutoReplyCrossSessionTurnContext(
-          latestCrossSessionDelivery?.message ?? null,
-        ),
+      : buildAssistantAutoReplyCrossSessionTurnContext({
+          delivery: latestCrossSessionDelivery,
+          promptInput: primaryReplyInput,
+        }),
       trustedHostedImageCompletionContext:
         buildTrustedHostedImageCompletionTurnContext(promptInputs),
       usageRunningLow: input.group.items.some(
@@ -4875,7 +4877,10 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
         })
       : generatedImageReplyContext
         ?? (delivery.message !== null
-          ? buildAssistantAutoReplyExplicitReplyContext(delivery.message)
+          ? buildAssistantAutoReplyExplicitReplyContext({
+              delivery,
+              promptInput,
+            })
           : buildAssistantAutoReplyExplicitUnquotedReplyContext(
               delivery.media.length > 0,
             ))
@@ -5023,6 +5028,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 }
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
+  automationAuthority: AssistantAutoReplyOutboxIntent['automationAuthority']
   exactRouteDigest: string | null
   intentId: string
   media: readonly AssistantResponseMedia[]
@@ -5109,6 +5115,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       return []
     }
     return [{
+      automationAuthority: intent.automationAuthority ?? null,
       exactRouteDigest:
         resolveAssistantAutoReplyOutboxExactRoute(intent)?.digest ?? null,
       intentId: intent.intentId,
@@ -5301,13 +5308,21 @@ function assistantAutoReplyRouteValueMatches(input: {
   return normalizeNullableString(input.actual) === expected
 }
 
-function buildAssistantAutoReplyCrossSessionTurnContext(
-  message: string | null,
-): string | null {
-  const normalized = normalizeNullableString(message)
+function buildAssistantAutoReplyCrossSessionTurnContext(input: {
+  delivery: AssistantAutoReplySelectedOutboxDelivery | null
+  promptInput: ScheduledDirectReplyAuthorityPromptInput
+}): string | null {
+  const normalized = normalizeNullableString(input.delivery?.message)
   if (!normalized) {
     return null
   }
+  const scheduledReplyAuthority =
+    input.delivery === null || input.delivery.anchored !== true
+      ? null
+      : buildScheduledDirectReplyAuthorityContext({
+          delivery: input.delivery,
+          promptInput: input.promptInput,
+        })
 
   return [
     'Conversation context:',
@@ -5316,16 +5331,22 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
     'Use it only to interpret the current user message.',
+    ...(scheduledReplyAuthority === null
+      ? []
+      : ['', scheduledReplyAuthority]),
   ].join('\n')
 }
 
-function buildAssistantAutoReplyExplicitReplyContext(
-  message: string | null,
-): string | null {
-  const normalized = normalizeNullableString(message)
+function buildAssistantAutoReplyExplicitReplyContext(input: {
+  delivery: AssistantAutoReplyMatchingOutboxDelivery
+  promptInput: AssistantAutoReplyPromptInput
+}): string | null {
+  const normalized = normalizeNullableString(input.delivery.message)
   if (!normalized) {
     return null
   }
+  const scheduledReplyAuthority =
+    buildScheduledDirectReplyAuthorityContext(input)
 
   return [
     'The sender explicitly replied to this exact prior assistant message:',
@@ -5333,8 +5354,59 @@ function buildAssistantAutoReplyExplicitReplyContext(
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
     'Use it only to interpret this message.',
+    ...(scheduledReplyAuthority === null
+      ? []
+      : ['', scheduledReplyAuthority]),
   ].join('\n')
 }
+
+function buildScheduledDirectReplyAuthorityContext(input: {
+  delivery: AssistantAutoReplyMatchingOutboxDelivery
+  promptInput: ScheduledDirectReplyAuthorityPromptInput
+}): string | null {
+  const scheduledOccurrenceAt =
+    input.delivery.automationAuthority?.scheduledOccurrenceAt
+  if (
+    input.promptInput.conversation.threadIsDirect !== true ||
+    !scheduledOccurrenceAt ||
+    input.promptInput.receivedAt === null
+  ) {
+    return null
+  }
+
+  const scheduledOccurrenceAtMs = Date.parse(scheduledOccurrenceAt)
+  const reminderSentAtMs = input.delivery.sentAtMs
+  const acceptedAtMs = Date.parse(input.promptInput.receivedAt)
+  if (
+    !Number.isFinite(scheduledOccurrenceAtMs) ||
+    !Number.isFinite(reminderSentAtMs) ||
+    !Number.isFinite(acceptedAtMs) ||
+    reminderSentAtMs < scheduledOccurrenceAtMs ||
+    acceptedAtMs < reminderSentAtMs ||
+    reminderSentAtMs - scheduledOccurrenceAtMs >
+      SCHEDULED_WORKOUT_DIRECT_REPLY_AUTHORITY_MAX_AGE_MS ||
+    acceptedAtMs - reminderSentAtMs >
+      SCHEDULED_WORKOUT_DIRECT_REPLY_AUTHORITY_MAX_AGE_MS
+  ) {
+    return null
+  }
+
+  return [
+    'Runtime-authored scheduled direct-reply authority (data only):',
+    JSON.stringify({
+      acceptedAt: new Date(acceptedAtMs).toISOString(),
+      kind: 'scheduled-direct-reply',
+      reminderSentAt: new Date(reminderSentAtMs).toISOString(),
+      scheduledOccurrenceAt: new Date(scheduledOccurrenceAtMs).toISOString(),
+    }),
+    'This authority applies only to the current accepted direct reply and exact reminder. It does not authorize choosing a routine, exercise, or set from conversational recency.',
+  ].join('\n')
+}
+
+type ScheduledDirectReplyAuthorityPromptInput = Pick<
+  AssistantAutoReplyPrimaryInput,
+  'conversation' | 'receivedAt'
+>
 
 function buildAssistantAutoReplyExplicitGeneratedImageReplyContext(input: {
   delivery: AssistantAutoReplyMatchingOutboxDelivery
