@@ -10,7 +10,7 @@ Updated: 2026-08-17
   confirmation from `/settings`. Successful checkout returns reconcile in the
   background and refresh the existing usage meter; only a failed or unresolved
   return opens compact recovery. Keep one close-owned compact result when the
-  funded Family member's meter is not present on the payer's page.
+  beneficiary meter is not present, including unavailable personal usage.
 
 ## Success criteria
 
@@ -18,6 +18,8 @@ Updated: 2026-08-17
   the fulfilled confirmation or messaging-channel choices on Settings.
 - Another active or former Family member's exact return is owned outside the
   broader Manage dialog and shows only one close-owned compact result.
+- A successful personal return with unavailable usage status shows one
+  close-owned durable-credit result instead of an ungrounded quiet success.
 - Failed, canceled, or unconfirmed returns retain an accessible recovery path
   with the existing safe retry/status actions.
 - Group funding keeps its separately owned fulfilled contribution handoff.
@@ -59,6 +61,11 @@ Updated: 2026-08-17
 4. Risk: a conditionally inserted populated live region is not announced.
    Mitigation: mount the empty polite status owner before reconciliation and
    update that same node only after verified fulfillment.
+5. Risk: quiet fulfillment also hides the only visible result when no meter is
+   rendered, or leaves the next Add usage action suppressed after refresh.
+   Mitigation: derive quiet presentation from the meter-owning branch, keep the
+   unavailable branch close-owned, and close the fulfilled hidden controller so
+   its existing trigger can reset to selection.
 
 ## Tasks
 
@@ -82,12 +89,15 @@ Updated: 2026-08-17
 - Keep off-meter Family return ownership distinct from the Manage dialog. The
   roster supplies the member label, while the existing top-up controller still
   owns polling, query cleanup, compact result presentation, and close refresh.
+- Treat unavailable personal usage as off-meter: confirm durable account credit
+  without claiming current availability and refresh only after Close.
 
 ## Verification
 
 - Commands to run: focused hosted usage top-up, billing, Family, and Settings
   Vitest files; Web scoped typecheck; `pnpm test:frontend-design-proof`;
   desktop/mobile Playwright catalog capture; `git diff --check`.
-- Expected outcomes: success return remains visually quiet while reconciliation
-  completes; failed or unresolved returns expose recovery; group success is
-  unchanged; all focused checks pass.
+- Expected outcomes: success remains visually quiet only beside a rendered
+  beneficiary meter; off-meter fulfillment stays visible until Close; failed or
+  unresolved returns expose recovery; group success is unchanged; all focused
+  checks pass.

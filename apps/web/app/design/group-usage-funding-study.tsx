@@ -227,7 +227,7 @@ const DESIGN_PERSONAL_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 const DESIGN_UNAVAILABLE_USAGE_STATUS: HostedPlanUsageStatus = {
   generatedAt: "2026-07-22T12:00:00.000Z",
-  reason: "group_not_supported",
+  reason: "hosted_access_inactive",
   recommendedAction: null,
   status: "unavailable",
 };
@@ -570,7 +570,7 @@ function DesignSponsorshipState(props: {
 function PersonalUsageCreditOwnerStudy() {
   const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
   const [returnPreview, setReturnPreview] = useState<
-    "failed" | "family" | "former" | null
+    "failed" | "family" | "former" | "inactive" | null
   >(null);
 
   return (
@@ -733,6 +733,12 @@ function PersonalUsageCreditOwnerStudy() {
           </Button>
           <Button
             variant="outline"
+            onClick={() => setReturnPreview("inactive")}
+          >
+            Preview inactive account completion
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => setReturnPreview("former")}
           >
             Preview former member completion
@@ -769,6 +775,22 @@ function PersonalUsageCreditOwnerStudy() {
             payerMemberId={DESIGN_PAYER_MEMBER_ID}
             scope="family"
             targetLabel="Family member"
+          />
+        ) : null}
+        {returnPreview === "inactive" ? (
+          <HostedBillingSettings
+            authenticated
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+            usageStatus={DESIGN_UNAVAILABLE_USAGE_STATUS}
+            usageTopUpActivePurchase={{
+              offerCode: "usage_10_usd",
+              purchaseId: "hucp_design_inactive_return",
+              retryAllowed: false,
+              status: "fulfilled",
+            }}
+            usageTopUpInitialOpen
+            usageTopUpOffers={[]}
+            usageTopUpScope="personal"
           />
         ) : null}
         {returnPreview === "former" ? (

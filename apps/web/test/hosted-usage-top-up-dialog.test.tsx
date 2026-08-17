@@ -4471,7 +4471,7 @@ test("keeps a recovery-only terminal return visible until the owner closes it", 
     assert.match(rendered.container.textContent ?? "", /Usage added/);
     assert.match(
       rendered.container.textContent ?? "",
-      /The available usage for this former family member has been updated\./,
+      /Usage credit was added for this former family member\./,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Purchase details/);
     assert.match(
@@ -4528,7 +4528,7 @@ test("shows a compact target-specific result for another active Family member", 
     );
     assert.match(
       rendered.container.textContent ?? "",
-      /The available usage for Family member has been updated\./,
+      /Usage credit was added for Family member\./,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Purchase details/);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
@@ -4896,7 +4896,7 @@ test("reconciles a fulfilled Settings return without presenting a confirmation",
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
       payerMemberId: TEST_PAYER_MEMBER_ID,
-      offers: [],
+      offers: usageCreditOffers(),
       purchaseReturn: {
         kind: "success",
         purchaseId: "hucp_quiet_added00",
@@ -4926,7 +4926,15 @@ test("reconciles a fulfilled Settings return without presenting a confirmation",
       /Usage added\. Your available usage has been updated\./,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
+    assert.equal(buttonByText(rendered.container, "Add usage").disabled, false);
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+
+    await clickButton(rendered.container, rendered.window, "Add usage");
+    assert.equal(
+      rendered.container.querySelector("h2")?.textContent,
+      "Add usage",
+    );
+    assert.match(rendered.container.textContent ?? "", /Choose an amount/);
   } finally {
     await rendered.cleanup();
   }

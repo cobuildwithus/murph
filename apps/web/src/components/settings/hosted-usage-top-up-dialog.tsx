@@ -167,7 +167,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         ? "Make a one-time contribution"
         : "Sponsor this chat"
       : "Add usage");
-  const statusContent = purchase
+  const defaultStatusContent = purchase
     ? readStatusContent({
         canResumeCheckout: canResume,
         canRetryCheckout: canRetry,
@@ -185,6 +185,19 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     purchase.status === "fulfilled" &&
     !purchase.selectionConflict &&
     !purchase.targetConflict;
+  const closeOwnedFulfilledConfirmation =
+    fulfilledConfirmation &&
+    props.scope !== "group" &&
+    props.deferTerminalRefreshUntilClose === true;
+  const statusContent = closeOwnedFulfilledConfirmation
+    ? {
+        message:
+          props.scope === "family" && props.targetLabel
+            ? `Usage credit was added for ${props.targetLabel}.`
+            : "Your usage credit was added to your account.",
+        title: "Usage added",
+      }
+    : defaultStatusContent;
   const showGroupMessagesAction =
     fulfilledConfirmation && props.scope === "group";
   const quietSuccessfulReturn =
@@ -205,13 +218,20 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const presentedOpen =
     controller.state.open &&
     (!quietSuccessfulReturn || returnNeedsRecovery);
-  const compactFamilyConfirmation =
-    fulfilledConfirmation &&
-    props.scope === "family" &&
-    !quietSuccessfulReturn;
+
+  useEffect(() => {
+    if (
+      props.quietSuccessfulReturn === true &&
+      controller.state.open &&
+      fulfilledConfirmation
+    ) {
+      controller.handleOpenChange(false);
+    }
+  }, [controller, fulfilledConfirmation, props.quietSuccessfulReturn]);
+
   const compactStatusPresentation =
     (props.scope !== "group" && purchaseNeedsRecovery) ||
-    compactFamilyConfirmation;
+    closeOwnedFulfilledConfirmation;
   const capacityConflict = selection?.capacityConflict === true;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
@@ -614,9 +634,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         ) : null}
     </>
   );
-  const canShowTrigger = quietSuccessfulReturn && !returnNeedsRecovery
-    ? false
-    : props.offers.length > 0 || purchaseTriggerLabel;
+  const canShowTrigger =
+    quietSuccessfulReturn && controller.state.open && !returnNeedsRecovery
+      ? false
+      : props.offers.length > 0 || purchaseTriggerLabel;
   const drawerTriggerButton = (
     <Button
       type="button"

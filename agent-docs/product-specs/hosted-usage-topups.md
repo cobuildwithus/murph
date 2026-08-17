@@ -105,8 +105,9 @@ An eligible paid Pulse or Edge member can:
    fulfillment; the browser never treats the success URL as payment proof.
 6. For personal and owner-seat Family credit, see fulfilled credit move the
    authenticated beneficiary's existing usage bar without a success dialog or
-   exact balance. For another active or former Family member, see one concise
-   target-specific result because that beneficiary's meter is not present.
+   exact balance when that bar is present. If personal usage status is
+   unavailable, or for another active or former Family member, see one concise
+   close-owned result because no beneficiary meter is present.
 7. If usage was blocked, have pending accepted work become runnable after the
    verified grant restores capacity.
 8. Continue using that credit after an included-usage reset until the credit is
@@ -471,8 +472,10 @@ while the authenticated beneficiary's existing usage meter refreshes. Their
 fulfilled transition updates one visually hidden polite status region that was
 already mounted before reconciliation, but shows no visible success modal or
 post-purchase messaging handoff. Failed or exhausted reconciliation opens the
-compact recovery dialog. Another active Family member and former-member
-recovery keep a compact target-specific result visible because Settings does
+compact recovery dialog. If personal usage status is unavailable, the existing
+off-meter host instead keeps a compact result visible until Close and confirms
+only that durable credit reached the account. Another active Family member and
+former-member recovery use the same close-owned pattern because Settings does
 not render that beneficiary's usage meter. The Family roster mounts the exact
 active member's returned-purchase owner independently of its Manage dialog;
 the result's Close action owns terminal refresh so the confirmation cannot

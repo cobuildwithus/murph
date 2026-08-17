@@ -658,7 +658,7 @@ function PlanUsageBand(props: {
         offers={[]}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
-        quietSuccessfulReturn
+        deferTerminalRefreshUntilClose
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
       />
