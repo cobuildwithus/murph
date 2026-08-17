@@ -1718,6 +1718,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('at least 3,000 lines')
     expect(prDeepReviewPrompt).toContain('This is neither an automatic merge rejection')
     expect(prDeepReviewPrompt).toContain('do not emit a standalone Invariant Violation')
+    expect(prDeepReviewPrompt).toMatch(
+      /A contract mismatch, undisclosed surface,\s+or theoretical concern is evidence, not a finding/u,
+    )
     expect(prDeepReviewPrompt).toContain('current scale, event volume,')
     expect(prDeepReviewPrompt).toContain('never assume hypothetical future or internet')
     expect(prDeepReviewPrompt).toMatch(

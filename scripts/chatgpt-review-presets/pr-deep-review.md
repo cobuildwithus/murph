@@ -288,6 +288,10 @@ chosen direction, require a new retrospective.
 
 Report only:
 
+Only report a finding when merging the PR would cause concrete, realistically
+reachable, material production harm. A contract mismatch, undisclosed surface,
+or theoretical concern is evidence, not a finding, unless it causes that harm.
+
 - **Critical** or **High**: a PR-caused, production-faithful, realistically
   reachable path to data loss or corruption, auth/privacy/security exposure,
   race/retry/idempotency failure, deploy/runtime breakage, billing or other
