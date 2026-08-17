@@ -110,6 +110,7 @@ import {
   createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault,
   resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantOutboxNextWakeAt,
   type HostedAssistantDeliveryPreparation,
@@ -2749,6 +2750,7 @@ export async function runHostedWorkspaceAssistantPhase(
       actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
       includeBackgroundDueIntents:
         input.shouldYieldBackgroundMaintenance?.() !== true,
+      messageVolumeReceiptPort: input.runtime.platform.effectsPort,
       preferredIntentIds: currentTurnDeliveryIntentIds,
       vaultRoot: input.restored.vaultRoot,
     });
@@ -5650,6 +5652,15 @@ async function runSystemMailboxMaintenancePhase(input: {
         result: mergeMemberPreferencesPrePlanningResult(null),
       };
     }
+    const queuedMessageVolumeReceipts =
+      phaseInput.foregroundCausalOnly !== true
+      && !backgroundMaintenanceYielded
+        ? await queueHostedAssistantPendingMessageVolumeReceiptsForVault({
+            effectsPort: phaseInput.runtime.platform.effectsPort,
+            now: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)),
+            vaultRoot: phaseInput.restored.vaultRoot,
+          })
+        : 0;
     if (dirtyDeviceSyncMetrics) {
       const dirtyAssistantCronWakeState = await readAssistantCronWakeState();
       const assistantCronWake = resolveHostedAssistantCronWakeCandidate({
@@ -5710,6 +5721,28 @@ async function runSystemMailboxMaintenancePhase(input: {
       };
     }
 
+    if (queuedMessageVolumeReceipts > 0) {
+      const backgroundWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
+        input: phaseInput,
+        pendingAssistantInputWakeAt,
+      });
+      return {
+        backgroundMaintenanceYielded,
+        continueAssistantLane: false,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
+        result: mergeMemberPreferencesPrePlanningResult({
+          checkpointReason: "outbox_receipt",
+          ...(backgroundWake.at ? { nextWakeAt: backgroundWake.at } : {}),
+          ...(shouldExposeHostedAssistantPhaseNextWakeReason(backgroundWake.reason)
+            ? { nextWakeReason: backgroundWake.reason }
+            : {}),
+          progressed: true,
+        }),
+      };
+    }
+
     return {
       backgroundMaintenanceYielded,
       continueAssistantLane: false,
@@ -5727,6 +5760,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       ? await collectHostedAssistantDeliverySideEffects({
         actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
         includeBackgroundDueIntents: phaseInput.foregroundCausalOnly !== true,
+        messageVolumeReceiptPort: phaseInput.runtime.platform.effectsPort,
         preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
           systemMailboxPreparation,
         ),

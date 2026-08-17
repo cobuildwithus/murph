@@ -17,13 +17,13 @@ import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "./hosted-runtime/runtime-logs.ts";
 import {
-  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
+  drainHostedAssistantDeliveryControlPlaneWritesBestEffort,
 } from "./hosted-runtime/callbacks.ts";
 // Re-exported so the container entrypoint's process-fatal handler can flush
 // queued diagnostics (bounded by its exit backstop) before the process dies.
 export { drainHostedRuntimeLogWritesBestEffort } from "./hosted-runtime/runtime-logs.ts";
 export {
-  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
+  drainHostedAssistantDeliveryControlPlaneWritesBestEffort,
 } from "./hosted-runtime/callbacks.ts";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
@@ -92,7 +92,7 @@ export async function runHostedWorkspaceInvocation(
       signal: input.signal ?? null,
     });
   } finally {
-    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort({
+    await drainHostedAssistantDeliveryControlPlaneWritesBestEffort({
       timeoutMs: 2_000,
     });
     // Info-level runtime log writes are queued off the reply hot path; flush
