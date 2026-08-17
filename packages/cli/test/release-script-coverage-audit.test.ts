@@ -547,6 +547,9 @@ function loadReviewGptOpenTargetHarness(
       ...process.env,
       ORACLE_DRAFT_FILES: '',
       ORACLE_DRAFT_MODE: options.draftMode ?? 'chat',
+      ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: String(
+        options.minimumMarkedResponseMs ?? 5 * 60 * 1000,
+      ),
       ORACLE_DRAFT_MODEL: 'gpt-5.6-sol',
       ORACLE_DRAFT_PROMPT: options.prompt ?? 'Review the requested changes.',
       ORACLE_DRAFT_REMOTE_PORT: options.remotePort ?? '9999',
@@ -1594,8 +1597,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "Vonneumann" ;;')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "9446" ;;')
+    expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "Apollo" ;;')
+    expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "9454" ;;')
     expect(reviewGptConfig).toContain(
-      'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann)',
+      'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann apollo)',
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
@@ -1863,18 +1868,20 @@ describe('monorepo release flow coverage audit', () => {
       'The `pr-review` prompt lives at',
     )
     expect(prReviewGptLoop).toContain(
-      'Both stages use the managed Eragon, Phlebas, Hercules, Mountain, and Vonneumann browser',
+      'Both stages use the managed Eragon, Phlebas, Hercules, Mountain, Vonneumann, and',
     )
     expect(prReviewGptLoop).toContain('default randomized usable managed')
     expect(prReviewGptLoop).toContain('Hercules on `9444`')
     expect(prReviewGptLoop).toContain('Vonneumann on `9446`')
-    expect(prReviewGptLoop).toContain('through five lanes and defaults to four')
+    expect(prReviewGptLoop).toContain('Apollo on')
+    expect(prReviewGptLoop).toContain('`9454`, always with profile `Default`')
+    expect(prReviewGptLoop).toContain('through six lanes and defaults to four')
     expect(prReviewGptLoop).toContain('current installed Brave binary')
     expect(prReviewGptLoop).toContain(
       "passes none of Chromium's background-timer, occluded-window, or renderer",
     )
     expect(prReviewGptLoop).toContain(
-      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain|vonneumann`',
+      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain|vonneumann|apollo`',
     )
     expect(prReviewGptLoop).toContain('6,500 UTF-8 bytes')
     expect(prReviewGptLoop).toContain(
@@ -2448,9 +2455,34 @@ printf '%s|%s|%s|%s|%s\n' \
       )
 
       writeHarnessFile(
+        harnessRoot,
+        'Library/Application Support/MurphReviewGPT/Vonneumann/SingletonLock',
+        'locked\n',
+      )
+      writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
         'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
+      )
+      const sixLaneResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(sixLaneResult.status, sixLaneResult.stderr).toBe(0)
+      expect(sixLaneResult.stdout.trim()).toBe(
+        'apollo|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+      )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=7\n',
       )
       const invalidLaneCountResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2464,12 +2496,12 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(invalidLaneCountResult.status).not.toBe(0)
       expect(invalidLaneCountResult.stderr).toContain(
-        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 5',
+        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 6',
       )
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
       )
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
@@ -2581,7 +2613,7 @@ printf '%s|%s|%s|%s|%s\n' \
       const correctionPresetHarness = `${configHarness}
 printf '%s|%s|%s|%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_selected_browser_display" "$review_gpt_selected_browser_port" "$managed_browser_user_data_dir" "$review_gpt_pr_review_prompt_file"
 review_gpt_managed_ports=()
-for review_gpt_lane in main eragon phlebas hercules mountain vonneumann; do
+for review_gpt_lane in main eragon phlebas hercules mountain vonneumann apollo; do
   review_gpt_managed_ports+=("$(review_gpt_browser_lane_port "$review_gpt_lane")")
 done
 printf '%s\n' "\${review_gpt_managed_ports[*]}"
@@ -2596,7 +2628,7 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
             ...cleanBrowserPreferenceEnv(),
             HOME: harnessRoot,
             REPO_ROOT: repoRoot,
-            REVIEW_GPT_BROWSER_LANE: 'vonneumann',
+            REVIEW_GPT_BROWSER_LANE: 'apollo',
             REVIEW_GPT_REVIEW_PHASE: 'final',
             REVIEW_GPT_ROUND_NUMBER: '2',
             REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
@@ -2610,12 +2642,12 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
         .split('\n')
       expect(correctionPresetLines.at(-2)).toBe(
         [
-          'vonneumann',
-          'Vonneumann',
-          '9446',
+          'apollo',
+          'Apollo',
+          '9454',
           path.join(
             harnessRoot,
-            'Library/Application Support/MurphReviewGPT/Vonneumann',
+            'Library/Application Support/MurphReviewGPT/Apollo',
           ),
           'pr-followup-review.md',
         ].join('|'),
@@ -2628,6 +2660,7 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
         '9444',
         '9450',
         '9446',
+        '9454',
       ])
       expect(new Set(managedPorts).size).toBe(managedPorts.length)
 
