@@ -102,12 +102,7 @@ describe("hosted phone-call result delivery ownership", () => {
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
-    "ASSISTANT_TELEGRAM_SEND_FAILED",
-  ])("keeps %s terminal after provider entry may have occurred", async (
-    deliveryErrorCode,
-  ) => {
+  it("keeps generic failure terminal after provider entry may have occurred", async () => {
     const store = createDeliveryStore("sending");
     mocks.getPrisma.mockReturnValue(store.prisma);
 
@@ -115,7 +110,7 @@ describe("hosted phone-call result delivery ownership", () => {
       memberId: MEMBER_ID,
       request: {
         ...deliveryRequest("failed"),
-        deliveryErrorCode,
+        deliveryErrorCode: "ASSISTANT_TELEGRAM_SEND_FAILED",
       },
     })).resolves.toEqual({ recorded: true, status: "failed" });
 
@@ -158,7 +153,7 @@ describe("hosted phone-call result delivery ownership", () => {
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
   });
 
-  it("replays queued transport exhaustion and recovers through one later provider send", async () => {
+  it("recovers no-effect exhaustion after a sending response is lost", async () => {
     const store = createDeliveryStore("queued");
     mocks.getPrisma.mockReturnValue(store.prisma);
     mocks.rearmRecovery
@@ -169,6 +164,15 @@ describe("hosted phone-call result delivery ownership", () => {
       deliveryErrorCode: "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
     };
     const providerFetch = vi.fn(async () => ({ messageId: "telegram_1" }));
+
+    // Web admits provider dispatch, but the runtime loses this callback response
+    // and therefore never enters Telegram for the exhausted generation.
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("sending"),
+    })).resolves.toEqual({ recorded: true, status: "sending" });
+    expect(store.readStatus()).toBe("sending");
+    expect(providerFetch).not.toHaveBeenCalled();
 
     await expect(recordHostedPhoneCallResultDeliveryOutcome({
       memberId: MEMBER_ID,
@@ -181,7 +185,7 @@ describe("hosted phone-call result delivery ownership", () => {
       memberId: MEMBER_ID,
       request: exhausted,
     })).resolves.toEqual({ recorded: false, status: "pending" });
-    expect(store.updateMany).toHaveBeenCalledOnce();
+    expect(store.updateMany).toHaveBeenCalledTimes(2);
     expect(mocks.rearmRecovery).toHaveBeenCalledTimes(2);
     expect(providerFetch).not.toHaveBeenCalled();
 

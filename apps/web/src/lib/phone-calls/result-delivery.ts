@@ -227,13 +227,11 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
     if (input.currentStatus === "pending") {
       return null;
     }
-    if (input.currentStatus === "queued") {
-      return {
-        rearm: true,
-        status: "pending",
-        terminal: false,
-      };
-    }
+    return {
+      rearm: true,
+      status: "pending",
+      terminal: false,
+    };
   }
 
   if (

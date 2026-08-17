@@ -1920,12 +1920,14 @@ Last verified: 2026-08-16
   because the runtime's cumulative outcome proves no Telegram request occurred.
   A different definitive runtime failure before the provider-entry callback
   commits terminalizes the queued generation as `failed`, except that exact
-  transport retry exhaustion returns a still-queued generation to `pending`:
-  the missing signed `sending` transition is durable proof that provider entry
-  never occurred. Replay of that terminal callback repeats only the bounded
-  recovery re-arm. Retry exhaustion after `sending` remains terminal because
-  provider entry may have occurred; provider success from queued remains
-  invalid.
+  transport retry exhaustion returns any nonterminal generation to `pending`.
+  A `sending` commit admits dispatch but can lose its response before the
+  runtime enters Telegram; the retry ceiling itself is cumulative evidence of
+  no-effect attempts because a may-have-succeeded request takes the separate
+  terminal ambiguity path before exhaustion. Replay of the exhausted terminal
+  callback repeats only the bounded recovery re-arm. Generic definitive
+  failures retain their existing terminal contract; provider success from
+  queued remains invalid.
   Callback-loss recovery treats a stored result and terminal Retell usage as
   sibling obligations in the same reconciliation pass. After the exact row and
   provider-authority reconciliation, those two branches start together and one
