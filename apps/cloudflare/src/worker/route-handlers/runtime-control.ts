@@ -178,6 +178,9 @@ export async function handleRuntimeEnsureProcessingRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const cloudflareRouteReceivedAtEpochMs = Date.now();
+  const commandStartedAtEpochMs =
+    context.runtimeControlAuthTiming?.runtimeControlAuthStartedAtEpochMs
+    ?? cloudflareRouteReceivedAtEpochMs;
   const userId = decodeRouteParam(encodedUserId);
   let ensureRequest: HostedRuntimeEnsureProcessingRequest;
   let commandTimeoutMs: number | null;
@@ -202,34 +205,58 @@ export async function handleRuntimeEnsureProcessingRoute(
       authorizationKind === "vercel-oidc",
     );
     if (authorizationKind === "vercel-oidc") {
-      const executionCtx = context.executionCtx;
-      if (!executionCtx) {
-        throw new Error("Worker execution context is required for direct runtime ensure-processing.");
-      }
-
-      executionCtx.waitUntil(
-        runRuntimeEnsureProcessingForUser({
+      try {
+        const result = await runRuntimeEnsureProcessingForUser({
+          commandStartedAtEpochMs,
           commandTimeoutMs,
           context,
           ensureRequest,
           orchestration,
           userId,
-        }).catch((error: unknown) => {
-          emitHostedExecutionStructuredLog({
-            component: "worker",
-            details: buildWorkerRouteLogDetails({
-              reason: "runtime-ensure-processing-waituntil-failed",
+        });
+        emitHostedExecutionStructuredLog({
+          component: "worker",
+          details: {
+            ...buildWorkerRouteLogDetails({
+              reason: "runtime-ensure-processing-direct-completed",
               routeName: "runtime-ensure-processing",
             }, context.request, userId),
-            error,
-            level: "error",
-            message: "Hosted worker runtime ensure-processing waitUntil task failed.",
-            phase: "failed",
-            userId,
-          });
-        }),
-      );
-      return json({ accepted: true }, 202);
+            orchestrationAttemptId: ensureRequest.orchestrationAttemptId,
+            ...(result.kind === "runtime_processing_accepted"
+              ? {
+                  runtimeAttemptId: result.runtimeAttemptId,
+                  runtimeProcessingAction: result.action,
+                }
+              : {}),
+            runtimeProcessingKind: result.kind,
+          },
+          message: "Hosted worker direct runtime ensure-processing completed.",
+          phase: "runtime.starting",
+          userId,
+        });
+        return json(result);
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "worker",
+          details: {
+            ...buildWorkerRouteLogDetails({
+              reason: "runtime-ensure-processing-direct-failed",
+              routeName: "runtime-ensure-processing",
+            }, context.request, userId),
+            orchestrationAttemptId: ensureRequest.orchestrationAttemptId,
+          },
+          error,
+          level: "error",
+          message: "Hosted worker direct runtime ensure-processing failed.",
+          phase: "failed",
+          userId,
+        });
+        const classified = classifyPublicRouteError(error);
+        return json({
+          code: "runtime_ensure_processing_failed",
+          error: classified.error,
+        }, classified.status);
+      }
     }
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -252,6 +279,7 @@ export async function handleRuntimeEnsureProcessingRoute(
   }
 
   return json(await runRuntimeEnsureProcessingForUser({
+    commandStartedAtEpochMs,
     commandTimeoutMs,
     context,
     ensureRequest,
@@ -333,6 +361,7 @@ async function handleRuntimeShellPrewarmRoute(
 }
 
 function runRuntimeEnsureProcessingForUser(input: {
+  commandStartedAtEpochMs: number;
   commandTimeoutMs: number | null;
   context: WorkerRouteContext;
   ensureRequest: HostedRuntimeEnsureProcessingRequest;
@@ -342,6 +371,7 @@ function runRuntimeEnsureProcessingForUser(input: {
   const stub = input.context.env.USER_RUNNER.getByName(input.userId);
   return stub.ensureRuntimeProcessingForUser({
     ...input.ensureRequest,
+    commandStartedAtEpochMs: input.commandStartedAtEpochMs,
     ...(input.commandTimeoutMs === null ? {} : { commandTimeoutMs: input.commandTimeoutMs }),
     orchestration: input.orchestration,
     userId: input.userId,

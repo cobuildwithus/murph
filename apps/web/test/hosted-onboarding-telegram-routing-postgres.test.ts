@@ -253,6 +253,85 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       },
     );
 
+    it("emits one route-restoration rearm across concurrent direct messages", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_telegram_route_transition_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const ownerWritten = createDeferred<boolean>();
+      const releaseOwner = createDeferred();
+      const contenderPid = createDeferred<number>();
+      const contenderWritten = createDeferred<boolean>();
+      const ownerUpdate = buildDirectTelegramUpdate(710_005);
+      const contenderUpdate = buildDirectTelegramUpdate(710_006);
+      let contenderTransaction: Promise<void> | null = null;
+
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+        },
+      });
+      await observer.$transaction(
+        (tx) => upsertHostedMemberTelegramRoutingBindingTx({
+          memberId,
+          prisma: tx,
+          telegramUserId,
+        }),
+        transactionOptions,
+      );
+
+      const ownerTransaction = owner.$transaction(async (tx) => {
+        const plan = await planHostedOnboardingTelegramWebhook({
+          prisma: tx,
+          update: ownerUpdate,
+        });
+        ownerWritten.resolve(
+          plan.postCommitPhoneCallResultRecoveryMemberIds?.includes(memberId)
+          ?? false,
+        );
+        await releaseOwner.promise;
+      }, transactionOptions);
+
+      try {
+        await Promise.race([ownerWritten.promise, ownerTransaction]);
+        contenderTransaction = contender.$transaction(async (tx) => {
+          contenderPid.resolve(await readBackendPid(tx));
+          const plan = await planHostedOnboardingTelegramWebhook({
+            prisma: tx,
+            update: contenderUpdate,
+          });
+          contenderWritten.resolve(
+            plan.postCommitPhoneCallResultRecoveryMemberIds?.includes(memberId)
+            ?? false,
+          );
+        }, transactionOptions);
+
+        await waitForBlockedBackend({
+          observer,
+          pid: await contenderPid.promise,
+        });
+        await expect(ownerWritten.promise).resolves.toBe(true);
+        releaseOwner.resolve();
+        await expect(ownerTransaction).resolves.toBeUndefined();
+        await expect(contenderTransaction).resolves.toBeUndefined();
+        await expect(contenderWritten.promise).resolves.toBe(false);
+      } finally {
+        releaseOwner.resolve();
+        await Promise.allSettled([
+          ownerTransaction,
+          ...(contenderTransaction ? [contenderTransaction] : []),
+        ]);
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: memberId,
+          },
+        });
+        await disconnectClients([observer, owner, contender]);
+      }
+    });
+
     it("does not let a stale inbound account undo a completed Settings relink", async () => {
       const fixtureId = randomUUID();
       const memberId = `member_telegram_relink_${fixtureId}`;

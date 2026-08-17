@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import {
   createMurphPageMetadata,
@@ -18,7 +19,13 @@ export default async function Page({
   searchParams: Promise<{ tab?: string | string[] }>;
 }) {
   const requestedTab = (await searchParams).tab;
-  const activeTab = Array.isArray(requestedTab) ? requestedTab[0] : requestedTab;
+  const activeTab = Array.isArray(requestedTab)
+    ? requestedTab[0]
+    : requestedTab;
+
+  if (activeTab === "sections") {
+    redirect("/screenshots");
+  }
 
   return (
     <>
