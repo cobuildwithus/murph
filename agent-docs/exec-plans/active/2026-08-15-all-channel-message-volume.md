@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-15
-Updated: 2026-08-15
+Updated: 2026-08-17
 
 ## Goal
 
@@ -75,15 +75,16 @@ Updated: 2026-08-15
 
 ## Tasks
 
-1. Have ReviewGPT trace the delivery owners and return a scoped implementation
-   patch with tests and durable documentation.
-2. Inspect and apply the patch, rejecting any parallel state or retry-sensitive
-   counting design.
-3. Run focused proof, add the changelog fragment, and review the final diff.
-4. Commit, push, open the PR, and start exact-head CI plus both routed ReviewGPT
-   stages concurrently.
-5. Resolve every accepted finding, reach exact-head green, merge, and retire
-   the task worktree through the guarded helper.
+1. [x] Trace the delivery owners and implement the scoped receipt, aggregation,
+   tests, and durable documentation without adding a parallel state owner.
+2. [x] Add the public changelog entry and verify its responsive rendered card.
+3. [x] Open PR #1917 and run focused local proof plus exact-head CI.
+4. [x] Resolve the final ReviewGPT findings with the existing runner schema
+   floor and outbox wake owner; final correction review passed.
+5. [x] Resolve the preliminary specialist findings with truthful sent-message
+   copy, a real-vault recovery test, and a real-PostgreSQL concurrency proof.
+6. [ ] Push the specialist corrections, reach exact-head green, complete the
+   merge-tree/base-update boundary, merge, and retire the task worktree.
 
 ## Decisions
 
@@ -92,10 +93,29 @@ Updated: 2026-08-15
   each channel's tracker cutover.
 - No user or message identifiers may enter the public metric, tests, changelog,
   PR body, or review artifacts.
+- Successful Telegram/email provider handoff creates one anonymous receipt
+  obligation on the existing outbox intent. Signed retries upsert one Web row
+  by a digest of authenticated member, channel, and stable outbox dedupe key.
+- Group-email recipient children count once; the planning parent, reactions,
+  and ephemeral progress sends count zero.
+- Receipt retry reuses `nextAttemptAt`, the existing assistant wake projection,
+  and an eight-item recovery cap. The first persisted v17 intent establishes a
+  Cloudflare rollback floor.
+- Public copy says "successfully sent" because provider acceptance does not
+  prove handset receipt or reading.
 
 ## Verification
 
-- Pending ReviewGPT implementation handoff.
-- Pending focused tests and typecheck.
-- Pending preliminary specialist and final ReviewGPT gates.
-- Pending exact-head required CI and merge-tree proof.
+- Final ReviewGPT correction audit: PASS at `35d1ac1dc7`; both accepted findings
+  (v17 schema floor and autonomous receipt continuation) were verified fixed.
+- Preliminary specialist audit: findings resolved. The refreshed copy uses
+  "successfully sent"; the real-vault recovery proof passes (1 test); the
+  guarded real-PostgreSQL concurrent-upsert proof passes (1 test).
+- Changelog generation and focused changelog tests pass (46 tests).
+- Assistant Runtime and Web typechecks pass after the specialist corrections.
+- Earlier focused suites pass for Assistant Engine (22 tests), Assistant
+  Runtime delivery/callback/workspace behavior (549 tests), Cloudflare runner
+  behavior (2,547 passed, 2 skipped), Web receipt/migration/growth behavior
+  (56 tests), and the changelog page (8 tests).
+- Pending the specialist-correction push, exact-head required CI, merge-tree
+  proof, merge, and guarded worktree retirement.

@@ -305,7 +305,7 @@ is reconciled; later known daily bars may still render. State that the daily
 message total combines inbound messages across supported channels with tracked
 successful Linq, Telegram, and email outbound messages. Telegram and email
 begin at their explicit post-cutover receipt date; do not imply reconstructed
-older history. For group email, count each successfully delivered recipient
+older history. For group email, count each successfully sent recipient
 child once and the recipient-planning parent zero times. For the new
 Telegram/email contribution, exclude reactions and ephemeral progress updates;
 the total must follow durable outbox-backed conversational delivery ownership

@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "A more complete message count",
     "summary": "Murph's public message total now includes successful conversational Telegram and email replies alongside incoming messages and tracked iMessage replies.",
-    "details": "Tracking begins with this release and counts each delivered conversation message once, including one message per delivered group-email recipient. Older Telegram and email history is not reconstructed.",
+    "details": "Tracking begins with this release and counts each successfully sent conversation message once, including one sent message per group-email recipient. Older Telegram and email history is not reconstructed.",
     "relevanceTags": ["messaging", "reliability"],
     "sourcePullRequests": [1917]
   }
