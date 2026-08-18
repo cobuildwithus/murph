@@ -429,13 +429,18 @@ test("destructive database reset is limited to an explicitly E2E-named database"
 });
 
 test("destructive database reset assumes the canonical schema owner", () => {
-  const ownedUrl = new URL(withDedicatedDatabaseOwner(
+  const ownedConnectionString = withDedicatedDatabaseOwner(
     "postgresql://credential@db.example.test/native_ios_e2e?sslmode=require&options=-c%20statement_timeout%3D10000",
-  ));
+  );
+  const ownedUrl = new URL(ownedConnectionString);
   assert.equal(ownedUrl.searchParams.get("sslmode"), "require");
   assert.equal(
     ownedUrl.searchParams.get("options"),
     "-c statement_timeout=10000 -c role=postgres",
+  );
+  assert.equal(
+    ownedUrl.search,
+    "?sslmode=require&options=-c%20statement_timeout%3D10000%20-c%20role%3Dpostgres",
   );
 });
 
