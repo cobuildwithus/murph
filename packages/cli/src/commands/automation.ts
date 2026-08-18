@@ -7,6 +7,7 @@ import {
   automationAssistantTargetOverrideSchema,
   automationActiveUntilSchema,
   automationContinuityPolicyValues,
+  automationPlannedOccurrenceOffsetMsSchema,
   automationDeviceActivityKindSchema,
   automationRouteSchema,
   automationScaffoldPayloadSchema,
@@ -106,6 +107,9 @@ export const automationRecordSchema = z
     route: automationRouteSchema,
     assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable(),
     supportKind: z.enum(automationSupportKindValues).nullable(),
+    plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema
+      .nullable()
+      .default(null),
     continuityPolicy: z.enum(automationContinuityPolicyValues),
     tags: z.array(z.string().min(1)),
     createdAt: z.string().min(1),
@@ -382,6 +386,21 @@ function buildAutomationSupportKindPatchFromOptions(input: {
   return input.supportKind;
 }
 
+function buildAutomationPlannedOccurrenceOffsetPatchFromOptions(input: {
+  clearPlannedOccurrenceOffset?: boolean;
+  plannedOccurrenceOffsetMs?: number;
+}): number | null | undefined {
+  if (input.clearPlannedOccurrenceOffset === true) {
+    if (input.plannedOccurrenceOffsetMs !== undefined) {
+      return invalidAutomationOption(
+        "--clear-planned-occurrence-offset cannot be combined with --planned-occurrence-offset-ms.",
+      );
+    }
+    return null;
+  }
+  return input.plannedOccurrenceOffsetMs;
+}
+
 function normalizeAutomationTagOptions(input: {
   existingTags?: readonly string[];
   supportSeriesId?: string;
@@ -499,6 +518,9 @@ const automationSharedOptionSchemas = {
     .enum(automationSupportKindValues)
     .optional()
     .describe("Persist the exact accepted support purpose for a plan-owned automation."),
+  plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema
+    .optional()
+    .describe("Milliseconds from this reminder to the planned session occurrence."),
   continuityPolicy: z
     .enum(automationContinuityPolicyValues)
     .optional()
@@ -623,6 +645,10 @@ const automationEditOptionSchemas = {
     .boolean()
     .optional()
     .describe("Clear persisted plan-support consent metadata."),
+  clearPlannedOccurrenceOffset: z
+    .boolean()
+    .optional()
+    .describe("Clear the planned session occurrence offset."),
   clearAssistantTargetOverride: z
     .boolean()
     .optional()
@@ -698,6 +724,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           assistantTargetOverrideReasoningEffort: context.options.assistantTargetOverrideReasoningEffort,
         }),
         supportKind: context.options.supportKind,
+        plannedOccurrenceOffsetMs: context.options.plannedOccurrenceOffsetMs,
         instructions: context.options.instructions,
         route,
         schedule: buildAutomationScheduleFromOptions({
@@ -816,6 +843,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         supportKind: buildAutomationSupportKindPatchFromOptions({
           clearSupportKind: context.options.clearSupportKind,
           supportKind: context.options.supportKind,
+        }),
+        plannedOccurrenceOffsetMs: buildAutomationPlannedOccurrenceOffsetPatchFromOptions({
+          clearPlannedOccurrenceOffset: context.options.clearPlannedOccurrenceOffset,
+          plannedOccurrenceOffsetMs: context.options.plannedOccurrenceOffsetMs,
         }),
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,

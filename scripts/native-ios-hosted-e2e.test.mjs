@@ -14,12 +14,14 @@ import {
 import {
   buildDedicatedDatabasePoolOptions,
   buildJunctionClientUserId,
+  cleanupE2e,
   inspectDedicatedMemberIdentity,
   inspectE2eDatabaseUrls,
   inspectFreshPrivyPrincipal,
   inspectJunctionAppleHealthConnection,
   inspectNamespacedJunctionUsers,
   inspectResolvedJunctionUser,
+  withDedicatedDatabaseOwner,
 } from "./native-ios-hosted-e2e-identity.mjs";
 import {
   buildDispatchInputs,
@@ -32,6 +34,7 @@ import {
   runBoundedCommand,
 } from "./native-ios-hosted-e2e-support.mjs";
 import {
+  createE2eDeployment,
   inspectPublicCandidateResponse,
   inspectRetirableE2eDeployment,
   inspectVercelCustomEnvironment,
@@ -223,6 +226,60 @@ test("Vercel proof binds project, custom environment, ref, and exact PR SHA", ()
   }
 });
 
+test("Vercel deployment creation sends only current strict API fields", async () => {
+  const env = {
+    GITHUB_REPOSITORY_ID: "123456789",
+    NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: "env_e2e",
+    NATIVE_IOS_E2E_VERCEL_PROJECT_ID: "prj_e2e",
+    NATIVE_IOS_E2E_VERCEL_PROJECT_NAME: "murph-native-ios-e2e",
+    NATIVE_IOS_E2E_VERCEL_TOKEN: "vercel_test_token",
+  };
+  const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  let requestBody;
+  try {
+    Object.assign(process.env, env);
+    globalThis.fetch = async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ id: "dpl_123" }), {
+        headers: { "content-type": "application/json" },
+      });
+    };
+    console.log = () => undefined;
+
+    assert.deepEqual(await createE2eDeployment({
+      correlationId: "murph-pr-test",
+      ref: "feature/native-e2e",
+      sha: SHA,
+    }), { id: "dpl_123" });
+    assert.deepEqual(requestBody, {
+      customEnvironmentSlugOrId: "env_e2e",
+      gitSource: {
+        ref: "feature/native-e2e",
+        repoId: 123456789,
+        sha: SHA,
+        type: "github",
+      },
+      meta: {
+        murphNativeIosE2e: NATIVE_IOS_HOSTED_E2E_LANE_MARKER,
+        murphNativeIosE2eContract: NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
+        murphNativeIosE2eCorrelationId: "murph-pr-test",
+      },
+      name: "murph-native-ios-e2e",
+      project: "prj_e2e",
+    });
+    assert.equal(Object.hasOwn(requestBody, "public"), false);
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 test("Vercel native E2E migration failure stops ordinary migration and build", async () => {
   const config = JSON.parse(await readFile(path.join(WEB_ROOT, "vercel.json"), "utf8"));
   assert.equal(config.buildCommand, "sh scripts/vercel-build.sh");
@@ -371,6 +428,22 @@ test("destructive database reset is limited to an explicitly E2E-named database"
   }
 });
 
+test("destructive database reset assumes the canonical schema owner", () => {
+  const ownedConnectionString = withDedicatedDatabaseOwner(
+    "postgresql://credential@db.example.test/native_ios_e2e?sslmode=require&options=-c%20statement_timeout%3D10000",
+  );
+  const ownedUrl = new URL(ownedConnectionString);
+  assert.equal(ownedUrl.searchParams.get("sslmode"), "require");
+  assert.equal(
+    ownedUrl.searchParams.get("options"),
+    "-c statement_timeout=10000 -c role=postgres",
+  );
+  assert.equal(
+    ownedUrl.search,
+    "?sslmode=require&options=-c%20statement_timeout%3D10000%20-c%20role%3Dpostgres",
+  );
+});
+
 test("Junction cleanup isolates one E2E namespace inside a shared sandbox team", () => {
   const expectedTeamId = "11111111-1111-4111-8111-111111111111";
   const owned = {
@@ -465,6 +538,65 @@ test("cleanup ownership enumerates the namespace before and after deletion", asy
     cleanupConfigSource,
     /NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
   );
+});
+
+test("database reset failure emits only the allowlisted command reason", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-database-reset-"));
+  const binDir = path.join(tempDir, "bin");
+  const fakePnpm = path.join(binDir, "pnpm");
+  const envNames = [
+    "NATIVE_IOS_E2E_DATABASE_URL",
+    "NATIVE_IOS_E2E_DIRECT_DATABASE_URL",
+    "NATIVE_IOS_E2E_JUNCTION_API_KEY",
+    "NATIVE_IOS_E2E_JUNCTION_TEAM_ID",
+    "PATH",
+  ];
+  const originalEnv = new Map(envNames.map((name) => [name, process.env[name]]));
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const logs = [];
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakePnpm, [
+      "#!/bin/sh",
+      "printf 'provider output must stay hidden\\n' >&2",
+      "exit 42",
+    ].join("\n") + "\n", { mode: 0o755 });
+    process.env.NATIVE_IOS_E2E_DATABASE_URL = "postgresql://owner@db.example.test/native_ios_e2e";
+    process.env.NATIVE_IOS_E2E_DIRECT_DATABASE_URL = "postgresql://owner@db.example.test/native_ios_e2e";
+    process.env.NATIVE_IOS_E2E_JUNCTION_API_KEY = "sk_us_test";
+    process.env.NATIVE_IOS_E2E_JUNCTION_TEAM_ID = "11111111-1111-4111-8111-111111111111";
+    process.env.PATH = `${binDir}:${originalEnv.get("PATH") ?? ""}`;
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      limit: 500,
+      offset: 0,
+      total: 0,
+      users: [],
+    }), { headers: { "content-type": "application/json" } });
+    console.log = (...args) => logs.push(args.join(" "));
+
+    await assert.rejects(() => cleanupE2e("e2e"), /E2E database reset failed/u);
+    assert.deepEqual(logs, [
+      "::notice::native-ios-e2e stage=junction_cleanup result=absent",
+      "::notice::native-ios-e2e stage=database_reset result=started",
+      "::error::native-ios-e2e stage=database_reset result=failure reason=command_exit",
+    ]);
+    assert.doesNotMatch(logs.join("\n"), /provider output/u);
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("database validator declares its PostgreSQL runtime at the controller root", async () => {
+  const rootPackage = JSON.parse(await readFile(path.join(REPO_ROOT, "package.json"), "utf8"));
+  assert.equal(rootPackage.devDependencies?.pg, "8.20.0");
+  assert.equal(typeof (await import("pg")).default?.Pool, "function");
 });
 
 test("database and child-command timeout contracts are explicit and fail closed", () => {
@@ -775,7 +907,29 @@ test("PR lifecycle stays red when final cleanup fails", async () => {
     now: () => 123,
     postconditions: async () => undefined,
     retire: async () => undefined,
-  }), /final cleanup did not complete/u);
+  }), /finalization failed at cleanup_after_run/u);
+});
+
+test("PR lifecycle retains secret-safe primary and finalization stage names", async () => {
+  let cleanupCalls = 0;
+  await assert.rejects(() => runPrLifecycle({
+    cleanup: async () => {
+      cleanupCalls += 1;
+      if (cleanupCalls === 2) throw new Error("provider payload must stay hidden");
+    },
+    deploy: async () => { throw new Error("candidate payload must stay hidden"); },
+    dispatch: async () => undefined,
+    now: () => 123,
+    postconditions: async () => undefined,
+    retire: async () => undefined,
+  }), (error) => {
+    assert.equal(
+      error.message,
+      "Native iOS E2E failed at deploy; fail-closed finalization failed at cleanup_after_run.",
+    );
+    assert.doesNotMatch(error.message, /provider payload|candidate payload/u);
+    return true;
+  });
 });
 
 function runWorkflowSelector(workflow, file) {

@@ -345,7 +345,7 @@ function decodedSystemWakeMatchesMailboxItem(
 ): wake is HostedExecutionSystemWake {
   const baseIdentityMatches = wake.kind !== "conversation.message"
     && wake.userId === item.item.userId
-    && wake.occurredAt === item.item.occurredAt
+    && hostedMailboxInstantsMatch(wake.occurredAt, item.item.occurredAt)
     && wake.eventId === item.item.dedupeKey
     && wake.kind === item.item.kind;
   if (!baseIdentityMatches) {
@@ -359,4 +359,12 @@ function decodedSystemWakeMatchesMailboxItem(
       && wake.ask.expiresAt === item.item.expiresAt;
   }
   return true;
+}
+
+function hostedMailboxInstantsMatch(left: string, right: string): boolean {
+  const leftTimestamp = Date.parse(left);
+  const rightTimestamp = Date.parse(right);
+  return Number.isFinite(leftTimestamp)
+    && Number.isFinite(rightTimestamp)
+    && leftTimestamp === rightTimestamp;
 }

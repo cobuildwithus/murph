@@ -396,6 +396,9 @@ describe("BiomarkerPage", () => {
         biomarkerId: "resting-heart-rate",
       }),
     })).resolves.toEqual(expect.objectContaining({
+      alternates: {
+        canonical: "/biomarkers/resting-heart-rate",
+      },
       description: expect.stringContaining("quiet rest"),
       openGraph: expect.objectContaining({
         images: [
@@ -407,6 +410,7 @@ describe("BiomarkerPage", () => {
         ],
         type: "article",
       }),
+      robots: { follow: true, index: true },
       title: "Resting Heart Rate | Murph Biomarkers",
       twitter: expect.objectContaining({
         images: [

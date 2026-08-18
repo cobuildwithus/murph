@@ -350,6 +350,13 @@ export const assistantExternalThreadRouteAuthoritySchema = z
 export const assistantOutboxAutomationAuthoritySchema = z
   .object({
     automationId: z.string().trim().min(1),
+    supportSeriesId: z.string().trim().min(1).optional(),
+    // Legacy parse-only fields retained for one 14-day terminal-outbox
+    // retention window after all writers stopped emitting them. They are inert:
+    // current delivery uses expectedUpdatedAt, while historical replies use
+    // supportSeriesId plus the delivered occurrence.
+    automationRelativePath: z.string().trim().min(1).optional(),
+    expectedSemanticRevision: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
     expectedUpdatedAt: isoTimestampSchema,
   })
   .strict()
@@ -1016,6 +1023,9 @@ export const assistantOutboxIntentSchema = z
     automationAuthority: assistantOutboxAutomationAuthoritySchema
       .nullable()
       .optional(),
+    scheduledOccurrenceAt: isoTimestampSchema.nullable().optional(),
+    // Exact event time derived from the durable automation lead at fire time.
+    plannedOccurrenceAt: isoTimestampSchema.nullable().optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),

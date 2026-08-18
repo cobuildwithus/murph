@@ -490,6 +490,7 @@ describe("hosted phone-call reconciliation Workflow", () => {
       resultJson: null,
       resultNotificationChannel: "telegram",
       status: "failed",
+      stopRequestedAt: null,
       updatedAt: endedAt,
     };
     const resultCommitted = createDeferred();

@@ -44,6 +44,7 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
     "Bounded initiating direct-channel discriminator used to route asynchronous results.",
   ),
   status: operational("Bounded call lifecycle enum."),
+  stopRequestedAt: operational("Member stop-intent lifecycle timestamp; contains no call content."),
   updatedAt: operational("Row concurrency timestamp; contains no call content."),
 } satisfies Record<string, PrivateStorageClassification>;
 
@@ -102,7 +103,7 @@ describe("HostedPhoneCall private-storage classification", () => {
     expect(migration).toContain(
       'CREATE TYPE "HostedPhoneCallResultNotificationChannel"',
     );
-    expect(migration).toContain("AS ENUM ('telegram')");
+    expect(migration).toContain("AS ENUM ('linq', 'telegram')");
     expect(migration).toContain(
       'CREATE TYPE "HostedPhoneCallResultDeliveryStatus"',
     );

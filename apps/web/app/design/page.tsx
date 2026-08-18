@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphPageMetadata,
+  MURPH_NOINDEX_PAGE_ROBOTS,
+} from "@/src/lib/site-metadata";
 import { DesignPage } from "./design-page";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Murph — Design",
   description: "Brand guidelines, visual identity, and component library.",
+  robots: MURPH_NOINDEX_PAGE_ROBOTS,
 });
 
 export default async function Page({

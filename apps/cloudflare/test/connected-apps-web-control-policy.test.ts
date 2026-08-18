@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_CONNECTED_APPS_PATH } from "@murphai/hosted-execution/connected-apps";
-import { HOSTED_PHONE_CALLS_PATH } from "@murphai/hosted-execution/phone-calls";
+import {
+  HOSTED_PHONE_CALLS_PATH,
+  HOSTED_PHONE_CALL_STATUS_PATH,
+  HOSTED_PHONE_CALL_STOP_PATH,
+} from "@murphai/hosted-execution/phone-calls";
 
 const mocks = vi.hoisted(() => ({
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
@@ -54,7 +58,7 @@ describe("connected-app web-control policy", () => {
     }).allowed).toBe(false);
   });
 
-  it("allows only the bounded phone-call start route", () => {
+  it("allows only the bounded phone-call control routes", () => {
     expect(readHostedRunnerWebControlPolicy({
       method: "POST",
       path: HOSTED_PHONE_CALLS_PATH,
@@ -65,6 +69,28 @@ describe("connected-app web-control policy", () => {
     expect(readHostedRunnerWebControlPolicy({
       method: "GET",
       path: HOSTED_PHONE_CALLS_PATH,
+    }).allowed).toBe(false);
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: HOSTED_PHONE_CALL_STATUS_PATH,
+    })).toEqual({
+      allowed: true,
+      operation: "phone_call_status",
+    });
+    expect(readHostedRunnerWebControlPolicy({
+      method: "GET",
+      path: HOSTED_PHONE_CALL_STATUS_PATH,
+    }).allowed).toBe(false);
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: HOSTED_PHONE_CALL_STOP_PATH,
+    })).toEqual({
+      allowed: true,
+      operation: "phone_call_stop",
+    });
+    expect(readHostedRunnerWebControlPolicy({
+      method: "GET",
+      path: HOSTED_PHONE_CALL_STOP_PATH,
     }).allowed).toBe(false);
     expect(readHostedRunnerWebControlPolicy({
       method: "POST",

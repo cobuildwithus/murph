@@ -1311,6 +1311,12 @@
                             "weekly_digest"
                           ]
                         },
+                        "plannedOccurrenceOffsetMs": {
+                          "description": "Milliseconds from this reminder to the planned session occurrence.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
                         "continuityPolicy": {
                           "description": "Optional continuity policy for scheduled assistant context.",
                           "type": "string",
@@ -1534,6 +1540,12 @@
                             "weekly_digest"
                           ]
                         },
+                        "plannedOccurrenceOffsetMs": {
+                          "description": "Milliseconds from this reminder to the planned session occurrence.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
                         "continuityPolicy": {
                           "description": "Optional continuity policy for scheduled assistant context.",
                           "type": "string",
@@ -1673,6 +1685,10 @@
                         },
                         "clearSupportKind": {
                           "description": "Clear persisted plan-support consent metadata.",
+                          "type": "boolean"
+                        },
+                        "clearPlannedOccurrenceOffset": {
+                          "description": "Clear the planned session occurrence offset.",
                           "type": "boolean"
                         },
                         "clearAssistantTargetOverride": {
@@ -12205,6 +12221,10 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 128
+                                },
+                                "reminderIntentId": {
+                                  "description": "Provider-accepted private reminder intent id from trusted ordered conversation context. The canonical writer derives and deduplicates the occurrence from it.",
+                                  "type": "string"
                                 },
                                 "date": {
                                   "description": "Optional intended local session date in YYYY-MM-DD form.",
