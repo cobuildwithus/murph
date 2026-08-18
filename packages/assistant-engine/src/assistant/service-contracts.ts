@@ -174,6 +174,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
+  outboxAutomationContextReferences?: AssistantOutboxIntent['automationContextReferences']
   outboxPlannedOccurrenceAt?: string | null
   outboxExternalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   persistUserPromptOnFailure?: boolean

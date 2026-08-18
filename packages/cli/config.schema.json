@@ -1317,6 +1317,14 @@
                           "minimum": 0,
                           "maximum": 9007199254740991
                         },
+                        "contextReference": {
+                          "description": "Exact canonical record in <entity-kind>=<entity-id> form. Repeat for multiple records; routing and interpretation context only.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 3
+                          }
+                        },
                         "continuityPolicy": {
                           "description": "Optional continuity policy for scheduled assistant context.",
                           "type": "string",
@@ -1546,6 +1554,14 @@
                           "minimum": 0,
                           "maximum": 9007199254740991
                         },
+                        "contextReference": {
+                          "description": "Exact canonical record in <entity-kind>=<entity-id> form. Repeat for multiple records; routing and interpretation context only.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 3
+                          }
+                        },
                         "continuityPolicy": {
                           "description": "Optional continuity policy for scheduled assistant context.",
                           "type": "string",
@@ -1689,6 +1705,10 @@
                         },
                         "clearPlannedOccurrenceOffset": {
                           "description": "Clear the planned session occurrence offset.",
+                          "type": "boolean"
+                        },
+                        "clearContextReferences": {
+                          "description": "Clear all canonical routing and interpretation references.",
                           "type": "boolean"
                         },
                         "clearAssistantTargetOverride": {

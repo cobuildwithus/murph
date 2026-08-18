@@ -1544,6 +1544,9 @@ function createHostedAssistantAutomationTool(input: {
             : { assistantTargetOverride: request.assistantTargetOverride }),
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
+          ...(request.contextReferences === undefined
+            ? {}
+            : { contextReferences: [...request.contextReferences] }),
           createOnly: true,
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
@@ -1618,6 +1621,9 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.continuityPolicy === undefined
           ? {}
           : { continuityPolicy: request.continuityPolicy }),
+        ...(request.contextReferences === undefined
+          ? {}
+          : { contextReferences: [...request.contextReferences] }),
         expectedUpdatedAt: request.expectedUpdatedAt,
         ...(request.instructions === undefined
           ? {}
@@ -1828,6 +1834,7 @@ async function projectHostedAutomationResponseFields(input: {
   const timingVerificationIssueList = [...timingVerificationIssues];
   return {
     automationId: input.record.automationId,
+    contextReferences: [...input.record.contextReferences],
     effectiveTimeZone,
     lookupId: input.record.slug,
     nextOccurrenceAt,

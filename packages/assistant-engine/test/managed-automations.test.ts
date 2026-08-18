@@ -13,6 +13,7 @@ type StoredAutomationRecord = {
     reasoningEffort?: string | null
   } | null
   continuityPolicy: 'fresh' | 'preserve'
+  contextReferences?: Array<{ entityId: string; entityKind: string }>
   instructions: string
   route: {
     channel: string
@@ -238,6 +239,7 @@ beforeEach(() => {
       automationId?: string
       assistantTargetOverride?: StoredAutomationRecord['assistantTargetOverride']
       continuityPolicy: 'fresh' | 'preserve'
+      contextReferences?: StoredAutomationRecord['contextReferences']
       instructions: string
       route: StoredAutomationRecord['route']
       schedule: StoredAutomationRecord['schedule']
@@ -260,6 +262,10 @@ beforeEach(() => {
             ? existing?.assistantTargetOverride ?? null
             : input.assistantTargetOverride,
         continuityPolicy: input.continuityPolicy,
+        contextReferences:
+          input.contextReferences === undefined
+            ? existing?.contextReferences ?? []
+            : [...input.contextReferences],
         instructions: input.instructions,
         route: input.route,
         schedule: input.schedule,
@@ -283,6 +289,7 @@ beforeEach(() => {
       activeUntil?: string | null
       assistantTargetOverride?: StoredAutomationRecord['assistantTargetOverride']
       continuityPolicy?: 'fresh' | 'preserve'
+      contextReferences?: StoredAutomationRecord['contextReferences']
       instructions?: string
       lookup: string
       route?: StoredAutomationRecord['route']
@@ -312,6 +319,10 @@ beforeEach(() => {
             ? existing.assistantTargetOverride
             : input.assistantTargetOverride,
         continuityPolicy: input.continuityPolicy ?? existing.continuityPolicy,
+        contextReferences:
+          input.contextReferences === undefined
+            ? existing.contextReferences
+            : [...input.contextReferences],
         instructions: input.instructions ?? existing.instructions,
         route: input.route ?? existing.route,
         schedule: input.schedule ?? existing.schedule,
@@ -500,6 +511,10 @@ describe('applyMurphManagedAutomations', () => {
     const progressSeed: MurphManagedAutomationSeed = {
       automationId: 'automation_desired_progress',
       continuityPolicy: 'fresh',
+      contextReferences: [{
+        entityId: 'exp_DESIRED_SUPPORT_SERIES',
+        entityKind: 'experiment',
+      }],
       instructions: 'Send the desired progress milestone.',
       schedule: { kind: 'at', at: '2026-06-09T13:00:00.000Z' },
       slug: 'experiment-progress-desired-day-4',
@@ -585,8 +600,13 @@ describe('applyMurphManagedAutomations', () => {
         shouldYield: null,
         vaultRoot,
       })
-    expect(managedAutomationMocks.records.get(progressSeed.automationId)?.status)
-      .toBe('active')
+    expect(managedAutomationMocks.records.get(progressSeed.automationId)).toMatchObject({
+      contextReferences: [{
+        entityId: 'exp_DESIRED_SUPPORT_SERIES',
+        entityKind: 'experiment',
+      }],
+      status: 'active',
+    })
     expect(managedAutomationMocks.records.get(finalSeed.automationId)?.tags)
       .toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(managedAutomationMocks.records.get(staleSameSeries.automationId)?.status)
