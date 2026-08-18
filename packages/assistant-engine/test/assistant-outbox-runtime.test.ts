@@ -33,7 +33,10 @@ import {
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
-import { resolveAssistantGeneratedImageDelivery } from '../src/assistant/response-media.ts'
+import {
+  hasAssistantOutboxDeliveryEvidence,
+  resolveAssistantGeneratedImageDelivery,
+} from '../src/assistant/response-media.ts'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   hasAssistantSeenFirstContact,
@@ -64,12 +67,15 @@ import {
   drainAssistantOutboxLocal,
   deliverAssistantOutboxReaction,
   deliverAssistantOutboxMessage,
+  listAssistantOutboxIntentsForAutoReplyRoute,
   listAssistantOutboxIntentsLocal,
   readAssistantOutboxIntentMirrorState,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
+import { createAssistantAutoReplyHistoryReader } from '../src/assistant/automation/reply.ts'
+import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import {
   buildAssistantCronNotificationDedupeToken,
 } from '../src/assistant/cron/notification-delivery.ts'
@@ -501,6 +507,278 @@ describe('assistant outbox runtime', () => {
         entry.endsWith('.json'),
       ),
     ).toHaveLength(1)
+  })
+
+  it.each(['missing', 'corrupt'] as const)(
+    'serializes %s projection recovery with a concurrent outbox writer',
+    async (projectionState) => {
+      const { vaultRoot } = await createAssistantVault(
+        `assistant-outbox-dedupe-${projectionState}-recovery-lock-`,
+      )
+      const createdAt = '2026-04-08T00:10:00.000Z'
+      const routeTarget = 'projection-recovery-route'
+      const seeded = await createIntent(vaultRoot, {
+        channel: 'telegram',
+        createdAt,
+        explicitTarget: routeTarget,
+        message: 'projection recovery route seed',
+        sessionId: 'session-projection-recovery-route',
+        threadId: 'thread-projection-recovery-route',
+        turnId: 'turn-projection-recovery-route',
+      })
+      const sent = await saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        attemptCount: 1,
+        delivery: createDelivery({
+          channel: 'telegram',
+          providerMessageId: 'provider-projection-recovery-route',
+          providerThreadId: routeTarget,
+          sentAt: createdAt,
+          target: routeTarget,
+          targetKind: 'explicit',
+        }),
+        lastAttemptAt: createdAt,
+        nextAttemptAt: null,
+        sentAt: createdAt,
+        status: 'sent',
+        updatedAt: createdAt,
+      })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const projectionPath = path.join(
+        paths.stateDirectory,
+        'outbox-dedupe.sqlite',
+      )
+      let writerEntered!: () => void
+      const writerStarted = new Promise<void>((resolve) => {
+        writerEntered = resolve
+      })
+      let releaseWriter!: () => void
+      const writerMayContinue = new Promise<void>((resolve) => {
+        releaseWriter = resolve
+      })
+      const writer = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+        if (projectionState === 'missing') {
+          await rm(projectionPath, { force: true })
+        } else {
+          await writeFile(projectionPath, 'not a sqlite database', 'utf8')
+        }
+        writerEntered()
+        await writerMayContinue
+        return await createIntent(vaultRoot, {
+          createdAt: '2026-04-08T00:11:00.000Z',
+          dedupeToken: 'concurrent-projection-recovery-token',
+          message: 'concurrent projection recovery intent',
+          sessionId: 'session-concurrent-projection-recovery',
+          turnId: 'turn-concurrent-projection-recovery',
+        })
+      })
+
+      await writerStarted
+      let routeReadSettled = false
+      const routeRead = listAssistantOutboxIntentsForAutoReplyRoute({
+        actorId: sent.actorId,
+        channel: 'telegram',
+        deliveryTarget: routeTarget,
+        identityId: sent.identityId,
+        providerMessageId: null,
+        threadId: sent.threadId,
+        vault: vaultRoot,
+      })
+      void routeRead.then(
+        () => {
+          routeReadSettled = true
+        },
+        () => {
+          routeReadSettled = true
+        },
+      )
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      expect(routeReadSettled).toBe(false)
+
+      releaseWriter()
+      const concurrentIntent = await writer
+      await expect(routeRead).resolves.toEqual([
+        expect.objectContaining({ intentId: sent.intentId }),
+      ])
+      const retry = await createIntent(vaultRoot, {
+        createdAt: '2026-04-08T00:12:00.000Z',
+        dedupeToken: 'concurrent-projection-recovery-token',
+        message: 'concurrent projection recovery intent',
+        sessionId: 'session-concurrent-projection-recovery',
+        turnId: 'turn-concurrent-projection-recovery',
+      })
+      expect(retry.intentId).toBe(concurrentIntent.intentId)
+      expect(
+        (await readdir(paths.outboxDirectory)).filter((entry) =>
+          entry.endsWith('.json'),
+        ),
+      ).toHaveLength(2)
+    },
+    120_000,
+  )
+
+  it('fails closed when an auto-reply foreground route exceeds 100 intents', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-auto-reply-route-bound-',
+    )
+    const createdAt = '2026-04-08T00:20:00.000Z'
+    const routeTarget = 'auto-reply-bound-route'
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'telegram',
+      createdAt,
+      explicitTarget: routeTarget,
+      message: 'auto-reply route bound seed',
+      sessionId: 'session-auto-reply-route-bound',
+      threadId: 'thread-auto-reply-route-bound',
+      turnId: 'turn-auto-reply-route-bound',
+    })
+    const sent = await saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 1,
+      delivery: createDelivery({
+        channel: 'telegram',
+        providerMessageId: 'provider-auto-reply-route-bound-000',
+        providerThreadId: routeTarget,
+        sentAt: createdAt,
+        target: routeTarget,
+        targetKind: 'explicit',
+      }),
+      lastAttemptAt: createdAt,
+      nextAttemptAt: null,
+      sentAt: createdAt,
+      status: 'sent',
+      updatedAt: createdAt,
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await Promise.all(Array.from({ length: 100 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const timestamp = new Date(
+        Date.parse(createdAt) + index * 1_000,
+      ).toISOString()
+      const delivery = expectMessageDelivery(sent.delivery)
+      const intent = {
+        ...sent,
+        createdAt: timestamp,
+        delivery: {
+          ...delivery,
+          providerMessageId: `provider-auto-reply-route-bound-${suffix}`,
+          sentAt: timestamp,
+        },
+        intentId: `outbox_auto_reply_route_bound_${suffix}`,
+        sentAt: timestamp,
+        updatedAt: timestamp,
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+
+    await expect(listAssistantOutboxIntentsForAutoReplyRoute({
+      actorId: sent.actorId,
+      channel: 'telegram',
+      deliveryTarget: routeTarget,
+      identityId: sent.identityId,
+      providerMessageId: null,
+      threadId: sent.threadId,
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_AUTO_REPLY_ROUTE_BOUND_EXCEEDED',
+    })
+  }, 120_000)
+
+  it('keeps accepted Linq media in native-reply history after a terminal rich-link failure', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-terminal-partial-linq-history-',
+    )
+    const media: AssistantOutboxIntent['media'][number] = {
+      alt: 'Generated portrait',
+      contentType: 'image/png',
+      filename: 'generated-portrait.png',
+      kind: 'vault_image',
+      ref: 'raw/captures/2026/08/generated-portrait.png',
+      sha256: '7'.repeat(64),
+      sizeBytes: 7,
+      source: 'gpt-image-2',
+    }
+    const intentInput: Parameters<typeof createIntent>[1] = {
+      actorId: null,
+      channel: 'linq',
+      createdAt: '2026-04-08T00:30:00.000Z',
+      dedupeToken: 'terminal-partial-linq-history',
+      explicitTarget: 'linq-terminal-partial-thread',
+      identityId: 'participant-terminal-partial',
+      media: [media],
+      message: 'Generated portrait',
+      sessionId: 'session-terminal-partial-linq',
+      threadId: 'linq-terminal-partial-thread',
+      threadIsDirect: false,
+      turnId: 'turn-terminal-partial-linq',
+    }
+    const seeded = await createIntent(vaultRoot, intentInput)
+    const providerMessageId = 'linq-terminal-partial-primary'
+    const failed = await saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 3,
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageEffects: [{
+          carriesIntentMedia: true,
+          message: 'Generated portrait',
+          providerMessageId,
+        }],
+        providerMessageId,
+        providerMessageIds: [providerMessageId],
+        providerThreadId: 'linq-terminal-partial-thread',
+        sentAt: '2026-04-08T00:30:01.000Z',
+        target: 'linq-terminal-partial-thread',
+        targetKind: 'thread',
+      }),
+      deliveryConfirmationPending: false,
+      lastAttemptAt: '2026-04-08T00:31:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+        message: 'The rich-link sibling exhausted retries.',
+      },
+      nextAttemptAt: null,
+      sentAt: null,
+      status: 'failed',
+      updatedAt: '2026-04-08T00:31:00.000Z',
+    })
+    expect(hasAssistantOutboxDeliveryEvidence(failed, true)).toBe(true)
+
+    const historyReader = createAssistantAutoReplyHistoryReader({
+      vault: vaultRoot,
+    })
+    await expect(historyReader.readOutboxIntents({
+      conversation: {
+        accountId: 'participant-terminal-partial',
+        actorId: null,
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'linq-terminal-partial-thread',
+        threadIsDirect: false,
+      },
+      deliveryTarget: 'linq-terminal-partial-thread',
+      providerMessageId,
+      source: 'linq',
+    })).resolves.toEqual([
+      expect.objectContaining({
+        intentId: failed.intentId,
+        media: [expect.objectContaining({
+          ref: media.ref,
+          sha256: media.sha256,
+        })],
+      }),
+    ])
+
+    const retry = await createIntent(vaultRoot, intentInput)
+    expect(retry.intentId).not.toBe(failed.intentId)
   })
 
   it('persists native reply intent explicitly while omitting it from legacy messages', async () => {

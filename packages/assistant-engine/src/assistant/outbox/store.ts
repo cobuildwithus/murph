@@ -20,6 +20,7 @@ import {
 } from '@murphai/runtime-state/node'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
+import { hasAssistantOutboxDeliveryEvidence } from '../response-media.js'
 import { ensureAssistantState } from '../store/persistence.js'
 import { resolveAssistantStatePaths } from '../store.js'
 import {
@@ -353,18 +354,24 @@ export async function listAssistantOutboxIntentsForAutoReplyRoute(
     : []
   const intentIds = new Set([
     ...await readAssistantOutboxForegroundTagIntentIds({
-      limit: ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT,
+      limit: ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT + 1,
       newestFirst: true,
       paths,
       tagDigests: routeTags,
     }),
     ...await readAssistantOutboxForegroundTagIntentIds({
-      limit: ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT,
+      limit: ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT + 1,
       newestFirst: true,
       paths,
       tagDigests: providerTags,
     }),
   ])
+  if (intentIds.size > ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT) {
+    throw new VaultCliError(
+      'ASSISTANT_AUTO_REPLY_ROUTE_BOUND_EXCEEDED',
+      `Assistant auto-reply history exceeded its fixed ${ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT}-intent route bound.`,
+    )
+  }
   return await readAssistantOutboxProjectedIntents({
     intentIds: [...intentIds],
     paths,
@@ -438,8 +445,7 @@ async function findAssistantOutboxIntentByProjectedRoutes(input: {
       return intent
     }
     if (input.rebuildOnStale) {
-      const rebuilt = await rebuildAssistantOutboxDedupeDatabase(input.paths)
-      rebuilt.close()
+      await rebuildAssistantOutboxDedupeDatabaseWithWriteLock(input.paths)
       return await findAssistantOutboxIntentByProjectedRoutes({
         ...input,
         rebuildOnStale: false,
@@ -580,9 +586,7 @@ async function readAssistantOutboxDedupeRoutes(
     if (!(error instanceof AssistantOutboxDedupeDatabaseValidationError)) {
       throw error
     }
-    await quarantineAssistantOutboxDedupeDatabase(paths, error)
-    const rebuilt = await rebuildAssistantOutboxDedupeDatabase(paths)
-    rebuilt.close()
+    await rebuildAssistantOutboxDedupeDatabaseWithWriteLock(paths)
     return await read()
   }
 }
@@ -752,9 +756,7 @@ async function readAssistantOutboxLegacyDedupeCandidates(
     if (!(error instanceof AssistantOutboxDedupeDatabaseValidationError)) {
       throw error
     }
-    await quarantineAssistantOutboxDedupeDatabase(paths, error)
-    const rebuilt = await rebuildAssistantOutboxDedupeDatabase(paths)
-    rebuilt.close()
+    await rebuildAssistantOutboxDedupeDatabaseWithWriteLock(paths)
     return await read()
   }
 }
@@ -793,6 +795,22 @@ async function synchronizeAssistantOutboxDedupeProjection(
         DELETE FROM assistant_outbox_foreground_tags
         WHERE intent_id = ?
       `).run(intent.intentId)
+      const insertForegroundTag = database.prepare(`
+        INSERT INTO assistant_outbox_foreground_tags (
+          tag_digest,
+          intent_id,
+          created_at_ms
+        ) VALUES (?, ?, ?)
+      `)
+      for (const tagDigest of resolveAssistantOutboxForegroundTagDigests(
+        intent,
+      )) {
+        insertForegroundTag.run(
+          tagDigest,
+          intent.intentId,
+          Date.parse(intent.createdAt),
+        )
+      }
       if (!isActiveAssistantOutboxIntent(intent)) {
         return
       }
@@ -808,20 +826,6 @@ async function synchronizeAssistantOutboxDedupeProjection(
         insertRoute.run(
           route.kind,
           resolveAssistantOutboxDedupeKeyDigest(route.kind, route.key),
-          intent.intentId,
-          Date.parse(intent.createdAt),
-        )
-      }
-      const insertForegroundTag = database.prepare(`
-        INSERT INTO assistant_outbox_foreground_tags (
-          tag_digest,
-          intent_id,
-          created_at_ms
-        ) VALUES (?, ?, ?)
-      `)
-      for (const tagDigest of resolveAssistantOutboxForegroundTagDigests(intent)) {
-        insertForegroundTag.run(
-          tagDigest,
           intent.intentId,
           Date.parse(intent.createdAt),
         )
@@ -921,6 +925,7 @@ function resolveAssistantOutboxForegroundTagDigests(
   const tags = new Set<string>()
   const bindingDelivery = intent.bindingDelivery
   if (
+    isActiveAssistantOutboxIntent(intent) &&
     bindingDelivery
     && intent.threadIsDirect === true
     && intent.privateCompletionContinuitySessionId !== undefined
@@ -937,6 +942,10 @@ function resolveAssistantOutboxForegroundTagDigests(
         threadId: intent.threadId,
       },
     ))
+  }
+
+  if (!hasAssistantOutboxDeliveryEvidence(intent, true)) {
+    return [...tags]
   }
 
   const delivery = intent.delivery
@@ -1108,7 +1117,16 @@ async function withAssistantOutboxDedupeDatabase<T>(
     if (isAssistantOutboxDedupeProjectionRecoveryError(error)) {
       // Never replay a callback that may have reached a write with an ambiguous
       // commit outcome. The next ordinary attempt rebuilds before its operation.
-      await quarantineAssistantOutboxDedupeDatabase(paths, error)
+      await withAssistantOutboxDedupeRecoveryWriteLock(
+        paths,
+        async (lockedPaths) => {
+          if (await assistantOutboxDedupePathExists(
+            resolveAssistantOutboxDedupeDatabasePath(lockedPaths),
+          )) {
+            await quarantineAssistantOutboxDedupeDatabase(lockedPaths, error)
+          }
+        },
+      )
     }
     throw error
   }
@@ -1118,18 +1136,56 @@ async function openOrRebuildAssistantOutboxDedupeDatabase(
   paths: AssistantStatePaths,
 ): Promise<AssistantOutboxDedupeDatabase> {
   const databasePath = resolveAssistantOutboxDedupeDatabasePath(paths)
-  if (!await assistantOutboxDedupePathExists(databasePath)) {
-    return await rebuildAssistantOutboxDedupeDatabase(paths)
-  }
-  try {
-    return openAssistantOutboxDedupeDatabase(paths)
-  } catch (error) {
-    if (!isAssistantOutboxDedupeProjectionRecoveryError(error)) {
-      throw error
+  if (await assistantOutboxDedupePathExists(databasePath)) {
+    try {
+      return openAssistantOutboxDedupeDatabase(paths)
+    } catch (error) {
+      if (!isAssistantOutboxDedupeProjectionRecoveryError(error)) {
+        throw error
+      }
     }
-    await quarantineAssistantOutboxDedupeDatabase(paths, error)
-    return await rebuildAssistantOutboxDedupeDatabase(paths)
   }
+  return await withAssistantOutboxDedupeRecoveryWriteLock(
+    paths,
+    async (lockedPaths) => {
+      const lockedDatabasePath = resolveAssistantOutboxDedupeDatabasePath(
+        lockedPaths,
+      )
+      if (await assistantOutboxDedupePathExists(lockedDatabasePath)) {
+        try {
+          return openAssistantOutboxDedupeDatabase(lockedPaths)
+        } catch (error) {
+          if (!isAssistantOutboxDedupeProjectionRecoveryError(error)) {
+            throw error
+          }
+          await quarantineAssistantOutboxDedupeDatabase(lockedPaths, error)
+        }
+      }
+      return await rebuildAssistantOutboxDedupeDatabase(lockedPaths)
+    },
+  )
+}
+
+async function withAssistantOutboxDedupeRecoveryWriteLock<T>(
+  paths: AssistantStatePaths,
+  operation: (lockedPaths: AssistantStatePaths) => Promise<T>,
+): Promise<T> {
+  return await withAssistantRuntimeWriteLock(
+    paths.absoluteVaultRoot,
+    operation,
+  )
+}
+
+async function rebuildAssistantOutboxDedupeDatabaseWithWriteLock(
+  paths: AssistantStatePaths,
+): Promise<void> {
+  await withAssistantOutboxDedupeRecoveryWriteLock(
+    paths,
+    async (lockedPaths) => {
+      const rebuilt = await rebuildAssistantOutboxDedupeDatabase(lockedPaths)
+      rebuilt.close()
+    },
+  )
 }
 
 function openAssistantOutboxDedupeDatabase(
@@ -1428,6 +1484,13 @@ function initializeAssistantOutboxDedupeDatabase(
       ) VALUES (?, ?, ?)
     `)
     for (const intent of intents) {
+      for (const tagDigest of resolveAssistantOutboxForegroundTagDigests(intent)) {
+        insertForegroundTag.run(
+          tagDigest,
+          intent.intentId,
+          Date.parse(intent.createdAt),
+        )
+      }
       if (!isActiveAssistantOutboxIntent(intent)) {
         continue
       }
@@ -1435,13 +1498,6 @@ function initializeAssistantOutboxDedupeDatabase(
         insertRoute.run(
           route.kind,
           resolveAssistantOutboxDedupeKeyDigest(route.kind, route.key),
-          intent.intentId,
-          Date.parse(intent.createdAt),
-        )
-      }
-      for (const tagDigest of resolveAssistantOutboxForegroundTagDigests(intent)) {
-        insertForegroundTag.run(
-          tagDigest,
           intent.intentId,
           Date.parse(intent.createdAt),
         )
