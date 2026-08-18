@@ -2632,6 +2632,7 @@ export async function runHostedWorkspaceAssistantPhase(
     const shadowedDeviceSyncMaintenance =
       await runShadowedDeviceSyncAfterNoProgressAssistantWake({
         assistantMetrics,
+        assistantNextWakeAt,
         executionContext,
         foregroundAssistantPass,
         hasFreshConversationInput,
@@ -4929,6 +4930,7 @@ async function runBackgroundMaintenanceAfterDeferredPendingAssistantInput(input:
 
 async function runShadowedDeviceSyncAfterNoProgressAssistantWake(input: {
   assistantMetrics: HostedAssistantMetrics;
+  assistantNextWakeAt: string | null;
   executionContext: AssistantExecutionContext;
   foregroundAssistantPass: boolean;
   hasFreshConversationInput: boolean;
@@ -4955,6 +4957,7 @@ async function runShadowedDeviceSyncAfterNoProgressAssistantWake(input: {
 
 function shouldRunShadowedDeviceSyncAfterNoProgressAssistantWake(input: {
   assistantMetrics: HostedAssistantMetrics;
+  assistantNextWakeAt: string | null;
   foregroundAssistantPass: boolean;
   hasFreshConversationInput: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -4963,7 +4966,9 @@ function shouldRunShadowedDeviceSyncAfterNoProgressAssistantWake(input: {
   if (
     input.hasFreshConversationInput
     || input.foregroundAssistantPass
+    || input.assistantNextWakeAt !== null
     || input.systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
+    || input.systemMailboxMaintenance.result !== null
     || input.systemMailboxMaintenance.deviceSyncMaintenanceRan
     || input.input.shouldYieldBackgroundMaintenance?.() === true
     || !isDueHostedLegacyDeviceSyncRecoveryAlarm(input.input)

@@ -48,14 +48,19 @@ continuation instead of the workspace repeating no-work checkpoints.
 ## Verification
 
 - `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-assistant-phase.test.ts`
-  passes all 298 focused assistant-phase tests.
+  passes all 299 focused assistant-phase tests, including no-work recovery,
+  fresh-input priority, real assistant-progress priority, and foreground yield.
 - `pnpm --dir packages/assistant-runtime typecheck` passes.
 - Product UX journeys: an idle member with a shadowed durable sync item resumes
   that item after a no-work assistant pass; fresh member input and actual
   assistant progress retain priority; no durable device item produces no
   synthetic sync work.
-- Exact pushed-head ReviewGPT, required CI, protected deployment, and production
-  convergence proof remain pending.
+- The first preliminary ReviewGPT result was `INVALID`: it requested a direct
+  assistant-progress regression and rendered proof for changed changelog copy.
+  The regression is added. The published copy is restored unchanged and this
+  PR now only appends its source reference, so there is no rendered UI claim.
+- Exact corrected-head ReviewGPT, required CI, protected deployment, and
+  production convergence proof remain pending.
 
 ## State
 
