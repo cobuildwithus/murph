@@ -65,9 +65,9 @@ continuation instead of the workspace repeating no-work checkpoints.
   unrelated maintenance when no device item matched. The follow-up removes the
   overly broad future-wake blocker, preserves that continuation through the
   existing wake merge, and makes background selection owner-only.
-- Pull request #1984 merged before those findings returned. A focused follow-up
-  pull request, its exact-head ReviewGPT and CI gates, protected deployment, and
-  production convergence proof remain pending.
+- Pull request #1984 merged before those findings returned. Follow-up pull
+  request #1985, its exact-head ReviewGPT and CI gates, protected deployment,
+  and production convergence proof remain pending.
 
 ## State
 
