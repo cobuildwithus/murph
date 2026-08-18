@@ -8172,7 +8172,7 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
-  it("retries Google Health webhook work while legacy Fitbit owns canonical admission", async () => {
+  it("retries current Google Health data while legacy Fitbit owns canonical admission", async () => {
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({
         provider: "junction",
@@ -8207,7 +8207,7 @@ describe("hosted device-sync wakes", () => {
       webhook: {
         acceptanceMode: "durable_webhook_work",
         dataSourceProviderSlug: "google_health",
-        eventType: "activity.updated",
+        eventType: "daily.data.activity.updated",
         jobs: [{
           kind: "resource",
           payload: {
@@ -8235,7 +8235,18 @@ describe("hosted device-sync wakes", () => {
       sourceProviderSlug: "google_health",
       tx: mocks.prismaTx,
     });
-    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          hint: expect.objectContaining({
+            eventType: "daily.data.activity.updated",
+            reason: "fitbit_migration_successor_arrival",
+          }),
+          reason: "webhook_hint",
+        }),
+        tx: mocks.prismaTx,
+      }),
+    );
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
@@ -8282,7 +8293,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
   });
 
-  it("accepts data-less historical completion while Fitbit still owns canonical admission", async () => {
+  it("keeps source-attributed historical Google Health data retryable until cutover", async () => {
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({
         provider: "junction",
@@ -8295,6 +8306,10 @@ describe("hosted device-sync wakes", () => {
     );
     mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
       buildHostedConnectionSourceAdmissionCandidate(googleHealthSource),
+    ]);
+    mocks.listConnectionSources.mockResolvedValue([
+      buildHostedConnectionSource("dsc_123", "fitbit"),
+      googleHealthSource,
     ]);
     const store = new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() });
 
@@ -8312,6 +8327,7 @@ describe("hosted device-sync wakes", () => {
       traceId: "trace_123",
       webhook: {
         acceptanceMode: "durable_webhook_work",
+        dataSourceProviderSlug: "google_health",
         eventType: "historical.data.sleep.created",
         jobs: [{
           kind: "resource",
@@ -8322,11 +8338,20 @@ describe("hosted device-sync wakes", () => {
         }],
         sourceProviderSlug: "google_health",
       },
-    })).resolves.toBeUndefined();
+    })).rejects.toMatchObject({
+      code: "WEBHOOK_SOURCE_NOT_READY",
+      httpStatus: 503,
+      retryable: true,
+    });
 
     expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledOnce();
-    expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
+    expect(mocks.markWebhookReceived).not.toHaveBeenCalled();
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
   it("accepts retried Google Health data after Fitbit becomes terminal", async () => {

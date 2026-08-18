@@ -2788,6 +2788,8 @@ async function persistHostedDeviceSyncWebhookAccepted(
       const hasPayloadResources = input.dirtyResources.some(
         hasHostedDeviceSyncDirtyResourcePayload,
       );
+      const advancesFitbitMigrationSuccessor =
+        isHostedJunctionDailyDataWebhookEvent(input.eventType);
       const initialAdmission = await input.store.withHealthDataAdmissionLock(
         input.userId,
         input.connectionId,
@@ -2798,14 +2800,13 @@ async function persistHostedDeviceSyncWebhookAccepted(
           }
           return {
             shouldPrepareWake: status.kind === "migration_pending"
-              || (
-                !hasPayloadResources
+              ? advancesFitbitMigrationSuccessor
+              : !hasPayloadResources
                 && await input.store.shouldRequestWakeForDirtyConnectionUpsert({
                   connectionId: input.connectionId,
                   tx,
                   userId: input.userId,
-                })
-              ),
+                }),
             status,
           } as const;
         },
@@ -2895,6 +2896,13 @@ async function persistHostedDeviceSyncWebhookAccepted(
                   },
                 });
               }
+            }
+
+            if (
+              finalAdmission.kind === "migration_pending"
+              && !advancesFitbitMigrationSuccessor
+            ) {
+              return { retrySourceAfterCommit: true, wakeMailboxItemIds };
             }
 
             if (finalAdmission.kind === "migration_pending") {
@@ -3311,8 +3319,12 @@ function hasNonTerminalHostedGoogleHealthFitbitLegacySource(
   );
 }
 
+function isHostedJunctionDailyDataWebhookEvent(eventType: string): boolean {
+  return eventType.startsWith("daily.data.");
+}
+
 function isHostedJunctionDataWebhookEvent(eventType: string): boolean {
-  return eventType.startsWith("daily.data.")
+  return isHostedJunctionDailyDataWebhookEvent(eventType)
     || eventType.startsWith("historical.data.");
 }
 
