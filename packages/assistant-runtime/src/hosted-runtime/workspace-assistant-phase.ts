@@ -4150,7 +4150,7 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
           entry: {
             component: "device-sync",
             errorCode: failure.errorCode,
-            eventCode: "device-sync.job_failed",
+            eventCode: "device-sync.dirty_ack_persistence_failed",
             level: "warn",
             phase: "checkpoint",
             redactedJson: {
@@ -4786,7 +4786,7 @@ async function writeHostedIdleDeviceSyncFailureRuntimeLog(input: {
         : failure.errorCode,
       eventCode: moduleLoadErrorCode
         ? "device-sync.module_load_failed"
-        : "device-sync.job_failed",
+        : "device-sync.maintenance_failed",
       level: "warn",
       phase: "idle",
       redactedJson: {
@@ -4816,7 +4816,7 @@ async function writeHostedDeviceActivityAutomationScheduleFailureRuntimeLog(inpu
     entry: {
       component: "runtime",
       errorCode: failure.errorCode,
-      eventCode: "device-sync.job_failed",
+      eventCode: "assistant.device_activity_automation_failed",
       level: "warn",
       phase: "idle",
       redactedJson: {
@@ -6545,12 +6545,14 @@ function resolveHostedSystemMailboxMetricsWakeAt(input: {
 async function collectForegroundDeliveryEffects(input: {
   actionApprovalPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"];
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  messageVolumeReceiptPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["effectsPort"];
   preferredIntentIds: readonly string[];
   vaultRoot: string;
 }): Promise<HostedPreparedAssistantDeliveryEffects> {
   const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
     actionApprovalPort: input.actionApprovalPort ?? null,
     includeBackgroundDueIntents: false,
+    messageVolumeReceiptPort: input.messageVolumeReceiptPort,
     preferredIntentIds: input.preferredIntentIds,
     vaultRoot: input.vaultRoot,
   });
@@ -6582,6 +6584,7 @@ async function runForegroundAssistantReplyPhase(input: {
   const preparedDeliveryEffects = await collectForegroundDeliveryEffects({
     actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
     linqDeliveryContexts: input.linqDeliveryContexts,
+    messageVolumeReceiptPort: input.input.runtime.platform.effectsPort,
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
     vaultRoot: input.input.restored.vaultRoot,
   });
