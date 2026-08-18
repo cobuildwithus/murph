@@ -12,6 +12,9 @@ import {
   listJunctionDeviceConnectRouteEntries,
 } from "@murphai/device-syncd/connect-config";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
+import {
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+} from "@murphai/device-syncd/public-account";
 
 const controlPlaneMocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
@@ -628,6 +631,7 @@ describe.skipIf(!runPostgresProof)(
       if (!sourceInstanceKey) {
         throw new Error("Synthetic deferred-source proof could not build its exact key.");
       }
+      const blockedSourceInstanceKey = `${sourceInstanceKey}_blocked`;
       const claimToken = `claim_device_sync_deferred_source_${suffix}`;
       const traceId = `trace_device_sync_deferred_source_${suffix}`;
       const connectedAt = new Date("2026-08-12T12:00:00.000Z");
@@ -651,18 +655,49 @@ describe.skipIf(!runPostgresProof)(
             userId: memberId,
           },
         });
-        await prisma.deviceConnectionSource.create({
-          data: {
-            connectionId,
-            firstSeenAt: connectedAt,
-            id: `dcs_device_sync_deferred_source_${suffix}`,
-            lastSeenAt: connectedAt,
-            resourceAvailabilitySummaryJson: {},
-            sourceInstanceKey,
-            sourceProviderSlug: "garmin",
-            status: "connected",
-          },
+        await prisma.deviceConnectionSource.createMany({
+          data: [
+            {
+              connectionId,
+              firstSeenAt: connectedAt,
+              id: `dcs_device_sync_deferred_source_${suffix}`,
+              lastSeenAt: connectedAt,
+              resourceAvailabilitySummaryJson: {},
+              sourceInstanceKey,
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            },
+            {
+              connectionId,
+              firstSeenAt: acceptedAt,
+              id: `dcs_device_sync_deferred_source_blocked_${suffix}`,
+              lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+              lastSeenAt: acceptedAt,
+              resourceAvailabilitySummaryJson: {},
+              sourceInstanceKey: blockedSourceInstanceKey,
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            },
+          ],
         });
+        await expect(store.resolveConnectionSourceAdmissionCandidate({
+          connectionId,
+          sourceProviderSlug: "garmin",
+        })).resolves.toMatchObject({
+          lastErrorCode: null,
+          sourceInstanceKey,
+          status: "connected",
+        });
+        await expect(store.resolveConnectionSourceAdmissionCandidate({
+          connectionId,
+          sourceInstanceKey: blockedSourceInstanceKey,
+          sourceProviderSlug: "garmin",
+        })).resolves.toMatchObject({
+          lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+          sourceInstanceKey: blockedSourceInstanceKey,
+          status: "connected",
+        });
+        exactSourceRead.mockClear();
         await prisma.deviceSyncDirtyConnection.create({
           data: {
             connectionId,
