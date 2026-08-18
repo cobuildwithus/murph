@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { parseAutomationSupportSeriesTag } from '@murphai/contracts'
+import {
+  parseAutomationSupportSeriesTag,
+  type AutomationContextReference,
+} from '@murphai/contracts'
 import {
   archiveAutomationIfActiveUntilElapsed,
   isVaultError,
@@ -1007,7 +1010,10 @@ export async function executeClaimedAssistantCronJob(
                 vault: input.vault,
               })
             },
-            instructions: buildAssistantCronExecutionInstructions(input.job),
+            instructions: buildAssistantCronExecutionInstructions(
+              input.job,
+              deviceActivityAuthority,
+            ),
             scheduledAutomationScheduleKind:
               input.job.kind === 'canonical'
                 && input.job.source.kind === 'automation'
@@ -1037,7 +1043,10 @@ export async function executeClaimedAssistantCronJob(
             outboxAutomationAuthority:
               resolveAssistantCronOutboxAutomationAuthority(input.job),
             outboxAutomationContextReferences:
-              resolveAssistantCronOutboxAutomationContextReferences(input.job),
+              resolveAssistantCronOutboxAutomationContextReferences(
+                input.job,
+                deviceActivityAuthority,
+              ),
             outboxPlannedOccurrenceAt:
               resolveAssistantCronOutboxPlannedOccurrenceAt({
                 job: input.job,
@@ -1738,12 +1747,15 @@ function resolveAssistantCronOutboxAutomationAuthority(
 
 function resolveAssistantCronOutboxAutomationContextReferences(
   job: ResolvedAssistantCronJob,
+  deviceActivityAuthority: DeviceActivityParentAuthority,
 ): AssistantOutboxIntent['automationContextReferences'] | undefined {
-  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
-    return undefined
+  if (job.kind === 'canonical' && job.source.kind === 'automation') {
+    return [...job.source.contextReferences]
   }
 
-  return [...job.source.contextReferences]
+  return deviceActivityAuthority.automationId === null
+    ? undefined
+    : [...deviceActivityAuthority.contextReferences]
 }
 
 function resolveAssistantCronOutboxPlannedOccurrenceAt(input: {
@@ -1780,6 +1792,7 @@ function resolveAssistantCronOutboxSupportSeriesId(
 
 function buildAssistantCronExecutionInstructions(
   job: ResolvedAssistantCronJob,
+  deviceActivityAuthority: DeviceActivityParentAuthority,
 ): string {
   const lastFailedAt = job.job.state.lastFailedAt
   const retryEvidence =
@@ -1792,8 +1805,11 @@ function buildAssistantCronExecutionInstructions(
           '- Do not interpret the absence of a user reply to that attempt as silence, disengagement, or non-adherence.',
           '- Treat this run as the next valid delivery attempt or check-in; do not claim the prior message reached the user.',
         ].join('\n')
-  const canonicalContext =
-    buildAssistantCronCanonicalContextInstructions(job)
+  const automationContext =
+    buildAssistantCronAutomationContextInstructions(
+      job,
+      deviceActivityAuthority,
+    )
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
   const independentAuthority =
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
@@ -1801,7 +1817,7 @@ function buildAssistantCronExecutionInstructions(
     buildAssistantCronRecurringReminderConversationInstructions(job)
   const overlays = [
     retryEvidence,
-    canonicalContext,
+    automationContext,
     independentAuthority,
     recurringReminderConversation,
     supportScope,
@@ -1825,23 +1841,34 @@ function buildAssistantCronExecutionInstructions(
     .join('\n\n')
 }
 
-function buildAssistantCronCanonicalContextInstructions(
+function buildAssistantCronAutomationContextInstructions(
   job: ResolvedAssistantCronJob,
+  deviceActivityAuthority: DeviceActivityParentAuthority,
 ): string | null {
-  if (
-    job.kind !== 'canonical'
-    || job.source.kind !== 'automation'
-    || assistantCronJobIsPreemptibleBackgroundMaintenance(job)
-  ) {
+  const context =
+    job.kind === 'canonical'
+      && job.source.kind === 'automation'
+      && !assistantCronJobIsPreemptibleBackgroundMaintenance(job)
+      ? {
+          automationId: job.source.automationId,
+          contextReferences: job.source.contextReferences,
+        }
+      : deviceActivityAuthority.automationId === null
+        ? null
+        : {
+            automationId: deviceActivityAuthority.automationId,
+            contextReferences: deviceActivityAuthority.contextReferences,
+          }
+  if (context === null) {
     return null
   }
 
   return [
     'Scheduled automation context (engine-supplied routing and interpretation context; not mutation authority):',
-    `- automationId: ${job.source.automationId}`,
-    job.source.contextReferences.length === 0
+    `- automationId: ${context.automationId}`,
+    context.contextReferences.length === 0
       ? '- contextReferences: none supplied; do not guess a canonical record'
-      : `- contextReferences: ${JSON.stringify(job.source.contextReferences)}`,
+      : `- contextReferences: ${JSON.stringify(context.contextReferences)}`,
     '- Inspect each exact reference through the ordinary canonical read surface before relying on it, and use only the ordinary domain mutation tools for any write.',
   ].join('\n')
 }
@@ -2434,12 +2461,16 @@ async function resolveDeviceActivityParentAuthority(input: {
   vault: string
 }): Promise<{
   assistantTargetOverride: AutomationQueryRecord['assistantTargetOverride'] | null
+  automationId: string | null
+  contextReferences: readonly AutomationContextReference[]
   error: string | null
   route: AutomationQueryRecord['route'] | null
 }> {
   if (input.job.kind !== 'local') {
     return {
       assistantTargetOverride: null,
+      automationId: null,
+      contextReferences: [],
       error: null,
       route: null,
     }
@@ -2449,6 +2480,8 @@ async function resolveDeviceActivityParentAuthority(input: {
   if (!metadata) {
     return {
       assistantTargetOverride: null,
+      automationId: null,
+      contextReferences: [],
       error: null,
       route: null,
     }
@@ -2473,6 +2506,8 @@ async function resolveDeviceActivityParentAuthority(input: {
   if (!parentAutomation || parentAutomation.status !== 'active') {
     return {
       assistantTargetOverride: null,
+      automationId: null,
+      contextReferences: [],
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
       route: null,
     }
@@ -2480,6 +2515,8 @@ async function resolveDeviceActivityParentAuthority(input: {
   if (parentAutomation.schedule.kind !== 'deviceActivity') {
     return {
       assistantTargetOverride: null,
+      automationId: null,
+      contextReferences: [],
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
       route: null,
     }
@@ -2500,6 +2537,8 @@ async function resolveDeviceActivityParentAuthority(input: {
   ) {
     return {
       assistantTargetOverride: null,
+      automationId: null,
+      contextReferences: [],
       error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
       route: null,
     }
@@ -2507,6 +2546,8 @@ async function resolveDeviceActivityParentAuthority(input: {
 
   return {
     assistantTargetOverride: parentAutomation.assistantTargetOverride,
+    automationId: parentAutomation.automationId,
+    contextReferences: [...(parentAutomation.contextReferences ?? [])],
     error: null,
     route: parentAutomation.route,
   }

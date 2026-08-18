@@ -9,6 +9,9 @@ import {
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
+import {
+  readAssistantDeviceActivityDeliveryIdempotencyMetadata,
+} from '../device-activity-cron-tags.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import { conversationRefFromAssistantInputConversation } from '../conversation-ref.js'
@@ -5177,6 +5180,10 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     ) {
       return []
     }
+    const deviceActivityMetadata =
+      readAssistantDeviceActivityDeliveryIdempotencyMetadata(
+        intent.deliveryIdempotencyKey,
+      )
     return [{
       automationContextReferences:
         intent.automationContextReferences?.map((reference) => ({
@@ -5184,7 +5191,9 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
           entityKind: reference.entityKind,
         })) ?? [],
       automationId:
-        normalizeNullableString(intent.automationAuthority?.automationId) ?? null,
+        normalizeNullableString(intent.automationAuthority?.automationId) ??
+        normalizeNullableString(deviceActivityMetadata?.parentAutomationId) ??
+        null,
       exactRouteDigest:
         resolveAssistantAutoReplyOutboxExactRoute(intent)?.digest ?? null,
       supportSeriesId:

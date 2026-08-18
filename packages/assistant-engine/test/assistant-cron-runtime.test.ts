@@ -2592,6 +2592,10 @@ describe('assistant cron runtime orchestration', () => {
         reasoningEffort: 'high',
       },
       continuityPolicy: 'fresh',
+      contextReferences: [{
+        entityId: 'exp_device_activity_renamed_listener',
+        entityKind: 'experiment',
+      }],
       createdAt: '2026-04-08T08:00:00.000Z',
       instructions: 'Ask about imported runs.',
       relativePath: 'bank/automations/renamed-device-activity-listener.md',
@@ -2709,9 +2713,19 @@ describe('assistant cron runtime orchestration', () => {
             )],
           }),
         },
+        outboxAutomationContextReferences:
+          parentAutomation.contextReferences,
         threadIsDirect: false,
-        instructions: 'Ask about the imported run.',
+        instructions: expect.stringContaining(
+          `- automationId: ${parentAutomationId}`,
+        ),
       }),
+    )
+    const instructions = cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0]
+      ?.instructions ?? ''
+    expect(instructions).toContain('Ask about the imported run.')
+    expect(instructions).toContain(
+      `- contextReferences: ${JSON.stringify(parentAutomation.contextReferences)}`,
     )
     expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2849,7 +2863,9 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: 'Review the sleep import and skip noisy or duplicate records.',
+        instructions: expect.stringContaining(
+          'Review the sleep import and skip noisy or duplicate records.',
+        ),
         responsePolicy: null,
       }),
     )
@@ -2973,7 +2989,7 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: 'Ask about the imported run.',
+        instructions: expect.stringContaining('Ask about the imported run.'),
       }),
     )
   })
@@ -3087,7 +3103,7 @@ describe('assistant cron runtime orchestration', () => {
         assistantTargetOverride: {
           reasoningEffort: 'high',
         },
-        instructions: 'Ask about the imported run.',
+        instructions: expect.stringContaining('Ask about the imported run.'),
       }),
     )
     expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
@@ -3273,7 +3289,7 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('fails queued device activity outbox delivery when parent authority changes before dispatch', async () => {
+  it('fails queued device activity outbox delivery when parent context references change before dispatch', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-device-outbox-stale-',
     )
@@ -3281,6 +3297,10 @@ describe('assistant cron runtime orchestration', () => {
     const parentAutomation: MockAutomationRecord = {
       automationId: parentAutomationId,
       continuityPolicy: 'fresh',
+      contextReferences: [{
+        entityId: 'exp_device_activity_original',
+        entityKind: 'experiment',
+      }],
       createdAt: '2026-04-08T08:00:00.000Z',
       instructions: 'Ask about the imported run.',
       route: {
@@ -3328,7 +3348,11 @@ describe('assistant cron runtime orchestration', () => {
       nextAttemptAt: '2026-04-08T08:02:00.000Z',
     })
 
-    parentAutomation.status = 'paused'
+    parentAutomation.contextReferences = [{
+      entityId: 'exp_device_activity_replacement',
+      entityKind: 'experiment',
+    }]
+    parentAutomation.updatedAt = '2026-04-08T08:01:30.000Z'
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
     const prepareDispatchIntent = vi.fn()

@@ -34,6 +34,9 @@ import {
   buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
 } from '../src/assistant/response-media.ts'
 import {
+  buildAssistantDeviceActivityDeliveryIdempotencyKey,
+} from '../src/assistant/device-activity-cron-tags.ts'
+import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   readAssistantOutboxIntent,
@@ -3483,6 +3486,67 @@ describe('assistant auto-reply event-first path', () => {
     expect(editedTurnContext).not.toContain('Canonical experiment reminder context:')
   })
 
+  it('recovers device activity automation provenance from existing delivery metadata', async () => {
+    const vault = await createTempVault()
+    const automationId = 'automation_device_activity_context'
+    const experimentId = 'exp_device_activity_context'
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationContextReferences: [{
+          entityId: experimentId,
+          entityKind: 'experiment',
+        }],
+        deliveryIdempotencyKey:
+          buildAssistantDeviceActivityDeliveryIdempotencyKey({
+            discriminator: { jobId: 'device-activity-context' },
+            metadata: {
+              authorityKey: 'a'.repeat(40),
+              occurrenceKey: 'b'.repeat(40),
+              parentAutomationId: automationId,
+              parentAutomationRelativePath:
+                'bank/automations/device-activity-context.md',
+            },
+          }),
+        intentId: 'intent-device-activity-context',
+        message: 'How did that activity feel?',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createAssistantInputCandidate({
+        occurredAt: '2026-04-08T00:10:00.000Z',
+        optionalInboxCaptureId: null,
+        source: 'email',
+        text: 'It felt good',
+        threadIsDirect: true,
+      })),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const turnContext = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+      .turnContext ?? ''
+    expect(turnContext).toContain('How did that activity feel?')
+    expect(turnContext).toContain(`- automationId: ${automationId}`)
+    expect(turnContext).toContain(
+      JSON.stringify([{ entityId: experimentId, entityKind: 'experiment' }]),
+    )
+  })
+
   it('marks legacy reminder context without planned chronology as context only', async () => {
     const vault = await createTempVault()
     const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM41WC'
@@ -5715,6 +5779,7 @@ function createOutboxMessage(input: {
     entityKind: string
   }[]
   channel?: string
+  deliveryIdempotencyKey?: string | null
   identityId?: string | null
   intentId: string
   media?: readonly unknown[]
@@ -5758,6 +5823,7 @@ function createOutboxMessage(input: {
       ? {}
       : { plannedOccurrenceAt: input.plannedOccurrenceAt }),
     channel,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,
     delivery:
       status === 'sent'
         ? {
