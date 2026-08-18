@@ -2308,9 +2308,16 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 
-  it("reads current Apple registration outside transactions before phase-two activation and acceptance", async () => {
+  it("converges a recoverable legacy Apple registration during final acceptance", async () => {
+    const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: "dsc_123",
+      sourceProviderSlug: "apple_health_kit",
+    });
+    expect(canonicalSourceInstanceKey).not.toBeNull();
     const source = buildHostedConnectionSource("dsc_123", "apple_health_kit", {
+      id: "dcs_legacy_apple_health_kit",
       lastSeenAt: "2026-03-26T11:59:00.000Z",
+      sourceInstanceKey: "legacy:dsc_123:apple_health_kit",
       status: "disconnected",
     });
     let activeTransactions = 0;
@@ -2381,6 +2388,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.listConnectionSources).not.toHaveBeenCalled();
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: "dsc_123",
+      sourceInstanceKey: canonicalSourceInstanceKey,
       sourceProviderSlug: "apple_health_kit",
       status: "connected",
       tx: mocks.prismaTx,
@@ -2397,6 +2405,20 @@ describe("hosted device-sync wakes", () => {
       tx: mocks.prismaTx,
     });
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
+    expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "dsc_123",
+      kind: "connected",
+      tx: mocks.prismaTx,
+      userId: "user-123",
+    }));
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        envelope: expect.objectContaining({ reason: "connected" }),
+        tx: mocks.prismaTx,
+      }),
+    );
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
       "junction",
       "4".repeat(64),
@@ -3047,6 +3069,11 @@ describe("hosted device-sync wakes", () => {
     const storedConnection = buildProviderConfigStoredConnection(connection);
     let sources = [
       buildHostedConnectionSource(connection.id, "oura"),
+      buildHostedConnectionSource(connection.id, "oura", {
+        id: "dcs_legacy_oura",
+        lastSeenAt: "2026-03-25T12:00:00.000Z",
+        sourceInstanceKey: `legacy:${connection.id}:oura`,
+      }),
       buildHostedConnectionSource(connection.id, "whoop_v2"),
       buildHostedConnectionSource(connection.id, "apple_health_kit"),
     ];

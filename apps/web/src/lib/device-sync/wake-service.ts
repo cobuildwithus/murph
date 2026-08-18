@@ -1606,12 +1606,6 @@ async function commitHostedDeviceSyncConnectionEstablishedTx(input: {
         });
     if (
       currentSource
-      && currentSource.sourceInstanceKey !== linkedSource.sourceInstanceKey
-    ) {
-      throw connectionEstablishmentStaleError();
-    }
-    if (
-      currentSource
       && (
         isHostedSourceDisconnectFenced(currentSource)
         || (

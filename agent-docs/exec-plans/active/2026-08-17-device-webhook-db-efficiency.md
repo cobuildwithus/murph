@@ -69,6 +69,27 @@ unwrap for that illustrative burst.
 
 ## Status
 
+### ReviewGPT round 2 retrospective
+
+- Original requirement: reduce device-webhook SQL and transaction duration
+  without changing source authority, recovery, durable dirty work, or mailbox
+  delivery.
+- The first-reviewed and round-2 heads both contain 530 authored production
+  additions and 282 deletions. Review remediation added tests and disclosure,
+  not a durable owner or lifecycle. The repeated mechanism was a split identity
+  rule: the shared resolver accepted a same-slug legacy source only for the
+  final connection-establishment owner to reject that selected row as stale.
+- Decision: continue with one canonical-preferred legacy-compatibility rule
+  owned by the existing resolver and final locked transaction. Delete the
+  downstream exact-key-only rejection; let the existing canonical upsert
+  converge a selected legacy row. An exact canonical row still wins before any
+  sibling, and the existing disconnect predicate continues to fence it.
+- Do not add state, an owner, a queue, a migration, a compatibility table, a
+  repair pass, or a reconciliation loop. Round 3 must prove connected and
+  recoverable-disconnected legacy paths, canonical-blocked precedence, and
+  source/credential drift with trace, source, dirty, signal, mailbox, and query
+  ownership assertions.
+
 - ReviewGPT authored the implementation patch from the exact target tree. The
   parent applied it and corrected two narrow type boundaries plus two affected
   test fixtures found by local verification.
