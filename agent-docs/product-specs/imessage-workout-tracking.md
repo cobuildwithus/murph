@@ -190,6 +190,8 @@ it also includes a bounded list of exact `contextReferences`; plan-owned support
 continues to include its `supportSeriesId`. Each reference names an entity kind
 and the canonical id it concerns, such as a workout format, experiment, habit,
 or regimen. The host keeps those exact ids visible to the model.
+That relationship metadata survives provider-accepted text, text-plus-media,
+and media-only reminder presentations; native reply is never required.
 
 A model-authored reference copies an id returned by a successful current
 canonical read or create result that identifies exactly one record. When that

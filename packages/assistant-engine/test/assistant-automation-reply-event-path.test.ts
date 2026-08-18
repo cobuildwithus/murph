@@ -3225,7 +3225,15 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('Prior message 2:')
     expect(sendInput.turnContext).toContain('latest cross-session reminder')
     expect(sendInput.turnContext).toContain('Prior message 3:')
-    expect(sendInput.turnContext).toContain('same-session referenced reminder')
+    expect(sendInput.turnContext).toContain(
+      'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+    )
+    expect(sendInput.turnContext).toContain(
+      'Text: unavailable in this prior-delivery context.',
+    )
+    expect(sendInput.turnContext).not.toContain(
+      'same-session referenced reminder',
+    )
     expect(sendInput.turnContext).not.toContain('same-session message')
     expect(sendInput.turnContext.indexOf('old reminder')).toBeLessThan(
       sendInput.turnContext.indexOf('latest cross-session reminder'),
@@ -3233,7 +3241,9 @@ describe('assistant auto-reply event-first path', () => {
     expect(
       sendInput.turnContext.indexOf('latest cross-session reminder'),
     ).toBeLessThan(
-      sendInput.turnContext.indexOf('same-session referenced reminder'),
+      sendInput.turnContext.indexOf(
+        'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+      ),
     )
     expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
       [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
@@ -3241,6 +3251,102 @@ describe('assistant auto-reply event-first path', () => {
     }))
     expect(sendInput.prompt).toContain('What do I do for this reset?')
   })
+
+  it.each(
+    (['cross-session', 'same-session'] as const).flatMap((sessionScope) =>
+      (['text', 'media-only'] as const).flatMap((presentation) =>
+        ([false, true] as const).flatMap((hasReferences) =>
+          (['ordinary', 'native'] as const).map((replyMode) => ({
+            hasReferences,
+            presentation,
+            replyMode,
+            sessionScope,
+          })),
+        ),
+      ),
+    ),
+  )(
+    'classifies $sessionScope $presentation deliveries with references=$hasReferences for $replyMode replies at one owner',
+    async ({ hasReferences, presentation, replyMode, sessionScope }) => {
+      const vault = await createTempVault()
+      const referenceId = 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WM'
+      const providerMessageId = 'linq-msg-reminder-matrix'
+      const deliveryText = 'Matrix reminder text.'
+      replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+        created: false,
+        session: {
+          lastTurnAt: '2026-04-08T00:02:00.000Z',
+          sessionId: 'session-chat',
+        },
+      })
+      replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+        createOutboxMessage({
+          ...(hasReferences
+            ? {
+                automationContextReferences: [{
+                  entityKind: 'workout_format',
+                  entityId: referenceId,
+                }],
+              }
+            : {}),
+          channel: 'linq',
+          intentId: 'intent-reminder-matrix',
+          media: presentation === 'media-only'
+            ? [{ filename: 'reminder.m4a', kind: 'voice_memo' }]
+            : [],
+          message: presentation === 'text' ? deliveryText : '',
+          providerMessageId,
+          sentAt: '2026-04-08T00:05:00.000Z',
+          sessionId: sessionScope === 'same-session'
+            ? 'session-chat'
+            : 'session-automation',
+        }),
+      ])
+      await completeAutoReplyRouteMigration(vault)
+      const candidate = createLinqGroupCandidate({
+        inputId: 'ain_91919191919191919191919191919191',
+        messageId: 'linq-msg-current-matrix',
+        occurredAt: '2026-04-08T00:10:00.000Z',
+        replyToMessageId: replyMode === 'native'
+          ? providerMessageId
+          : null,
+        text: '45 × 6 on set 2',
+        threadIsDirect: true,
+      })
+
+      await processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context: createReplyContext(candidate),
+        enabledChannels: ['linq'],
+        inboxServices: createInboxServices(),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault,
+      })
+
+      const sendInput = readSentInput()
+      const turnContext = sendInput.turnContext ?? ''
+      const textProjected = presentation === 'text' &&
+        sessionScope === 'cross-session'
+      const contextExpected = hasReferences || textProjected
+      expect(turnContext.includes(deliveryText)).toBe(textProjected)
+      expect(turnContext.includes(referenceId)).toBe(hasReferences)
+      expect(turnContext.includes(
+        'Text: unavailable in this prior-delivery context.',
+      )).toBe(contextExpected && !textProjected)
+      expect(sendInput.receiptMetadata).toEqual(
+        contextExpected
+          ? expect.objectContaining({
+              [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+                'intent-reminder-matrix',
+            })
+          : expect.not.objectContaining({
+              [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+                'intent-reminder-matrix',
+            }),
+      )
+    },
+  )
 
   it('carries historical experiment reminder provenance without rereading the mutable automation', async () => {
     const vault = await createTempVault()
@@ -4428,7 +4534,8 @@ describe('assistant auto-reply event-first path', () => {
           },
         ],
         intentId: 'intent-older-stale',
-        message: 'older stale reminder',
+        media: [{ filename: 'older-reminder.m4a', kind: 'voice_memo' }],
+        message: '',
         sentAt: '2026-04-08T00:04:00.000Z',
         sessionId: 'session-chat',
       }),
@@ -4440,7 +4547,8 @@ describe('assistant auto-reply event-first path', () => {
           },
         ],
         intentId: 'intent-already-seen',
-        message: 'already seen reminder',
+        media: [{ filename: 'seen-reminder.m4a', kind: 'voice_memo' }],
+        message: '',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session-chat',
       }),
