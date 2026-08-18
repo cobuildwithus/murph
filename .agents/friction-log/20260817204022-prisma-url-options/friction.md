@@ -9,11 +9,11 @@ The native iOS hosted E2E controller test should prove that PostgreSQL startup o
 
 ## Current Behavior
 
-The test parsed the generated URL before asserting the `options` value. That normalization made `+` and `%20` look identical even though Prisma forwarded `+` literally and PostgreSQL rejected the resulting `+role` configuration parameter.
+The controller test parsed the generated URL before asserting the `options` value, while the downstream hosted migration test expected the raw `+` form. The normalization made `+` and `%20` look identical at one boundary and encoded the broken transport as expected behavior at the next, even though Prisma forwarded `+` literally and PostgreSQL rejected the resulting `+role` configuration parameter.
 
 ## Possible Solution
 
-Assert both the decoded option value and the raw query string, keeping spaces percent-encoded for the Prisma connection boundary.
+Assert both the decoded option value and raw query string at both existing owner-composition boundaries, keeping spaces percent-encoded for Prisma.
 
 ## Minimal Reproducible Example
 
