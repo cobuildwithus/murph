@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
@@ -25,11 +26,13 @@ import {
   VitalConnectionDialog,
 } from "./connect-page-dialogs";
 import {
+  FITBIT_MIGRATION_AUTHORIZED_NOTICE,
   createConnectCallbackNotice,
   filterConnectSourcesForSearch,
   isHostedDeviceConnectIntentUnavailableError,
   isHostedWhoopDirectConnectCapReachedError,
   markCallbackConnectedSource,
+  markLocallyCompletedFitbitMigrations,
   markLocallyDisconnectedSources,
   readDeviceConnectIntentFromCurrentLocation,
   requestConnectionAuthorizationUrl,
@@ -53,6 +56,7 @@ import type {
 } from "./connect-page-types";
 
 interface HostedDeviceSyncDisconnectResponse {
+  status?: "complete" | "pending";
   connection?: { status: string };
   warning?: { historicalResetIncomplete?: boolean; message: string };
 }
@@ -66,6 +70,14 @@ type VitalConnectionRequest = {
   intentClaim?: string;
   source: ConnectSource;
 };
+
+const FITBIT_MIGRATION_REFRESH_INTERVAL_MS = 15_000;
+
+function isFitbitMigrationNotice(
+  value: ConnectCallbackNotice,
+): value is NonNullable<ConnectCallbackNotice> {
+  return value?.title === FITBIT_MIGRATION_AUTHORIZED_NOTICE.title;
+}
 
 export type {
   ConnectCallbackInput,
@@ -131,6 +143,9 @@ export function ConnectSourcesGrid({
   const [disconnectedSourceIds, setDisconnectedSourceIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
+  const [completedMigrationSourceIds, setCompletedMigrationSourceIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [locationConnectIntent] = useState<InitialDeviceConnectIntent>(() =>
     initialConnectIntent ? null : readDeviceConnectIntentFromCurrentLocation(),
   );
@@ -138,6 +153,7 @@ export function ConnectSourcesGrid({
     useState(false);
   const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
+  const router = useRouter();
   const { openAuthDialog } = useAuth();
   const callbackConnectedSourceId =
     initialCallback?.status === "connected"
@@ -146,10 +162,13 @@ export function ConnectSourcesGrid({
   const displaySources = useMemo(
     () =>
       sortConnectSourcesByConnectionState(
-        markLocallyDisconnectedSources(
-          markCallbackConnectedSource(sources, callbackConnectedSourceId),
-          disconnectedConnectionIds,
-          disconnectedSourceIds,
+        markLocallyCompletedFitbitMigrations(
+          markLocallyDisconnectedSources(
+            markCallbackConnectedSource(sources, callbackConnectedSourceId),
+            disconnectedConnectionIds,
+            disconnectedSourceIds,
+          ),
+          completedMigrationSourceIds,
         ).filter(
           (source) =>
             source.connectionAvailable !== false ||
@@ -164,6 +183,7 @@ export function ConnectSourcesGrid({
       ),
     [
       callbackConnectedSourceId,
+      completedMigrationSourceIds,
       disconnectedConnectionIds,
       disconnectedSourceIds,
       sources,
@@ -172,6 +192,26 @@ export function ConnectSourcesGrid({
   const filteredSources = useMemo(
     () => filterConnectSourcesForSearch(displaySources, search),
     [displaySources, search],
+  );
+  const hasVerifyingFitbitMigration = useMemo(
+    () =>
+      displaySources.some(
+        (source) =>
+          source.id === "fitbit" &&
+          source.migrationState === "verifying_successor",
+      ),
+    [displaySources],
+  );
+  const hasAutomaticallyProgressingFitbitMigration = useMemo(
+    () =>
+      displaySources.some(
+        (source) =>
+          source.id === "fitbit" &&
+          (source.migrationState === "verifying_successor" ||
+            (source.migrationState === "cutover_ready" &&
+              source.migrationRetryRequired !== true)),
+      ),
+    [displaySources],
   );
   const disconnectUnavailableSourceNames = useMemo(() => {
     if (
@@ -205,8 +245,12 @@ export function ConnectSourcesGrid({
       initialConnectIntentDismissed,
     ],
   );
-  const visibleNotice =
+  const noticeCandidate =
     notice ?? initialConnectIntentPresentation?.notice ?? null;
+  const visibleNotice =
+    !hasVerifyingFitbitMigration && isFitbitMigrationNotice(noticeCandidate)
+      ? null
+      : noticeCandidate;
   const visibleActionError =
     actionError ?? initialConnectIntentPresentation?.actionError ?? null;
   const activeAppleHealthRelaySetupGuide = isAppleHealthRelaySetupGuideId(
@@ -242,6 +286,23 @@ export function ConnectSourcesGrid({
       stripConnectCallbackParams();
     }
   }, [hasInitialCallback]);
+
+  useEffect(() => {
+    if (!hasAutomaticallyProgressingFitbitMigration) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (
+        document.visibilityState !== "hidden"
+        && window.navigator.onLine !== false
+      ) {
+        router.refresh();
+      }
+    }, FITBIT_MIGRATION_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [hasAutomaticallyProgressingFitbitMigration, router]);
 
   useEffect(() => {
     if (
@@ -434,7 +495,7 @@ export function ConnectSourcesGrid({
     };
   }, [activeConnectIntent, authenticated, displaySources]);
 
-  async function disconnectConnection(source: ConnectSource) {
+  const disconnectConnection = useCallback(async (source: ConnectSource) => {
     const connectionId = source.disconnectConnectionId?.trim();
     if (
       !connectionId ||
@@ -450,7 +511,10 @@ export function ConnectSourcesGrid({
 
     try {
       const sourceProviderSlug = source.disconnectSourceProviderSlug?.trim();
-      const disconnectUrl = sourceProviderSlug
+      const migrationCutover = source.migrationState === "cutover_ready";
+      const disconnectUrl = migrationCutover
+        ? `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/fitbit-migration/cutover`
+        : sourceProviderSlug
         ? `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/sources/${encodeURIComponent(sourceProviderSlug)}/disconnect`
         : `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/disconnect`;
       const result =
@@ -458,6 +522,15 @@ export function ConnectSourcesGrid({
           method: "POST",
           url: disconnectUrl,
         });
+      if (migrationCutover && result.status === "pending") {
+        setNotice({
+          kind: "warning",
+          title: "Fitbit is still switching",
+          message: "The legacy Fitbit connection is still syncing. Murph will retry the switch automatically.",
+        });
+        router.refresh();
+        return;
+      }
       if (
         !sourceProviderSlug
         && (
@@ -469,11 +542,15 @@ export function ConnectSourcesGrid({
         )
       ) {
         throw new Error(result.warning?.historicalResetIncomplete === true
-          ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
-          : "Disconnect not finished. Remove Murph access in the provider account, then retry Disconnect here.");
+           ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
+           : "Disconnect not finished. Remove Murph access in the provider account, then retry Disconnect here.");
       }
       setDisconnectSource(null);
-      if (sourceProviderSlug) {
+      if (source.migrationState === "cutover_ready") {
+        setCompletedMigrationSourceIds(
+          (current) => new Set([...current, source.id]),
+        );
+      } else if (sourceProviderSlug) {
         setDisconnectedSourceIds((current) => new Set([...current, source.id]));
       } else {
         setDisconnectedConnectionIds(
@@ -482,7 +559,9 @@ export function ConnectSourcesGrid({
       }
       setNotice({
         kind: result.warning?.message ? "warning" : "success",
-        title: "Source disconnected",
+        title: source.migrationState === "cutover_ready"
+          ? "Fitbit migration complete"
+          : "Source disconnected",
         message: result.warning?.message
           ? `${resolveDisconnectSuccessMessage(source)} ${resolveDisconnectWarningDetail(result.warning)}`
           : resolveDisconnectSuccessMessage(source),
@@ -499,7 +578,7 @@ export function ConnectSourcesGrid({
     } finally {
       setPendingDisconnectSourceId(null);
     }
-  }
+  }, [pendingDisconnectSourceId, pendingSourceId, router]);
 
   return (
     <section className="flex min-w-0 flex-col gap-4">
@@ -571,12 +650,15 @@ export function ConnectSourcesGrid({
               errorMessage={
                 visibleActionError?.sourceId === source.id
                   ? visibleActionError.message
-                  : null
+                  : source.migrationRetryRequired
+                    ? "Murph could not stop the legacy Fitbit connection. It is still syncing; retry when you are ready."
+                    : null
               }
               pending={pendingSourceId === source.id}
               pendingDisconnect={pendingDisconnectSourceId === source.id}
               source={source}
               onDisconnectTargetChange={setDisconnectSource}
+              onMigrationRetry={(retrySource) => void disconnectConnection(retrySource)}
               onSetupGuideOpen={setActiveSetupGuideId}
               onStartConnection={startConnection}
             />
@@ -677,6 +759,10 @@ export function requiresVitalConnectionPreflight(
   source: ConnectSource,
   connectIntentProvider?: string | null,
 ): boolean {
+  if (source.id === "fitbit") {
+    return false;
+  }
+
   if (connectIntentProvider) {
     return connectIntentProvider === "junction";
   }
@@ -689,12 +775,20 @@ export function requiresVitalConnectionPreflight(
 }
 
 function resolveDisconnectSuccessMessage(source: ConnectSource): string {
+  if (source.migrationState === "cutover_ready") {
+    return "Fitbit now uses Google Health. Your history is still saved.";
+  }
+
   return source.disconnectScope === "junction_account"
     ? "Disconnected this connection. Your history is still saved."
     : `Disconnected ${source.name}. Your history is still saved.`;
 }
 
 function resolveDisconnectFailureMessage(source: ConnectSource): string {
+  if (source.migrationState === "cutover_ready") {
+    return "We could not finish the Fitbit migration right now. The legacy Fitbit connection was not changed.";
+  }
+
   return source.disconnectScope === "junction_account"
     ? "We could not disconnect this connection right now."
     : `We could not disconnect ${source.name} right now.`;

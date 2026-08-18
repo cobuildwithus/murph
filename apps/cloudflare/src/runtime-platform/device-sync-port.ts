@@ -9,6 +9,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -16,6 +17,7 @@ import {
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncDirtyAckResponse,
   parseHostedExecutionDeviceSyncDirtyPendingResponse,
+  parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDeviceSyncReconcileResponse,
@@ -31,6 +33,25 @@ export function createHostedWebDeviceSyncPort(input: {
   transport: HostedWebControlTransport;
 }): HostedRuntimeDeviceSyncPort {
   return {
+    async completeFitbitMigration(runtimeInput: {
+      connectionId: string;
+      signal?: AbortSignal | null;
+    }) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: {
+          connectionId: runtimeInput.connectionId,
+        },
+        boundUserId: input.boundUserId,
+        description: "Hosted Fitbit migration cutover",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
+        signal: runtimeInput.signal ?? null,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse(payload);
+    },
     async reconcileAccount(runtimeInput: {
       connectionId: string;
       signal?: AbortSignal | null;

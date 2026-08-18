@@ -10,6 +10,7 @@ import {
 } from "../shared.ts";
 
 import { defaultDeviceProviderAdapters } from "./defaults.ts";
+import { deriveJunctionCanonicalCoverageEvidence } from "./junction.ts";
 import { buildWearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 import { createDeviceProviderRegistry } from "./registry.ts";
 
@@ -296,5 +297,48 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     defaultTimeZone: resolvedDefaultTimeZone,
     providerRegistry,
   });
-  return (await writer.importDeviceBatch(payload)) as TResult;
+  const result = await writer.importDeviceBatch(payload);
+  const resultRecord = readPlainObject(result);
+  if (payload.provider !== "junction" || !resultRecord || !Array.isArray(resultRecord.events)) {
+    return result as TResult;
+  }
+
+  return {
+    ...resultRecord,
+    junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
+      resultRecord.events.filter(isEventRecord),
+      {
+        defaultTimeZone: resolvedDefaultTimeZone,
+        providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
+      },
+    ),
+  } as TResult;
+}
+
+function resolveJunctionCoverageProviderPulledAt(input: unknown): string | undefined {
+  const request = deviceProviderSnapshotImportSchema.safeParse(input);
+  if (!request.success || request.data.provider !== "junction") {
+    return undefined;
+  }
+  const providerPulledAt = readPlainObject(request.data.snapshot)
+    ?.canonicalCoverageProviderPulledAt;
+  return typeof providerPulledAt === "string" ? providerPulledAt : undefined;
+}
+
+function readPlainObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function isEventRecord(value: unknown): value is Parameters<
+  typeof deriveJunctionCanonicalCoverageEvidence
+>[0][number] {
+  const record = readPlainObject(value);
+  return Boolean(
+    record
+    && typeof record.kind === "string"
+    && typeof record.occurredAt === "string"
+    && typeof record.dayKey === "string",
+  );
 }

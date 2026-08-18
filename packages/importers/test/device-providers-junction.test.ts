@@ -26,6 +26,7 @@ import {
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
   classifyJunctionSummaryNormalizationEvidence,
+  deriveJunctionCanonicalCoverageEvidence,
   identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
   JunctionSparseCalendarRepairNormalizationError,
@@ -11661,4 +11662,192 @@ test("Junction normalizer ignores aggregator provider and ambiguous type provena
     sourceProviderSlug: "oura",
     sourceType: "cloud-provider",
   });
+});
+
+test("Junction migration daily coverage finalizes only after the provider-local day closes", () => {
+  const event = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+  };
+  const cases = [
+    {
+      expectedFinalizedAt: undefined,
+      name: "inline accepted fact has no provider pull proof",
+      options: { defaultTimeZone: "America/New_York" },
+    },
+    {
+      expectedFinalizedAt: undefined,
+      name: "pre-close pull",
+      options: {
+        defaultTimeZone: "America/New_York",
+        providerPulledAt: "2026-08-12T03:59:59.999Z",
+      },
+    },
+    {
+      expectedFinalizedAt: "2026-08-12T04:00:00.000Z",
+      name: "first post-close pull",
+      options: {
+        defaultTimeZone: "America/New_York",
+        providerPulledAt: "2026-08-12T04:00:00.000Z",
+      },
+    },
+    {
+      dayKey: "2026-11-01",
+      expectedFinalizedAt: undefined,
+      name: "DST fall-back day before its 25-hour close",
+      options: {
+        defaultTimeZone: "America/New_York",
+        providerPulledAt: "2026-11-02T04:59:59.999Z",
+      },
+    },
+    {
+      dayKey: "2026-11-01",
+      expectedFinalizedAt: "2026-11-02T05:00:00.000Z",
+      name: "DST fall-back day at close",
+      options: {
+        defaultTimeZone: "America/New_York",
+        providerPulledAt: "2026-11-02T05:00:00.000Z",
+      },
+    },
+  ] as const;
+
+  for (const value of cases) {
+    const dayKey = value.dayKey ?? event.dayKey;
+    assert.deepEqual(
+      deriveJunctionCanonicalCoverageEvidence([{ ...event, dayKey }], value.options),
+      [{
+        coverageBoundary: dayKey,
+        ...(value.expectedFinalizedAt
+          ? { coverageFinalizedAt: value.expectedFinalizedAt }
+          : {}),
+        resource: "activity",
+        sourceProviderSlug: "fitbit",
+      }],
+      value.name,
+    );
+  }
+});
+
+test("Junction migration preserves daily facts when close cannot yet be proven", () => {
+  const payload = normalizeJunctionSnapshot({
+    canonicalCoverageDailyClosedOnlySourceProviderSlug: "fitbit",
+    importedAt: "2026-08-12T04:00:00.000Z",
+    summaries: {
+      activity: [{
+        date: "2026-08-12",
+        id: "fitbit-day-without-time-zone",
+        sourceProviderSlug: "fitbit",
+        steps: 500,
+      }],
+    },
+  });
+
+  const activity = payload.events?.find((event) =>
+    event.externalRef?.resourceType === "junction-fitbit-activity"
+  );
+  assert.equal(activity?.dayKey, "2026-08-12");
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence(payload.events ?? [], {
+      providerPulledAt: "2026-08-12T04:00:00.000Z",
+    }),
+    [{
+      coverageBoundary: "2026-08-12",
+      resource: "activity",
+      sourceProviderSlug: "fitbit",
+    }],
+  );
+});
+
+test("Junction migration interval coverage uses the accepted canonical end", () => {
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([{
+      dataOrigin: { sourceProviderSlug: "fitbit" },
+      endAt: "2026-08-12T10:00:00.000Z",
+      externalRef: { resourceType: "junction-fitbit-sleep" },
+      kind: "sleep_session",
+      occurredAt: "2026-08-12T02:00:00.000Z",
+    }]),
+    [{
+      coverageBoundary: "2026-08-12T10:00:00.000Z",
+      resource: "sleep",
+      sourceProviderSlug: "fitbit",
+    }],
+  );
+});
+
+test("Junction migration keeps active Fitbit on closed days and admits successor only after each fence", () => {
+  const payload = normalizeJunctionSnapshot({
+    canonicalCoverageDailyClosedOnlySourceProviderSlug: "fitbit",
+    canonicalCoverageFence: {
+      coverageBoundaryByResource: {
+        activity: "2026-08-11",
+        sleep: "2026-08-12T10:00:00.000Z",
+      },
+      sourceProviderSlug: "google_health",
+    },
+    canonicalCoverageProviderPulledAt: "2026-08-12T04:00:00.000Z",
+    importedAt: "2026-08-12T04:00:00.000Z",
+    summaries: {
+      activity: [
+        {
+          date: "2026-08-11",
+          id: "fitbit-closed-day",
+          sourceProviderSlug: "fitbit",
+          steps: 4000,
+        },
+        {
+          date: "2026-08-12",
+          id: "fitbit-open-day",
+          sourceProviderSlug: "fitbit",
+          steps: 500,
+        },
+        {
+          date: "2026-08-11",
+          id: "successor-equal-day",
+          sourceProviderSlug: "google_health",
+          steps: 1000,
+        },
+        {
+          date: "2026-08-12",
+          id: "successor-next-day",
+          sourceProviderSlug: "google_health",
+          steps: 2000,
+        },
+      ],
+      sleep: [
+        {
+          bedtime_start: "2026-08-12T02:00:00.000Z",
+          bedtime_stop: "2026-08-12T10:00:00.000Z",
+          duration: 28_800,
+          id: "successor-equal-session",
+          sourceProviderSlug: "google_health",
+          total: 25_200,
+        },
+        {
+          bedtime_start: "2026-08-13T02:00:00.000Z",
+          bedtime_stop: "2026-08-13T10:00:00.000Z",
+          duration: 28_800,
+          id: "successor-next-session",
+          sourceProviderSlug: "google_health",
+          total: 25_200,
+        },
+      ],
+    },
+  }, { defaultTimeZone: "America/New_York" });
+
+  const activityDays = payload.events
+    ?.filter((event) => event.externalRef?.resourceType.includes("activity"))
+    .map((event) => [event.dataOrigin?.sourceProviderSlug, event.dayKey]);
+  assert.deepEqual(activityDays, [
+    ["fitbit", "2026-08-11"],
+    ["google-health", "2026-08-12"],
+  ]);
+
+  const sleepEnds = payload.events
+    ?.filter((event) => event.kind === "sleep_session")
+    .map((event) => event.fields?.endAt);
+  assert.deepEqual(sleepEnds, ["2026-08-13T10:00:00.000Z"]);
 });

@@ -89,22 +89,35 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
       unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
     },
   },
-  {
+  ...([
+    ["fitbit-authorization", "authorization_required", null],
+    ["fitbit-verifying", "verifying_successor", null],
+    ["fitbit-switching", "cutover_ready", null],
+    [
+      "fitbit-retry",
+      "cutover_ready",
+      "Murph could not stop the legacy Fitbit connection. It is still syncing; retry when you are ready.",
+    ],
+  ] as const).map(([id, migrationState, errorMessage]) => ({
     authenticated: true,
-    errorMessage: null,
+    errorMessage,
     source: {
       connectTarget: "fitbit",
-      description: "Sleep, activity, heart rate, and daily readiness.",
-      id: "fitbit",
+      description:
+        "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+      disconnectConnectionId: "design-fitbit-migration",
+      disconnectSourceProviderSlug: "fitbit",
+      id,
       logo: {
         className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
         height: 36,
         src: "/brand-logos/connect/fitbit.svg",
         width: 128,
       },
+      migrationState,
       name: "Fitbit",
     },
-  },
+  })),
   {
     authenticated: false,
     errorMessage: null,
@@ -353,6 +366,7 @@ export function ConnectSourceCardStudy({
               pendingDisconnect={false}
               source={source}
               onDisconnectTargetChange={() => {}}
+              onMigrationRetry={() => {}}
               onSetupGuideOpen={() => {}}
               onStartConnection={() => Promise.resolve()}
             />

@@ -1655,7 +1655,7 @@ test("Junction provider exposes primitive handlers without OAuth compatibility m
 });
 
 test("Junction default provider filter covers hosted Link connect routes", () => {
-  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
+  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 34);
 
   assert.deepEqual(
     JUNCTION_LINK_PROVIDER_SLUGS,
@@ -7528,6 +7528,42 @@ test("Junction provider proves source access only from explicit active statuses"
   }
 });
 
+test("Junction provider requires definitive absence for cutover recovery", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    assert.equal(
+      readUrl(input),
+      "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    );
+    return createJsonResponse({
+      data: [
+        { slug: "fitbit", status: "error" },
+        { slug: "fitbit", status: "revoked" },
+        { slug: "oura", status: "revoked" },
+        { slug: "garmin", status: "connected" },
+        { slug: "garmin", status: "error" },
+      ],
+    });
+  });
+  const isSourceAccessActive = requireValue(
+    provider.connectionHandler?.isSourceAccessActive,
+  );
+
+  assert.equal(
+    await isSourceAccessActive(createAccount(), "garmin", { requireDefinitive: true }),
+    true,
+  );
+  assert.equal(
+    await isSourceAccessActive(createAccount(), "oura", { requireDefinitive: true }),
+    false,
+  );
+  await assert.rejects(
+    () => isSourceAccessActive(createAccount(), "fitbit", { requireDefinitive: true }),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_SOURCE_STATUS_AMBIGUOUS"
+      && error.retryable === true,
+  );
+});
+
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
   assert.deepEqual(normalizeJunctionProviderFilter(["oura", "withings"]), ["oura", "withings"]);
 
@@ -9054,7 +9090,12 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.equal(requests.every((request) => request.headers.get("x-vital-api-key") === "sk_us_test_123"), true);
 });
 
-test("Junction beginConnection dispatches Link directly without mutating the requested source provider", async () => {
+test("Junction maps legacy Fitbit and Google Health status identities to one visible source", () => {
+  assert.equal(resolveDeviceConnectSourceIdForJunctionProviderSlug("fitbit"), "fitbit");
+  assert.equal(resolveDeviceConnectSourceIdForJunctionProviderSlug("google_health"), "fitbit");
+});
+
+test("Junction beginConnection dispatches Fitbit through Google Health", async () => {
   const requests: Array<{ body: unknown; method: string; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const url = readUrl(input);
@@ -9079,7 +9120,7 @@ test("Junction beginConnection dispatches Link directly without mutating the req
     now: "2026-04-03T00:00:00.000Z",
     scopes: [],
     ownerId: "owner-internal-id-123",
-    sourceProviderSlug: "fitbit",
+    sourceProviderSlug: "google_health",
   });
 
   const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;
@@ -9087,7 +9128,7 @@ test("Junction beginConnection dispatches Link directly without mutating the req
     typeof linkBody === "object" && linkBody !== null && "provider" in linkBody
       ? linkBody.provider
       : null,
-    "fitbit",
+    "google_health",
   );
   assert.equal(
     typeof linkBody === "object" && linkBody !== null && "filter_on_providers" in linkBody,
@@ -19150,4 +19191,192 @@ test("Junction workout_stream carries terminal progress across cancellation", as
   );
   assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2", "workout-3"]);
   assert.equal(second.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+});
+
+test("Junction webhook jobs use complete migration provenance and retry mixed sources", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const parseWebhook = async (input: {
+    data: Record<string, unknown>;
+    eventType?: string;
+    messageId: string;
+  }) => {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: input.eventType ?? "daily.data.activity.created",
+        user_id: "junction-user-fitbit-migration",
+        data: input.data,
+      },
+      messageId: input.messageId,
+      timestamp: "1775174400",
+    });
+    return requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    });
+  };
+
+  const cases = [
+    {
+      data: {
+        id: "activity-direct-google-health",
+        sourceProviderSlug: "google_health",
+      },
+      eventType: "daily.data.activity.created",
+      expected: "google_health",
+      name: "direct",
+    },
+    {
+      data: {
+        id: "activity-nested-google-health",
+        provider: "fitbit",
+        results: [{
+          date: "2026-04-02",
+          sourceProviderSlug: "google_health",
+          steps: 4321,
+        }],
+      },
+      eventType: "daily.data.activity.created",
+      expected: "google_health",
+      name: "nested",
+    },
+    {
+      data: {
+        groups: {
+          fitbit: [{
+            data: [{
+              sourceProviderSlug: "google_health",
+              timestamp: "2026-04-02T12:00:00.000Z",
+              value: 1234,
+            }],
+          }],
+        },
+        provider: "fitbit",
+      },
+      eventType: "daily.data.steps.created",
+      expected: "google_health",
+      name: "grouped",
+    },
+  ] as const;
+
+  for (const value of cases) {
+    const parsed = await parseWebhook({
+      data: value.data,
+      eventType: value.eventType,
+      messageId: `msg_migration_${value.name}`,
+    });
+    assert.equal(parsed.dataSourceProviderSlug, value.expected, value.name);
+    assert.equal(parsed.jobs[0]?.payload?.sourceProviderSlug, value.expected, value.name);
+  }
+
+  for (const value of [
+    {
+      data: {
+        groups: {
+          fitbit: [{ data: [{ date: "2026-04-02", steps: 4321 }] }],
+          google_health: [{ data: [{ date: "2026-04-02", steps: 1234 }] }],
+        },
+        id: "activity-mixed-migration-sources",
+      },
+      messageId: "msg_activity_mixed_migration_sources",
+    },
+    {
+      data: {
+        id: "activity-known-and-unknown-migration-sources",
+        records: [
+          { date: "2026-04-02", sourceProviderSlug: "google_health", steps: 1234 },
+          { date: "2026-04-02", steps: 4321 },
+        ],
+      },
+      messageId: "msg_activity_known_and_unknown_migration_sources",
+    },
+  ]) {
+    await assert.rejects(
+      parseWebhook(value),
+      (error: unknown) => error instanceof DeviceSyncError
+        && error.code === "WEBHOOK_SOURCE_NOT_READY"
+        && error.httpStatus === 503
+        && error.retryable === true,
+    );
+  }
+});
+
+test("Junction migration cleanup requires the active successor and revokes only Fitbit", async () => {
+  const requests: Array<{ method: string; url: string }> = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    const request = {
+      method: String(init?.method ?? "GET"),
+      url: readUrl(input),
+    };
+    requests.push(request);
+    if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        data: [
+          { slug: "garmin", status: "connected" },
+          { slug: "fitbit", status: "connected" },
+          { slug: "google_health", status: "connected" },
+        ],
+      });
+    }
+    if (request.method === "DELETE") {
+      return createJsonResponse({ success: true });
+    }
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+  });
+  const revokeSourceAccess = requireValue(
+    provider.connectionHandler?.revokeSourceAccess,
+  );
+
+  await revokeSourceAccess(createAccount(), "fitbit", {
+    requiredActiveSourceProviderSlug: "google_health",
+  });
+
+  assert.deepEqual(requests, [
+    {
+      method: "GET",
+      url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    },
+    {
+      method: "DELETE",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/fitbit",
+    },
+  ]);
+});
+
+test("Junction migration cleanup leaves Fitbit active without an active successor", async () => {
+  let deletes = 0;
+  const provider = createJunctionProvider(async (input, init) => {
+    const url = readUrl(input);
+    if (String(init?.method ?? "GET") === "DELETE") {
+      deletes += 1;
+      return createJsonResponse({ success: true });
+    }
+    assert.equal(
+      url,
+      "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    );
+    return createJsonResponse({
+      data: [
+        { slug: "fitbit", status: "connected" },
+        { slug: "google_health", status: "error" },
+      ],
+    });
+  });
+  const revokeSourceAccess = requireValue(
+    provider.connectionHandler?.revokeSourceAccess,
+  );
+
+  await assert.rejects(
+    () => revokeSourceAccess(createAccount(), "fitbit", {
+      requiredActiveSourceProviderSlug: "google_health",
+    }),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_REQUIRED_SOURCE_NOT_ACTIVE"
+      && error.retryable === true,
+  );
+  assert.equal(deletes, 0);
 });

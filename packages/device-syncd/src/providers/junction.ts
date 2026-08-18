@@ -32,6 +32,7 @@ import {
   resolveJunctionBoundedFeatureRecords,
   resolveJunctionWeightProviderRecordIdentity,
   selectJunctionWorkoutStreamCandidates,
+  type JunctionSnapshotInput,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import {
@@ -41,6 +42,8 @@ import {
 import {
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
+  maxJunctionCanonicalCoverageBoundary,
+  normalizeJunctionCanonicalCoverageBoundary,
 } from "@murphai/importers/device-providers/junction-resources";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
@@ -52,7 +55,9 @@ import {
   sanitizeHostedRuntimeDiagnosticText,
 } from "../hosted-runtime.ts";
 import {
-  isJunctionCredentialIndependentInlineImportJob,
+  areJunctionProviderSlugsDataEquivalent,
+  classifyDeviceSyncJunctionInlineSourceProviderSlug,
+  isJunctionInlineImportJob,
   resolveDeviceSyncJunctionInlineSourceProviderSlug,
 } from "../junction-inline-authority.ts";
 import {
@@ -73,6 +78,17 @@ import {
   type JunctionHistoricalBackfillStatus,
 } from "../junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
+import {
+  buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
+  buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey,
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+  DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE,
+  isGoogleHealthFitbitMigrationLegacyTerminal,
+  isGoogleHealthFitbitMigrationLegacyCoverageReady,
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
+  readDeviceSyncSourceCanonicalCoverageBoundary,
+  readDeviceSyncSourceCanonicalCoverageFinalizedAt,
+} from "../fitbit-migration.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
@@ -119,7 +135,8 @@ import {
   type JunctionWindowInput,
 } from "./junction-client.ts";
 import {
-  areJunctionDeviceConnectProviderSlugsEquivalent,
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   resolveJunctionDeviceConnectRouteByProviderSlug,
 } from "../config/connect-routes.ts";
 import {
@@ -262,6 +279,8 @@ interface JunctionHistoricalUnresolvedProviderRecords {
 }
 
 interface PreparedJunctionImportSnapshot {
+  canonicalCoverageFence?: JunctionSnapshotInput["canonicalCoverageFence"];
+  canonicalCoverageDailyClosedOnlySourceProviderSlug?: string;
   connections: Array<Record<string, unknown>>;
   sourceProviders: readonly JunctionProviderConnection[];
   snapshots: Record<string, unknown[]>;
@@ -311,6 +330,7 @@ const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9
 interface JunctionWindowFetchOptions {
   collectionWorkLimit?: JunctionCollectionWorkLimit;
   dateQueryFormat?: JunctionDateQueryFormat;
+  sourceProviderSlug?: string | null;
   requireStructurallyCompleteCollection?: boolean;
 }
 
@@ -769,10 +789,21 @@ export function createJunctionDeviceSyncProvider(
   async function revokeSourceAccess(
     account: DeviceSyncAccount,
     sourceProviderSlug: string,
+    options?: { requiredActiveSourceProviderSlug?: string },
   ): Promise<void> {
     const userId = normalizeString(account.externalAccountId);
     const targetProviderSlug = normalizeProviderSlug(sourceProviderSlug);
-    if (!userId || !targetProviderSlug) {
+    const requiredActiveProviderSlug = options?.requiredActiveSourceProviderSlug === undefined
+      ? null
+      : normalizeProviderSlug(options.requiredActiveSourceProviderSlug);
+    if (
+      !userId
+      || !targetProviderSlug
+      || (
+        options?.requiredActiveSourceProviderSlug !== undefined
+        && !requiredActiveProviderSlug
+      )
+    ) {
       throw deviceSyncError({
         code: "JUNCTION_SOURCE_DEREGISTER_INPUT_INVALID",
         message: "Junction source cleanup requires a stored user and provider slug.",
@@ -782,15 +813,39 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const providers = await client.listUserProviders(userId);
-    const targetIsRegistered = providers.some((provider) =>
-      mapJunctionSourceStatus(provider.status) !== "disconnected"
-      && (
-        normalizeProviderSlug(provider.origin.sourceProviderSlug)
-        ?? normalizeProviderSlug(provider.slug)
-      ) === targetProviderSlug
-    );
-    if (!targetIsRegistered) {
+    const targetStatuses = providers
+      .filter((provider) =>
+        (
+          normalizeProviderSlug(provider.origin.sourceProviderSlug)
+          ?? normalizeProviderSlug(provider.slug)
+        ) === targetProviderSlug
+      )
+      .map((provider) => mapJunctionSourceStatus(provider.status));
+    if (
+      targetStatuses.length === 0
+      || targetStatuses.every((status) => status === "disconnected")
+    ) {
       return;
+    }
+    if (
+      requiredActiveProviderSlug
+      && (
+        !targetStatuses.includes("connected")
+        || !providers.some((provider) =>
+          mapJunctionSourceStatus(provider.status) === "connected"
+          && (
+            normalizeProviderSlug(provider.origin.sourceProviderSlug)
+            ?? normalizeProviderSlug(provider.slug)
+          ) === requiredActiveProviderSlug
+        )
+      )
+    ) {
+      throw deviceSyncError({
+        code: "JUNCTION_REQUIRED_SOURCE_NOT_ACTIVE",
+        message: "Junction source cleanup requires an active successor source.",
+        retryable: true,
+        httpStatus: 409,
+      });
     }
 
     await client.deregisterProvider({
@@ -802,6 +857,7 @@ export function createJunctionDeviceSyncProvider(
   async function isSourceAccessActive(
     account: DeviceSyncAccount,
     sourceProviderSlug: string,
+    options?: { requireDefinitive?: boolean },
   ): Promise<boolean> {
     const userId = normalizeString(account.externalAccountId);
     const targetProviderSlug = normalizeProviderSlug(sourceProviderSlug);
@@ -814,13 +870,27 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    return (await client.listUserProviders(userId)).some((provider) =>
-      mapJunctionSourceStatus(provider.status) === "connected"
-      && (
+    const statuses = (await client.listUserProviders(userId))
+      .filter((provider) => (
         normalizeProviderSlug(provider.origin.sourceProviderSlug)
         ?? normalizeProviderSlug(provider.slug)
-      ) === targetProviderSlug
-    );
+      ) === targetProviderSlug)
+      .map((provider) => mapJunctionSourceStatus(provider.status));
+    if (statuses.includes("connected")) {
+      return true;
+    }
+    if (statuses.length === 0 || statuses.every((status) => status === "disconnected")) {
+      return false;
+    }
+    if (options?.requireDefinitive) {
+      throw deviceSyncError({
+        code: "JUNCTION_SOURCE_STATUS_AMBIGUOUS",
+        message: "Junction source status is not definitive yet. Retry shortly.",
+        retryable: true,
+        httpStatus: 503,
+      });
+    }
+    return false;
   }
 
   function createScheduledJobs(
@@ -1246,6 +1316,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
+    const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
     const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
       signal: context.signal ?? null,
@@ -1266,8 +1337,12 @@ export function createJunctionDeviceSyncProvider(
       summaryWindow.windowStart,
       summaryWindow.windowEnd,
       skippedOptionalResources,
-      { dateQueryFormat: summaryDateQueryFormat },
+      {
+        dateQueryFormat: summaryDateQueryFormat,
+        sourceProviderSlug,
+      },
     );
+    const historicalSummaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
     const profileSummaryResult = await fetchProfileSummaryOnce(context, skippedOptionalResources);
     const profileMetadataPatch = profileSummaryResult.checked
       ? buildJunctionProfileSummaryCheckedMetadataPatch(context)
@@ -1306,7 +1381,7 @@ export function createJunctionDeviceSyncProvider(
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
-      await context.importSnapshot({
+      const snapshot = {
         provider: "junction",
         accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
@@ -1314,9 +1389,18 @@ export function createJunctionDeviceSyncProvider(
         windowStart: summaryWindow.windowStart,
         windowEnd: summaryWindow.windowEnd,
         connections: importConnections,
+        canonicalCoverageFence: preparedSummaryImport.canonicalCoverageFence,
+        canonicalCoverageDailyClosedOnlySourceProviderSlug:
+          preparedSummaryImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+        canonicalCoverageProviderPulledAt: context.now,
         summaries: importSummaries,
         timeseries: {},
-      });
+      };
+      const receipt = await context.importSnapshot(snapshot);
+      await recordAcceptedJunctionFitbitCoverage(
+        context,
+        receipt,
+      );
     }
     // Current records are durable before the optional historical-status probe.
     // An unavailable introspection endpoint must not hold fresh ingestion hostage.
@@ -1362,6 +1446,7 @@ export function createJunctionDeviceSyncProvider(
         hourlyFidelityWindow.windowEnd,
         skippedOptionalResources,
         dailyTimeseriesResources,
+        sourceProviderSlug,
       );
       if (timeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
@@ -1395,7 +1480,9 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: window.windowEnd,
           })
         : buildNonConnectHistoricalBackfillFollowUp({
-            hasRecords: historicalSummaryHasRecords,
+            hasRecords: sourceProviderSlug
+              ? historicalSummaryHasFetchedRecords
+              : historicalSummaryHasRecords,
             job,
             now: context.now,
             windowStart: window.windowStart,
@@ -1460,6 +1547,15 @@ export function createJunctionDeviceSyncProvider(
       context.now,
       addMilliseconds(context.now, reconcileIntervalMs),
     );
+    const completedSourceBackfillProviderSlug = job.kind === "backfill"
+      && historicalSummaryHasFetchedRecords
+      ? sourceProviderSlug
+      : null;
+    if (completedSourceBackfillProviderSlug) {
+      await projectJunctionSources(context, sourceProviders, {
+        historicalBackfillCompletedProviderSlug: completedSourceBackfillProviderSlug,
+      });
+    }
     const shouldScheduleTimeseries = timeseriesResources.length > 0
       && (
         job.kind === "backfill"
@@ -1580,7 +1676,7 @@ export function createJunctionDeviceSyncProvider(
     if (!webhookDataJson) {
       return null;
     }
-    if (!isJunctionCredentialIndependentInlineImportJob({
+    if (!isJunctionInlineImportJob({
       kind: job.kind,
       payload: job.payload,
     })) {
@@ -2727,7 +2823,7 @@ export function createJunctionDeviceSyncProvider(
       summaries,
       sourceProviders,
     );
-    await context.importSnapshot({
+    const snapshot = {
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
@@ -2735,9 +2831,18 @@ export function createJunctionDeviceSyncProvider(
       windowStart: window.windowStart,
       windowEnd: window.windowEnd,
       connections: preparedImport.connections,
+      canonicalCoverageFence: preparedImport.canonicalCoverageFence,
+      canonicalCoverageDailyClosedOnlySourceProviderSlug:
+        preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+      canonicalCoverageProviderPulledAt: context.now,
       summaries: preparedImport.snapshots,
       timeseries: {},
-    });
+    };
+    const receipt = await context.importSnapshot(snapshot);
+    await recordAcceptedJunctionFitbitCoverage(
+      context,
+      receipt,
+    );
 
     return withJunctionHistoricalCoverageVerification(
       context,
@@ -3186,19 +3291,35 @@ export function createJunctionDeviceSyncProvider(
     const data = readPlainObject(verified.payload[JUNCTION_WEBHOOK_ROOT_FIELDS.data]);
     const externalAccountSelection = requireJunctionWebhookUserIdSelection(verified.payload, data);
     const resource = inferJunctionWebhookResource(eventType, data);
-    const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
+    const envelopeSourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
     const eventOccurredAt = extractJunctionWebhookOccurredAt(data);
     const occurredAt = eventOccurredAt ?? context.now;
     const window = buildJunctionWebhookWindow(data, occurredAt, context.now, resource);
+    const historicalPullCompleted = isJunctionHistoricalDataEvent(eventType)
+      && data !== null
+      && isJunctionHistoricalPullCompletedWebhookData(data, externalAccountSelection.userId);
+    const dataSourceProviderSlug = resolveJunctionWebhookDataSourceProviderSlug({
+      data,
+      envelopeSourceProviderSlug,
+      eventType,
+      historicalPullCompleted,
+    });
     const webhookDataJsons = buildJunctionWebhookDataJobJsons({
       data,
       eventType,
       externalAccountId: externalAccountSelection.userId,
       resource,
       summaryResources,
-      sourceProviderSlug,
+      sourceProviderSlug: dataSourceProviderSlug,
     });
+    if (webhookDataJsons.length > 0) {
+      assertJunctionWebhookDataJobSourceProviderSlug(
+        webhookDataJsons,
+        dataSourceProviderSlug,
+      );
+    }
+    const sourceProviderSlug = dataSourceProviderSlug ?? envelopeSourceProviderSlug;
     const jobs = buildJunctionWebhookJobs({
       eventType,
       objectId,
@@ -3223,14 +3344,7 @@ export function createJunctionDeviceSyncProvider(
       // A historical-pull completion is a data-less notification, so accepting
       // its fetch job proves nothing arrived. Treating it as delivery would
       // refresh the arrival signal and hide the very stall this detects.
-      dataSourceProviderSlug: isJunctionDataEvent(eventType)
-          && !(
-            isJunctionHistoricalDataEvent(eventType)
-            && data !== null
-            && isJunctionHistoricalPullCompletedWebhookData(data, externalAccountSelection.userId)
-          )
-        ? sourceProviderSlug
-        : null,
+      dataSourceProviderSlug,
       jobs,
       unknownAccountAction: "accept",
     };
@@ -3253,6 +3367,7 @@ export function createJunctionDeviceSyncProvider(
       const request: JunctionWindowInput = {
         resource,
         signal: context.signal ?? null,
+        sourceProviderSlug: options.sourceProviderSlug,
         userId: context.account.externalAccountId,
         windowStart,
         windowEnd,
@@ -3602,7 +3717,7 @@ export function createJunctionDeviceSyncProvider(
           windowStart: executionWindowStart,
         });
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          const receipt = await context.importSnapshot({
+          const snapshot = {
             provider: "junction",
             accountId: buildJunctionImportAccountId(context.account.externalAccountId),
             connectionId: context.account.id,
@@ -3611,9 +3726,18 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: executionWindowEnd,
             timeseriesWindowKind: "precise",
             connections: preparedImport.connections,
+            canonicalCoverageFence: preparedImport.canonicalCoverageFence,
+            canonicalCoverageDailyClosedOnlySourceProviderSlug:
+              preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+            canonicalCoverageProviderPulledAt: context.now,
             summaries: {},
             timeseries: preparedImport.snapshots,
-          });
+          };
+          const receipt = await context.importSnapshot(snapshot);
+          await recordAcceptedJunctionFitbitCoverage(
+            context,
+            receipt,
+          );
           providerRecordsExamined = true;
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
           canonicalEventDayKeys = readProviderSnapshotCanonicalEventDayKeys(receipt);
@@ -4280,7 +4404,7 @@ export function createJunctionDeviceSyncProvider(
           input.sourceProviders,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          await input.context.importSnapshot({
+          const receipt = await input.context.importSnapshot({
             provider: "junction",
             accountId: buildJunctionImportAccountId(input.context.account.externalAccountId),
             connectionId: input.context.account.id,
@@ -4288,9 +4412,14 @@ export function createJunctionDeviceSyncProvider(
             windowStart: input.windowStart,
             windowEnd: input.windowEnd,
             connections: preparedImport.connections,
+            canonicalCoverageFence: preparedImport.canonicalCoverageFence,
+            canonicalCoverageDailyClosedOnlySourceProviderSlug:
+              preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
+            canonicalCoverageProviderPulledAt: input.context.now,
             summaries: {},
             timeseries: preparedImport.snapshots,
           });
+          await recordAcceptedJunctionFitbitCoverage(input.context, receipt);
         }
       } catch (error) {
         return carryTerminalProgressOrThrow(error);
@@ -4341,7 +4470,7 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const receipt = await context.importSnapshot({
+    const snapshot = {
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
@@ -4349,9 +4478,15 @@ export function createJunctionDeviceSyncProvider(
       windowStart,
       windowEnd,
       connections,
+      canonicalCoverageFence: preparedImport.canonicalCoverageFence,
       summaries,
       timeseries: {},
-    });
+    };
+    const receipt = await context.importSnapshot(snapshot);
+    await recordAcceptedJunctionFitbitCoverage(
+      context,
+      receipt,
+    );
     return {
       durableDeliveryAccepted: readProviderSnapshotDurableDeliveryAccepted(receipt),
       normalizationEvidence,
@@ -6278,14 +6413,6 @@ function resolveJunctionProviderRouteSlug(value: unknown): string | null {
     ?? normalized;
 }
 
-function areJunctionProviderSlugsRouteEquivalent(left: unknown, right: unknown): boolean {
-  const normalizedLeft = normalizeProviderSlug(left);
-  const normalizedRight = normalizeProviderSlug(right);
-  return normalizedLeft !== null
-    && normalizedRight !== null
-    && areJunctionDeviceConnectProviderSlugsEquivalent(normalizedLeft, normalizedRight);
-}
-
 interface JunctionAccountSourceIdentity {
   sourceInstanceId?: string;
   sourceInstanceKey?: string;
@@ -6318,7 +6445,7 @@ function resolveJunctionAccountSourceStates(
 ): Array<ResolvedDeviceSyncSourceState<JunctionImportAdmissionSource>> {
   const states: Array<ResolvedDeviceSyncSourceState<JunctionImportAdmissionSource>> = [];
   for (const source of sources) {
-    if (states.some((state) => areJunctionProviderSlugsRouteEquivalent(
+    if (states.some((state) => areJunctionProviderSlugsDataEquivalent(
       state.identitySource.sourceProviderSlug,
       source.sourceProviderSlug,
     ))) {
@@ -6343,7 +6470,7 @@ function mergeJunctionAccountSourceIdentities(
     ...accountSourceIdentities,
     ...requestedSourceIdentities.filter((requestedIdentity) =>
       !accountSourceIdentities.some((accountIdentity) =>
-        areJunctionProviderSlugsRouteEquivalent(
+        areJunctionProviderSlugsDataEquivalent(
           requestedIdentity.sourceProviderSlug,
           accountIdentity.sourceProviderSlug,
         )
@@ -6405,7 +6532,7 @@ function findJunctionAccountSources(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string,
 ): JunctionImportAdmissionSource[] {
-  return sources.filter((source) => areJunctionProviderSlugsRouteEquivalent(
+  return sources.filter((source) => areJunctionProviderSlugsDataEquivalent(
     source.sourceProviderSlug,
     sourceProviderSlug,
   ));
@@ -6441,7 +6568,7 @@ function sanitizeJunctionImportConnections(
   return providers.map((provider) => {
     const sourceProviderSlug = provider.origin.sourceProviderSlug ?? provider.slug;
     const projectedSourceIdentity = sourceIdentities.find(
-      (identity) => areJunctionProviderSlugsRouteEquivalent(
+      (identity) => areJunctionProviderSlugsDataEquivalent(
         sourceProviderSlug,
         identity.sourceProviderSlug,
       ),
@@ -6508,6 +6635,9 @@ function prepareJunctionImportSnapshotForSources(
   );
 
   return {
+    canonicalCoverageFence: buildJunctionGoogleHealthCanonicalCoverageFence(currentSources),
+    canonicalCoverageDailyClosedOnlySourceProviderSlug:
+      resolveJunctionFitbitMigrationClosedDailySource(currentSources),
     connections: sanitizeJunctionImportConnections(
       sourceProviders,
       options.sourceIdentities,
@@ -6525,6 +6655,22 @@ function prepareJunctionImportSnapshotForSources(
       options,
     ),
   };
+}
+
+function resolveJunctionFitbitMigrationClosedDailySource(
+  sources: readonly JunctionImportAdmissionSource[],
+): string | undefined {
+  const activeFitbit = sources.some((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    && source.status !== "disconnected"
+  );
+  const activeGoogleHealth = sources.some((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    && source.status !== "disconnected"
+  );
+  return activeFitbit && activeGoogleHealth
+    ? JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    : undefined;
 }
 
 function filterJunctionImportSnapshots(
@@ -6563,6 +6709,143 @@ function filterJunctionImportSnapshots(
   );
 }
 
+async function recordAcceptedJunctionFitbitCoverage(
+  context: ProviderJobContext,
+  receipt: unknown,
+): Promise<void> {
+  const canonicalCoverage = readProviderSnapshotJunctionCanonicalCoverage(receipt);
+  if (
+    !readProviderSnapshotDurableDeliveryAccepted(receipt)
+    || canonicalCoverage.length === 0
+    || !context.upsertConnectionSource
+  ) {
+    return;
+  }
+
+  const coverageByResource = new Map<string, {
+    coverageBoundary: string;
+    coverageFinalizedAt?: string;
+  }>();
+  for (const evidence of canonicalCoverage) {
+    if (
+      normalizeProviderSlug(evidence.sourceProviderSlug)
+        !== JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      || !buildDeviceSyncSourceCanonicalCoverageBoundaryKey(evidence.resource)
+    ) {
+      continue;
+    }
+    const existing = coverageByResource.get(evidence.resource);
+    const coverageBoundary = existing
+      ? maxJunctionCanonicalCoverageBoundary(
+          evidence.resource,
+          existing.coverageBoundary,
+          evidence.coverageBoundary,
+        )
+      : evidence.coverageBoundary;
+    coverageByResource.set(evidence.resource, {
+      coverageBoundary,
+      coverageFinalizedAt: coverageBoundary === evidence.coverageBoundary
+        ? evidence.coverageFinalizedAt ?? existing?.coverageFinalizedAt
+        : existing?.coverageFinalizedAt,
+    });
+  }
+
+  if (coverageByResource.size === 0) {
+    return;
+  }
+
+  const sources: readonly JunctionImportAdmissionSource[] = context.listConnectionSources
+    ? await context.listConnectionSources({
+        sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+      })
+    : context.account.sources ?? [];
+  const legacy = sources.find((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug)
+      === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+  );
+  if (!legacy || legacy.status === "disconnected") {
+    return;
+  }
+
+  const resourceAvailabilitySummary = {
+    ...(legacy.resourceAvailabilitySummary ?? {}),
+  };
+  let changed = false;
+  for (const [resource, coverage] of coverageByResource) {
+    const key = buildDeviceSyncSourceCanonicalCoverageBoundaryKey(resource);
+    if (!key) {
+      continue;
+    }
+    const existingCoverage = readDeviceSyncSourceCanonicalCoverageBoundary(
+      resourceAvailabilitySummary,
+      resource,
+    );
+    const coverageAdvanced =
+      !existingCoverage
+      || maxJunctionCanonicalCoverageBoundary(
+          resource,
+          existingCoverage,
+          coverage.coverageBoundary,
+        ) !== existingCoverage;
+    if (coverageAdvanced) {
+      resourceAvailabilitySummary[key] = coverage.coverageBoundary;
+      changed = true;
+    }
+    const finalizedAtKey = buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey(resource);
+    if (!finalizedAtKey) {
+      continue;
+    }
+    const existingFinalizedAt = readDeviceSyncSourceCanonicalCoverageFinalizedAt(
+      resourceAvailabilitySummary,
+      resource,
+    );
+    if (coverageAdvanced) {
+      resourceAvailabilitySummary[finalizedAtKey] = coverage.coverageFinalizedAt ?? null;
+      continue;
+    }
+    if (
+      existingCoverage !== coverage.coverageBoundary
+      || !coverage.coverageFinalizedAt
+      || existingFinalizedAt
+    ) {
+      continue;
+    }
+    resourceAvailabilitySummary[finalizedAtKey] = coverage.coverageFinalizedAt;
+    changed = true;
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  const sourceInstanceKey = legacy.sourceInstanceKey
+    ?? buildJunctionProviderSourceInstanceKey({
+      connectionId: context.account.id,
+      sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+    });
+  if (!sourceInstanceKey) {
+    return;
+  }
+
+  await context.upsertConnectionSource({
+    sourceInstanceKey,
+    sourceProviderSlug: legacy.sourceProviderSlug,
+    ...(legacy.displayName === undefined
+      ? {}
+      : { displayName: legacy.displayName }),
+    status: legacy.status,
+    resourceAvailabilitySummary,
+    ...(legacy.lastErrorCode === undefined
+      ? {}
+      : { lastErrorCode: legacy.lastErrorCode }),
+    ...(legacy.lastErrorMessage === undefined
+      ? {}
+      : { lastErrorMessage: legacy.lastErrorMessage }),
+    ...(legacy.firstSeenAt ? { firstSeenAt: legacy.firstSeenAt } : {}),
+    lastSeenAt: context.now,
+  });
+}
+
 function isJunctionImportRecordAdmitted(
   value: unknown,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
@@ -6581,12 +6864,16 @@ function isJunctionImportRecordAdmitted(
     resolveJunctionOrigin(record, fallback).sourceProviderSlug,
   );
   if (sourceProviderSlug) {
-    return isJunctionSourceAdmittedForImport(
+    if (!isJunctionSourceAdmittedForImport(
       sources,
       sourceProviderSlug,
       allowUnlistedSources,
       sourceStatusRequirement,
-    );
+    )) {
+      return false;
+    }
+
+    return true;
   }
 
   return !hasPendingSourceAdmission || !hasJunctionSourceReferenceIdentity(record);
@@ -6674,7 +6961,7 @@ function sanitizeJunctionImportSnapshotValue(
     (unresolvedPreservedSourceReference ? undefined : origin.sourceInstanceId);
   const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
   const projectedSourceIdentity = options.sourceIdentities
-    ?.find((identity) => areJunctionProviderSlugsRouteEquivalent(
+    ?.find((identity) => areJunctionProviderSlugsDataEquivalent(
       sourceProviderSlug,
       identity.sourceProviderSlug,
     ));
@@ -8192,8 +8479,12 @@ function buildNonConnectHistoricalBackfillFollowUp(input: {
   }
 
   const retryAt = addMilliseconds(input.now, retryDelayMs);
+  const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
   const retryJob = buildExactWindowJob({
     kind: "backfill",
+    payload: sourceProviderSlug
+      ? { sourceProviderSlug }
+      : undefined,
     priority: Math.max(input.job.priority, JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY),
     windowStart: input.windowStart,
     windowEnd: input.windowEnd,
@@ -8676,7 +8967,7 @@ function filterJunctionSparseCalendarRecordsToSource(
     if (!recordSourceProviderSlug) {
       throw incompleteJunctionSparseCalendarCollectionError();
     }
-    if (!areJunctionProviderSlugsRouteEquivalent(recordSourceProviderSlug, sourceProviderSlug)) {
+    if (!areJunctionProviderSlugsDataEquivalent(recordSourceProviderSlug, sourceProviderSlug)) {
       return [];
     }
     const recordSourceType = normalizeString(origin.sourceType);
@@ -9086,13 +9377,78 @@ function buildJunctionWebhookDataJobJsons(input: {
   if (!record) {
     return [];
   }
+  const inlineSourceProviderSlug = resolveDeviceSyncJunctionInlineSourceProviderSlug(record);
 
   const withSource = stripUndefined({
     ...record,
     sourceProviderSlug:
-      normalizeProviderSlug(record.sourceProviderSlug) ?? input.sourceProviderSlug ?? undefined,
+      normalizeProviderSlug(record.sourceProviderSlug)
+      ?? inlineSourceProviderSlug
+      ?? input.sourceProviderSlug
+      ?? undefined,
   });
   return [serializeJunctionWebhookDataJobRecord(withSource)];
+}
+
+function resolveJunctionWebhookDataSourceProviderSlug(input: {
+  data: Record<string, unknown> | null;
+  envelopeSourceProviderSlug: string | null;
+  eventType: string;
+  historicalPullCompleted: boolean;
+}): string | null {
+  if (
+    !input.data
+    || !isJunctionDataEvent(input.eventType)
+    || input.historicalPullCompleted
+  ) {
+    return null;
+  }
+  const classification = classifyDeviceSyncJunctionInlineSourceProviderSlug(
+    input.data,
+  );
+  if (classification.status === "ambiguous") {
+    throw junctionWebhookSourceNotReadyError();
+  }
+  return classification.status === "resolved"
+    ? classification.sourceProviderSlug
+    : input.envelopeSourceProviderSlug;
+}
+
+function assertJunctionWebhookDataJobSourceProviderSlug(
+  webhookDataJsons: readonly string[],
+  expectedSourceProviderSlug: string | null,
+): void {
+  const sourceProviderSlugs = new Set<string>();
+  for (const webhookDataJson of webhookDataJsons) {
+    const record = parseJunctionWebhookDataJobRecord(webhookDataJson);
+    if (!record) {
+      throw junctionWebhookSourceNotReadyError();
+    }
+    const classification = classifyDeviceSyncJunctionInlineSourceProviderSlug(record);
+    if (classification.status === "ambiguous") {
+      throw junctionWebhookSourceNotReadyError();
+    }
+    if (classification.status === "resolved") {
+      sourceProviderSlugs.add(classification.sourceProviderSlug);
+    }
+  }
+
+  if (sourceProviderSlugs.size > 1) {
+    throw junctionWebhookSourceNotReadyError();
+  }
+  const sourceProviderSlug = [...sourceProviderSlugs][0] ?? null;
+  if (sourceProviderSlug !== expectedSourceProviderSlug) {
+    throw junctionWebhookSourceNotReadyError();
+  }
+}
+
+function junctionWebhookSourceNotReadyError(): DeviceSyncError {
+  return deviceSyncError({
+    code: "WEBHOOK_SOURCE_NOT_READY",
+    message: "Junction webhook data source provenance was ambiguous. Retry later.",
+    retryable: true,
+    httpStatus: 503,
+  });
 }
 
 function serializeJunctionWebhookDataJobRecord(record: Record<string, unknown>): string {
@@ -9900,6 +10256,7 @@ async function projectJunctionSources(
   context: ProviderJobContext,
   providers: readonly JunctionProviderConnection[],
   options: {
+    historicalBackfillCompletedProviderSlug?: string;
     preserveHistoricalReconnect?: boolean;
     preserveHistoricalReconnectProviderSlugs?: readonly string[];
   } = {},
@@ -9978,6 +10335,17 @@ async function projectJunctionSources(
           : requiresHistoricalResetDeviceSyncSource(existing)
       );
     const historicalReconnectError = keepHistoricalReconnect ? existing : null;
+    const historicalBackfillCompletedAt =
+      source.sourceProviderSlug === options.historicalBackfillCompletedProviderSlug
+        ? context.now
+        : existing?.resourceAvailabilitySummary?.[
+            DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
+          ];
+    const existingSourceMetadata = Object.fromEntries(
+      Object.entries(existing?.resourceAvailabilitySummary ?? {}).filter(
+        ([key]) => isDeviceSyncSourceResourceAvailabilityMetadataKey(key),
+      ),
+    );
     await context.upsertConnectionSource({
       sourceInstanceKey:
         accountSourceIdentity?.sourceInstanceKey ?? source.sourceInstanceKey,
@@ -9988,7 +10356,16 @@ async function projectJunctionSources(
       status: keepHistoricalReconnect
         ? "error"
         : source.status,
-      resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+      resourceAvailabilitySummary: {
+        ...source.resourceAvailabilitySummary,
+        ...existingSourceMetadata,
+        ...(typeof historicalBackfillCompletedAt === "string"
+          ? {
+              [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
+                historicalBackfillCompletedAt,
+            }
+          : {}),
+      },
       // Only assert error fields when this projection saw an errored entry;
       // omitting the keys lets the store preserve existing detail while the
       // status stays "error" and auto-clear it once the status recovers.
@@ -10005,6 +10382,58 @@ async function projectJunctionSources(
   }
 }
 
+function buildJunctionGoogleHealthCanonicalCoverageFence(
+  sources: readonly JunctionImportAdmissionSource[],
+): JunctionSnapshotInput["canonicalCoverageFence"] {
+  const legacySources = sources.filter((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+  );
+  if (
+    legacySources.length === 0
+    || legacySources.some((source) => !isGoogleHealthFitbitMigrationLegacyTerminal(source))
+  ) {
+    return undefined;
+  }
+
+  const coverageBoundaryByResource: Record<string, string | null> = {};
+  for (const resource of [
+    ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+    ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  ]) {
+    const coverageKey = buildDeviceSyncSourceCanonicalCoverageBoundaryKey(resource);
+    if (!coverageKey) {
+      continue;
+    }
+    const summariesWithCoverage = legacySources.flatMap((source) => {
+      const summary = source.resourceAvailabilitySummary;
+      return summary && coverageKey in summary ? [summary] : [];
+    });
+    if (summariesWithCoverage.length === 0) {
+      continue;
+    }
+    const coverageValues = summariesWithCoverage.map((summary) =>
+      readDeviceSyncSourceCanonicalCoverageBoundary(summary, resource)
+    );
+    if (coverageValues.some((coverage) => coverage === null)) {
+      coverageBoundaryByResource[resource] = null;
+      continue;
+    }
+    const validCoverage = coverageValues.filter(
+      (coverage): coverage is string => coverage !== null,
+    );
+    coverageBoundaryByResource[resource] = validCoverage.reduce((latest, coverage) =>
+      maxJunctionCanonicalCoverageBoundary(resource, latest, coverage)
+    );
+  }
+
+  return Object.keys(coverageBoundaryByResource).length > 0
+    ? {
+        coverageBoundaryByResource,
+        sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+      }
+    : undefined;
+}
+
 function isJunctionSourceAdmittedForImport(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,
@@ -10014,6 +10443,44 @@ function isJunctionSourceAdmittedForImport(
   const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
   if (!normalizedSourceProviderSlug) {
     return true;
+  }
+
+  // Junction does not deduplicate equivalent Fitbit and Google Health records.
+  // During migration, keep legacy Fitbit as the sole canonical writer until its
+  // access is explicitly terminal through local cutover or provider-confirmed absence.
+  // A disconnect-in-progress fence blocks both sides so a failed revoke cannot
+  // leave a brief dual-writer interval before the legacy row is restored.
+  if (normalizedSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG) {
+    const legacySources = sources.filter((source) =>
+      normalizeProviderSlug(source.sourceProviderSlug)
+        === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    );
+    if (legacySources.length > 0) {
+      const canonicalFence = buildJunctionGoogleHealthCanonicalCoverageFence(sources);
+      const successor = sources.find((source) =>
+        normalizeProviderSlug(source.sourceProviderSlug)
+          === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+      );
+      if (
+        legacySources.some((source) => !isGoogleHealthFitbitMigrationLegacyTerminal(source))
+        || !successor
+        || legacySources.some((source) =>
+          !isGoogleHealthFitbitMigrationLegacyCoverageReady({
+            legacyAccessTerminal: true,
+            legacySummary: source.resourceAvailabilitySummary,
+            successorSummary: successor.resourceAvailabilitySummary,
+          })
+        )
+        || (
+          canonicalFence
+          && Object.values(canonicalFence.coverageBoundaryByResource).some(
+            (boundary) => boundary === null,
+          )
+        )
+      ) {
+        return false;
+      }
+    }
   }
 
   const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
@@ -10072,7 +10539,7 @@ function hasJunctionSourceListing(
   }
 
   return sources.some((source) =>
-    areJunctionProviderSlugsRouteEquivalent(
+    areJunctionProviderSlugsDataEquivalent(
       source.sourceProviderSlug,
       normalizedSourceProviderSlug,
     )
@@ -10221,6 +10688,9 @@ function projectJunctionSourcesByProviderSlug(
     const status = mapJunctionSourceStatus(provider.status);
     const lastErrorCode = status === "error"
       ? truncateJunctionSourceErrorText(provider.errorDetails?.errorType, JUNCTION_SOURCE_ERROR_CODE_MAX_LENGTH)
+      : status === "disconnected"
+          && sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      ? DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE
       : null;
     const lastErrorMessage = status === "error"
       ? truncateJunctionSourceErrorText(provider.errorDetails?.errorMessage, JUNCTION_SOURCE_ERROR_MESSAGE_MAX_LENGTH)
@@ -10232,10 +10702,19 @@ function projectJunctionSourcesByProviderSlug(
         resourceAvailabilitySummary,
       );
       existing.status = mergeJunctionSourceStatus(existing.status, status);
-      if (existing.status !== "error") {
+      if (
+        existing.status === "disconnected"
+        && sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      ) {
+        existing.lastErrorCode = DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE;
+        existing.lastErrorMessage = null;
+      } else if (existing.status !== "error") {
         existing.lastErrorCode = null;
         existing.lastErrorMessage = null;
-      } else if (existing.lastErrorCode === null && existing.lastErrorMessage === null) {
+      } else if (
+        existing.lastErrorCode === DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE
+        || (existing.lastErrorCode === null && existing.lastErrorMessage === null)
+      ) {
         existing.lastErrorCode = lastErrorCode;
         existing.lastErrorMessage = lastErrorMessage;
       }
@@ -10515,6 +10994,44 @@ function readProviderSnapshotCanonicalEventExternalRefResourceIds(
       && resourceIds.every((resourceId) => typeof resourceId === "string")
     ? resourceIds
     : null;
+}
+
+function readProviderSnapshotJunctionCanonicalCoverage(value: unknown): readonly {
+  coverageBoundary: string;
+  coverageFinalizedAt?: string;
+  resource: string;
+  sourceProviderSlug: string;
+}[] {
+  const entries = readPlainObject(value)?.junctionCanonicalCoverage;
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+
+  return entries.flatMap((entry) => {
+    const evidence = readPlainObject(entry);
+    const resource = typeof evidence?.resource === "string" ? evidence.resource : "";
+    const coverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+      resource,
+      evidence?.coverageBoundary,
+    );
+    if (
+      !evidence
+      || !coverageBoundary
+      || !resource
+      || typeof evidence.sourceProviderSlug !== "string"
+    ) {
+      return [];
+    }
+    const coverageFinalizedAt = toIsoTimestampIfValid(evidence.coverageFinalizedAt);
+    return [{
+      coverageBoundary,
+      ...(coverageFinalizedAt
+        ? { coverageFinalizedAt }
+        : {}),
+      resource,
+      sourceProviderSlug: evidence.sourceProviderSlug,
+    }];
+  });
 }
 
 function uniqueJunctionProviderRecordIdentities(

@@ -316,7 +316,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     {
       assetPath: "/brand-logos/connect/fitbit.svg",
       description:
-        "Fitbit sleep, activity, heart rate, exercise, and daily readiness-style trends.",
+        "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
       name: "Fitbit",
     },
     {
@@ -6113,3 +6113,93 @@ function expectSettingResponseNotLoaded() {
     0,
   );
 }
+
+test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", async () => {
+  const { resolveConnectSourceConnectionStates } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+  const legacy = {
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    lastDataAt: "2026-08-10T00:00:00.000Z",
+    lastSeenAt: "2026-08-10T00:00:00.000Z",
+    providerLabel: "Fitbit",
+    resourceCount: 4,
+    sourceProviderSlug: "fitbit",
+    status: "connected" as const,
+  };
+  const successor = {
+    fitbitMigrationCoverageReady: true,
+    firstSeenAt: "2026-08-11T10:00:00.000Z",
+    historicalBackfillComplete: true,
+    lastDataAt: "2026-08-11T10:05:00.000Z",
+    lastSeenAt: "2026-08-11T10:06:00.000Z",
+    providerLabel: "Google Health",
+    resourceCount: 3,
+    sourceProviderSlug: "google_health",
+    status: "connected" as const,
+  };
+  const cases = [
+    {
+      expected: {
+        connectProvider: "junction",
+        connectTarget: "fitbit",
+        migrationState: "authorization_required",
+      },
+      name: "explicit Google authorization",
+      upstreamSources: [legacy],
+    },
+    {
+      expected: {
+        connectProvider: null,
+        connectTarget: null,
+        migrationState: "verifying_successor",
+      },
+      name: "legacy stays active while successor proof is incomplete",
+      upstreamSources: [legacy, { ...successor, fitbitMigrationCoverageReady: false }],
+    },
+    {
+      expected: {
+        connectProvider: null,
+        connectTarget: null,
+        disconnectSourceProviderSlug: "fitbit",
+        migrationState: "cutover_ready",
+      },
+      name: "targeted automatic cutover",
+      upstreamSources: [legacy, successor],
+    },
+    {
+      expected: {
+        connectProvider: null,
+        connectTarget: null,
+        disconnectSourceProviderSlug: "fitbit",
+        migrationRetryRequired: true,
+        migrationState: "cutover_ready",
+      },
+      name: "durable provider failure retry",
+      upstreamSources: [{
+        ...legacy,
+        lastErrorCode: "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED",
+      }, successor],
+    },
+  ];
+
+  for (const value of cases) {
+    const states = resolveConnectSourceConnectionStates(
+      [{ id: "fitbit" }],
+      [{
+        connectionId: "dsc_junction_fitbit",
+        provider: "junction",
+        state: "active",
+        upstreamSources: value.upstreamSources,
+      }],
+    );
+    assert.equal(states.length, 1, value.name);
+    assert.deepEqual(states[0], {
+      connectionId: "dsc_junction_fitbit",
+      requiresReconnect: false,
+      sourceId: "fitbit",
+      state: "active",
+      ...value.expected,
+    }, value.name);
+  }
+});

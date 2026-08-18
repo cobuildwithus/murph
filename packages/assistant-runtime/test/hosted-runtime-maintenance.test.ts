@@ -1771,6 +1771,184 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
+  it("completes a ready active Fitbit cutover only after scheduled imports are drained and published", async () => {
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const drainWorker = vi.fn(async () => 0);
+    const service = {
+      close: vi.fn(),
+      drainWorker,
+      getNextJobWakeAt: () => null,
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce,
+    };
+    const completeFitbitMigration = vi.fn(async () => ({
+      connectionId: "hosted_fitbit",
+      status: "complete" as const,
+    }));
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listConnectionSources: vi.fn(() => [
+        {
+          resourceAvailabilitySummary: {
+            activity: true,
+            canonicalCoverageBoundary_activity: "2026-08-11",
+            canonicalCoverageFinalizedAt_activity: "2026-08-12T04:00:01.000Z",
+          },
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        },
+        {
+          firstSeenAt: "2026-08-11T10:00:00.000Z",
+          lastDataAt: "2026-08-12T04:00:01.000Z",
+          resourceAvailabilitySummary: {
+            activity: true,
+            historicalBackfillCompletedAt: "2026-08-12T03:59:00.000Z",
+          },
+          sourceProviderSlug: "google_health",
+          status: "connected",
+        },
+      ]),
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map([["hosted_fitbit", "local_fitbit"]]),
+      localToHostedAccountIds: new Map([["local_fitbit", "hosted_fitbit"]]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
+    });
+
+    const result = await withHostedMaintenanceNow(
+      "2026-08-12T04:00:01.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_active_fitbit_cutover",
+          kind: "runtime.timer",
+          occurredAt: "2026-08-12T04:00:01.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        FIXED_MAINTENANCE_VAULT_ROOT,
+        DEVICE_SYNC_CONFIG,
+        {
+          ...createMaintenanceDeviceSyncPortStub(),
+          completeFitbitMigration,
+        },
+        45_000,
+      ),
+    );
+
+    expect(completeFitbitMigration).toHaveBeenCalledWith({
+      connectionId: "hosted_fitbit",
+      signal: null,
+    });
+    expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
+    expect(drainWorker).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(runSchedulerOnce.mock.invocationCallOrder[0]).toBeLessThan(
+      drainWorker.mock.invocationCallOrder[0]!,
+    );
+    expect(drainWorker.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.reconcileHostedDeviceSyncControlPlaneState.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.reconcileHostedDeviceSyncControlPlaneState.mock.invocationCallOrder[0],
+    ).toBeLessThan(completeFitbitMigration.mock.invocationCallOrder[0]!);
+    expect(result).toEqual({
+      nextWakeAt: null,
+      postCheckpointRecord: null,
+      processedJobs: 0,
+      skipped: false,
+    });
+  });
+
+  it("schedules durable retry when automatic Fitbit cutover fails", async () => {
+    const account = {
+      id: "local_fitbit",
+      nextReconcileAt: null as string | null,
+      status: "active",
+    };
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => null,
+      getNextWakeAt: () => account.nextReconcileAt,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const completeFitbitMigration = vi.fn(async () => {
+      throw new Error("provider unavailable");
+    });
+    const patchAccount = vi.fn((_: string, patch: { nextReconcileAt: string | null }) => {
+      account.nextReconcileAt = patch.nextReconcileAt;
+      return account;
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      getAccountById: vi.fn(() => account),
+      listConnectionSources: vi.fn(() => [
+        {
+          resourceAvailabilitySummary: {
+            canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
+            sleep: true,
+          },
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        },
+        {
+          firstSeenAt: "2026-08-11T10:00:00.000Z",
+          lastDataAt: "2026-08-11T10:05:00.000Z",
+          resourceAvailabilitySummary: {
+            historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+            sleep: true,
+          },
+          sourceProviderSlug: "google_health",
+          status: "connected",
+        },
+      ]),
+      patchAccount,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map([["hosted_fitbit", "local_fitbit"]]),
+      localToHostedAccountIds: new Map([["local_fitbit", "hosted_fitbit"]]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
+    });
+
+    const result = await withHostedMaintenanceNow(
+      "2026-08-11T10:05:00.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_fitbit_cutover_retry",
+          kind: "runtime.timer",
+          occurredAt: "2026-08-11T10:05:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        FIXED_MAINTENANCE_VAULT_ROOT,
+        DEVICE_SYNC_CONFIG,
+        {
+          ...createMaintenanceDeviceSyncPortStub(),
+          completeFitbitMigration,
+        },
+        45_000,
+      ),
+    );
+
+    expect(patchAccount).toHaveBeenCalledWith("local_fitbit", {
+      nextReconcileAt: "2026-08-11T10:05:30.000Z",
+    });
+    expect(completeFitbitMigration).toHaveBeenCalledTimes(1);
+    expect(service.runSchedulerOnce).toHaveBeenCalledTimes(1);
+    expect(result.nextWakeAt).toBe("2026-08-11T10:05:30.000Z");
+  });
+
+
   it("builds a member-only provider runtime from one credential-bearing snapshot", async () => {
     const memberProviderConfigs = {
       strava: {

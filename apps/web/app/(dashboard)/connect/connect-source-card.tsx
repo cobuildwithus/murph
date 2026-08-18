@@ -15,6 +15,7 @@ export function SourceCard({
   pendingDisconnect,
   source,
   onDisconnectTargetChange,
+  onMigrationRetry,
   onSetupGuideOpen,
   onStartConnection,
 }: {
@@ -24,15 +25,21 @@ export function SourceCard({
   pendingDisconnect: boolean;
   source: ConnectSource;
   onDisconnectTargetChange: (source: ConnectSource | null) => void;
+  onMigrationRetry?: (source: ConnectSource) => void;
   onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
 }) {
   const setupGuideActionLabel = source.setupGuideActionLabel;
   const setupGuideId = source.setupGuideId;
+  const migrationState = source.migrationState;
   const setupOnly = Boolean(setupGuideId)
     || (source.connectionAvailable === false && Boolean(source.unavailableActionUrl));
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
+  const showFitbitJunctionDisclosure = source.connectTarget === "fitbit"
+    && canStart
+    && migrationState !== "verifying_successor"
+    && migrationState !== "cutover_ready";
   const canDisconnect = !setupOnly
     && authenticated
     && Boolean(source.disconnectConnectionId);
@@ -44,12 +51,17 @@ export function SourceCard({
     && !source.connected
     && !requiresConnectionReset
     && !requiresReconnect;
-  const actionLabel = requiresReconnect ? "Reconnect" : "Connect";
+  const actionLabel = migrationState === "authorization_required"
+    ? "Authorize Google"
+    : requiresReconnect
+      ? "Reconnect"
+      : "Connect";
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
   const reconnectUnavailable = requiresReconnect && !isAvailable;
   const connectionOfferEnabled = source.connectionAvailable !== false;
   const historicalReconnectUnavailable = historicalResetIncomplete && !connectionOfferEnabled;
   const showReconnectStateDisconnect = canDisconnect
+    && migrationState !== "cutover_ready"
     && (
       reconnectUnavailable
       || requiresConnectionReset
@@ -64,6 +76,7 @@ export function SourceCard({
   // description into a narrow column.
   const showsSideMessage = requiresConnectionReset
     || requiresReconnect
+    || Boolean(migrationState)
     || historicalResetIncomplete
     || Boolean(unavailableMessage)
     || Boolean(errorMessage);
@@ -77,6 +90,7 @@ export function SourceCard({
             historicalResetIncomplete={historicalResetIncomplete}
             requiresConnectionReset={requiresConnectionReset}
             requiresReconnect={requiresReconnect}
+            migrationState={migrationState}
             sourceName={source.name}
           />
         </div>
@@ -102,7 +116,7 @@ export function SourceCard({
           </p>
         </div>
 
-        {!setupOnly && source.connected && !requiresReconnect ? (
+        {!setupOnly && source.connected && !requiresReconnect && !migrationState ? (
           <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink">
             {errorMessage ? (
               <p role="alert" className="text-xs leading-snug text-destructive">
@@ -129,7 +143,17 @@ export function SourceCard({
                 : "ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"
             }
           >
-            {requiresConnectionReset ? (
+            {migrationState ? (
+              <p className="max-w-[24rem] text-sm leading-relaxed text-pretty text-muted-foreground">
+                {migrationState === "authorization_required"
+                  ? "Authorize Google Health to keep Fitbit and Pixel Watch syncing. Murph will keep the legacy Fitbit connection active until Google Health is verified, then switch automatically."
+                  : migrationState === "verifying_successor"
+                    ? "Google Health is authorized, but Murph cannot verify representative history yet. The legacy Fitbit connection stays active while Murph waits for the historical import, supported resources, and a fresh update."
+                    : errorMessage
+                      ? "Google Health is verified, but Murph could not stop the legacy Fitbit connection. Fitbit keeps syncing until you retry."
+                      : "Google Health is verified. Murph is switching from the legacy Fitbit connection automatically; your existing history is kept."}
+              </p>
+            ) : requiresConnectionReset ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
                 {connectionOfferEnabled
                   ? `${source.name} needs a fresh connection. Disconnect it first, then connect it again.`
@@ -158,6 +182,20 @@ export function SourceCard({
             {errorMessage ? (
               <p role="alert" className="text-xs leading-snug text-destructive">
                 {errorMessage}
+              </p>
+            ) : null}
+            {showFitbitJunctionDisclosure ? (
+              <p className="max-w-[22rem] text-xs leading-relaxed text-muted-foreground">
+                Google authorization is handled through{" "}
+                <a
+                  className="underline underline-offset-2 hover:text-foreground"
+                  href="https://www.junction.com"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Junction
+                </a>
+                .
               </p>
             ) : null}
             {source.unavailableActionUrl && source.unavailableActionLabel ? (
@@ -211,7 +249,18 @@ export function SourceCard({
               >
                 Sign in
               </AuthButton>
-            ) : reconnectUnavailable
+            ) : migrationState === "cutover_ready" ? (
+              <Button
+                type="button"
+                disabled={!errorMessage || !canDisconnect || pendingDisconnect}
+                aria-label={errorMessage ? "Retry Fitbit migration" : "Switching Fitbit to Google Health"}
+                onClick={() => onMigrationRetry?.(source)}
+                className="self-end"
+              >
+                {errorMessage ? "Retry migration" : "Switching..."}
+              </Button>
+            ) : migrationState === "verifying_successor" ? null
+              : reconnectUnavailable
               || requiresConnectionReset
               || historicalReconnectUnavailable
               || unavailableMessage ? null : (
@@ -219,7 +268,7 @@ export function SourceCard({
                 type="button"
                 disabled={!canStart || pending}
                 aria-label={isAvailable
-                  ? `${actionLabel} ${source.name}`
+                  ? `${actionLabel}${migrationState === "authorization_required" ? " for" : ""} ${source.name}`
                   : `${source.name} connection is not available yet`}
                 onClick={() => void onStartConnection(source)}
                 className="self-end"
@@ -256,15 +305,17 @@ function SourceStatusDot({
   historicalResetIncomplete = false,
   requiresConnectionReset = false,
   requiresReconnect = false,
+  migrationState,
   sourceName,
 }: {
   connected?: boolean;
   historicalResetIncomplete?: boolean;
   requiresConnectionReset?: boolean;
   requiresReconnect?: boolean;
+  migrationState?: ConnectSource["migrationState"];
   sourceName: string;
 }) {
-  const needsAttention = requiresReconnect || requiresConnectionReset || historicalResetIncomplete;
+  const needsAttention = Boolean(migrationState) || requiresReconnect || requiresConnectionReset || historicalResetIncomplete;
   const state = needsAttention ? "needs-access" : connected ? "connected" : "idle";
 
   return (
@@ -283,6 +334,12 @@ function SourceStatusDot({
       <span className="sr-only">
         {sourceName} {requiresConnectionReset
           ? "needs a fresh connection"
+          : migrationState === "authorization_required"
+          ? "needs Google authorization"
+          : migrationState === "verifying_successor"
+          ? "is verifying Google Health"
+          : migrationState === "cutover_ready"
+          ? "is switching to Google Health"
           : requiresReconnect
           ? "needs reconnect"
           : historicalResetIncomplete

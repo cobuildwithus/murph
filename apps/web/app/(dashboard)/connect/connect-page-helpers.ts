@@ -1,3 +1,5 @@
+import { JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG } from "@murphai/device-syncd/connect-config";
+
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 
 import {
@@ -18,6 +20,13 @@ interface HostedDeviceSyncConnectResponse {
 }
 
 const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
+
+export const FITBIT_MIGRATION_AUTHORIZED_NOTICE = {
+  kind: "success",
+  title: "Google Health authorized",
+  message:
+    "Murph is verifying Google Health and will switch automatically when a fresh supported update arrives. The legacy Fitbit connection stays active for now.",
+} satisfies NonNullable<ConnectCallbackNotice>;
 
 export function filterConnectSourcesForSearch(
   sources: readonly ConnectSource[],
@@ -72,7 +81,40 @@ export function markCallbackConnectedSource(
     return sources;
   }
 
-  return sources.map((source) => source.id === sourceId ? { ...source, connected: true } : source);
+  return sources.map((source) => {
+    if (source.id !== sourceId) {
+      return source;
+    }
+
+    return source.migrationState === "authorization_required"
+      ? { ...source, connected: true, migrationState: "verifying_successor" as const }
+      : { ...source, connected: true };
+  });
+}
+
+export function markLocallyCompletedFitbitMigrations(
+  sources: readonly ConnectSource[],
+  completedSourceIds: ReadonlySet<string>,
+): readonly ConnectSource[] {
+  if (completedSourceIds.size === 0) {
+    return sources;
+  }
+
+  return sources.map((source) => {
+    if (!completedSourceIds.has(source.id) || source.migrationState !== "cutover_ready") {
+      return source;
+    }
+
+    const { migrationRetryRequired, migrationState, ...completedSource } = source;
+    void migrationRetryRequired;
+    void migrationState;
+
+    return {
+      ...completedSource,
+      connected: true,
+      disconnectSourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+    };
+  });
 }
 
 export function markLocallyDisconnectedSources(
@@ -125,6 +167,12 @@ export function createConnectCallbackNotice(
     return null;
   }
 
+  const catalogSource = findCallbackSource({
+    connectSource: input.connectSource,
+    connectTarget: input.connectTarget,
+    provider: input.provider,
+    sources,
+  });
   const sourceLabel = resolveCallbackSourceLabel({
     connectSource: input.connectSource,
     connectTarget: input.connectTarget,
@@ -133,6 +181,14 @@ export function createConnectCallbackNotice(
   });
 
   if (input.status === "connected") {
+    if (
+      catalogSource?.id === "fitbit" &&
+      (catalogSource.migrationState === "authorization_required" ||
+        catalogSource.migrationState === "verifying_successor")
+    ) {
+      return FITBIT_MIGRATION_AUTHORIZED_NOTICE;
+    }
+
     return {
       kind: "success",
       title: "Device connected",
@@ -143,13 +199,6 @@ export function createConnectCallbackNotice(
   // Error callbacks are taken straight from query params, so only a catalog
   // source and a recognizable code shape may reach the prefilled support mail.
   // Anything else is unverified text and is dropped rather than quoted back.
-  const catalogSource = findCallbackSource({
-    connectSource: input.connectSource,
-    connectTarget: input.connectTarget,
-    provider: input.provider,
-    sources,
-  });
-
   return {
     errorCode: normalizeConnectCallbackErrorReference(input.errorCode),
     kind: "error",

@@ -57,6 +57,7 @@ import {
   handleHostedDeviceSyncWebhookAccepted,
   prepareHostedDeviceSyncConnectionSourceStart,
 } from "./wake-service";
+import { completeHostedGoogleHealthFitbitMigration } from "./fitbit-migration-cutover";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 import {
@@ -711,6 +712,30 @@ export class HostedDeviceSyncPublicIngressService {
       store: this.context.store,
       userId,
     });
+  }
+
+  async completeGoogleHealthFitbitMigration(
+    userId: string,
+    connectionId: string,
+  ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+    const registry = await this.resolveRegistryForConnection(userId, connectionId);
+    return completeHostedGoogleHealthFitbitMigration({
+      connectionId,
+      registry,
+      store: this.context.store,
+      userId,
+    });
+  }
+
+  async completeBrowserGoogleHealthFitbitMigration(
+    userId: string,
+    publicConnectionId: string,
+  ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+    const connection = await this.requireOwnedBrowserConnection(
+      userId,
+      publicConnectionId,
+    );
+    return this.completeGoogleHealthFitbitMigration(userId, connection.id);
   }
 
   async disconnectAllConnections(userId: string): Promise<{

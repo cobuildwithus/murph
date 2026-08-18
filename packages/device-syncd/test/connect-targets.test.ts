@@ -20,7 +20,7 @@ test("configured Junction source authority fits one runtime connection snapshot"
     ),
   );
 
-  assert.equal(sourceProviderSlugs.size, 33);
+  assert.equal(sourceProviderSlugs.size, 34);
   assert.ok(
     sourceProviderSlugs.size
       <= HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
@@ -53,7 +53,7 @@ test("connect targets prefer direct providers except Junction-backed WHOOP", () 
       { connectSourceId: "oura", connectTarget: "oura", provider: "oura", sourceProviderSlug: null },
       { connectSourceId: "strava", connectTarget: "strava", provider: "strava", sourceProviderSlug: null },
       { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop_v2" },
-      { connectSourceId: "fitbit", connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
+      { connectSourceId: "fitbit", connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "google_health" },
     ],
   );
 

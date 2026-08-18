@@ -4,6 +4,13 @@ import type {
   DeviceConnectionSourceStatus,
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX,
+  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX,
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+  readDeviceSyncSourceCanonicalCoverageBoundary,
+  readDeviceSyncSourceCanonicalCoverageFinalizedAt,
+} from "@murphai/device-syncd/fitbit-migration";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -145,6 +152,7 @@ export class PrismaHostedConnectionSourceStore {
     const hasLastErrorCode = hasOwnInputProperty(input, "lastErrorCode");
     const hasLastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage");
     const hasLastDataAt = hasOwnInputProperty(input, "lastDataAt");
+    const hasFirstSeenAt = hasOwnInputProperty(input, "firstSeenAt");
     const lastDataAt = hasLastDataAt ? maybeDate(input.lastDataAt) ?? null : null;
     const displayName = hasDisplayName
       ? sanitizeSourceDisplayName(input.displayName)
@@ -166,6 +174,10 @@ export class PrismaHostedConnectionSourceStore {
 
     if (hasDisplayName) {
       update.displayName = displayName;
+    }
+
+    if (hasFirstSeenAt) {
+      update.firstSeenAt = firstSeenAt;
     }
 
     if (hasResourceAvailabilitySummary) {
@@ -219,8 +231,8 @@ export class PrismaHostedConnectionSourceStore {
 
   /**
    * Records that an inbound payload carried this source's data. Matching is by
-   * provider slug because that is what the webhook envelope names, and the
-   * update is forward-only so an out-of-order redelivery cannot rewind the
+   * provider slug after ingress has resolved complete webhook provenance, and
+   * the update is forward-only so an out-of-order redelivery cannot rewind the
    * signal a stall is measured against.
    *
    * This never creates a source row: a payload that arrives before the connect
@@ -624,7 +636,7 @@ function sanitizeResourceAvailabilitySummary(
       continue;
     }
 
-    const scalar = sanitizeSummaryScalar(rawValue);
+    const scalar = sanitizeSummaryScalar(key, rawValue);
 
     if (scalar !== undefined) {
       summary[key] = scalar;
@@ -649,7 +661,10 @@ function sanitizeSummaryKey(value: string): string | null {
   return key;
 }
 
-function sanitizeSummaryScalar(value: unknown): boolean | number | string | null | undefined {
+function sanitizeSummaryScalar(
+  key: string,
+  value: unknown,
+): boolean | number | string | null | undefined {
   if (value === null) {
     return null;
   }
@@ -667,6 +682,43 @@ function sanitizeSummaryScalar(value: unknown): boolean | number | string | null
   }
 
   const normalized = normalizeNullableString(value);
+
+  if (
+    key === DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
+  ) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const timestampMs = Date.parse(normalized);
+    return Number.isFinite(timestampMs)
+      && new Date(timestampMs).toISOString() === normalized
+      ? normalized
+      : undefined;
+  }
+
+  if (key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX)) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const resource = key.slice(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX.length);
+    return readDeviceSyncSourceCanonicalCoverageBoundary(
+      { [key]: normalized },
+      resource,
+    ) ?? undefined;
+  }
+
+  if (key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX)) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const resource = key.slice(
+      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX.length,
+    );
+    return readDeviceSyncSourceCanonicalCoverageFinalizedAt(
+      { [key]: normalized },
+      resource,
+    ) ?? undefined;
+  }
 
   if (
     !normalized
