@@ -1414,15 +1414,20 @@ Last verified: 2026-08-16
   test identities and never staging, production, or real-person data.
   Hosted crypto for that candidate must use the dedicated Vercel project's
   exact named custom-environment OIDC subject (`environment:native-ios-e2e`), as
-  reported by Vercel project/deployment metadata, through a non-production
-  Workload Identity provider and service account with key-level access to the
-  preview KMS keyring. Do not substitute the generic `environment:preview`
-  subject for a custom-environment deployment.
-  Never admit the E2E subject to the production Workload Identity provider,
-  production crypto service account, or production KMS keys. The provider
-  condition, service-account impersonation binding, Vercel hosted-crypto
-  variables, and preview key permissions are one configuration boundary and
-  must be proved together before the first credentialed sweep.
+  reported by Vercel project/deployment metadata. The non-production Workload
+  Identity provider must explicitly admit that subject, the preview crypto
+  service account must grant impersonation only to that exact principal, and
+  the service account must have only key-level access to the preview KMS
+  keyring. Do not substitute the generic `environment:preview` subject for a
+  custom-environment deployment.
+  The production provider is not changed by E2E activation. The E2E principal
+  must have no impersonation binding on the production crypto service account
+  and no IAM role on production KMS keys; the production service account must
+  continue to admit only the exact production subject. Provider admission alone
+  grants no crypto authority, so prove the effective boundary across the Vercel
+  subject, provider mapping and condition, service-account policies,
+  hosted-crypto variables, and key-level IAM before the first credentialed
+  sweep.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
 - Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
   every class and must contain no authorized keys. Deploy automation must not
