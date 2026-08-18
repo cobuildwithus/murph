@@ -48,28 +48,41 @@ export function buildHostedRuntimeLogContextFields(
 // One process-global FIFO carries each entry with the port it was logged
 // through. A warm runner process outlives an invocation — the invocation-end
 // drain is deliberately bounded, so the next invocation's fresh log port can
-// appear while an older request is still in flight — and a queue of
-// (entry, port) pairs keeps enqueue order and the process-wide bound correct
-// across that rotation without a second owner.
+// appear while an older request is still in flight — and the queue keeps
+// enqueue order across that rotation without a second owner. A barrier also
+// keeps an in-flight direct batch ahead of the suffix transferred on foreground
+// preemption.
 const HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES = HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES;
 // A conservative proxy for the callback's 256 KiB body limit, measured in
 // serialized JSON length rather than encoded bytes. An oversized batch would
 // fail the whole request, not one entry, so the budget stays well under the
 // limit even for multi-byte diagnostics.
 const HOSTED_RUNTIME_LOG_BATCH_MAX_JSON_LENGTH = 64 * 1024;
-// A stalled log endpoint must not retain unbounded diagnostics in a warm
-// runner process. This bounds the whole queue, across invocations and ports.
-// Only debug/info entries are ever dropped here.
+const HOSTED_RUNTIME_LOG_PREEMPTION_POLL_MS = 25;
+// A stalled log endpoint must not retain unbounded verbose diagnostics in a
+// warm runner process. This bounds debug/info entries across invocations and
+// ports. Finite warn/error continuations are never dropped.
 export const HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES = 500;
 
 type HostedRuntimeLogPort = NonNullable<HostedRuntimePlatform["logPort"]>;
 
 interface QueuedHostedRuntimeLogEntry {
+  droppable: boolean;
   entry: HostedRuntimeLogEntry;
+  kind: "entry";
   logPort: HostedRuntimeLogPort;
 }
 
-const queuedHostedRuntimeLogEntries: QueuedHostedRuntimeLogEntry[] = [];
+interface QueuedHostedRuntimeLogBarrier {
+  kind: "barrier";
+  readyAfter: Promise<void>;
+}
+
+type QueuedHostedRuntimeLogItem =
+  | QueuedHostedRuntimeLogBarrier
+  | QueuedHostedRuntimeLogEntry;
+
+const queuedHostedRuntimeLogItems: QueuedHostedRuntimeLogItem[] = [];
 let hostedRuntimeLogWriter: Promise<void> | null = null;
 
 export async function writeHostedRuntimeLogBestEffort(input: {
@@ -92,17 +105,13 @@ export async function writeHostedRuntimeLogBestEffort(input: {
     return;
   }
 
-  queuedHostedRuntimeLogEntries.push({ entry, logPort });
-  if (queuedHostedRuntimeLogEntries.length > HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES) {
-    const dropped = queuedHostedRuntimeLogEntries.splice(
-      0,
-      queuedHostedRuntimeLogEntries.length - HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
-    );
-    console.warn("Hosted runtime log queue is full; dropping verbose diagnostics.", {
-      droppedEntryCount: dropped.length,
-      maxQueuedEntries: HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
-    });
-  }
+  queuedHostedRuntimeLogItems.push({
+    droppable: true,
+    entry,
+    kind: "entry",
+    logPort,
+  });
+  trimQueuedHostedRuntimeVerboseLogEntries();
   startHostedRuntimeLogWriter();
 }
 
@@ -131,16 +140,119 @@ export async function writeHostedRuntimeLogEntriesBestEffort(input: {
   });
   let offset = 0;
   while (offset < entries.length) {
+    if (input.shouldYieldBetweenBatches?.() === true) {
+      enqueueHostedRuntimeLogContinuation({
+        entries: entries.slice(offset),
+        logPort,
+      });
+      return;
+    }
+
     const batch = takeBoundedHostedRuntimeLogEntries(entries.slice(offset));
-    await writeHostedRuntimeLogEntries(logPort, batch);
+    const writePromise = writeHostedRuntimeLogEntries(logPort, batch);
+    const result = await waitForHostedRuntimeLogWriteOrYield({
+      shouldYield: input.shouldYieldBetweenBatches ?? null,
+      writePromise,
+    });
     offset += batch.length;
-    if (
-      offset < entries.length
-      && input.shouldYieldBetweenBatches?.() === true
-    ) {
+    if (result === "yielded") {
+      enqueueHostedRuntimeLogContinuation({
+        entries: entries.slice(offset),
+        logPort,
+        readyAfter: writePromise,
+      });
       return;
     }
   }
+}
+
+function enqueueHostedRuntimeLogContinuation(input: {
+  entries: readonly HostedRuntimeLogEntry[];
+  logPort: HostedRuntimeLogPort;
+  readyAfter?: Promise<void>;
+}): void {
+  if (input.readyAfter) {
+    queuedHostedRuntimeLogItems.push({
+      kind: "barrier",
+      readyAfter: input.readyAfter,
+    });
+  }
+  for (const entry of input.entries) {
+    queuedHostedRuntimeLogItems.push({
+      droppable: false,
+      entry,
+      kind: "entry",
+      logPort: input.logPort,
+    });
+  }
+  startHostedRuntimeLogWriter();
+}
+
+async function waitForHostedRuntimeLogWriteOrYield(input: {
+  shouldYield: (() => boolean) | null;
+  writePromise: Promise<void>;
+}): Promise<"written" | "yielded"> {
+  if (!input.shouldYield) {
+    await input.writePromise;
+    return "written";
+  }
+
+  return await new Promise<"written" | "yielded">((resolve) => {
+    let settled = false;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const finish = (result: "written" | "yielded") => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (pollTimer) {
+        clearInterval(pollTimer);
+      }
+      resolve(result);
+    };
+    const checkForYield = () => {
+      if (input.shouldYield?.() === true) {
+        finish("yielded");
+      }
+    };
+
+    void input.writePromise.then(
+      () => finish("written"),
+      () => finish("written"),
+    );
+    checkForYield();
+    if (!settled) {
+      pollTimer = setInterval(checkForYield, HOSTED_RUNTIME_LOG_PREEMPTION_POLL_MS);
+      pollTimer.unref?.();
+    }
+  });
+}
+
+function trimQueuedHostedRuntimeVerboseLogEntries(): void {
+  const verboseEntryCount = queuedHostedRuntimeLogItems.reduce(
+    (count, item) => count + (item.kind === "entry" && item.droppable ? 1 : 0),
+    0,
+  );
+  let remainingToDrop = verboseEntryCount - HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES;
+  if (remainingToDrop <= 0) {
+    return;
+  }
+
+  const droppedEntryCount = remainingToDrop;
+  for (let index = 0; index < queuedHostedRuntimeLogItems.length && remainingToDrop > 0;) {
+    const item = queuedHostedRuntimeLogItems[index];
+    if (item?.kind === "entry" && item.droppable) {
+      queuedHostedRuntimeLogItems.splice(index, 1);
+      remainingToDrop -= 1;
+      continue;
+    }
+    index += 1;
+  }
+
+  console.warn("Hosted runtime log queue is full; dropping verbose diagnostics.", {
+    droppedEntryCount,
+    maxQueuedEntries: HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
+  });
 }
 
 // One writer at a time keeps requests in enqueue order and lets everything
@@ -152,43 +264,59 @@ function startHostedRuntimeLogWriter(): void {
 
   hostedRuntimeLogWriter = (async () => {
     try {
-      let batch = takeHostedRuntimeLogBatch();
-      while (batch) {
-        await writeHostedRuntimeLogEntries(batch.logPort, batch.entries);
-        batch = takeHostedRuntimeLogBatch();
+      let work = takeHostedRuntimeLogWork();
+      while (work) {
+        if (work.kind === "barrier") {
+          await work.readyAfter;
+        } else {
+          await writeHostedRuntimeLogEntries(work.logPort, work.entries);
+        }
+        work = takeHostedRuntimeLogWork();
       }
     } finally {
       hostedRuntimeLogWriter = null;
+      if (queuedHostedRuntimeLogItems.length > 0) {
+        startHostedRuntimeLogWriter();
+      }
     }
   })();
 }
 
+type HostedRuntimeLogWork =
+  | { kind: "barrier"; readyAfter: Promise<void> }
+  | { entries: HostedRuntimeLogEntry[]; kind: "batch"; logPort: HostedRuntimeLogPort };
+
 // Drains the queue's leading same-port run up to the request's entry and body
-// bounds. Stopping at a port change keeps every entry on the port it was
-// logged through; the first entry always goes, so an oversized single entry
-// gets its own request instead of wedging the queue.
-function takeHostedRuntimeLogBatch(): {
-  entries: HostedRuntimeLogEntry[];
-  logPort: HostedRuntimeLogPort;
-} | null {
-  const head = queuedHostedRuntimeLogEntries[0];
+// bounds. A barrier keeps a preempted direct write ahead of its queued suffix.
+// Stopping at a port change keeps every entry on the port it was logged
+// through; the first entry always goes, so an oversized single entry gets its
+// own request instead of wedging the queue.
+function takeHostedRuntimeLogWork(): HostedRuntimeLogWork | null {
+  const head = queuedHostedRuntimeLogItems[0];
   if (!head) {
     return null;
+  }
+  if (head.kind === "barrier") {
+    queuedHostedRuntimeLogItems.splice(0, 1);
+    return head;
   }
 
   const { logPort } = head;
   const candidates: HostedRuntimeLogEntry[] = [];
   while (
-    candidates.length < queuedHostedRuntimeLogEntries.length
-    && queuedHostedRuntimeLogEntries[candidates.length]!.logPort === logPort
+    candidates.length < queuedHostedRuntimeLogItems.length
     && candidates.length < HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES
   ) {
-    candidates.push(queuedHostedRuntimeLogEntries[candidates.length]!.entry);
+    const item = queuedHostedRuntimeLogItems[candidates.length];
+    if (item?.kind !== "entry" || item.logPort !== logPort) {
+      break;
+    }
+    candidates.push(item.entry);
   }
   const entries = takeBoundedHostedRuntimeLogEntries(candidates);
-  queuedHostedRuntimeLogEntries.splice(0, entries.length);
+  queuedHostedRuntimeLogItems.splice(0, entries.length);
 
-  return { entries, logPort };
+  return { entries, kind: "batch", logPort };
 }
 
 function takeBoundedHostedRuntimeLogEntries(

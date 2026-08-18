@@ -836,6 +836,13 @@ describe("hosted device-sync runtime", () => {
         store,
         "readNextJobWakeAtForAccount",
       );
+      const sourcesByAccountId = new Map<
+        string,
+        ReturnType<typeof store.listConnectionSources>
+      >();
+      vi.spyOn(store, "listConnectionSources").mockImplementation(
+        ({ connectionId }) => sourcesByAccountId.get(connectionId) ?? [],
+      );
       const updateCount = HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT + 1;
       const localToHostedAccountIds = new Map<string, string>();
       const hostedToLocalAccountIds = new Map<string, string>();
@@ -858,11 +865,17 @@ describe("hosted device-sync runtime", () => {
         localToHostedAccountIds.set(account.id, hostedConnectionId);
         hostedToLocalAccountIds.set(hostedConnectionId, account.id);
         observedTokenVersions.set(hostedConnectionId, null);
-        for (let sourceIndex = 0; sourceIndex < 64; sourceIndex += 1) {
-          store.upsertConnectionSource({
+        sourcesByAccountId.set(
+          account.id,
+          Array.from({ length: 64 }, (_, sourceIndex) => ({
             connectionId: account.id,
+            createdAt: "2026-04-06T09:00:00.000Z",
             displayName: null,
             firstSeenAt: "2026-04-06T09:00:00.000Z",
+            id: `source_row_${index}_${sourceIndex}`,
+            lastDataAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
             lastSeenAt: "2026-04-06T10:05:00.000Z",
             resourceAvailabilitySummary: {
               activity: true,
@@ -871,9 +884,10 @@ describe("hosted device-sync runtime", () => {
             sourceInstanceKey:
               `source_${String(index).padStart(3, "0")}_${String(sourceIndex).padStart(2, "0")}_${"x".repeat(80)}`,
             sourceProviderSlug: `source_${sourceIndex}`,
-            status: "connected",
-          });
-        }
+            status: "connected" as const,
+            updatedAt: "2026-04-06T10:05:00.000Z",
+          })),
+        );
       }
 
       let activeApplyCalls = 0;
@@ -3540,7 +3554,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation omits redundant provider diagnostics when sync failure advances", async () => {
+  test("reconciliation keeps worker-only workout candidate context out of Web updates", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -3558,14 +3572,17 @@ describe("hosted device-sync runtime", () => {
           jobExecutor: {
             async executeJob() {
               throw deviceSyncError({
-                accountStatus: "disconnected",
-                code: "TOKEN_REQUEST_FAILED",
+                code: "JUNCTION_API_REQUEST_FAILED",
                 details: {
-                  oauthErrorDescription: "Refresh token expired. Reconnect provider.",
+                  requestCandidateAliasSource: "id",
+                  requestCandidateCount: 8,
+                  requestCandidateOrdinal: 3,
+                  requestEndpointKind: "junction_workout_stream",
+                  requestMethod: "GET",
                 },
-                httpStatus: 400,
-                message: "Provider token request failed.",
-                retryable: false,
+                httpStatus: 500,
+                message: "Junction workout stream request failed.",
+                retryable: true,
               });
             },
           },
@@ -3627,8 +3644,8 @@ describe("hosted device-sync runtime", () => {
 
       const failed = getStore(service).getAccountById(localAccountId);
       assert.ok(failed);
-      assert.equal(failed.lastErrorCode, "TOKEN_REQUEST_FAILED");
-      assert.equal(failed.status, "disconnected");
+      assert.equal(failed.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(failed.status, "active");
       assert.ok(failed.lastSyncErrorAt);
 
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -3646,7 +3663,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(request.updates[0]?.failureDiagnostic, undefined);
       assert.equal(
         request.updates[0]?.localState?.lastErrorMessage,
-        "Provider token request failed. Provider reason: Refresh token expired. Reconnect provider.",
+        "Junction workout stream request failed.",
       );
       assert.equal(request.updates[0]?.localState?.lastSyncErrorAt, failed.lastSyncErrorAt);
       assert.equal(request.updates[0]?.observedUpdatedAt, "2026-04-06T09:15:00.000Z");
@@ -5625,7 +5642,7 @@ describe("hosted device-sync runtime", () => {
         store.claimDueJob("lease-expired-worker", "2026-04-04T10:00:00.000Z", 60_000)?.id,
         retainedJob.id,
       );
-      assert.equal(
+      assert.ok(
         store.failJobIfOwned(
           retainedJob.id,
           "lease-expired-worker",
@@ -5635,7 +5652,6 @@ describe("hosted device-sync runtime", () => {
           null,
           false,
         ),
-        true,
       );
       assert.equal(store.getJobById(retainedJob.id)?.status, "dead");
       state.pendingDirtyPayloadJobs.push({
@@ -10275,7 +10291,7 @@ describe("hosted device-sync runtime", () => {
       const claimed = firstStore.claimDueJob("worker_exact_recovery", occurredAt, 60_000);
       assert.ok(claimed);
       assert.equal(claimed.attempts, 1);
-      assert.equal(firstStore.failJobIfOwned(
+      assert.ok(firstStore.failJobIfOwned(
         claimed.id,
         "worker_exact_recovery",
         occurredAt,
@@ -10283,7 +10299,7 @@ describe("hosted device-sync runtime", () => {
         "retryable",
         retryAt,
         true,
-      ), true);
+      ));
 
       const recovery = resolveHostedDeviceSyncWakeRecovery({
         service: firstService,

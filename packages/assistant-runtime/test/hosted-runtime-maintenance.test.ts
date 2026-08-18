@@ -141,6 +141,9 @@ import {
   runHostedDeviceSyncWakeLane,
 } from "../src/hosted-runtime/device-sync-maintenance.ts";
 import {
+  drainHostedRuntimeLogWritesBestEffort,
+} from "../src/hosted-runtime/runtime-logs.ts";
+import {
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "../src/hosted-device-sync-limits.ts";
 import {
@@ -172,6 +175,12 @@ async function withHostedMaintenanceNow<T>(
     return await callback();
   } finally {
     vi.useRealTimers();
+  }
+}
+
+async function flushHostedRuntimeLogMicrotasks(): Promise<void> {
+  for (let index = 0; index < 8; index += 1) {
+    await Promise.resolve();
   }
 }
 
@@ -3627,6 +3636,7 @@ describe("runHostedDeviceSyncPass", () => {
         {
           accountId: "local_account_sensitive",
           accountStatus: null,
+          attempts: 1,
           code: "SYNC_JOB_FAILED",
           details: {
             failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
@@ -3655,6 +3665,10 @@ describe("runHostedDeviceSyncPass", () => {
             providerOAuthResponseErrorFieldPresent: true,
             providerOAuthResponseShapeKind: "json_object",
           },
+          jobDisposition: "queued",
+          jobKind: "reconcile",
+          maxAttempts: 5,
+          remainingAttempts: 4,
           retryable: true,
         },
       ]),
@@ -3749,9 +3763,14 @@ describe("runHostedDeviceSyncPass", () => {
     assert.equal(entry.phase, "invoke");
     assert.deepEqual(entry.redactedJson, {
       failureCode: "SYNC_JOB_FAILED",
-      failureDisposition: "retry",
+      failureDisposition: "queued",
+      failureEventOrigin: "worker_attempt",
+      failureJobAttempts: 1,
+      failureJobKind: "reconcile",
+      failureJobMaxAttempts: 5,
+      failureJobRemainingAttempts: 4,
       failureSummary:
-        "Importer failed reading <redacted-path> for <redacted-email> with <redacted-secret>",
+        "Importer failed reading <redacted-path> for <redacted-email> with",
       failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
       failureErrorCause: "Connect Timeout Error",
       failureErrorName: "TypeError",
@@ -3798,6 +3817,178 @@ describe("runHostedDeviceSyncPass", () => {
     expect(serialized).not.toContain("file://");
     expect(serialized).not.toContain("owner@example.test");
     expect(serialized).not.toContain("<fixture-secret>");
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes both failure summary sources and reason fields through shared diagnostic redaction", async () => {
+    const close = vi.fn();
+    const drainWorker = vi.fn(async () => 3);
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const failureDiagnostics = [
+      {
+        accountId: "local_summary_source",
+        accountStatus: null,
+        code: "SUMMARY_SOURCE_FAILED",
+        details: {
+          failureErrorCause:
+            "Connection refused for user user_654321 at 198.51.100.9 requestId=req_123456",
+        },
+        retryable: true,
+        summary:
+          "Provider failed for account member_123456 from 192.0.2.44 details [connectionId=conn_abcdef123456, email=owner@example.test]",
+      },
+      {
+        accountId: "local_account_fallback",
+        accountStatus: null,
+        code: "ACCOUNT_FALLBACK_FAILED",
+        details: {
+          providerHttpStatusText:
+            "Request rejected for owner owner_987654 from 203.0.113.7 traceId=trace_123456",
+        },
+        retryable: false,
+      },
+      {
+        accountId: "local_unsafe_fallback",
+        accountStatus: null,
+        code: "UNSAFE_FALLBACK_FAILED",
+        details: {
+          providerOAuthErrorDescription: '{"accountId":"member_unsafe_123456"}',
+        },
+        retryable: true,
+      },
+    ];
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => failureDiagnostics),
+      listAccounts: vi.fn(() => [
+        {
+          id: "local_summary_source",
+          lastErrorCode: "SUMMARY_SOURCE_FAILED",
+          lastErrorMessage: "unused account fallback",
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: "2026-04-08T00:00:03.000Z",
+          lastSyncStartedAt: "2026-04-08T00:00:01.000Z",
+          nextReconcileAt: "2026-04-08T02:00:00.000Z",
+          provider: "demo",
+          setupPhase: null,
+          status: "active",
+        },
+        {
+          id: "local_account_fallback",
+          lastErrorCode: "ACCOUNT_FALLBACK_FAILED",
+          lastErrorMessage:
+            "Provider failed for member: member_abcdef123456, email=owner@example.test",
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: "2026-04-08T00:00:04.000Z",
+          lastSyncStartedAt: "2026-04-08T00:00:02.000Z",
+          nextReconcileAt: "2026-04-08T02:00:00.000Z",
+          provider: "demo",
+          setupPhase: null,
+          status: "active",
+        },
+        {
+          id: "local_unsafe_fallback",
+          lastErrorCode: "UNSAFE_FALLBACK_FAILED",
+          lastErrorMessage: '{"accountId":"member_unsafe_123456"}',
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: "2026-04-08T00:00:05.000Z",
+          lastSyncStartedAt: "2026-04-08T00:00:03.000Z",
+          nextReconcileAt: "2026-04-08T02:00:00.000Z",
+          provider: "demo",
+          setupPhase: null,
+          status: "active",
+        },
+      ]),
+      runSchedulerOnce,
+    });
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_shared_diagnostic_redaction",
+        hint: null,
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "webhook_hint",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              logRequests.push(request);
+              return {
+                loggedCount: request.entries.length,
+              };
+            },
+          },
+        },
+      },
+    );
+
+    const entriesByCode = new Map(
+      logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "device-sync.job_failed")
+        .map((entry) => [entry.errorCode, entry]),
+    );
+    const summarySourceEntry = entriesByCode.get("SUMMARY_SOURCE_FAILED");
+    assert.ok(summarySourceEntry?.redactedJson);
+    assert.equal(
+      summarySourceEntry.redactedJson.failureSummary,
+      "Provider failed for account <redacted-id> from <redacted-ip> details",
+    );
+    assert.equal(
+      summarySourceEntry.redactedJson.failureErrorCause,
+      "Connection refused for user <redacted-id> at <redacted-ip>",
+    );
+
+    const accountFallbackEntry = entriesByCode.get("ACCOUNT_FALLBACK_FAILED");
+    assert.ok(accountFallbackEntry?.redactedJson);
+    assert.equal(
+      accountFallbackEntry.redactedJson.failureSummary,
+      "Provider failed for member: <redacted-id>",
+    );
+    assert.equal(
+      accountFallbackEntry.redactedJson.providerHttpStatusText,
+      "Request rejected for owner <redacted-id> from <redacted-ip>",
+    );
+
+    const unsafeFallbackEntry = entriesByCode.get("UNSAFE_FALLBACK_FAILED");
+    assert.ok(unsafeFallbackEntry?.redactedJson);
+    assert.equal(
+      unsafeFallbackEntry.redactedJson.failureSummary,
+      "Hosted device-sync job failed.",
+    );
+    assert.equal(
+      unsafeFallbackEntry.redactedJson.providerOAuthErrorDescription,
+      "Hosted device-sync job failed.",
+    );
+
+    const serialized = JSON.stringify(logRequests);
+    for (const sensitiveValue of [
+      "member_123456",
+      "user_654321",
+      "192.0.2.44",
+      "198.51.100.9",
+      "req_123456",
+      "member_abcdef123456",
+      "owner_987654",
+      "203.0.113.7",
+      "trace_123456",
+      "owner@example.test",
+      "member_unsafe_123456",
+    ]) {
+      expect(serialized).not.toContain(sensitiveValue);
+    }
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -3921,7 +4112,171 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("retains the earlier failed-attempt event when a later success clears account error state", async () => {
+  it("retains the full failed-attempt suffix when foreground preempts a slow log write", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let resolveFirstWrite: (() => void) | null = null;
+    try {
+      const close = vi.fn();
+      const drainWorker = vi.fn(async () => HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
+      const runSchedulerOnce = vi.fn(async () => undefined);
+      const logRequests: HostedRuntimeLogRequest[] = [];
+      const failureDiagnostics = Array.from(
+        { length: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT },
+        (_, index) => ({
+          accountId: "local_account_preempted_failure_pass",
+          accountStatus: null,
+          code: `PREEMPTED_JOB_FAILURE_${index}`,
+          details: {},
+          retryable: true,
+        }),
+      );
+      let foregroundWaiting = false;
+      let markFirstWriteStarted: (() => void) | null = null;
+      const firstWriteStarted = new Promise<void>((resolve) => {
+        markFirstWriteStarted = resolve;
+      });
+
+      mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+        close,
+        drainWorker,
+        getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
+        getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+        listJobFailureDiagnostics: vi.fn(() => failureDiagnostics),
+        listAccounts: vi.fn(() => [
+          {
+            id: "local_account_preempted_failure_pass",
+            lastErrorCode: "PREEMPTED_JOB_FAILURE_99",
+            lastErrorMessage: "Synthetic device-sync job failure.",
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: "2026-04-08T00:00:03.000Z",
+            lastSyncStartedAt: "2026-04-08T00:00:01.000Z",
+            nextReconcileAt: "2026-04-08T02:00:00.000Z",
+            provider: "demo",
+            setupPhase: null,
+            status: "active",
+          },
+        ]),
+        runSchedulerOnce,
+      });
+      mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue({
+        hostedToLocalAccountIds: new Map([
+          ["hosted_connection_preempted_failure_pass", "local_account_preempted_failure_pass"],
+        ]),
+        localToHostedAccountIds: new Map([
+          ["local_account_preempted_failure_pass", "hosted_connection_preempted_failure_pass"],
+        ]),
+        observedTokenVersions: new Map(),
+        pendingDirtyAcks: [],
+        pendingDirtyPayloadJobs: [],
+        snapshot: {
+          connections: [
+            {
+              connection: {
+                id: "hosted_connection_preempted_failure_pass",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: null,
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: null,
+              },
+            },
+          ],
+        },
+      });
+
+      const passPromise = runHostedDeviceSyncPass(
+        {
+          eventId: "evt_device_sync_preempted_failure_pass",
+          hint: null,
+          kind: "device-sync.wake",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "webhook_hint",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        {
+          runtimeLogPlatform: {
+            logPort: {
+              async write(request) {
+                logRequests.push(request);
+                if (logRequests.length === 1) {
+                  markFirstWriteStarted?.();
+                  return await new Promise((resolve) => {
+                    resolveFirstWrite = () => resolve({
+                      loggedCount: request.entries.length,
+                    });
+                  });
+                }
+                return {
+                  loggedCount: request.entries.length,
+                };
+              },
+            },
+          },
+          shouldYield: () => foregroundWaiting,
+        },
+      );
+      let passSettled = false;
+      void passPromise.then(
+        () => {
+          passSettled = true;
+        },
+        () => {
+          passSettled = true;
+        },
+      );
+
+      await firstWriteStarted;
+      foregroundWaiting = true;
+      await vi.advanceTimersByTimeAsync(25);
+      await flushHostedRuntimeLogMicrotasks();
+
+      assert.equal(passSettled, true);
+      const result = await passPromise;
+      assert.equal(result.processedJobs, HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
+      assert.equal(result.skipped, true);
+      assert.equal(typeof result.nextWakeAt, "string");
+      assert.equal(logRequests.length, 1);
+      assert.equal(
+        logRequests[0]?.entries.length,
+        HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+      );
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+
+      (resolveFirstWrite as (() => void) | null)?.();
+      resolveFirstWrite = null;
+      await flushHostedRuntimeLogMicrotasks();
+      await drainHostedRuntimeLogWritesBestEffort();
+
+      assert.deepEqual(
+        logRequests.map((request) => request.entries.length),
+        [HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES, HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES],
+      );
+      for (const request of logRequests) {
+        assert.ok(JSON.stringify(request).length <= 64 * 1024);
+      }
+      const jobFailureEntries = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "device-sync.job_failed");
+      assert.deepEqual(
+        jobFailureEntries.map((entry) => entry.errorCode),
+        failureDiagnostics.map((diagnostic) => diagnostic.code),
+      );
+    } finally {
+      (resolveFirstWrite as (() => void) | null)?.();
+      await flushHostedRuntimeLogMicrotasks();
+      await drainHostedRuntimeLogWritesBestEffort({ timeoutMs: 50 });
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs an exhausted retryable workout-stream attempt as dead with bounded safe candidate context", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 2);
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -3937,18 +4292,28 @@ describe("runHostedDeviceSyncPass", () => {
           accountId: "local_account_sleep_sensitive",
           accountStatus: null,
           at: "2026-06-08T02:00:02.000Z",
-          attempts: 3,
+          attempts: 5,
           code: "JUNCTION_API_REQUEST_FAILED",
           details: {
-            providerHttpStatus: 503,
-            providerRequestEndpointKind: "junction_summary",
+            providerHttpStatus: 500,
+            providerRequestCandidateAliasSource: "id",
+            providerRequestCandidateCount: 8,
+            providerRequestCandidateOrdinal: 3,
+            providerRequestEndpointKind: "junction_workout_stream",
             providerRequestMethod: "GET",
+            providerResponseRequestId: "private-provider-request-id-must-not-escape",
+            rawProviderPayload: "private-provider-payload-must-not-escape",
+            rawRequestUrl: "https://junction.example/private-workout-id-must-not-escape",
+            rawWorkoutId: "private-workout-id-must-not-escape",
           },
-          jobKind: "resource",
+          jobDisposition: "dead",
+          jobKind: "reconcile",
+          maxAttempts: 5,
           provider: "junction",
-          resource: "sleep",
+          remainingAttempts: 0,
+          resource: "workout_stream",
           retryable: true,
-          summary: "Junction summary request failed with an ambiguous provider error.",
+          summary: "Junction workout stream request failed with an ambiguous provider error.",
         },
       ]),
       listAccounts: vi.fn(() => [
@@ -4036,11 +4401,14 @@ describe("runHostedDeviceSyncPass", () => {
     assert.equal(entry.phase, "invoke");
     assert.deepEqual(entry.redactedJson, {
       failureCode: "JUNCTION_API_REQUEST_FAILED",
-      failureDisposition: "retry",
-      failureJobAttempts: 3,
-      failureJobKind: "resource",
-      failureResource: "sleep",
-      failureSummary: "Junction summary request failed with an ambiguous provider error.",
+      failureDisposition: "dead",
+      failureEventOrigin: "worker_attempt",
+      failureJobAttempts: 5,
+      failureJobKind: "reconcile",
+      failureJobMaxAttempts: 5,
+      failureJobRemainingAttempts: 0,
+      failureResource: "workout_stream",
+      failureSummary: "Junction workout stream request failed with an ambiguous provider error.",
       failureRetryable: true,
       hadPriorFailure: false,
       hadPriorSuccess: true,
@@ -4048,8 +4416,11 @@ describe("runHostedDeviceSyncPass", () => {
       nextReconcileAt: "2026-06-08T03:00:00.000Z",
       processedJobs: 2,
       provider: "junction",
-      providerHttpStatus: 503,
-      providerRequestEndpointKind: "junction_summary",
+      providerHttpStatus: 500,
+      providerRequestCandidateAliasSource: "id",
+      providerRequestCandidateCount: 8,
+      providerRequestCandidateOrdinal: 3,
+      providerRequestEndpointKind: "junction_workout_stream",
       providerRequestMethod: "GET",
       setupPhase: null,
       status: "active",
@@ -4062,6 +4433,10 @@ describe("runHostedDeviceSyncPass", () => {
     const serializedWebhookFailureLogs = JSON.stringify(logRequests);
     expect(serializedWebhookFailureLogs).not.toContain("local_account_sleep_sensitive");
     expect(serializedWebhookFailureLogs).not.toContain("hosted_connection_sleep_sensitive");
+    expect(serializedWebhookFailureLogs).not.toContain("private-workout-id-must-not-escape");
+    expect(serializedWebhookFailureLogs).not.toContain("private-provider-payload-must-not-escape");
+    expect(serializedWebhookFailureLogs).not.toContain("private-provider-request-id-must-not-escape");
+    expect(serializedWebhookFailureLogs).not.toContain("junction.example");
     expect(close).toHaveBeenCalledTimes(1);
   });
 

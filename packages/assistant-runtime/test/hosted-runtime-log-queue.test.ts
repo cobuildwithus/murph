@@ -151,28 +151,39 @@ describe("hosted runtime log write queue", () => {
     },
   );
 
-  it("checks foreground yield between direct diagnostic batches", async () => {
-    const write = vi.fn(async (request: { entries: HostedRuntimeLogEntry[] }) => ({
-      loggedCount: request.entries.length,
-    }));
+  it("retains every direct diagnostic when foreground yield is already waiting", async () => {
+    const { port, writes } = createControlledLogPort();
     const shouldYieldBetweenBatches = vi.fn(() => true);
     const entries = Array.from(
       { length: HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES + 1 },
-      () => buildQueueLogEntry("warn"),
+      (_, index) => ({
+        ...buildQueueLogEntry("warn"),
+        errorCode: `DIRECT_DIAGNOSTIC_${index}`,
+      }),
     );
 
     await writeHostedRuntimeLogEntriesBestEffort({
       entries,
       now: () => "2026-06-12T00:00:03.000Z",
-      platform: { logPort: { write } },
+      platform: { logPort: port },
       shouldYieldBetweenBatches,
     });
+    await flushMicrotasks();
 
-    expect(write).toHaveBeenCalledTimes(1);
-    expect(write.mock.calls[0]?.[0].entries).toHaveLength(
-      HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
-    );
     expect(shouldYieldBetweenBatches).toHaveBeenCalledTimes(1);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.entries).toHaveLength(HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES);
+
+    writes[0]!.resolve();
+    await flushMicrotasks();
+    expect(writes).toHaveLength(2);
+    expect(writes[1]!.entries).toHaveLength(1);
+    expect(writes.flatMap((write) => write.entries).map((entry) => entry.errorCode)).toEqual(
+      entries.map((entry) => entry.errorCode),
+    );
+
+    writes[1]!.resolve();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
   it("bounded drain returns on timeout while queued writes keep flushing", async () => {

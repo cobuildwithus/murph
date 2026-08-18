@@ -4,7 +4,10 @@ import {
 import type {
   SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
-import type { DeviceSyncJobFailureDiagnostic } from "@murphai/device-syncd/types";
+import type {
+  DeviceSyncJobFailureDiagnostic,
+  DeviceSyncJobFailureEventOrigin,
+} from "@murphai/device-syncd/types";
 import {
   resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
@@ -12,7 +15,7 @@ import {
 } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import {
-  sanitizeHostedRuntimeErrorText,
+  sanitizeHostedRuntimeDiagnosticText,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import { evaluatePushPrimarySourceStaleness } from "@murphai/device-syncd/source-staleness";
@@ -75,7 +78,7 @@ import {
 } from "./background-maintenance-cancellation.ts";
 
 const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
-const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
+const HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK = "Hosted device-sync job failed.";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
 export async function runHostedDeviceSyncPass(
@@ -511,7 +514,7 @@ export function resolveHostedDeviceSyncNextWakeAt(input: {
           level: "warn",
           phase: "invoke",
           redactedJson: {
-            errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+            errorSummary: sanitizeHostedRuntimeDiagnosticText(errorToString(error))
               ?? "device sync wake projection failed",
           },
         },
@@ -844,7 +847,7 @@ async function writeHostedDeviceSyncSourceStalledRuntimeLogs(input: {
         level: "warn",
         phase: "invoke",
         redactedJson: {
-          errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+          errorSummary: sanitizeHostedRuntimeDiagnosticText(errorToString(error))
             ?? "source staleness evaluation failed",
           failed: true,
         },
@@ -907,7 +910,7 @@ async function writeHostedDeviceSyncDenseRawRetentionFailureRuntimeLog(input: {
       level: "warn",
       phase: "invoke",
       redactedJson: {
-        errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(input.error))
+        errorSummary: sanitizeHostedRuntimeDiagnosticText(errorToString(input.error))
           ?? "dense raw retention failed",
         failed: true,
         hasMore: true,
@@ -1233,7 +1236,7 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
   processedJobs: number;
   wake: HostedRuntimeEvent;
 }): Record<string, boolean | number | string | null> {
-  const summary = sanitizeHostedDeviceSyncFailureSummary(
+  const summary = sanitizeHostedRuntimeDiagnosticText(
     input.failureDiagnostic.summary
       ?? (input.account && input.account.lastErrorCode === input.failureDiagnostic.code
         ? input.account.lastErrorMessage
@@ -1244,17 +1247,26 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
 
   return {
     failureCode: toHostedRuntimeLogCode(input.failureDiagnostic.code),
-    failureDisposition: input.failureDiagnostic.retryable ? "retry" : "drop",
+    failureEventOrigin: "worker_attempt" satisfies DeviceSyncJobFailureEventOrigin,
+    ...(input.failureDiagnostic.jobDisposition
+      ? { failureDisposition: input.failureDiagnostic.jobDisposition }
+      : {}),
     ...(typeof input.failureDiagnostic.attempts === "number"
       ? { failureJobAttempts: input.failureDiagnostic.attempts }
       : {}),
     ...(input.failureDiagnostic.jobKind
       ? { failureJobKind: toHostedRuntimeLogCode(input.failureDiagnostic.jobKind) }
       : {}),
+    ...(typeof input.failureDiagnostic.maxAttempts === "number"
+      ? { failureJobMaxAttempts: input.failureDiagnostic.maxAttempts }
+      : {}),
+    ...(typeof input.failureDiagnostic.remainingAttempts === "number"
+      ? { failureJobRemainingAttempts: input.failureDiagnostic.remainingAttempts }
+      : {}),
     ...(input.failureDiagnostic.resource
       ? { failureResource: toHostedRuntimeLogCode(input.failureDiagnostic.resource) }
       : {}),
-    failureSummary: summary ?? "Hosted device-sync job failed.",
+    failureSummary: summary ?? HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK,
     ...buildHostedDeviceSyncFailureDiagnosticRedactedJson(input.failureDiagnostic),
     hadPriorFailure: Boolean(priorLocalState?.lastSyncErrorAt),
     hadPriorSuccess: Boolean(priorLocalState?.lastSyncCompletedAt),
@@ -1299,6 +1311,7 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
   "providerRequestAuthPlacement",
   "providerRequestBodyFieldNames",
   "providerRequestBodyKind",
+  "providerRequestCandidateAliasSource",
   "providerRequestContentType",
   "providerRequestEndpointKind",
   "providerRequestMethod",
@@ -1328,6 +1341,8 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
 const DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
   "providerHttpStatus",
   "providerRequestBodyFieldCount",
+  "providerRequestCandidateCount",
+  "providerRequestCandidateOrdinal",
   "providerRequestQueryParameterCount",
   "providerOAuthRequestDuplicateParameterCount",
   "providerOAuthRequestParameterCount",
@@ -1421,53 +1436,8 @@ function appendHostedDeviceSyncFailureDiagnosticReason(
     return;
   }
 
-  const reason = sanitizeHostedDeviceSyncFailureSummary(value);
-  if (reason) {
-    redacted[key] = reason;
-  }
-}
-
-function sanitizeHostedDeviceSyncFailureSummary(value: string | null): string | null {
-  const sanitized = sanitizeHostedRuntimeErrorText(value);
-
-  if (!sanitized) {
-    return null;
-  }
-
-  const redacted = sanitized
-    .replace(/\bfile:\/\/[^\s)"']+/giu, "<redacted-path>")
-    .replace(/(^|[\s(])\/[^\s)]+/gu, "$1<redacted-path>")
-    .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<redacted-path>")
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
-    .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
-    .replace(
-      /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+/giu,
-      "<redacted-secret>",
-    )
-    .trim();
-
-  const bounded = redacted.length <= HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH
-    ? redacted
-    : `${redacted.slice(0, HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH - 3).trimEnd()}...`;
-
-  return isHostedDeviceSyncSafeRuntimeLogSummary(bounded)
-    ? bounded
-    : "[redacted]";
-}
-
-function isHostedDeviceSyncSafeRuntimeLogSummary(value: string): boolean {
-  return value.length > 0
-    && value.length <= HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH
-    && !(
-      /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
-      || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
-      || /\+\d[\d().\s-]{7,}\d/u.test(value)
-      || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
-        .test(value)
-      || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
-      || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
-      || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
-    );
+  redacted[key] = sanitizeHostedRuntimeDiagnosticText(value)
+    ?? HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK;
 }
 
 async function preloadHostedDeviceSyncRuntimeSnapshot(input: {
