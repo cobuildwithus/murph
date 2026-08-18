@@ -28,11 +28,18 @@ import {
   assistantAutomationInputSummaryFromCandidate,
 } from '../src/assistant/automation/input-summary.ts'
 import {
+  listAssistantOutboxIntentsForAutoReplyRoute,
+  readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import {
+  readAssistantAutomationState,
   resolveAssistantSession as seedAssistantSession,
+  saveAssistantAutomationState,
 } from '../src/assistant/store.ts'
+import {
+  runAssistantAutomationPass,
+} from '../src/assistant/automation/run-loop.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const boundaries = vi.hoisted(() => ({
@@ -127,6 +134,179 @@ describeStateCardinality('assistant foreground state-cardinality invariant', () 
     await assertStateCardinalityInvariant(assistantHotReplyProbe)
   }, 180_000)
 })
+
+it('keeps a fresh reply moving past a full route window plus protected image history', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-hot-reply-full-route-',
+  )
+  cleanupPaths.push(parentRoot)
+  await seedRetainedRouteHistory(vaultRoot)
+
+  const target = createAssistantModelTarget({
+    approvalPolicy: 'never',
+    model: 'gpt-5.6-test',
+    provider: 'codex-cli',
+    sandbox: 'danger-full-access',
+  })
+  if (!target) {
+    throw new Error('Expected a test assistant target.')
+  }
+  await seedAssistantSession({
+    actorId: 'actor-current',
+    channel: 'email',
+    identityId: 'identity-current',
+    target,
+    threadId: 'thread-current',
+    threadIsDirect: true,
+    vault: vaultRoot,
+  })
+  const storedInput = await upsertAssistantInputEvent({
+    event: createEmailInputEvent(),
+    vault: vaultRoot,
+  })
+  const candidate = assistantInputCandidateFromStoredEvent(storedInput)
+  await saveAssistantAutomationState(vaultRoot, {
+    autoReply: [{
+      channel: 'email',
+      eligibleAfter: null,
+      enabledAt: '2026-08-15T11:59:00.000Z',
+    }],
+    updatedAt: '2026-08-15T11:59:00.000Z',
+    version: 1,
+  })
+  const onProviderRequestStarted = vi.fn()
+
+  const result = await runAssistantAutomationPass({
+    deliveryDispatchMode: 'queue-only',
+    drainOutbox: false,
+    executionContext: {
+      hosted: {
+        defaultTarget: target,
+        memberId: 'member-test',
+        userEnvKeys: [],
+      },
+    },
+    inboxServices: createInboxServices(),
+    onProviderRequestStarted,
+    requestId: 'request-full-route-window',
+    vault: vaultRoot,
+  })
+
+  expect(boundaries.executeProvider).toHaveBeenCalledOnce()
+  expect(onProviderRequestStarted).toHaveBeenCalledOnce()
+  expect(result.replies).toMatchObject({
+    considered: 1,
+    failed: 0,
+    replied: 1,
+  })
+  expect(result.currentTurnDeliveryIntentIds).toEqual([expect.any(String)])
+  const committed = await readAssistantOutboxIntent(
+    vaultRoot,
+    result.currentTurnDeliveryIntentIds[0]!,
+  )
+  expect(committed).toMatchObject({
+    actorId: 'actor-current',
+    channel: 'email',
+    identityId: 'identity-current',
+    status: 'pending',
+    threadId: 'thread-current',
+  })
+  const state = await readAssistantAutomationState(vaultRoot)
+  expect(state.autoReply).toContainEqual(expect.objectContaining({
+    channel: 'email',
+    eligibleAfter: candidate.event.cursor,
+  }))
+}, 180_000)
+
+it('preserves an older exact native-reply anchor beyond the route window', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-hot-reply-native-anchor-',
+  )
+  cleanupPaths.push(parentRoot)
+  await seedNativeReplyRouteHistory(vaultRoot)
+
+  const target = createAssistantModelTarget({
+    approvalPolicy: 'never',
+    model: 'gpt-5.6-test',
+    provider: 'codex-cli',
+    sandbox: 'danger-full-access',
+  })
+  if (!target) {
+    throw new Error('Expected a test assistant target.')
+  }
+  await seedAssistantSession({
+    actorId: 'actor-native-reply',
+    channel: 'linq',
+    identityId: 'identity-native-reply',
+    target,
+    threadId: 'hidden-native-reply-thread',
+    threadIsDirect: true,
+    vault: vaultRoot,
+  })
+  const storedInput = await upsertAssistantInputEvent({
+    event: createLinqNativeReplyInputEvent(),
+    vault: vaultRoot,
+  })
+  const routeHistory = await listAssistantOutboxIntentsForAutoReplyRoute({
+    actorId: 'actor-native-reply',
+    channel: 'linq',
+    deliveryTarget: 'real-native-reply-thread',
+    identityId: 'identity-native-reply',
+    providerMessageId: 'provider-native-reply-anchor',
+    threadId: 'hidden-native-reply-thread',
+    vault: vaultRoot,
+  })
+  expect(routeHistory).toHaveLength(100)
+  expect(routeHistory.map((intent) => intent.intentId)).toContain(
+    'outbox_native_reply_history_000',
+  )
+  const candidate = assistantInputCandidateFromStoredEvent(storedInput)
+  expect(candidate.event.sourceMetadata).toMatchObject({
+    kind: 'linq',
+    replyToMessageId: 'provider-native-reply-anchor',
+  })
+  const contextItem = {
+    inputCandidate: candidate,
+    summary: assistantAutomationInputSummaryFromCandidate(candidate),
+    telegramMetadata: null,
+  }
+  const {
+    createAssistantAutoReplyGroupContext,
+    processAssistantAutoReplyGroup,
+  } = await import('../src/assistant/automation/reply.ts')
+  const context = createAssistantAutoReplyGroupContext([contextItem])
+  if (!context) {
+    throw new Error('Expected one native-reply context.')
+  }
+
+  const result = await processAssistantAutoReplyGroup({
+    allowSelfAuthored: false,
+    context,
+    deliveryDispatchMode: 'queue-only',
+    enabledChannels: ['linq'],
+    executionContext: {
+      hosted: {
+        defaultTarget: target,
+        memberId: 'member-test',
+        userEnvKeys: [],
+      },
+    },
+    inboxServices: createInboxServices(),
+    requestId: 'request-native-anchor-window',
+    sessionMaxAgeMs: null,
+    vault: vaultRoot,
+  })
+
+  expect(result).toMatchObject({
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  expect(boundaries.executeProvider).toHaveBeenCalledOnce()
+  expect(
+    boundaries.executeProvider.mock.calls[0]?.[0].input.turnContext,
+  ).toContain('Prior anchored answer outside the route window.')
+}, 180_000)
 
 async function prepareHotReply(unrelatedStateCount: number) {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
@@ -257,6 +437,56 @@ function createEmailInputEvent() {
   }
 }
 
+function createLinqNativeReplyInputEvent() {
+  const text = 'Following up on that older answer.'
+  return {
+    content: {
+      text,
+      transcriptText: text,
+      userMessageContent: [{
+        text,
+        type: 'text' as const,
+      }],
+    },
+    conversation: {
+      accountId: 'identity-native-reply',
+      actorId: 'actor-native-reply',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: 'hidden-native-reply-thread',
+      threadIsDirect: true,
+    },
+    occurredAt: '2026-08-15T12:10:00.000Z',
+    receivedAt: '2026-08-15T12:10:00.500Z',
+    replyTarget: {
+      channel: 'linq',
+      messageId: 'incoming-native-reply',
+      threadId: 'real-native-reply-thread',
+    },
+    sourceMetadata: {
+      externalThreadRouteAuthorityPresent: true,
+      kind: 'linq' as const,
+      partCount: 1,
+      reactionEligible: true,
+      replyToMessageId: 'provider-native-reply-anchor',
+      senderHandle: '+15550000000',
+      service: 'iMessage',
+    },
+    sourceRef: {
+      dedupeKey: 'dedupe-native-reply',
+      eventId: 'event-native-reply',
+      itemId: 'item-native-reply',
+      kind: 'hosted-mailbox' as const,
+      lane: 'conversation' as const,
+      laneSeq: '1',
+      payloadSchema: 'payload-schema',
+      payloadSource: 'inline' as const,
+      source: 'hosted-mailbox' as const,
+      wakeSchema: 'wake-schema',
+    },
+  }
+}
+
 async function seedUnrelatedOutbox(
   vaultRoot: string,
   unrelatedStateCount: number,
@@ -267,6 +497,126 @@ async function seedUnrelatedOutbox(
       createUnrelatedPendingOutboxIntent(index),
     )
   }
+}
+
+async function seedRetainedRouteHistory(vaultRoot: string): Promise<void> {
+  await saveAssistantOutboxIntent(
+    vaultRoot,
+    createRetainedRouteIntent(0, true),
+  )
+  for (let index = 1; index <= 100; index += 1) {
+    await saveAssistantOutboxIntent(
+      vaultRoot,
+      createRetainedRouteIntent(index, false),
+    )
+  }
+}
+
+async function seedNativeReplyRouteHistory(vaultRoot: string): Promise<void> {
+  for (let index = 0; index <= 100; index += 1) {
+    const base = createRetainedRouteIntent(index, false)
+    const createdAt = base.createdAt
+    const suffix = index.toString().padStart(3, '0')
+    const message = index === 0
+      ? 'Prior anchored answer outside the route window.'
+      : `Newer native-reply route delivery ${suffix}`
+    await saveAssistantOutboxIntent(vaultRoot, assistantOutboxIntentSchema.parse({
+      ...base,
+      actorId: 'actor-native-reply',
+      channel: 'linq',
+      dedupeKey: `dedupe-native-reply-history-${suffix}`,
+      delivery: {
+        ...base.delivery,
+        channel: 'linq',
+        messageLength: message.length,
+        providerMessageId: index === 0
+          ? 'provider-native-reply-anchor'
+          : `provider-native-reply-history-${suffix}`,
+        providerThreadId: 'real-native-reply-thread',
+        target: 'real-native-reply-thread',
+      },
+      deliveryIdempotencyKey: `delivery-native-reply-history-${suffix}`,
+      explicitTarget: 'real-native-reply-thread',
+      identityId: 'identity-native-reply',
+      intentId: `outbox_native_reply_history_${suffix}`,
+      message,
+      sessionId: `session_native_reply_history_${suffix}`,
+      targetFingerprint: `target-native-reply-history-${suffix}`,
+      threadId: 'hidden-native-reply-thread',
+      turnId: `turn_native_reply_history_${suffix}`,
+      updatedAt: createdAt,
+    }))
+  }
+}
+
+function createRetainedRouteIntent(
+  index: number,
+  generatedImage: boolean,
+): AssistantOutboxIntent {
+  const suffix = index.toString().padStart(3, '0')
+  const createdAt = new Date(
+    Date.parse('2026-08-14T00:00:00.000Z') + index * 1_000,
+  ).toISOString()
+  const message = generatedImage
+    ? 'Generated image delivery'
+    : `Recent route delivery ${suffix}`
+
+  return assistantOutboxIntentSchema.parse({
+    schema: 'murph.assistant-outbox-intent.v1',
+    intentId: `outbox_route_history_${suffix}`,
+    sessionId: `session_route_history_${suffix}`,
+    turnId: `turn_route_history_${suffix}`,
+    createdAt,
+    updatedAt: createdAt,
+    lastAttemptAt: createdAt,
+    nextAttemptAt: null,
+    sentAt: createdAt,
+    attemptCount: 1,
+    status: 'sent',
+    message,
+    media: generatedImage
+      ? [{
+          alt: 'Generated image',
+          contentType: 'image/png',
+          filename: 'generated.png',
+          kind: 'vault_image',
+          ref: 'raw/captures/generated.png',
+          sha256: 'a'.repeat(64),
+          sizeBytes: 4,
+          source: 'gpt-image-2',
+        }]
+      : [],
+    card: null,
+    subject: null,
+    operation: null,
+    dedupeKey: `dedupe-route-history-${suffix}`,
+    targetFingerprint: `target-route-history-${suffix}`,
+    channel: 'email',
+    identityId: 'identity-current',
+    actorId: 'actor-current',
+    threadId: 'thread-current',
+    threadIsDirect: true,
+    replyToMessageId: null,
+    bindingDelivery: null,
+    deliverySource: null,
+    explicitTarget: 'thread-current',
+    delivery: {
+      channel: 'email',
+      idempotencyKey: `delivery-route-history-${suffix}`,
+      messageLength: message.length,
+      providerMessageId: `provider-route-history-${suffix}`,
+      providerThreadId: 'thread-current',
+      sentAt: createdAt,
+      target: 'thread-current',
+      targetKind: 'thread',
+    },
+    deliveryConfirmationPending: false,
+    deliveryIdempotencyKey: `delivery-route-history-${suffix}`,
+    deliveryTransportIdempotent: true,
+    answeredMailboxItemIds: [],
+    preparedDispatchToken: null,
+    lastError: null,
+  })
 }
 
 function createUnrelatedPendingOutboxIntent(index: number): AssistantOutboxIntent {

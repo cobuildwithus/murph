@@ -4672,6 +4672,7 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
+      providerMessageId: replyToMessageId,
     })).filter((delivery) => delivery.message !== null)
   const replyTargetDelivery = replyToMessageId === null
     ? null
@@ -4830,6 +4831,10 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
         deliveryTarget: input.deliveryTarget,
         historyReader: input.historyReader,
         input: input.input,
+        providerMessageId: replyToMessageIds.reduce<string | null>(
+          (selected, replyToMessageId) => replyToMessageId ?? selected,
+          null,
+        ),
       })
     : []
   const exactDeliveries = replyToMessageIds.map((replyToMessageId) =>
@@ -5099,6 +5104,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
+  providerMessageId?: string | null
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery[]> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
@@ -5109,9 +5115,9 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   const intents = await input.historyReader.readOutboxIntents({
     conversation: input.input.conversation,
     deliveryTarget,
-    providerMessageId: readAssistantTargetProviderScalar(
-      input.input.replyTarget?.messageId,
-    ),
+    providerMessageId: input.providerMessageId === undefined
+      ? readAssistantTargetProviderScalar(input.input.replyTarget?.messageId)
+      : readAssistantTargetProviderScalar(input.providerMessageId),
     source: channel,
   })
   return intents.flatMap((intent) => {

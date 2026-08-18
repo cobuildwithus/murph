@@ -617,7 +617,7 @@ describe('assistant outbox runtime', () => {
     120_000,
   )
 
-  it('fails closed when an auto-reply foreground route exceeds 100 intents', async () => {
+  it('bounds auto-reply route context while preserving an older exact provider anchor', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-auto-reply-route-bound-',
     )
@@ -679,7 +679,7 @@ describe('assistant outbox runtime', () => {
       force: true,
     })
 
-    await expect(listAssistantOutboxIntentsForAutoReplyRoute({
+    const recentRouteHistory = await listAssistantOutboxIntentsForAutoReplyRoute({
       actorId: sent.actorId,
       channel: 'telegram',
       deliveryTarget: routeTarget,
@@ -687,9 +687,31 @@ describe('assistant outbox runtime', () => {
       providerMessageId: null,
       threadId: sent.threadId,
       vault: vaultRoot,
-    })).rejects.toMatchObject({
-      code: 'ASSISTANT_AUTO_REPLY_ROUTE_BOUND_EXCEEDED',
     })
+    expect(recentRouteHistory).toHaveLength(100)
+    expect(recentRouteHistory.map((intent) => intent.intentId)).toEqual(
+      Array.from({ length: 100 }, (_, offset) =>
+        `outbox_auto_reply_route_bound_${(offset + 1).toString().padStart(3, '0')}`
+      ),
+    )
+
+    const nativeReplyHistory = await listAssistantOutboxIntentsForAutoReplyRoute({
+      actorId: sent.actorId,
+      channel: 'telegram',
+      deliveryTarget: routeTarget,
+      identityId: sent.identityId,
+      providerMessageId: 'provider-auto-reply-route-bound-000',
+      threadId: sent.threadId,
+      vault: vaultRoot,
+    })
+    expect(nativeReplyHistory).toHaveLength(100)
+    expect(nativeReplyHistory[0]?.intentId).toBe(sent.intentId)
+    expect(nativeReplyHistory.map((intent) => intent.intentId)).not.toContain(
+      'outbox_auto_reply_route_bound_001',
+    )
+    expect(nativeReplyHistory.at(-1)?.intentId).toBe(
+      'outbox_auto_reply_route_bound_100',
+    )
   }, 120_000)
 
   it('keeps accepted Linq media in native-reply history after a terminal rich-link failure', async () => {

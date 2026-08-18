@@ -352,28 +352,25 @@ export async function listAssistantOutboxIntentsForAutoReplyRoute(
         { providerMessageId },
       )]
     : []
-  const intentIds = new Set([
-    ...await readAssistantOutboxForegroundTagIntentIds({
-      limit: ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT + 1,
-      newestFirst: true,
-      paths,
-      tagDigests: routeTags,
-    }),
-    ...await readAssistantOutboxForegroundTagIntentIds({
-      limit: ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT + 1,
-      newestFirst: true,
-      paths,
-      tagDigests: providerTags,
-    }),
-  ])
-  if (intentIds.size > ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT) {
-    throw new VaultCliError(
-      'ASSISTANT_AUTO_REPLY_ROUTE_BOUND_EXCEEDED',
-      `Assistant auto-reply history exceeded its fixed ${ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT}-intent route bound.`,
-    )
-  }
+  const providerIntentIds = await readAssistantOutboxForegroundTagIntentIds({
+    // One match resolves an exact native-reply anchor; two prove ambiguity.
+    limit: 2,
+    newestFirst: true,
+    paths,
+    tagDigests: providerTags,
+  })
+  const routeIntentIds = await readAssistantOutboxForegroundTagIntentIds({
+    limit: ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT,
+    newestFirst: true,
+    paths,
+    tagDigests: routeTags,
+  })
+  const intentIds = [...new Set([
+    ...providerIntentIds,
+    ...routeIntentIds,
+  ])].slice(0, ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT)
   return await readAssistantOutboxProjectedIntents({
-    intentIds: [...intentIds],
+    intentIds,
     paths,
     vault: input.vault,
   })
