@@ -350,10 +350,13 @@ Intents without references omit the optional field, so ordinary replies remain
 readable by the preceding strict reader. Deploy the reference-aware Worker and
 runner together with immediate container rollout before any reminder carrying
 references can fire, then prove the exact runner-bundle fingerprint. The first
-persisted non-empty reference list establishes that bundle as the hard rollback
-floor until every such intent and hosted checkpoint has drained; recovery below
-the floor requires the current compatible reader or a forward fix, never manual
-editing of assistant runtime state.
+canonical automation or outbox intent with a non-empty reference list
+establishes that bundle as the hard rollback floor. Hosted rollback below the
+floor is safe only after every such canonical reference is removed through the
+current writer and every affected intent and checkpoint has drained; otherwise
+recovery requires the compatible reader or a forward fix, never manual editing
+of canonical or assistant runtime state. A local CLI downgrade below the same
+reader floor is unsupported while canonical automations carry references.
 
 Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store
