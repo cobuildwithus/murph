@@ -13,6 +13,7 @@ import {
 const APPLE_HEALTH_PROVIDER = "apple_health_kit";
 const CLOCK_SKEW_MS = 2 * 60_000;
 const DB_CONNECTION_TIMEOUT_MS = 5_000;
+const DB_OWNER_CONNECTION_OPTION = "-c role=postgres";
 const DB_QUERY_TIMEOUT_MS = 10_000;
 const DB_STATEMENT_TIMEOUT_MS = 10_000;
 const JUNCTION_USER_PAGE_LIMIT = 500;
@@ -56,6 +57,18 @@ export function buildDedicatedDatabasePoolOptions(connectionString) {
     query_timeout: DB_QUERY_TIMEOUT_MS,
     statement_timeout: DB_STATEMENT_TIMEOUT_MS,
   };
+}
+
+export function withDedicatedDatabaseOwner(connectionString) {
+  const parsed = new URL(connectionString);
+  const existingOptions = parsed.searchParams.get("options")?.trim();
+  parsed.searchParams.set(
+    "options",
+    existingOptions
+      ? `${existingOptions} ${DB_OWNER_CONNECTION_OPTION}`
+      : DB_OWNER_CONNECTION_OPTION,
+  );
+  return parsed.toString();
 }
 
 export function buildJunctionClientUserId(secret, memberId, namespace = "") {
@@ -336,8 +349,9 @@ async function resetDedicatedDatabase(directDatabaseUrl) {
   for (const name of Object.keys(childEnv)) {
     if (name.startsWith("NATIVE_IOS_E2E_")) delete childEnv[name];
   }
-  childEnv.DATABASE_URL = directDatabaseUrl;
-  childEnv.DIRECT_DATABASE_URL = directDatabaseUrl;
+  const ownerDatabaseUrl = withDedicatedDatabaseOwner(directDatabaseUrl);
+  childEnv.DATABASE_URL = ownerDatabaseUrl;
+  childEnv.DIRECT_DATABASE_URL = ownerDatabaseUrl;
   await runBoundedCommand({
     argv: ["--dir", "apps/web", "exec", "prisma", "migrate", "reset", "--force"],
     command: "pnpm",
