@@ -18,7 +18,7 @@ import {
   DialogTrigger,
 } from "@/src/components/ui/dialog";
 
-const FAMILY_SETTINGS_PATH = "/settings#family";
+const FAMILY_SETTINGS_PATH = "/settings?familyRecovery=true#family";
 
 type ClipboardFeedback =
   | { kind: "idle" }

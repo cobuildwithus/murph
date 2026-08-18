@@ -469,14 +469,8 @@ describe("HostedBillingSettings", () => {
         usageStatus: buildUsageStatus({
           planCode: "launch_group_monthly",
           planName: "Group",
-          recommendedPlanCode: "launch_monthly",
           remainingPercent: 0,
           status: "exhausted",
-          subscriptionActionQuote: buildSubscriptionActionQuote({
-            label: "Upgrade to Pulse",
-            targetPlanCode: "launch_monthly",
-            timing: "immediate",
-          }),
           usedPercent: 100,
         }),
       },
@@ -563,14 +557,8 @@ describe("HostedBillingSettings", () => {
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
       usageStatus: buildUsageStatus({
-        recommendedPlanCode: "launch_edge_monthly",
         remainingPercent: 0,
         status: "exhausted",
-        subscriptionActionQuote: buildSubscriptionActionQuote({
-          label: "Upgrade to Edge",
-          targetPlanCode: "launch_edge_monthly",
-          timing: "immediate",
-        }),
         usedPercent: 100,
       }),
       usageTopUpOffers: [{
@@ -587,7 +575,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /min-h-11 w-full sm:w-auto/);
   });
 
-  test("uses the server-returned Max quote for an eligible Edge recovery", async () => {
+  test("uses the Settings-owned Max eligibility for an Edge recovery", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -604,11 +592,6 @@ describe("HostedBillingSettings", () => {
         planName: "Edge",
         remainingPercent: 0,
         status: "exhausted",
-        subscriptionActionQuote: buildSubscriptionActionQuote({
-          label: "Upgrade to Max",
-          targetPlanCode: "launch_max_monthly",
-          timing: "immediate",
-        }),
         usedPercent: 100,
       }),
     }));
@@ -748,10 +731,13 @@ describe("HostedBillingSettings", () => {
         await Promise.resolve();
       });
 
-      assert.equal(writeText.mock.calls[0]?.[0], "https://app.murph.test/settings#family");
+      assert.equal(
+        writeText.mock.calls[0]?.[0],
+        "https://app.murph.test/settings?familyRecovery=true#family",
+      );
       const copiedUrl = new URL(String(writeText.mock.calls[0]?.[0]));
       assert.equal(copiedUrl.pathname, "/settings");
-      assert.equal(copiedUrl.search, "");
+      assert.equal(copiedUrl.search, "?familyRecovery=true");
       assert.equal(copiedUrl.hash, "#family");
       assert.doesNotMatch(copiedUrl.toString(), /usageRecovery|payer|member|token/i);
       assert.match(rendered.container.textContent ?? "", /Family Settings link copied/);
@@ -807,7 +793,10 @@ describe("HostedBillingSettings", () => {
       const alert = rendered.container.querySelector('[role="alert"]');
       assert.ok(alert instanceof rendered.window.HTMLElement);
       assert.match(alert.textContent ?? "", /The link could not be copied/);
-      assert.match(alert.textContent ?? "", /https:\/\/app\.murph\.test\/settings#family/);
+      assert.match(
+        alert.textContent ?? "",
+        /https:\/\/app\.murph\.test\/settings\?familyRecovery=true#family/,
+      );
       assert.doesNotMatch(alert.textContent ?? "", /usageRecovery|payer|member|token/i);
     } finally {
       await rendered.cleanup();
@@ -2258,20 +2247,8 @@ describe("HostedBillingSettings", () => {
       billingStatus: "active",
       canStartDirectPlan: true,
       usageStatus: buildStarterStatus({
-        availablePlans: [{
-          code: "launch_monthly",
-          displayName: "Pulse",
-          monthlyPriceUsdCents: 800,
-          selectable: true,
-        }],
-        recommendedPlanCode: "launch_monthly",
         remainingPercent: 0,
         status: "exhausted",
-        subscriptionActionQuote: buildSubscriptionActionQuote({
-          label: "Upgrade to Pulse",
-          targetPlanCode: "launch_monthly",
-          timing: "now",
-        }),
         usedPercent: 100,
       }),
     }));
@@ -2280,6 +2257,27 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, />Upgrade to Pulse</);
     assert.doesNotMatch(markup, /Does not expire/);
     assert.doesNotMatch(markup, /resets? /i);
+  });
+
+  test("prefers the visible Core plan for an eligible Starter group member", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      canStartDirectPlan: true,
+      showGroupPlan: true,
+      usageStatus: buildStarterStatus({
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+    }));
+
+    assert.match(markup, /Core is the recommended recurring way to continue/);
+    assert.match(markup, />Upgrade to Core</);
+    assert.doesNotMatch(markup, />Upgrade to Pulse</);
   });
 });
 

@@ -516,11 +516,9 @@ test("SettingsPage completes a return only from an active paid exact projection"
     undefined,
   );
   expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
-    includeSubscriptionActionQuote: true,
     memberId: "member_123",
     prisma: mocks.prisma,
     publicBaseUrl: null,
-    subscriptionActionTargetPlanCode: "launch_max_monthly",
   });
 });
 
@@ -699,6 +697,45 @@ test("SettingsPage keeps the signed-out usage recovery handoff in Settings", asy
   expect(redirectMock).not.toHaveBeenCalled();
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps the exact signed-out Family recovery handoff in Settings", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ familyRecovery: "true" }),
+  }));
+
+  assert.match(markup, /Continue to Family Settings/);
+  assert.match(markup, /choose the Family member and review their available options/);
+  expect(redirectMock).not.toHaveBeenCalled();
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage rejects an augmented signed-out Family recovery handoff", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  await expect(SettingsPage({
+    searchParams: Promise.resolve({
+      familyRecovery: "true",
+      usageRecovery: "true",
+    }),
+  })).rejects.toThrow("NEXT_REDIRECT:/");
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
 test("SettingsPage keeps a signed-out Core payment return recoverable", async () => {
@@ -1067,7 +1104,6 @@ test("SettingsPage reads the app session and persisted account settings into the
     });
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
-      includeSubscriptionActionQuote: true,
       memberId: "member_123",
       prisma: mocks.prisma,
       publicBaseUrl: null,
@@ -1283,6 +1319,21 @@ test("SettingsPage resolves an eligible Family owner recovery from authenticated
     expect.objectContaining({ usageRecoveryInitialOpen: true }),
     undefined,
   );
+
+  vi.clearAllMocks();
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ familyRecovery: "true" }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      familyState: "owner",
+      usageRecoveryInitialOpen: false,
+    }),
+    undefined,
+  );
+  const familySettingsProps = mocks.HostedFamilySettings.mock.calls.at(-1)?.[0];
+  expect(familySettingsProps).not.toHaveProperty("usageRecoveryInitialOpen");
 });
 
 test("SettingsPage surfaces and opens the authenticated active Family owner's own usage picker", async () => {

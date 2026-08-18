@@ -23,18 +23,33 @@ const USAGE_RECOVERY_AUTH_REQUIRED_PROPS = {
   title: "Continue in Settings",
 };
 
+const FAMILY_RECOVERY_AUTH_REQUIRED_PROPS = {
+  description: "Sign in to continue to Family Settings.",
+  eyebrow: "Family access",
+  eyebrowIcon: Gauge,
+  footer: "After sign in, you can choose the Family member and review their available options.",
+  title: "Continue to Family Settings",
+};
+
 // The payment link Murph sends over text can open in a browser that has never
 // held a Murph session, so this screen is a normal return state, not an error.
 //
 // The copy stays neutral because nothing is verified yet: the signature is
 // bound to a member id absent from the URL, so anyone could put these
 // parameters in a link. Murph must not vouch for an unchecked payment.
-export function SettingsAuthRequired(props: { usageRecovery?: boolean }) {
+export function SettingsAuthRequired(props: {
+  familyRecovery?: boolean;
+  usageRecovery?: boolean;
+}) {
   return (
     <HostedAuthRequiredScreen
-      {...(props.usageRecovery
-        ? USAGE_RECOVERY_AUTH_REQUIRED_PROPS
-        : SETTINGS_AUTH_REQUIRED_PROPS)}
+      {...(
+        props.familyRecovery
+          ? FAMILY_RECOVERY_AUTH_REQUIRED_PROPS
+          : props.usageRecovery
+            ? USAGE_RECOVERY_AUTH_REQUIRED_PROPS
+            : SETTINGS_AUTH_REQUIRED_PROPS
+      )}
     />
   );
 }
@@ -43,4 +58,8 @@ export function SettingsAuthRequired(props: { usageRecovery?: boolean }) {
 // cannot drift from what a member returning from Stripe actually reads.
 export function SettingsAuthRequiredView() {
   return <HostedAuthRequiredScreenView {...SETTINGS_AUTH_REQUIRED_PROPS} />;
+}
+
+export function SettingsFamilyRecoveryAuthRequiredView() {
+  return <HostedAuthRequiredScreenView {...FAMILY_RECOVERY_AUTH_REQUIRED_PROPS} />;
 }

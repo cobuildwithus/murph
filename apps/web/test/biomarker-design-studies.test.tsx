@@ -181,7 +181,6 @@ test("screenshot categories keep the production studies available without one gi
   expect(sectionsMarkup).toContain('data-design-study="group-usage-funding"');
   expect(sectionsMarkup).toContain("Sunday sleep crew");
   expect(sectionsMarkup).toContain("Support Murph in Sunday sleep crew");
-  expect(sectionsMarkup).not.toContain("Keep Murph going");
   expect(sectionsMarkup).toContain("Sponsor this chat");
   expect(sectionsMarkup).toContain('data-design-state="monthly-activation"');
   expect(sectionsMarkup).toContain('data-design-state="ordinary-sponsored-one-time"');
@@ -217,7 +216,7 @@ test("screenshot categories keep the production studies available without one gi
   expect(sectionsMarkup).toContain("Preview Family member completion");
   expect(sectionsMarkup).toContain("Preview inactive account completion");
   expect(sectionsMarkup).toContain("Preview former member completion");
-  expect(sectionsMarkup).toContain("Add usage to continue");
+  expect(sectionsMarkup).toContain("Add one-time usage");
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
   expect(sectionsMarkup).not.toContain("usage credit remaining");
@@ -266,7 +265,6 @@ test("screenshot categories keep the production studies available without one gi
   expect(componentsMarkup).toContain("Monthly limit");
   expect(componentsMarkup).toContain("Sunday sleep crew");
   expect(componentsMarkup).toContain("Support Murph in Sunday sleep crew");
-  expect(componentsMarkup).not.toContain("Keep Murph going");
   expect(componentsMarkup).toContain("Sponsor this chat");
   expect(componentsMarkup).toMatch(
     /data-slot="radio-group-item"[^>]*class="[^"]*sr-only/u,

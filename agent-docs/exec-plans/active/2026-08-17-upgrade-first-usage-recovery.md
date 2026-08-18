@@ -61,8 +61,10 @@ Updated: 2026-08-18
 ## Risks and mitigations
 
 1. Risk: A generic link sends the Family owner to the wrong surface.
-   Mitigation: Use a stable Family anchor and let the signed-in Settings read
-   resolve the owner/member relationship before rendering actions.
+   Mitigation: Use the exact identifier-free
+   `/settings?familyRecovery=true#family` handoff, preserve it through sign-in,
+   and let Settings resolve the owner/member relationship before rendering
+   actions.
 2. Risk: The UI offers an unauthorized or nonexistent upgrade.
    Mitigation: Render only server-returned eligible plans and preserve truthful
    add-usage/wait fallbacks when no higher tier exists.
@@ -100,21 +102,30 @@ Updated: 2026-08-18
   outbound message. The message opens Settings; Settings shows a focused dialog
   with a large `Copy link for your Family owner` action.
 - The copied owner URL is the generic Family Settings URL. It carries neither a
-  member identifier nor a bearer token; the owner chooses the member after
-  authentication.
+  member identifier nor a bearer token. Its exact
+  `familyRecovery=true#family` destination survives authentication, and the
+  owner chooses the member after sign-in.
 - Family owners are taken to their applicable recurring plan upgrade when one is
   eligible, with member-specific one-time usage secondary.
 - Direct and trial/Starter members see only current server-returned plan options.
   Max/no-higher-tier states do not invent an upgrade and instead expose an
   authorized add-usage or wait-for-reset fallback.
+- Settings derives the next direct recovery tier from the same server-owned plan
+  visibility and eligibility facts that render its plan cards. The usage
+  projection does not resolve a second subscription quote or recommendation
+  pipeline for this UI.
 - User messages should promise recovery, not a particular price or action; the
   signed-in UI owns the current recommendation.
+- Core exhaustion copy keeps the wearable-sync and authorized-group-update
+  boundary explicit. Family copy says the exhausted allowance is individual
+  and that other members keep separate allowances. Both reuse the shared
+  Settings-link template machinery.
 
 ## Verification
 
 - Commands to run:
   - Focused Vitest suites selected from the files changed by the patch.
-  - `pnpm --filter web typecheck`
+  - `pnpm --dir apps/web typecheck`
   - Repository completion/review commands required by the changed surface.
   - Browser walkthrough at narrow-phone and desktop viewports.
 - Expected outcomes:
@@ -133,29 +144,58 @@ Updated: 2026-08-18
 - Direct paid member with no higher tier: the exhausted Max state truthfully
   promotes the authorized one-time usage action without inventing an upgrade.
 - Sponsored Family member: the recovery handoff opens a focused dialog with a
-  large copy action and only the generic `/settings#family` destination.
-- Family owner: focused client coverage proves the recovery route selects the
-  owner's next eligible recurring tier first and retains authorized one-time
+  large copy action and only the identifier-free
+  `/settings?familyRecovery=true#family` destination.
+- Family owner: focused client coverage and rendered phone/desktop proof show
+  the recovery banner selects the owner's next eligible recurring tier first,
+  automatically opens its confirmation dialog, and retains authorized one-time
   usage as the secondary action.
 - Signed-out member: focused auth coverage proves only the exact
-  `usageRecovery=true#subscription` handoff resumes after sign-in; repeated or
-  augmented parameters fail closed to the normal Home route.
+  `usageRecovery=true#subscription` and `familyRecovery=true#family` handoffs
+  resume after sign-in; repeated or augmented parameters fail closed to the
+  normal Home route.
 - Presentation proof was inspected at phone and desktop widths from production
   components on the synthetic screenshot surface. Selected redacted evidence:
   `.artifacts/review-gpt/usage-recovery-sponsored-phone.png`,
   `.artifacts/review-gpt/usage-recovery-direct-phone.png`,
   `.artifacts/review-gpt/usage-recovery-max-phone.png`, and
-  `.artifacts/review-gpt/usage-recovery-direct-desktop.png`.
+  `.artifacts/review-gpt/usage-recovery-direct-desktop.png`. Corrective evidence
+  adds `.artifacts/review-gpt/usage-recovery-family-owner-phone.png`,
+  `.artifacts/review-gpt/usage-recovery-family-owner-desktop.png`,
+  `.artifacts/review-gpt/usage-recovery-family-owner-banner-phone.png`,
+  `.artifacts/review-gpt/usage-recovery-family-owner-banner-desktop.png`, and
+  `.artifacts/review-gpt/usage-recovery-family-signed-out-phone.png`.
 - Result: `Ready`. The screenshot surface proves presentation; focused route,
   authority, clipboard, and action tests provide the journey proof unavailable
   from synthetic props alone.
 
 ## Local proof
 
-- Focused Vitest: 6 files and 210 tests passed.
+- Focused Vitest: all 344 unique tests across 8 files passed. One overloaded
+  batch produced a timeout in a billing projection test; that test passed in
+  15.64 seconds when isolated, and the full changed Settings page suite passed
+  64/64 after the query-shape correction.
 - Web typecheck: passed.
 - Changed-file ESLint: passed.
 - Frontend-evidence checker tests: 6 passed.
 - `git diff --check`: passed.
-- Privacy scan over tracked and untracked task content: no configured direct
-  identifier appeared.
+- Privacy scan over changed task content: no configured direct identifier
+  appeared.
+
+## Review findings and resolutions
+
+- ReviewGPT final round 1 found that `/settings#family` loses its fragment at
+  the server boundary for a signed-out owner. Repaired with the exact
+  identifier-free Family recovery query plus fragment and fail-closed query
+  tests.
+- ReviewGPT final round 1 found a duplicate usage-projection quote and
+  eligibility pipeline. Deleted it; Settings now derives the next tier from its
+  existing visibility and eligibility facts.
+- The preliminary specialist pass was invalid because the evidence set lacked
+  phone/desktop Family-owner banner and auto-open-dialog proof plus a signed-out
+  render. Those states are now implemented, captured, and inspected for the
+  required retry.
+- Specialist scope feedback identified lost Core and Family allowance meaning
+  in the shared exhaustion copy. Added small shared variants that preserve the
+  correct continuity and per-member boundaries without exposing authority,
+  identifiers, prices, or plan recommendations.

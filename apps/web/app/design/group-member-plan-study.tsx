@@ -4,8 +4,10 @@ import type {
   HostedPlanUsageAvailableStatus,
 } from "@murphai/hosted-execution/plan-usage";
 
+import { SettingsFamilyRecoveryAuthRequiredView } from "@/app/(dashboard)/settings/settings-auth-required";
 import { UsageLimitBanner } from "@/src/components/home/usage-limit-banner";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
+import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 
 const CORE_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
@@ -492,6 +494,77 @@ export function GroupMemberPlanStudy() {
               subscriptionActionQuote: null,
             }}
           />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family owner recovery starts with the next recurring tier"
+        state="usage-recovery-family-owner"
+      >
+        <div inert>
+          <HostedFamilyManager
+            billingActive
+            invites={[]}
+            members={[
+              {
+                isOwner: true,
+                joinedAtIso: "2026-07-01T00:00:00.000Z",
+                label: null,
+                memberId: "design-family-owner",
+                pendingPlanCode: null,
+                planCode: "pulse",
+              },
+            ]}
+            payerMemberId="design-family-owner"
+            plans={{
+              edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+              max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+              pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
+            }}
+            seats={{
+              active: 1,
+              billed: 2,
+              invited: 0,
+              max: 6,
+              min: 2,
+              remaining: 1,
+              used: 1,
+            }}
+            tiers={[
+              {
+                name: "Pulse",
+                planCode: "pulse",
+                priceLabel: "$7/mo",
+                recurringAmountUsdCents: 700,
+              },
+              {
+                name: "Edge",
+                planCode: "edge",
+                priceLabel: "$19/mo",
+                recurringAmountUsdCents: 1_900,
+              },
+              {
+                name: "Max",
+                planCode: "max",
+                priceLabel: "$49/mo",
+                recurringAmountUsdCents: 4_900,
+              },
+            ]}
+            usageRecoveryInitialOpen
+            usageTopUpOffers={[{
+              amountLabel: "$5",
+              offerCode: "usage_5_usd",
+            }]}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Signed-out Family owner recovery handoff"
+        state="usage-recovery-family-owner-signed-out"
+      >
+        <div className="overflow-hidden rounded-2xl border border-border bg-background" inert>
+          <SettingsFamilyRecoveryAuthRequiredView />
         </div>
       </StudyState>
 

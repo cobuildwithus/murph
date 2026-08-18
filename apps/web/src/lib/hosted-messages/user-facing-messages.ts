@@ -117,6 +117,25 @@ const USAGE_RECOVERY_MESSAGE_TEMPLATES = [
 {settingsUrl}`,
 ] as const
 
+function withUsageRecoveryScope(
+  templates: readonly string[],
+  scopeCopy: string,
+): readonly string[] {
+  return templates.map((template) =>
+    template.replace("\n{settingsUrl}", ` ${scopeCopy}\n{settingsUrl}`)
+  )
+}
+
+const CORE_USAGE_RECOVERY_MESSAGE_TEMPLATES = withUsageRecoveryScope(
+  USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "New personal AI work pauses; wearable syncing and authorized group updates continue.",
+)
+
+const FAMILY_USAGE_RECOVERY_MESSAGE_TEMPLATES = withUsageRecoveryScope(
+  USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "Your individual Family allowance is used; other members' allowances are separate.",
+)
+
 export interface RenderUserFacingMessageInput<K extends UserFacingMessageTemplateKey> {
   context: UserFacingMessageContextByKey[K]
   key: K
@@ -606,8 +625,8 @@ Sound good?`,
   ],
   "linq.ai_usage.starter_limit_reached": USAGE_RECOVERY_MESSAGE_TEMPLATES,
   "linq.ai_usage.edge_limit_reached": USAGE_RECOVERY_MESSAGE_TEMPLATES,
-  "linq.ai_usage.family_limit_reached": USAGE_RECOVERY_MESSAGE_TEMPLATES,
-  "linq.ai_usage.group_upgrade_pulse": USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "linq.ai_usage.family_limit_reached": FAMILY_USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "linq.ai_usage.group_upgrade_pulse": CORE_USAGE_RECOVERY_MESSAGE_TEMPLATES,
   "linq.ai_usage.max_limit_reached": USAGE_RECOVERY_MESSAGE_TEMPLATES,
   "linq.ai_usage.pulse_upgrade_edge": USAGE_RECOVERY_MESSAGE_TEMPLATES,
   "linq.ai_usage.thread_limit_reached": [

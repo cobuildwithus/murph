@@ -146,6 +146,7 @@ export function HostedBillingSettings(props: {
     currentPlanCode,
     familyCurrent,
     planChangePending: props.planChangePending === true,
+    showGroupPlan: props.showGroupPlan === true,
     status: props.usageStatus,
   });
   const usageRecoveryPlanName = usageRecoveryPlanCode
@@ -707,6 +708,7 @@ function resolveDirectUsageRecoveryPlanCode(input: {
   currentPlanCode: HostedBillingPlanCode | null;
   familyCurrent: boolean;
   planChangePending: boolean;
+  showGroupPlan: boolean;
   status?: HostedPlanUsageStatus | null;
 }): HostedBillingPlanCode | null {
   if (
@@ -718,79 +720,28 @@ function resolveDirectUsageRecoveryPlanCode(input: {
     return null;
   }
 
-  const status = input.status;
-  const recommendedActionPlanCode =
-    status.recommendedAction?.kind === "change_plan"
-      ? status.recommendedAction.targetPlanCode
-      : status.recommendedAction?.kind === "start_pulse"
-        ? "launch_monthly"
-        : status.recommendedAction?.kind === "upgrade_edge"
-          ? "launch_edge_monthly"
-          : null;
-  const candidates = [
-    status.subscriptionActionQuote?.targetPlanCode ?? null,
-    recommendedActionPlanCode,
-    status.recommendedPlanCode ?? null,
-  ];
-
-  for (const candidate of candidates) {
-    if (
-      candidate
-      && isDirectUsageRecoveryPlanEligible({
-        canStartDirectPlan: input.canStartDirectPlan,
-        canUpgradeToEdge: input.canUpgradeToEdge,
-        canUpgradeToMax: input.canUpgradeToMax,
-        canUpgradeToPulse: input.canUpgradeToPulse,
-        candidate,
-        currentPlanCode: input.currentPlanCode,
-        status,
-      })
-    ) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-function isDirectUsageRecoveryPlanEligible(input: {
-  canStartDirectPlan: boolean;
-  canUpgradeToEdge: boolean;
-  canUpgradeToMax: boolean;
-  canUpgradeToPulse: boolean;
-  candidate: HostedBillingPlanCode;
-  currentPlanCode: HostedBillingPlanCode | null;
-  status: Exclude<HostedPlanUsageStatus, { status: "unavailable" }>;
-}): boolean {
-  if (input.candidate === input.currentPlanCode) {
-    return false;
-  }
   if (input.status.accessKind === "starter") {
-    const serverPlanCodes = input.status.availablePlans?.map((plan) => plan.code);
-    return input.canStartDirectPlan
-      && (serverPlanCodes === undefined || serverPlanCodes.includes(input.candidate));
+    if (!input.canStartDirectPlan) {
+      return null;
+    }
+    return input.showGroupPlan
+      ? "launch_group_monthly"
+      : "launch_monthly";
   }
   if (input.status.accessKind !== "paid") {
-    return false;
+    return null;
   }
-  if (input.candidate === "launch_monthly") {
-    return input.currentPlanCode === "launch_group_monthly"
-      && input.canUpgradeToPulse;
+  switch (input.currentPlanCode) {
+    case "launch_group_monthly":
+      return input.canUpgradeToPulse ? "launch_monthly" : null;
+    case "launch_monthly":
+      return input.canUpgradeToEdge ? "launch_edge_monthly" : null;
+    case "launch_edge_monthly":
+      return input.canUpgradeToMax ? "launch_max_monthly" : null;
+    case "launch_max_monthly":
+    case null:
+      return null;
   }
-  if (input.candidate === "launch_edge_monthly") {
-    return (
-      input.currentPlanCode === "launch_group_monthly"
-      || input.currentPlanCode === "launch_monthly"
-    ) && input.canUpgradeToEdge;
-  }
-  if (input.candidate === "launch_max_monthly") {
-    return (
-      input.currentPlanCode === "launch_group_monthly"
-      || input.currentPlanCode === "launch_monthly"
-      || input.currentPlanCode === "launch_edge_monthly"
-    ) && input.canUpgradeToMax;
-  }
-  return false;
 }
 
 function renderDirectUsageRecoveryAction(input: {

@@ -2378,7 +2378,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("identifies Max when an active Max member exhausts the combined allowance", async () => {
+  it("routes an exhausted Max member to the stable Settings recovery handoff", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_max_monthly",
       limitUsdMicros: DIRECT_MAX_ALLOWANCE_USD_MICROS,
@@ -2403,8 +2403,10 @@ describe("resolveHostedAiUsageGate", () => {
     if (decision.allowed || !decision.userNotice) {
       throw new Error("Expected exhausted Max usage to return a user notice");
     }
-    expect(decision.userNotice.message).toMatch(/Max/iu);
-    expect(decision.userNotice.message).not.toMatch(/Pulse|Edge/iu);
+    expect(decision.userNotice.message).toContain(
+      "https://withmurph.ai/settings?usageRecovery=true#subscription",
+    );
+    expect(decision.userNotice.message).not.toMatch(/Pulse|Edge|addUsage=true/iu);
   });
 
   it("gives an exhausted group gate the deterministic refill admission seam before denial", async () => {
@@ -2638,7 +2640,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("uses starter-specific copy when non-expiring starter credit is exhausted", async () => {
+  it("routes exhausted non-expiring starter credit to Settings recovery", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
@@ -2662,7 +2664,9 @@ describe("resolveHostedAiUsageGate", () => {
       reason: "ai_usage_limit_exceeded",
       userNotice: {
         code: "starter_usage_limit_reached",
-        message: expect.stringContaining("https://withmurph.ai/home"),
+        message: expect.stringContaining(
+          "https://withmurph.ai/settings?usageRecovery=true#subscription",
+        ),
       },
     });
   });

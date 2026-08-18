@@ -41,6 +41,12 @@ const PERSONAL_USAGE_RECOVERY_TEMPLATE_KEYS = [
   "linq.ai_usage.max_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
 ] as const;
+const GENERIC_USAGE_RECOVERY_TEMPLATE_KEYS = [
+  "linq.ai_usage.starter_limit_reached",
+  "linq.ai_usage.edge_limit_reached",
+  "linq.ai_usage.max_limit_reached",
+  "linq.ai_usage.pulse_upgrade_edge",
+] as const;
 const USAGE_RECOVERY_SETTINGS_URL =
   "https://withmurph.ai/settings?usageRecovery=true#subscription";
 
@@ -172,17 +178,40 @@ describe("user-facing message variants", () => {
 
 
 
-  it("keeps personal exhaustion notices short, generic, and first-party", () => {
+  it("keeps personal exhaustion notices short and first-party", () => {
     for (const key of PERSONAL_USAGE_RECOVERY_TEMPLATE_KEYS) {
       for (const text of collectRenderedTexts(key)) {
         expect(text).toMatch(/Murph.*paused/iu);
         expect(text).toContain(USAGE_RECOVERY_SETTINGS_URL);
         expect(text.length).toBeLessThan(260);
         expect(text).not.toMatch(
-          /Family owner|family member|member[_ -]?id|email|token|trial|starter|Core|Pulse|Edge|Max|price|\$|add usage|checkout|billing authority/iu,
+          /Family owner|member[_ -]?id|email|token|trial|starter|Core|Pulse|Edge|Max|price|\$|add usage|checkout|billing authority/iu,
         );
         expect(text.match(/https?:\/\//gu)).toHaveLength(1);
       }
+    }
+  });
+
+  it("keeps direct exhaustion notices generic", () => {
+    for (const key of GENERIC_USAGE_RECOVERY_TEMPLATE_KEYS) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).not.toMatch(/Family|wearable|group updates/iu);
+      }
+    }
+  });
+
+  it("preserves the Core continuity boundary in every exhaustion notice", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.group_upgrade_pulse")) {
+      expect(text).toMatch(/new personal AI work pauses/iu);
+      expect(text).toMatch(/wearable syncing/iu);
+      expect(text).toMatch(/authorized group updates continue/iu);
+    }
+  });
+
+  it("preserves individual Family allowance scope in every exhaustion notice", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
+      expect(text).toMatch(/your individual Family allowance is used/iu);
+      expect(text).toMatch(/other members' allowances are separate/iu);
     }
   });
 

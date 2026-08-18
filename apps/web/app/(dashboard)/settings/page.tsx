@@ -111,6 +111,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 type SettingsSearchParams = {
   addEmail?: string | string[] | undefined;
   addUsage?: string | string[] | undefined;
+  familyRecovery?: string | string[] | undefined;
   familyInviteReturn?: string | string[] | undefined;
   startGroup?: string | string[] | undefined;
   planUpdate?: string | string[] | undefined;
@@ -140,8 +141,16 @@ export default async function SettingsPage({
   const addUsageTarget = readOnlySearchParamValue(resolvedSearchParams.addUsage);
   const openPersonalUsageTopUp = addUsageTarget === "true";
   const requestedFamilyOwnerUsageTopUp = addUsageTarget === "family";
-  const usageRecoveryInitialOpen =
-    readOnlySearchParamValue(resolvedSearchParams.usageRecovery) === "true";
+  const familyRecoveryRequested = hasExactSettingsSearchParam(
+    resolvedSearchParams,
+    "familyRecovery",
+    "true",
+  );
+  const usageRecoveryInitialOpen = hasExactSettingsSearchParam(
+    resolvedSearchParams,
+    "usageRecovery",
+    "true",
+  );
   const openVoiceLink =
     readFirstSearchParamValue(resolvedSearchParams.voice) === "true";
   const usageTopUpPurchaseReturn = readUsageTopUpPurchaseReturn(
@@ -162,11 +171,17 @@ export default async function SettingsPage({
       && !groupPaymentMethodSaved
       && planChangeReturn === null
       && usageTopUpPurchaseReturn === null
+      && !familyRecoveryRequested
       && !usageRecoveryInitialOpen
     ) {
       redirect("/");
     }
-    return <SettingsAuthRequired usageRecovery={usageRecoveryInitialOpen} />;
+    return (
+      <SettingsAuthRequired
+        familyRecovery={familyRecoveryRequested}
+        usageRecovery={usageRecoveryInitialOpen}
+      />
+    );
   }
 
   if (planChangeReturn === HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE) {
@@ -794,21 +809,10 @@ async function readSettingsPageData(input: {
     && await isHostedBillingPlanSelectionAvailable({
       billingPlanCode: "launch_max_monthly",
     });
-  const currentPlanCode = parseHostedBillingPlanCode(
-    settingsSnapshot.billingRef?.currentBillingPlanCode,
-  );
-  const subscriptionActionTargetPlanCode =
-    currentPlanCode === "launch_edge_monthly" && maxPlanAvailable
-      ? "launch_max_monthly" as const
-      : undefined;
   const usageStatus = await readHostedPersonalAiUsageStatus({
-    includeSubscriptionActionQuote: true,
     memberId,
     prisma,
     publicBaseUrl: null,
-    ...(subscriptionActionTargetPlanCode
-      ? { subscriptionActionTargetPlanCode }
-      : {}),
   });
   const usageActivity = await readHostedAiUsageActivity({
     memberId,
@@ -896,6 +900,19 @@ function readFirstSearchParamValue(
   value: string | string[] | undefined,
 ): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function hasExactSettingsSearchParam(
+  searchParams: SettingsSearchParams,
+  key: keyof SettingsSearchParams,
+  value: string,
+): boolean {
+  const presentEntries = Object.entries(searchParams).filter(
+    ([, entryValue]) => entryValue !== undefined,
+  );
+  return presentEntries.length === 1
+    && presentEntries[0]?.[0] === key
+    && presentEntries[0]?.[1] === value;
 }
 
 function hasHigherHostedFamilyOwnerTier(

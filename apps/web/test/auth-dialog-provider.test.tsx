@@ -687,21 +687,52 @@ test("AuthProvider preserves a Group payment return through sign-in", async () =
 
 test.each([
   {
+    hash: "#subscription",
     label: "exact recovery handoff",
     resumes: true,
     search: "?usageRecovery=true",
   },
   {
+    hash: "#subscription",
     label: "recovery handoff with extra state",
     resumes: false,
     search: "?usageRecovery=true&context=extra",
   },
   {
+    hash: "#subscription",
     label: "repeated recovery handoff",
     resumes: false,
     search: "?usageRecovery=true&usageRecovery=true",
   },
-])("AuthProvider scopes the Settings usage recovery return: $label", async ({ resumes, search }) => {
+  {
+    hash: "#family",
+    label: "exact Family recovery handoff",
+    resumes: true,
+    search: "?familyRecovery=true",
+  },
+  {
+    hash: "#subscription",
+    label: "Family recovery with the wrong fragment",
+    resumes: false,
+    search: "?familyRecovery=true",
+  },
+  {
+    hash: "#family",
+    label: "augmented Family recovery handoff",
+    resumes: false,
+    search: "?familyRecovery=true&context=extra",
+  },
+  {
+    hash: "#family",
+    label: "repeated Family recovery handoff",
+    resumes: false,
+    search: "?familyRecovery=true&familyRecovery=true",
+  },
+])("AuthProvider scopes the Settings recovery return: $label", async ({
+  hash,
+  resumes,
+  search,
+}) => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -717,7 +748,7 @@ test.each([
     );
   }
 
-  const href = `https://join.example.test/settings${search}#subscription`;
+  const href = `https://join.example.test/settings${search}${hash}`;
   const rendered = await renderClientComponent(
     createElement(
       AuthProvider,
@@ -729,7 +760,7 @@ test.each([
     configurable: true,
     value: {
       assign,
-      hash: "#subscription",
+      hash,
       href,
       origin: "https://join.example.test",
       pathname: "/settings",
