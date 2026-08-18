@@ -11,6 +11,7 @@ import {
 import type {
   DeviceConnectionHandler,
   DeviceSyncRegistry,
+  ListDeviceConnectionSourcesInput,
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 
@@ -18,6 +19,7 @@ import { completeHostedGoogleHealthFitbitMigration } from "@/src/lib/device-sync
 import type {
   CreateHostedSignalInput,
   HostedDeviceConnectionSource,
+  HostedPrismaTransactionClient,
   HostedSignalRecord,
 } from "@/src/lib/device-sync/prisma-store";
 
@@ -133,10 +135,30 @@ class FakeCutoverStore {
       : null;
   }
 
-  async listConnectionSources(connectionId: string) {
+  async listConnectionSources(
+    input: ListDeviceConnectionSourcesInput,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]>;
+  async listConnectionSources(
+    input: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]>;
+  async listConnectionSources(
+    input: string | ListDeviceConnectionSourcesInput,
+    _tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]> {
     expect(this.lockDepth).toBeGreaterThan(0);
+    const connectionId = typeof input === "string" ? input : input.connectionId;
     expect(connectionId).toBe(CONNECTION_ID);
-    return structuredClone(this.sources);
+    const sources = structuredClone(this.sources);
+    if (typeof input === "string") {
+      return sources;
+    }
+    return sources.filter((candidate) =>
+      (!input.sourceProviderSlug
+        || candidate.sourceProviderSlug === input.sourceProviderSlug)
+      && (!input.status || candidate.status === input.status)
+    );
   }
 
   async hasPendingDirtyConnection(connectionId: string) {
