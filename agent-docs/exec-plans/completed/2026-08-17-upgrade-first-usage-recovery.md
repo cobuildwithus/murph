@@ -1,6 +1,6 @@
 # Upgrade-first usage recovery UX
 
-Status: active
+Status: completed
 Created: 2026-08-17
 Updated: 2026-08-18
 
@@ -87,9 +87,9 @@ Updated: 2026-08-18
    scenario tests plus a member-facing changelog entry.
 5. [x] Run focused tests and web typecheck, then render and inspect narrow-phone and
    desktop recovery states.
-6. [in progress] Run Product UX, preliminary specialist, and final cross-cutting ReviewGPT
+6. [x] Run Product UX, preliminary specialist, and final cross-cutting ReviewGPT
    gates; address actionable findings.
-7. [in progress] Commit with the authenticated approved Git identity, push, open a PR, monitor
+7. [x] Commit with the authenticated approved Git identity, push, open a PR, monitor
    CI/review automation, and archive the plan through `scripts/finish-task`.
 
 ## Decisions
@@ -187,23 +187,32 @@ Updated: 2026-08-18
   `.artifacts/review-gpt/usage-recovery-family-owner-desktop.png`,
   `.artifacts/review-gpt/usage-recovery-family-owner-banner-phone.png`,
   `.artifacts/review-gpt/usage-recovery-family-owner-banner-desktop.png`, and
-  `.artifacts/review-gpt/usage-recovery-family-signed-out-phone.png`.
+  `.artifacts/review-gpt/usage-recovery-family-signed-out-phone.png`. Successful
+  purchase-return ownership is shown in
+  `.artifacts/review-gpt/usage-recovery-purchase-return-phone.png` and
+  `.artifacts/review-gpt/usage-recovery-purchase-return-desktop.png`.
 - Result: `Ready`. The screenshot surface proves presentation; focused route,
   authority, clipboard, and action tests provide the journey proof unavailable
   from synthetic props alone.
 
-## Local proof
+## Final proof
 
-- Focused Vitest: all 344 unique tests across 8 files passed. One overloaded
-  batch produced a timeout in a billing projection test; that test passed in
-  15.64 seconds when isolated, and the full changed Settings page suite passed
-  64/64 after the query-shape correction.
-- Web typecheck: passed.
-- Changed-file ESLint: passed.
-- Frontend-evidence checker tests: 6 passed.
-- `git diff --check`: passed.
-- Privacy scan over changed task content: no configured direct identifier
-  appeared.
+- Merged-head focused Vitest: 192/192 passed across Settings page (66), Family
+  manager (30), billing settings (69), screenshot design study (10), and the WAF
+  build-command contract (17).
+- Full web typecheck passed after refreshing the current base branch's generated
+  Health Commons and Prisma artifacts.
+- Changed-file ESLint and `git diff --check` passed.
+- ReviewGPT final round 4 returned a valid zero-finding pass on the exact final
+  production head. The later WAF changes were test-only base alignment, and the
+  subsequent base merge was conflict-free and behavior-preserving.
+- All PR checks passed on the final feature head except the Native iOS hosted E2E
+  gate, which the user explicitly waived for this web-only change. Hosted Stripe
+  billing, release app verification, release build/typecheck, package coverage,
+  repository hygiene, viewport overflow, PR evidence, and Vercel all passed.
+- The final merge-tree simulation against current `main` succeeded without
+  conflicts.
+- Privacy scan over changed task content found no configured direct identifier.
 
 ## Review findings and resolutions
 
@@ -238,3 +247,11 @@ Updated: 2026-08-18
   Removed that presentation exception only from exhausted usage and added a
   composed checkout-open through fulfilled regression test; quiet confirmation
   remains limited to the already-refreshed meter branch.
+- ReviewGPT final round 4 accepted the remediation with no findings and confirmed
+  the rendered phone/desktop evidence covered the relevant recovery hierarchy.
+- Two app-verification runs used a stale synthetic merge base whose build command
+  no longer matched the WAF test assertion. The temporary compatibility assertion
+  was verified locally, then removed when current `main` landed the equivalent
+  direct-command test fix. The resulting test file matches `main` exactly and the
+  production build command was never changed by this PR.
+Completed: 2026-08-18
