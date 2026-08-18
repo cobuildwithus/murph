@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-16
+Last verified: 2026-08-17
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -587,8 +587,8 @@ For hosted assistant-provider choice, the truthful diff lane must cover
 iteration should include the provider contract/config suites, hosted Web
 preference/route/component/workspace tests, and Cloudflare egress plus deploy
 preflight tests. Final proof remains `pnpm test:diff ...` across the touched
-owners plus `pnpm verify:acceptance`, desktop/mobile design-catalog evidence,
-and the routed review gates. Routine verification uses synthetic credentials
+owners plus `pnpm verify:acceptance`, risk-based design-catalog evidence, and
+the routed review gates. Routine verification uses synthetic credentials
 and must not call a paid provider.
 
 Saved-card group-funding changes stay on the full `apps/web` acceptance lane.
@@ -609,34 +609,31 @@ focused hosted-execution contract, hosted-web provider/API/UI, Cloudflare port,
 assistant-runtime bridge, and assistant-engine tool/prompt tests. Exact-head CI
 owns the broad diff and scenario-integrity surfaces; direct shared-default
 pushes use `pnpm verify:acceptance`.
-Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
-putting a real query or ZIP in a durable artifact. Complete the preliminary
-ReviewGPT product-experience/prompt/frontend/coverage pass, the review-only
-Fable or Opus UI pass, and the separate final ReviewGPT gate before handoff.
+Capture authenticated, fixture-safe `/labs` proof at each viewport where the
+changed result can differ, without putting a real query or ZIP in a durable
+artifact. Complete the preliminary
+ReviewGPT Product UX/prompt/frontend/coverage pass and the separate final
+ReviewGPT gate before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
-The pull-request body proof workflow requires the four concrete `Architecture
-and reuse` bullets on every PR. It validates rendered GitHub Markdown so hidden
-comments, code blocks, and raw HTML cannot satisfy the requirement.
-
 For every user-facing `apps/web` UI diff, verification also includes
-`pnpm test:frontend-design-proof`, a production-component update on
-`/design?tab=components` or a composed-section update on
-`/design?tab=sections`, and desktop and mobile screenshots from that catalog
-surface in the pull request. The pull-request workflow repeats the policy check
-against the final base-to-head diff and PR body. Prefer an attached in-app
-Browser for this proof when available, then fall back to the repository-installed
-Playwright runtime against the local catalog when no tab is attached or the
-connection is unusable. Browser attachment alone must not block completion when
-Playwright can capture the required states. Treat that fallback as required:
-attempt Playwright before asking for a browser attachment or reporting a
-screenshot blocker, and record the exact command and failure only if Playwright
-cannot capture the proof. Capture lossless PNGs at 2x device scale or higher,
-crop to the changed component or section, and visually inspect both the local
-file and the hosted `/designproof` Cloudflare Images variant at native
-resolution. Do not use a long full-page capture that makes review text smaller
-than the rendered UI.
+`pnpm test:frontend-evidence` and evidence matched to the changed visual,
+state, interaction, and responsive risk. The pull-request workflow repeats the
+evidence check against the final base-to-head diff and PR body. Inspect phone and desktop
+when responsive behavior can change; do not add a viewport only to meet a
+quota. Prefer an attached in-app Browser for visual proof, then use the
+repository-installed Playwright runtime when no tab is attached or the
+connection is unusable. Report a blocker only when the material claim cannot
+be judged after the applicable fallback. When screenshots add proof, crop them
+to the changed component or section and inspect them at native resolution. Do
+not use a long full-page capture that makes review text smaller than the
+rendered UI.
+
+Use `/screenshots` only for difficult or reusable presentation states. Its
+pages render real production components with synthetic props, no live data, no
+live requests, and inert controls. They prove presentation only. Use the real
+product path for complete journey proof.
 
 ## Scoped Verification Mode
 
@@ -830,15 +827,20 @@ and then execs the build as the invoking user with the caller's environment,
 working directory, and stdio unchanged. In the current observe-only state it
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
 Vercel package build starts the parent Next process with a direct 1 GiB
-old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS`. Node applies
-the direct flag to the parent; Next 16.3.0 rebuilds non-isolated child options
-from the parent arguments followed by `NODE_OPTIONS`, so the sequential Webpack
-compiler workers receive 3 GiB; the later TypeScript CLI child inherits the same
-limit. Next removes the flag from isolated static workers. The same script owns
-the Vercel package build and the CI memory-observation invocation. This bounds
-the compile parent without weakening validation, but only repeated forced-cold
-Standard previews prove the
-real Vercel boundary. A 2 GiB parent-bound candidate passed one forced-cold
+old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS` for the
+Webpack build worker. The same runner first performs route type generation and
+an explicit app-local generated-contract TypeScript check at 3.5 GiB, then marks
+only that prepared check complete before starting the Webpack build. Node
+applies the direct flag to the parent; Next 16.3.0 rebuilds non-isolated child
+options from the parent arguments followed by `NODE_OPTIONS`, so the sequential
+Webpack compiler workers receive 3 GiB while the separate TypeScript CLI child
+receives 3.5 GiB. Next removes the flag from isolated static workers. The same
+script owns the Vercel package build and the CI memory-observation invocation.
+This bounds the compile parent without weakening validation, but only repeated
+forced-cold Standard previews prove the real Vercel boundary. The generated-
+contract worker limit moved from 3 GiB to 3.5 GiB only after an exact cold check
+succeeded at 3.5 GiB and deterministically exhausted the 3 GiB heap. A 2 GiB
+parent-bound candidate passed one forced-cold
 preview but the next identical build was still killed by the 8 GB container
 OOM boundary. Single
 global 1 GiB and 1.5 GiB limits starved Next's generated-contract TypeScript

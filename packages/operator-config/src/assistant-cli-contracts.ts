@@ -1033,6 +1033,12 @@ export const assistantOutboxIntentSchema = z
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
     deliveryConfirmationPending: z.boolean().default(false),
+    // Undefined means the delivery predates outbound message-volume cutover
+    // or is not an eligible conversational Telegram/email message. Null is a
+    // durable pending receipt; a timestamp confirms the anonymous Web-side
+    // receipt was recorded. The delivery owner keeps this marker so a crash
+    // cannot lose or duplicate accounting without changing send behavior.
+    messageVolumeReceiptRecordedAt: isoTimestampSchema.nullable().optional(),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
     groupEmailAuthorizationProof: z

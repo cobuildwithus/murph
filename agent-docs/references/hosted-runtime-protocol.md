@@ -103,7 +103,8 @@ Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
 `assistant.ask.completed` mailbox items. After each append, Web first signals
 Temporal and then starts the existing payloadless direct `ensure-processing`
-latency hint; the hint has no retry or durable authority. The group runtime may
+latency hint; the hint may make one deadline-bounded retry after an explicit
+`retry_later`, but has no durable authority. The group runtime may
 answer one request in a separate read-only one-shot Codex child while its
 resident foreground assistant continues to own writes and sends. The mailbox
 remains the only durable queue and operation state; Cloudflare gains no second
@@ -1459,8 +1460,15 @@ orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. Linq webhook ingress and Assistant Ask request/completion append
 handlers may additionally fire one best-effort direct
-`ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
-message payload). Linq first proves the committed known-checkpoint owner and
+`ensure-processing` request (Vercel OIDC, no message payload). The post-response
+helper waits for the real accepted-or-retry outcome, stays inside a 29-second
+outer deadline, and may make exactly one retry only when the returned
+`retryAt` plus a minimum command/response window still fits that deadline.
+The relational latency phase records the final parsed direct result kind and,
+only for `runtime_processing_accepted`, its bounded action and runtime attempt
+id. Retry reasons and raw errors stay out of the trace; Cloudflare structured
+logs carry retry reasons under the direct orchestration attempt id.
+Linq first proves the committed known-checkpoint owner and
 canonical live active access; Assistant Ask first completes its normal
 server-bound append checks. Web always awaits the applicable Temporal
 `signalWithStart`; only after Temporal accepts that durable signal does Web
@@ -2304,6 +2312,21 @@ This matches the runner readiness ceiling without weakening invalidated-shell
 or destroy-settlement checks. Accepted background invocations begin their
 pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
+Container readiness receives at most 15 wall-clock seconds, including time
+queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
+allows one absolute five-second fail-closed cleanup deadline shared by the
+pre-destroy state read and destroy settlement, and its caller-side guard keeps
+a separate one-second margin. If the container RPC settles
+with a timeout or transport failure, the fresh fence is compare-cleared as
+before. If cleanup remains unsettled at its deadline or only the outer guard
+elapses, Cloudflare preserves the fresh fence: the lifecycle RPC has not proved
+that cleanup is safe, and the existing startup-grace convergence path remains
+the sole recovery owner.
+When a shorter command budget applies, readiness receives the smaller of 15
+seconds and the remaining command time minus the one-second caller guard. The
+cleanup allowance is not subtracted up front: a healthy 7–8 second cold start
+can still succeed under the default ten-second command, while cleanup that
+cannot fit causes the outer guard to preserve the fence.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
 same-version runtime fence whose child is missing remains protected by the

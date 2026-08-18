@@ -29,8 +29,20 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
   provider: operational("Bounded provider discriminator."),
   providerCallId: operational("Opaque provider correlation identity."),
   requestKey: operational("Opaque idempotency identity."),
+  resultDeliveryGeneration: operational(
+    "Monotonic bounded delivery-attempt generation; contains no message content.",
+  ),
+  resultDeliveryStatus: operational(
+    "Fixed-vocabulary asynchronous result delivery disposition.",
+  ),
+  resultDeliveryTerminalAt: operational(
+    "Result delivery lifecycle timestamp; contains no message content.",
+  ),
   resultEncrypted: encrypted("Member-private bounded final call analysis."),
   resultJson: legacyDebt(),
+  resultNotificationChannel: operational(
+    "Bounded initiating direct-channel discriminator used to route asynchronous results.",
+  ),
   status: operational("Bounded call lifecycle enum."),
   updatedAt: operational("Row concurrency timestamp; contains no call content."),
 } satisfies Record<string, PrivateStorageClassification>;
@@ -76,6 +88,43 @@ describe("HostedPhoneCall private-storage classification", () => {
     expect(migration).toContain("ALTER COLUMN \"brief_json\" DROP NOT NULL");
     expect(migration).not.toMatch(/DROP COLUMN/iu);
     expect(migration).not.toMatch(/SET NOT NULL/iu);
+  });
+
+  it("adds only bounded result-routing ownership metadata", () => {
+    const migration = readFileSync(
+      new URL(
+        "../prisma/migrations/20260815120000_hosted_phone_call_result_notification_channel/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain(
+      'CREATE TYPE "HostedPhoneCallResultNotificationChannel"',
+    );
+    expect(migration).toContain("AS ENUM ('telegram')");
+    expect(migration).toContain(
+      'CREATE TYPE "HostedPhoneCallResultDeliveryStatus"',
+    );
+    expect(migration).toContain(
+      'ADD COLUMN "result_notification_channel"',
+    );
+    expect(migration).toContain(
+      'ADD COLUMN "result_delivery_status"',
+    );
+    expect(migration).toContain(
+      'ADD COLUMN "result_delivery_generation" INTEGER DEFAULT 0',
+    );
+    expect(migration).not.toMatch(
+      /ADD COLUMN "result_delivery_generation" INTEGER NOT NULL/u,
+    );
+    expect(migration).toContain(
+      'ADD COLUMN "result_delivery_terminal_at" TIMESTAMP(3)',
+    );
+    expect(migration).toContain(
+      'CREATE INDEX "hosted_phone_call_result_delivery_idx"',
+    );
+    expect(migration).not.toMatch(/DROP (?:COLUMN|TABLE|TYPE)/iu);
   });
 });
 

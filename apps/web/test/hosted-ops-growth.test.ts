@@ -68,6 +68,9 @@ const mocks = vi.hoisted(() => ({
     findMany: vi.fn(),
     groupBy: vi.fn(),
   },
+  hostedOutboundMessageVolumeReceipt: {
+    count: vi.fn(),
+  },
   hostedMemberEmailAuthorization: {
     findMany: vi.fn(),
   },
@@ -143,6 +146,8 @@ const prisma = {
   hostedInvite: mocks.hostedInvite,
   hostedLinqDelivery: mocks.hostedLinqDelivery,
   hostedMailboxItem: mocks.hostedMailboxItem,
+  hostedOutboundMessageVolumeReceipt:
+    mocks.hostedOutboundMessageVolumeReceipt,
   hostedMemberEmailAuthorization: mocks.hostedMemberEmailAuthorization,
   hostedMemberIdentity: mocks.hostedMemberIdentity,
   hostedMemberRouting: mocks.hostedMemberRouting,
@@ -176,6 +181,7 @@ describe("hosted ops growth metrics", () => {
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
+    mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.findMany.mockResolvedValue([]);
     mocks.hostedMailboxItem.groupBy.mockResolvedValue([]);
     mocks.hostedMemberEmailAuthorization.findMany.mockResolvedValue([]);
@@ -762,10 +768,11 @@ describe("hosted ops growth metrics", () => {
     });
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(120);
     mocks.hostedLinqDelivery.count.mockResolvedValueOnce(80);
+    mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValueOnce(25);
 
     await expect(
       readHostedMessageVolumeTotal(new Date("2026-07-23T18:00:00.000Z")),
-    ).resolves.toBe(HOSTED_MESSAGE_VOLUME_BASE + 7_300 + 200);
+    ).resolves.toBe(HOSTED_MESSAGE_VOLUME_BASE + 7_300 + 225);
     expect(mocks.hostedMailboxItem.count).toHaveBeenCalledWith({
       where: {
         kind: "conversation.message",
@@ -781,6 +788,13 @@ describe("hosted ops growth metrics", () => {
         },
         status: {
           in: ["accepted", "delivered", "sent_no_receipt_expected"],
+        },
+      },
+    });
+    expect(mocks.hostedOutboundMessageVolumeReceipt.count).toHaveBeenCalledWith({
+      where: {
+        recordedAt: {
+          gte: lastSnapshotDate,
         },
       },
     });
@@ -803,6 +817,13 @@ describe("hosted ops growth metrics", () => {
       where: {
         kind: "conversation.message",
         occurredAt: {
+          gte: new Date("2026-07-23T00:00:00.000Z"),
+        },
+      },
+    });
+    expect(mocks.hostedOutboundMessageVolumeReceipt.count).toHaveBeenCalledWith({
+      where: {
+        recordedAt: {
           gte: new Date("2026-07-23T00:00:00.000Z"),
         },
       },
@@ -2501,6 +2522,7 @@ describe("hosted ops growth metrics", () => {
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
     mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
+    mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValueOnce(9);
     mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
       snapshotRow("2026-07-06", 2_900),
     );
@@ -2527,14 +2549,24 @@ describe("hosted ops growth metrics", () => {
         },
       },
     });
+    expect(
+      mocks.hostedOutboundMessageVolumeReceipt.count.mock.calls[0]?.[0],
+    ).toEqual({
+      where: {
+        recordedAt: {
+          gte: new Date("2026-07-05T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+      },
+    });
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
     expect(upsertArg?.create).toMatchObject({
       inboundMessagesPriorDay: 42,
-      outboundMessagesPriorDay: 57,
+      outboundMessagesPriorDay: 66,
     });
     expect(upsertArg?.update).toMatchObject({
       inboundMessagesPriorDay: 42,
-      outboundMessagesPriorDay: 57,
+      outboundMessagesPriorDay: 66,
     });
   });
 
@@ -2704,6 +2736,13 @@ describe("hosted ops growth metrics", () => {
       lt: new Date("2026-07-06T00:00:00.000Z"),
     });
     expect(mocks.hostedLinqDelivery.count.mock.calls[0]?.[0]?.where.attemptedAt).toEqual({
+      gte: new Date("2026-07-05T00:00:00.000Z"),
+      lt: new Date("2026-07-06T00:00:00.000Z"),
+    });
+    expect(
+      mocks.hostedOutboundMessageVolumeReceipt.count.mock.calls[0]?.[0]?.where
+        .recordedAt,
+    ).toEqual({
       gte: new Date("2026-07-05T00:00:00.000Z"),
       lt: new Date("2026-07-06T00:00:00.000Z"),
     });

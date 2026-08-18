@@ -35,6 +35,8 @@ const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY = "MURPH_TELEGRAM_USERNAME_OVERRI
 const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
 const WORKFLOW_LOCAL_DATA_DIR_ENV_KEY = "WORKFLOW_LOCAL_DATA_DIR";
 const WORKFLOW_TARGET_WORLD_ENV_KEY = "WORKFLOW_TARGET_WORLD";
+const HOSTED_WEB_PREPARED_TYPECHECK_ENV_KEY = "MURPH_HOSTED_WEB_PREPARED_TYPECHECK";
+const HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE = "complete";
 const WORKFLOW_NEXT_DEFAULT_LOCAL_DATA_DIR = ".next/workflow-data";
 const WORKFLOW_LOCAL_TARGET_WORLD = "local";
 const PRIVY_REQUIRED_CHILD_FRAME_SOURCES = [
@@ -363,6 +365,9 @@ export function buildHostedWebNextConfig(
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
     typescript: {
+      ignoreBuildErrors:
+        environment[HOSTED_WEB_PREPARED_TYPECHECK_ENV_KEY]
+          === HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE,
       tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
     },
     headers: async () => [

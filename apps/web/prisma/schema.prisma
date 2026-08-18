@@ -534,6 +534,18 @@ enum HostedComputerHandoffStatus {
   expired
 }
 
+enum HostedPhoneCallResultNotificationChannel {
+  telegram
+}
+
+enum HostedPhoneCallResultDeliveryStatus {
+  pending
+  queued
+  sending
+  delivered
+  ambiguous
+}
+
 enum HostedPhoneCallStatus {
   starting
   calling
@@ -899,6 +911,10 @@ model HostedPhoneCall {
   briefEncrypted String?               @map("brief_encrypted")
   resultJson     Json?                 @map("result_json")
   resultEncrypted String?              @map("result_encrypted")
+  resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")
+  resultDeliveryStatus HostedPhoneCallResultDeliveryStatus? @map("result_delivery_status")
+  resultDeliveryGeneration Int?        @default(0) @map("result_delivery_generation")
+  resultDeliveryTerminalAt DateTime?   @map("result_delivery_terminal_at")
   endedAt        DateTime?             @map("ended_at")
   analyzedAt     DateTime?             @map("analyzed_at")
   createdAt      DateTime              @default(now()) @map("created_at")
@@ -907,6 +923,7 @@ model HostedPhoneCall {
 
   @@unique([memberId, requestKey])
   @@index([memberId, createdAt])
+  @@index([memberId, resultNotificationChannel, resultDeliveryStatus, createdAt], map: "hosted_phone_call_result_delivery_idx")
   @@index([status, updatedAt])
   @@map("hosted_phone_call")
 }
@@ -1404,6 +1421,19 @@ model HostedGrowthDailySnapshot {
   familyMrrUsdCents     Int? @map("family_mrr_usd_cents")
 
   @@map("hosted_growth_daily_snapshot")
+}
+
+/// Anonymous exact-once receipts for successful post-cutover conversational
+/// Telegram and email deliveries. The lookup key is a one-way digest over the
+/// authenticated member, channel, and durable outbox dedupe key; no member,
+/// target, thread, or provider identifier is retained.
+model HostedOutboundMessageVolumeReceipt {
+  receiptLookupKey String   @id @map("receipt_lookup_key") @db.VarChar(64)
+  channel          String   @db.VarChar(16)
+  recordedAt       DateTime @default(now()) @map("recorded_at")
+
+  @@index([recordedAt], map: "homvr_recorded_at_idx")
+  @@map("hosted_outbound_message_volume_receipt")
 }
 
 /// Anonymous company-wide growth totals that must outlive member-scoped rows.

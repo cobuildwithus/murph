@@ -1397,6 +1397,91 @@ describe('hosted domain dynamic tools', () => {
     })
   })
 
+  it('treats only a missing automation inspection as a successful absent read', async () => {
+    const lookup = 'weekly-summary'
+    const missingError = Object.assign(
+      new Error('private automation lookup detail'),
+      { code: 'automation_not_found' as const },
+    )
+    const missingTool = {
+      request: vi.fn(async () => {
+        throw missingError
+      }),
+    }
+    const inspectRequest = readToolRequest('automation', {
+      action: 'inspect',
+      lookup,
+    })
+    if (!inspectRequest) {
+      throw new Error('Expected a missing automation inspection request.')
+    }
+
+    const missingInspection = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool: missingTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: inspectRequest,
+    })
+
+    expect(missingInspection.rpcResult.success).toBe(true)
+    expect(readResultPayload(missingInspection)).toEqual({
+      action: 'inspect',
+      found: false,
+    })
+    expect(missingInspection.rpcResult.contentItems[0]?.text).not.toContain(
+      'private automation lookup detail',
+    )
+
+    const patchRequest = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+      lookup,
+      status: 'paused',
+    })
+    if (!patchRequest) {
+      throw new Error('Expected a missing automation patch request.')
+    }
+    const missingPatch = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool: missingTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: patchRequest,
+    })
+    expect(missingPatch.rpcResult).toEqual({
+      contentItems: [{
+        text: 'automation operation is unavailable',
+        type: 'inputText',
+      }],
+      success: false,
+    })
+
+    const failedInspection = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: {
+          request: vi.fn(async () => {
+            throw new Error('private storage failure')
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: inspectRequest,
+    })
+    expect(failedInspection.rpcResult).toEqual({
+      contentItems: [{
+        text: 'automation operation is unavailable',
+        type: 'inputText',
+      }],
+      success: false,
+    })
+  })
+
   it('returns safe recovery instructions for local-time and write-conflict failures', async () => {
     const gapRequest = readToolRequest('automation', {
       action: 'save',

@@ -221,14 +221,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   directly by the current foreground assistant phase may run as foreground
   work inside that window without publishing a snapshot. The only other
   exception is a server-identified, fixed-destination exact completion: a
-  transport-idempotent phone-call-result or usage-referral-reward notification,
+  generation-scoped phone-call-result or transport-idempotent
+  usage-referral-reward notification,
   or a private Assistant Ask completion whose `aask_done_*` identity binds its
   exact text, personal member, current direct route, and expiry. After fresh
   conversation work has priority, the runtime may select only those durable
   mailbox families, compose them queue-only, and persist their causal outbox
   intents before the idle floor. Transport-idempotent delivery may drain in the
-  hot pass; non-idempotent provider work remains behind the resulting durable
-  checkpoint. Generic notifications and unrelated pending outbox work remain
+  hot pass. The exact generation-scoped phone-call result may also drain there
+  only after its current intent passes the existing `outbox_sending` durability
+  barrier; generic non-idempotent provider work remains excluded until routine
+  checkpointing. Generic notifications and unrelated pending outbox work remain
   excluded. Inherited, committed, durability-gated, and shutdown-time wakes do
   not otherwise use this exception. If the hot pass dirties state, the full
   quiet window starts again. An actual host termination may use the separate
