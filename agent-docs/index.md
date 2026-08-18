@@ -109,6 +109,13 @@ The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+The external-provider request guard is an ownership check: registered providers
+use their official SDK, and unavoidable raw transports are confined to exact
+path-and-function owners with a one-call limit. Its policy and focused proof are
+specified by `agent-docs/SECURITY.md`,
+`agent-docs/references/testing-ci-map.md`, and
+`agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
+
 Hosted Junction setup recovery treats a signed source-attributed webhook as a
 trigger, not as connection proof. Web reads the live provider source list, then
 atomically confirms the matching pending setup, callback-equivalent source
@@ -312,6 +319,9 @@ Spread-free official provider SDK request construction, including the generated
 Composio client boundary, and the safe opt-in Stripe test-mode resume contract
 probe are jointly specified by
 `agent-docs/SECURITY.md` and `agent-docs/references/testing-ci-map.md`.
+The external-provider guard also recognizes defaulted, assigned, and exact
+one-hop low-level transports while the sole xAI exception proves the direct
+runtime URL and closed request syntax.
 
 Private generated-image failure diagnostics, their failure-only scope,
 untrusted-provider-text boundary, and reader-first hosted compatibility
@@ -354,7 +364,10 @@ provider-owned card masking, a concise date-and-meal-count nutrition
 caption with conditional partial-state and assessed-goal-direction subcaptions,
 one trusted provider reply-thread binding, bounded offline V3 compact-table,
 read-only V4 workout-session, editable V6 workout-session with a
-runtime-hydrated typed optimistic projection, and V5 challenge-standings
+runtime-hydrated typed optimistic projection, V4 logical capacity of 16
+exercises and 16 sets per exercise with measured fragment/image length as the
+final gate, a compact four-exercise transcript summary plus remaining count,
+and V5 challenge-standings
 fragments, plus the shared
 strict queryless static-image route are specified by
 `ARCHITECTURE.md`,

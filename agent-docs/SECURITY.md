@@ -561,29 +561,30 @@ Last verified: 2026-08-16
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - The public footer status read is a browser-to-incident.io technical-data boundary. Keep it on the fixed HTTPS status origin and fixed public summary path with no request body or query; retain the global `strict-origin` referrer policy and the exact-origin `connect-src` entry. Do not add account, page-path, query, fragment, prompt, health, message, cookie, or credential data to the request, and do not treat an empty public incident list as direct uptime proof. Keep incident.io and the technical metadata it receives disclosed in the public subprocessor register.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
-- External provider request params, nested params, and per-request options must
-  use installed official SDK types and must not contain object spread syntax or
-  `Object.assign`. Build the SDK-typed object first, then assign each optional
-  field explicitly; this preserves excess-property checking that TypeScript
-  otherwise loses across composed objects. `pnpm provider-requests:guard`
-  enforces the registered Composio, Stripe, Kernel, Linq, Retell, Temporal,
-  OpenAI, Resend, Junction, ElevenLabs, Exa, Lob, and Google Cloud client
-  boundaries across production apps, packages, and JavaScript/TypeScript
-  scripts. It also rejects direct `fetch`/`Request` construction when a known
-  provider origin is statically visible through local literals, templates,
-  URL objects, or variables. A detected official-SDK transport adapter may use
-  `provider-request-boundary-allow-next-line: sdk-transport-adapter` only when
-  the matching SDK is imported; a Linq SDK owner may use the
-  `linq-presigned-bytes` reason only for an `uploadUrl` or `downloadUrl` byte
-  transfer. The guard cannot prove the destination of imported or otherwise
-  runtime-computed URLs, and it does not inspect every possible HTTP library,
-  so it remains a focused boundary check rather than blanket proof that raw
-  provider HTTP is absent. Register each new official SDK and provider origin
-  when it is introduced. The opt-in
+- External provider calls should use the installed official SDK whenever one
+  is registered. `pnpm provider-requests:guard` scans authored production
+  JavaScript and TypeScript under `apps`, `packages`, and `scripts` for direct
+  `fetch`, Node HTTP/HTTPS, Undici, and common fetch aliases at registered
+  provider boundaries. It uses Babel's parser and scope bindings; it does not
+  reimplement TypeScript, validate provider payloads, or duplicate runtime
+  request/response contracts.
+
+  Raw transport is allowed only in an exact path-and-function owner registered
+  by the guard: an official SDK fetch hook or override, an opaque presigned byte
+  transfer, the runtime-validated xAI `x_search` call, or an explicitly named
+  pre-existing provider boundary retained as migration debt. Every owner is limited
+  to one raw call, and SDK owners must retain their registered runtime import.
+  Static same-origin calls and providers with no verified TypeScript SDK remain
+  outside the ban. Comments never suppress findings.
+
+  This is an ownership/convention check, not a security sandbox. Register each
+  provider and host explicitly. It does not claim coverage for an unregistered
+  provider, deliberately obscured transport, or code with no registered host,
+  SDK import, provider-named owner, or provider-named path. Production runtime
+  validators remain authoritative for URL, headers, body, response, timeout,
+  retry, and credential rules. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
-  test-mode secret key and calls the real resume endpoint with a synthetic
-  missing Subscription, so parameter drift fails without creating, charging,
-  or mutating a Stripe resource.
+  test-mode key and a synthetic missing Subscription.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no
