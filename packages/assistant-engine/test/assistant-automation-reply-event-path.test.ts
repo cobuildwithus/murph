@@ -441,8 +441,7 @@ describe('assistant auto-reply event-first path', () => {
       async (query: { providerMessageIds?: readonly string[] | null }) => {
         const providerMessageIds = new Set(query.providerMessageIds ?? [])
         return deliveries.filter((intent) =>
-          intent.delivery?.kind !== 'message-reaction' &&
-          providerMessageIds.has(intent.delivery!.providerMessageId!),
+          providerMessageIds.has(intent.delivery?.providerMessageId ?? ''),
         )
       },
     )
