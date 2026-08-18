@@ -99,8 +99,20 @@ Updated: 2026-08-18
   694 assistant-runtime tests, and the assistant-engine typecheck. The Telegram
   phone-result integration now completes under its unchanged five-second test
   limit.
-- Current remaining work is base reconciliation, diff-aware verification,
-  pushed-head specialist/final ReviewGPT gates, CI, and PR handoff.
+- Reconciled the implementation onto the current `origin/main` with ReviewGPT,
+  preserving the newer bounded reply-history semantics, orchestration
+  diagnostics, and receipt mutations through the projection-aware mutation
+  seam. Focused hosted-execution tests and affected package typechecks pass.
+- Diff-aware verification passed repository guards (apart from four baseline
+  workspace-boundary findings in untouched files), generated-artifact checks,
+  CLI package-shape verification, and all affected typechecks. Its full
+  assistant-engine run passed 3,820 tests and exposed 20 follow-ups: stale
+  full-module mocks for the new turn-receipt reader, reply-event assertions for
+  the old scan/metric contract, and one disappearing-file race. These are being
+  returned to ReviewGPT before the PR head is published.
+- Current remaining work is integrate and verify that correction, publish the
+  candidate, add the changelog entry, run pushed-head specialist/final
+  ReviewGPT gates concurrently with CI, and complete the PR handoff.
 
 ## Verification
 
@@ -116,3 +128,12 @@ Updated: 2026-08-18
   - assistant-engine: 4 files, 323 tests passed;
   - assistant-runtime: 4 files, 694 tests passed;
   - assistant-engine TypeScript check passed.
+- Completed post-reconciliation proof:
+  - hosted-execution runtime-control tests: 32 passed;
+  - assistant-engine lookup-threshold tests: 23 passed;
+  - assistant-engine and hosted-execution TypeScript checks passed;
+  - the 17-test projection suite passed with a diagnostic 180-second CLI-only
+    timeout under host contention; repository timeouts were not changed;
+  - affected package/app typechecks passed across the diff-aware workspace run;
+  - the full assistant-engine suite passed 3,820 tests and failed 20 tests in
+    five files plus one mock-load suite, now queued for ReviewGPT correction.
