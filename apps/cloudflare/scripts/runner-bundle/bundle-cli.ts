@@ -87,11 +87,15 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // only bounded schemas and delivery handling within the already-bundled Hosted
 // Execution and Assistant Engine graphs; the combined graph measured
 // 9,165,765 B on 2026-08-16. The static startup closure still measured 24,950 B.
+// Current main measured 9,193,847 B on macOS on 2026-08-17. The reviewed
+// workout-rollover reply authority and atomic transition grow that existing
+// graph by 25,187 B to 9,219,034 B without adding a package; the static startup
+// closure remains unchanged.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
 // growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_198_500;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_252_000;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

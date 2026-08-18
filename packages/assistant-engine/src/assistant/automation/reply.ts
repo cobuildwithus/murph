@@ -4956,10 +4956,7 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
         })
       : generatedImageReplyContext
         ?? (delivery.message !== null
-          ? buildAssistantAutoReplyExplicitReplyContext({
-              delivery,
-              promptInput,
-            })
+          ? buildAssistantAutoReplyExplicitReplyContext(delivery.message)
           : buildAssistantAutoReplyExplicitUnquotedReplyContext(
               delivery.media.length > 0,
             ))
@@ -5525,18 +5522,13 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
   ].join('\n')
 }
 
-function buildAssistantAutoReplyExplicitReplyContext(input: {
-  delivery: AssistantAutoReplyMatchingOutboxDelivery
-  promptInput: ScheduledDirectReplyAuthorityPromptInput
-}): string | null {
-  const normalized = normalizeNullableString(input.delivery.message)
+function buildAssistantAutoReplyExplicitReplyContext(
+  message: string,
+): string | null {
+  const normalized = normalizeNullableString(message)
   if (!normalized) {
     return null
   }
-  const authorityNotice =
-    resolveWorkoutReplyAuthority(input) === null
-      ? null
-      : buildWorkoutReplyAuthorityContext()
 
   return [
     'The sender explicitly replied to this exact prior assistant message:',
@@ -5544,9 +5536,6 @@ function buildAssistantAutoReplyExplicitReplyContext(input: {
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
     'Use it only to interpret this message.',
-    ...(authorityNotice === null
-      ? []
-      : ['', authorityNotice]),
   ].join('\n')
 }
 

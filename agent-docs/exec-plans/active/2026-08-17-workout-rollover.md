@@ -139,8 +139,18 @@ Updated: 2026-08-18
   case real Vault Usecases rollover suite. Typecheck passes for Contracts, Core,
   Query, Vault Usecases, and Assistant Engine; the incremental workspace build,
   CLI schema generation, and `git diff --check` pass after merging current
-  `main`. Earlier package-shape and runner vault CLI bundle proof passed on the
-  pre-merge candidate; both will be rerun before the next exact-head review.
+  `main`. A post-merge simplification removed a redundant explicit-reply
+  authority check; its Assistant Engine typecheck and 93-case event-path suite
+  pass. The two runner-bundle guard suites pass 51 cases and Cloudflare
+  typecheck passes.
+- Current `main` measured a 9,193,847-byte vault CLI bundle and an
+  8,302,447-byte static runner closure on macOS. The candidate measured
+  9,219,034 bytes and 8,381,097 bytes respectively, added no package or
+  forbidden boot input, and left the 24,950-byte vault CLI startup closure
+  unchanged. The checked-in guards now record those demonstrated baselines
+  with their existing narrow cross-platform tolerances; full assemble-only
+  production bundle and parity proof passes. The built CLI package-shape check
+  also passes on this post-merge candidate.
 - Complete first-provider request capture compares frozen base
   `17fa4a43091db5aa0d354bc26e4dacf908c26d80` with the remediated candidate using
   the pinned real Codex App Server, repository scripted Responses endpoint,
