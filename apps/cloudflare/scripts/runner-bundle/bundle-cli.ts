@@ -76,6 +76,11 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // current main on 2026-08-14. The reviewed Junction temporal-fidelity and
 // source-authority graph measured 9,128,211 B on Linux CI and 9,175,594 B on
 // macOS after merging current main on 2026-08-14; no package entered the graph.
+// The reviewed cross-session context reply work measured 9,119,111 B after
+// normalizing the esbuild working directory on 2026-08-15; it grows the
+// existing Assistant Engine graph without adding a package. Preserving the
+// exact planned experiment occurrence measured 9,153,208 B on Linux CI; it
+// extends that same graph without adding a package.
 // The reviewed Telegram rich-response work measured 9,159,100 B in the Linux
 // deploy lane on 2026-08-16; it grows the existing Assistant Engine graph
 // without adding a package. The reviewed Telegram phone-call result route adds

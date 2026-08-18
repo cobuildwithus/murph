@@ -396,6 +396,17 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
+    if (
+      prepared.routeAction === "run-device-sync-wake"
+      && metrics.backgroundMaintenanceYielded === true
+      && metrics.postCheckpointRecord == null
+      && input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        prepared,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
     if (postCheckpointRecord || input.retainProcessedItemUntilRecorded === true) {
       const processedItem: HostedSystemMailboxPendingItem = {

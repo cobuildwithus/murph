@@ -13863,6 +13863,511 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("system mailbox hands a newly due assistant cron past an older device-sync wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const now = "2026-04-27T14:00:00.000Z";
+    const staleDeviceSyncWakeAt = "2026-04-27T13:59:00.000Z";
+    const automationId = "automation_01JQ8PWXP5A68SQM1W0GYM41WA";
+    const deviceSyncPort = createSnapshotDeviceSyncPort({
+      connectionId: "device_sync_connection_due_assistant_handoff",
+      nextReconcileAt: "2026-04-27T14:05:00.000Z",
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(now));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId,
+        continuityPolicy: "fresh",
+        instructions: "Send one synthetic experiment reminder.",
+        now: new Date("2026-04-27T13:58:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: {
+          at: "2026-04-27T13:59:30.000Z",
+          kind: "at",
+        },
+        status: "active",
+        title: "Synthetic due reminder",
+        vaultRoot,
+      });
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/due-assistant-system-handoff-before.bundle.json",
+        vaultRoot,
+      });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_due_assistant_system_handoff",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/due-assistant-system-handoff.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("No mailbox items should be imported for this handoff.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleDeviceSyncWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox handoff must return before assistant execution.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, now);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, now);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("system mailbox yields device sync when its projected assistant cron becomes due", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchStarted = createDeferred<void>();
+    const now = "2026-04-27T14:00:00.000Z";
+    const reminderAt = "2026-04-27T14:00:01.000Z";
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:assistant-deadline",
+      id: "mailbox_item_system_mailbox_device_assistant_deadline",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceSyncPort = createSnapshotDeviceSyncPort({
+      connectionId: "device_sync_connection_assistant_deadline",
+      nextReconcileAt: "2026-04-27T14:05:00.000Z",
+      onFetchSnapshot: async (signal) => {
+        fetchStarted.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          const abort = () => reject(signal?.reason);
+          if (signal?.aborted) {
+            abort();
+            return;
+          }
+          signal?.addEventListener("abort", abort, { once: true });
+        });
+      },
+    });
+
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    try {
+      vi.setSystemTime(new Date(now));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41WZ",
+        continuityPolicy: "fresh",
+        instructions: "Send one deadline-sensitive reminder.",
+        now: new Date("2026-04-27T13:58:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: { at: reminderAt, kind: "at" },
+        status: "active",
+        title: "Synthetic deadline reminder",
+        vaultRoot,
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-device-assistant-deadline-before.bundle.json",
+        vaultRoot,
+      });
+
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_device_assistant_deadline",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-device-assistant-deadline.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: now,
+                nextWakeReason: "device-sync.reconcile",
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox mode must hand off rather than execute assistant work.");
+          },
+          vaultRoot,
+        },
+      );
+
+      await fetchStarted.promise;
+      vi.setSystemTime(new Date(Date.parse(reminderAt) - 25));
+      await vi.advanceTimersByTimeAsync(25);
+      const result = await resultPromise;
+
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, reminderAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(deviceSyncPort.applyUpdatesCalls, 0);
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(state.pending.length, 1);
+      assert.equal(state.pending[0]?.itemId, deviceItem.id);
+      assert.equal(state.pending[0]?.status, "pending");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("system mailbox stops the projection suffix when its assistant cron becomes due", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const projectionStarted = createDeferred<void>();
+    const projectionRelease = createDeferred<void>();
+    const now = "2026-04-27T14:00:00.000Z";
+    const reminderAt = "2026-04-27T14:00:01.000Z";
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:projection-assistant-deadline",
+      id: "mailbox_item_system_mailbox_projection_assistant_deadline",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    let projectionCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(now));
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41WX",
+        continuityPolicy: "fresh",
+        instructions: "Send one projection deadline reminder.",
+        now: new Date("2026-04-27T13:58:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: { at: reminderAt, kind: "at" },
+        status: "active",
+        title: "Synthetic projection deadline reminder",
+        vaultRoot,
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-projection-assistant-deadline-before.bundle.json",
+        vaultRoot,
+      });
+
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_projection_assistant_deadline",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-projection-assistant-deadline.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            vaultSharePort: {
+              async listActiveProjectionScopes() {
+                return {
+                  generationTokensByProjectionScopeKey: {
+                    "profile-name.v0": "a".repeat(43),
+                    "time-zone.v0": "b".repeat(43),
+                  },
+                  projectionKinds: [
+                    "profile-name.v0" as const,
+                    "time-zone.v0" as const,
+                  ],
+                  projectionScopes: [
+                    { projectionKind: "profile-name.v0" as const },
+                    { projectionKind: "time-zone.v0" as const },
+                  ],
+                };
+              },
+              async deliver() {
+                projectionCalls += 1;
+                if (projectionCalls === 1) {
+                  projectionStarted.resolve();
+                  await projectionRelease.promise;
+                }
+                return { status: "delivered" as const };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: now,
+                nextWakeReason: "device-sync.reconcile",
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox mode must hand off rather than execute assistant work.");
+          },
+          vaultRoot,
+        },
+      );
+
+      await projectionStarted.promise;
+      vi.setSystemTime(new Date(reminderAt));
+      projectionRelease.resolve();
+      const result = await resultPromise;
+
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, reminderAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(projectionCalls, 1);
+      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).not.toHaveBeenCalled();
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      const retained = state.pending.find((item) => item.itemId === deviceItem.id);
+      assert.equal(retained?.status, "recording");
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "0",
+      );
+    } finally {
+      projectionRelease.resolve();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("system mailbox caps an in-flight browser refresh at its assistant cron deadline", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const nowMs = Date.parse("2026-04-27T14:00:00.000Z");
+    const reminderAt = new Date(nowMs + 25).toISOString();
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:browser-refresh-assistant-deadline",
+      id: "mailbox_item_system_mailbox_browser_refresh_assistant_deadline",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const refreshImplementation =
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
+
+    mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async (input) => {
+      assert.equal(input.deadlineMs, Date.parse(reminderAt));
+      vi.setSystemTime(new Date(reminderAt));
+      return {
+        source: { fileCount: 0, totalBytes: 0 },
+        status: "deferred_timeout" as const,
+      };
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(nowMs));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId: "automation_01JQ8PWXP5A68SQM1W0GYM41WY",
+        continuityPolicy: "fresh",
+        instructions: "Send one browser refresh deadline reminder.",
+        now: new Date("2026-04-27T13:58:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: { at: reminderAt, kind: "at" },
+        status: "active",
+        title: "Synthetic browser refresh deadline reminder",
+        vaultRoot,
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-browser-refresh-assistant-deadline-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_browser_refresh_assistant_deadline",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-browser-refresh-assistant-deadline.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: new Date(nowMs).toISOString(),
+                nextWakeReason: "device-sync.reconcile",
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox mode must hand off rather than execute assistant work.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, reminderAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      const retained = state.pending.find((item) => item.itemId === deviceItem.id);
+      assert.equal(retained?.status, "recording");
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "0",
+      );
+    } finally {
+      const restoreRefreshImplementation =
+        refreshImplementation
+        ?? mocks.actualRefreshHostedBrowserVaultReplicaFromRuntime;
+      if (restoreRefreshImplementation) {
+        mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
+          restoreRefreshImplementation,
+        );
+      }
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -38574,7 +39079,7 @@ function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
   nextReconcileAt: string;
   onApplyUpdates?: (() => Promise<void> | void) | null;
-  onFetchSnapshot?: (() => Promise<void> | void) | null;
+  onFetchSnapshot?: ((signal: AbortSignal | null) => Promise<void> | void) | null;
 }): HostedRuntimeDeviceSyncPort & {
   readonly applyUpdatesCalls: number;
   readonly fetchSnapshotCalls: number;
@@ -38608,9 +39113,9 @@ function createSnapshotDeviceSyncPort(input: {
         userId: TEST_USER_ID,
       };
     },
-    async fetchSnapshot() {
+    async fetchSnapshot(request) {
       fetchSnapshotCalls += 1;
-      await input.onFetchSnapshot?.();
+      await input.onFetchSnapshot?.(request?.signal ?? null);
       return {
         connections: [
           {

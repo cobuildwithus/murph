@@ -1750,6 +1750,104 @@ test("createExperiment rejects invalid status values on the canonical path", asy
   );
 });
 
+test("createExperiment rejects newly authored repeated targets that infer completion from silence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      createExperiment({
+        vaultRoot,
+        slug: "repeated-assumed-target",
+        title: "Repeated assumed target",
+        runPlan: {
+          adherenceTargets: [{
+            targetId: "micro-set",
+            label: "Micro set",
+            phase: "intervention",
+            calendar: {
+              kind: "daily",
+              timeZone: "UTC",
+              targetCountPerDay: 8,
+            },
+            evidence: {
+              kind: "linkedEventCount",
+              eventKind: "intervention_session",
+              missing: "assumed_after_grace",
+            },
+          }],
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "FRONTMATTER_INVALID",
+  );
+});
+
+test("updateExperiment rejects newly repeated assumed targets but permits unrelated legacy edits", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+  const singleOccurrenceTarget = {
+    targetId: "micro-set",
+    label: "Micro set",
+    phase: "intervention" as const,
+    calendar: {
+      kind: "daily" as const,
+      timeZone: "UTC",
+      targetCountPerDay: 1,
+    },
+    evidence: {
+      kind: "linkedEventCount" as const,
+      eventKind: "intervention_session" as const,
+      missing: "assumed_after_grace" as const,
+    },
+  };
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "update-repeated-assumed-target",
+    title: "Update repeated assumed target",
+    runPlan: { adherenceTargets: [singleOccurrenceTarget] },
+  });
+
+  await assert.rejects(
+    () => updateExperiment({
+      vaultRoot,
+      relativePath: created.experiment.relativePath,
+      runPlan: {
+        adherenceTargets: [{
+          ...singleOccurrenceTarget,
+          calendar: {
+            ...singleOccurrenceTarget.calendar,
+            targetCountPerDay: 8,
+          },
+        }],
+      },
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "FRONTMATTER_INVALID",
+  );
+
+  const absolutePath = path.join(vaultRoot, created.experiment.relativePath);
+  const legacyDocument = parseFrontmatterDocument(
+    await fs.readFile(absolutePath, "utf8"),
+  );
+  const legacyRunPlan = legacyDocument.attributes.runPlan as {
+    adherenceTargets: Array<typeof singleOccurrenceTarget>;
+  };
+  legacyRunPlan.adherenceTargets[0]!.calendar.targetCountPerDay = 8;
+  await fs.writeFile(
+    absolutePath,
+    stringifyFrontmatterDocument(legacyDocument),
+    "utf8",
+  );
+
+  const unrelatedUpdate = await updateExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    title: "Legacy target title update",
+  });
+  assert.equal(unrelatedUpdate.updated, true);
+});
+
 test("assessment imports append contract-shaped records and emit intake audits", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");

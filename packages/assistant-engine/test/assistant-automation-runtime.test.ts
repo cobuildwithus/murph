@@ -1003,7 +1003,9 @@ function createReplyGroupItem(
       groupRoomBatchingEligible: false,
       projectionReady: true,
       replyToMessageId:
-        metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
+        metadata?.kind === 'linq' || metadata?.kind === 'telegram'
+          ? metadata.replyToMessageId ?? null
+          : null,
       captureId: capture.captureId,
     },
     telegramMetadata,
@@ -1046,7 +1048,9 @@ function createCapturelessReplyGroupItem(
         metadata.externalThreadRouteAuthorityPresent === true,
       projectionReady: candidate.projection.status !== 'pending',
       replyToMessageId:
-        metadata?.kind === 'linq' ? metadata.replyToMessageId ?? null : null,
+        metadata?.kind === 'linq' || metadata?.kind === 'telegram'
+          ? metadata.replyToMessageId ?? null
+          : null,
       captureId: candidate.event.inputId,
     },
     telegramMetadata: null,
@@ -5981,6 +5985,108 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
+  it('leaves a late direct Telegram native reply for a fresh turn', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+        {
+          mediaGroupId: null,
+          messageId: 'initial_msg_1',
+          replyContext: null,
+        },
+      ),
+    ])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const lateReply = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-1',
+      inputId: 'ain_cccccccccccccccccccccccccccccccc',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'late_msg_1',
+        threadId: 'thread-1',
+      },
+      source: 'telegram',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+        replyToMessageId: 'earlier_assistant_msg_1',
+      },
+      text: 'late native reply',
+    })
+    const inputSource = {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      async listNewConversationInputs() {
+        return {
+          inputs: [lateReply],
+          nextCursor: lateReply.event.cursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toEqual({ kind: 'no-new-input' })
+      return {
+        delivery: {
+          channel: 'telegram',
+          target: 'target-1',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'initial response',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+  })
+
   it('derives Linq reaction availability from the same mixed late input as the reply target', async () => {
     const promptBuilder = await vi.importActual<
       typeof import('../src/assistant/automation/prompt-builder.ts')
@@ -9715,8 +9821,17 @@ describe('assistant auto-reply runtime', () => {
         deliveryReplyToMessageId: 'incoming_group_reply_b',
       }),
     )
-    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0])
-      .not.toHaveProperty('turnContext')
+    const turnContext =
+      replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.turnContext ?? ''
+    expect(turnContext).toContain('Prior message 1:')
+    expect(turnContext).toContain('Prior assistant answer A.')
+    expect(turnContext).toContain(
+      'Prior message 2 (native reply target):',
+    )
+    expect(turnContext).toContain('Prior assistant answer B.')
+    expect(turnContext.indexOf('Prior assistant answer A.')).toBeLessThan(
+      turnContext.indexOf('Prior assistant answer B.'),
+    )
   })
 
   it('batches twenty initial Linq messages into one four-handle speaker lookup', async () => {
@@ -13981,6 +14096,7 @@ describe('assistant automation run loop', () => {
                   media_group_id: 'group-local-1',
                   message_id: 101,
                   reply_context_preview: 'Replying to: earlier Telegram message',
+                  reply_to_message_id: 99,
                   schema: 'murph.telegram-capture.v1',
                 },
                 source: 'telegram',
@@ -14095,6 +14211,7 @@ describe('assistant automation run loop', () => {
       kind: 'telegram',
       mediaGroupId: expect.stringMatching(/^lid_[0-9a-f]{32}$/u),
       replyContext: 'Replying to: earlier Telegram message',
+      replyToMessageId: '99',
     })
     expect(JSON.stringify(stagedInputs[0]?.event)).not.toContain(
       'photo-local',
