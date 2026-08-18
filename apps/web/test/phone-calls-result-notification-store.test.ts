@@ -1,4 +1,4 @@
-import type { HostedPhoneCall } from "@prisma/client";
+import { Prisma, type HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
   HostedPhoneCallResult,
@@ -21,6 +21,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  encryptHostedPhoneCallResult: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedPhoneCallBrief: vi.fn(),
@@ -44,7 +45,7 @@ vi.mock("@/src/lib/phone-calls/crypto", () => ({
     decryptBrief: vi.fn(),
     decryptResult: vi.fn(),
     encryptBrief: vi.fn(),
-    encryptResult: vi.fn(),
+    encryptResult: mocks.encryptHostedPhoneCallResult,
   },
   readHostedPhoneCallBrief: mocks.readHostedPhoneCallBrief,
   readHostedPhoneCallResult: mocks.readHostedPhoneCallResult,
@@ -83,6 +84,8 @@ vi.mock(
 );
 
 import {
+  finalizeHostedPhoneCallStartFailure,
+  finalizeHostedPhoneCallStopSettlement,
   finalizeStoredHostedPhoneCallResult,
   handleRetellCallAnalyzed,
 } from "@/src/lib/phone-calls/result";
@@ -129,9 +132,28 @@ const TELEGRAM_DESTINATION: HostedAssistantNotificationDestination = {
   },
 };
 
+const DESTINATION: HostedAssistantNotificationDestination = {
+  conversationShape: "direct-member",
+  externalThreadRouteAuthority: null,
+  route: {
+    actorId: MEMBER_ID,
+    channel: "linq",
+    delivery: {
+      kind: "thread",
+      target: "linq_home_result_notification_store",
+    },
+    identityId: "identity_result_notification_store",
+    threadId: "thread_result_notification_store",
+    threadIsDirect: true,
+  },
+};
+
 describe("default phone-call result notification store", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    mocks.encryptHostedPhoneCallResult.mockResolvedValue(
+      "encrypted-fallback-result",
+    );
     setHostedSecureBoxStringTestCodecForTests(null);
     mocks.signalHostedPhoneCallReconciliation.mockResolvedValue(undefined);
   });
@@ -280,6 +302,401 @@ describe("default phone-call result notification store", () => {
       prisma,
     });
   });
+
+  it("routes a stored Linq-origin result back through Linq", async () => {
+    const prisma = buildPrisma({ resultNotificationChannel: "linq" });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_linq_result" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: { id: "mailbox_linq_result", userId: MEMBER_ID },
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: buildAnalyzedRetellCallPayload(),
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_linq_result",
+      notificationUserId: MEMBER_ID,
+    });
+
+    expect(mocks.requireHostedAssistantNotificationDestination).toHaveBeenCalledWith({
+      directChannel: "linq",
+      memberId: MEMBER_ID,
+      prisma,
+    });
+  });
+
+  it("keeps a revoked originating route retryable instead of switching channels", async () => {
+    const prisma = buildPrisma({ resultNotificationChannel: "telegram" });
+    const routeError = Object.assign(new Error("origin route revoked"), {
+      retryable: true,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockRejectedValue(
+      routeError,
+    );
+
+    await expect(handleRetellCallAnalyzed({
+      call: buildAnalyzedRetellCallPayload(),
+    })).rejects.toBe(routeError);
+
+    expect(mocks.requireHostedAssistantNotificationDestination).toHaveBeenCalledWith({
+      directChannel: "telegram",
+      memberId: MEMBER_ID,
+      prisma,
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedPhoneCall.findUnique).toHaveBeenCalled();
+  });
+
+  it("dedupes the required stop-settlement mailbox item across workflow replay", async () => {
+    const stoppedAt = new Date("2026-08-09T00:02:00.000Z");
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall(),
+      analyzedAt: null,
+      endedAt: stoppedAt,
+      resultEncrypted: null,
+      status: "ended",
+      stopRequestedAt: new Date("2026-08-09T00:01:00.000Z"),
+      updatedAt: stoppedAt,
+    };
+    const prisma = buildPrisma({ resultNotificationChannel: "telegram" });
+    const signalRuntime = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: `hosted-user-runtime:${MEMBER_ID}`,
+    }));
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "mailbox_stop_settled",
+        userId: MEMBER_ID,
+      });
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_stop_settled" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: { id: "mailbox_stop_settled", userId: MEMBER_ID },
+    });
+
+    await finalizeHostedPhoneCallStopSettlement(call, { signalRuntime });
+    await finalizeHostedPhoneCallStopSettlement(call, { signalRuntime });
+
+    const stopDedupeKey =
+      `assistant.notification.requested:phone-call-result:${CALL_ID}:stop-settled`;
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenNthCalledWith(1, {
+      dedupeKey: stopDedupeKey,
+      prisma,
+      userId: MEMBER_ID,
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenNthCalledWith(2, {
+      dedupeKey: stopDedupeKey,
+      prisma,
+      userId: MEMBER_ID,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(signalRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    {
+      label: "provider-less start failure",
+      outcome: "not_completed",
+      providerCallId: null,
+      summary: "Murph could not start the phone call.",
+      stopRequestedAt: null,
+    },
+    {
+      label: "unsafe provider cleanup",
+      outcome: "needs_user",
+      providerCallId: PROVIDER_CALL_ID,
+      summary: "Murph could not safely verify whether the request was completed.",
+      stopRequestedAt: null,
+    },
+    {
+      label: "unsafe provider cleanup with a stop fence",
+      outcome: "needs_user",
+      providerCallId: PROVIDER_CALL_ID,
+      summary: "Murph could not safely verify whether the request was completed.",
+      stopRequestedAt: new Date("2026-08-09T00:01:00.000Z"),
+    },
+  ])("dedupes $label and requires Murph to send it", async ({
+    outcome,
+    providerCallId,
+    summary,
+    stopRequestedAt,
+  }) => {
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall({ resultNotificationChannel: "linq" }),
+      analyzedAt: null,
+      endedAt: null,
+      providerCallId,
+      resultEncrypted: null,
+      status: "failed",
+      stopRequestedAt,
+    };
+    const prisma = buildPrisma({ call, resultNotificationChannel: "linq" });
+    const signalRuntime = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: `hosted-user-runtime:${MEMBER_ID}`,
+    }));
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "mailbox_start_failed",
+        userId: MEMBER_ID,
+      });
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_start_failed" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: { id: "mailbox_start_failed", userId: MEMBER_ID },
+    });
+    mocks.readHostedPhoneCallResult.mockResolvedValue({
+      ...(providerCallId
+        ? {
+            followUp:
+              "Confirm the outcome with the call recipient before repeating the request.",
+          }
+        : {}),
+      outcome,
+      summary: providerCallId
+        ? "The call is no longer active, but Murph could not safely verify whether the request was completed."
+        : summary,
+    });
+
+    await finalizeHostedPhoneCallStartFailure(call, { signalRuntime });
+    const storedCall = await prisma.hostedPhoneCall.findUnique({
+      where: { id: call.id },
+    });
+    await finalizeHostedPhoneCallStartFailure(storedCall, { signalRuntime });
+
+    expect(mocks.encryptHostedPhoneCallResult).toHaveBeenCalledOnce();
+    expect(prisma.hostedPhoneCall.updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ...(providerCallId ? {} : { analyzedAt: expect.any(Date) }),
+        resultEncrypted: "encrypted-fallback-result",
+      }),
+      where: expect.objectContaining({
+        analyzedAt: null,
+        ...(providerCallId ? { endedAt: null } : {}),
+        id: CALL_ID,
+        provider: "retell",
+        providerCallId,
+        resultEncrypted: null,
+        status: "failed",
+      }),
+    });
+    expect(storedCall).toMatchObject({
+      analyzedAt: providerCallId ? null : expect.any(Date),
+      resultEncrypted: "encrypted-fallback-result",
+      resultJson: null,
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenNthCalledWith(1, {
+      dedupeKey: LEGACY_NOTIFICATION_DEDUPE_KEY,
+      prisma,
+      userId: MEMBER_ID,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.readHostedPhoneCallResult).toHaveBeenCalledOnce();
+    const instructions = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
+      .envelope.notification.instructions;
+    expect(instructions).toContain(summary);
+    expect(instructions).toContain(`"outcome":"${outcome}"`);
+    if (providerCallId) {
+      expect(instructions).toContain(
+        "Confirm the outcome with the call recipient before repeating the request.",
+      );
+      expect(instructions).not.toContain("Murph stopped the phone call");
+    }
+    expect(JSON.stringify(
+      mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0],
+    )).toContain('"kind":"require_send"');
+    expect(signalRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it("stores a fenced provider-less failure without emitting an ordinary result", async () => {
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall({ resultNotificationChannel: "linq" }),
+      analyzedAt: null,
+      endedAt: null,
+      providerCallId: null,
+      resultEncrypted: null,
+      status: "failed",
+      stopRequestedAt: new Date("2026-08-09T00:01:00.000Z"),
+    };
+    const prisma = buildPrisma({ call, resultNotificationChannel: "linq" });
+    const signalRuntime = vi.fn();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await finalizeHostedPhoneCallStartFailure(call, {
+      notifyResult: false,
+      signalRuntime,
+    });
+
+    expect(await prisma.hostedPhoneCall.findUnique({
+      where: { id: call.id },
+    })).toMatchObject({
+      resultEncrypted: "encrypted-fallback-result",
+      resultJson: null,
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(signalRuntime).not.toHaveBeenCalled();
+  });
+
+  it("keeps provider analysis canonical when it wins the fallback CAS", async () => {
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall({ resultNotificationChannel: "linq" }),
+      analyzedAt: null,
+      endedAt: null,
+      resultEncrypted: null,
+      status: "failed",
+    };
+    const authoritativeResult: HostedPhoneCallResult = {
+      outcome: "completed",
+      summary: "The recipient confirmed the request was completed.",
+    };
+    const prisma = buildPrisma({
+      call,
+      onResultUpdate: () => ({
+        call: {
+          ...call,
+          analyzedAt: new Date("2026-08-09T00:02:00.000Z"),
+          endedAt: new Date("2026-08-09T00:02:00.000Z"),
+          resultEncrypted: "encrypted-authoritative-result",
+          status: "completed",
+        },
+        count: 0,
+      }),
+      resultNotificationChannel: "linq",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(authoritativeResult);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_authoritative_result" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: { id: "mailbox_authoritative_result", userId: MEMBER_ID },
+    });
+
+    await finalizeHostedPhoneCallStartFailure(call, { signalRuntime: vi.fn() });
+
+    const instructions = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
+      .envelope.notification.instructions;
+    expect(instructions).toContain(authoritativeResult.summary);
+    expect(instructions).toContain('"outcome":"completed"');
+    expect(instructions).not.toContain("could not safely verify");
+  });
+
+  it("forwards the provider result fence and reuses an existing fallback notification", async () => {
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall({ resultNotificationChannel: "linq" }),
+      analyzedAt: null,
+      endedAt: new Date("2026-08-09T00:02:00.000Z"),
+      resultEncrypted: "encrypted-fallback-result",
+      status: "failed",
+    };
+    const prisma = buildPrisma({
+      call,
+      onResultUpdate: () => ({ call, count: 0 }),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      id: "mailbox_fallback_result",
+      userId: MEMBER_ID,
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "A late provider event claimed the call completed.",
+          },
+        },
+        call_id: PROVIDER_CALL_ID,
+        data_storage_setting: "basic_attributes_only",
+      },
+      completionPolicy: "transfer_follow_up_required",
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_fallback_result",
+      notificationUserId: MEMBER_ID,
+    });
+
+    expect(prisma.hostedPhoneCall.updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        resultEncrypted: expect.any(String),
+        status: "completed",
+      }),
+      where: expect.objectContaining({
+        resultEncrypted: null,
+        resultJson: {
+          equals: Prisma.DbNull,
+        },
+      }),
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledOnce();
+    expect(mocks.readHostedPhoneCallResult).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a cleanup fallback durable when ordinary notification fails", async () => {
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall({ resultNotificationChannel: "linq" }),
+      analyzedAt: null,
+      endedAt: null,
+      resultEncrypted: null,
+      status: "failed",
+    };
+    const prisma = buildPrisma({ call, resultNotificationChannel: "linq" });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockRejectedValue(
+      new Error("route unavailable"),
+    );
+
+    await expect(finalizeHostedPhoneCallStartFailure(call)).rejects.toThrow(
+      "route unavailable",
+    );
+
+    expect(await prisma.hostedPhoneCall.findUnique({
+      where: { id: call.id },
+    })).toMatchObject({
+      analyzedAt: null,
+      resultEncrypted: "encrypted-fallback-result",
+      resultJson: null,
+    });
+    });
 
   it("returns the canonical mailbox item without opening a transaction", async () => {
     const prisma = buildPrisma();
@@ -453,7 +870,7 @@ describe("default phone-call result notification store", () => {
     },
     {
       expectedDedupeKey: LEGACY_NOTIFICATION_DEDUPE_KEY,
-      expectedPolicy: "allow_send_or_skip",
+      expectedPolicy: "require_send",
       label: "legacy ordinary result",
       result: RESULT,
       tracked: false,
@@ -518,7 +935,7 @@ describe("default phone-call result notification store", () => {
       );
     } else {
       expect(envelope?.notification.instructions).toContain(
-        "you may skip sending a message",
+        "never stay silent about it",
       );
     }
     expect(signalRuntime).toHaveBeenCalledWith({
@@ -649,9 +1066,23 @@ describe("default phone-call result notification store", () => {
 
 function buildPrisma(input: {
   call?: HostedPhoneCall;
+  onResultUpdate?: () => {
+    call: HostedPhoneCall;
+    count: number;
+  };
   onTransaction?: (callback: (tx: unknown) => Promise<unknown>) => Promise<unknown>;
+  resultNotificationChannel?: "linq" | "telegram" | null;
 } = {}) {
-  let call = input.call ?? buildStoredAnalyzedCall();
+  const resultNotificationChannel = input.resultNotificationChannel === undefined
+    ? "linq"
+    : input.resultNotificationChannel;
+  let call = input.call
+    ?? buildStoredAnalyzedCall({
+      resultNotificationChannel,
+      ...(resultNotificationChannel === "telegram"
+        ? { resultDeliveryStatus: "pending" }
+        : {}),
+    });
   const transactionClient = {
     hostedPhoneCall: {
       updateMany: vi.fn(async (args: {
@@ -687,8 +1118,29 @@ function buildPrisma(input: {
       return await callback(transactionClient);
     }),
     hostedPhoneCall: {
-      findUnique: vi.fn(async () => call),
-      updateMany: vi.fn(async () => {
+      findUnique: vi.fn(async (findInput?: unknown) => {
+        void findInput;
+        return call;
+      }),
+      updateMany: vi.fn(async (update: {
+        data: Partial<HostedPhoneCall> & { resultJson?: unknown };
+      }) => {
+        if (update.data.resultEncrypted) {
+          if (input.onResultUpdate) {
+            const result = input.onResultUpdate();
+            call = result.call;
+            return { count: result.count };
+          }
+          if (call.resultEncrypted === null && call.resultJson === null) {
+            call = {
+              ...call,
+              ...update.data,
+              resultJson: null,
+            };
+            return { count: 1 };
+          }
+          return { count: 0 };
+        }
         throw new Error("Stored analyzed result must not run the analysis CAS.");
       }),
     },
@@ -716,8 +1168,9 @@ function buildStoredAnalyzedCall(
     resultDeliveryTerminalAt: null,
     resultEncrypted: "encrypted-result",
     resultJson: null,
-    resultNotificationChannel: null,
+    resultNotificationChannel: "linq",
     status: "completed",
+    stopRequestedAt: null,
     updatedAt: now,
     ...overrides,
   };

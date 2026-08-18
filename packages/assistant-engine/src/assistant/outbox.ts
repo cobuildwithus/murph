@@ -281,6 +281,8 @@ export type AssistantOutboxCreateIntentInput = {
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
+  plannedOccurrenceAt?: string | null
+  scheduledOccurrenceAt?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   createdAt?: string
@@ -517,6 +519,8 @@ export async function createAssistantOutboxIntent(
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
       automationAuthority: input.automationAuthority ?? null,
+      plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
+      scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
       externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
       delivery: null,
       deliveryConfirmationPending: false,
@@ -1601,6 +1605,8 @@ export async function deliverAssistantOutboxMessage(input: {
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
+  plannedOccurrenceAt?: string | null
+  scheduledOccurrenceAt?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   card?: AssistantResponseCard | null
   channel?: string | null
@@ -1639,6 +1645,8 @@ export async function deliverAssistantOutboxMessage(input: {
     reviewedAssistantAskCompletionExpiresAt:
       input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.automationAuthority ?? null,
+    plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     card: input.card ?? null,

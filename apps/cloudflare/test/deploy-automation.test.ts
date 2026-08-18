@@ -629,8 +629,8 @@ describe("hosted deploy automation helpers", () => {
 
     const expectedDefaultInstanceType = {
       disk_mb: 6000,
-      memory_mib: 6144,
-      vcpu: 2,
+      memory_mib: 3072,
+      vcpu: 1,
     };
     expect(generatedConfig.containers.map(({ instance_type }) => instance_type)).toEqual([
       expectedDefaultInstanceType,
@@ -706,7 +706,7 @@ describe("hosted deploy automation helpers", () => {
     expect(environment.workerVars).toEqual({
       ...expectedRequiredHostedCryptoWorkerVars(),
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });
   });

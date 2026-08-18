@@ -300,9 +300,11 @@ landing; record the chosen posture here so the decision is reviewable.
   transport-idempotency keys plus hashed foreground route, provider-message,
   and private-completion tags to durable outbox intent ids. It retains normalized
   media only for the legacy media-sensitive key migration; the intent JSON files
-  remain canonical delivery state. Foreground route and legacy verification
-  each read at most 100 projected candidates and fail closed when their fixed
-  bound is exceeded.
+  remain canonical delivery state. Auto-reply history canonical-validates at most 100 projected candidates,
+  prioritizing an exact provider-message anchor before filling the remaining
+  optional context window with newest route history. Legacy media and
+  private-completion verification each retain their fixed 100-candidate
+  fail-closed bound.
   Route cardinality grows rows, not workspace files. A missing or positively
   corrupt projection is rebuilt from canonical intents and published atomically.
   Ordinary creates and lifecycle transitions update it under the existing
@@ -325,7 +327,6 @@ landing; record the chosen posture here so the decision is reviewable.
   so an interrupted write can leave a safe false positive but not a false
   negative. Repeated pending inputs overwrite the same two documents and do not
   grow workspace file count.
-
 - `bank/habitat/*.md` (`murph.frontmatter.habitat.v1`) is canonical product
   truth included in hosted workspace snapshots. It stores one optional Markdown
   document per versioned habitat catalog aspect, and a habitat save creates at

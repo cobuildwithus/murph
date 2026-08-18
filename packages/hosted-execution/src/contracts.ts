@@ -491,6 +491,8 @@ export interface HostedExecutionTelegramMessage {
   mediaGroupId?: string | null;
   messageId: string;
   replyContextPreview?: string | null;
+  /** Exact Telegram message id targeted by the sender's native reply. */
+  replyToMessageId?: string;
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
   /**
    * Presentation-only display name from trusted Telegram ingress. Never

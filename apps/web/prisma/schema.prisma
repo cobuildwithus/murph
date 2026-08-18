@@ -535,6 +535,7 @@ enum HostedComputerHandoffStatus {
 }
 
 enum HostedPhoneCallResultNotificationChannel {
+  linq
   telegram
 }
 
@@ -911,6 +912,7 @@ model HostedPhoneCall {
   briefEncrypted String?               @map("brief_encrypted")
   resultJson     Json?                 @map("result_json")
   resultEncrypted String?              @map("result_encrypted")
+  stopRequestedAt DateTime?            @map("stop_requested_at")
   resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")
   resultDeliveryStatus HostedPhoneCallResultDeliveryStatus? @map("result_delivery_status")
   resultDeliveryGeneration Int?        @default(0) @map("result_delivery_generation")

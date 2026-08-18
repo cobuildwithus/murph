@@ -1653,8 +1653,9 @@ describe('monorepo release flow coverage audit', () => {
       'A later full audit also\nuses `INVALID` for the mandatory prior-finding summary gap',
     )
     expect(prDeepReviewPrompt).toContain(
-      'Do not stop for a discrepancy confined to the descriptive content of',
+      'Do not audit or report discrepancies confined to descriptive PR-body content',
     )
+    expect(prDeepReviewPrompt).not.toContain('Body discrepancy:')
     expect(prDeepReviewPrompt).not.toContain('repo.snapshot.zip')
     expect(prDeepReviewPrompt).not.toContain('repo.repomix.zip')
     expect(prDeepReviewPrompt.toLowerCase()).not.toContain('repomix')

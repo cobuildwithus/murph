@@ -734,7 +734,7 @@ describe('assistant store persistence seams', () => {
     )
   })
 
-  it('quarantines and atomically rebuilds an incomplete routing database', async () => {
+  it('reuses one excluded rebuild slot after interrupted routing database recovery', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-route-rebuild-')
     await ensureAssistantState(paths)
     await readAssistantSessionRouting(paths, {
@@ -751,14 +751,40 @@ describe('assistant store persistence seams', () => {
     await synchronizeAssistantIndexes(paths, session, null)
 
     const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
-    await writeFile(databasePath, 'not-a-complete-sqlite-projection', 'utf8')
+    const rebuildPath = path.join(
+      path.dirname(databasePath),
+      '.tmp',
+      `${path.basename(databasePath)}.rebuild`,
+    )
+    const rebuildPaths = [
+      rebuildPath,
+      `${rebuildPath}-journal`,
+      `${rebuildPath}-shm`,
+      `${rebuildPath}-wal`,
+    ]
 
-    await expect(readAssistantSessionRouting(paths, {
-      alias: 'repair-alias',
-      conversationKeys: [],
-    })).resolves.toMatchObject({
-      aliasSessionId: 'session-repair',
-    })
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await writeFile(databasePath, 'not-a-complete-sqlite-projection', 'utf8')
+      await mkdir(path.dirname(rebuildPath), { recursive: true })
+      await Promise.all(rebuildPaths.map((rebuildArtifactPath) =>
+        writeFile(rebuildArtifactPath, `interrupted-rebuild-${attempt}`, 'utf8'),
+      ))
+
+      await expect(readAssistantSessionRouting(paths, {
+        alias: 'repair-alias',
+        conversationKeys: [],
+      })).resolves.toMatchObject({
+        aliasSessionId: 'session-repair',
+      })
+      await Promise.all(rebuildPaths.map((rebuildArtifactPath) =>
+        expect(access(rebuildArtifactPath)).rejects.toMatchObject({
+          code: 'ENOENT',
+        }),
+      ))
+      await expect(readdir(path.dirname(databasePath))).resolves.toEqual([
+        path.basename(databasePath),
+      ])
+    }
     expect(await listAssistantQuarantineEntriesAtPaths(paths)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

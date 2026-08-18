@@ -824,6 +824,10 @@ describe("hosted web production migration guard", () => {
       parsed.searchParams.get("options"),
       `-c statement_timeout=5000 -c role=${hostedWebMigrationOwnerRole}`,
     );
+    assert.equal(
+      parsed.search,
+      "?sslmode=require&options=-c%20statement_timeout%3D5000%20-c%20role%3Dpostgres",
+    );
   });
 
   test("fails closed on ownership drift while allowing canonical bootstrap", async () => {
@@ -924,7 +928,7 @@ describe("hosted web production migration guard", () => {
     );
 
     const expectedOwnerUrl =
-      "postgresql://direct.example.com:5432/app?sslmode=require&options=-c+role%3Dpostgres";
+      "postgresql://direct.example.com:5432/app?sslmode=require&options=-c%20role%3Dpostgres";
     assert.deepEqual(events, ["verify:start", "verify:complete", "run"]);
     assert.deepEqual(verifiedUrls, [expectedOwnerUrl]);
     assert.deepEqual(calls, [

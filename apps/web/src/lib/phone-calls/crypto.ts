@@ -9,6 +9,7 @@ import type { HostedSecureBoxAadFields } from "@murphai/runtime-state";
 
 import {
   openHostedUserSecureBoxString,
+  openHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxString,
   type HostedSecureBoxPrismaClient,
 } from "../hosted-crypto/secure-box";
@@ -137,7 +138,10 @@ export async function readHostedPhoneCallBrief(input: {
 }
 
 export async function readHostedPhoneCallResult(input: {
-  call: HostedPhoneCall;
+  call: Pick<
+    HostedPhoneCall,
+    "id" | "memberId" | "resultEncrypted" | "resultJson"
+  >;
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedSecureBoxPrismaClient;
   signal?: AbortSignal;
@@ -155,6 +159,62 @@ export async function readHostedPhoneCallResult(input: {
     return null;
   }
   return hostedPhoneCallResultSchema.parse(input.call.resultJson);
+}
+
+export async function readHostedPhoneCallResults(input: {
+  calls: readonly Pick<
+    HostedPhoneCall,
+    "id" | "memberId" | "resultEncrypted" | "resultJson"
+  >[];
+  crypto?: HostedPhoneCallCrypto;
+  prisma?: HostedSecureBoxPrismaClient;
+  signal?: AbortSignal;
+}): Promise<Array<HostedPhoneCallResult | null>> {
+  if (input.crypto) {
+    return Promise.all(input.calls.map((call) => readHostedPhoneCallResult({
+      call,
+      crypto: input.crypto,
+      prisma: input.prisma,
+      signal: input.signal,
+    })));
+  }
+
+  const encryptedCalls = input.calls.filter((call) =>
+    call.resultEncrypted !== null
+  );
+  const plaintexts = encryptedCalls.length === 0
+    ? []
+    : await openHostedUserSecureBoxStrings({
+        entries: encryptedCalls.map((call) => {
+          const binding = getHostedPhoneCallPrivateContentBinding("result", call.id);
+          return {
+            aad: binding.aad,
+            scope: binding.scope,
+            userId: call.memberId,
+            value: call.resultEncrypted,
+          };
+        }),
+        lane: "hosted-member-private-field",
+        prisma: input.prisma,
+        signal: input.signal,
+      });
+  let encryptedIndex = 0;
+  return input.calls.map((call) => {
+    if (call.resultEncrypted !== null) {
+      const plaintext = plaintexts[encryptedIndex];
+      encryptedIndex += 1;
+      if (plaintext === null || plaintext === undefined) {
+        throw new Error("Hosted phone-call encrypted result returned no plaintext.");
+      }
+      return hostedPhoneCallResultSchema.parse(
+        parseHostedPhoneCallPrivateJson(plaintext),
+      );
+    }
+    if (call.resultJson === null) {
+      return null;
+    }
+    return hostedPhoneCallResultSchema.parse(call.resultJson);
+  });
 }
 
 function getHostedPhoneCallPrivateContentBinding(

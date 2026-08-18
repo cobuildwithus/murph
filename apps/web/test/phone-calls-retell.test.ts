@@ -26,6 +26,7 @@ import {
 import {
   buildPhoneCallResultNotificationInstructions,
   buildPhoneCallResultNotificationWake,
+  buildPhoneCallStopSettlementNotificationWake,
   finalizePreparedRetellCallResult,
   finalizeStoredHostedPhoneCallResult,
   handleRetellCallAnalyzed,
@@ -472,6 +473,65 @@ describe("Retell phone-call runtime", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it("returns stopped only after Retell confirms an active call was stopped", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        call_status: "ongoing",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl })
+      .stopIfActive("retell_call_123")).resolves.toBe("stopped");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0]![0])).toContain("/v2/get-call/retell_call_123");
+    expect(String(fetchImpl.mock.calls[1]![0])).toContain("/v2/stop-call/retell_call_123");
+    expect(fetchImpl.mock.calls[1]![1]?.method).toBe("POST");
+  });
+
+  it("reports an already-terminal Retell call without issuing a stop", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        call_id: "retell_call_123",
+        call_status: "ended",
+      }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      },
+    ));
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl })
+      .stopIfActive("retell_call_123")).resolves.toBe("already_terminal");
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("reports a missing Retell call as already terminal", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        message: "Cannot find requested asset under given api key.",
+        status: "error",
+      }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 422,
+      },
+    ));
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl })
+      .stopIfActive("retell_call_123")).resolves.toBe("already_terminal");
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("stops active calls and deletes their provider data during account deletion", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     const fetchImpl = vi.fn<typeof fetch>()
@@ -750,7 +810,7 @@ describe("Retell phone-call result handling", () => {
     expect(instructions).not.toContain("create or update the calendar");
   });
 
-  it("builds an allow-skip notification wake keyed for idempotent delivery", () => {
+  it("requires an idempotent direct result notification", () => {
     const route = {
       actorId: "+12125550111",
       channel: "linq" as const,
@@ -782,9 +842,7 @@ describe("Retell phone-call result handling", () => {
     });
 
     expect(wake.kind).toBe("assistant.notification.requested");
-    // Allow-skip is the one deliberate deviation from the pre-context delivery
-    // tail: Murph composes and may skip a non-meaningful result.
-    expect(wake.notification.responsePolicy).toEqual({ kind: "allow_send_or_skip" });
+    expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
     expect(wake.notification.deliveryDedupeToken).toBe("phone-call-result:hpc_123");
     expect(wake.notification.deliveryIdempotencyKey).toBe("phone-call-result:hpc_123");
     expect(wake.notification.deliveryDispatchMode).toBe("queue-only");
@@ -794,7 +852,12 @@ describe("Retell phone-call result handling", () => {
     expect(wake.notification.instructions).toContain(
       "The office confirmed the appointment for Friday at 10am.",
     );
-    expect(wake.notification.instructions).toContain("you may skip sending a message");
+    expect(wake.notification.instructions).toContain(
+      "never stay silent about it.",
+    );
+    expect(wake.notification.instructions).not.toContain(
+      "you may skip sending a message",
+    );
   });
 
   it("requires a direct transferred-call follow-up from trusted instructions", () => {
@@ -843,6 +906,43 @@ describe("Retell phone-call result handling", () => {
     expect(wake.notification.instructions).not.toContain(
       "you may skip sending a message",
     );
+  });
+
+  it("binds a direct Linq thread result to provider-entry route authority", () => {
+    const wake = buildPhoneCallResultNotificationWake({
+      brief: VALID_BRIEF,
+      callId: "hpc_direct_linq",
+      destination: {
+        conversationShape: "direct-member",
+        externalThreadRouteAuthority: null,
+        route: {
+          actorId: "+12125550111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-direct-chat",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq-direct-thread",
+          threadIsDirect: true,
+        },
+      },
+      memberId: "member_123",
+      result: {
+        outcome: "completed",
+        summary: "The office confirmed the appointment.",
+      },
+    });
+
+    expect(wake.notification.externalThreadRouteAuthority).toEqual({
+      channel: "linq",
+      containerMemberId: "member_123",
+      threadId: "linq-direct-chat",
+    });
+    expect(wake.notification.route.delivery).toEqual({
+      kind: "explicit",
+      target: "linq-direct-chat",
+    });
   });
 
   it("binds a direct Telegram result wake to the exact live thread authority", () => {
@@ -897,6 +997,50 @@ describe("Retell phone-call result handling", () => {
     );
     expect(wake.notification.instructions).not.toContain("group chat");
     expect(wake.notification.instructions).not.toContain("The group asked");
+  });
+
+  it("requires an idempotent confirmation after an asynchronous stop settles", () => {
+    const wake = buildPhoneCallStopSettlementNotificationWake({
+      callId: "hpc_stop_settled",
+      destination: {
+        conversationShape: "direct-member",
+        externalThreadRouteAuthority: null,
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram-direct-chat",
+          },
+          identityId: null,
+          threadId: "telegram-direct-thread",
+          threadIsDirect: true,
+        },
+      },
+      memberId: "member_123",
+      providerCallExisted: true,
+    });
+
+    expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
+    expect(wake.notification.deliveryDedupeToken).toBe(
+      "phone-call-result:hpc_stop_settled:stop-settled",
+    );
+    expect(wake.notification.deliveryIdempotencyKey).toBe(
+      "phone-call-result:hpc_stop_settled:stop-settled",
+    );
+    expect(wake.notification.externalThreadRouteAuthority).toEqual({
+      channel: "telegram",
+      containerMemberId: "member_123",
+      threadId: "telegram-direct-chat",
+    });
+    expect(wake.notification.route.channel).toBe("telegram");
+    expect(wake.notification.instructions).toContain("no longer active");
+    expect(wake.notification.instructions).toContain(
+      "do not claim what the callee heard or whether the call goal completed",
+    );
+    expect(wake.notification.instructions).toContain(
+      "direct channel that requested the call",
+    );
   });
 
   it("signals the runtime only after a prepared result appends its mailbox item", async () => {
@@ -1074,7 +1218,7 @@ describe("Retell phone-call result handling", () => {
     }]);
   });
 
-  it("closes unsafe-storage cleanup authority without converting it to success", async () => {
+  it("leaves unsafe-storage cleanup terminalization to reconciliation", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({
         analyzedAt: null,
@@ -1094,26 +1238,22 @@ describe("Retell phone-call result handling", () => {
       prisma: store.prisma,
     });
 
-    expect(store.updateManyCalls).toEqual([{
-      data: {
-        endedAt: new Date("2026-06-25T12:34:56.000Z"),
-        status: "failed",
-      },
-      where: {
-        endedAt: null,
-        id: "hpc_123",
-        provider: "retell",
-        providerCallId: "retell_call_unsafe",
-        status: {
-          in: ["starting", "calling", "ended", "failed"],
-        },
-      },
-    }]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      endedAt: null,
+      providerCallId: "retell_call_unsafe",
+      status: "failed",
+    });
   });
 
-  it("carries required transfer delivery through an idempotent notification append", async () => {
+  it("persists a terminal end for an analyzed fenced call and replays its notification idempotently", async () => {
     const store = createWebhookStore({
-      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      call: buildHostedPhoneCall({
+        id: "hpc_123",
+        status: "calling",
+        stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      }),
     });
     const call = {
       call_analysis: {
@@ -1148,6 +1288,8 @@ describe("Retell phone-call result handling", () => {
     expect(store.updateManyCalls).toHaveLength(1);
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
+        analyzedAt: expect.any(Date),
+        endedAt: expect.any(Date),
         resultEncrypted: expect.stringMatching(/^hsb-test:/u),
         resultJson: Prisma.DbNull,
         status: "completed",
@@ -1157,11 +1299,18 @@ describe("Retell phone-call result handling", () => {
         id: "hpc_123",
         provider: "retell",
         providerCallId: "retell_call_123",
+        resultEncrypted: null,
+        resultJson: {
+          equals: Prisma.DbNull,
+        },
         status: {
           in: ["starting", "calling", "ended"],
         },
       },
     });
+    expect(store.updateManyCalls[0]!.data.endedAt).toBe(
+      store.updateManyCalls[0]!.data.analyzedAt,
+    );
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
       "hpc_123",
@@ -1338,6 +1487,51 @@ describe("Retell phone-call result handling", () => {
       resultEncrypted: null,
       resultJson: canonicalResult,
       status: "needs_user",
+    });
+    expect(store.appendResultNotificationResults).toEqual([undefined]);
+  });
+
+  it("keeps a fallback result canonical when late provider analysis loses the result fence", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        analyzedAt: null,
+        endedAt: new Date("2026-06-25T12:00:00.000Z"),
+        id: "hpc_123",
+        resultEncrypted: "encrypted-fallback-result",
+        status: "failed",
+      }),
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "A late provider event claimed the call completed.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+      completionPolicy: "transfer_follow_up_required",
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_hpc_123",
+      notificationUserId: "member_123",
+    });
+
+    expect(store.updateManyCalls).toHaveLength(1);
+    expect(store.updateManyCalls[0]!.where).toMatchObject({
+      resultEncrypted: null,
+      resultJson: {
+        equals: Prisma.DbNull,
+      },
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      resultEncrypted: "encrypted-fallback-result",
+      resultJson: null,
+      status: "failed",
     });
     expect(store.appendResultNotificationResults).toEqual([undefined]);
   });
@@ -2210,6 +2404,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     resultJson: null,
     resultNotificationChannel: null,
     status: "starting",
+    stopRequestedAt: null,
     updatedAt: now,
     ...overrides,
   };
@@ -2384,6 +2579,12 @@ function matchesWebhookUpdateWhere(
     return false;
   }
   if (where.analyzedAt === null && call.analyzedAt !== null) {
+    return false;
+  }
+  if (where.resultEncrypted === null && call.resultEncrypted !== null) {
+    return false;
+  }
+  if (where.resultJson && call.resultJson !== null) {
     return false;
   }
   if (where.endedAt === null && call.endedAt !== null) {

@@ -937,9 +937,11 @@ describe("Junction opt-in timeseries configuration", () => {
     region: "us" as const,
   };
 
-  it("requests every canonical resource when configuration is omitted", () => {
+  it("requests only curated defaults when configuration is omitted", () => {
     expect(normalizeJunctionDeviceSyncRuntimeConfig(baseConfig).timeseriesResources)
-      .toEqual(JUNCTION_TIMESERIES_RESOURCES);
+      .toEqual(JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
+    expect(normalizeJunctionDeviceSyncRuntimeConfig(baseConfig).timeseriesResources)
+      .not.toContain(JUNCTION_OPT_IN_TIMESERIES_RESOURCES[0]);
   });
 
   it("preserves an explicit only-opt-in list exactly", () => {

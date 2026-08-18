@@ -2209,6 +2209,26 @@ export const experimentAdherenceTargetsSchema = uniqueArray(experimentAdherenceT
   }
 });
 
+export const experimentAdherenceTargetsAuthoringSchema =
+  experimentAdherenceTargetsSchema.superRefine((targets, context) => {
+    for (const [index, target] of targets.entries()) {
+      const repeatedCalendar = target.calendar?.kind === "explicitDates"
+        ? target.calendar.dates.some((entry) => (entry.targetCount ?? 1) > 1)
+        : (target.calendar?.targetCountPerDay ?? 1) > 1;
+      if (
+        repeatedCalendar &&
+        target.evidence.kind === "linkedEventCount" &&
+        target.evidence.missing === "assumed_after_grace"
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Repeated adherence occurrences must use explicit missing evidence.",
+          path: [index, "evidence", "missing"],
+        });
+      }
+    }
+  });
+
 export const experimentRunPlanSchema = z
   .object({
     baseline: experimentRunBaselineSchema.optional(),

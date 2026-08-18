@@ -1,6 +1,6 @@
 {
   "id": "experiment-session-log",
-  "command": "vault-cli experiment session log <lookup> --vault <path> [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--intervention-type <type>] [--status completed|partial|missed|skipped] [--session-status completed|partial|missed|skipped] [--duration-minutes <n>] [--protocol-id <id>] [--timing <text>] [--temperature-c <number>] [--after-exercise] [--symptoms <text> ...] [--confounders <text> ...] [--confounder <key=value> ...] [--request-id <id>]",
+  "command": "vault-cli experiment session log <lookup> --vault <path> [--reminder-intent-id <outbox-id>] [--date <YYYY-MM-DD>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--intervention-type <type>] [--status completed|partial|missed|skipped] [--session-status completed|partial|missed|skipped] [--duration-minutes <n>] [--protocol-id <id>] [--timing <text>] [--temperature-c <number>] [--after-exercise] [--symptoms <text> ...] [--confounders <text> ...] [--confounder <key=value> ...] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
