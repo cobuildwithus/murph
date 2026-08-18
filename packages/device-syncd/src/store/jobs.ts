@@ -19,11 +19,12 @@ import {
   type DeviceSyncCredentialIndependentImportJobClassifier,
 } from "../hosted-runtime.ts";
 import { isJunctionRetainedAcceptedWorkJob } from "../junction-resources.ts";
-import type {
-  DeviceSyncJobFailureDisposition,
-  DeviceSyncJobFailureTransition,
-  DeviceSyncJobInput,
-  DeviceSyncJobRecord,
+import {
+  JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX,
+  type DeviceSyncJobFailureDisposition,
+  type DeviceSyncJobFailureTransition,
+  type DeviceSyncJobInput,
+  type DeviceSyncJobRecord,
 } from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
@@ -1066,6 +1067,31 @@ export function enqueueDeviceSyncJobInTransaction(
         return getDeviceSyncJobById(database, existing.id) ?? existingJob;
       }
       return existingJob;
+    }
+
+    // Junction temporal resource/day children are re-enqueued on every
+    // scheduled reconcile cadence so widened sources or late provider history
+    // converge. Terminal rows are execution history, not authority. Sweep the
+    // whole temporal dedupe namespace, not just the incoming coordinate:
+    // coordinates that roll out of the horizon (or belong to a prior vault
+    // timezone) are never re-enqueued, so exact-key cleanup would strand their
+    // rows forever.
+    if (
+      input.provider === "junction"
+      && input.kind === "resource"
+      && input.dedupeKey.startsWith(JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX)
+    ) {
+      database.prepare(`
+        delete from device_job
+        where account_id = ?
+          and provider = ?
+          and dedupe_key like ?
+          and status not in ('queued', 'running')
+      `).run(
+        input.accountId,
+        input.provider,
+        `${JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX}%`,
+      );
     }
   }
 

@@ -249,7 +249,9 @@ describe("hosted device-sync reconcile contract", () => {
   it("accepts only the bounded request and queued response shapes", () => {
     expect(parseHostedExecutionDeviceSyncReconcileRequest({
       connectionId: "dsc_123",
-    })).toEqual({ connectionId: "dsc_123" });
+    })).toEqual({
+      connectionId: "dsc_123",
+    });
     expect(parseHostedExecutionDeviceSyncReconcileResponse({
       connectionId: "dsc_123",
       occurredAt: "2026-07-15T12:00:00.000Z",
@@ -263,6 +265,10 @@ describe("hosted device-sync reconcile contract", () => {
       action: "disconnect",
       connectionId: "dsc_123",
     })).toThrow(/action is not supported/u);
+    expect(() => parseHostedExecutionDeviceSyncReconcileRequest({
+      connectionId: "dsc_123",
+      unexpected: "value",
+    })).toThrow(/unexpected is not supported/u);
     expect(() => parseHostedExecutionDeviceSyncReconcileResponse({
       connectionId: "dsc_123",
       occurredAt: "2026-07-15T12:00:00.000Z",

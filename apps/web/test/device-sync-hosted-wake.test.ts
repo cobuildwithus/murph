@@ -1749,7 +1749,9 @@ describe("hosted device-sync wakes", () => {
       const request = new Request(
         "https://control.example.test/api/internal/device-sync/reconcile",
         {
-          body: JSON.stringify({ connectionId: "dsc_123" }),
+          body: JSON.stringify({
+            connectionId: "dsc_123",
+          }),
           method: "POST",
         },
       );
@@ -1767,7 +1769,9 @@ describe("hosted device-sync wakes", () => {
         expect.objectContaining({
           envelope: expect.objectContaining({
             connectionId: "dsc_123",
-            hint: expect.objectContaining({ reason: "manual_reconcile" }),
+            hint: expect.objectContaining({
+              reason: "manual_reconcile",
+            }),
             reason: "reconcile_due",
           }),
           tx: mocks.prismaTx,

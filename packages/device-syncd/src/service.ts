@@ -210,7 +210,9 @@ export interface DeviceSyncService {
   handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult>;
   handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
-  queueManualReconcile(accountId: string): QueueManualReconcileResult;
+  queueManualReconcile(
+    accountId: string,
+  ): QueueManualReconcileResult;
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
@@ -603,7 +605,9 @@ class DeviceSyncServiceController {
     return this.publicIngress.handleWebhook(providerName, headers, rawBody);
   }
 
-  queueManualReconcile(accountId: string): QueueManualReconcileResult {
+  queueManualReconcile(
+    accountId: string,
+  ): QueueManualReconcileResult {
     const account = this.requireStoredAccount(accountId);
 
     if (
@@ -1136,9 +1140,26 @@ class DeviceSyncServiceController {
           ? normalizedJob
           : normalizeConfiguredDeviceSyncJobRecord(provider.provider, activeJob, "execution")
       );
+      let vaultTimeZone: string | undefined;
+      if (
+        provider.provider === "junction"
+        && this.importer.resolveDeviceProviderSnapshotDefaultTimeZone
+      ) {
+        try {
+          vaultTimeZone = await this.importer.resolveDeviceProviderSnapshotDefaultTimeZone({
+            vaultRoot: this.vaultRoot,
+          });
+        } catch {
+          // Timezone-dependent authority fails closed; ordinary provider
+          // ingestion remains available when vault metadata cannot be read.
+          vaultTimeZone = undefined;
+        }
+      }
+      ensureExecutionActive();
       const jobContext: ProviderJobContext = {
         account: currentAccount,
         now,
+        ...(vaultTimeZone ? { vaultTimeZone } : {}),
         signal: jobAbortController.signal,
         connectionSourceAdmissionMode: this.listConnectionSourcesForJob
           ? "listed_only"
@@ -1147,12 +1168,13 @@ class DeviceSyncServiceController {
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),
         throwIfAborted: assertJobExecutionNotYielded,
-        importSnapshot: async (snapshot: unknown) => {
+        importSnapshot: async (snapshot: unknown, options) => {
           ensureExecutionActive();
           const importResult = await this.importer.importDeviceProviderSnapshot({
             provider: provider.provider,
             snapshot,
             vaultRoot: this.vaultRoot,
+            ...options,
           });
           const canonicalSparseCalendarTargets =
             readCanonicalDeviceImportSparseCalendarTargets(importResult);
@@ -1850,6 +1872,9 @@ export function createDefaultImporterPort(): DeviceSyncImporterPort {
   return {
     importDeviceProviderSnapshot(input) {
       return importers.importDeviceProviderSnapshot(input);
+    },
+    resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+      return importers.resolveDeviceProviderSnapshotDefaultTimeZone(input);
     },
   };
 }

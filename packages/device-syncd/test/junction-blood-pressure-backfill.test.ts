@@ -309,11 +309,13 @@ function createJobContext(input: {
     status: string;
   }>;
   shouldYield?: () => boolean;
+  vaultTimeZone?: string;
 } = {}): ProviderJobContext {
   const account = input.account ?? createAccount();
   return {
     account,
     now: input.now ?? NOW,
+    ...(input.vaultTimeZone ? { vaultTimeZone: input.vaultTimeZone } : {}),
     ...(input.connectionSourceAdmissionMode
       ? { connectionSourceAdmissionMode: input.connectionSourceAdmissionMode }
       : {}),
@@ -553,25 +555,27 @@ function createProvider(input: {
         };
         const noteWindowStart = url.searchParams.get("start_date");
         const noteWindowEnd = url.searchParams.get("end_date");
+        const logicalResource = resource === "body_fat" ? "fat" : resource;
         const noteRecords = (input.noteRecords ?? []).filter((record) => {
           const timestamp = typeof record.start === "string" ? record.start : null;
           return timestamp !== null
             && isMockRecordInRequestWindow(timestamp, noteWindowStart, noteWindowEnd);
         });
-        const timeseriesRecords = (input.timeseriesRecords?.[resource] ?? []).filter((record) => {
-          const timestamp = typeof record.start === "string"
-            ? record.start
-            : typeof record.timestamp === "string"
-              ? record.timestamp
-              : null;
-          return timestamp !== null
-            && isMockRecordInRequestWindow(
-              timestamp,
-              noteWindowStart,
-              noteWindowEnd,
-              record.timezone_offset,
-            );
-        });
+        const timeseriesRecords = (input.timeseriesRecords?.[logicalResource] ?? [])
+          .filter((record) => {
+            const timestamp = typeof record.start === "string"
+              ? record.start
+              : typeof record.timestamp === "string"
+                ? record.timestamp
+                : null;
+            return timestamp !== null
+              && isMockRecordInRequestWindow(
+                timestamp,
+                noteWindowStart,
+                noteWindowEnd,
+                record.timezone_offset,
+              );
+          });
         const resourceGroups = resource === "note"
           ? { oura: noteRecords }
           : resource === "blood_pressure"
@@ -1255,6 +1259,7 @@ test("prior Oura note coverage receives one current semantic reimport while dens
   const bounded = requireValue(scheduled.jobs.find((job) => job.kind === "reconcile"));
   const boundedContext = createJobContext({
       account: createAccount({ metadata: result.metadataPatch }),
+      vaultTimeZone: "UTC",
     });
   const boundedResult = await requireValue(provider.jobExecutor).executeJob(
     boundedContext,
@@ -1265,9 +1270,12 @@ test("prior Oura note coverage receives one current semantic reimport while dens
     initialResult: boundedResult,
     provider,
   });
+  // Bounded dual-owner shape: seven ordinary UTC provider-date requests from
+  // the broad correction sweep plus one exact vault-local temporal window for
+  // the newest lag-closed day.
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
-    7,
+    8,
   );
 
   const completed = createScheduledJobs(
@@ -3747,7 +3755,7 @@ test("live blood-pressure capability gates provider egress and terminal coverage
   );
 });
 
-test("live capability loss preserves carried history evidence until authority recovers", async () => {
+test("live capability loss preserves evidence while clean recovery clears legacy count-only ambiguity", async () => {
   const unavailableStates: MutableProviderState[] = [
     {
       resourceAvailability: { activity: true, blood_pressure: false },
@@ -3827,30 +3835,14 @@ test("live capability loss preserves carried history evidence until authority re
       activity: true,
       blood_pressure: true,
     };
-    const empty = await requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
-      toJobRecord(continuation, index + 10),
-    );
-    const stillRecoverable = findBloodPressureJob(empty.scheduledJobs ?? []);
-
-    assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
-    assert.equal(stillRecoverable.dedupeKey, evidenceBearing.dedupeKey);
-    assert.equal(stillRecoverable.payload?.historicalProviderRecordsSeen, true);
-    assert.equal(stillRecoverable.payload?.windowStart, "2026-02-19T00:00:00.000Z");
-
-    records.push({
-      id: `bp-after-live-authority-recovery-${index}`,
-      timestamp: "2026-03-15T08:30:00.000Z",
-      systolic: 121,
-      diastolic: 79,
-    });
-    const { result: completed } = await executeImmediateBloodPressureContinuations({
-      context: createJobContext({ now: "2026-06-13T12:00:00.000Z" }),
-      job: toJobRecord(stillRecoverable, index + 20),
+    const { result: empty } = await executeImmediateBloodPressureContinuations({
+      context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+      job: toJobRecord(continuation, index + 10),
       provider,
     });
-    assert.equal(completed.scheduledJobs?.length ?? 0, 1);
-    assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+
+    assertHistoryCoverage(empty.metadataPatch, "omron", "blood_pressure");
+    assert.equal(empty.scheduledJobs?.length ?? 0, 0);
   }
 
   const canonicalState: MutableProviderState = {
