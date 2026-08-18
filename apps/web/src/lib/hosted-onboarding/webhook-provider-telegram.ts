@@ -148,6 +148,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     let familyStripeEffectPending = false;
     let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
     let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+    let familyTelegramBindingMemberId: string | null = null;
     try {
       familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
         now: new Date(summary.occurredAt),
@@ -160,6 +161,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
               userId: activation.memberId,
             };
           }
+        },
+        onTelegramBindingWritten: (memberId) => {
+          familyTelegramBindingMemberId = memberId;
         },
         telegramThreadId: telegramMessage.threadId,
         telegramUsername: summary.senderTelegramUsername,
@@ -212,6 +216,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       return {
         desiredSideEffects: [],
         postCommitGroupJoinConfirmationMemberIds: [familyAcceptance.memberId],
+        postCommitPhoneCallResultRecoveryMemberIds: [familyAcceptance.memberId],
         response: {
           ok: true,
           reason: "family-invite-accepted",
@@ -229,6 +234,13 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     if (familyDraftCheckoutConflictInviteCode) {
       return {
         desiredSideEffects: [],
+        ...(familyTelegramBindingMemberId
+          ? {
+              postCommitPhoneCallResultRecoveryMemberIds: [
+                familyTelegramBindingMemberId,
+              ],
+            }
+          : {}),
         response: {
           familyInviteCode: familyDraftCheckoutConflictInviteCode,
           ignored: true,
@@ -245,7 +257,16 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     }
 
     if (familyInviteTokenPresent || familyInviteNotAccepted) {
-      return buildIgnoredTelegramWebhookPlan("family-invite-not-accepted");
+      return {
+        ...buildIgnoredTelegramWebhookPlan("family-invite-not-accepted"),
+        ...(familyTelegramBindingMemberId
+          ? {
+              postCommitPhoneCallResultRecoveryMemberIds: [
+                familyTelegramBindingMemberId,
+              ],
+            }
+          : {}),
+      };
     }
   }
 
@@ -399,6 +420,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 
+  let directTelegramRouteChanged = false;
   if (summary.isDirect) {
     if (preparedDirectAuthority) {
       if (!preparedDirectAuthority.preparedControlRoot) {
@@ -411,7 +433,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       });
     }
     try {
-      await runWithHostedDomainRootProviderCallsDisabled(() =>
+      const routeWrite = await runWithHostedDomainRootProviderCallsDisabled(() =>
         upsertHostedMemberTelegramRoutingBindingTx({
           memberId: existingMember.id,
           prisma: input.prisma,
@@ -419,6 +441,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           telegramUserId: senderTelegramUserId,
         }),
       );
+      directTelegramRouteChanged = routeWrite.effectiveRouteChanged;
     } catch (error) {
       if (error instanceof HostedDomainRootPreparationMismatchError) {
         throw hostedDirectTelegramPreparationRequired("sender_route");
@@ -428,7 +451,14 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   if (!accessDecision.allowed) {
-    return buildIgnoredTelegramWebhookPlan("inactive-member");
+    return {
+      ...buildIgnoredTelegramWebhookPlan("inactive-member"),
+      ...(summary.isDirect
+        ? {
+            postCommitPhoneCallResultRecoveryMemberIds: [existingMember.id],
+          }
+        : {}),
+    };
   }
 
   let runtimeMemberId = existingMember.id;
@@ -643,6 +673,11 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ? { postCommitUsageReferralIds: qualificationCandidateReferralIds }
       : {}),
     postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
+    ...(directTelegramRouteChanged || mailboxAppend.duplicate
+      ? {
+          postCommitPhoneCallResultRecoveryMemberIds: [existingMember.id],
+        }
+      : {}),
     response: {
       ok: true,
       reason: summary.isDirect

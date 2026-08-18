@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { junctionProviderAdapter } from "@murphai/importers/device-providers/junction";
@@ -9,6 +10,7 @@ import { JUNCTION_CONNECT_SOURCE_TARGETS } from "../src/config/junction-connect-
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
 } from "../src/junction-historical-backfill-progress.ts";
 import {
   clearJunctionAllExtendedHistoryCoverageForProvider,
@@ -622,7 +624,7 @@ function assertHistoryCoverage(
   resource: string,
   expected = true,
   message?: string,
-  version = resource === "note" ? 2 : 1,
+  version = historyCoverageVersion(resource),
 ): void {
   assert.equal(
     hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -645,10 +647,63 @@ function addHistoryCoverage(
     metadata,
     providerSlug,
     resource,
-    version: resource === "note" ? 2 : 1,
+    version: historyCoverageVersion(resource),
   });
   assert.ok(update);
   return { ...metadata, [update.metadataKey]: update.value };
+}
+
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected Junction extended-history version for ${resource}.`);
+  }
+  return version;
+}
+
+function toPriorExtendedHistoryCoverage(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(metadata).map(([key, value]) => [
+    key,
+    typeof value === "string" ? value.replace(/^m2\|/u, "m1|") : value,
+  ]));
+}
+
+function scheduleTimeHistoryDedupeKey(input: {
+  providerSlug: string;
+  resource: string;
+  sourceLifecycleEpoch: number;
+  version: number;
+}): string {
+  return createHash("sha256").update(JSON.stringify([
+    "junction",
+    "extended-timeseries-backfill",
+    input.providerSlug,
+    input.resource,
+    input.sourceLifecycleEpoch,
+    input.version,
+  ])).digest("hex");
+}
+
+function sourceWindowHistoryDedupeKey(input: {
+  historicalWindowStart: string;
+  providerSlug: string;
+  resource: "blood_pressure" | "weight";
+  sourceLifecycleEpoch: number;
+  version?: number;
+  windowEnd: string;
+}): string {
+  return createHash("sha256").update(JSON.stringify([
+    "junction",
+    "extended-timeseries-backfill",
+    input.providerSlug,
+    input.resource,
+    input.sourceLifecycleEpoch,
+    ...(input.version === undefined ? [] : [input.version]),
+    input.historicalWindowStart,
+    input.windowEnd,
+  ])).digest("hex");
 }
 
 async function executeImmediateBloodPressureContinuations(input: {
@@ -808,6 +863,7 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
   assert.equal(bloodPressure.availableAt, NOW);
   assert.deepEqual(bloodPressure.payload, {
     historicalBackfill: true,
+    historicalBackfillVersion: historyCoverageVersion("blood_pressure"),
     historicalWindowStart: EXTENDED_HISTORY_WINDOW_START,
     resource: "blood_pressure",
     resourceCategory: "timeseries",
@@ -821,7 +877,7 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
   const boundedResult = await executor.executeJob(
     createJobContext({
       account: createAccount({
-        metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|omron" },
+        metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|omron" },
       }),
     }),
     toJobRecord(backfill, 1),
@@ -887,7 +943,7 @@ test("covered Link reconnects retain the configured bounded window for ordinary 
     );
     const account = createAccount({
       connectedAt: "2026-03-20T23:55:00.000Z",
-      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|omron" },
+      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|omron" },
       now: callbackAt,
       sources: [createSourceSummary("omron", "2026-03-20T23:55:00.000Z")],
     });
@@ -1013,7 +1069,7 @@ test("a source-scoped terminal pass preserves completed sibling coverage", async
   const { result } = await executeImmediateBloodPressureContinuations({
     context: createJobContext({
       account: createAccount({
-        metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|withings" },
+        metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|withings" },
       }),
     }),
     job: toJobRecord(sourceScoped, 1),
@@ -1037,7 +1093,7 @@ test("a newly confirmed source backfills older blood pressure after sibling cove
     requests: [],
   });
   const bloodPressure = createScheduledBloodPressureJob(provider, {
-    metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|withings" },
+    metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|withings" },
   });
   const sourceScoped = {
     ...bloodPressure,
@@ -1050,7 +1106,7 @@ test("a newly confirmed source backfills older blood pressure after sibling cove
   const { result } = await executeImmediateBloodPressureContinuations({
     context: createJobContext({
       account: createAccount({
-        metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|withings" },
+        metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|withings" },
       }),
       importedSnapshots,
     }),
@@ -1091,7 +1147,7 @@ test("an existing source receives one migration anchored to its first-seen windo
   const completed = createScheduledJobs(
     createStoredAccount({
       connectedAt,
-      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|omron" },
+      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|omron" },
       sources,
     }),
     NOW,
@@ -1105,7 +1161,7 @@ test("an existing source receives one migration anchored to its first-seen windo
   );
 });
 
-test("v1 Oura note coverage receives one v2 semantic reimport while dense timeseries stay bounded", async () => {
+test("prior Oura note coverage receives one current semantic reimport while dense timeseries stay bounded", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     additionalProviders: [{
@@ -1141,7 +1197,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
   )];
   const scheduled = createScheduledJobs(
     createStoredAccount({
-      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v2|oura" },
       sources,
     }),
     NOW,
@@ -1152,7 +1208,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
 
   assert.deepEqual(note.payload, {
     historicalBackfill: true,
-    historicalBackfillVersion: 2,
+    historicalBackfillVersion: historyCoverageVersion("note"),
     historicalWindowStart: "2025-12-13T00:00:00.000Z",
     resource: "note",
     resourceCategory: "timeseries",
@@ -1166,7 +1222,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
   const { executionCount, result } = await executeImmediateResourceContinuations({
     context: createJobContext({
       account: createAccount({
-        metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+        metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v2|oura" },
       }),
       importedSnapshots,
     }),
@@ -1185,7 +1241,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
 
   const nextDayPending = createScheduledJobs(
     createStoredAccount({
-      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v2|oura" },
       sources,
     }),
     "2026-06-12T12:00:00.000Z",
@@ -1274,11 +1330,7 @@ test("sparse daily resources receive one rollout-anchored summary-history job", 
 });
 
 test("terminal matrix coverage suppresses every extended-history pair", () => {
-  const extendedResources = [
-    "blood_pressure",
-    "note",
-    ...SPARSE_DAILY_HISTORY_RESOURCES,
-  ] as const;
+  const extendedResources = EXTENDED_HISTORY_RESOURCES;
   const extendedResourceSet = new Set<string>(extendedResources);
   const resourceAvailabilitySummary = Object.fromEntries(
     extendedResources.map((resource) => [resource, true] as const),
@@ -1524,7 +1576,7 @@ test("a stale job leaves newer extended-history coverage untouched without egres
     createJobContext({
       account: createAccount({
         metadata: {
-          junctionBloodPressureHistoryBackfillCoverage: `m2|${"0".repeat(192)}`,
+          junctionBloodPressureHistoryBackfillCoverage: `m3|${"0".repeat(192)}`,
         },
         sources,
       }),
@@ -3264,7 +3316,7 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
           result.metadataPatch ?? {},
           "omron",
           "caffeine",
-          1,
+          historyCoverageVersion("caffeine"),
         )
       ),
       false,
@@ -3276,72 +3328,101 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
   }
 });
 
-test("in-flight unversioned note history cannot certify v2 coverage after upgrade", async () => {
+test("an in-flight prior note generation can import but cannot certify current coverage", async () => {
+  const importedSnapshots: unknown[] = [];
+  const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     additionalProviders: [{
       resourceAvailability: { note: true },
       slug: "oura",
     }],
     includeNote: true,
-    requests: [],
+    noteRecords: [{
+      id: "prior-note-generation-record",
+      end: "2026-06-09T20:05:00.000Z",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      start: "2026-06-09T20:00:00.000Z",
+      tags: ["sauna"],
+    }],
+    requests,
   });
   const executor = requireValue(provider.jobExecutor);
-  const legacyJob = toJobRecord({
+  const priorVersion = historyCoverageVersion("note") - 1;
+  const priorDedupeKey = scheduleTimeHistoryDedupeKey({
+    providerSlug: "oura",
+    resource: "note",
+    sourceLifecycleEpoch: 1,
+    version: priorVersion,
+  });
+  const priorJob = toJobRecord({
+    availableAt: NOW,
+    dedupeKey: priorDedupeKey,
     kind: "resource",
     payload: {
       historicalBackfill: true,
+      historicalBackfillVersion: priorVersion,
       historicalWindowStart: "2026-06-09T00:00:00.000Z",
       resource: "note",
       resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
       sourceProviderSlug: "oura",
       windowEnd: "2026-06-11T00:00:00.000Z",
       windowStart: "2026-06-09T00:00:00.000Z",
     },
   }, 1);
-
-  const completedLegacy = await executor.executeJob(createJobContext(), legacyJob);
-  assert.deepEqual(completedLegacy, {});
-  assertHistoryCoverage(completedLegacy.metadataPatch, "oura", "note", false);
-
   const sources = [createSourceSummary(
     "oura",
     "2026-01-01T12:00:00.000Z",
     "connected",
     { note: true },
   )];
-  const scheduledV2 = requireValue(executor.createScheduledJobs)(
-    createStoredAccount({ metadata: completedLegacy.metadataPatch, sources }),
+
+  const completedPrior = await executeImmediateResourceContinuations({
+    context: createJobContext({
+      account: createAccount({ sources }),
+      importedSnapshots,
+    }),
+    job: priorJob,
+    provider,
+    resource: "note",
+  });
+
+  assert.equal(importedSnapshots.length > 0, true);
+  assert.equal(requests.filter((request) => request.resource === "note").length, 2);
+  assertHistoryCoverage(completedPrior.result.metadataPatch, "oura", "note", false);
+  for (const result of completedPrior.results.slice(0, -1)) {
+    const continuation = findResourceJob(result.scheduledJobs ?? [], "note");
+    assert.equal(continuation.payload?.historicalBackfillVersion, priorVersion);
+    assert.equal(continuation.dedupeKey, priorDedupeKey);
+  }
+
+  const currentJob = requireValue(executor.createScheduledJobs)(
+    createStoredAccount({ metadata: completedPrior.result.metadataPatch, sources }),
     NOW,
   ).jobs.find((job) => job.kind === "resource" && job.payload?.resource === "note");
-  assert.equal(scheduledV2?.payload?.historicalBackfillVersion, 2);
-
-  const lateLegacyCompletion = await executor.executeJob(
-    createJobContext({
-      account: createAccount({ metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v2|oura" } }),
-    }),
-    toJobRecord({
-      kind: legacyJob.kind,
-      payload: {
-        ...legacyJob.payload,
-        windowStart: "2026-06-10T00:00:00.000Z",
-      },
-    }, 3),
-  );
   assert.equal(
-    Object.hasOwn(lateLegacyCompletion.metadataPatch ?? {}, NOTE_HISTORY_COVERAGE_KEY),
-    false,
+    currentJob?.payload?.historicalBackfillVersion,
+    historyCoverageVersion("note"),
   );
+  assert.notEqual(currentJob?.dedupeKey, priorDedupeKey);
 
   const futureJob = toJobRecord({
-    kind: legacyJob.kind,
+    kind: priorJob.kind,
     payload: {
-      ...legacyJob.payload,
-      historicalBackfillVersion: 3,
+      ...priorJob.payload,
+      historicalBackfillVersion: historyCoverageVersion("note") + 1,
       windowStart: "2026-06-10T00:00:00.000Z",
     },
   }, 4);
-  const futureResult = await executor.executeJob(createJobContext(), futureJob);
-  assert.equal(Object.hasOwn(futureResult.metadataPatch ?? {}, NOTE_HISTORY_COVERAGE_KEY), false);
+  const futureResult = await executor.executeJob(
+    createJobContext({ account: createAccount({ sources }) }),
+    futureJob,
+  );
+  assert.equal(
+    Object.hasOwn(futureResult.metadataPatch ?? {}, NOTE_HISTORY_COVERAGE_KEY),
+    false,
+  );
 });
 
 test("empty Oura note history reaches terminal source coverage", async () => {
@@ -3420,6 +3501,7 @@ test("a Link reconnect cannot narrow or certify an older persisted-source window
   assert.equal(schedulerJob.availableAt, callbackAt);
   assert.deepEqual(schedulerJob.payload, {
     historicalBackfill: true,
+    historicalBackfillVersion: historyCoverageVersion("blood_pressure"),
     historicalWindowStart: "2025-09-21T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
@@ -3467,7 +3549,7 @@ test("completed source coverage does not certify a sibling source", () => {
   );
   const scheduled = createScheduledJobs(
     createStoredAccount({
-      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|omron" },
+      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|omron" },
       sources: [
         createSourceSummary("omron", "2026-05-01T10:00:00.000Z"),
         createSourceSummary("withings", "2026-06-01T10:00:00.000Z"),
@@ -3841,7 +3923,7 @@ test("an older runtime does not reinterpret newer source-coverage semantics", ()
   );
   const scheduled = createScheduledJobs(
     createStoredAccount({
-      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|withings" },
+      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v3|withings" },
       sources: [createSourceSummary("omron")],
     }),
     NOW,
@@ -5648,7 +5730,126 @@ test("repeated SDK setup does not create unscoped blood-pressure history work", 
   }
 });
 
-test("extended Junction history always starts with 180 days independently of the generic timeseries window", () => {
+test("a prior active sparse-history key cannot suppress the current 180-day root", () => {
+  const resource = "caffeine";
+  const providerSlug = "omron";
+  const sourceLifecycleEpoch = 1;
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { [resource]: true },
+      status: "connected",
+    },
+    requests: [],
+    timeseriesResources: [resource],
+  });
+  const currentVersion = historyCoverageVersion(resource);
+  const priorDedupeKey = scheduleTimeHistoryDedupeKey({
+    providerSlug,
+    resource,
+    sourceLifecycleEpoch,
+    version: currentVersion - 1,
+  });
+  const currentDedupeKey = scheduleTimeHistoryDedupeKey({
+    providerSlug,
+    resource,
+    sourceLifecycleEpoch,
+    version: currentVersion,
+  });
+  const metadata = toPriorExtendedHistoryCoverage(
+    addHistoryCoverage({}, providerSlug, resource),
+  );
+  let queriedKeys: readonly string[] = [];
+  const scheduled = requireValue(requireValue(provider.jobExecutor).createScheduledJobs)(
+    createStoredAccount({
+      metadata,
+      sources: [createSourceSummary(
+        providerSlug,
+        "2026-01-01T00:00:00.000Z",
+        "connected",
+        { [resource]: true },
+        sourceLifecycleEpoch,
+      )],
+    }),
+    NOW,
+    {
+      findActiveDedupeKeys: (dedupeKeys) => {
+        queriedKeys = dedupeKeys;
+        return new Set(dedupeKeys.filter((key) => key === priorDedupeKey));
+      },
+    },
+  );
+  const root = findResourceJob(scheduled.jobs, resource);
+
+  assert.equal(priorDedupeKey === currentDedupeKey, false);
+  assert.equal(queriedKeys.includes(currentDedupeKey), true);
+  assert.equal(queriedKeys.includes(priorDedupeKey), false);
+  assert.equal(root.dedupeKey, currentDedupeKey);
+  assert.equal(root.payload?.historicalBackfillVersion, currentVersion);
+  assert.equal(root.payload?.historicalWindowStart, EXTENDED_HISTORY_WINDOW_START);
+});
+
+test("current history generation certifies only at its terminal fixture window", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    bloodPressureRecords: [{
+      id: "current-generation-bp",
+      timestamp: "2026-06-09T08:30:00.000Z",
+      systolic: 121,
+      diastolic: 79,
+    }],
+    requests,
+  });
+  const rawRoot = createScheduledResourceJob(provider, "blood_pressure");
+  assert.equal(rawRoot.payload?.historicalWindowStart, EXTENDED_HISTORY_WINDOW_START);
+  assert.equal(
+    rawRoot.payload?.historicalBackfillVersion,
+    historyCoverageVersion("blood_pressure"),
+  );
+  assert.equal(
+    rawRoot.dedupeKey,
+    sourceWindowHistoryDedupeKey({
+      historicalWindowStart: EXTENDED_HISTORY_WINDOW_START,
+      providerSlug: "omron",
+      resource: "blood_pressure",
+      sourceLifecycleEpoch: 1,
+      version: historyCoverageVersion("blood_pressure"),
+      windowEnd: BACKFILL_WINDOW_END,
+    }),
+  );
+  assert.notEqual(
+    rawRoot.dedupeKey,
+    sourceWindowHistoryDedupeKey({
+      historicalWindowStart: EXTENDED_HISTORY_WINDOW_START,
+      providerSlug: "omron",
+      resource: "blood_pressure",
+      sourceLifecycleEpoch: 1,
+      windowEnd: BACKFILL_WINDOW_END,
+    }),
+  );
+  const compactRoot = withHistoricalFixtureDays(rawRoot, 2);
+  const executor = requireValue(provider.jobExecutor);
+  const first = await executor.executeJob(
+    createJobContext(),
+    toJobRecord(compactRoot, 1),
+  );
+  const continuation = findBloodPressureJob(first.scheduledJobs ?? []);
+
+  assertHistoryCoverage(first.metadataPatch, "omron", "blood_pressure", false);
+  assert.equal(
+    continuation.payload?.historicalBackfillVersion,
+    historyCoverageVersion("blood_pressure"),
+  );
+  assert.equal(continuation.dedupeKey, compactRoot.dedupeKey);
+
+  const terminal = await executor.executeJob(
+    createJobContext(),
+    toJobRecord(continuation, 2),
+  );
+  assertHistoryCoverage(terminal.metadataPatch, "omron", "blood_pressure");
+  assert.equal(requests.filter((request) => request.resource === "blood_pressure").length, 2);
+});
+
+test("prior coverage reopens all 13 resources at the fixed 180-day generation", () => {
   for (const timeseriesBackfillDays of [undefined, 14] as const) {
     for (const resource of EXTENDED_HISTORY_RESOURCES) {
       const provider = createProvider({
@@ -5657,12 +5858,21 @@ test("extended Junction history always starts with 180 days independently of the
         timeseriesResources: [resource],
         ...(timeseriesBackfillDays === undefined ? {} : { timeseriesBackfillDays }),
       });
-      const job = createScheduledResourceJob(provider, resource);
+      const priorCoverage = toPriorExtendedHistoryCoverage(
+        addHistoryCoverage({}, "omron", resource),
+      );
+      const job = createScheduledResourceJob(provider, resource, {
+        metadata: priorCoverage,
+      });
 
       assert.equal(
         job.payload?.historicalWindowStart,
         EXTENDED_HISTORY_WINDOW_START,
         `${resource} should retain the extended history horizon`,
+      );
+      assert.equal(
+        job.payload?.historicalBackfillVersion,
+        historyCoverageVersion(resource),
       );
       assert.equal(job.payload?.windowStart, EXTENDED_HISTORY_WINDOW_START);
       assert.equal(job.payload?.windowEnd, BACKFILL_WINDOW_END);

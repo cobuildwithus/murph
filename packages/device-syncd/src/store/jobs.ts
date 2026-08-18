@@ -19,7 +19,12 @@ import {
   type DeviceSyncCredentialIndependentImportJobClassifier,
 } from "../hosted-runtime.ts";
 import { isJunctionRetainedAcceptedWorkJob } from "../junction-resources.ts";
-import type { DeviceSyncJobInput, DeviceSyncJobRecord } from "../types.ts";
+import type {
+  DeviceSyncJobFailureDisposition,
+  DeviceSyncJobFailureTransition,
+  DeviceSyncJobInput,
+  DeviceSyncJobRecord,
+} from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
   provider: string;
@@ -756,7 +761,7 @@ export function failDeviceSyncJobIfOwned(
     retainUntilSuccess?: boolean;
     workerId: string;
   },
-): boolean {
+): DeviceSyncJobFailureTransition | null {
   if (input.retryable) {
     const replacementPayloadJson = input.replacementPayload === undefined
       ? null
@@ -778,7 +783,8 @@ export function failDeviceSyncJobIfOwned(
         and lease_expires_at is not null
         and lease_expires_at > ?
         and (attempts < max_attempts or ? = 1)
-    `).run(
+      returning attempts, max_attempts
+    `).get(
       input.retryAt ?? input.now,
       input.retainUntilSuccess ? 1 : 0,
       replacementPayloadJson === null ? 0 : 1,
@@ -790,10 +796,10 @@ export function failDeviceSyncJobIfOwned(
       input.workerId,
       input.now,
       input.retainUntilSuccess ? 1 : 0,
-    ) as { changes: number };
+    ) as Record<string, unknown> | undefined;
 
-    if ((retryResult.changes ?? 0) > 0) {
-      return true;
+    if (retryResult) {
+      return decodeDeviceSyncJobFailureTransition(retryResult, "queued");
     }
   }
 
@@ -811,7 +817,8 @@ export function failDeviceSyncJobIfOwned(
       and lease_owner = ?
       and lease_expires_at is not null
       and lease_expires_at > ?
-  `).run(
+    returning attempts, max_attempts
+  `).get(
     input.code,
     input.message,
     input.now,
@@ -819,9 +826,33 @@ export function failDeviceSyncJobIfOwned(
     input.jobId,
     input.workerId,
     input.now,
-  ) as { changes: number };
+  ) as Record<string, unknown> | undefined;
 
-  return (deadResult.changes ?? 0) > 0;
+  return deadResult
+    ? decodeDeviceSyncJobFailureTransition(deadResult, "dead")
+    : null;
+}
+
+function decodeDeviceSyncJobFailureTransition(
+  row: Record<string, unknown>,
+  disposition: DeviceSyncJobFailureDisposition,
+): DeviceSyncJobFailureTransition {
+  const attempts = requireJobRowNumber(row, "attempts");
+  const maxAttempts = requireJobRowNumber(row, "max_attempts");
+
+  if (!Number.isSafeInteger(attempts) || attempts < 1) {
+    throw new TypeError("Expected device_job.attempts to be a positive safe integer.");
+  }
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < attempts) {
+    throw new TypeError("Expected device_job.max_attempts to cover the committed attempt count.");
+  }
+
+  return {
+    attempts,
+    disposition,
+    maxAttempts,
+    remainingAttempts: disposition === "queued" ? maxAttempts - attempts : 0,
+  };
 }
 
 export function markPendingDeviceSyncJobsDeadForAccount(

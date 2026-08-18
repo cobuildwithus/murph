@@ -12,6 +12,7 @@ import { SqliteDeviceSyncStore } from "../src/store.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
 } from "../src/junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { markCredentialScopedPendingDeviceSyncJobsDeadForAccount } from "../src/store/jobs.ts";
@@ -29,6 +30,14 @@ import {
   setConnectionUpdatedAtForTesting,
 } from "./store-test-helpers.ts";
 import type { StoredDeviceSyncAccount } from "../src/types.ts";
+
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
 
 const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
 const UNSUPPORTED_SCHEMA_VERSION = DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION + 1;
@@ -424,7 +433,7 @@ test("device sync store preserves failed calendar work across a later correction
       60_000,
     );
     assert.equal(failedDayOne?.payload.calendarRefreshDay, "2026-04-01");
-    assert.equal(store.failJobIfOwned(
+    assert.deepEqual(store.failJobIfOwned(
       failedDayOne!.id,
       workerId,
       "2026-04-04T00:02:10.000Z",
@@ -432,7 +441,12 @@ test("device sync store preserves failed calendar work across a later correction
       "Calendar fetch failed.",
       "2026-04-05T00:00:00.000Z",
       true,
-    ), true);
+    ), {
+      attempts: 1,
+      disposition: "queued",
+      maxAttempts: 5,
+      remainingAttempts: 4,
+    });
     const afterV2 = store.getAccountById(account.id);
     assert.ok(afterV2);
 
@@ -522,7 +536,7 @@ test("device sync store commits source admission with initial jobs atomically", 
       metadata: account.metadata,
       providerSlug: "garmin",
       resource: "note",
-      version: 2,
+      version: historyCoverageVersion("note"),
     });
     assert.ok(coverage);
     store.patchAccount(account.id, {
@@ -561,7 +575,7 @@ test("device sync store commits source admission with initial jobs atomically", 
         store.getAccountById(account.id)?.metadata ?? {},
         "garmin",
         "note",
-        2,
+        historyCoverageVersion("note"),
       ),
       true,
     );
@@ -3374,7 +3388,7 @@ test("device sync store failure transitions requeue, replace only owned progress
       store.claimDueJob("worker-a", "2026-04-07T00:05:00.000Z", 60_000)?.id,
       retryableJob.id,
     );
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         retryableJob.id,
         "worker-b",
@@ -3386,11 +3400,11 @@ test("device sync store failure transitions requeue, replace only owned progress
         false,
         { phase: "foreign" },
       ),
-      false,
+      null,
     );
     assert.deepEqual(store.getJobById(retryableJob.id)?.payload, { phase: "original" });
 
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         retryableJob.id,
         "worker-a",
@@ -3402,7 +3416,12 @@ test("device sync store failure transitions requeue, replace only owned progress
         false,
         { phase: "bounded-progress" },
       ),
-      true,
+      {
+        attempts: 2,
+        disposition: "queued",
+        maxAttempts: 3,
+        remainingAttempts: 1,
+      },
     );
     const ownedRetry = store.getJobById(retryableJob.id);
     assert.equal(ownedRetry?.status, "queued");
@@ -3414,7 +3433,7 @@ test("device sync store failure transitions requeue, replace only owned progress
       store.claimDueJob("worker-b", "2026-04-07T00:05:20.000Z", 60_000)?.id,
       retryableJob.id,
     );
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         retryableJob.id,
         "worker-b",
@@ -3426,7 +3445,12 @@ test("device sync store failure transitions requeue, replace only owned progress
         false,
         { phase: "must-not-replace-on-dead" },
       ),
-      true,
+      {
+        attempts: 3,
+        disposition: "dead",
+        maxAttempts: 3,
+        remainingAttempts: 0,
+      },
     );
     const exhausted = store.getJobById(retryableJob.id);
     assert.equal(exhausted?.status, "dead");
@@ -3844,7 +3868,7 @@ test("device sync store preserves retained calendar work across account cleanup 
       60_000,
     );
     assert.equal(claimedRetained?.id, retained.id);
-    assert.equal(store.failJobIfOwned(
+    assert.deepEqual(store.failJobIfOwned(
       retained.id,
       "worker-disconnected",
       "2026-04-09T00:00:01.000Z",
@@ -3853,12 +3877,17 @@ test("device sync store preserves retained calendar work across account cleanup 
       "2026-04-10T00:00:00.000Z",
       true,
       true,
-    ), true);
+    ), {
+      attempts: 1,
+      disposition: "queued",
+      maxAttempts: 5,
+      remainingAttempts: 4,
+    });
     assert.equal(
       store.claimDueJob("worker-unrelated-failure", "2026-04-09T00:00:01.000Z", 60_000)?.id,
       unrelatedFailure.id,
     );
-    assert.equal(store.failJobIfOwned(
+    assert.deepEqual(store.failJobIfOwned(
       unrelatedFailure.id,
       "worker-unrelated-failure",
       "2026-04-09T00:00:02.000Z",
@@ -3867,7 +3896,12 @@ test("device sync store preserves retained calendar work across account cleanup 
       "2026-04-10T00:00:00.000Z",
       true,
       true,
-    ), true);
+    ), {
+      attempts: 1,
+      disposition: "queued",
+      maxAttempts: 5,
+      remainingAttempts: 4,
+    });
 
     const database = openSqliteRuntimeDatabase(store.databasePath);
     try {
@@ -5041,7 +5075,7 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
     assert.equal(claimed?.id, job.id);
     assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T01:00:30.000Z"), false);
     assert.equal(store.completeJobIfOwned(job.id, "worker-a", "2026-04-07T01:01:00.000Z"), false);
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         job.id,
         "worker-a",
@@ -5053,7 +5087,7 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
         false,
         { windowStart: "2026-04-08T00:00:00.000Z" },
       ),
-      false,
+      null,
     );
     assert.equal(store.getJobById(job.id)?.status, "running");
     assert.deepEqual(store.getJobById(job.id)?.payload, {});

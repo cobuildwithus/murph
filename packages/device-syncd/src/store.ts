@@ -101,6 +101,7 @@ import type {
   DiscardUnconsumedOAuthStateResult,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncAccountStatus,
+  DeviceSyncJobFailureTransition,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncServiceSummary,
@@ -818,7 +819,7 @@ export class SqliteDeviceSyncStore {
     retryable: boolean,
     retainUntilSuccess = false,
     replacementPayload?: Record<string, unknown>,
-  ): boolean {
+  ): DeviceSyncJobFailureTransition | null {
     return failDeviceSyncJobIfOwned(this.database, {
       code,
       jobId,

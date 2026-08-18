@@ -68,6 +68,7 @@ import {
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
   type JunctionHistoricalBackfillEvidence,
   type JunctionHistoricalBackfillEvidenceResource,
   type JunctionHistoricalBackfillStatus,
@@ -143,6 +144,7 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
+  DeviceSyncProviderRequestCandidateAliasSource,
   DeviceSyncRestDiagnosticContext,
   ProviderBeginConnectionContext,
   ProviderBeginConnectionResult,
@@ -395,22 +397,25 @@ const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_DAYS = 180;
-const JUNCTION_NOTE_HISTORY_BACKFILL_VERSION = 2;
 
 interface JunctionBoundedTimeseriesBackfillPolicy {
   history: "bounded";
 }
 
-interface JunctionExtendedTimeseriesBackfillPolicy {
+interface JunctionExtendedTimeseriesBackfillPolicyDefinition {
   anchor: "current_day" | "source_first_seen";
   completion: "daily_aggregate" | "exact_records" | "fetch_complete";
   history: "extended";
+}
+
+interface JunctionExtendedTimeseriesBackfillPolicy
+  extends JunctionExtendedTimeseriesBackfillPolicyDefinition {
   version: number;
 }
 
-type JunctionTimeseriesBackfillPolicy =
+type JunctionTimeseriesBackfillPolicyDefinition =
   | JunctionBoundedTimeseriesBackfillPolicy
-  | JunctionExtendedTimeseriesBackfillPolicy;
+  | JunctionExtendedTimeseriesBackfillPolicyDefinition;
 
 const JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY = Object.freeze({
   history: "bounded",
@@ -419,7 +424,6 @@ const JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY = Object.freeze({
   anchor: "current_day",
   completion: "daily_aggregate",
   history: "extended",
-  version: 1,
 } as const);
 
 // This is the history-depth decision for every admitted resource. Only the
@@ -433,7 +437,6 @@ const JUNCTION_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
     anchor: "source_first_seen",
     completion: "exact_records",
     history: "extended",
-    version: 1,
   },
   body_temperature: JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY,
   body_temperature_delta: JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY,
@@ -449,7 +452,6 @@ const JUNCTION_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
     anchor: "current_day",
     completion: "fetch_complete",
     history: "extended",
-    version: JUNCTION_NOTE_HISTORY_BACKFILL_VERSION,
   },
   respiratory_rate: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   sleep_breathing_disturbance: JUNCTION_SPARSE_DAILY_TIMESERIES_BACKFILL_POLICY,
@@ -461,7 +463,6 @@ const JUNCTION_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
     anchor: "current_day",
     completion: "exact_records",
     history: "extended",
-    version: 1,
   },
   body_mass_index: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   carbohydrates: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
@@ -489,7 +490,10 @@ const JUNCTION_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   workout_swimming_stroke: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   electrocardiogram_voltage: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
   workout_stream: JUNCTION_BOUNDED_TIMESERIES_BACKFILL_POLICY,
-} as const satisfies Record<JunctionTimeseriesResource, JunctionTimeseriesBackfillPolicy>);
+} as const satisfies Record<
+  JunctionTimeseriesResource,
+  JunctionTimeseriesBackfillPolicyDefinition
+>);
 
 function resolveJunctionExtendedTimeseriesBackfillPolicy(
   resource: string,
@@ -500,7 +504,14 @@ function resolveJunctionExtendedTimeseriesBackfillPolicy(
   const policy = JUNCTION_TIMESERIES_BACKFILL_POLICIES[
     resource as JunctionTimeseriesResource
   ];
-  return policy.history === "extended" ? policy : null;
+  if (policy.history !== "extended") {
+    return null;
+  }
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError("Junction extended-history policy requires a coverage generation.");
+  }
+  return { ...policy, version };
 }
 
 const JUNCTION_DENSE_FIDELITY_RESOURCE_SET = new Set<string>(
@@ -970,9 +981,7 @@ export function createJunctionDeviceSyncProvider(
         return {
           anchor: policy.anchor,
           availableAt: now,
-          ...(resource === "note"
-            ? { historicalBackfillVersion: policy.version }
-            : {}),
+          historicalBackfillVersion: policy.version,
           historicalWindowStart: window.windowStart,
           resource,
           sourceLifecycleEpoch: source.lifecycleEpoch,
@@ -3135,9 +3144,7 @@ export function createJunctionDeviceSyncProvider(
       return {};
     }
 
-    const admittedVersion = resource === "note"
-      ? readJunctionNoteHistoryBackfillVersion(job.payload)
-      : policy.version;
+    const admittedVersion = readJunctionHistoricalBackfillVersion(job.payload);
     if (admittedVersion !== policy.version) {
       // A semantic generation can only certify its own coverage. Older jobs
       // may still import facts without closing the current generation's bit.
@@ -4332,7 +4339,7 @@ export function createJunctionDeviceSyncProvider(
       [...completedIdentities].filter((identity) => candidateIdentities.has(identity)),
     );
 
-    for (const candidate of candidates) {
+    for (const [candidateIndex, candidate] of candidates.entries()) {
       if (completedIdentities.has(candidate.identity)) {
         continue;
       }
@@ -4366,7 +4373,13 @@ export function createJunctionDeviceSyncProvider(
           input.context.account.externalAccountId,
         );
         if (!failure) {
-          return carryTerminalProgressOrThrow(error);
+          return carryTerminalProgressOrThrow(
+            addJunctionWorkoutStreamCandidateFailureContext(error, {
+              aliasSource: candidate.workoutIdAliasSource,
+              candidateCount: candidates.length,
+              candidateOrdinal: candidateIndex + 1,
+            }),
+          );
         }
         logSkippedOptionalJunctionResource(
           input.context,
@@ -5091,6 +5104,34 @@ function hasCheckedJunctionProfileSummary(metadata: Record<string, unknown>): bo
     && Number.isFinite(Date.parse(checkedAt))
     && metadata[JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY]
       === JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION;
+}
+
+function addJunctionWorkoutStreamCandidateFailureContext(
+  error: unknown,
+  input: {
+    aliasSource: DeviceSyncProviderRequestCandidateAliasSource;
+    candidateCount: number;
+    candidateOrdinal: number;
+  },
+): unknown {
+  if (!isDeviceSyncError(error) || error.code !== "JUNCTION_API_REQUEST_FAILED") {
+    return error;
+  }
+
+  return deviceSyncError({
+    accountStatus: error.accountStatus,
+    cause: error.cause,
+    code: error.code,
+    details: {
+      ...error.details,
+      requestCandidateAliasSource: input.aliasSource,
+      requestCandidateCount: input.candidateCount,
+      requestCandidateOrdinal: input.candidateOrdinal,
+    },
+    httpStatus: error.httpStatus,
+    message: error.message,
+    retryable: error.retryable,
+  });
 }
 
 function classifyOptionalJunctionResourceFailure(
@@ -8879,10 +8920,8 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     return null;
   }
 
+  const coverageVersion = readJunctionHistoricalBackfillVersion(payload);
   if (!["blood_pressure", "weight"].includes(resource)) {
-    const coverageVersion = resource === "note"
-      ? readJunctionNoteHistoryBackfillVersion(payload)
-      : policy.version;
     return sha256Text(JSON.stringify([
       "junction",
       "extended-timeseries-backfill",
@@ -8899,6 +8938,7 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     canonicalizeJunctionProviderSlug(payload.sourceProviderSlug),
     resource,
     sourceLifecycleEpoch,
+    coverageVersion,
     historicalWindowStart,
     windowEnd,
   ]));
@@ -9015,7 +9055,7 @@ function buildExtendedTimeseriesBackfillJob(
   };
 }
 
-function readJunctionNoteHistoryBackfillVersion(
+function readJunctionHistoricalBackfillVersion(
   payload: Record<string, unknown>,
 ): number {
   const version = payload.historicalBackfillVersion;

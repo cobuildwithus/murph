@@ -14,6 +14,7 @@ import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
 } from "@murphai/device-syncd/junction-historical-backfill-progress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -116,6 +117,14 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
+
 function addJunctionHistoryCoverage(
   metadata: Record<string, unknown>,
   providerSlug: string,
@@ -125,7 +134,7 @@ function addJunctionHistoryCoverage(
     metadata,
     providerSlug,
     resource,
-    version: resource === "note" ? 2 : 1,
+    version: historyCoverageVersion(resource),
   });
   if (!update) {
     throw new TypeError("Expected representable Junction history coverage.");
@@ -142,7 +151,7 @@ function hasJunctionHistoryCoverage(
     metadata,
     providerSlug,
     resource,
-    resource === "note" ? 2 : 1,
+    historyCoverageVersion(resource),
   );
 }
 
@@ -151,7 +160,7 @@ function toFutureJunctionHistoryCoverage(
 ): Record<string, unknown> {
   return Object.fromEntries(Object.entries(metadata).map(([key, value]) => [
     key,
-    typeof value === "string" ? value.replace(/^m1\|/u, "m2|") : value,
+    typeof value === "string" ? value.replace(/^m2\|/u, "m3|") : value,
   ]));
 }
 

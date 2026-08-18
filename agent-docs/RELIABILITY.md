@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-15
+Last verified: 2026-08-16
 ## Local Frog autofix scheduling
 
 - One macOS user-session LaunchAgent owns the optional local schedule with
@@ -1330,12 +1330,13 @@ Last verified: 2026-08-15
   idempotent target-only revoke. The initiating operation follows the newest
   same-purpose claim before returning, while separate start-cleanup and user-
   disconnect phase codes preserve the intended terminal state.
-- Junction sparse note-history jobs freeze their semantic generation in the
-  existing durable resource-job payload. Yielded and retry-delayed
-  continuations preserve it, completion derives source coverage from it, and
-  an unversioned queued or leased job remains generation 1 after an upgrade.
-  Only a complete generation-2 chain may certify generation-2 note coverage;
-  late generation-1 completion cannot downgrade newer coverage. This keeps the
+- Every Junction extended-history root freezes its package-owned resource
+  policy generation in the existing durable job payload and root dedupe
+  identity. Yielded and retry-delayed continuations preserve both; an
+  unversioned queued or leased job remains generation 1 after an upgrade. Only
+  a terminal chain whose admitted generation matches the current resource
+  policy may certify coverage. A packed coverage matrix from an older
+  generation is stale and reopens the current obligations. This keeps the
   rollout fence in the existing queue, scheduler, and account-metadata owners
   without another repair loop or lifecycle manager.
 - Junction full reconcile and backfill jobs finish inventory, summary, profile,
@@ -1888,9 +1889,12 @@ Last verified: 2026-08-15
   those exact dedupe-key families and carries only the just-created causal
   outbox intent into the existing write-ahead provider drain. Private Assistant
   Ask completion still repeats its Web-owned text, member, expiry, and direct
-  route authority before every provider attempt, and non-idempotent transport
-  work remains checkpoint-gated. Generic notifications or unrelated pending
-  outbox work cannot hitchhike. Fresh conversation input retains priority.
+  route authority before every provider attempt. The exact generation-scoped
+  phone-call result may enter that drain on Telegram only after its stable
+  current intent is persisted through the existing `outbox_sending` durability
+  barrier. Generic non-idempotent transport work remains excluded from the hot
+  pass, and generic notifications or unrelated pending outbox work cannot
+  hitchhike. Fresh conversation input retains priority.
   Referral recovery also selects each lane containing a live pending celebration
   and re-signals only its first live item above the canonical lane-consumption
   cursor. The shared live-row predicates naturally skip retention-old or expired
@@ -1905,6 +1909,133 @@ Last verified: 2026-08-15
   success, terminally records a definitive stale route without sending, and
   leaves unavailable or retryable authority-owner failures on the ordinary
   same-item retry path. This recovery never falls back, appends, or rewinds.
+- Direct phone-call result recovery is intentionally Telegram-only. The
+  `HostedPhoneCall` row is the sole durable delivery owner: it records a
+  generation-scoped `pending`, `queued`, `sending`, `delivered`, or `ambiguous`
+  disposition. Mailbox, outbox, journal, and Temporal rows remain
+  transport and wake machinery; their existence or retention expiry never
+  proves result delivery. Web atomically advances `pending` to a new queued
+  generation with its mailbox append. The write-fenced runtime reports provider
+  entry through the signed Web control plane. After provider entry, the existing
+  outbox intent retains the provider receipt or terminal failure as transport
+  evidence and stays retryable until Web acknowledges the matching terminal
+  callback. A later runtime pass replays only that idempotent callback from the
+  persisted evidence; it never re-enters the Telegram provider. The outbox marks
+  a provider receipt on the in-memory dispatch owner before its first
+  post-provider checkpoint, so a failed checkpoint fallback cannot discard the
+  receipt or callback obligation. Each failed callback advances the existing
+  bounded outbox retry timestamp from the time that failure is persisted, not
+  from an upstream dispatch-start snapshot; it does not immediately spin or
+  resend.
+  The intent becomes ordinarily terminal and nonselectable only after Web
+  acknowledges the call-row transition and its next-obligation re-arm. If the
+  process is lost while the non-idempotent Telegram intent is still `sending`,
+  stale recovery makes the same no-resend decision, persists an ambiguous callback outcome on
+  the existing intent, and waits for Web acknowledgement before terminalizing
+  the outbox. The call row supplies the stronger generation fact: queued
+  ambiguity returns to `pending`, while sending ambiguity is terminal. A
+  definitive failure returns either queued or sending to `pending` because the
+  signed runtime outcome proves that no Telegram provider effect occurred. This
+  includes route/configuration failures, definitive provider rejections, and
+  exact transport retry exhaustion.
+  A `sending` commit admits dispatch but can lose its response before the
+  runtime enters Telegram; the retry ceiling itself is cumulative evidence of
+  no-effect attempts because a may-have-succeeded request takes the separate
+  terminal ambiguity path before exhaustion. Replay of the exhausted terminal
+  callback repeats only the bounded recovery re-arm. Only the separate
+  `failed_ambiguous` outcome terminalizes without resend; provider success from
+  queued remains invalid.
+  Callback-loss recovery treats a stored result and terminal Retell usage as
+  sibling obligations in the same reconciliation pass. After the exact row and
+  provider-authority reconciliation, those two branches start together and one
+  bounded `allSettled` drain waits for both, so either branch can make progress
+  without consuming the other's deadline and an abort never leaves started work
+  detached. This bounds each pass to two concurrent obligation branches. A
+  ready stored result is finalized even while usage lookup or ledger persistence
+  remains pending, and the workflow completes only after every applicable
+  obligation settles. Stored-result finalization runs inside the existing
+  request-scoped domain-root unwrap cache: it prepares the mailbox root before
+  opening the append transaction, and the legacy mailbox append reuses that
+  cached key instead of calling KMS or another provider while database locks and
+  a pooled connection are held. A root-preparation failure opens no transaction.
+  When Retell reports a terminal transfer and no stored
+  result exists, its transfer-specific finalizer is synthesized inside the
+  usage branch and runs independently of usage persistence. An existing stored
+  result remains authoritative and suppresses that synthesis. The existing
+  encrypted result owns one bounded optional
+  `transfer_follow_up_required` completion policy, so a crash after result
+  persistence but before mailbox append cannot turn that obligation into a
+  generic or skippable result. Legacy absence retains ordinary result semantics.
+  Authoritative analysis always commits to that call row before Web attempts
+  the deterministic per-call hook. The hook is a bounded, best-effort latency
+  hint and its rejection cannot reject or roll back accepted analysis. After an
+  active 120-attempt, 30-second retry window exhausts, the same pre-armed
+  per-call Workflow races its hook with a 30-minute durable recheck. If the row
+  remains unresolved, later rechecks run at most once per 24 hours for that
+  exact call. Each timer runs one non-retrying canonical recovery pass rather
+  than another active window: one exact initial call-row read, at most one
+  terminal-usage lookup and ready-usage transaction, and at most one stored-
+  result finalization with its bounded decrypt and mailbox work. A failed first
+  pass retains the 30-minute cadence until the row is successfully classified,
+  while a new hook can re-enter a bounded active window immediately. This
+  preserves late ordinary and transfer analysis, route and mailbox recovery,
+  and later provider-usage readiness without relying on Retell webhook retries,
+  adding another Workflow, or promoting a mailbox, queue, scheduler, lease, or
+  signal into the durable owner.
+  At the first provider fetch, the runtime
+  gives Web the exact queued Telegram authority; Web revalidates that authority
+  and compare-and-sets the same generation from `queued` to `sending` in the
+  callback operation. A lost callback response sends nothing on that attempt,
+  and retry revalidates the route before continuing the same generation.
+  Provider acceptance completes delivery. A definitive no-effect failure
+  returns either a queued or sending generation to `pending`; a
+  may-have-succeeded failure remains terminally ambiguous and is never resent.
+  Every committed
+  exact-route bind and each terminal callback re-arms at most one oldest member-local
+  nonterminal call, so there is no second queue or fanout scheduler. Every
+  recovery-hint attempt uses the existing five-second reconciliation-signal
+  bound. Browser authentication and settings treat a failed or timed-out hint
+  as best-effort after their route mutation commits, so they cannot turn a
+  durable success into a user-visible failure. Exact webhook and terminal-
+  callback replay owners may propagate that bounded failure because their
+  idempotent retry re-attempts only the same latency hint; dropping every hint
+  still converges through the sole per-call Workflow timer. Tracked
+  direct results are required-send and bind the exact live Telegram route into
+  each generation. Route-restoration requests do not acknowledge success until
+  replay-capable webhook handling has synchronously re-armed the oldest
+  obligation; it first hands off its foreground wake, then returns a retryable
+  error when re-arm fails so an idempotent retry repeats the lookup and start.
+  Request-key replay still requires exact stored-channel
+  equality, including legacy null, before provider work. Tracked and
+  generationless manual direct transfers write the same bounded completion
+  policy. Group calls keep null and their existing thread-container delivery
+  behavior, and group normalization removes transfer authority at both
+  boundaries so groups are outside this policy evolution.
+  The completion-policy rollout is consumer-first. Its reader-only Web release
+  accepts the optional policy but emits only the legacy shape. Before the first
+  reader-plus-writer Web activates, pause all new phone-call admission and wait
+  the full configured start-route lifetime so every prior request exits or
+  exposes its durable call and deployment-pinned reconciliation Workflow. Keep
+  analyzed-result ingress live until every result-capable provider call and
+  every pre-writer Workflow settles. Then freeze that ingress, wait its full
+  route lifetime, and re-prove zero provider calls, pre-writer Workflows, or
+  other legacy-producer executions. Vercel Workflow runs retain their starting
+  deployment, so elapsed route lifetime is not Workflow drain proof. Apply the
+  additive result-channel schema and deploy the reader-plus-writer Web before
+  the runner producer, then roll the runner out immediately. Resume ingress and
+  admission only after compatible Web is current.
+  After the first durable policy write, reader-plus-writer Web is the
+  operational rollback floor even when no result channel is stored. A lower
+  reader may accept existing policy-bearing ciphertext but must not produce new
+  transfer results. Generation-aware Web is an additional rollback floor while
+  any non-null result-channel row exists. Terminal tracked rows remain
+  replay-suppression authority because old Web uses the legacy result key and
+  channel-agnostic routing. A zero non-null result-channel count proves only
+  generation-state compatibility and cannot prove encrypted-result
+  compatibility. Emergency rollback below either floor repeats the full
+  admission, provider/Workflow, and result-ingress drain; prefer a compatible
+  forward deployment. A runner rollback additionally keeps the callback-capable
+  runner until every nonterminal tracked call drains.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution

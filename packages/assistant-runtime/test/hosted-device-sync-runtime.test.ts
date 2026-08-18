@@ -20,6 +20,7 @@ import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
 } from "@murphai/device-syncd/junction-historical-backfill-progress";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -87,6 +88,14 @@ vi.mock("@murphai/hosted-execution", async () => {
     emitHostedExecutionStructuredLog: hostedExecutionMocks.emitHostedExecutionStructuredLog,
   };
 });
+
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
 
 const DEVICE_SYNC_SECRET = "secret-for-tests";
 type ApplyUpdatesRequest = Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0];
@@ -1497,7 +1506,7 @@ describe("hosted device-sync runtime", () => {
           metadata: unpublishedMetadata,
           providerSlug,
           resource,
-          version: 1,
+          version: historyCoverageVersion(resource),
         });
         assert.ok(update);
         unpublishedMetadata = { ...unpublishedMetadata, [update.metadataKey]: update.value };
@@ -1568,7 +1577,7 @@ describe("hosted device-sync runtime", () => {
           sourceStartMetadata,
           "garmin",
           "blood_pressure",
-          1,
+          historyCoverageVersion("blood_pressure"),
         ),
         false,
       );
@@ -1577,7 +1586,7 @@ describe("hosted device-sync runtime", () => {
           sourceStartMetadata,
           "garmin",
           "caffeine",
-          1,
+          historyCoverageVersion("caffeine"),
         ),
         false,
       );
@@ -1586,7 +1595,7 @@ describe("hosted device-sync runtime", () => {
           sourceStartMetadata,
           "withings",
           "blood_pressure",
-          1,
+          historyCoverageVersion("blood_pressure"),
         ),
         true,
       );
@@ -1654,7 +1663,7 @@ describe("hosted device-sync runtime", () => {
           reconnectedMetadata,
           "garmin",
           "caffeine",
-          1,
+          historyCoverageVersion("caffeine"),
         ),
         false,
       );
@@ -1663,7 +1672,7 @@ describe("hosted device-sync runtime", () => {
           reconnectedMetadata,
           "withings",
           "caffeine",
-          1,
+          historyCoverageVersion("caffeine"),
         ),
         true,
       );
@@ -1672,7 +1681,7 @@ describe("hosted device-sync runtime", () => {
           reconnectedMetadata,
           "withings",
           "blood_pressure",
-          1,
+          historyCoverageVersion("blood_pressure"),
         ),
         true,
       );
@@ -1681,7 +1690,7 @@ describe("hosted device-sync runtime", () => {
           reconnectedMetadata,
           "garmin",
           "blood_pressure",
-          1,
+          historyCoverageVersion("blood_pressure"),
         ),
         false,
       );
@@ -1712,7 +1721,7 @@ describe("hosted device-sync runtime", () => {
           appliedMetadata,
           "garmin",
           "caffeine",
-          1,
+          historyCoverageVersion("caffeine"),
         ),
         false,
       );
@@ -1944,7 +1953,7 @@ describe("hosted device-sync runtime", () => {
           metadata: unpublishedMetadata,
           providerSlug,
           resource,
-          version: 1,
+          version: historyCoverageVersion(resource),
         });
         assert.ok(update);
         unpublishedMetadata = { ...unpublishedMetadata, [update.metadataKey]: update.value };
@@ -2055,7 +2064,7 @@ describe("hosted device-sync runtime", () => {
           hydratedMetadata,
           "apple_health_kit",
           "caffeine",
-          1,
+          historyCoverageVersion("caffeine"),
         ),
         false,
       );
@@ -2064,7 +2073,7 @@ describe("hosted device-sync runtime", () => {
           hydratedMetadata,
           "apple_health_kit",
           "blood_pressure",
-          1,
+          historyCoverageVersion("blood_pressure"),
         ),
         false,
       );
@@ -2073,7 +2082,7 @@ describe("hosted device-sync runtime", () => {
           hydratedMetadata,
           "withings",
           "caffeine",
-          1,
+          historyCoverageVersion("caffeine"),
         ),
         true,
       );
@@ -2164,7 +2173,7 @@ describe("hosted device-sync runtime", () => {
           appliedMetadata,
           "apple_health_kit",
           "caffeine",
-          1,
+          historyCoverageVersion("caffeine"),
         ),
         false,
       );
@@ -3075,11 +3084,11 @@ describe("hosted device-sync runtime", () => {
         assert.ok(scheduledPressureHistory);
         assert.equal(
           scheduledPressureHistory.payload?.historicalWindowStart,
-          "2026-07-22T00:00:00.000Z",
+          "2026-01-28T00:00:00.000Z",
         );
         assert.equal(
           scheduledPressureHistory.payload?.windowStart,
-          "2026-07-22T00:00:00.000Z",
+          "2026-01-28T00:00:00.000Z",
         );
         assert.equal(
           scheduledPressureHistory.payload?.windowEnd,
@@ -4374,7 +4383,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation includes provider failure diagnostics when sync failure advances", async () => {
+  test("reconciliation strips worker-only workout candidate context from Web diagnostics", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -4392,37 +4401,17 @@ describe("hosted device-sync runtime", () => {
           jobExecutor: {
             async executeJob() {
               throw deviceSyncError({
-                accountStatus: "disconnected",
-                code: "TOKEN_REQUEST_FAILED",
+                code: "JUNCTION_API_REQUEST_FAILED",
                 details: {
-                  httpStatusText: "Bad Request",
-                  oauthErrorCode: "invalid_grant",
-                  oauthErrorDescription: "Refresh token expired. Reconnect provider.",
-                  oauthGrantType: "refresh_token",
-                  oauthRequestBodyBuilderKind: "url_search_params_record",
-                  oauthRequestClientAuthPlacement: "body_parameters",
-                  oauthRequestClientCredentialPresent: true,
-                  oauthRequestClientIdPresent: true,
-                  oauthRequestContentType: "application_x_www_form_urlencoded",
-                  oauthRequestDuplicateParameterCount: 0,
-                  oauthRequestEncodingKind: "form_urlencoded",
-                  oauthRequestHasDuplicateParameters: false,
-                  oauthRequestMethod: "POST",
-                  oauthRequestOfflineScopePresent: true,
-                  oauthRequestParameterCount: 5,
-                  oauthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-                  oauthRequestRefreshCredentialPresent: true,
-                  oauthRequestScopeCount: 1,
-                  oauthRequestScopePresent: true,
-                  oauthRequestScopeValue: "offline",
-                  oauthRequestTokenEndpointKind: "whoop_oauth_token",
-                  oauthResponseErrorDescriptionFieldPresent: true,
-                  oauthResponseErrorFieldPresent: true,
-                  oauthResponseShapeKind: "json_object",
+                  requestCandidateAliasSource: "id",
+                  requestCandidateCount: 8,
+                  requestCandidateOrdinal: 3,
+                  requestEndpointKind: "junction_workout_stream",
+                  requestMethod: "GET",
                 },
-                httpStatus: 400,
-                message: "Provider token request failed.",
-                retryable: false,
+                httpStatus: 500,
+                message: "Junction workout stream request failed.",
+                retryable: true,
               });
             },
           },
@@ -4484,8 +4473,8 @@ describe("hosted device-sync runtime", () => {
 
       const failed = getStore(service).getAccountById(localAccountId);
       assert.ok(failed);
-      assert.equal(failed.lastErrorCode, "TOKEN_REQUEST_FAILED");
-      assert.equal(failed.status, "disconnected");
+      assert.equal(failed.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(failed.status, "active");
       assert.ok(failed.lastSyncErrorAt);
 
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -4501,40 +4490,23 @@ describe("hosted device-sync runtime", () => {
       assert.equal(request.updates.length, 1);
       assert.equal(request.updates[0]?.connectionId, "hosted_conn_failure_diagnostic");
       assert.deepEqual(request.updates[0]?.failureDiagnostic, {
-        accountStatus: "disconnected",
-        code: "TOKEN_REQUEST_FAILED",
+        accountStatus: null,
+        code: "JUNCTION_API_REQUEST_FAILED",
         details: {
-          providerHttpStatus: 400,
-          providerHttpStatusText: "Bad Request",
-          providerOAuthErrorCode: "invalid_grant",
-          providerOAuthErrorDescription: "Refresh token expired. Reconnect provider.",
-          providerOAuthGrantType: "refresh_token",
-          providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-          providerOAuthRequestClientAuthPlacement: "body_parameters",
-          providerOAuthRequestClientCredentialPresent: true,
-          providerOAuthRequestClientIdPresent: true,
-          providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-          providerOAuthRequestDuplicateParameterCount: 0,
-          providerOAuthRequestEncodingKind: "form_urlencoded",
-          providerOAuthRequestHasDuplicateParameters: false,
-          providerOAuthRequestMethod: "POST",
-          providerOAuthRequestOfflineScopePresent: true,
-          providerOAuthRequestParameterCount: 5,
-          providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-          providerOAuthRequestRefreshCredentialPresent: true,
-          providerOAuthRequestScopeCount: 1,
-          providerOAuthRequestScopePresent: true,
-          providerOAuthRequestScopeValue: "offline",
-          providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-          providerOAuthResponseErrorDescriptionFieldPresent: true,
-          providerOAuthResponseErrorFieldPresent: true,
-          providerOAuthResponseShapeKind: "json_object",
+          providerHttpStatus: 500,
+          providerRequestEndpointKind: "junction_workout_stream",
+          providerRequestMethod: "GET",
         },
-        retryable: false,
+        retryable: true,
       });
+      const failureDetails = request.updates[0]?.failureDiagnostic?.details;
+      assert.ok(failureDetails);
+      assert.equal("providerRequestCandidateAliasSource" in failureDetails, false);
+      assert.equal("providerRequestCandidateCount" in failureDetails, false);
+      assert.equal("providerRequestCandidateOrdinal" in failureDetails, false);
       assert.equal(
         request.updates[0]?.localState?.lastErrorMessage,
-        "Provider token request failed. Provider reason: Refresh token expired. Reconnect provider.",
+        "Junction workout stream request failed.",
       );
       assert.equal(request.updates[0]?.localState?.lastSyncErrorAt, failed.lastSyncErrorAt);
       assert.equal(request.updates[0]?.observedUpdatedAt, "2026-04-06T09:15:00.000Z");
@@ -6513,7 +6485,7 @@ describe("hosted device-sync runtime", () => {
         store.claimDueJob("lease-expired-worker", "2026-04-04T10:00:00.000Z", 60_000)?.id,
         retainedJob.id,
       );
-      assert.equal(
+      assert.deepEqual(
         store.failJobIfOwned(
           retainedJob.id,
           "lease-expired-worker",
@@ -6523,7 +6495,12 @@ describe("hosted device-sync runtime", () => {
           null,
           false,
         ),
-        true,
+        {
+          attempts: 1,
+          disposition: "dead",
+          maxAttempts: 1,
+          remainingAttempts: 0,
+        },
       );
       assert.equal(store.getJobById(retainedJob.id)?.status, "dead");
       state.pendingDirtyPayloadJobs.push({
@@ -11163,7 +11140,7 @@ describe("hosted device-sync runtime", () => {
       const claimed = firstStore.claimDueJob("worker_exact_recovery", occurredAt, 60_000);
       assert.ok(claimed);
       assert.equal(claimed.attempts, 1);
-      assert.equal(firstStore.failJobIfOwned(
+      assert.deepEqual(firstStore.failJobIfOwned(
         claimed.id,
         "worker_exact_recovery",
         occurredAt,
@@ -11171,7 +11148,12 @@ describe("hosted device-sync runtime", () => {
         "retryable",
         retryAt,
         true,
-      ), true);
+      ), {
+        attempts: 1,
+        disposition: "queued",
+        maxAttempts: 5,
+        remainingAttempts: 4,
+      });
 
       const recovery = resolveHostedDeviceSyncWakeRecovery({
         service: firstService,

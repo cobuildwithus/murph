@@ -39,12 +39,13 @@ Current providers:
   Patterns currently derives an action factor only from the exact Oura `sauna`
   tag; other-source, symptom, context, outcome, and custom tags remain neutral.
   Free-text note values are dropped before raw snapshot and compact evidence
-  retention. Note-history coverage version 2 reopens sources completed under
-  the legacy intervention normalizer for one bounded semantic reimport, then
-  records terminal source coverage again. The admitted resource-job payload
-  freezes that generation across durable continuations and retries. Persisted
-  unversioned work remains v1 after an upgrade and cannot certify or downgrade
-  v2 coverage.
+  retention. Note-history policy generation 2 reopened sources completed under
+  the legacy intervention normalizer for one bounded semantic reimport. The
+  fixed 180-day extended-history rollout advances note to generation 3 and the
+  other twelve extended resources to generation 2. Every admitted
+  extended-history root freezes that package-owned generation across durable
+  continuations and retries; older work may still import safe facts but cannot
+  certify current coverage.
 - Junction's product-default labels include `steps`, `distance`,
   `calories_active`, `heartrate`, and `weight`. Production configuration sets
   the exhaustive 48-resource registry explicitly, and omitting the list at the
@@ -90,7 +91,15 @@ Current providers:
   Each present workout metric array must align with the timestamp array. A workout
   whose present metric arrays do not align is skipped so one malformed stream cannot
   block other workouts or replace a previously complete canonical measurement; the
-  skip emits a metadata-only cardinality warning for provider follow-up.
+  skip emits a metadata-only cardinality warning for provider follow-up. A
+  retryable per-workout request failure remains owned by the existing job retry
+  transition and still stops the serial loop. Its worker-attempt runtime
+  diagnostic records only the canonical-order candidate ordinal/count and which
+  supported summary-id alias selected the request; it never records the workout
+  id, summary, stream payload, URL, or provider response identifier.
+  Worker-attempt logs also report the committed `queued`/`dead` transition and
+  remaining bounded attempt budget, while a typed origin distinguishes them
+  from canonical-apply and checkpoint-side diagnostics.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
@@ -180,9 +189,12 @@ day at a time, serialize per account, and record terminal coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
-source-by-resource matrix in an existing blood-pressure or note metadata slot;
-legacy values still read, and unsupported route identities fail before history
-egress rather than advancing an unretainable checkpoint. Every date-mode
+source-by-resource matrix in an existing blood-pressure or note metadata slot.
+Its existing envelope generation advances to `m2` for this rollout because the
+packed bits do not carry per-resource policy versions: pre-180-day `m1` bits are
+stale and writable, while future envelopes remain opaque. Unsupported route
+identities fail before history egress rather than advancing an unretainable
+checkpoint. Every date-mode
 timeseries fetch preserves one complete provider
 calendar date during both migration and normal reconcile; a provider-bearing
 date with any row rejected by the canonical aggregate parser retries only that
@@ -194,7 +206,8 @@ nonterminal state waits, and explicit failure remains uncovered. Explicit
 status requires canonical history evidence. Delayed work derives
 the live reconcile boundary after every completed segment and continues until
 no middle gap remains. An explicit timeseries backfill override still governs
-every timeseries resource.
+only the generic bounded timeseries policy; it does not shorten the fixed
+extended-history horizon.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero

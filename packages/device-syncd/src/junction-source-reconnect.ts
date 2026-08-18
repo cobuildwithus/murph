@@ -1,4 +1,5 @@
 import {
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS,
   JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS,
   removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
 } from "./junction-historical-backfill-progress.ts";
@@ -53,15 +54,16 @@ export function clearJunctionAllExtendedHistoryCoverageForProvider(input: {
   metadata: Record<string, unknown>;
   providerSlug: string;
 }): Record<string, unknown> {
-  const metadata = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
-    metadata: input.metadata,
-    providerSlug: input.providerSlug,
-    resource: "blood_pressure",
-    version: 1,
-  }) ?? input.metadata;
+  let metadata = input.metadata;
 
-  return clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
-    metadata,
-    providerSlug: input.providerSlug,
-  });
+  for (const [resource, version] of JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS) {
+    metadata = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata,
+      providerSlug: input.providerSlug,
+      resource,
+      version,
+    }) ?? metadata;
+  }
+
+  return metadata;
 }

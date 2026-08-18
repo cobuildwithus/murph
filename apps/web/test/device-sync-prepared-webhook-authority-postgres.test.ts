@@ -14,6 +14,7 @@ import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
 } from "@murphai/device-syncd/junction-historical-backfill-progress";
 import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 import type { DeviceSyncRegistry } from "@murphai/device-syncd/types";
@@ -459,6 +460,14 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
   fixture.restoreCryptoEnvironment();
 }
 
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
+
 function addHistoryCoverage(
   metadata: Record<string, unknown>,
   providerSlug: string,
@@ -498,8 +507,18 @@ describe.skipIf(!runPostgresProof)(
       for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
         metadata = addHistoryCoverage(metadata, "apple_health_kit", resource, version);
       }
-      metadata = addHistoryCoverage(metadata, "apple_health_kit", "blood_pressure", 1);
-      metadata = addHistoryCoverage(metadata, "garmin", "weight", 1);
+      metadata = addHistoryCoverage(
+        metadata,
+        "apple_health_kit",
+        "blood_pressure",
+        historyCoverageVersion("blood_pressure"),
+      );
+      metadata = addHistoryCoverage(
+        metadata,
+        "garmin",
+        "weight",
+        historyCoverageVersion("weight"),
+      );
       expect(JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS).toHaveLength(12);
 
       const providerFetch = vi.fn(async (requestInput: string | URL | Request, init?: RequestInit) => {
@@ -717,13 +736,13 @@ describe.skipIf(!runPostgresProof)(
           finalMetadata,
           "apple_health_kit",
           "blood_pressure",
-          1,
+          historyCoverageVersion("blood_pressure"),
         )).toBe(true);
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
           finalMetadata,
           "garmin",
           "weight",
-          1,
+          historyCoverageVersion("weight"),
         )).toBe(true);
       } finally {
         await cleanupFixture(fixture);
@@ -1696,8 +1715,18 @@ describe.skipIf(!runPostgresProof)(
       for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
         metadata = addHistoryCoverage(metadata, "apple_health_kit", resource, version);
       }
-      metadata = addHistoryCoverage(metadata, "apple_health_kit", "blood_pressure", 1);
-      metadata = addHistoryCoverage(metadata, "garmin", "weight", 1);
+      metadata = addHistoryCoverage(
+        metadata,
+        "apple_health_kit",
+        "blood_pressure",
+        historyCoverageVersion("blood_pressure"),
+      );
+      metadata = addHistoryCoverage(
+        metadata,
+        "garmin",
+        "weight",
+        historyCoverageVersion("weight"),
+      );
 
       await fixture.store.syncDurableConnectionMetadata(fixture.connectionId, metadata);
       await fixture.prisma.deviceConnectionSource.update({
@@ -1800,13 +1829,13 @@ describe.skipIf(!runPostgresProof)(
           durableMetadata,
           "apple_health_kit",
           "blood_pressure",
-          1,
+          historyCoverageVersion("blood_pressure"),
         )).toBe(true);
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
           durableMetadata,
           "garmin",
           "weight",
-          1,
+          historyCoverageVersion("weight"),
         )).toBe(true);
         await expect(fixture.prisma.deviceWebhookTrace.findUniqueOrThrow({
           select: { claimToken: true, processingExpiresAt: true, status: true },

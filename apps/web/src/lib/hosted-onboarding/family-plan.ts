@@ -5209,6 +5209,7 @@ export async function prepareHostedFamilyOwnerNotification(input: {
 export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   now?: Date;
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
+  onTelegramBindingWritten?: (memberId: string) => void;
   telegramThreadId?: string | null;
   telegramUsername?: string | null;
   telegramUserId: string;
@@ -5327,6 +5328,7 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
       telegramUserId: input.telegramUserId,
     });
     telegramBindingWritten = true;
+    input.onTelegramBindingWritten?.(member.id);
   };
 
   try {

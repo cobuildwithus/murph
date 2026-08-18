@@ -839,6 +839,15 @@ export async function executeAutomationDynamicTool(input: {
     }
     return automationTextResult(true, text)
   } catch (error) {
+    if (
+      input.request.request.action === 'inspect'
+      && isAutomationNotFoundError(error)
+    ) {
+      return automationTextResult(
+        true,
+        JSON.stringify({ action: 'inspect', found: false }),
+      )
+    }
     if (isAutomationConflictError(error)) {
       return automationTextResult(
         false,
@@ -847,6 +856,12 @@ export async function executeAutomationDynamicTool(input: {
     }
     return automationTextResult(false, 'automation operation is unavailable')
   }
+}
+
+function isAutomationNotFoundError(
+  error: unknown,
+): error is { code: 'automation_not_found' } {
+  return isUnknownRecord(error) && error.code === 'automation_not_found'
 }
 
 function isAutomationConflictError(

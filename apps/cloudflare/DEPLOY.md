@@ -145,6 +145,32 @@ image-plus-link and one text-plus-voice response, checkpoint both workspaces,
 and confirm Workers Observability contains no outbox quarantine or runner schema
 version failures.
 
+## Outbound Message-Volume Receipt Rollout
+
+Deploy the additive Web receipt migration and signed callback route first, then
+deploy Cloudflare/runner with `container_rollout=immediate`. Old runners do not
+write Telegram/email receipt markers, so a gradual runner rollout would create
+an unrecoverable counting gap even though delivery itself remains safe. Keep the
+Web table and callback route available until the new managed runner fingerprint
+is confirmed everywhere.
+
+This release advances Durable Object runner state to schema version 17 before
+creating an invocation, workspace snapshot, or container service. A version-16
+Worker rejects version 17 before it can wake a runner or read an encrypted
+workspace, so it cannot pass the new strict outbox receipt marker to a legacy
+parser and quarantine the intent. Version 17 is a hard Cloudflare/runner
+rollback floor after the release reaches a member's Durable Object. Do not roll
+Worker or runner below that floor; forward-fix on version 17 or newer. The
+additive Web table and callback may remain deployed during a Cloudflare repair.
+
+After deployment, verify the managed runner fingerprint, record one signed
+Telegram receipt and one signed email receipt, replay each exact dedupe key, and
+confirm the public total increments once per delivery. Check Workers
+Observability for receipt callback failures, outbox quarantine, and runner
+schema-version rejection. Also confirm an intentionally failed callback leaves
+a bounded assistant wake and succeeds after recovery without provider
+redispatch.
+
 ## Health-Data Consent Stop-Target Rollout
 
 Deploy the Cloudflare Worker that retains an exact user-control stop target

@@ -36,7 +36,10 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { JunctionTimeseriesProgressError } from "../src/junction-timeseries-progress.ts";
-import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
+import {
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
+} from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -6432,9 +6435,12 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     sourceProviderSlug: "garmin",
     status: "connected" as const,
   };
+  const bloodPressureHistoryVersion = requireValue(
+    resolveJunctionExtendedTimeseriesHistoryBackfillVersion("blood_pressure"),
+  );
   const schedulerAccount = createStoredAccount({
     metadata: {
-      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+      junctionBloodPressureHistoryBackfillCoverage: `v${bloodPressureHistoryVersion}|omron`,
     },
     nextReconcileAt: "2026-04-03T00:00:00.000Z",
     sources: [garminSource],
@@ -6453,6 +6459,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   const schedulerJob = findScheduledHistoryJob("2026-04-03T00:00:00.000Z");
   assert.deepEqual(schedulerJob.payload, {
     historicalBackfill: true,
+    historicalBackfillVersion: bloodPressureHistoryVersion,
     historicalWindowStart: "2025-09-21T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
@@ -6511,7 +6518,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+          junctionBloodPressureHistoryBackfillCoverage: `v${bloodPressureHistoryVersion}|omron`,
         },
         sources: [garminSource],
       }),
@@ -6534,7 +6541,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       createJunctionJobContext({
         account: createAccount({
           metadata: {
-            junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+            junctionBloodPressureHistoryBackfillCoverage: `v${bloodPressureHistoryVersion}|omron`,
           },
           sources: [garminSource],
         }),
@@ -6561,7 +6568,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       scheduledResult.metadataPatch ?? {},
       "garmin",
       "blood_pressure",
-      1,
+      bloodPressureHistoryVersion,
     ),
     true,
   );
@@ -6570,7 +6577,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       scheduledResult.metadataPatch ?? {},
       "omron",
       "blood_pressure",
-      1,
+      bloodPressureHistoryVersion,
     ),
     true,
   );
@@ -19080,13 +19087,17 @@ test("Junction workout_stream carries the owning day when retryable failure prec
   assert.deepEqual(harness.streamRequests, ["workout-1"]);
 });
 
-test("Junction workout_stream carries exact progress with its retryable provider failure", async () => {
+test("Junction workout_stream carries exact progress and bounded context with its retryable provider failure", async () => {
   const importedWorkoutIds: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1", "workout-2"],
     streamResponse: (workoutId) => workoutId === "workout-2"
-      ? new Response(JSON.stringify({ error: "temporary provider failure" }), {
-          status: 503,
+      ? new Response(JSON.stringify({
+          error: "temporary provider failure",
+          privatePayloadMarker: "raw-workout-payload-must-not-escape",
+          workoutId,
+        }), {
+          status: 500,
           headers: {
             "Content-Type": "application/json",
             "Retry-After": "0",
@@ -19117,6 +19128,13 @@ test("Junction workout_stream carries exact progress with its retryable provider
       assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.ok(error.failure instanceof DeviceSyncError);
       assert.equal(error.failure.retryable, true);
+      assert.equal(error.failure.details?.status, 500);
+      assert.equal(error.failure.details?.requestCandidateAliasSource, "id");
+      assert.equal(error.failure.details?.requestCandidateCount, 2);
+      assert.equal(error.failure.details?.requestCandidateOrdinal, 2);
+      const serializedDetails = JSON.stringify(error.failure.details);
+      assert.equal(serializedDetails.includes("workout-2"), false);
+      assert.equal(serializedDetails.includes("raw-workout-payload-must-not-escape"), false);
       assert.deepEqual(readJunctionWorkoutProgressIdentities({
         workoutStreamCursor: error.workoutStreamCursor,
       }), [junctionWorkoutCandidateIdentity("workout-1")]);

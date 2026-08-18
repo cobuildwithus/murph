@@ -362,9 +362,24 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
   assert.equal(productionNextConfig.webpack, undefined);
   assert.deepEqual(productionNextConfig.typescript, {
+    ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
   });
   assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
+});
+
+test("production build skips only the duplicate typecheck after the runner proves it", () => {
+  const preparedConfig = buildHostedWebNextConfig(
+    PHASE_PRODUCTION_BUILD,
+    createProcessEnv({ MURPH_HOSTED_WEB_PREPARED_TYPECHECK: "complete" }),
+  );
+  const forgedConfig = buildHostedWebNextConfig(
+    PHASE_PRODUCTION_BUILD,
+    createProcessEnv({ MURPH_HOSTED_WEB_PREPARED_TYPECHECK: "1" }),
+  );
+
+  assert.equal(preparedConfig.typescript?.ignoreBuildErrors, true);
+  assert.equal(forgedConfig.typescript?.ignoreBuildErrors, false);
 });
 
 test("next.config leaves agent guidance under repository ownership", () => {

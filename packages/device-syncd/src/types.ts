@@ -56,6 +56,28 @@ export interface DeviceSyncServiceConfig {
   shouldYieldJobExecution?: (() => boolean) | null;
 }
 
+export type DeviceSyncJobFailureDisposition = "queued" | "dead";
+
+export interface DeviceSyncJobFailureTransition {
+  attempts: number;
+  disposition: DeviceSyncJobFailureDisposition;
+  maxAttempts: number;
+  remainingAttempts: number;
+}
+
+export type DeviceSyncJobFailureEventOrigin =
+  | "canonical_apply"
+  | "checkpoint"
+  | "device_activity_automation"
+  | "idle_maintenance"
+  | "worker_attempt";
+
+export type DeviceSyncProviderRequestCandidateAliasSource =
+  | "id"
+  | "multiple_equal"
+  | "workoutId"
+  | "workout_id";
+
 export interface DeviceSyncJobFailureDiagnosticDetails {
   failureCauseCode?: string;
   failureCauseName?: string;
@@ -68,6 +90,9 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   providerRequestBodyFieldCount?: number;
   providerRequestBodyFieldNames?: string;
   providerRequestBodyKind?: string;
+  providerRequestCandidateAliasSource?: DeviceSyncProviderRequestCandidateAliasSource;
+  providerRequestCandidateCount?: number;
+  providerRequestCandidateOrdinal?: number;
   providerRequestContentType?: string;
   providerRequestCredentialPresent?: boolean;
   providerRequestEndpointKind?: string;
@@ -113,9 +138,15 @@ export interface DeviceSyncJobFailureDiagnostic {
   attempts?: number;
   code: string;
   details: DeviceSyncJobFailureDiagnosticDetails;
+  /** Actual committed queue transition for this failed attempt, when known. */
+  jobDisposition?: DeviceSyncJobFailureDisposition;
   /** Job kind of the failing job (for example `resource`, `reconcile`), when known. */
   jobKind?: string;
+  /** Maximum attempt budget committed on the failing job row, when known. */
+  maxAttempts?: number;
   provider?: string;
+  /** Attempts still available after the committed failure transition, when known. */
+  remainingAttempts?: number;
   /** Provider resource name from the failing job payload, when known. */
   resource?: string;
   retryable: boolean;

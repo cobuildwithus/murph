@@ -1,12 +1,21 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
 } from "@murphai/device-syncd/junction-historical-backfill-progress";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
 } from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
 
 function addWeightHistoryCoverage(
   metadata: Record<string, unknown>,
@@ -16,7 +25,7 @@ function addWeightHistoryCoverage(
     metadata,
     providerSlug,
     resource: "weight",
-    version: 1,
+    version: historyCoverageVersion("weight"),
   });
   if (!update) {
     throw new TypeError("Expected representable Junction weight history coverage.");
@@ -3263,6 +3272,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         phase: "invoke",
         redactedJson: expect.objectContaining({
         failureCode: "WHOOP_TOKEN_REQUEST_FAILED",
+        failureEventOrigin: "canonical_apply",
         failureRetryable: false,
         failureSummary: "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
         hadPriorFailure: true,

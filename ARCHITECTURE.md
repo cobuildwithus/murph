@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-13
+Last verified: 2026-08-16
 ## Local Frog Autofix
 
 Murph's optional local Frog repair loop is an operator-owned macOS process, not
@@ -814,7 +814,46 @@ mailbox receipt (`HostedMailboxItem.createdAt`) so a provider event delivered
 after the daily capture cannot later rewrite a completed day; provider event
 time remains payload/decryption and conversation evidence only. The date-keyed
 upsert makes
-same-day cron and ops-page retries idempotent. An attribution integrity failure
+same-day cron and ops-page retries idempotent. Public lifetime message volume
+stays in this existing growth projection rather than creating a separate
+analytics service. Successful Linq outbound remains owned by the Web delivery
+ledger. Successful conversational Telegram and email outbound remains owned by
+the runtime outbox: a newly delivered eligible intent carries a durable pending
+receipt marker, and a bounded best-effort signed Web-control callback records an
+anonymous SHA-256 lookup receipt keyed from the authenticated member, channel,
+and stable outbox dedupe key. One eligible outbox intent contributes one
+receipt regardless of provider chunk or message-id count. The receipt primary
+key makes retries, replay, and a crash after central commit count exactly once;
+a failed callback never changes provider delivery state. Pending receipts reuse
+the outbox intent's existing `nextAttemptAt` clock: the durable delivery write
+arms the first attempt, callback failure defers it by one bounded minute, and a
+successful callback clears both the marker and deadline. Sent pending receipts
+participate in the ordinary assistant wake projection without blocking later
+delivery on the same conversation boundary. Idle runtime passes scan at most
+eight due receipts, checkpoint that recovery pass, and preserve an immediate
+wake for any remainder, so a cold restore or a backlog converges without another
+mailbox item or user action. All recovery remains outside the foreground reply
+critical path and introduces no second queue or state owner. The strict persisted
+outbox marker advances hosted runner state schema to version 17 before any runner
+invocation. A version-16 Worker rejects that Durable Object state before it can
+restore and quarantine the newer outbox record, making version 17 the
+Cloudflare/runner rollback floor once deployed state is established. The
+Telegram/email receipt contribution excludes message reactions and ephemeral
+progress sends:
+neither is an outbox-backed conversational delivery, and those progress paths
+have no durable successful-delivery owner that can support truthful replay-safe
+accounting. The existing Linq ledger contribution remains unchanged.
+Group-email fanout counts one message for each successful recipient child and
+zero for the planning parent. The empty migration is the explicit
+Telegram/email cutover: no unavailable pre-cutover history is reconstructed.
+Growth snapshots count receipt rows by
+Web database `recorded_at` for `[prior_day_start, snapshot_date)`, while the live
+read begins inclusively at the latest snapshot date. A late acknowledgement
+therefore increases the live window monotonically and cannot rewrite a completed
+UTC day; the 5,000 historical base and all-channel inbound count remain
+unchanged.
+
+An attribution integrity failure
 is reported and creates null activity values only when no same-date row exists;
 on retry it leaves any existing activity values untouched while still updating
 the snapshot's revenue, member, and message aggregates. The cron returns a
@@ -858,6 +897,33 @@ route becomes a typed terminal no-send for the same pending item so lane order
 advances; authority-owner unavailability keeps the ordinary same-item retry.
 There is no payload rewrite, replacement append, cursor rewind, migration, or
 second reconciliation owner.
+
+Tracked direct phone-call results use the Web-owned `HostedPhoneCall` row as
+their only durable delivery owner and are intentionally Telegram-only. The row
+stores one generation-scoped delivery disposition; a transaction advances a
+pending result to a queued generation with the matching mailbox append. The
+runtime then reports provider entry and terminal outcome through its existing
+signed, write-fenced Web control plane before checkpointing. Mailbox, outbox,
+journal, and Temporal state are transport and wake machinery, never delivery
+truth. Safe pre-provider route loss returns the row to pending for a new
+generation; provider success, definitive failure, and may-have-succeeded
+failure become terminal delivered, failed, or ambiguous dispositions. One
+route loss observed after that generation already crossed provider entry is
+also ambiguous, never permission to resend onto a new route. One
+terminal callback re-arms one oldest member-local obligation, so retention
+expiry cannot fabricate completion and recovery adds no queue or scheduler.
+The call result commits before its deterministic hook is signaled. That hook is
+only a latency hint: after the existing bounded active retry window, the same
+pre-armed per-call Workflow uses a 30-minute first durable timer and then a
+24-hour low-frequency timer to re-read its exact call row. A dropped hook can
+therefore delay recovery but cannot erase an accepted result or create another
+Workflow.
+The encrypted result itself owns the bounded optional direct-transfer follow-up
+policy, so same-version stored recovery cannot lose that obligation. A
+reader-only Web release must accept that field before this writer activates;
+after the first policy write, reader-plus-writer Web is the operational rollback
+floor independently of generation state. Group transfer authority is disabled
+at both normalization boundaries and is outside this policy evolution.
 
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 
@@ -1006,7 +1072,26 @@ enter runner env, prompts, diagnostics, or workspace state. Transfer numbers are
 resolved server-side from verified hosted member identity when the brief allows a
 live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
 call for request-key idempotency, provider call id, status, bounded call brief,
-and final analysis. Briefs and results are encrypted before persistence with the
+and final analysis. A direct Linq or Telegram call also stores only the bounded
+initiating channel enum, never a phone number or thread identifier. Web resolves
+that exact current direct route before provider dispatch and resolves the same
+channel again immediately before entering the provider. Exact request-key
+replays read the durable call before mutable route admission, so route removal
+cannot turn an already-started call into a definitive no-call result. When the
+asynchronous result is ready, Web binds the current direct thread as egress
+authority on the queued notification; provider entry revalidates that authority
+so a later route removal or rebind cannot disclose the result to a stale chat.
+The existing phone-call reconciliation workflow keeps an analyzed result
+pending until its deduped mailbox notification is durable, and a restored direct
+route signals the newest affected call without falling back to another surface.
+Its deterministic hook is a best-effort fast path; durable timers on that same
+Workflow re-derive an accepted pending result from `HostedPhoneCall` if the
+signal is dropped.
+Group calls keep the
+channel null and continue to use their durable thread-container authority.
+Request-key replay compares the stored channel exactly, including legacy null,
+so a retry cannot change the eventual result audience. Briefs and results are
+encrypted before persistence with the
 control-domain hosted secure-box lane and AAD bound to the member, table, row,
 field, and scope; only provider/status/timestamp identifiers remain operational
 metadata. During account deletion, the member is suspended before `apps/web`
@@ -1877,7 +1962,7 @@ application code.
 - Machine-facing truth lives in append-only JSONL ledgers for inbox captures, events, display-grade metric samples, explicit raw/debug samples, and audit records, with inbox capture intake canonicalized first through `ledger/inbox-captures/**`. Device observation events distinguish raw sample, compact summary, and derived-fact grain so dense telemetry admission does not depend on default query/search visibility.
 - Raw imported artifacts are immutable once copied into `raw/`, and they now live under owner-scoped directories derived from the owning canonical record or import session (`kind` + `id`, plus a partition only for batch families such as device/sample/workout imports). Dated media captures use the same owner-scoped raw path under `raw/captures/**` while staying durable as tagged note events rather than a separate medical record family. Each raw import directory keeps a `manifest.json` sidecar that records the same explicit owner metadata used to resolve the on-disk path, while normalized device/provider API snapshots continue to live under `raw/integrations/**`. Lookup-backed generated-image captures may also write a portable retry lookup in the compact index at `derived/captures/generated-image-lookups.json`; those capture events are immutable after creation except for `deleteEvent`, so the lookup can resolve the original event shard and raw media without scanning while still treating a tombstone as deleted. `raw/inbox/**` media bytes are the scoped privacy exception: image/audio/video bytes can be retention-expired after 14 days by an append-only retention ledger, while documents/PDFs and explicit promoted owner paths remain durable.
 - Raw-artifact repair helpers must stay explicit and proof-driven. `packages/core` keeps tested wearable storage repair primitives that may compact legacy payload-bearing wearable receipts, tombstone derived canonical-record artifacts, report legacy dense sample-debug ledger candidates without deleting them in v1, and tombstone dense raw provider timeseries only when an operator explicitly asks for dense raw pruning or the hosted device-sync runtime runs its bounded post-drain retention step. Each repair must prove manifest byte/sha state, preserve durable product facts, update raw manifests when raw tombstones are written, and emit metadata-only `vault_repair` audit entries; the hosted path must use the named core dense-prune primitive with recent dense raw excluded, bounded file/byte budgets, and metadata-only runtime logs. There is no separate hosted cron, generic raw delete API, or content-addressed raw store for this repair lane.
-- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction preserves its existing daily facts for `glucose`, `blood_oxygen`, and `stress_level`, and adds exactly one deterministic 24-hour feature envelope and one measurement of queryable derived facts per source/day. The envelope uses capped-gap estimated coverage and capped episode summaries, so it never represents discrete samples as clinically exact duration. Only rows with a provider-supplied clock enter temporal derivation; date-only rows remain in the established daily aggregates and produce a zero-coverage envelope with no invented hourly, overnight, rate, peak, or episode facts. Dense reconcile and direct-resource jobs share the existing closed-calendar-day importer as their only owner; precise resource windows cannot emit a partial day under a complete-day identity. Every scheduled reconcile refreshes the latest globally closed provider date for the six fidelity resources, while the account's existing UTC-day gate retains the broader seven-day correction sweep across all configured resources. Sparse Junction `caffeine`, `water`, and `mindfulness_minutes` intervals retain one exact-start canonical measurement with start/end qualifiers and one compact per-record evidence part in addition to their existing daily sums. Their direct-resource jobs keep precise windows but emit intervals only, then use the canonical import receipt's provider-local day keys to refresh each closed corrected date through the calendar-day path; that path alone writes daily sums, so UTC-normalized execution windows cannot select the wrong provider date and partial set growth cannot freeze or conflict with the completed aggregate. Date-only fetches retain the complete provider-local calendar response rather than applying a UTC post-filter, and publication waits until that date has closed at UTC-12, the latest admitted civil offset. Daily sums and dense feature envelopes are complete collection facts, so they do not borrow a maximum child-row revision as a resource/day version; serialized complete-calendar imports reconcile non-empty set growth or removal through the canonical event spine, and exact replays collapse. An empty provider collection emits no aggregate tombstone and therefore does not delete a previously published fact. Explicit provider revisions remain attached only to stable sparse interval identities: one versioned interval may migrate its pre-versioning baseline, stale revisions cannot overwrite newer facts, and changed unversioned or equal-revision bodies fail closed without another state owner. Both seams fail closed at explicit response, source/day, and normalized-output bounds, preserve source/local-day provenance, and never write raw dense samples. Junction `note` is a sparse product input: the importer keeps normalized dated tags on a kind-stable neutral `note` spine with compact evidence and drops the free-text value before raw snapshot retention. Personal Patterns owns the narrower semantic projection and currently admits only a provenance-verified Oura `sauna` tag as an action factor. The neutral external-reference facet is distinct from the legacy per-tag intervention facets, so existing event kinds are never rewritten in place. Note-history coverage version 2 performs one bounded semantic reimport for sources covered by the legacy intervention normalizer; query excludes the recognizable legacy rows while neutral replacements arrive. The existing resource-job payload freezes the admitted note-history generation across continuations and retries: unversioned persisted work remains v1 and only a complete admitted v2 chain can certify v2 coverage. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; other sparse or higher-sensitivity resources such as weight need a separate product/debug policy before any default ingestion or pruning.
+- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction preserves its existing daily facts for `glucose`, `blood_oxygen`, and `stress_level`, and adds exactly one deterministic 24-hour feature envelope and one measurement of queryable derived facts per source/day. The envelope uses capped-gap estimated coverage and capped episode summaries, so it never represents discrete samples as clinically exact duration. Only rows with a provider-supplied clock enter temporal derivation; date-only rows remain in the established daily aggregates and produce a zero-coverage envelope with no invented hourly, overnight, rate, peak, or episode facts. Dense reconcile and direct-resource jobs share the existing closed-calendar-day importer as their only owner; precise resource windows cannot emit a partial day under a complete-day identity. Every scheduled reconcile refreshes the latest globally closed provider date for the six fidelity resources, while the account's existing UTC-day gate retains the broader seven-day correction sweep across all configured resources. Sparse Junction `caffeine`, `water`, and `mindfulness_minutes` intervals retain one exact-start canonical measurement with start/end qualifiers and one compact per-record evidence part in addition to their existing daily sums. Their direct-resource jobs keep precise windows but emit intervals only, then use the canonical import receipt's provider-local day keys to refresh each closed corrected date through the calendar-day path; that path alone writes daily sums, so UTC-normalized execution windows cannot select the wrong provider date and partial set growth cannot freeze or conflict with the completed aggregate. Date-only fetches retain the complete provider-local calendar response rather than applying a UTC post-filter, and publication waits until that date has closed at UTC-12, the latest admitted civil offset. Daily sums and dense feature envelopes are complete collection facts, so they do not borrow a maximum child-row revision as a resource/day version; serialized complete-calendar imports reconcile non-empty set growth or removal through the canonical event spine, and exact replays collapse. An empty provider collection emits no aggregate tombstone and therefore does not delete a previously published fact. Explicit provider revisions remain attached only to stable sparse interval identities: one versioned interval may migrate its pre-versioning baseline, stale revisions cannot overwrite newer facts, and changed unversioned or equal-revision bodies fail closed without another state owner. Both seams fail closed at explicit response, source/day, and normalized-output bounds, preserve source/local-day provenance, and never write raw dense samples. Junction `note` is a sparse product input: the importer keeps normalized dated tags on a kind-stable neutral `note` spine with compact evidence and drops the free-text value before raw snapshot retention. Personal Patterns owns the narrower semantic projection and currently admits only a provenance-verified Oura `sauna` tag as an action factor. The neutral external-reference facet is distinct from the legacy per-tag intervention facets, so existing event kinds are never rewritten in place. Note-history policy generation 2 introduced one bounded semantic reimport for sources covered by the legacy intervention normalizer; query excludes the recognizable legacy rows while neutral replacements arrive. The fixed 180-day rollout advances note to generation 3 without changing those canonical semantics. The existing resource-job payload freezes the admitted generation across continuations and retries: unversioned persisted work remains v1, older work may still import safe facts, and only a terminal chain matching the current package policy can certify current coverage. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; other sparse or higher-sensitivity resources such as weight need a separate product/debug policy before any default ingestion or pruning.
 - Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction's contracts-owned policy admits bounded daily aggregates, compact UTC-hour features, sparse readings/events, note tags, and two bounded dense-resource projections; optional resources stay disabled until exact code-owned opt-in, and the production provider assembly owns one fixed 26-resource addition that member or environment overlays cannot alter. Grouped provider arrays never become canonical evidence, and the importer does not invent coverage metadata. Junction `note` keeps normalized dated tags on a kind-stable neutral note spine and drops free text before retention; its payload freezes the admitted history generation. `fall` remains a sparse alert fact. `electrocardiogram_voltage` reduces at most 100,000 one-day samples into 64 compact recording measurements; dedicated `workout_stream` processes at most 32 indexed workouts serially with 100,000 points each. Each feature uses its own deterministic measurement identity, so it cannot replace the richer ECG summary or workout session. Neither path retains waveform or stream arrays. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles.
 - Audio/video transcript outputs under `derived/inbox/**` are rebuildable and never canonical health facts. They may survive an earlier raw-media byte pass, but the owning inbound message-content pass deletes them at the receipt-plus-14-day deadline. PDFs, documents, CSVs, and other inspectable attachment files follow their existing raw-inbox lifecycle unless a user or importer creates durable promoted artifacts; they are not reclassified as message-body text by this policy.
 - `bank/library/**` is the stable health reference layer for durable shared entities such as biomarkers, domains, protocol variants, and source artifacts.
