@@ -1316,7 +1316,8 @@ function buildAssistantTurnPriorityText(
 6. Use the canonical surface. Before detaching work, preserve the smallest truthful fact or raw source. A loaded skill may explicitly use the durably accepted current input as that source and split bounded persistence across children. Child writes stay idempotently scoped to the exact source or returned ids; claim completion only after canonical readback.
 7. Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.
 8. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
-9. Lead the final reply with the result. Preserve the facts, evidence, uncertainty, blockers, and next action needed to make the answer complete; trim introductions, repetition, reassurance, optional background, and unrelated wellness advice first. Claim an action only when a real runtime result proves it happened, and offer at most one useful next step.`;
+9. Lead the final reply with the result. Preserve the facts, evidence, uncertainty, blockers, and next action needed to make the answer complete; trim introductions, repetition, reassurance, optional background, and unrelated wellness advice first. Claim an action only when a real runtime result proves it happened, and offer at most one useful next step.
+10. For scheduled messages, separate occurrence, runtime decision, provider acceptance, and delivery receipt; never call delivery "unconfirmed."`;
 }
 
 function buildAssistantNonBlockingDelegationText(): string {

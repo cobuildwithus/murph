@@ -4,7 +4,10 @@ import { notFound, redirect } from "next/navigation";
 import { BiomarkerOverview } from "@/src/components/biomarkers/biomarker-detail/biomarker-overview";
 import { resolveHealthCommonsBiomarkerOverview } from "@/src/lib/health-commons/biomarker-projections";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphPageMetadata,
+  MURPH_INDEXABLE_PAGE_ROBOTS,
+} from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
   params,
@@ -27,6 +30,9 @@ export async function generateMetadata({
   } as const;
 
   return createMurphPageMetadata({
+    alternates: {
+      canonical: `/biomarkers/${encodeURIComponent(biomarker.routeId)}`,
+    },
     description: biomarker.summary,
     openGraph: {
       images: [ogImage],
@@ -36,6 +42,7 @@ export async function generateMetadata({
     twitter: {
       images: [ogImage],
     },
+    robots: MURPH_INDEXABLE_PAGE_ROBOTS,
   });
 }
 

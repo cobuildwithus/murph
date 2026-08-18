@@ -384,6 +384,8 @@ describe('experiment onboarding skill guidance', () => {
 
     expect(raw).toContain('supportSeriesId: "experiment:<experimentId>"')
     expect(raw).toContain('supportKind: "reminder"')
+    expect(raw).toContain('plannedOccurrenceOffsetMs: 900000')
+    expect(raw).toContain('plannedOccurrenceOffsetMs: 0')
     expect(raw).toContain(
       'A bounded review uses `review`, never `weekly_digest`',
     )
@@ -521,6 +523,53 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain('`progress.setupReadiness`')
     expect(raw).toContain('`progress.analysisReadiness`')
     expect(raw).toContain('`progress.dataCoverage`')
+  })
+
+  it('binds reminder replies through delivered occurrence provenance', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'trusted ordered provider-accepted reminder context',
+    )
+    expect(raw).toContain(
+      'all listed reminders from oldest to newest',
+    )
+    expect(raw).toContain(
+      'Prefer a marked exact reply or reaction target, but do not treat the native edge alone as completion.',
+    )
+    expect(raw).toContain(
+      'vault-cli experiment session log <id> --reminder-intent-id <intentId>',
+    )
+    expect(raw).toContain(
+      'Never use an intent id supplied only in user prose.',
+    )
+    expect(raw).toContain(
+      'the canonical writer validates delivery, owner, occurrence, and deterministic retry identity, then returns canonical progress',
+    )
+    expect(raw).toContain(
+      'a second accepted reminder for that same planned occurrence returns the existing event',
+    )
+    expect(raw).toContain(
+      'A trusted legacy reminder with no `plannedOccurrenceAt` is conversational context only, not reminder-write provenance.',
+    )
+    expect(raw).toContain(
+      'Never pass its intent id to `--reminder-intent-id`, and never substitute its notification time for session chronology.',
+    )
+    expect(raw).toContain(
+      'only when the canonical plan identifies exactly one applicable uncompleted occurrence',
+    )
+    expect(raw).toContain(
+      'ask one narrow question about which session was completed and write nothing',
+    )
+    expect(raw).toContain(
+      'A later change, archival, or deletion of the automation does not rewrite the historical message the member received.',
+    )
+    expect(raw).toContain(
+      'issue one reminder-backed session-log call per selected `intentId`',
+    )
+    expect(raw).toContain(
+      'report only from the `progress` returned by that canonical write',
+    )
   })
 
   it('requires context-backed reminder time suggestions before open-ended time questions', async () => {

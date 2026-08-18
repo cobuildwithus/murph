@@ -106,6 +106,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/src/hooks/use-mobile", () => ({
+  useIsMobile: () => false,
+}));
+
 vi.mock("@/src/components/ui/dialog", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   const noopOpenChange: (open: boolean) => void = () => {};
@@ -776,7 +780,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /reconcil/iu);
   });
 
-  test("mounts an exact return without offers or an active purchase", async () => {
+  test("mounts an exact return controller without presenting payment status", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -797,8 +801,10 @@ describe("HostedBillingSettings", () => {
       ),
     );
 
-    assert.match(markup, /Confirming payment for you/);
-    assert.match(markup, /We’re confirming your payment/);
+    assert.match(markup, /AI usage/);
+    assert.doesNotMatch(markup, /Confirming payment for you/);
+    assert.doesNotMatch(markup, /We’re confirming your payment/);
+    assert.doesNotMatch(markup, /Check payment/);
     assert.doesNotMatch(
       markup,
       /Other checkout|unfinished checkout|another usage destination/i,
@@ -810,7 +816,7 @@ describe("HostedBillingSettings", () => {
     );
   });
 
-  test("offers Text Murph on a fulfilled top-up when a contact channel resolves", async () => {
+  test("keeps a fulfilled Settings top-up quiet beside the refreshed meter", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const fulfilledPurchase = {
@@ -827,36 +833,83 @@ describe("HostedBillingSettings", () => {
         usedPercent: 55,
       }),
       usageTopUpActivePurchase: fulfilledPurchase,
-      usageTopUpContactOptions: [{
-        href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-        kind: "text" as const,
-        label: "Messages",
-      }],
       usageTopUpInitialOpen: true,
     }));
 
-    assert.match(markup, /Usage added/);
-    assert.match(markup, /55% used/);
-    assert.match(markup, /45% remaining/);
-    assert.match(markup, /Text Murph/);
     assert.match(
       markup,
-      /sms:\+15555550100\?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage\./,
+      /class="sr-only" role="status"[^>]*>Usage added\. Your available usage has been updated\.<\/p>/,
     );
-    assert.match(markup, /aria-label="Text Murph in Messages"/);
+    assert.doesNotMatch(markup, /role="dialog"/);
+    assert.match(markup, /55% used/);
+    assert.match(markup, /45% remaining/);
+    assert.doesNotMatch(markup, /Text Murph/);
+  });
 
-    const withoutContactMarkup = renderToStaticMarkup(
+  test("keeps an inactive Settings return visible until its durable credit receipt is closed", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      purchaseId: "hucp_inactive_return",
+      status: "fulfilled",
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(
       createElement(HostedBillingSettings, {
-        payerMemberId: TEST_PAYER_MEMBER_ID,
         authenticated: true,
-        usageStatus: buildUsageStatus(),
-        usageTopUpActivePurchase: fulfilledPurchase,
-        usageTopUpInitialOpen: true,
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        usageStatus: {
+          generatedAt: "2026-07-10T12:00:00.000Z",
+          reason: "hosted_access_inactive",
+          recommendedAction: null,
+          status: "unavailable",
+        },
+        usageTopUpPurchaseReturn: {
+          kind: "success",
+          purchaseId: "hucp_inactive_return",
+        },
       }),
+      {
+        location: {
+          href: "https://example.test/settings?usagePurchase=hucp_inactive_return&usageCheckout=success",
+        },
+        requireButton: false,
+      },
     );
 
-    assert.match(withoutContactMarkup, /Usage added/);
-    assert.doesNotMatch(withoutContactMarkup, /Text Murph/);
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.equal(rendered.container.querySelector('[aria-label$="AI usage"]'), null);
+      assert.ok(rendered.container.querySelector('[role="dialog"]'));
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Usage added.*Your usage credit was added to your account\./s,
+      );
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /available usage has been updated|Text Murph|Purchase details/i,
+      );
+      assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+      const closeButton = [...rendered.container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Close");
+      assert.ok(closeButton);
+      await act(async () => {
+        closeButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+        await Promise.resolve();
+      });
+
+      assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("offers the same top-up primitive to a direct paid Edge member", async () => {

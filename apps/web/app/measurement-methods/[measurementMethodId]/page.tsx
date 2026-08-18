@@ -17,7 +17,10 @@ import {
   resolveHealthCommonsMeasurementMethodDetail,
   type MeasurementMethodPageModel,
 } from "@/src/lib/health-commons/measurement-method-detail";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphPageMetadata,
+  MURPH_INDEXABLE_PAGE_ROBOTS,
+} from "@/src/lib/site-metadata";
 
 export function generateStaticParams(): Array<{ measurementMethodId: string }> {
   return listHealthCommonsMeasurementMethodRoutes().map((measurementMethodId) => ({
@@ -38,11 +41,15 @@ export async function generateMetadata({
   }
 
   return createMurphPageMetadata({
+    alternates: {
+      canonical: `/measurement-methods/${encodeURIComponent(method.routeId)}`,
+    },
     description: method.summary,
     openGraph: {
       type: "article",
     },
     title: `${method.title} | Murph Measurement Methods`,
+    robots: MURPH_INDEXABLE_PAGE_ROBOTS,
   });
 }
 

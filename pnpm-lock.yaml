@@ -101,6 +101,9 @@ importers:
       frog:
         specifier: 1.1.0
         version: 1.1.0
+      pg:
+        specifier: 8.20.0
+        version: 8.20.0
       tsx:
         specifier: ^4.20.6
         version: 4.21.0
@@ -171,6 +174,9 @@ importers:
       '@murphai/hosted-local-harness':
         specifier: workspace:*
         version: link:../../packages/hosted-local-harness
+      '@murphai/operator-config':
+        specifier: workspace:*
+        version: link:../../packages/operator-config
       '@types/node':
         specifier: ^25.6.2
         version: 25.6.2

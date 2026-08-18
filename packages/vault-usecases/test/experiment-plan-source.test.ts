@@ -274,6 +274,77 @@ test('custom experiment starts still persist calendar-ful synthesized adherence 
   })
 })
 
+test('protocol daily frequency persists repeated explicit-occurrence adherence', async () => {
+  await withInitializedVault(async ({ services, vault }) => {
+    const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(
+      (entry) =>
+        entry.key ===
+        'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+    )
+    assert.ok(protocol?.protocol)
+
+    await services.core.startExperiment({
+      vault,
+      requestId: null,
+      payload: {
+        source: { kind: 'health_commons_protocol' },
+        experiment: {
+          slug: 'synthetic-micro-set-frequency',
+          title: 'Synthetic micro-set frequency',
+          startedOn: '2026-06-01',
+          status: 'active',
+        },
+        commonsProtocolRef: {
+          key: protocol.key,
+          pageRevisionId: protocol.revision.pageRevisionId,
+          runSpecRevisionId: protocol.revision.runSpecRevisionId,
+        },
+        effectiveProtocolSnapshot: {
+          effectiveSpecHash: protocol.revision.runSpecRevisionId,
+          doseSignature: 'Eight synthetic micro-sets daily',
+          modality: 'micro set',
+          frequency: { sessionsPerDay: 8 },
+          targetSessions: 2920,
+          minimumUsefulSessions: 2800,
+        },
+        runPlan: {
+          modality: 'Micro set',
+          targetSessions: 2920,
+          minimumUsefulSessions: 2800,
+          interventionStart: '2026-06-01',
+          interventionEnd: '2027-05-31',
+          schedule: {
+            kind: 'dailyLocal',
+            localTime: '09:30',
+            timeZone: 'America/New_York',
+          },
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: 'biomarker:resting-heart-rate',
+        },
+        onboarding: {
+          completedAt: '2026-05-31T12:00:00.000Z',
+        },
+      },
+    })
+
+    const runPlan = await readPersistedRunPlan({
+      services,
+      vault,
+      lookup: 'synthetic-micro-set-frequency',
+    })
+    const targets = runPlan.adherenceTargets as Array<Record<string, unknown>>
+    const target = requireRecord(targets[0], 'adherence target')
+    const calendar = requireRecord(target.calendar, 'adherence calendar')
+    const evidence = requireRecord(target.evidence, 'adherence evidence')
+
+    assert.equal(calendar.kind, 'daily')
+    assert.equal(calendar.targetCountPerDay, 8)
+    assert.equal(evidence.eventKind, 'intervention_session')
+    assert.equal(evidence.missing, 'missed_after_grace')
+  })
+})
+
 test('Health Commons protocol starts persist snapshot activity evidence in the adherence target', async () => {
   await withInitializedVault(async ({ services, vault }) => {
     const protocol = loadGeneratedHealthCommonsProtocolRunSpecs().protocols.find(

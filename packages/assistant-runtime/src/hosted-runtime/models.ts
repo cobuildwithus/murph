@@ -137,6 +137,7 @@ export interface HostedAssistantDeliveryOutcome {
 }
 
 export interface HostedMailboxEffect {
+  backgroundMaintenanceYielded?: true;
   conversationMetrics: HostedConversationWakeMetrics | null;
   deliveryIntentIds?: readonly string[] | null;
   nextWakeAt?: string | null;

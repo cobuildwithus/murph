@@ -185,6 +185,7 @@ export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input:
 }
 
 export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
+  deadlineMs?: number | null;
   generatedAt?: string | null;
   force?: boolean | null;
   maxAgeMs?: number | null;
@@ -204,10 +205,18 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
   }
 
   const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const configuredTimeoutMs =
+    input.timeoutMs ?? DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS;
+  const timeoutMs = input.deadlineMs === null || input.deadlineMs === undefined
+    ? configuredTimeoutMs
+    : Math.min(
+        configuredTimeoutMs,
+        Math.max(0, input.deadlineMs - Date.now()),
+      );
   const cancellation = createBrowserVaultRefreshCancellation({
     runtimeWakeSignal: input.runtimeWakeSignal ?? null,
     signal: input.signal ?? null,
-    timeoutMs: input.timeoutMs ?? DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS,
+    timeoutMs,
   });
 
   try {
