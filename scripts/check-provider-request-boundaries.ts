@@ -1,42 +1,31 @@
-import { readFile, readdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { parse, type ParserPlugin } from "@babel/parser";
-import {
-  isCallExpression,
-  isClassProperty,
-  isFunction,
-  isIdentifier,
-  isImportDeclaration,
-  isImportDefaultSpecifier,
-  isImportNamespaceSpecifier,
-  isImportSpecifier,
-  isMemberExpression,
-  isObjectExpression,
-  isObjectProperty,
-  isOptionalCallExpression,
-  isOptionalMemberExpression,
-  isReturnStatement,
-  isSpreadElement,
-  isStringLiteral,
-  isTSTypeAliasDeclaration,
-  isVariableDeclarator,
-  traverseFast,
-  type CallExpression,
-  type Expression,
-  type Node,
-  type OptionalCallExpression,
+import traverseImport, { type NodePath } from "@babel/traverse";
+import type {
+  CallExpression,
+  Expression,
+  File,
+  Node,
+  OptionalCallExpression,
 } from "@babel/types";
 
+type Traverse = typeof import("@babel/traverse").default;
+const traverseModule = traverseImport as unknown as Traverse | { default: Traverse };
+const traverse: Traverse = (
+  typeof traverseImport === "function"
+    ? traverseModule as Traverse
+    : (traverseModule as { default: Traverse }).default
+);
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const execFileAsync = promisify(execFile);
 
-export const providerRequestScanRoots = [
-  "apps",
-  "packages",
-  "scripts",
-] as const;
-
+export const providerRequestScanRoots = ["apps", "packages", "scripts"] as const;
 export const providerRequestSourceExtensions = [
   ".cjs",
   ".cts",
@@ -47,6 +36,7 @@ export const providerRequestSourceExtensions = [
   ".ts",
   ".tsx",
 ] as const;
+
 const sourceExtensions = new Set<string>(providerRequestSourceExtensions);
 const skippedDirectoryNames = new Set([
   ".next",
@@ -54,155 +44,407 @@ const skippedDirectoryNames = new Set([
   ".next-smoke",
   ".deploy",
   "__tests__",
+  "build",
   "coverage",
   "dist",
   "e2e",
   "fixtures",
   "generated",
   "node_modules",
+  "out",
   "test",
   "tests",
 ]);
-const providerModulePrefixes = [
-  "@composio/client",
-  "@elevenlabs/elevenlabs-js",
-  "@google-cloud/kms",
-  "@junction-api/sdk",
-  "@linqapp/sdk",
-  "@lob/lob-typescript-sdk",
-  "@onkernel/sdk",
-  "@temporalio/client",
-  "exa-js",
-  "google-auth-library",
-  "openai",
-  "resend",
-  "retell-sdk",
-  "stripe",
-] as const;
-const providerSourceMarkers = [
-  "@composio/client",
-  "@elevenlabs/elevenlabs-js",
-  "@google-cloud/kms",
-  "@junction-api/sdk",
-  "@linqapp/sdk",
-  "@lob/lob-typescript-sdk",
-  "@onkernel/sdk",
-  "@temporalio/client",
-  "exa-js",
-  "google-auth-library",
-  "openai",
-  "resend",
-  "retell-sdk",
-  "stripe",
-] as const;
-const knownProviderApiOrigins = [
+
+type RegisteredProviderRawHttpPolicy =
+  | "allow-no-verified-sdk"
+  | "require-official-sdk";
+
+interface RegisteredProviderBoundary {
+  readonly hosts: readonly string[];
+  readonly id: string;
+  readonly identifiers: readonly string[];
+  readonly label: string;
+  readonly rawHttpPolicy: RegisteredProviderRawHttpPolicy;
+  readonly sdkModules: readonly string[];
+}
+
+export const providerBoundaryRegistry = Object.freeze([
   {
-    originPattern: /https:\/\/api\.elevenlabs\.io(?=[:/?#]|$)/iu,
-    provider: "ElevenLabs",
+    hosts: ["backend.composio.dev"],
+    id: "composio",
+    identifiers: ["composio"],
+    label: "Composio",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@composio/client"],
   },
   {
-    originPattern: /https:\/\/api\.exa\.ai(?=[:/?#]|$)/iu,
-    provider: "Exa",
+    hosts: [
+      "api.us.junction.com",
+      "api.eu.junction.com",
+      "api.sandbox.us.junction.com",
+      "api.sandbox.eu.junction.com",
+    ],
+    id: "junction",
+    identifiers: ["junction"],
+    label: "Junction",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@junction-api/sdk"],
   },
   {
-    originPattern: /https:\/\/api(?:\.sandbox)?\.(?:eu|us)\.junction\.com(?=[:/?#]|$)/iu,
-    provider: "Junction",
+    hosts: ["api.linqapp.com"],
+    id: "linq",
+    identifiers: ["linq"],
+    label: "Linq",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@linqapp/sdk"],
   },
   {
-    originPattern: /https:\/\/api\.linqapp\.com(?=[:/?#]|$)/iu,
-    provider: "Linq",
+    hosts: [],
+    id: "kernel",
+    identifiers: ["kernel"],
+    label: "Kernel",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@onkernel/sdk"],
   },
   {
-    originPattern: /https:\/\/api\.lob\.com(?=[:/?#]|$)/iu,
-    provider: "Lob",
+    hosts: [],
+    id: "temporal",
+    identifiers: ["temporal"],
+    label: "Temporal",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@temporalio/client"],
   },
   {
-    originPattern: /https:\/\/api\.openai\.com(?=[:/?#]|$)/iu,
-    provider: "OpenAI",
+    hosts: ["api.openai.com"],
+    id: "openai",
+    identifiers: ["openai", "open-ai"],
+    label: "OpenAI",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["openai"],
   },
   {
-    originPattern: /https:\/\/api\.resend\.com(?=[:/?#]|$)/iu,
-    provider: "Resend",
+    hosts: ["api.retellai.com"],
+    id: "retell",
+    identifiers: ["retell"],
+    label: "Retell",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["retell-sdk"],
   },
   {
-    originPattern: /https:\/\/cloudkms\.googleapis\.com(?=[:/?#]|$)/iu,
-    provider: "Google Cloud KMS",
+    hosts: ["api.stripe.com"],
+    id: "stripe",
+    identifiers: ["stripe"],
+    label: "Stripe",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["stripe"],
   },
   {
-    originPattern: /https:\/\/iamcredentials\.googleapis\.com(?=[:/?#]|$)/iu,
-    provider: "Google Cloud IAM Credentials",
+    hosts: ["api.agentmail.to"],
+    id: "agentmail",
+    identifiers: ["agentmail", "agent-mail"],
+    label: "AgentMail",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["agentmail"],
   },
   {
-    originPattern: /https:\/\/sts\.googleapis\.com(?=[:/?#]|$)/iu,
-    provider: "Google Cloud STS",
+    hosts: ["api.resend.com"],
+    id: "resend",
+    identifiers: ["resend"],
+    label: "Resend",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["resend"],
   },
-] as const;
-const knownProviderApiHostMarkers = [
-  "api.elevenlabs.io",
-  "api.exa.ai",
-  "api.eu.junction.com",
-  "api.linqapp.com",
-  "api.lob.com",
-  "api.openai.com",
-  "api.resend.com",
-  "api.sandbox.eu.junction.com",
-  "api.sandbox.us.junction.com",
-  "api.us.junction.com",
-  "cloudkms.googleapis.com",
-  "iamcredentials.googleapis.com",
-  "sts.googleapis.com",
-] as const;
-const providerSdkModulePrefixesByProvider: Readonly<Record<string, readonly string[]>> = {
-  ElevenLabs: ["@elevenlabs/elevenlabs-js"],
-  Exa: ["exa-js"],
-  Junction: ["@junction-api/sdk"],
-  Linq: ["@linqapp/sdk"],
-  Lob: ["@lob/lob-typescript-sdk"],
-  OpenAI: ["openai"],
-  Resend: ["resend"],
-  "Google Cloud IAM Credentials": ["google-auth-library"],
-  "Google Cloud KMS": ["@google-cloud/kms", "google-auth-library"],
-  "Google Cloud STS": ["google-auth-library"],
-};
-const rawProviderHttpAllowlistReasons = new Set([
-  "linq-presigned-bytes",
-  "sdk-transport-adapter",
-]);
-const rawProviderHttpAllowlistPattern =
-  /^\s*\/\/\s*provider-request-boundary-allow-next-line:\s*([a-z0-9-]+)\s*$/u;
-const providerClientFactoryNames = new Set([
-  "requireHostedStripeApi",
-]);
-const providerRequestTypeNamePattern =
-  /(?:ConnectionOptions|Create(?:Batch|Email)(?:Request)?Options|MediaPart|MessageContent|Params?(?:NonStreaming|Streaming)?|RequestOptions|TextPart)$/u;
+  {
+    hosts: ["api.elevenlabs.io"],
+    id: "elevenlabs",
+    identifiers: ["elevenlabs", "eleven-labs"],
+    label: "ElevenLabs",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@elevenlabs/elevenlabs-js"],
+  },
+  {
+    hosts: ["api.exa.ai"],
+    id: "exa",
+    identifiers: ["exa"],
+    label: "Exa",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["exa-js"],
+  },
+  {
+    hosts: ["api.lob.com"],
+    id: "lob",
+    identifiers: ["lob"],
+    label: "Lob",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@lob/lob-typescript-sdk"],
+  },
+  {
+    hosts: ["cloudkms.googleapis.com"],
+    id: "google-cloud-kms",
+    identifiers: ["cloudkms", "cloud-kms", "gcp-kms"],
+    label: "Google Cloud KMS",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@google-cloud/kms"],
+  },
+  {
+    hosts: ["sts.googleapis.com"],
+    id: "google-sts",
+    identifiers: ["gcp-sts", "google-sts"],
+    label: "Google STS",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["google-auth-library"],
+  },
+  {
+    hosts: ["iamcredentials.googleapis.com"],
+    id: "google-iam-credentials",
+    identifiers: ["iamcredentials", "iam-credentials"],
+    label: "Google IAM Credentials",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@google-cloud/iam-credentials"],
+  },
+  {
+    hosts: ["api.x.ai"],
+    id: "xai",
+    identifiers: ["xai", "x-ai"],
+    label: "xAI",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: [],
+  },
+  {
+    hosts: ["api.telegram.org"],
+    id: "telegram",
+    identifiers: ["telegram"],
+    label: "Telegram",
+    rawHttpPolicy: "allow-no-verified-sdk",
+    sdkModules: [],
+  },
+  {
+    hosts: ["api.ouraring.com"],
+    id: "oura",
+    identifiers: ["oura"],
+    label: "Oura",
+    rawHttpPolicy: "allow-no-verified-sdk",
+    sdkModules: [],
+  },
+  {
+    hosts: ["api.prod.whoop.com"],
+    id: "whoop",
+    identifiers: ["whoop"],
+    label: "Whoop",
+    rawHttpPolicy: "allow-no-verified-sdk",
+    sdkModules: [],
+  },
+  {
+    hosts: ["www.strava.com"],
+    id: "strava",
+    identifiers: ["strava"],
+    label: "Strava",
+    rawHttpPolicy: "allow-no-verified-sdk",
+    sdkModules: [],
+  },
+] satisfies readonly RegisteredProviderBoundary[]);
+
+type ApprovedRawHttpOwnerReason =
+  | "existing-provider-boundary"
+  | "official-sdk-fetch-hook"
+  | "presigned-byte-transfer"
+  | "provider-sdk-override"
+  | "xai-x-search";
+
+interface ApprovedRawHttpOwner {
+  readonly ownerName: string;
+  readonly providerIds: readonly string[];
+  readonly reason: ApprovedRawHttpOwnerReason;
+  readonly relativePath: string;
+  readonly requiredRuntimeModule?: string;
+}
+
+// This is the policy surface. Production code owns request validation; the
+// guard owns only where a raw transport capability may exist.
+export const approvedProviderRawHttpOwners = Object.freeze([
+  {
+    ownerName: "fetchHostedLinqAttachmentDownloadUrl",
+    providerIds: ["linq"],
+    reason: "existing-provider-boundary",
+    relativePath: "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
+  },
+  {
+    ownerName: "hostedLocalFetch",
+    providerIds: ["linq"],
+    reason: "existing-provider-boundary",
+    relativePath: "packages/hosted-local-harness/src/dev-hosted-local/linq-webhook-tunnel.ts",
+  },
+  {
+    ownerName: "fetchLinqWebhookSubscriptions",
+    providerIds: ["linq"],
+    reason: "existing-provider-boundary",
+    relativePath: "packages/hosted-local-harness/src/dev-hosted-local/linq-webhook-tunnel.ts",
+  },
+  {
+    ownerName: "resolveDefaultLinqFetch",
+    providerIds: ["linq"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "packages/operator-config/src/linq-runtime.ts",
+    requiredRuntimeModule: "@linqapp/sdk",
+  },
+  {
+    ownerName: "putHostedContainerDirectR2SmokePayload",
+    providerIds: [],
+    reason: "presigned-byte-transfer",
+    relativePath: "apps/cloudflare/src/container-entrypoint.ts",
+  },
+  {
+    ownerName: "fetchMurphHostedLinqContactCardVcfPhoto",
+    providerIds: ["linq"],
+    reason: "presigned-byte-transfer",
+    relativePath: "apps/web/src/lib/hosted-onboarding/linq-contact-card.ts",
+  },
+  {
+    ownerName: "sendHostedLinqAttachmentMessage",
+    providerIds: ["linq"],
+    reason: "presigned-byte-transfer",
+    relativePath: "apps/web/src/lib/hosted-onboarding/linq-client.ts",
+  },
+  {
+    ownerName: "uploadLinqAttachmentBytes",
+    providerIds: ["linq"],
+    reason: "presigned-byte-transfer",
+    relativePath: "packages/operator-config/src/linq-runtime.ts",
+  },
+  {
+    ownerName: "downloadHostedLinqAttachmentBytes",
+    providerIds: ["linq"],
+    reason: "presigned-byte-transfer",
+    relativePath: "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
+  },
+  {
+    ownerName: "executeAskGrokTool",
+    providerIds: ["xai"],
+    reason: "xai-x-search",
+    relativePath: "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
+  },
+  {
+    ownerName: "createOperatorLinqFetch",
+    providerIds: ["linq"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "apps/cloudflare/src/operator-alert/linq.ts",
+    requiredRuntimeModule: "@linqapp/sdk",
+  },
+  {
+    ownerName: "createBoundedComposioFetch",
+    providerIds: ["composio"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "apps/web/src/lib/connected-apps/composio.ts",
+    requiredRuntimeModule: "@composio/client",
+  },
+  {
+    ownerName: "createHostedLinqFirstContactAdmissionOpenAiFetch",
+    providerIds: ["openai"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "apps/web/src/lib/hosted-onboarding/linq-first-contact-admission.ts",
+    requiredRuntimeModule: "openai",
+  },
+  {
+    ownerName: "requestJunctionResource",
+    providerIds: ["junction"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "apps/web/src/lib/labs/junction.ts",
+    requiredRuntimeModule: "@junction-api/sdk",
+  },
+  {
+    ownerName: "createBoundedLinqApiFetch",
+    providerIds: ["linq"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "apps/web/src/lib/linq/api.ts",
+    requiredRuntimeModule: "@linqapp/sdk",
+  },
+  {
+    ownerName: "createLobFetchAdapter",
+    providerIds: ["lob"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "apps/web/src/lib/physical-notes/lob-runtime.ts",
+    requiredRuntimeModule: "@lob/lob-typescript-sdk",
+  },
+  {
+    ownerName: "createTelegramElevenLabsFetchAdapter",
+    providerIds: ["elevenlabs"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "packages/assistant-engine/src/assistant/channels/runtime.ts",
+    requiredRuntimeModule: "@murphai/operator-config/elevenlabs-runtime",
+  },
+  {
+    ownerName: "createOpenAiImageSdkFetch",
+    providerIds: ["openai"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "packages/assistant-engine/src/assistant-codex/openai-image-generation.ts",
+    requiredRuntimeModule: "openai",
+  },
+  {
+    ownerName: "requestSdkResource",
+    providerIds: ["junction"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "packages/device-syncd/src/providers/junction-client.ts",
+    requiredRuntimeModule: "@junction-api/sdk/activity",
+  },
+  {
+    ownerName: "createElevenLabsSdkFetch",
+    providerIds: ["elevenlabs"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "packages/operator-config/src/elevenlabs-runtime.ts",
+    requiredRuntimeModule: "@elevenlabs/elevenlabs-js",
+  },
+  {
+    ownerName: "createLinqSdkFetch",
+    providerIds: ["linq"],
+    reason: "official-sdk-fetch-hook",
+    relativePath: "packages/operator-config/src/linq-runtime.ts",
+    requiredRuntimeModule: "@linqapp/sdk",
+  },
+  {
+    ownerName: "fetchRequest",
+    providerIds: ["resend"],
+    reason: "provider-sdk-override",
+    relativePath: "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts",
+    requiredRuntimeModule: "resend",
+  },
+  {
+    ownerName: "request",
+    providerIds: ["exa"],
+    reason: "provider-sdk-override",
+    relativePath: "packages/cli/src/research-scout-client.ts",
+    requiredRuntimeModule: "exa-js",
+  },
+  {
+    ownerName: "fetchAuthorizedProviderUpstream",
+    providerIds: ["elevenlabs", "exa", "linq", "openai", "xai"],
+    reason: "existing-provider-boundary",
+    relativePath: "apps/cloudflare/src/runner-egress-intercept.ts",
+  },
+  {
+    ownerName: "requestLinqApi",
+    providerIds: ["linq"],
+    reason: "existing-provider-boundary",
+    relativePath: "scripts/linq-typing-repro.ts",
+  },
+  {
+    ownerName: "resolveJunctionUser",
+    providerIds: ["junction"],
+    reason: "existing-provider-boundary",
+    relativePath: "scripts/native-ios-hosted-e2e-identity.mjs",
+  },
+  {
+    ownerName: "deleteJunctionUser",
+    providerIds: ["junction"],
+    reason: "existing-provider-boundary",
+    relativePath: "scripts/native-ios-hosted-e2e-identity.mjs",
+  },
+] satisfies readonly ApprovedRawHttpOwner[]);
 
 type ProviderRequestBoundaryViolationKind =
-  | "object-assign"
-  | "object-spread"
-  | "raw-provider-http"
-  | "untyped-request-object";
-
-interface VariableBinding {
-  readonly identifierStart: number;
-  readonly initializer: Expression;
-  readonly scopeEnd: number;
-  readonly scopeStart: number;
-  readonly start: number;
-  readonly typeAnnotation: string | null;
-}
-
-interface LexicalScope {
-  readonly end: number;
-  readonly start: number;
-}
-
-interface ProviderSourceAnalysis {
-  readonly clientNames: ReadonlySet<string>;
-  readonly methodAliases: ReadonlyMap<string, string>;
-  readonly providerModules: ReadonlySet<string>;
-  readonly requestTypeNames: ReadonlySet<string>;
-  readonly typeRoots: ReadonlySet<string>;
-}
+  | "approved-owner-overflow"
+  | "invalid-approved-owner"
+  | "raw-provider-http";
 
 export interface ProviderRequestBoundaryViolation {
   readonly boundary: string;
@@ -212,220 +454,182 @@ export interface ProviderRequestBoundaryViolation {
   readonly line: number;
 }
 
+interface RawTransportCall {
+  readonly urlPath: NodePath<Node> | null;
+}
+
+const lowLevelTransportModules = new Set([
+  "cross-fetch",
+  "http",
+  "https",
+  "node-fetch",
+  "node:http",
+  "node:https",
+  "undici",
+]);
+const lowLevelTransportMethods = new Set(["fetch", "get", "request"]);
+const transparentExpressionTypes = new Set([
+  "ParenthesizedExpression",
+  "TSAsExpression",
+  "TSInstantiationExpression",
+  "TSNonNullExpression",
+  "TSSatisfiesExpression",
+  "TypeCastExpression",
+]);
+const potentialRawTransportPattern = String.raw`\bfetch(?:Impl|Implementation)?\b|["'](?:node:)?https?["']|["'](?:cross-fetch|node-fetch|undici)["']`;
+const potentialRawTransportRegex = new RegExp(potentialRawTransportPattern, "u");
+
 export async function collectProviderRequestBoundaryViolations(): Promise<
   ProviderRequestBoundaryViolation[]
 > {
-  const violations: ProviderRequestBoundaryViolation[] = [];
-  for (const root of providerRequestScanRoots) {
-    await scanDirectory(root, violations);
-  }
-  return violations;
+  const sourceFiles = await listProviderRequestSourceFiles();
+  const violations = await mapWithConcurrency(sourceFiles, 16, async (relativePath) => {
+    let contents: string;
+    try {
+      contents = await readFile(path.join(repoRoot, relativePath), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    return findProviderRequestBoundaryViolations(relativePath, contents);
+  });
+  return violations.flat().sort(compareViolations);
 }
 
 export function findProviderRequestBoundaryViolations(
   relativePath: string,
   contents: string,
 ): ProviderRequestBoundaryViolation[] {
-  if (
-    !containsProviderSourceMarker(contents) &&
-    !containsKnownProviderApiOrigin(contents)
-  ) {
+  if (!potentialRawTransportRegex.test(contents)) {
     return [];
   }
 
+  const normalizedPath = normalizeRepoPath(relativePath);
   const sourceFile = parse(contents, {
     allowAwaitOutsideFunction: true,
     allowReturnOutsideFunction: true,
     allowUndeclaredExports: true,
     attachComment: false,
-    plugins: parserPlugins(relativePath),
-    sourceFilename: relativePath,
+    plugins: parserPlugins(normalizedPath),
+    sourceFilename: normalizedPath,
     sourceType: "unambiguous",
   });
-  const analysis = analyzeProviderSource(sourceFile, contents);
-  if (
-    analysis.clientNames.size === 0 &&
-    analysis.requestTypeNames.size === 0 &&
-    analysis.typeRoots.size === 0
-  ) {
-    return [];
-  }
+  const runtimeModules = collectRuntimeModules(sourceFile);
+  const importedProviderIds = collectImportedProviderIds(runtimeModules);
+  const approvalCounts = new Map<ApprovedRawHttpOwner, number>();
+  const violations = new Map<string, ProviderRequestBoundaryViolation>();
 
-  const bindings = collectVariableBindings(sourceFile, contents);
-  const violationsByKey = new Map<string, ProviderRequestBoundaryViolation>();
+  traverse(sourceFile, {
+    CallExpression(callPath) {
+      inspectCall(callPath);
+    },
+    OptionalCallExpression(callPath) {
+      inspectCall(callPath);
+    },
+  });
 
-  traverseFast(sourceFile, (node) => {
-    const target = readRawProviderHttpTarget(node);
-    if (!target) {
+  return [...violations.values()].sort(compareViolations);
+
+  function inspectCall(
+    callPath: NodePath<CallExpression | OptionalCallExpression>,
+  ): void {
+    const rawCall = readRawTransportCall(callPath, contents);
+    if (!rawCall || isStaticSameOrigin(rawCall.urlPath, new Set())) {
       return;
     }
-    const allowlistReason = readRawProviderHttpAllowlistReason(
-      contents,
-      node.start ?? 0,
+
+    const ownerNames = readCallableNames(callPath);
+    const ownerName = ownerNames[0] ?? "<module>";
+    const approval = approvedProviderRawHttpOwners.find(
+      (candidate) =>
+        candidate.relativePath === normalizedPath &&
+        ownerNames.includes(candidate.ownerName),
     );
-    const provider = resolveKnownProviderApiOrigin({
-      before: node.start ?? Number.MAX_SAFE_INTEGER,
-      bindings,
-      node: target,
-      resolvingBindings: new Set(),
+    const providerIds = collectCallProviderIds({
+      callPath,
+      contents,
+      importedProviderIds,
+      ownerName,
+      relativePath: normalizedPath,
+      urlPath: rawCall.urlPath,
     });
-    if (allowlistReason) {
-      if (isAllowedRawProviderHttp({
-        analysis,
-        reason: allowlistReason,
-        provider,
-        target,
-      })) {
+    const requiredProviderIds = providerIds.filter(
+      (providerId) => providerById(providerId)?.rawHttpPolicy === "require-official-sdk",
+    );
+
+    if (approval) {
+      const count = (approvalCounts.get(approval) ?? 0) + 1;
+      approvalCounts.set(approval, count);
+      if (count > 1) {
+        recordViolation({
+          boundary: `${approval.reason} owner ${ownerName}`,
+          kind: "approved-owner-overflow",
+          node: callPath.node,
+        });
         return;
       }
-      recordViolation(
-        {
-          boundary: `Invalid provider HTTP exception ${allowlistReason}`,
-          contents,
-          relativePath,
-          violationsByKey,
-        },
-        node,
-        "raw-provider-http",
-      );
-      return;
-    }
-    if (!provider) {
-      return;
-    }
-    recordViolation(
-      {
-        boundary: `Direct ${provider} provider HTTP`,
-        contents,
-        relativePath,
-        violationsByKey,
-      },
-      node,
-      "raw-provider-http",
-    );
-  });
-
-  traverseFast(sourceFile, (node) => {
-    if (!isProviderRequestCall(node, analysis)) {
-      return;
-    }
-
-    const boundary = readProviderBoundaryName(node, analysis, contents);
-    for (const argument of node.arguments) {
-      if (argument.type === "ArgumentPlaceholder") {
-        continue;
-      }
-      collectUnsafeProviderRequestComposition({
-        bindings,
-        boundary,
-        contents,
-        node: argument,
-        relativePath,
-        resolvingBindings: new Set(),
-        violationsByKey,
-      });
-      recordUntypedRequestObject({
-        argument,
-        bindings,
-        boundary,
-        contents,
-        relativePath,
-        violationsByKey,
-      });
-    }
-  });
-
-  traverseFast(sourceFile, (node) => {
-    if (isFunction(node) && node.returnType) {
-      const returnType = readNodeText(node.returnType, contents);
-      if (isProviderRequestTypeText(returnType, analysis)) {
-        const boundary = `Provider-typed request builder ${readFunctionName(node)}`;
-        if (node.body.type !== "BlockStatement") {
-          collectUnsafeProviderRequestComposition({
-            bindings,
-            boundary,
-            contents,
-            node: node.body,
-            relativePath,
-            resolvingBindings: new Set(),
-            violationsByKey,
-          });
-          return;
-        }
-        traverseFast(node.body, (child) => {
-          if (isFunction(child)) {
-            return traverseFast.skip;
-          }
-          if (isReturnStatement(child) && child.argument) {
-            collectUnsafeProviderRequestComposition({
-              bindings,
-              boundary,
-              contents,
-              node: child.argument,
-              relativePath,
-              resolvingBindings: new Set(),
-              violationsByKey,
-            });
-          }
+      if (
+        approval.requiredRuntimeModule &&
+        !hasRuntimeModule(runtimeModules, approval.requiredRuntimeModule)
+      ) {
+        recordViolation({
+          boundary: `${approval.reason} owner ${ownerName}`,
+          kind: "invalid-approved-owner",
+          node: callPath.node,
         });
+        return;
       }
+    }
+
+    const uncoveredProviderIds = requiredProviderIds.filter(
+      (providerId) => !approval?.providerIds.includes(providerId),
+    );
+    if (uncoveredProviderIds.length === 0) {
       return;
     }
+    const labels = uncoveredProviderIds
+      .map((providerId) => providerById(providerId)?.label ?? providerId)
+      .sort((left, right) => left.localeCompare(right));
+    recordViolation({
+      boundary: `Direct ${labels.join(" / ")} provider HTTP in ${ownerName}`,
+      kind: "raw-provider-http",
+      node: callPath.node,
+    });
+  }
 
-    if (
-      isVariableDeclarator(node) &&
-      isIdentifier(node.id) &&
-      node.id.typeAnnotation &&
-      node.init &&
-      isProviderRequestTypeText(
-        readNodeText(node.id.typeAnnotation, contents),
-        analysis,
-      )
-    ) {
-      collectUnsafeProviderRequestComposition({
-        bindings,
-        boundary: `Provider-typed request object ${node.id.name}`,
-        contents,
-        node: node.init,
-        relativePath,
-        resolvingBindings: new Set(),
-        violationsByKey,
-      });
+  function recordViolation(input: {
+    readonly boundary: string;
+    readonly kind: ProviderRequestBoundaryViolationKind;
+    readonly node: Node;
+  }): void {
+    const start = input.node.start ?? 0;
+    const key = `${input.kind}:${start}`;
+    if (violations.has(key)) {
       return;
     }
-
-    if (
-      node.type === "TSSatisfiesExpression" &&
-      isProviderRequestTypeText(readNodeText(node.typeAnnotation, contents), analysis)
-    ) {
-      collectUnsafeProviderRequestComposition({
-        bindings,
-        boundary: "Provider-typed satisfies expression",
-        contents,
-        node: node.expression,
-        relativePath,
-        resolvingBindings: new Set(),
-        violationsByKey,
-      });
-    }
-  });
-
-  return [...violationsByKey.values()].sort((left, right) =>
-    left.line - right.line || left.column - right.column ||
-    left.kind.localeCompare(right.kind)
-  );
+    const position = readLineAndColumn(contents, start);
+    violations.set(key, {
+      boundary: input.boundary,
+      column: position.column,
+      filePath: normalizedPath,
+      kind: input.kind,
+      line: position.line,
+    });
+  }
 }
 
 export async function main(): Promise<void> {
   const violations = await collectProviderRequestBoundaryViolations();
   if (violations.length === 0) {
-    console.log("Provider request boundaries use explicit typed object construction.");
+    console.log("External provider raw HTTP is confined to registered owners.");
     return;
   }
 
   throw new Error([
-    "Found unsafe provider request object construction.",
-    "Use an official SDK request type, initialize visible fields directly, and assign optional fields individually.",
+    "Found external provider request boundary violations.",
+    "Use the official SDK. If raw transport is unavoidable, isolate one call in an exact audited owner and register that owner here.",
     ...violations.map(
       (violation) =>
         `- ${violation.filePath}:${violation.line}:${violation.column} ${formatViolationKind(violation.kind)} at \`${violation.boundary}\``,
@@ -433,840 +637,602 @@ export async function main(): Promise<void> {
   ].join("\n"));
 }
 
-function analyzeProviderSource(sourceFile: Node, contents: string): ProviderSourceAnalysis {
-  const clientNames = new Set<string>();
-  const providerModules = new Set<string>();
-  const requestTypeNames = new Set<string>();
-  const typeRoots = new Set<string>();
-
-  traverseFast(sourceFile, (node) => {
-    if (!isImportDeclaration(node) || !isProviderModule(node.source.value)) {
-      return;
-    }
-    providerModules.add(node.source.value);
-    for (const specifier of node.specifiers) {
-      const localName = specifier.local.name;
-      typeRoots.add(localName);
-      if (
-        isImportSpecifier(specifier) &&
-        providerRequestTypeNamePattern.test(readImportedName(specifier))
-      ) {
-        requestTypeNames.add(localName);
-      }
-      const typeOnly = node.importKind === "type" ||
-        (isImportSpecifier(specifier) && specifier.importKind === "type");
-      if (
-        !typeOnly &&
-        (
-          isImportDefaultSpecifier(specifier) ||
-          isImportNamespaceSpecifier(specifier) ||
-          isImportSpecifier(specifier)
-        )
-      ) {
-        clientNames.add(localName);
-        clientNames.add(lowercaseInitial(localName));
-      }
-    }
-  });
-
-  clientNames.add("stripe");
-  typeRoots.add("Stripe");
-
-  const typeAliases: Array<{ readonly name: string; readonly text: string }> = [];
-  traverseFast(sourceFile, (node) => {
-    if (isTSTypeAliasDeclaration(node)) {
-      typeAliases.push({
-        name: node.id.name,
-        text: readNodeText(node.typeAnnotation, contents),
-      });
-    }
-  });
-  let aliasesChanged = true;
-  while (aliasesChanged) {
-    aliasesChanged = false;
-    for (const alias of typeAliases) {
-      if (
-        !requestTypeNames.has(alias.name) &&
-        isProviderRequestTypeText(alias.text, {
-          requestTypeNames,
-          typeRoots,
-        })
-      ) {
-        requestTypeNames.add(alias.name);
-        aliasesChanged = true;
-      }
-    }
-  }
-
-  traverseFast(sourceFile, (node) => {
-    if (isVariableDeclarator(node) && isIdentifier(node.id)) {
-      const declaredType = node.id.typeAnnotation
-        ? readNodeText(node.id.typeAnnotation, contents)
-        : "";
-      const initializer = node.init ? readNodeText(node.init, contents) : "";
-      if (
-        typeTextIsProviderClient(declaredType, typeRoots) ||
-        textReferencesProviderClient(initializer, clientNames)
-      ) {
-        clientNames.add(node.id.name);
-      }
-      return;
-    }
-
-    if (
-      isClassProperty(node) &&
-      isIdentifier(node.key) &&
-      node.typeAnnotation &&
-      typeTextIsProviderClient(
-        readNodeText(node.typeAnnotation, contents),
-        typeRoots,
-      )
-    ) {
-      clientNames.add(node.key.name);
-      return;
-    }
-
-    if (isFunction(node)) {
-      for (const parameter of node.params) {
-        if (
-          isIdentifier(parameter) &&
-          parameter.typeAnnotation &&
-          typeTextIsProviderClient(
-            readNodeText(parameter.typeAnnotation, contents),
-            typeRoots,
-          )
-        ) {
-          clientNames.add(parameter.name);
-        }
-      }
-    }
-  });
-
-  const methodAliases = new Map<string, string>();
-  traverseFast(sourceFile, (node) => {
-    if (
-      !isVariableDeclarator(node) ||
-      !isIdentifier(node.id) ||
-      !node.init ||
-      (!isMemberExpression(node.init) && !isOptionalMemberExpression(node.init))
-    ) {
-      return;
-    }
-    const pathParts = readMemberPath(node.init);
-    if (pathParts && isProviderMemberPath(pathParts, clientNames)) {
-      methodAliases.set(node.id.name, readNodeText(node.init, contents));
-    }
-  });
-
-  return {
-    clientNames,
-    methodAliases,
-    providerModules,
-    requestTypeNames,
-    typeRoots,
-  };
-}
-
-function collectVariableBindings(
-  sourceFile: Node,
-  contents: string,
-): Map<string, VariableBinding[]> {
-  const scopes = collectLexicalScopes(sourceFile);
-  const bindings = new Map<string, VariableBinding[]>();
-  traverseFast(sourceFile, (node) => {
-    if (!isVariableDeclarator(node) || !isIdentifier(node.id) || !node.init) {
-      return;
-    }
-    const current = bindings.get(node.id.name) ?? [];
-    const scope = findInnermostLexicalScope(scopes, node.start ?? 0);
-    current.push({
-      identifierStart: node.id.start ?? node.start ?? 0,
-      initializer: node.init,
-      scopeEnd: scope.end,
-      scopeStart: scope.start,
-      start: node.start ?? 0,
-      typeAnnotation: node.id.typeAnnotation
-        ? readNodeText(node.id.typeAnnotation, contents)
-        : null,
-    });
-    bindings.set(node.id.name, current);
-  });
-  return bindings;
-}
-
-function collectLexicalScopes(sourceFile: Node): LexicalScope[] {
-  const scopes: LexicalScope[] = [];
-  traverseFast(sourceFile, (node) => {
-    if (
-      node.type === "Program" ||
-      node.type === "BlockStatement" ||
-      node.type === "CatchClause" ||
-      node.type === "ForInStatement" ||
-      node.type === "ForOfStatement" ||
-      node.type === "ForStatement" ||
-      node.type === "StaticBlock" ||
-      node.type === "SwitchStatement" ||
-      node.type === "TSModuleBlock"
-    ) {
-      scopes.push({
-        end: node.end ?? Number.MAX_SAFE_INTEGER,
-        start: node.start ?? 0,
-      });
-    }
-  });
-  return scopes;
-}
-
-function findInnermostLexicalScope(
-  scopes: readonly LexicalScope[],
-  position: number,
-): LexicalScope {
-  let resolved: LexicalScope = {
-    end: Number.MAX_SAFE_INTEGER,
-    start: 0,
-  };
-  for (const scope of scopes) {
-    if (
-      scope.start <= position &&
-      position <= scope.end &&
-      scope.start >= resolved.start &&
-      scope.end <= resolved.end
-    ) {
-      resolved = scope;
-    }
-  }
-  return resolved;
-}
-
-function collectUnsafeProviderRequestComposition(input: {
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly boundary: string;
-  readonly contents: string;
-  readonly node: Node;
-  readonly relativePath: string;
-  readonly resolvingBindings: ReadonlySet<string>;
-  readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
-}): void {
-  const { node } = input;
-
-  if (isIdentifier(node)) {
-    const binding = resolveBinding(input.bindings, node.name, node.start ?? Number.MAX_SAFE_INTEGER);
-    if (!binding || input.resolvingBindings.has(node.name)) {
-      return;
-    }
-    const resolvingBindings = new Set(input.resolvingBindings);
-    resolvingBindings.add(node.name);
-    collectUnsafeProviderRequestComposition({
-      ...input,
-      node: binding.initializer,
-      resolvingBindings,
-    });
-    return;
-  }
-
-  if (isObjectExpression(node)) {
-    for (const property of node.properties) {
-      if (isSpreadElement(property)) {
-        recordViolation(input, property, "object-spread");
-        collectUnsafeProviderRequestComposition({ ...input, node: property.argument });
-        continue;
-      }
-      if (isObjectProperty(property)) {
-        collectUnsafeProviderRequestComposition({ ...input, node: property.value });
-      }
-    }
-    return;
-  }
-
-  if (
-    (isCallExpression(node) || isOptionalCallExpression(node)) &&
-    isObjectAssignCall(node)
-  ) {
-    recordViolation(input, node, "object-assign");
-    for (const argument of node.arguments) {
-      if (argument.type !== "ArgumentPlaceholder") {
-        collectUnsafeProviderRequestComposition({ ...input, node: argument });
-      }
-    }
-    return;
-  }
-
-  switch (node.type) {
-    case "ArrayExpression":
-      for (const element of node.elements) {
-        if (element) {
-          collectUnsafeProviderRequestComposition({
-            ...input,
-            node: isSpreadElement(element) ? element.argument : element,
-          });
-        }
-      }
-      return;
-    case "AssignmentExpression":
-      collectUnsafeProviderRequestComposition({ ...input, node: node.right });
-      return;
-    case "ConditionalExpression":
-      collectUnsafeProviderRequestComposition({ ...input, node: node.consequent });
-      collectUnsafeProviderRequestComposition({ ...input, node: node.alternate });
-      return;
-    case "LogicalExpression":
-      collectUnsafeProviderRequestComposition({ ...input, node: node.left });
-      collectUnsafeProviderRequestComposition({ ...input, node: node.right });
-      return;
-    case "SequenceExpression":
-      for (const expression of node.expressions) {
-        collectUnsafeProviderRequestComposition({ ...input, node: expression });
-      }
-      return;
-    case "TSAsExpression":
-    case "TSInstantiationExpression":
-    case "TSNonNullExpression":
-    case "TSSatisfiesExpression":
-    case "TypeCastExpression":
-      collectUnsafeProviderRequestComposition({ ...input, node: node.expression });
-      return;
-    default:
-      return;
-  }
-}
-
-function recordUntypedRequestObject(input: {
-  readonly argument: Node;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly boundary: string;
-  readonly contents: string;
-  readonly relativePath: string;
-  readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
-}): void {
-  const argument = unwrapExpression(input.argument);
-  if (!isIdentifier(argument)) {
-    return;
-  }
-  const binding = resolveBinding(
-    input.bindings,
-    argument.name,
-    argument.start ?? Number.MAX_SAFE_INTEGER,
-  );
-  if (
-    !binding ||
-    binding.typeAnnotation !== null ||
-    !isInlineObjectConstruction(binding.initializer)
-  ) {
-    return;
-  }
-  recordViolationAtPosition(
-    input,
-    binding.identifierStart,
-    "untyped-request-object",
-  );
-}
-
-function recordViolation(
-  input: {
-    readonly boundary: string;
-    readonly contents: string;
-    readonly relativePath: string;
-    readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
-  },
-  node: Node,
-  kind: ProviderRequestBoundaryViolationKind,
-): void {
-  recordViolationAtPosition(input, node.start ?? 0, kind);
-}
-
-function recordViolationAtPosition(
-  input: {
-    readonly boundary: string;
-    readonly contents: string;
-    readonly relativePath: string;
-    readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
-  },
-  start: number,
-  kind: ProviderRequestBoundaryViolationKind,
-): void {
-  const key = `${kind}:${start}`;
-  if (input.violationsByKey.has(key)) {
-    return;
-  }
-  const position = readLineAndColumn(input.contents, start);
-  input.violationsByKey.set(key, {
-    boundary: input.boundary,
-    column: position.column,
-    filePath: normalizeRepoPath(input.relativePath),
-    kind,
-    line: position.line,
-  });
-}
-
-function resolveBinding(
-  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
-  name: string,
-  before: number,
-): VariableBinding | null {
-  const candidates = bindings.get(name);
-  if (!candidates) {
-    return null;
-  }
-  let resolved: VariableBinding | null = null;
-  for (const candidate of candidates) {
-    if (
-      candidate.start <= before &&
-      candidate.scopeStart <= before &&
-      before <= candidate.scopeEnd &&
-      (
-        !resolved ||
-        candidate.scopeStart > resolved.scopeStart ||
-        (
-          candidate.scopeStart === resolved.scopeStart &&
-          candidate.start > resolved.start
-        )
-      )
-    ) {
-      resolved = candidate;
-    }
-  }
-  return resolved;
-}
-
-function isProviderRequestCall(
-  node: Node,
-  analysis: ProviderSourceAnalysis,
-): node is CallExpression | OptionalCallExpression {
-  if (!isCallExpression(node) && !isOptionalCallExpression(node)) {
+export function isProviderRequestGuardEntrypoint(
+  entryPath: string | undefined,
+  moduleUrl: string,
+): boolean {
+  if (!entryPath) {
     return false;
   }
-  if (isIdentifier(node.callee) && analysis.methodAliases.has(node.callee.name)) {
-    return true;
+  try {
+    return path.resolve(entryPath) === path.resolve(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
   }
-  const pathParts = readMemberPath(node.callee);
-  return Boolean(pathParts && isProviderMemberPath(pathParts, analysis.clientNames));
 }
 
-function isProviderMemberPath(
-  pathParts: readonly string[],
-  clientNames: ReadonlySet<string>,
-): boolean {
-  const clientIndex = pathParts.findIndex(
-    (part) =>
-      clientNames.has(part) ||
-      providerClientFactoryNames.has(part) ||
-      part.toLowerCase() === "stripe",
-  );
-  return clientIndex >= 0 && pathParts.length > clientIndex + 1;
-}
-
-function readProviderBoundaryName(
-  node: CallExpression | OptionalCallExpression,
-  analysis: ProviderSourceAnalysis,
+function readRawTransportCall(
+  callPath: NodePath<CallExpression | OptionalCallExpression>,
   contents: string,
-): string {
-  if (isIdentifier(node.callee)) {
-    return analysis.methodAliases.get(node.callee.name) ?? node.callee.name;
+): RawTransportCall | null {
+  const calleePath = callPath.get("callee") as NodePath<Node>;
+  if (!isLowLevelTransportExpression(calleePath, contents, new Set())) {
+    return null;
   }
-  return readNodeText(node.callee, contents);
+  const argumentsPaths = callPath.get("arguments") as NodePath<Node>[];
+  const calleeName = readStaticMemberName(calleePath.node);
+  if (calleeName === "bind") {
+    return null;
+  }
+  const urlIndex = calleeName === "call" ? 1 : calleeName === "apply" ? -1 : 0;
+  return {
+    urlPath: urlIndex >= 0 ? argumentsPaths[urlIndex] ?? null : null,
+  };
 }
 
-function isProviderRequestTypeText(
-  typeText: string,
-  analysis: Pick<ProviderSourceAnalysis, "requestTypeNames" | "typeRoots">,
+function isLowLevelTransportExpression(
+  originalPath: NodePath<Node>,
+  contents: string,
+  resolvingBindings: Set<string>,
 ): boolean {
-  for (const name of analysis.requestTypeNames) {
-    if (containsIdentifier(typeText, name)) {
+  const expressionPath = unwrapExpressionPath(originalPath);
+  const node = expressionPath.node;
+
+  if (expressionPath.isLogicalExpression()) {
+    return isLowLevelTransportExpression(
+      expressionPath.get("left") as NodePath<Node>,
+      contents,
+      resolvingBindings,
+    ) || isLowLevelTransportExpression(
+      expressionPath.get("right") as NodePath<Node>,
+      contents,
+      resolvingBindings,
+    );
+  }
+
+  if (expressionPath.isConditionalExpression()) {
+    return isLowLevelTransportExpression(
+      expressionPath.get("consequent") as NodePath<Node>,
+      contents,
+      resolvingBindings,
+    ) || isLowLevelTransportExpression(
+      expressionPath.get("alternate") as NodePath<Node>,
+      contents,
+      resolvingBindings,
+    );
+  }
+
+  if (expressionPath.isIdentifier()) {
+    const name = expressionPath.node.name;
+    const binding = expressionPath.scope.getBinding(name);
+    if (!binding) {
+      return name === "fetch";
+    }
+    const bindingKey = `${name}:${binding.identifier.start ?? 0}`;
+    if (resolvingBindings.has(bindingKey)) {
+      return false;
+    }
+    const nextResolving = new Set(resolvingBindings).add(bindingKey);
+    if (binding.kind === "param") {
+      return isFetchLikeName(name) || bindingHasFetchType(binding.path, contents);
+    }
+    if (binding.path.isImportSpecifier() || binding.path.isImportDefaultSpecifier()) {
+      const declaration = binding.path.parentPath;
+      if (!declaration?.isImportDeclaration()) {
+        return false;
+      }
+      const moduleName = declaration.node.source.value;
+      const importedName = binding.path.isImportSpecifier()
+        ? readImportedName(binding.path.node.imported)
+        : "default";
+      return isCallableTransportImport(moduleName, importedName);
+    }
+    const declarator = binding.path.isVariableDeclarator()
+      ? binding.path
+      : binding.path.parentPath?.isVariableDeclarator()
+        ? binding.path.parentPath
+        : null;
+    if (declarator) {
+      const initPath = declarator.get("init") as NodePath<Node> | null;
+      if (initPath?.node && isLowLevelTransportExpression(initPath, contents, nextResolving)) {
+        return true;
+      }
+      const destructuredTransport = readDestructuredTransportBinding(
+        declarator,
+        name,
+      );
+      if (destructuredTransport) {
+        return true;
+      }
+    }
+    return binding.constantViolations.length > 0 && isFetchLikeName(name);
+  }
+
+  if (expressionPath.isMemberExpression() || expressionPath.isOptionalMemberExpression()) {
+    const memberName = readStaticMemberName(node);
+    const objectPath = expressionPath.get("object") as NodePath<Node>;
+    if (memberName === "call" || memberName === "apply" || memberName === "bind") {
+      return isLowLevelTransportExpression(objectPath, contents, resolvingBindings);
+    }
+    if (memberName && isFetchLikeName(memberName)) {
       return true;
     }
+    if (memberName && lowLevelTransportMethods.has(memberName)) {
+      return isTransportNamespace(objectPath, resolvingBindings);
+    }
+    return false;
   }
-  for (const root of analysis.typeRoots) {
-    if (
-      new RegExp(`\\b${escapeRegExp(root)}\\b[\\s\\S]*(?:Params?|RequestOptions)\\b`, "u")
-        .test(typeText) ||
+
+  if (expressionPath.isCallExpression() || expressionPath.isOptionalCallExpression()) {
+    const innerCallee = expressionPath.get("callee") as NodePath<Node>;
+    if (readLoaderModuleName(expressionPath.node)) {
+      return true;
+    }
+    return readStaticMemberName(innerCallee.node) === "bind" &&
+      isLowLevelTransportExpression(innerCallee, contents, resolvingBindings);
+  }
+
+  return false;
+}
+
+function isTransportNamespace(
+  originalPath: NodePath<Node>,
+  resolvingBindings: Set<string>,
+): boolean {
+  const expressionPath = unwrapExpressionPath(originalPath);
+  if (expressionPath.isAwaitExpression()) {
+    return isTransportNamespace(
+      expressionPath.get("argument") as NodePath<Node>,
+      resolvingBindings,
+    );
+  }
+  if (expressionPath.isCallExpression() || expressionPath.isOptionalCallExpression()) {
+    const moduleName = readLoaderModuleName(expressionPath.node);
+    return moduleName !== null && lowLevelTransportModules.has(moduleName);
+  }
+  if (!expressionPath.isIdentifier()) {
+    return false;
+  }
+  const binding = expressionPath.scope.getBinding(expressionPath.node.name);
+  if (!binding) {
+    return expressionPath.node.name === "http" || expressionPath.node.name === "https";
+  }
+  const bindingKey = `${expressionPath.node.name}:${binding.identifier.start ?? 0}`;
+  if (resolvingBindings.has(bindingKey)) {
+    return false;
+  }
+  const nextResolving = new Set(resolvingBindings).add(bindingKey);
+  if (
+    binding.path.isImportNamespaceSpecifier() ||
+    binding.path.isImportDefaultSpecifier() ||
+    (
+      binding.path.isImportSpecifier() &&
+      binding.path.node.importKind !== "type" &&
+      readImportedName(binding.path.node.imported) === "default"
+    )
+  ) {
+    const declaration = binding.path.parentPath;
+    return Boolean(
+      declaration?.isImportDeclaration() &&
+      declaration.node.importKind !== "type" &&
+      lowLevelTransportModules.has(declaration.node.source.value),
+    );
+  }
+  if (binding.path.isTSImportEqualsDeclaration()) {
+    const moduleReference = binding.path.node.moduleReference;
+    return moduleReference.type === "TSExternalModuleReference" &&
+      moduleReference.expression.type === "StringLiteral" &&
+      lowLevelTransportModules.has(moduleReference.expression.value);
+  }
+  const declarator = binding.path.isVariableDeclarator()
+    ? binding.path
+    : binding.path.parentPath?.isVariableDeclarator()
+      ? binding.path.parentPath
+      : null;
+  if (!declarator) {
+    return false;
+  }
+  const initPath = declarator.get("init") as NodePath<Node> | null;
+  return Boolean(
+    initPath?.node && isTransportNamespace(initPath, nextResolving),
+  );
+}
+
+function readDestructuredTransportBinding(
+  declarator: NodePath<Node>,
+  localName: string,
+): boolean {
+  if (!declarator.isVariableDeclarator() || declarator.node.id.type !== "ObjectPattern") {
+    return false;
+  }
+  const initPath = declarator.get("init") as NodePath<Node> | null;
+  if (!initPath?.node) {
+    return false;
+  }
+  const moduleName = readLoaderModuleName(unwrapExpressionPath(initPath).node);
+  const globalObject = readMemberPath(unwrapExpressionPath(initPath).node)?.join(".");
+  for (const property of declarator.node.id.properties) {
+    if (property.type !== "ObjectProperty") {
+      continue;
+    }
+    const boundName = property.value.type === "Identifier"
+      ? property.value.name
+      : property.value.type === "AssignmentPattern" && property.value.left.type === "Identifier"
+        ? property.value.left.name
+        : null;
+    if (boundName !== localName) {
+      continue;
+    }
+    const importedName = property.key.type === "Identifier"
+      ? property.key.name
+      : property.key.type === "StringLiteral"
+        ? property.key.value
+        : null;
+    return Boolean(
+      importedName &&
+      lowLevelTransportMethods.has(importedName) &&
       (
-        /\bParameters\s*</u.test(typeText) &&
-        containsIdentifier(typeText, root)
+        (moduleName !== null && lowLevelTransportModules.has(moduleName)) ||
+        globalObject === "globalThis"
+      ),
+    );
+  }
+  return false;
+}
+
+function collectRuntimeModules(sourceFile: File): Set<string> {
+  const modules = new Set<string>();
+  traverse(sourceFile, {
+    ImportDeclaration(importPath) {
+      if (
+        importPath.node.importKind !== "type" &&
+        (
+          importPath.node.specifiers.length === 0 ||
+          importPath.node.specifiers.some(
+            (specifier) =>
+              specifier.type !== "ImportSpecifier" || specifier.importKind !== "type",
+          )
+        )
+      ) {
+        modules.add(importPath.node.source.value);
+      }
+    },
+    TSImportEqualsDeclaration(importPath) {
+      if (importPath.node.importKind === "type") {
+        return;
+      }
+      const reference = importPath.node.moduleReference;
+      if (
+        reference.type === "TSExternalModuleReference" &&
+        reference.expression.type === "StringLiteral"
+      ) {
+        modules.add(reference.expression.value);
+      }
+    },
+    CallExpression(callPath) {
+      const moduleName = readLoaderModuleName(callPath.node);
+      if (moduleName) {
+        modules.add(moduleName);
+      }
+    },
+  });
+  return modules;
+}
+
+function collectImportedProviderIds(runtimeModules: ReadonlySet<string>): Set<string> {
+  const providerIds = new Set<string>();
+  for (const provider of providerBoundaryRegistry) {
+    if (
+      provider.sdkModules.some((sdkModule) => hasRuntimeModule(runtimeModules, sdkModule))
+    ) {
+      providerIds.add(provider.id);
+    }
+  }
+  return providerIds;
+}
+
+function collectCallProviderIds(input: {
+  readonly callPath: NodePath<CallExpression | OptionalCallExpression>;
+  readonly contents: string;
+  readonly importedProviderIds: ReadonlySet<string>;
+  readonly ownerName: string;
+  readonly relativePath: string;
+  readonly urlPath: NodePath<Node> | null;
+}): string[] {
+  const providerIds = new Set(input.importedProviderIds);
+  const callText = readNodeText(input.callPath.node, input.contents);
+  const urlText = input.urlPath
+    ? readNodeText(input.urlPath.node, input.contents)
+    : "";
+  const pathFallback = input.importedProviderIds.size === 0 ? input.relativePath : "";
+  const evidenceText = `${pathFallback} ${input.ownerName} ${callText} ${urlText}`;
+  for (const provider of providerBoundaryRegistry) {
+    if (
+      provider.hosts.some((host) => callText.toLowerCase().includes(host)) ||
+      provider.identifiers.some((identifier) =>
+        containsNormalizedIdentifier(evidenceText, identifier)
       )
     ) {
-      return true;
+      providerIds.add(provider.id);
     }
   }
-  return false;
+  return [...providerIds].sort((left, right) => left.localeCompare(right));
 }
 
-function typeTextIsProviderClient(
-  typeText: string,
-  typeRoots: ReadonlySet<string>,
+function isStaticSameOrigin(
+  originalPath: NodePath<Node> | null,
+  resolvingBindings: Set<string>,
 ): boolean {
-  const normalized = typeText.replace(/^\s*:\s*/u, "").trim();
-  for (const root of typeRoots) {
+  if (!originalPath?.node) {
+    return false;
+  }
+  const expressionPath = unwrapExpressionPath(originalPath);
+  if (expressionPath.isStringLiteral()) {
+    return isSingleSlashPath(expressionPath.node.value);
+  }
+  if (expressionPath.isTemplateLiteral()) {
+    return expressionPath.node.expressions.length === 0 &&
+      isSingleSlashPath(expressionPath.node.quasis[0]?.value.cooked ?? "");
+  }
+  if (expressionPath.isIdentifier()) {
+    const binding = expressionPath.scope.getBinding(expressionPath.node.name);
+    if (!binding) {
+      return false;
+    }
+    const bindingKey = `${expressionPath.node.name}:${binding.identifier.start ?? 0}`;
+    if (resolvingBindings.has(bindingKey)) {
+      return false;
+    }
+    const declarator = binding.path.isVariableDeclarator()
+      ? binding.path
+      : binding.path.parentPath?.isVariableDeclarator()
+        ? binding.path.parentPath
+        : null;
+    const initPath = declarator?.get("init") as NodePath<Node> | null;
+    return Boolean(
+      initPath?.node &&
+      isStaticSameOrigin(
+        initPath,
+        new Set(resolvingBindings).add(bindingKey),
+      ),
+    );
+  }
+  if (!expressionPath.isNewExpression()) {
+    return false;
+  }
+  const calleePath = readMemberPath(expressionPath.node.callee);
+  const argumentPaths = expressionPath.get("arguments") as NodePath<Node>[];
+  return calleePath?.join(".") === "URL" &&
+    isStaticSameOrigin(argumentPaths[0] ?? null, resolvingBindings) &&
+    readMemberPath(argumentPaths[1]?.node)?.join(".") === "location.origin";
+}
+
+function readCallableNames(pathInput: NodePath<Node>): string[] {
+  const names: string[] = [];
+  for (let current = pathInput.parentPath; current; current = current.parentPath) {
+    if (!current.isFunction()) {
+      continue;
+    }
+    const node = current.node;
+    if ((node.type === "FunctionDeclaration" || node.type === "FunctionExpression") && node.id) {
+      names.push(node.id.name);
+      continue;
+    }
     if (
-      new RegExp(
-        `^(?:(?:Pick|Readonly|Required)\\s*<\\s*)?${escapeRegExp(root)}\\b`,
-        "u",
-      ).test(normalized)
+      node.type === "ClassMethod" ||
+      node.type === "ClassPrivateMethod" ||
+      node.type === "ObjectMethod"
     ) {
-      return true;
+      const name = readPropertyName(node.key);
+      if (name) {
+        names.push(name);
+      }
+      continue;
+    }
+    const parent = current.parentPath;
+    if (parent?.isVariableDeclarator() && parent.node.id.type === "Identifier") {
+      names.push(parent.node.id.name);
+      continue;
+    }
+    if (parent?.isObjectProperty()) {
+      const name = readPropertyName(parent.node.key);
+      if (name) {
+        names.push(name);
+      }
     }
   }
-  return false;
+  return names;
 }
 
-function textReferencesProviderClient(
-  text: string,
-  clientNames: ReadonlySet<string>,
-): boolean {
-  if (/(?:JunctionClient|StripeApi|StripeClient)\b/u.test(text)) {
-    return true;
+function unwrapExpressionPath(originalPath: NodePath<Node>): NodePath<Node> {
+  let current = originalPath;
+  while (transparentExpressionTypes.has(current.node.type)) {
+    current = current.get("expression") as NodePath<Node>;
   }
-  for (const name of clientNames) {
-    if (containsIdentifier(text, name)) {
-      return true;
-    }
-  }
-  return false;
+  return current;
 }
 
-function readRawProviderHttpTarget(node: Node): Node | null {
-  if (node.type === "NewExpression") {
-    const calleePath = readMemberPath(node.callee);
-    if (calleePath?.at(-1) !== "Request") {
-      return null;
-    }
-    const target = node.arguments[0];
-    return target && target.type !== "ArgumentPlaceholder" && target.type !== "SpreadElement"
-      ? target
-      : null;
+function readLoaderModuleName(node: Node): string | null {
+  if (node.type === "AwaitExpression") {
+    return readLoaderModuleName(node.argument);
   }
-  if (!isCallExpression(node) && !isOptionalCallExpression(node)) {
+  if (node.type !== "CallExpression" && node.type !== "OptionalCallExpression") {
     return null;
   }
-  const calleePath = readMemberPath(node.callee);
-  const calleeName = calleePath?.at(-1);
-  if (!calleeName || !/fetch(?:implementation|impl)?$/iu.test(calleeName)) {
-    return null;
-  }
-  const target = node.arguments[0];
-  return target && target.type !== "ArgumentPlaceholder" && target.type !== "SpreadElement"
-    ? target
+  const calleeIsLoader =
+    (node.callee.type === "Identifier" && node.callee.name === "require") ||
+    node.callee.type === "Import";
+  const argument = node.arguments[0];
+  return calleeIsLoader && argument?.type === "StringLiteral"
+    ? argument.value
     : null;
 }
 
-function resolveKnownProviderApiOrigin(input: {
-  readonly before: number;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly node: Node;
-  readonly resolvingBindings: ReadonlySet<string>;
-}): string | null {
-  for (const candidate of collectStaticUrlTexts(input)) {
-    for (const origin of knownProviderApiOrigins) {
-      if (origin.originPattern.test(candidate)) {
-        return origin.provider;
-      }
-    }
+function readMemberPath(node: Node | null | undefined): string[] | null {
+  if (!node) {
+    return null;
+  }
+  if (node.type === "Identifier") {
+    return [node.name];
+  }
+  if (transparentExpressionTypes.has(node.type)) {
+    return readMemberPath((node as Node & { expression: Node }).expression);
+  }
+  if (node.type !== "MemberExpression" && node.type !== "OptionalMemberExpression") {
+    return null;
+  }
+  const root = readMemberPath(node.object);
+  const property = readStaticMemberName(node);
+  return root && property ? [...root, property] : null;
+}
+
+function readStaticMemberName(node: Node): string | null {
+  if (node.type !== "MemberExpression" && node.type !== "OptionalMemberExpression") {
+    return null;
+  }
+  if (!node.computed && node.property.type === "Identifier") {
+    return node.property.name;
+  }
+  if (node.computed && node.property.type === "StringLiteral") {
+    return node.property.value;
   }
   return null;
 }
 
-function collectStaticUrlTexts(input: {
-  readonly before: number;
-  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
-  readonly node: Node;
-  readonly resolvingBindings: ReadonlySet<string>;
-}): string[] {
-  const node = unwrapExpression(input.node);
-  if (isStringLiteral(node)) {
-    return [node.value];
-  }
-  if (isIdentifier(node)) {
-    if (input.resolvingBindings.has(node.name)) {
-      return [];
-    }
-    const binding = resolveBinding(input.bindings, node.name, input.before);
-    if (!binding) {
-      return [];
-    }
-    const resolvingBindings = new Set(input.resolvingBindings);
-    resolvingBindings.add(node.name);
-    return collectStaticUrlTexts({
-      ...input,
-      before: binding.start,
-      node: binding.initializer,
-      resolvingBindings,
-    });
-  }
-  if (node.type === "TemplateLiteral") {
-    let candidates = [node.quasis[0]?.value.cooked ?? ""];
-    for (const [index, expression] of node.expressions.entries()) {
-      const expressionCandidates = collectStaticUrlTexts({
-        ...input,
-        node: expression,
-      });
-      candidates = combineStaticTextCandidates(
-        candidates,
-        expressionCandidates.length > 0 ? expressionCandidates : [""],
-        node.quasis[index + 1]?.value.cooked ?? "",
-      );
-    }
-    return candidates;
-  }
-  if (node.type === "BinaryExpression" && node.operator === "+") {
-    const left = collectStaticUrlTexts({ ...input, node: node.left });
-    const right = collectStaticUrlTexts({ ...input, node: node.right });
-    if (left.length === 0 && right.length === 0) {
-      return [];
-    }
-    return combineStaticTextCandidates(
-      left.length > 0 ? left : [""],
-      right.length > 0 ? right : [""],
-      "",
-    );
-  }
-  if (node.type === "ConditionalExpression") {
-    return [
-      ...collectStaticUrlTexts({ ...input, node: node.consequent }),
-      ...collectStaticUrlTexts({ ...input, node: node.alternate }),
-    ];
-  }
-  if (node.type === "LogicalExpression") {
-    return [
-      ...collectStaticUrlTexts({ ...input, node: node.left }),
-      ...collectStaticUrlTexts({ ...input, node: node.right }),
-    ];
-  }
-  if (node.type === "SequenceExpression") {
-    const last = node.expressions.at(-1);
-    return last ? collectStaticUrlTexts({ ...input, node: last }) : [];
-  }
-  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
-    const memberPath = readMemberPath(node);
-    if (["href", "origin"].includes(memberPath?.at(-1) ?? "")) {
-      return collectStaticUrlTexts({ ...input, node: node.object });
-    }
-    return [];
-  }
-  if (
-    node.type === "NewExpression" ||
-    isCallExpression(node) ||
-    isOptionalCallExpression(node)
-  ) {
-    const calleePath = readMemberPath(node.callee);
-    const calleeName = calleePath?.at(-1);
-    if (["toJSON", "toString"].includes(calleeName ?? "")) {
-      if (isMemberExpression(node.callee) || isOptionalMemberExpression(node.callee)) {
-        return collectStaticUrlTexts({ ...input, node: node.callee.object });
-      }
-      return [];
-    }
-    if (calleeName !== "Request" && calleeName !== "URL") {
-      return [];
-    }
-    const target = node.arguments[0];
-    if (!target || target.type === "ArgumentPlaceholder" || target.type === "SpreadElement") {
-      return [];
-    }
-    const targetCandidates = collectStaticUrlTexts({ ...input, node: target });
-    if (calleeName === "Request") {
-      return targetCandidates;
-    }
-    const base = node.arguments[1];
-    if (!base || base.type === "ArgumentPlaceholder" || base.type === "SpreadElement") {
-      return targetCandidates;
-    }
-    const baseCandidates = collectStaticUrlTexts({ ...input, node: base });
-    if (baseCandidates.length === 0) {
-      return targetCandidates;
-    }
-    const relativeCandidates = targetCandidates.length > 0 ? targetCandidates : [""];
-    return combineStaticTextCandidates(baseCandidates, relativeCandidates, "");
-  }
-  return [];
+function readImportedName(node: Node): string {
+  return node.type === "Identifier" ? node.name : node.type === "StringLiteral" ? node.value : "";
 }
 
-function combineStaticTextCandidates(
-  prefixes: readonly string[],
-  values: readonly string[],
-  suffix: string,
-): string[] {
-  const combined: string[] = [];
-  for (const prefix of prefixes) {
-    for (const value of values) {
-      combined.push(`${prefix}${value}${suffix}`);
-      if (combined.length >= 32) {
-        return combined;
-      }
-    }
-  }
-  return combined;
+function readPropertyName(node: Node): string | null {
+  return node.type === "Identifier" || node.type === "PrivateName"
+    ? node.type === "PrivateName"
+      ? node.id.name
+      : node.name
+    : node.type === "StringLiteral"
+      ? node.value
+      : null;
 }
 
-function isAllowedRawProviderHttp(input: {
-  readonly analysis: ProviderSourceAnalysis;
-  readonly reason: string;
-  readonly provider: string | null;
-  readonly target: Node;
-}): boolean {
-  if (!rawProviderHttpAllowlistReasons.has(input.reason)) {
-    return false;
-  }
-  if (input.reason === "sdk-transport-adapter") {
-    if (!input.provider) {
-      return false;
-    }
-    const modulePrefixes = providerSdkModulePrefixesByProvider[input.provider] ?? [];
-    return hasImportedProviderModule(input.analysis.providerModules, modulePrefixes);
-  }
-  if (input.reason !== "linq-presigned-bytes" || input.provider !== null) {
-    return false;
-  }
-  if (!hasImportedProviderModule(input.analysis.providerModules, ["@linqapp/sdk"])) {
-    return false;
-  }
-  const target = unwrapExpression(input.target);
-  return isIdentifier(target) && /^(?:download|upload)Url$/u.test(target.name);
+function bindingHasFetchType(bindingPath: NodePath<Node>, contents: string): boolean {
+  const text = readNodeText(bindingPath.node, contents);
+  return /\btypeof\s+(?:globalThis\.)?fetch\b|\bPromise\s*<\s*Response\b/u.test(text);
 }
 
-function hasImportedProviderModule(
-  providerModules: ReadonlySet<string>,
-  prefixes: readonly string[],
-): boolean {
-  for (const moduleName of providerModules) {
-    if (prefixes.some(
-      (prefix) => moduleName === prefix || moduleName.startsWith(`${prefix}/`),
-    )) {
+function isCallableTransportImport(moduleName: string, importedName: string): boolean {
+  if (!lowLevelTransportModules.has(moduleName)) {
+    return false;
+  }
+  return importedName === "default" || lowLevelTransportMethods.has(importedName);
+}
+
+function isFetchLikeName(name: string): boolean {
+  return /^fetch(?:Impl|Implementation)?$/iu.test(name);
+}
+
+function isSingleSlashPath(value: string): boolean {
+  return value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\");
+}
+
+function providerById(id: string): RegisteredProviderBoundary | undefined {
+  return providerBoundaryRegistry.find((provider) => provider.id === id);
+}
+
+function hasRuntimeModule(modules: ReadonlySet<string>, expected: string): boolean {
+  for (const moduleName of modules) {
+    if (moduleName === expected || moduleName.startsWith(`${expected}/`)) {
       return true;
     }
   }
   return false;
 }
 
-function readRawProviderHttpAllowlistReason(
-  contents: string,
-  nodeStart: number,
-): string | null {
-  const currentLineStart = contents.lastIndexOf("\n", Math.max(0, nodeStart - 1));
-  if (currentLineStart < 0) {
-    return null;
-  }
-  const previousLineEnd = currentLineStart;
-  const previousLineStart = contents.lastIndexOf("\n", previousLineEnd - 1) + 1;
-  const previousLine = contents.slice(previousLineStart, previousLineEnd);
-  return rawProviderHttpAllowlistPattern.exec(previousLine)?.[1] ?? null;
-}
-
-function containsProviderSourceMarker(contents: string): boolean {
-  const lowerContents = contents.toLowerCase();
-  return providerSourceMarkers.some((marker) => lowerContents.includes(marker));
-}
-
-function containsKnownProviderApiOrigin(contents: string): boolean {
-  const lowerContents = contents.toLowerCase();
-  return knownProviderApiHostMarkers.some((hostname) => lowerContents.includes(hostname));
-}
-
-function isProviderModule(moduleName: string): boolean {
-  return providerModulePrefixes.some(
-    (prefix) => moduleName === prefix || moduleName.startsWith(`${prefix}/`),
+function containsNormalizedIdentifier(text: string, identifier: string): boolean {
+  return containsNormalizedIdentifierInNormalizedText(
+    normalizeIdentifierText(text),
+    identifier,
   );
 }
 
-function readImportedName(specifier: Node & { imported?: Node }): string {
-  if (!specifier.imported) {
-    return "";
-  }
-  if (isIdentifier(specifier.imported)) {
-    return specifier.imported.name;
-  }
-  if (isStringLiteral(specifier.imported)) {
-    return specifier.imported.value;
-  }
-  return "";
+function containsNormalizedIdentifierInNormalizedText(
+  normalizedText: string,
+  identifier: string,
+): boolean {
+  const normalizedIdentifier = normalizeIdentifierText(identifier);
+  return `-${normalizedText}-`.includes(`-${normalizedIdentifier}-`);
 }
 
-function isObjectAssignCall(node: CallExpression | OptionalCallExpression): boolean {
-  const pathParts = readMemberPath(node.callee);
-  return pathParts?.join(".") === "Object.assign";
+function normalizeIdentifierText(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/gu, "$1-$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-|-$/gu, "");
 }
 
-function isInlineObjectConstruction(node: Node): boolean {
-  const expression = unwrapExpression(node);
-  if (isObjectExpression(expression)) {
-    return true;
-  }
-  if (expression.type === "ConditionalExpression") {
-    return isInlineObjectConstruction(expression.consequent) ||
-      isInlineObjectConstruction(expression.alternate);
-  }
-  if (expression.type === "LogicalExpression") {
-    return isInlineObjectConstruction(expression.left) ||
-      isInlineObjectConstruction(expression.right);
-  }
-  return false;
+export async function listProviderRequestSourceFiles(): Promise<string[]> {
+  const matches = await listPotentialRawTransportFiles();
+  return [...new Set(matches)]
+    .filter(Boolean)
+    .map(normalizeRepoPath)
+    .filter((relativePath) =>
+      shouldScanProviderRequestSourceFile(relativePath) &&
+      relativePath
+        .split("/")
+        .slice(0, -1)
+        .every((segment) => !shouldSkipProviderRequestDirectory(segment))
+    )
+    .sort((left, right) => left.localeCompare(right));
 }
 
-function unwrapExpression(node: Node): Node {
-  switch (node.type) {
-    case "TSAsExpression":
-    case "TSInstantiationExpression":
-    case "TSNonNullExpression":
-    case "TSSatisfiesExpression":
-    case "TypeCastExpression":
-      return unwrapExpression(node.expression);
-    default:
-      return node;
-  }
-}
-
-function readMemberPath(node: Node): string[] | null {
-  if (isIdentifier(node)) {
-    return [node.name];
-  }
-  if (node.type === "ThisExpression") {
-    return ["this"];
-  }
-  if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
-    const property = node.property;
-    const propertyName = !node.computed && isIdentifier(property)
-      ? property.name
-      : node.computed && isStringLiteral(property)
-        ? property.value
-        : null;
-    if (!propertyName) {
-      return null;
-    }
-    const objectPath = readMemberPath(node.object);
-    return objectPath ? [...objectPath, propertyName] : null;
-  }
-  if (isCallExpression(node) || isOptionalCallExpression(node)) {
-    return readMemberPath(node.callee);
-  }
-  return null;
-}
-
-function readFunctionName(node: Node): string {
-  if ("id" in node && node.id && isIdentifier(node.id)) {
-    return node.id.name;
-  }
-  return "<anonymous>";
-}
-
-async function scanDirectory(
-  relativePath: string,
-  violations: ProviderRequestBoundaryViolation[],
-): Promise<void> {
-  const entries = await readdir(path.join(repoRoot, relativePath), { withFileTypes: true });
-  for (const entry of entries) {
-    const entryRelativePath = path.posix.join(relativePath, entry.name);
-    if (entry.isDirectory()) {
-      if (!shouldSkipProviderRequestDirectory(entry.name)) {
-        await scanDirectory(entryRelativePath, violations);
-      }
-      continue;
-    }
-    if (!entry.isFile() || !shouldScanProviderRequestSourceFile(entryRelativePath)) {
-      continue;
-    }
-    const contents = await readFile(path.join(repoRoot, entryRelativePath), "utf8");
-    violations.push(
-      ...findProviderRequestBoundaryViolations(entryRelativePath, contents),
+async function listPotentialRawTransportFiles(): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      "rg",
+      [
+        "--files-with-matches",
+        "--no-messages",
+        "--glob",
+        "*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+        potentialRawTransportPattern,
+        "--",
+        ...providerRequestScanRoots,
+      ],
+      { cwd: repoRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
     );
+    return stdout.split("\n").filter(Boolean);
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 1) {
+      return [];
+    }
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
+  const { stdout } = await execFileAsync(
+    "git",
+    ["grep", "-I", "-l", "-P", potentialRawTransportPattern, "--", ...providerRequestScanRoots],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+  );
+  return stdout.split("\n").filter(Boolean);
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapValue: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, values.length) },
+    async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex++;
+        results[index] = await mapValue(values[index]!);
+      }
+    },
+  ));
+  return results;
 }
 
 function parserPlugins(relativePath: string): ParserPlugin[] {
@@ -1279,6 +1245,7 @@ function parserPlugins(relativePath: string): ParserPlugin[] {
 
 export function shouldScanProviderRequestSourceFile(relativePath: string): boolean {
   return !/\.d\.[cm]?ts$/u.test(relativePath) &&
+    !/\.(?:gen|generated)\.[cm]?[jt]sx?$/u.test(relativePath) &&
     !/\.(?:spec|test)\.[cm]?[jt]sx?$/u.test(relativePath) &&
     sourceExtensions.has(path.posix.extname(relativePath));
 }
@@ -1287,16 +1254,24 @@ export function shouldSkipProviderRequestDirectory(name: string): boolean {
   return skippedDirectoryNames.has(name) || name.startsWith(".next");
 }
 
+function compareViolations(
+  left: ProviderRequestBoundaryViolation,
+  right: ProviderRequestBoundaryViolation,
+): number {
+  return left.filePath.localeCompare(right.filePath) ||
+    left.line - right.line ||
+    left.column - right.column ||
+    left.kind.localeCompare(right.kind);
+}
+
 function formatViolationKind(kind: ProviderRequestBoundaryViolationKind): string {
   switch (kind) {
-    case "object-assign":
-      return "uses Object.assign";
-    case "object-spread":
-      return "contains an object spread";
+    case "approved-owner-overflow":
+      return "contains more raw transport calls than its approval permits";
+    case "invalid-approved-owner":
+      return "lost its required runtime SDK import";
     case "raw-provider-http":
-      return "constructs direct raw provider HTTP";
-    case "untyped-request-object":
-      return "passes an untyped object-literal variable";
+      return "uses raw provider HTTP";
   }
 }
 
@@ -1320,20 +1295,8 @@ function normalizeRepoPath(filePath: string): string {
   return filePath.replace(/\\/gu, "/");
 }
 
-function containsIdentifier(text: string, identifier: string): boolean {
-  return new RegExp(`\\b${escapeRegExp(identifier)}\\b`, "u").test(text);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-function lowercaseInitial(value: string): string {
-  return value.length === 0 ? value : `${value[0]?.toLowerCase()}${value.slice(1)}`;
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await main().catch((error) => {
+if (isProviderRequestGuardEntrypoint(process.argv[1], import.meta.url)) {
+  void main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });

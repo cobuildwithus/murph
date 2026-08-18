@@ -537,6 +537,7 @@ export function resolveConfiguredDeviceSyncProviderDescriptor(
 }
 
 export interface NormalizedJunctionDeviceSyncRuntimeConfig {
+  clientUserIdNamespace: string;
   clientUserIdSecret: string;
   providerFilter: string[];
   reconcileIntervalMs: number;
@@ -573,6 +574,9 @@ export function buildConfiguredDeviceSyncProviderRuntimeDescriptor<
 export function normalizeJunctionDeviceSyncRuntimeConfig(
   config: JunctionDeviceSyncProviderConfig,
 ): NormalizedJunctionDeviceSyncRuntimeConfig {
+  const clientUserIdNamespace = normalizeJunctionClientUserIdNamespace(
+    config.clientUserIdNamespace,
+  );
   const clientUserIdSecret = assertValidJunctionClientUserIdSecret(config.clientUserIdSecret);
   const summaryResources = normalizeRequiredJunctionResourceList(
     config.summaryResources,
@@ -597,6 +601,7 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
   }
 
   return {
+    clientUserIdNamespace,
     clientUserIdSecret,
     providerFilter,
     reconcileIntervalMs,
@@ -630,6 +635,23 @@ export function assertValidJunctionClientUserIdSecret(secret: string): string {
   }
 
   return normalizedSecret;
+}
+
+export function normalizeJunctionClientUserIdNamespace(
+  namespace: string | undefined,
+): string {
+  const normalizedNamespace = normalizeString(namespace);
+
+  if (!normalizedNamespace) {
+    return "";
+  }
+  if (!/^[a-z][a-z0-9]{0,7}$/u.test(normalizedNamespace)) {
+    throw new TypeError(
+      "JUNCTION_CLIENT_USER_ID_NAMESPACE must be 1-8 lowercase letters or digits and start with a letter.",
+    );
+  }
+
+  return normalizedNamespace;
 }
 
 export function buildOuraDeviceSyncScopes(input: string[] | undefined): string[] {

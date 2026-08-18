@@ -18,6 +18,17 @@ export const MURPH_DEFAULT_METADATA_DESCRIPTION =
 export const MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION =
   "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.";
 export const MURPH_IOS_APP_STORE_ID = "6786145859";
+export const MURPH_PUBLIC_SITE_URL = "https://www.withmurph.ai";
+
+export const MURPH_INDEXABLE_PAGE_ROBOTS = {
+  follow: true,
+  index: true,
+} as const;
+
+export const MURPH_NOINDEX_PAGE_ROBOTS = {
+  follow: false,
+  index: false,
+} as const;
 
 export const MURPH_DEFAULT_OPEN_GRAPH_IMAGE = {
   alt: MURPH_TAGLINE,
@@ -68,6 +79,7 @@ export function createMurphPageMetadata(input: {
   alternates?: Metadata["alternates"];
   description: string;
   openGraph?: OpenGraphMetadata;
+  robots?: Metadata["robots"];
   title: string;
   twitter?: TwitterMetadata;
 }): Metadata {
@@ -91,6 +103,10 @@ export function createMurphPageMetadata(input: {
 
   if (input.alternates) {
     metadata.alternates = input.alternates;
+  }
+
+  if (input.robots) {
+    metadata.robots = input.robots;
   }
 
   return metadata;

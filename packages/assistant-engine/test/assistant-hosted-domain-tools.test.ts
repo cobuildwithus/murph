@@ -924,6 +924,7 @@ describe('hosted domain dynamic tools', () => {
       action: 'save',
       activeUntil: '2026-08-01T00:00:00.000Z',
       instructions: 'Send a short reminder to wind down.',
+      plannedOccurrenceOffsetMs: 900_000,
       schedule: { kind: 'dailyLocal', localTime: '22:30' },
       status: 'paused',
       supportKind: 'reminder',
@@ -935,6 +936,7 @@ describe('hosted domain dynamic tools', () => {
         action: 'save',
         activeUntil: '2026-08-01T00:00:00.000Z',
         instructions: 'Send a short reminder to wind down.',
+        plannedOccurrenceOffsetMs: 900_000,
         schedule: { kind: 'dailyLocal', localTime: '22:30' },
         status: 'paused',
         supportKind: 'reminder',
@@ -1101,6 +1103,48 @@ describe('hosted domain dynamic tools', () => {
     })).toMatchObject({
       kind: 'automation',
       request: { schedule: { at: '2026-11-01T06:30:00.000Z', kind: 'at' } },
+    })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send one plan-owned reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '22:30' },
+      supportKind: 'reminder',
+      title: 'Unowned plan reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send one plan-owned reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '22:30' },
+      supportSeriesId: 'experiment:exp_synthetic_owner',
+      title: 'Untyped plan reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+      lookup: 'evening-wind-down',
+      supportKind: 'reminder',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        lookup: 'evening-wind-down',
+        supportKind: 'reminder',
+      },
+    })
+    expect(readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+      lookup: 'evening-wind-down',
+      supportSeriesId: 'habit:sleep-wind-down',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        lookup: 'evening-wind-down',
+        supportSeriesId: 'habit:sleep-wind-down',
+      },
     })
 
     expect(readToolRequest('automation', {

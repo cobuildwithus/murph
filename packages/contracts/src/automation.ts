@@ -40,6 +40,12 @@ export const automationSupportKindValues = [
   "weekly_digest",
 ] as const;
 
+export const automationPlannedOccurrenceOffsetMsSchema = z
+  .number()
+  .int()
+  .safe()
+  .nonnegative();
+
 export const automationTimeScheduleKindValues = [
   "at",
   "every",
@@ -379,6 +385,8 @@ export const automationFrontmatterSchema = withContractMetadata(
       route: automationRouteSchema,
       assistantTargetOverride: automationAssistantTargetOverrideSchema.optional(),
       supportKind: z.enum(automationSupportKindValues).optional(),
+      // Nonnegative lead from this notification to the event it supports.
+      plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema.optional(),
       continuityPolicy: z.enum(automationContinuityPolicyValues),
       tags: z.array(z.string().min(1)).optional(),
       createdAt: isoTimestampSchema(),
@@ -407,6 +415,7 @@ export const automationScaffoldPayloadSchema = z
     route: automationRouteSchema,
     assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
     supportKind: z.enum(automationSupportKindValues).nullable().optional(),
+    plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema.nullable().optional(),
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),
     status: z.enum(automationStatusValues).default("active"),

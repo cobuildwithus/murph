@@ -1,32 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  HostedPhoneCallStartRequest,
-} from "@murphai/hosted-execution/phone-calls";
-
 import {
   createAssistantHostedToolContext,
   resolveAssistantHostedPhoneCallResultNotificationChannel,
   resolveAssistantHostedScheduledPhoneCallScope,
 } from "../src/assistant/hosted-tool-context.js";
 
-const START_REQUEST: HostedPhoneCallStartRequest = {
-  brief: {
-    allowTransferToUser: false,
-    goal: "Confirm the reservation.",
-    instructions: [],
-    shareableFacts: {},
-    successCriteria: "The reservation status is known.",
-    timeZone: "America/New_York",
-    to: { phoneNumber: "+14045550123" },
-  },
-  originSessionId: "session_phone_call",
-  requestKey: "phone_call_request",
-};
-
 describe("assistant hosted phone-call result routing", () => {
   it.each([
-    ["linq", "direct", null],
+    ["linq", "direct", "linq"],
     ["telegram", "direct", "telegram"],
     ["email", "direct", null],
     ["telegram", "group", null],
@@ -41,13 +23,13 @@ describe("assistant hosted phone-call result routing", () => {
   );
 
   it.each([
-    ["linq", "direct", true, undefined],
+    ["linq", "direct", true, "linq"],
     ["telegram", "direct", true, "telegram"],
     ["telegram", "direct", false, undefined],
     ["telegram", "group", true, undefined],
   ] as const)(
-    "injects only the bounded result channel for a %s %s scheduled=%s call",
-    async (channel, conversationScope, scheduled, expectedChannel) => {
+    "exposes bounded scheduled authority for a %s %s scheduled=%s call",
+    (channel, conversationScope, scheduled, expectedChannel) => {
       const start = vi.fn(async () => ({
         phoneCallId: "hpc_test",
         status: "calling" as const,
@@ -79,16 +61,18 @@ describe("assistant hosted phone-call result routing", () => {
         } as never,
       });
 
-      await expect(context.phoneCalls?.start(START_REQUEST)).resolves.toEqual({
-        phoneCallId: "hpc_test",
-        status: "calling",
-      });
-      expect(start).toHaveBeenCalledWith({
-        ...START_REQUEST,
-        ...(expectedChannel
-          ? { resultNotificationChannel: expectedChannel }
-          : {}),
-      }, undefined);
+      const scope = context.currentScheduledPhoneCallScope?.() ?? null;
+      if (expectedChannel) {
+        expect(scope).toEqual({
+          automationId: "automation_phone_call",
+          occurrenceAt,
+          originSessionId: "session_phone_call",
+          resultNotificationChannel: expectedChannel,
+        });
+      } else {
+        expect(scope).toBeNull();
+      }
+      expect(start).not.toHaveBeenCalled();
     },
   );
 
@@ -111,6 +95,7 @@ describe("assistant hosted phone-call result routing", () => {
       automationId: "automation_telegram_call",
       occurrenceAt,
       originSessionId: "session_telegram_call",
+      resultNotificationChannel: "telegram",
     });
   });
 

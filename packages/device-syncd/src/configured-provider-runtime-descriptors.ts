@@ -8,6 +8,7 @@ export {
   buildStravaDeviceSyncScopes,
   buildWhoopDeviceSyncRuntimeDescriptor,
   buildWhoopDeviceSyncScopes,
+  normalizeJunctionClientUserIdNamespace,
   normalizeJunctionDeviceSyncRuntimeConfig,
   normalizeStravaDeviceSyncScopes,
 } from "./config/provider-manifests.ts";

@@ -69,8 +69,13 @@ a freshly created fixed Privy principal exists, and a connected real Junction
 `apple_health_kit` provider exists before cleanup. Local mocked or hosted-local
 tests do not replace it. Runtime credentials stay in the dedicated Vercel
 custom environment; the cleanup/dispatch credentials stay only in protected
-Actions environments. The Junction sandbox API key/team is exclusive to this
-one lane, and cleanup enumerates that team before touching the isolated database.
+Actions environments. Junction cleanup completely enumerates the configured
+sandbox team, validates every returned team id, and deletes at most one user in
+the lane's explicit client-user-id namespace before touching the isolated
+database; unrelated sandbox users are never cleanup targets. Because a Junction
+Team API key still has full team data access, a shared team is allowed only for
+disposable sandbox identities and never for staging, production, or real-person
+data.
 PR reset ownership is `orchestrator_owned_reset`, while production canary mode
 is non-destructive and receives none of that authority. Controller child
 commands and direct PostgreSQL reads are explicitly time-bounded.

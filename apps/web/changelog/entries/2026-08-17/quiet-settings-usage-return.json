@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-17",
+  "order": 100,
+  "item": {
+    "id": "quiet-settings-usage-return",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Usage top-ups return quietly",
+    "summary": "Settings no longer opens a large confirmation after personal or Family usage is added.",
+    "details": "The AI usage meter refreshes after confirmation. If no meter is available, Settings keeps one compact receipt; if payment cannot be confirmed, it opens compact recovery.",
+    "relevanceTags": ["settings", "billing", "ai-usage"],
+    "sourcePullRequests": [1938]
+  }
+}

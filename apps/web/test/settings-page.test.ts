@@ -40,13 +40,6 @@ const mocks = vi.hoisted(() => ({
     } | null;
     message?: { body?: string | null } | null;
   }) => {
-    if (input?.message?.body === "Hey Murph, I just added more usage.") {
-      return [{
-        href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-        kind: "text",
-        label: "Messages",
-      }];
-    }
     if (
       input?.message?.body
         === "Hey Murph, what referral options can I choose from?"
@@ -1095,19 +1088,6 @@ test("SettingsPage reads the app session and persisted account settings into the
         text: true,
       },
       message: {
-        body: "Hey Murph, I just added more usage.",
-      },
-      murphEmailAddress: null,
-      murphPhoneNumber: "+15550100001",
-      userEmailAddress: "verified@example.com",
-    });
-    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(3, {
-      contactChannels: {
-        email: false,
-        telegram: true,
-        text: true,
-      },
-      message: {
         body: "Hey Murph, what referral options can I choose from?",
       },
       murphEmailAddress: null,
@@ -1123,15 +1103,8 @@ test("SettingsPage reads the app session and persisted account settings into the
         label: "Messages",
       },
     }, undefined);
-    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        usageTopUpContactOptions: [{
-          href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-          kind: "text",
-          label: "Messages",
-        }],
-      }),
-      undefined,
+    expect(mocks.HostedBillingSettings.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+      "usageTopUpContactOptions",
     );
     expect(mocks.HostedPasskeySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
@@ -1976,11 +1949,6 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
     payerMemberId: "member_123",
     usageTopUpActiveMemberId: "member_family",
     usageTopUpActivePurchase: activePurchase,
-    usageTopUpContactOptions: [{
-      href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-      kind: "text",
-      label: "Messages",
-    }],
     usageTopUpOffers: [],
     usageTopUpPurchaseReturn: {
       kind: "success",

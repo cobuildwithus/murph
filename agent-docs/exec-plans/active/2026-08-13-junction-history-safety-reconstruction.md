@@ -779,3 +779,25 @@ Updated: 2026-08-17
     records the precedence defect and the bounded workaround: isolate optional
     local preferences for this invocation while retaining the repository's
     browser defaults and an explicit supported lane count.
+  - Current-main reconciliation preserves both migration owners, combines the
+    runner-bundle history, and regenerates the canonical CLI skill hash. The
+    owning generator is stable on `f7614227f03140ee`; its focused hash test
+    passes 2 tests. Migration ownership passes 10 tests and the initial runner
+    bundle conflict owner passes 9 tests. The frozen install aligns the merged
+    checkout with current main's ReviewGPT `0.5.133` lockfile.
+  - The resolved merge passes device-sync, assistant-runtime, Web, CLI, and
+    Cloudflare typechecks. The complete device-sync package passes 47 files and
+    1,189 tests; assistant hosted-device-sync passes 113 tests; focused hosted
+    Web source/runtime/store coverage passes 289 tests; and the isolated
+    migrated-Postgres lifecycle and load-overlap proofs pass 9 and 7 tests.
+  - Canonical production assembly exposed two combined-history budget ratchets.
+    ReviewGPT authored both corrections from exact measured output: vault total
+    `9,311,785/9,344,553` bytes, and runner static closure baseline `8,367,726`
+    bytes with the existing `96,000`-byte tolerance. The focused runner policy
+    owner passes 42 tests. The final assembly passes all six CLI parity probes;
+    runner entry is `1,693,072` bytes, static closure is `8,367,726` bytes, and
+    total is `10,943,302/11,393,617` bytes.
+  - Final unresolved-path, conflict-marker, diff-check, and added-line privacy
+    scans pass before the merge checkpoint. ReviewGPT artifact recovery exposed
+    one new fail-closed capture/download friction case; the required public-safe
+    Frog record is included with the task.

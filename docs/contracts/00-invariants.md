@@ -498,6 +498,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   stores the scheduled occurrence and structured provider send-or-skip decision;
   surrounding job and session ids are the bounded record references, while
   private tool output and reasoning remain excluded.
+- A provider-accepted reminder remains immutable historical conversation
+  evidence after its automation is edited, archived, or deleted. Reply planning
+  supplies a bounded ordered projection of those deliveries and marks an exact
+  native reply or reaction edge when available; the model owns natural-language
+  interpretation. A canonical reminder-backed write accepts only the typed
+  outbox intent id from that trusted context, validates the persisted private
+  delivery, plan owner, and scheduled occurrence, derives one deterministic effect id,
+  no-ops retries under the canonical write lock, and returns canonical readback.
+  It never re-reads mutable automation content to redefine a message already
+  delivered. Current revision and plan-consent checks still run immediately
+  before provider delivery and govern future occurrences only.
 - A detached system notification without a valid scheduled occurrence is not a
   user or automation turn. It runs as isolated output-only formatting with no
   conversation history, private context, resume mutation, tools, network, or

@@ -211,8 +211,12 @@ test("screenshot categories keep the production studies available without one gi
   expect(sectionsMarkup).toContain("76% used");
   expect(sectionsMarkup).toContain("24% remaining");
   expect(sectionsMarkup).toContain("0% used");
-  expect(sectionsMarkup).toContain("Fulfilled top-up with refreshed usage");
-  expect(sectionsMarkup).toContain("Preview fulfilled top-up");
+  expect(sectionsMarkup).toContain("Successful top-up return");
+  expect(sectionsMarkup).toContain("Preview quiet refresh");
+  expect(sectionsMarkup).toContain("Preview failed recovery");
+  expect(sectionsMarkup).toContain("Preview Family member completion");
+  expect(sectionsMarkup).toContain("Preview inactive account completion");
+  expect(sectionsMarkup).toContain("Preview former member completion");
   expect(sectionsMarkup).toContain("Add usage to continue");
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
@@ -298,7 +302,11 @@ test("screenshot categories keep the production studies available without one gi
     new URL("../app/design/group-usage-funding-study.tsx", import.meta.url),
     "utf8",
   );
-  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(1);
+  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(4);
+  expect(groupFundingStudySource).toContain('returnPreview === "failed"');
+  expect(groupFundingStudySource).toContain('returnPreview === "family"');
+  expect(groupFundingStudySource).toContain('returnPreview === "inactive"');
+  expect(groupFundingStudySource).toContain('returnPreview === "former"');
   expect(groupFundingStudySource).toContain(
     "<GroupSponsorshipManagementCard",
   );

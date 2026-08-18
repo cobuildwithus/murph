@@ -99,6 +99,8 @@ import {
 } from './dynamic-tools/generate-voice-memo.js'
 import {
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_GET_PHONE_CALL_STATUS_TOOL,
+  MURPH_STOP_PHONE_CALL_TOOL,
 } from './dynamic-tools/phone-calls.js'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -1507,6 +1509,8 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_GET_PHONE_CALL_STATUS_TOOL,
+  MURPH_STOP_PHONE_CALL_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
   MURPH_LABS_TOOL,
 ] as const
@@ -1565,6 +1569,8 @@ export interface MurphDynamicToolAvailability {
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
+  phoneCallStatusAvailable?: boolean | null
+  phoneCallStopAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
@@ -1618,6 +1624,9 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.pendingVaultFilesAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
+    [MURPH_GET_PHONE_CALL_STATUS_TOOL, defaultOff((a) =>
+      a.phoneCallStatusAvailable)],
+    [MURPH_STOP_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallStopAvailable)],
     [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>

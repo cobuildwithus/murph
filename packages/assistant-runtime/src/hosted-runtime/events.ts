@@ -115,6 +115,9 @@ export async function executeHostedMailboxEvent(input: {
   });
 
   return {
+    ...(mailboxEffect.backgroundMaintenanceYielded === true
+      ? { backgroundMaintenanceYielded: true as const }
+      : {}),
     bootstrapResult,
     conversationMetrics: mailboxEffect.conversationMetrics,
     ...(mailboxEffect.deliveryIntentIds === undefined
@@ -350,6 +353,9 @@ async function executeHostedSystemWake(input: {
         ),
       ]);
       return createNoopMailboxEffect({
+        ...(deviceSyncMetrics.deviceSyncSkipped
+          ? { backgroundMaintenanceYielded: true as const }
+          : {}),
         conversationMetrics: null,
         mailboxLane: "device-sync",
         nextWakeAt: nextWake.at,
