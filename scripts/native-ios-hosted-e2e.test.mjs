@@ -21,6 +21,7 @@ import {
   inspectJunctionAppleHealthConnection,
   inspectNamespacedJunctionUsers,
   inspectResolvedJunctionUser,
+  withDedicatedDatabaseOwner,
 } from "./native-ios-hosted-e2e-identity.mjs";
 import {
   buildDispatchInputs,
@@ -425,6 +426,17 @@ test("destructive database reset is limited to an explicitly E2E-named database"
       directDatabaseUrl: `postgresql://owner@db.example.test/${databaseName}`,
     }), /explicitly E2E\/test database/u);
   }
+});
+
+test("destructive database reset assumes the canonical schema owner", () => {
+  const ownedUrl = new URL(withDedicatedDatabaseOwner(
+    "postgresql://credential@db.example.test/native_ios_e2e?sslmode=require&options=-c%20statement_timeout%3D10000",
+  ));
+  assert.equal(ownedUrl.searchParams.get("sslmode"), "require");
+  assert.equal(
+    ownedUrl.searchParams.get("options"),
+    "-c statement_timeout=10000 -c role=postgres",
+  );
 });
 
 test("Junction cleanup isolates one E2E namespace inside a shared sandbox team", () => {
