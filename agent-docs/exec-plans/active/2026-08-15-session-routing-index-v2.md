@@ -148,6 +148,19 @@ Updated: 2026-08-17
   positively proven irrecoverable projection corruption. Preserving that winner
   through true projection loss would require a second durable authority or
   reconciliation system, which this design deliberately rejects.
+- ReviewGPT round 6 accepted one boundedness finding in the recovery mechanism:
+  a hard termination could strand each UUID-named rebuild database and its
+  SQLite sidecars. Reuse one deterministic rebuild slot under the already
+  snapshot-excluded assistant `state/.tmp` directory. The existing assistant
+  runtime write lock remains the sole rebuild coordinator; do not add a
+  sweeper, marker, UUID family, or new owner.
+- Round 6 also identified an undisclosed shared-helper surface. Closing a SQLite
+  handle that fails PRAGMA configuration and preserving the original operation
+  or commit error when rollback fails are intentional package-wide contracts,
+  not assistant-local exceptions. Keep the shared implementation, prove the
+  configuration close/error boundary directly, run representative device-sync,
+  query-projection, and inbox-persistence package gates, and disclose those
+  downstream owners in the PR.
 
 ## Verification
 
@@ -205,3 +218,21 @@ Updated: 2026-08-17
 - Corrected-head local verification: assistant persistence 30/30; exact final
   recovery cases 2/2; runtime-state SQLite helpers 6/6; assistant-engine and
   runtime-state package typechecks; and `git diff --check` all pass.
+- ReviewGPT substantive round 6: all round-1 through round-5 findings are
+  resolved. Two accepted findings remain: make interrupted rebuild scratch
+  bounded and snapshot-invisible, and disclose plus prove the shared SQLite
+  failure contracts across their downstream package owners.
+- Round-6 correction verification: two consecutive simulated hard-termination
+  residues reused and removed the same deterministic rebuild slot and all four
+  SQLite family members; the state directory returned to its single live
+  database. Both full-workspace and assistant hot-state snapshot proofs exclude
+  that scratch family. The shared SQLite opener closes its handle and preserves
+  the exact PRAGMA configuration error even when close also fails.
+- Representative downstream SQLite consumers pass: device sync store 51/51,
+  query projection 108/108, and inbox persistence/migration 28/28. Runtime-state
+  SQLite helpers pass 7/7, the two affected snapshot cases pass, and
+  assistant persistence passes 30/30. Assistant-engine, runtime-state,
+  device-syncd, query, and inboxd package typechecks pass. A broad runtime-state
+  invocation passed 73/75; its only two failures were unrelated pre-existing
+  filesystem-hardening cases that exceeded their 60-second timeout under
+  concurrent machine load.

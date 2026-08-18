@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import {
   access,
   open,
@@ -1185,9 +1185,12 @@ async function rebuildAssistantSessionRoutingDatabase(
     legacyIndex,
   )
   const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
-  const rebuildPath = `${databasePath}.${randomUUID()}.rebuild`
-  await removeAssistantSessionRoutingDatabaseSidecars(rebuildPath)
-  await rm(rebuildPath, { force: true })
+  const rebuildDirectory = path.join(path.dirname(databasePath), '.tmp')
+  const rebuildPath = path.join(
+    rebuildDirectory,
+    `${path.basename(databasePath)}.rebuild`,
+  )
+  await rm(rebuildDirectory, { force: true, recursive: true })
 
   let rebuilt: AssistantSessionRoutingDatabase | null = null
   try {
@@ -1200,15 +1203,22 @@ async function rebuildAssistantSessionRoutingDatabase(
     rebuilt.close()
     rebuilt = null
 
+    await removeAssistantSessionRoutingDatabaseSidecars(rebuildPath)
     await removeAssistantSessionRoutingDatabaseSidecars(databasePath)
     await rename(rebuildPath, databasePath)
+    await rm(rebuildDirectory, { force: true, recursive: true })
     // A legacy aggregate is one-way migration input. Publishing this projection
     // establishes the runtime rollback floor before the aggregate is removed.
     await rm(paths.indexesPath, { force: true })
   } catch (error) {
-    rebuilt?.close()
-    await rm(rebuildPath, { force: true }).catch(() => undefined)
-    await removeAssistantSessionRoutingDatabaseSidecars(rebuildPath)
+    try {
+      rebuilt?.close()
+    } catch {
+      // Preserve the rebuild error that determines recovery.
+    }
+    await rm(rebuildDirectory, { force: true, recursive: true }).catch(
+      () => undefined,
+    )
     throw error
   }
 
