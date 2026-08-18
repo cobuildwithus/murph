@@ -4363,6 +4363,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           result: passResult,
           workspace: passWorkspace,
         });
+        const assistantContinuationWakeAt =
+          passResult.assistantPhaseResult?.nextWakeAt ?? null;
+        const assistantContinuationWake =
+          assistantContinuationWakeAt !== null
+          && hostedRuntimeWakeReasonIsAssistant(
+            passResult.assistantPhaseResult?.nextWakeReason ?? null,
+          )
+            ? {
+                nextWakeAt: assistantContinuationWakeAt,
+                nextWakeReason:
+                  passResult.assistantPhaseResult?.nextWakeReason ?? null,
+              }
+            : null;
         const passWake = resolveHostedWorkspaceRunNextWake({
           assistantPhaseResult: passResult.assistantPhaseResult,
           committedWorkspace: committedPassWorkspace,
@@ -4418,12 +4431,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (
           checkpointPendingBeforePass
           && presentedInvocationLocalProjectedAssistantWakeKey === null
-          && passProjectedAssistantWakeKey !== null
+          && assistantContinuationWake !== null
+          && hotProjectedAssistantWakeAttemptedKey !== null
+          && buildHostedRuntimeWakeKey(previousPendingWake)
+            === hotProjectedAssistantWakeAttemptedKey
           && previousPendingWake.nextWakeAt !== null
           && hostedRuntimeWakeReasonIsAssistant(previousPendingWake.nextWakeReason)
           && hostedRuntimeWakeIsDue(previousPendingWake.nextWakeAt)
-          && passWake.nextWakeAt !== null
-          && Date.parse(passWake.nextWakeAt)
+          && Date.parse(assistantContinuationWake.nextWakeAt)
             > Date.parse(previousPendingWake.nextWakeAt)
           && hostedRuntimePendingWakeMatches(pendingWake, previousPendingWake)
         ) {
@@ -4435,8 +4450,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   pendingWakeAfterDueAssistantService?.durableWake.nextWakeReason ?? null,
               },
               {
-                at: passWake.nextWakeAt,
-                reason: passWake.nextWakeReason,
+                at: assistantContinuationWake.nextWakeAt,
+                reason: assistantContinuationWake.nextWakeReason,
               },
             ]),
           };

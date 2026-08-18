@@ -37047,7 +37047,6 @@ describe("hosted workspace runtime entrypoint", () => {
               reminderCreated.resolve();
               return {
                 checkpointReason: "assistant_runtime_commit",
-                invocationLocalAssistantWakeAt: reminderWakeAt,
                 nextWakeAt: reminderWakeAt,
                 nextWakeReason: "assistant",
                 progressed: true,
