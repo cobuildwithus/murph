@@ -223,13 +223,14 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       applyButton.click();
     });
 
-    expect(rendered.container.textContent).toContain("Increase limit to $20?");
+    expect(rendered.container.textContent).toContain("Increase your limit to $20?");
     expect(rendered.container.textContent).toContain(
-      "This changes your monthly maximum from $10 to $20",
+      "Your monthly limit will change from $10 to $20",
     );
     expect(rendered.container.textContent).toContain(
-      "Murph makes $5 usage purchases only while automatic refills are active",
+      "When automatic refills are on, Murph may charge $5 at a time",
     );
+    expect(rendered.container.textContent).toContain("Keep $10 limit");
     assert.equal(fetchMock.mock.calls.length, 0);
 
     const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
@@ -303,7 +304,7 @@ test.each([
 
     assert.equal(fetchMock.mock.calls.length, 0);
     expect(rendered.container.textContent).toContain(
-      "Murph makes $5 usage purchases only while automatic refills are active",
+      "When automatic refills are on, Murph may charge $5 at a time",
     );
 
     const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
@@ -368,9 +369,9 @@ test("keeps an uncertain cap increase actionable and reloads on dismissal", asyn
     });
 
     assert.equal(fetchMock.mock.calls.length, 1);
-    expect(rendered.container.textContent).toContain("Increase limit to $20?");
+    expect(rendered.container.textContent).toContain("Increase your limit to $20?");
     expect(rendered.container.textContent).toContain(
-      "We couldn’t confirm whether that change went through",
+      "We’re not sure whether your limit changed",
     );
     expect(confirmButton.textContent).toBe("Increase to $20");
 
@@ -448,10 +449,10 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
 
     assert.equal(fetchMock.mock.calls.length, 0);
     expect(rendered.container.textContent).toContain(
-      "Cancel monthly sponsorship?",
+      "Cancel your monthly sponsorship?",
     );
     expect(rendered.container.textContent).toContain(
-      "Usage credit already purchased stays with the group",
+      "Any usage credit already purchased will stay with the group",
     );
 
     const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
@@ -520,7 +521,7 @@ test.each([false, true])(
       });
 
       expect(rendered.container.textContent).toContain(
-        "We couldn’t confirm whether cancellation went through",
+        "We’re not sure whether your sponsorship was canceled",
       );
       expect(confirmButton.textContent).toBe("Check cancellation status");
       expect(rendered.container.textContent).not.toContain("Check current setup");

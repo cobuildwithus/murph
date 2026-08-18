@@ -400,6 +400,9 @@ export function GroupSponsorshipManagementConfirmationDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const isIncrease = confirmation?.kind === "increase";
+  const currentLimit = isIncrease
+    ? formatMoney(confirmation.currentMonthlyCapMinor)
+    : null;
   const nextLimit = isIncrease
     ? formatMoney(confirmation.nextMonthlyCapMinor)
     : null;
@@ -429,13 +432,13 @@ export function GroupSponsorshipManagementConfirmationDialog({
             </p>
             <AlertDialogPrimitive.Title className="font-serif text-2xl/7 font-semibold text-balance tracking-normal">
               {isIncrease
-                ? `Increase limit to ${nextLimit}?`
-                : "Cancel monthly sponsorship?"}
+                ? `Increase your limit to ${nextLimit}?`
+                : "Cancel your monthly sponsorship?"}
             </AlertDialogPrimitive.Title>
             <AlertDialogPrimitive.Description className="max-w-[48ch] text-sm/6 text-pretty text-muted-foreground">
               {isIncrease
-                ? `This changes your monthly maximum from ${formatMoney(confirmation.currentMonthlyCapMinor)} to ${nextLimit}. Murph makes $5 usage purchases only while automatic refills are active and the group needs more capacity.`
-                : "Future automatic refills will stop. Usage credit already purchased stays with the group."}
+                ? `Your monthly limit will change from ${currentLimit} to ${nextLimit}. When automatic refills are on, Murph may charge $5 at a time for more usage credit.`
+                : "Automatic refills will stop. Any usage credit already purchased will stay with the group."}
             </AlertDialogPrimitive.Description>
           </header>
 
@@ -444,8 +447,8 @@ export function GroupSponsorshipManagementConfirmationDialog({
               {authoritativeRejection
                 ? error.message
                 : isIncrease
-                ? "We couldn’t confirm whether that change went through. Check your current setup or try again."
-                : "We couldn’t confirm whether cancellation went through. Check its status to see whether automatic refills stopped."}
+                ? "We’re not sure whether your limit changed. Check your current setup before trying again."
+                : "We’re not sure whether your sponsorship was canceled. Check its status before trying again."}
             </p>
           ) : null}
 
@@ -459,7 +462,9 @@ export function GroupSponsorshipManagementConfirmationDialog({
                   ? "Refresh current setup"
                   : error
                     ? "Check current setup"
-                    : "Keep current setup"}
+                    : isIncrease
+                      ? `Keep ${currentLimit} limit`
+                      : "Keep sponsorship"}
               </AlertDialogPrimitive.Close>
             )}
             {authoritativeRejection ? null : (
