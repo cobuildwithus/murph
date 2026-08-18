@@ -1,6 +1,6 @@
 # Restore Starter allowance from Ops
 
-Status: active
+Status: completed
 Created: 2026-08-18
 Updated: 2026-08-18
 
@@ -20,8 +20,8 @@ Success means:
   immutable usage, delivery history, and historical periods remain unchanged;
 - stale table state, concurrent credit changes, and in-flight notice dispatches
   continue to fail closed; and
-- focused tests, typechecks, rendered Product UX proof, exact-head CI, and the
-  required ReviewGPT gates pass.
+- focused tests, typechecks, rendered Product UX proof, and exact-head CI pass;
+  any explicit user waiver of a review or platform-specific gate is recorded.
 
 ## Evidence
 
@@ -119,17 +119,19 @@ Product decision:
 
 Current evidence:
 
-- 94 focused service, route, growth, and rendered-client tests pass, including
-  close/remount reconstruction of a Starter wake-only retry that sends no
-  second grant request and clears locally after acceptance.
+- 94 focused service, route, growth, and rendered-client tests pass. The client
+  proof covers a committed 202 response followed by close, delayed or failed
+  refresh with old props, remount recovery, a later capture with unconsumed
+  work, and the final capture after that work is consumed.
 - The isolated local PostgreSQL proof passes both the existing paid-period reset
   and the exhausted-Starter flow. It proves a $4.50 balance, ledger version
   advance, unchanged prior entries, canonical admission, stale-replay rejection
   with exactly one Ops grant, and a later new grant only after the first recovery
   is fully consumed and the gate is exhausted again.
-- Web typecheck, focused ESLint, and the initial exact-head broad CI pass. The
-  corrected client and maximum-page query tests also pass locally; fresh
-  exact-head CI remains pending after the review-finding commit.
+- Web typecheck, focused ESLint, docs drift, diff checks, and the corrected
+  client and maximum-page query tests pass locally. Exact-head GitHub checks
+  were running when the user requested immediate merge; the canceled or
+  pending Native iOS guard was explicitly waived.
 - The preliminary specialist audit identified losable Starter wake recovery,
   contradictory product authority, stale post-commit row claims, hidden
   narrow-width actions, and missing maximum-page recovery-query proof. The
@@ -143,6 +145,13 @@ Current evidence:
   and narrow-width operator paths now provide truthful status and a reachable
   next action. The member receives restored canonical capacity without a new
   self-service entitlement or changed credit history.
+- Final ReviewGPT round 2 found that closing the pending-wake dialog could
+  re-expose stale reset controls after the grant had committed. The required
+  retrospective was recorded on the PR. The correction replaced three
+  overlapping local authorities with one capture-scoped post-commit value:
+  pending keeps only the wake-safe action, accepted is non-actionable, and a
+  new dashboard capture restores canonical server ownership. The user then
+  explicitly opted out of another ReviewGPT round and requested merge.
 - Seven synthetic production-component captures cover the unscrolled 1184px
   dashboard, Starter confirmation, committed/refreshing result, full 390px
   dashboard, compact eligible row, pending wake, and reload-derived wake retry.
@@ -156,3 +165,4 @@ hosted runtimes already consume the resulting canonical balance and accept the
 existing recheck signal. No Cloudflare tandem deploy or rollback floor is
 introduced. Post-deploy, confirm one synthetic/staging exhausted Starter reset
 adds exactly one grant and that a stale replay cannot add another.
+Completed: 2026-08-18
