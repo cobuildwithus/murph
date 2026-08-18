@@ -5600,15 +5600,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             throw error;
           }
         };
-        const preserveImmediateDurableCheckpointFollowUp = (): void => {
-          if (!durableCheckpointFollowUpPending) {
-            return;
-          }
-          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
-          // Foreground work rearms the ordinary idle window; the promoted
-          // successor still needs its immediate durable checkpoint.
-          setIdleCheckpointStartBy(Date.now());
-        };
         if (conversationInputAhead && mayRunPostCheckpointWork()) {
           await runOptionalPostCheckpointWork(
             async () =>
@@ -5618,7 +5609,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               }),
           );
           if (runtimeStateDirty) {
-            preserveImmediateDurableCheckpointFollowUp();
+            pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
             continue;
           }
         }
@@ -5692,7 +5683,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
         }
         if (runtimeStateDirty) {
-          preserveImmediateDurableCheckpointFollowUp();
+          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           continue;
         }
         let vaultShareOpportunity: HostedVaultShareProjectionOpportunity | null = null;

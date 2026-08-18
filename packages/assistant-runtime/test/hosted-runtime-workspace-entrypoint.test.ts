@@ -36850,6 +36850,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const olderWakePersisted = createDeferred<void>();
     const reminderCreated = createDeferred<void>();
     const reminderWakePersisted = createDeferred<void>();
+    const firstCheckpointConversationHandled = createDeferred<void>();
+    const secondCheckpointConversationHandled = createDeferred<void>();
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_assistant_carry_mask_001",
@@ -36971,13 +36973,21 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
-            if (assistantPass === 4) {
+            if (assistantPass === 4 || assistantPass === 5) {
+              const expectedMailboxItemId = assistantPass === 4
+                ? "mailbox_item_entrypoint_assistant_carry_mask_003"
+                : "mailbox_item_entrypoint_assistant_carry_mask_004";
               assert.ok(
                 events.includes(
-                  "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_003",
+                  `mailbox.importItem:${expectedMailboxItemId}`,
                 ),
                 events.join(","),
               );
+              if (assistantPass === 4) {
+                firstCheckpointConversationHandled.resolve();
+              } else {
+                secondCheckpointConversationHandled.resolve();
+              }
               return {
                 checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: reminderWakeAt,
@@ -37020,6 +37030,43 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.notEqual(persistedDispatchIndex, -1, events.join(","));
 
+      if (checkpointConversation) {
+        await withRealTimeout(
+          firstCheckpointConversationHandled.promise,
+          15_000,
+          () => events.join(","),
+        );
+        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+        await waitForFakeTimerScheduled(() => events.join(","));
+        assert.equal(
+          events.some((event) => event.startsWith("snapshot:2:")),
+          false,
+          events.join(","),
+        );
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        mailboxItems.push(createMailboxItem({
+          id: "mailbox_item_entrypoint_assistant_carry_mask_004",
+          laneSeq: "4",
+        }));
+        runtimeWakeSignal.notify(Date.now());
+        await withRealTimeout(
+          secondCheckpointConversationHandled.promise,
+          15_000,
+          () => events.join(","),
+        );
+        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+        await waitForFakeTimerScheduled(() => events.join(","));
+
+        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+        assert.equal(
+          events.some((event) => event.startsWith("snapshot:2:")),
+          false,
+          events.join(","),
+        );
+        await vi.advanceTimersByTimeAsync(1);
+      }
+
       await withRealTimeout(
         reminderWakePersisted.promise,
         15_000,
@@ -37033,7 +37080,15 @@ describe("hosted workspace runtime entrypoint", () => {
         [olderDueWakeAt, "assistant"],
         [reminderWakeAt, "assistant"],
       ]);
+      const secondSnapshotIndex = events.findIndex((event) =>
+        event.startsWith("snapshot:2:")
+      );
+      assert.notEqual(secondSnapshotIndex, -1, events.join(","));
       if (!checkpointConversation) {
+        assert.equal(
+          events[secondSnapshotIndex],
+          `snapshot:2:idle_shutdown:${Date.parse(TEST_NOW) + idleCheckpointDelayMs}`,
+        );
         assert.equal(
           events.slice(persistedDispatchIndex + 1).some((event) =>
             event.startsWith("mailbox.importItem:")
@@ -37050,14 +37105,20 @@ describe("hosted workspace runtime entrypoint", () => {
         );
         return;
       }
-      const secondSnapshotIndex = events.findIndex((event) =>
-        event.startsWith("snapshot:2:")
-      );
-      const foregroundAssistantIndex = events.findIndex((event) =>
+      const firstForegroundAssistantIndex = events.findIndex((event) =>
         event.startsWith("assistant:4:")
       );
-      assert.notEqual(secondSnapshotIndex, -1, events.join(","));
-      assert.notEqual(foregroundAssistantIndex, -1, events.join(","));
+      const secondForegroundAssistantIndex = events.findIndex((event) =>
+        event.startsWith("assistant:5:")
+      );
+      assert.notEqual(firstForegroundAssistantIndex, -1, events.join(","));
+      assert.notEqual(secondForegroundAssistantIndex, -1, events.join(","));
+      assert.equal(
+        events[secondSnapshotIndex],
+        `snapshot:2:idle_shutdown:${
+          Date.parse(TEST_NOW) + idleCheckpointDelayMs + 1_000 + idleCheckpointDelayMs
+        }`,
+      );
       assert.ok(
         requireEventIndex(
           events,
@@ -37066,7 +37127,18 @@ describe("hosted workspace runtime entrypoint", () => {
         events.join(","),
       );
       assert.ok(
-        foregroundAssistantIndex < secondSnapshotIndex,
+        firstForegroundAssistantIndex < secondSnapshotIndex,
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_004",
+        ) < secondSnapshotIndex,
+        events.join(","),
+      );
+      assert.ok(
+        secondForegroundAssistantIndex < secondSnapshotIndex,
         events.join(","),
       );
     } finally {
