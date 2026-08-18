@@ -4233,6 +4233,8 @@ async function persistHostedEmailGroupFanoutIntents(input: {
         actorId: payload.actorId,
         answeredMailboxItemIds: payload.answeredMailboxItemIds,
         automationAuthority: parentIntent.automationAuthority ?? null,
+        automationContextReferences:
+          parentIntent.automationContextReferences ?? null,
         channel: "email",
         dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
         deliveryIdempotencyKey: payload.idempotencyKey,

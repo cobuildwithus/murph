@@ -17,6 +17,7 @@ import {
   normalizeIanaTimeZone,
   parseAutomationSupportSeriesTag,
   type AutomationAssistantTargetOverride,
+  type AutomationContextReference,
   type AutomationContinuityPolicy,
   type AutomationRoute,
   type AutomationSchedule,
@@ -75,6 +76,7 @@ export interface MurphManagedAutomationSeed {
   automationId: string
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
+  contextReferences?: readonly AutomationContextReference[]
   ownerScope?: MurphManagedAutomationOwnerScope
   hostedRuntimeOnly?: boolean
   instructions: string
@@ -1113,6 +1115,9 @@ export async function applyMurphManagedAutomations(
           : { activeUntil: seed.activeUntil }),
         automationId: seed.automationId,
         continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
+        ...(seed.contextReferences === undefined
+          ? {}
+          : { contextReferences: [...seed.contextReferences] }),
         instructions: seed.instructions,
         now,
         ...(seed.assistantTargetOverride === undefined
@@ -1211,6 +1216,9 @@ export async function applyMurphManagedAutomations(
         : { activeUntil: seed.activeUntil }),
       automationId: existing.automationId,
       continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
+      ...(seed.contextReferences === undefined
+        ? {}
+        : { contextReferences: [...seed.contextReferences] }),
       instructions: seed.instructions,
       now,
       ...(seed.assistantTargetOverride === undefined
@@ -1862,6 +1870,13 @@ function murphManagedAutomationSeedChanged(
     ) ||
     (summary !== null && existing.summary !== summary) ||
     existing.continuityPolicy !== resolveMurphManagedAutomationContinuity(seed) ||
+    (
+      seed.contextReferences !== undefined &&
+      !murphManagedAutomationValuesEqual(
+        existing.contextReferences,
+        seed.contextReferences,
+      )
+    ) ||
     existing.instructions !== seed.instructions ||
     (
       seed.assistantTargetOverride !== undefined &&
