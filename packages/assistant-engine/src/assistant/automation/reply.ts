@@ -74,11 +74,20 @@ import {
 import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
+  resolveAssistantStatePaths,
 } from '../store.js'
 import {
   hasAssistantOutboxDeliveryEvidence,
   stripAssistantImageResponseTranscriptMarker,
 } from '../response-media.js'
+import { resolveAssistantOutboxIntentPath } from '../outbox/intents.js'
+import { readAssistantOutboxIntentAtPath } from '../outbox/store.js'
+import {
+  readAssistantOutboxDeliveryProviderMessageIds,
+  readAssistantOutboxProviderLookupAtPaths,
+  readAssistantOutboxRouteLookupAtPaths,
+  type AssistantOutboxLookupReadMetrics,
+} from '../outbox/lookup-projection.js'
 import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
@@ -99,6 +108,12 @@ import {
   isAssistantProviderCapacityError,
   isAssistantProviderUsageLimitError,
 } from './auto-reply-retry.js'
+import {
+  assistantAutoReplyOutboxMatchesInput,
+  resolveAssistantAutoReplyRouteProjectionQuery,
+  type AssistantAutoReplyRouteProjectionQuery,
+  type AssistantAutoReplyRouteProjectionReadProof,
+} from './cross-session-route-projection.js'
 import {
   compareAssistantAutoReplyDeliveryOrders,
   createAssistantAutoReplyRouteClaimHook,
@@ -177,6 +192,15 @@ type AssistantAutoReplyOutboxIntent =
   Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
 
 export interface AssistantAutoReplyHistoryMetrics {
+  outboxLookupCanonicalValidationBytesRead: number
+  outboxLookupCanonicalValidationFilesRead: number
+  outboxLookupElapsedMs: number
+  outboxLookupFallbackCount: number
+  outboxLookupFallbackReason?: string
+  outboxLookupFilesRead: number
+  outboxLookupReads: number
+  outboxLookupPublicationRetries: number
+  outboxLookupBytesRead: number
   outboxScanBytesRead?: number
   outboxScanElapsedMs?: number
   outboxScanFilesRead?: number
@@ -188,9 +212,23 @@ export interface AssistantAutoReplyHistoryMetrics {
   receiptScanPerformed: boolean
 }
 
+export type AssistantAutoReplyOutboxLookupSelection =
+  | {
+      channel: string
+      kind: 'provider-message'
+      providerMessageIds: readonly string[]
+    }
+  | {
+      kind: 'route'
+      proof: AssistantAutoReplyRouteProjectionReadProof
+      query: AssistantAutoReplyRouteProjectionQuery
+    }
+
 export interface AssistantAutoReplyHistoryReader {
   readMetrics(): AssistantAutoReplyHistoryMetrics
-  readOutboxIntents(): Promise<readonly AssistantAutoReplyOutboxIntent[]>
+  readOutboxIntents(
+    selection?: AssistantAutoReplyOutboxLookupSelection,
+  ): Promise<readonly AssistantAutoReplyOutboxIntent[]>
   readReceipts(): Promise<readonly AssistantAutoReplyReceiptRecord[]>
 }
 
@@ -4316,6 +4354,10 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot(in
 export function createAssistantAutoReplyHistoryReader(input: {
   vault: string
 }): AssistantAutoReplyHistoryReader {
+  const lookupReads = new Map<
+    string,
+    Promise<readonly AssistantAutoReplyOutboxIntent[]>
+  >()
   let outboxIntents:
     | Promise<readonly AssistantAutoReplyOutboxIntent[]>
     | null = null
@@ -4325,10 +4367,130 @@ export function createAssistantAutoReplyHistoryReader(input: {
   let receipts:
     | Promise<readonly AssistantAutoReplyReceiptRecord[]>
     | null = null
+  const lookupMetrics: AssistantOutboxLookupReadMetrics & {
+    fallbackCount: number
+    reads: number
+  } = {
+    canonicalValidationBytesRead: 0,
+    canonicalValidationFilesRead: 0,
+    elapsedMs: 0,
+    fallbackCount: 0,
+    lookupBytesRead: 0,
+    lookupFilesRead: 0,
+    publicationRetries: 0,
+    reads: 0,
+  }
+  let firstLookupFallbackReason: string | null = null
+
+  const readCanonicalOutbox = () => {
+    outboxIntents ??= (async () => {
+      const startedAt = Date.now()
+      try {
+        return await listAssistantOutboxIntents(input.vault, (metrics) => {
+          outboxScanMetrics = metrics
+        })
+      } finally {
+        outboxScanElapsedMs = Math.max(0, Date.now() - startedAt)
+      }
+    })()
+    return outboxIntents
+  }
+  const observeLookup = (metrics: AssistantOutboxLookupReadMetrics) => {
+    lookupMetrics.canonicalValidationBytesRead +=
+      metrics.canonicalValidationBytesRead
+    lookupMetrics.canonicalValidationFilesRead +=
+      metrics.canonicalValidationFilesRead
+    lookupMetrics.elapsedMs += metrics.elapsedMs
+    lookupMetrics.lookupBytesRead += metrics.lookupBytesRead
+    lookupMetrics.lookupFilesRead += metrics.lookupFilesRead
+    lookupMetrics.publicationRetries += metrics.publicationRetries
+    lookupMetrics.reads += 1
+    if (metrics.fallbackReason) {
+      lookupMetrics.fallbackCount += 1
+      firstLookupFallbackReason ??= metrics.fallbackReason
+    }
+  }
+  const readSelection = (
+    selection: AssistantAutoReplyOutboxLookupSelection,
+  ): Promise<readonly AssistantAutoReplyOutboxIntent[]> => {
+    const key = selection.kind === 'provider-message'
+      ? JSON.stringify([
+          selection.kind,
+          selection.channel,
+          [...new Set(selection.providerMessageIds)].sort(),
+        ])
+      : JSON.stringify([
+          selection.kind,
+          selection.query.lookupKey,
+          selection.query.expectedExactRouteDigest,
+          selection.proof,
+        ])
+    let existing = lookupReads.get(key)
+    if (existing) {
+      return existing
+    }
+    existing = (async () => {
+      const paths = resolveAssistantStatePaths(input.vault)
+      const reader = {
+        readIntent: async (
+          intentId: string,
+          onBytesRead?: (bytes: number) => void,
+        ) => await readAssistantOutboxIntentAtPath(
+          resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
+          {
+            ...(onBytesRead ? { onBytesRead } : {}),
+            vault: input.vault,
+          },
+        ),
+      }
+      if (selection.kind === 'provider-message') {
+        const result = await readAssistantOutboxProviderLookupAtPaths({
+          channel: selection.channel,
+          paths,
+          providerMessageIds: selection.providerMessageIds,
+          reader,
+        })
+        observeLookup(result.metrics)
+        if (result.kind === 'fallback') {
+          return await readCanonicalOutbox()
+        }
+        return [...new Map(
+          [...result.intentsByProviderMessageId.values()]
+            .flat()
+            .map((intent) => [intent.intentId, intent] as const),
+        ).values()]
+      }
+      const result = await readAssistantOutboxRouteLookupAtPaths({
+        paths,
+        proof: selection.proof,
+        query: selection.query,
+        reader,
+      })
+      observeLookup(result.metrics)
+      return result.kind === 'fallback'
+        ? await readCanonicalOutbox()
+        : [...result.intentsById.values()]
+    })()
+    lookupReads.set(key, existing)
+    return existing
+  }
 
   return {
     readMetrics() {
       return {
+        outboxLookupCanonicalValidationBytesRead:
+          lookupMetrics.canonicalValidationBytesRead,
+        outboxLookupCanonicalValidationFilesRead:
+          lookupMetrics.canonicalValidationFilesRead,
+        outboxLookupElapsedMs: lookupMetrics.elapsedMs,
+        outboxLookupFallbackCount: lookupMetrics.fallbackCount,
+        ...(firstLookupFallbackReason === null
+          ? {}
+          : { outboxLookupFallbackReason: firstLookupFallbackReason }),
+        outboxLookupFilesRead: lookupMetrics.lookupFilesRead,
+        outboxLookupReads: lookupMetrics.reads,
+        outboxLookupPublicationRetries: lookupMetrics.publicationRetries,
+        outboxLookupBytesRead: lookupMetrics.lookupBytesRead,
         ...(outboxScanMetrics === null
           ? {}
           : {
@@ -4348,18 +4510,8 @@ export function createAssistantAutoReplyHistoryReader(input: {
         receiptScanPerformed: receiptScanMetrics !== null,
       }
     },
-    readOutboxIntents() {
-      outboxIntents ??= (async () => {
-        const startedAt = Date.now()
-        try {
-          return await listAssistantOutboxIntents(input.vault, (metrics) => {
-            outboxScanMetrics = metrics
-          })
-        } finally {
-          outboxScanElapsedMs = Math.max(0, Date.now() - startedAt)
-        }
-      })()
-      return outboxIntents
+    readOutboxIntents(selection) {
+      return selection ? readSelection(selection) : readCanonicalOutbox()
     },
     readReceipts() {
       receipts ??= listAssistantTurnReceipts(
@@ -4504,20 +4656,19 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
   const inputProviderMessageId = readAssistantTargetProviderScalar(
     input.input.replyTarget?.messageId,
   )
-  const matchingDeliveries = await listAssistantAutoReplyMatchingOutboxDeliveries(
-    {
-      deliveryTarget: input.deliveryTarget,
-      historyReader: input.historyReader,
-      input: input.input,
-    },
-  )
-  if (
-    inputProviderMessageId !== null &&
-    matchingDeliveries.some((delivery) =>
+  if (inputProviderMessageId !== null) {
+    const anchoredDeliveries =
+      await listAssistantAutoReplyMatchingOutboxDeliveries({
+        deliveryTarget: input.deliveryTarget,
+        historyReader: input.historyReader,
+        input: input.input,
+        providerMessageIds: [inputProviderMessageId],
+      })
+    if (anchoredDeliveries.some((delivery) =>
       delivery.providerMessageIds.includes(inputProviderMessageId),
-    )
-  ) {
-    return true
+    )) {
+      return true
+    }
   }
 
   const inputText = normalizeNullableString(input.input.text)
@@ -4559,8 +4710,19 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
     }
   }
 
+  const routeDeliveries = await listAssistantAutoReplyMatchingOutboxDeliveries({
+    deliveryTarget: input.deliveryTarget,
+    historyReader: input.historyReader,
+    input: input.input,
+    routeProjectionProof: {
+      causalUpperBoundMs,
+      inputTimeMs: inputTime,
+      kind: 'echo',
+      maxDeltaMs: ASSISTANT_AUTO_REPLY_OUTBOX_CLOCK_SKEW_MS,
+    },
+  })
   textCandidates.push(
-    ...matchingDeliveries.flatMap((delivery) =>
+    ...routeDeliveries.flatMap((delivery) =>
       delivery.message !== null &&
       delivery.sentAtMs <= causalUpperBoundMs &&
       (
@@ -4644,43 +4806,36 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     }
   }
 
-  // Every consumer of this resolver quotes delivery text (latest fallback,
-  // reaction context, cross-session context), so media-only records stay out
-  // and its behavior is unchanged by their attestation elsewhere.
-  const replyToMessageId = input.replyToMessageId
-  const matchingDeliveries =
-    (await listAssistantAutoReplyMatchingOutboxDeliveries({
-      allowAcceptedNonSentMedia: replyToMessageId !== null,
-      deliveryTarget,
-      historyReader: input.historyReader,
-      input: input.input,
-    })).filter((delivery) => delivery.message !== null)
-  const replyTargetDelivery = replyToMessageId === null
-    ? null
-    : resolveAssistantAutoReplyExactOutboxDelivery(
-        matchingDeliveries,
-        replyToMessageId,
-      )
-  const sessionEligible = matchingDeliveries
-    .filter((delivery) =>
-      input.session === null || delivery.sessionId !== input.session.sessionId,
-    )
-    .sort((left, right) =>
-      compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
-    )
   const inputRoute = resolveAssistantAutoReplyInputExactRoute({
     conversation: input.input.conversation,
     deliveryTarget,
   })
+  const replyToMessageId = input.replyToMessageId
 
   // Explicit native reply: the user-supplied provider message id is
   // authoritative, so this branch ignores both the local-clock causal cutoff
-  // and the unanchored route watermark. It still installs the same pre-egress
-  // claim as an unanchored selection; a completed older anchor cannot move
-  // settledThrough backwards.
+  // and the unanchored route watermark for its claim. Resolve that identity
+  // through the exact provider lookup, then use the route projection only for
+  // bounded surrounding history; compacted history falls back to canonical
+  // authority rather than silently dropping older context.
   if (replyToMessageId) {
+    const exactMatchingDeliveries =
+      (await listAssistantAutoReplyMatchingOutboxDeliveries({
+        allowAcceptedNonSentMedia: true,
+        deliveryTarget,
+        historyReader: input.historyReader,
+        input: input.input,
+        providerMessageIds: [replyToMessageId],
+      })).filter((delivery) => delivery.message !== null)
+    const replyTargetDelivery = resolveAssistantAutoReplyExactOutboxDelivery(
+      exactMatchingDeliveries,
+      replyToMessageId,
+    )
     const selected = resolveAssistantAutoReplyExactOutboxDelivery(
-      sessionEligible,
+      exactMatchingDeliveries.filter((delivery) =>
+        input.session === null ||
+        delivery.sessionId !== input.session.sessionId,
+      ),
       replyToMessageId,
     )
     if (!selected) {
@@ -4698,8 +4853,38 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
         replyTargetDelivery,
       }
     }
+
     const causalUpperBoundMs =
       resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input.input)
+    const routeHistory = causalUpperBoundMs === null
+      ? []
+      : await listAssistantAutoReplyMatchingOutboxDeliveries({
+          deliveryTarget,
+          historyReader: input.historyReader,
+          input: input.input,
+          ...(inputRoute !== null && routeDigest === inputRoute.digest
+            ? {
+                routeProjectionProof: {
+                  causalUpperBoundMs,
+                  excludedSessionId: input.session?.sessionId ?? null,
+                  kind: 'history',
+                  settledThrough: null,
+                } satisfies AssistantAutoReplyRouteProjectionReadProof,
+              }
+            : {}),
+        })
+    const sessionEligible = [...new Map(
+      [...routeHistory, selected].map((delivery) => [
+        delivery.intentId,
+        delivery,
+      ] as const),
+    ).values()]
+      .filter((delivery) =>
+        input.session === null || delivery.sessionId !== input.session.sessionId,
+      )
+      .sort((left, right) =>
+        compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
+      )
     const deliveries = sessionEligible.filter((candidate) =>
       candidate.intentId === selected.intentId ||
       (
@@ -4730,10 +4915,54 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     return {
       claim: null,
       deliveries: [],
-      replyTargetDelivery,
+      replyTargetDelivery: null,
     }
   }
 
+  let lookupRouteState: Awaited<
+    ReturnType<typeof readAssistantAutoReplyRouteState>
+  >
+  try {
+    lookupRouteState = await readAssistantAutoReplyRouteState({
+      routeDigest: inputRoute.digest,
+      vault: input.vault,
+    })
+  } catch {
+    return {
+      claim: null,
+      deliveries: [],
+      replyTargetDelivery: null,
+    }
+  }
+  if (lookupRouteState.kind === 'blocked') {
+    return {
+      claim: null,
+      deliveries: [],
+      replyTargetDelivery: null,
+    }
+  }
+
+  // Every unanchored consumer quotes delivery text, so media-only records stay
+  // out and its behavior is unchanged by their exact attestation elsewhere.
+  const matchingDeliveries =
+    (await listAssistantAutoReplyMatchingOutboxDeliveries({
+      deliveryTarget,
+      historyReader: input.historyReader,
+      input: input.input,
+      routeProjectionProof: {
+        causalUpperBoundMs,
+        excludedSessionId: input.session?.sessionId ?? null,
+        kind: 'history',
+        settledThrough: lookupRouteState.settledThrough,
+      },
+    })).filter((delivery) => delivery.message !== null)
+  const sessionEligible = matchingDeliveries
+    .filter((delivery) =>
+      input.session === null || delivery.sessionId !== input.session.sessionId,
+    )
+    .sort((left, right) =>
+      compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
+    )
   const fresh = sessionEligible.filter(
     (delivery) => delivery.sentAtMs <= causalUpperBoundMs,
   )
@@ -4747,51 +4976,56 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     return {
       claim: null,
       deliveries: [],
-      replyTargetDelivery,
+      replyTargetDelivery: null,
     }
   }
 
+  // The lookup proof needs a pre-read watermark. Reread before selecting
+  // context so a concurrent completed or pending claim still fails closed or
+  // advances the watermark without sacrificing bounded lookup work.
+  let routeState: Awaited<ReturnType<typeof readAssistantAutoReplyRouteState>>
   try {
-    const routeState = await readAssistantAutoReplyRouteState({
+    routeState = await readAssistantAutoReplyRouteState({
       routeDigest: inputRoute.digest,
       vault: input.vault,
     })
-    if (routeState.kind === 'blocked') {
-      return {
-        claim: null,
-        deliveries: [],
-        replyTargetDelivery,
-      }
-    }
-    const deliveries = fresh.filter((delivery) =>
-      routeState.settledThrough === null ||
-      compareAssistantAutoReplyDeliveryOrders(
-        delivery.order,
-        routeState.settledThrough,
-      ) > 0,
-    )
-    const selected = deliveries.at(-1) ?? null
-    return {
-      claim: selected === null
-        ? null
-        : {
-            anchored: false,
-            intentId: selected.intentId,
-            order: selected.order,
-            routeDigest: inputRoute.digest,
-          },
-      deliveries: buildAssistantAutoReplyPriorDeliveryContexts({
-        deliveries,
-        exactReplyTargetIntentId: null,
-      }),
-      replyTargetDelivery,
-    }
   } catch {
     return {
       claim: null,
       deliveries: [],
-      replyTargetDelivery,
+      replyTargetDelivery: null,
     }
+  }
+  if (routeState.kind === 'blocked') {
+    return {
+      claim: null,
+      deliveries: [],
+      replyTargetDelivery: null,
+    }
+  }
+
+  const deliveries = fresh.filter((delivery) =>
+    routeState.settledThrough === null ||
+    compareAssistantAutoReplyDeliveryOrders(
+      delivery.order,
+      routeState.settledThrough,
+    ) > 0,
+  )
+  const selected = deliveries.at(-1) ?? null
+  return {
+    claim: selected === null
+      ? null
+      : {
+          anchored: false,
+          intentId: selected.intentId,
+          order: selected.order,
+          routeDigest: inputRoute.digest,
+        },
+    deliveries: buildAssistantAutoReplyPriorDeliveryContexts({
+      deliveries,
+      exactReplyTargetIntentId: null,
+    }),
+    replyTargetDelivery: null,
   }
 }
 
@@ -4831,14 +5065,17 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
     }
   }
 
-  const matchingDeliveries = replyToMessageIds.some(
-    (replyToMessageId) => replyToMessageId !== null,
+  const exactProviderMessageIds = replyToMessageIds.filter(
+    (replyToMessageId): replyToMessageId is string =>
+      replyToMessageId !== null,
   )
+  const matchingDeliveries = exactProviderMessageIds.length > 0
     ? await listAssistantAutoReplyMatchingOutboxDeliveries({
         allowAcceptedNonSentMedia: true,
         deliveryTarget: input.deliveryTarget,
         historyReader: input.historyReader,
         input: input.input,
+        providerMessageIds: exactProviderMessageIds,
       })
     : []
   const exactDeliveries = replyToMessageIds.map((replyToMessageId) =>
@@ -5123,6 +5360,8 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
+  providerMessageIds?: readonly string[]
+  routeProjectionProof?: AssistantAutoReplyRouteProjectionReadProof
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery[]> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
@@ -5130,7 +5369,34 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     return []
   }
 
-  const intents = await input.historyReader.readOutboxIntents()
+  const providerMessageIds = [...new Set(
+    (input.providerMessageIds ?? [])
+      .map((value) => readAssistantTargetProviderScalar(value))
+      .filter((value): value is string => value !== null),
+  )]
+  const routeQuery = providerMessageIds.length === 0
+    ? resolveAssistantAutoReplyRouteProjectionQuery({
+        conversation: input.input.conversation,
+        deliveryTarget,
+      })
+    : null
+  const intents = await input.historyReader.readOutboxIntents(
+    providerMessageIds.length > 0
+      ? {
+          channel,
+          kind: 'provider-message',
+          providerMessageIds,
+        }
+      : routeQuery
+        ? input.routeProjectionProof
+          ? {
+              kind: 'route',
+              proof: input.routeProjectionProof,
+              query: routeQuery,
+            }
+          : undefined
+        : undefined,
+  )
   return intents.flatMap((intent) => {
     if (intent.operation !== null) {
       return []
@@ -5151,8 +5417,8 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       return []
     }
 
-    const providerMessageIds =
-      readAssistantAutoReplyOutboxDeliveryProviderMessageIds(delivery)
+    const deliveryProviderMessageIds =
+      readAssistantOutboxDeliveryProviderMessageIds(delivery)
     const providerMessageEffects = delivery.providerMessageEffects ?? []
     if (!hasAssistantOutboxDeliveryEvidence(
       intent,
@@ -5193,7 +5459,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
         sentAt: delivery.sentAt,
       },
       providerMessageEffects,
-      providerMessageIds,
+      providerMessageIds: deliveryProviderMessageIds,
       sentAtMs,
       sessionId: intent.sessionId,
     }]
@@ -5337,119 +5603,6 @@ async function resolveAssistantAutoReplyExistingSession(input: {
     }
     throw error
   }
-}
-
-function assistantAutoReplyOutboxMatchesInput(input: {
-  conversation: AssistantInputConversationRef
-  delivery: AssistantAutoReplyOutboxMessageDelivery
-  deliveryTarget: string
-  intent: AssistantAutoReplyOutboxIntent
-}): boolean {
-  const exactTargetMatch = assistantAutoReplyOutboxDeliveryMatchesExactTarget({
-    delivery: input.delivery,
-    deliveryTarget: input.deliveryTarget,
-  })
-  if (
-    normalizeNullableString(input.delivery.channel) === 'linq' &&
-    exactTargetMatch
-  ) {
-    return true
-  }
-
-  return assistantAutoReplyOutboxIntentMatchesConversation({
-    conversation: input.conversation,
-    intent: input.intent,
-  }) &&
-    (
-      exactTargetMatch ||
-      assistantAutoReplyOutboxDeliveryMatchesStableConversationFallback({
-        conversation: input.conversation,
-        delivery: input.delivery,
-        intent: input.intent,
-      })
-    )
-}
-
-function assistantAutoReplyOutboxIntentMatchesConversation(input: {
-  conversation: AssistantInputConversationRef
-  intent: AssistantAutoReplyOutboxIntent
-}): boolean {
-  const conversation = conversationRefFromAssistantInputConversation(
-    input.conversation,
-  )
-  return assistantAutoReplyRouteValueMatches({
-    actual: input.intent.identityId,
-    expected: conversation.identityId,
-  }) &&
-    assistantAutoReplyRouteValueMatches({
-      actual: input.intent.actorId,
-      expected: conversation.participantId,
-    }) &&
-    assistantAutoReplyRouteValueMatches({
-      actual: input.intent.threadId,
-      expected: conversation.threadId,
-    })
-}
-
-function assistantAutoReplyOutboxDeliveryMatchesExactTarget(input: {
-  delivery: AssistantAutoReplyOutboxMessageDelivery
-  deliveryTarget: string
-}): boolean {
-  return [input.delivery.target, input.delivery.providerThreadId].some(
-    (candidate) => normalizeNullableString(candidate) === input.deliveryTarget,
-  )
-}
-
-function assistantAutoReplyOutboxDeliveryMatchesStableConversationFallback(input: {
-  conversation: AssistantInputConversationRef
-  delivery: AssistantAutoReplyOutboxMessageDelivery
-  intent: AssistantAutoReplyOutboxIntent
-}): boolean {
-  const conversation = conversationRefFromAssistantInputConversation(
-    input.conversation,
-  )
-  const channel = normalizeNullableString(input.delivery.channel)
-  const threadId = normalizeNullableString(conversation.threadId)
-  return (
-    channel === 'email' &&
-    threadId !== null &&
-    normalizeNullableString(input.intent.threadId) === threadId
-  )
-}
-
-function readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
-  delivery: AssistantAutoReplyOutboxMessageDelivery,
-): string[] {
-  const orderedProviderMessageIds = Array.isArray(delivery.providerMessageIds)
-    ? delivery.providerMessageIds
-        .map((id) => readAssistantTargetProviderScalar(id))
-        .filter((id): id is string => id !== null)
-    : []
-  const legacyProviderMessageId = readAssistantTargetProviderScalar(
-    delivery.providerMessageId,
-  )
-  if (
-    orderedProviderMessageIds.length === 0 &&
-    (delivery.providerMessageEffects?.length ?? 0) > 1
-  ) {
-    return []
-  }
-  return [...new Set([
-    ...orderedProviderMessageIds,
-    legacyProviderMessageId,
-  ].filter((id): id is string => id !== null))]
-}
-
-function assistantAutoReplyRouteValueMatches(input: {
-  actual: string | null | undefined
-  expected: string | null | undefined
-}): boolean {
-  const expected = normalizeNullableString(input.expected)
-  if (expected === null) {
-    return true
-  }
-
-  return normalizeNullableString(input.actual) === expected
 }
 
 function buildAssistantAutoReplyCrossSessionTurnContext(

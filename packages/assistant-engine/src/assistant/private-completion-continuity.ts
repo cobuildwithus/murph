@@ -8,14 +8,15 @@ import {
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
-import { listAssistantOutboxIntentsLocal } from './outbox/store.js'
 import { resolveAssistantOutboxIntentPath } from './outbox/intents.js'
+import {
+  listAssistantOutboxIntentsLocal,
+  persistAssistantOutboxIntentAtPaths,
+  readAssistantOutboxIntentAtPath,
+} from './outbox/store.js'
 import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
-import {
-  normalizeNullableString,
-  writeJsonFileAtomic,
-} from './shared.js'
+import { normalizeNullableString } from './shared.js'
 import {
   appendTranscriptEntries,
   ensureAssistantState,
@@ -249,14 +250,18 @@ async function writeAssistantPrivateCompletionIntent(input: {
   const parsed = assistantOutboxIntentSchema.parse(
     sanitizeAssistantOutboxIntentForPersistence(input.intent),
   )
-  await writeJsonFileAtomic(
-    resolveAssistantOutboxIntentPath(
-      input.paths.outboxDirectory,
-      parsed.intentId,
-    ),
-    sanitizeAssistantOutboxIntentForPersistence(parsed),
+  const intentPath = resolveAssistantOutboxIntentPath(
+    input.paths.outboxDirectory,
+    parsed.intentId,
   )
-  return parsed
+  const previous = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.paths.absoluteVaultRoot,
+  })
+  return persistAssistantOutboxIntentAtPaths({
+    intent: parsed,
+    paths: input.paths,
+    previous,
+  })
 }
 
 function assistantPrivateCompletionCanJoinSession(input: {

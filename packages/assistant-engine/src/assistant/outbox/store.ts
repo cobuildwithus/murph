@@ -26,6 +26,12 @@ import { normalizeAssistantDeliveryError } from './retry-policy.js'
 import { compareAssistantOutboxDeliverySequenceOrder } from './ordering.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { readAssistantCronCanonicalRuntimeStore } from '../cron/runtime-state.js'
+import {
+  invalidateAssistantOutboxLookupProjectionAtPaths,
+  persistAssistantOutboxLookupAwareCanonicalMutationAtPaths,
+  readAssistantOutboxDedupeLookupAtPaths,
+  type AssistantOutboxLookupReadMetrics,
+} from './lookup-projection.js'
 
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT = 100
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
@@ -34,6 +40,20 @@ const ASSISTANT_OUTBOX_INVENTORY_READ_CONCURRENCY = 4
 export interface AssistantOutboxInventoryScanMetrics {
   bytesRead: number
   filesRead: number
+}
+
+export type AssistantOutboxDedupeResolution =
+  | {
+      intent: AssistantOutboxIntent
+      kind: 'found'
+      legacyDedupeLookupKeyUpgrade?: string
+    }
+  | { kind: 'not-found' }
+
+export interface AssistantOutboxDedupeReadObservation {
+  fallbackReason?: string
+  lookup: AssistantOutboxLookupReadMetrics
+  outboxScan?: AssistantOutboxInventoryScanMetrics & { elapsedMs: number }
 }
 
 export async function readAssistantOutboxIntent(
@@ -58,12 +78,71 @@ export async function saveAssistantOutboxIntent(
     const parsed = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(intent),
     )
-    const persisted = sanitizeAssistantOutboxIntentForPersistence(parsed)
-    await writeJsonFileAtomic(
+    const previous = await readAssistantOutboxIntentAtPath(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, parsed.intentId),
-      persisted,
+      { vault },
     )
-    return parsed
+    return persistAssistantOutboxIntentAtPaths({
+      intent: parsed,
+      paths,
+      previous,
+    })
+  })
+}
+
+export async function persistAssistantOutboxIntentAtPaths(input: {
+  intent: AssistantOutboxIntent
+  paths: AssistantStatePaths
+  previous: AssistantOutboxIntent | null
+}): Promise<AssistantOutboxIntent> {
+  const parsed = assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence(input.intent),
+  )
+  if (input.previous && input.previous.intentId !== parsed.intentId) {
+    throw new TypeError(
+      'Assistant outbox canonical mutation cannot change intent identity.',
+    )
+  }
+  const persisted = sanitizeAssistantOutboxIntentForPersistence(parsed)
+  await persistAssistantOutboxLookupAwareCanonicalMutationAtPaths({
+    next: parsed,
+    paths: input.paths,
+    previous: input.previous,
+    writeCanonical: async () => {
+      await writeJsonFileAtomic(
+        resolveAssistantOutboxIntentPath(
+          input.paths.outboxDirectory,
+          parsed.intentId,
+        ),
+        persisted,
+      )
+    },
+  })
+  return parsed
+}
+
+export async function removeAssistantOutboxIntentAtPaths(input: {
+  intent: AssistantOutboxIntent
+  intentPath?: string
+  paths: AssistantStatePaths
+}): Promise<void> {
+  const canonicalPath = resolveAssistantOutboxIntentPath(
+    input.paths.outboxDirectory,
+    input.intent.intentId,
+  )
+  const intentPath = input.intentPath ?? canonicalPath
+  if (path.resolve(intentPath) !== path.resolve(canonicalPath)) {
+    throw new TypeError(
+      'Assistant outbox canonical removal path does not match intent identity.',
+    )
+  }
+  await persistAssistantOutboxLookupAwareCanonicalMutationAtPaths({
+    next: null,
+    paths: input.paths,
+    previous: input.intent,
+    writeCanonical: async () => {
+      await rm(intentPath, { force: true })
+    },
   })
 }
 
@@ -190,8 +269,10 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
     if (!pruneByCount && !pruneByAge) {
       continue
     }
-    await rm(entry.intentPath, {
-      force: true,
+    await removeAssistantOutboxIntentAtPaths({
+      intent: entry.intent,
+      intentPath: entry.intentPath,
+      paths: input.paths,
     })
     pruned += 1
   }
@@ -203,13 +284,66 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
   dedupeKey: string
   deliveryIdempotencyKey?: string | null
   dedupeToken?: string | null
+  onLookup?: (observation: AssistantOutboxDedupeReadObservation) => void
   vault: string
-}): Promise<AssistantOutboxIntent | null> {
-  const intents = await listAssistantOutboxIntentsLocal(input.vault)
+}): Promise<AssistantOutboxDedupeResolution> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantState(paths)
+  const lookup = await readAssistantOutboxDedupeLookupAtPaths({
+    dedupeKey: input.dedupeKey,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    dedupeToken: input.dedupeToken,
+    paths,
+    reader: {
+      readIntent: async (intentId, onBytesRead) =>
+        readAssistantOutboxIntentAtPath(
+          resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
+          { onBytesRead, vault: input.vault },
+        ),
+    },
+  })
+  if (lookup.kind === 'found') {
+    observeAssistantOutboxDedupeLookup(input.onLookup, {
+      lookup: lookup.metrics,
+    })
+    return {
+      intent: lookup.intent,
+      kind: 'found',
+      ...(lookup.legacyDedupeLookupKeyUpgrade
+        ? {
+            legacyDedupeLookupKeyUpgrade:
+              lookup.legacyDedupeLookupKeyUpgrade,
+          }
+        : {}),
+    }
+  }
+  if (lookup.kind === 'not-found') {
+    observeAssistantOutboxDedupeLookup(input.onLookup, {
+      lookup: lookup.metrics,
+    })
+    return { kind: 'not-found' }
+  }
+
+  let scanMetrics: AssistantOutboxInventoryScanMetrics = {
+    bytesRead: 0,
+    filesRead: 0,
+  }
+  const scanStartedAt = Date.now()
+  const intents = await listAssistantOutboxIntentsLocal(input.vault, (metrics) => {
+    scanMetrics = metrics
+  })
+  observeAssistantOutboxDedupeLookup(input.onLookup, {
+    fallbackReason: lookup.reason,
+    lookup: lookup.metrics,
+    outboxScan: {
+      ...scanMetrics,
+      elapsedMs: Math.max(0, Date.now() - scanStartedAt),
+    },
+  })
   const activeIntents = intents.filter(isActiveAssistantOutboxIntent)
   const exactMatch = activeIntents.find((intent) => intent.dedupeKey === input.dedupeKey)
   if (exactMatch) {
-    return exactMatch
+    return { intent: exactMatch, kind: 'found' }
   }
 
   const dedupeToken = normalizeNullableString(input.dedupeToken)
@@ -221,19 +355,37 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
         deliveryIdempotencyKey,
     )
     if (transportKeyMatch) {
-      return transportKeyMatch
+      return { intent: transportKeyMatch, kind: 'found' }
     }
   }
 
-  return (
-    activeIntents.find((intent) => {
-      const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
-        dedupeToken,
-        media: intent.media,
-      })
-      return legacyDedupeKey !== null && intent.dedupeKey === legacyDedupeKey
-    }) ?? null
-  )
+  const legacyMatch = activeIntents.find((intent) => {
+    const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
+      dedupeToken,
+      media: intent.media,
+    })
+    return legacyDedupeKey !== null && intent.dedupeKey === legacyDedupeKey
+  }) ?? null
+  return legacyMatch
+    ? {
+        intent: legacyMatch,
+        kind: 'found',
+        ...(legacyMatch.legacyDedupeLookupKey === undefined
+          ? { legacyDedupeLookupKeyUpgrade: input.dedupeKey }
+          : {}),
+      }
+    : { kind: 'not-found' }
+}
+
+function observeAssistantOutboxDedupeLookup(
+  observer:
+    | ((observation: AssistantOutboxDedupeReadObservation) => void)
+    | undefined,
+  observation: AssistantOutboxDedupeReadObservation,
+): void {
+  try {
+    observer?.(observation)
+  } catch {}
 }
 
 export async function readAssistantOutboxIntentAtPath(
@@ -245,7 +397,9 @@ export async function readAssistantOutboxIntentAtPath(
 ): Promise<AssistantOutboxIntent | null> {
   try {
     const raw = await readFile(intentPath, 'utf8')
-    options?.onBytesRead?.(Buffer.byteLength(raw, 'utf8'))
+    try {
+      options?.onBytesRead?.(Buffer.byteLength(raw, 'utf8'))
+    } catch {}
     return assistantOutboxIntentSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -253,12 +407,11 @@ export async function readAssistantOutboxIntentAtPath(
     }
 
     if (options?.vault) {
-      await quarantineAssistantOutboxIntentFile({
+      return await quarantineAssistantOutboxIntentFile({
         error,
         intentPath,
         vault: options.vault,
       })
-      return null
     }
 
     throw error
@@ -280,38 +433,76 @@ export async function quarantineAssistantOutboxIntentFile(input: {
   error: unknown
   intentPath: string
   vault: string
-}): Promise<void> {
-  const paths = resolveAssistantStatePaths(input.vault)
-  const quarantineDirectory = resolveAssistantOutboxQuarantineDirectory(
-    paths.outboxDirectory,
-  )
-  const basename = path.basename(input.intentPath, '.json')
-  const quarantinePath = path.join(
-    quarantineDirectory,
-    `${basename}.${Date.now()}.invalid.json`,
-  )
-
-  try {
-    await ensureAssistantStateDirectory(quarantineDirectory)
-    await rename(input.intentPath, quarantinePath)
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return
+}): Promise<AssistantOutboxIntent | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const resolvedIntentPath = path.resolve(input.intentPath)
+    const resolvedOutboxDirectory = path.resolve(paths.outboxDirectory)
+    if (
+      path.dirname(resolvedIntentPath) !== resolvedOutboxDirectory ||
+      !path.basename(resolvedIntentPath).endsWith('.json')
+    ) {
+      throw new TypeError(
+        'Assistant outbox quarantine target must be a canonical intent file.',
+      )
     }
-    throw error
-  }
 
-  try {
-    const deliveryError = normalizeAssistantDeliveryError(input.error)
-    await recordAssistantDiagnosticEvent({
-      vault: input.vault,
-      code: deliveryError.code ?? 'ASSISTANT_OUTBOX_INTENT_INVALID',
-      component: 'outbox',
-      kind: 'outbox.intent.quarantined',
-      level: 'warn',
-      message: deliveryError.message,
-    })
-  } catch {}
+    let currentError = input.error
+    try {
+      const raw = await readFile(resolvedIntentPath, 'utf8')
+      try {
+        return assistantOutboxIntentSchema.parse(JSON.parse(raw))
+      } catch (error) {
+        currentError = error
+      }
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        return null
+      }
+      currentError = error
+    }
+
+    // The lock-owned re-read above prevents an earlier malformed observation
+    // from quarantining a concurrently repaired canonical intent. Best-effort
+    // invalidation prevents trusted misses after canonical evidence disappears;
+    // a failure here cannot make disposable state escape into foreground work.
+    await invalidateAssistantOutboxLookupProjectionAtPaths({ paths }).catch(
+      () => undefined,
+    )
+
+    const quarantineDirectory = resolveAssistantOutboxQuarantineDirectory(
+      paths.outboxDirectory,
+    )
+    const basename = path.basename(resolvedIntentPath, '.json')
+    const quarantinePath = path.join(
+      quarantineDirectory,
+      `${basename}.${Date.now()}.invalid.json`,
+    )
+
+    try {
+      await ensureAssistantStateDirectory(quarantineDirectory)
+      await rename(resolvedIntentPath, quarantinePath)
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        return null
+      }
+      throw error
+    }
+
+    try {
+      const deliveryError = normalizeAssistantDeliveryError(currentError)
+      await recordAssistantDiagnosticEvent({
+        vault: input.vault,
+        code: deliveryError.code ?? 'ASSISTANT_OUTBOX_INTENT_INVALID',
+        component: 'outbox',
+        kind: 'outbox.intent.quarantined',
+        level: 'warn',
+        message: deliveryError.message,
+      })
+    } catch {}
+
+    return null
+  })
 }
 
 function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {

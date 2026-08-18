@@ -33,6 +33,7 @@ import type {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
+  HostedRuntimeOutboxLookupFallbackReason,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS,
@@ -814,7 +815,7 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
     HostedRuntimeLatencyPhaseBreakdown["preProvider"]
   > = {
     ...(input.preProviderPhase ?? {}),
-    ...(input.autoReplyHistory ?? {}),
+    ...toHostedAutoReplyHistoryLatencyBreakdown(input.autoReplyHistory),
     ...(input.providerStartCriticalPath
       ? {
           automationLaneToAssistantServiceMs:
@@ -905,6 +906,62 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   }).catch(() => {
     // Latency traces are diagnostic-only and must not affect runtime progress.
   });
+}
+
+function toHostedAutoReplyHistoryLatencyBreakdown(
+  input: AssistantAutoReplyHistoryMetrics | undefined,
+): NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]> {
+  if (!input) {
+    return {};
+  }
+  const { outboxLookupFallbackReason, ...metrics } = input;
+  const fallbackReason = classifyHostedOutboxLookupFallbackReason(
+    outboxLookupFallbackReason,
+  );
+  return {
+    ...metrics,
+    ...(fallbackReason === undefined
+      ? {}
+      : { outboxLookupFallbackReason: fallbackReason }),
+  };
+}
+
+function classifyHostedOutboxLookupFallbackReason(
+  value: string | undefined,
+): HostedRuntimeOutboxLookupFallbackReason | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (value.includes("ambiguous")) {
+    return "ambiguous";
+  }
+  if (value.includes("canonical-validation")) {
+    return "canonical-validation";
+  }
+  if (value.includes("incomplete")) {
+    return "incomplete";
+  }
+  if (
+    value.startsWith("publication-")
+    || value.startsWith("lookup-publication-")
+  ) {
+    return "publication";
+  }
+  if (value.startsWith("route-")) {
+    return "route-projection";
+  }
+  if (
+    value.startsWith("record-")
+    || value.startsWith("bucket-")
+    || value.startsWith("lookup-record-")
+    || value.startsWith("lookup-bucket-")
+  ) {
+    return "lookup-record";
+  }
+  if (value.startsWith("lookup-operation-") || value === "lookup-invalid") {
+    return "operation";
+  }
+  return "unknown";
 }
 
 const HOSTED_ASSISTANT_PROVIDER_START_TRACE_RETRY_DELAYS_MS = [250, 1_000] as const;

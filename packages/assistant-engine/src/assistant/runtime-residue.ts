@@ -49,6 +49,10 @@ import {
   type AssistantInputEventRecord,
 } from './input-store.js'
 import { readAssistantOutboxIntentInventoryEntry } from './outbox/store.js'
+import {
+  maintainAssistantOutboxLookupProjectionAtPaths,
+  type AssistantOutboxLookupMaintenanceResult,
+} from './outbox/lookup-projection.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { isMissingFileError } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
@@ -59,6 +63,13 @@ const ASSISTANT_RUNTIME_RESIDUE_RETENTION_LIMIT = 100
 // deeper bounded history without expanding every other runtime residue class.
 const ASSISTANT_INPUT_EVENT_RETENTION_LIMIT = 1_000
 const ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
+
+export interface AssistantOutboxDerivedStateMaintenanceResult {
+  changed: boolean
+  lookup?: AssistantOutboxLookupMaintenanceResult
+  route?: AssistantAutoReplyRouteMaintenanceResult
+  trusted: boolean
+}
 
 export interface AssistantRuntimeResiduePruneResult {
   acceptedTurnInputJournalsPruned: number
@@ -160,20 +171,20 @@ export async function pruneAssistantRuntimeResidue(input: {
   return result
 }
 
-export async function maintainAssistantAutoReplyRouteState(
+export async function maintainAssistantOutboxDerivedState(
   input: {
     shouldYield?: (() => boolean) | null
     signal?: AbortSignal | null
     vault: string
   },
-): Promise<AssistantAutoReplyRouteMaintenanceResult> {
+): Promise<AssistantOutboxDerivedStateMaintenanceResult> {
   input.signal?.throwIfAborted()
   const shouldYield = () => {
     input.signal?.throwIfAborted()
     return input.shouldYield?.() === true
   }
   if (shouldYield()) {
-    return { changed: false, trusted: false }
+    return createEmptyAssistantOutboxDerivedStateMaintenanceResult()
   }
   return await withAssistantRuntimeWriteLock(
     input.vault,
@@ -190,8 +201,15 @@ export async function maintainAssistantAutoReplyRouteState(
       )
       input.signal?.throwIfAborted()
       if (!outbox.trusted || shouldYield()) {
-        return { changed: false, trusted: false }
+        return createEmptyAssistantOutboxDerivedStateMaintenanceResult()
       }
+      const lookup = await maintainAssistantOutboxLookupProjectionAtPaths({
+        outboxIntents: outbox.records.map(({ record }) => record),
+        outboxTrusted: outbox.trusted,
+        paths,
+        shouldYield,
+      })
+      input.signal?.throwIfAborted()
       const receipts = migrationStatus === 'missing'
         ? await readJsonInventory(
             paths.turnsDirectory,
@@ -201,7 +219,7 @@ export async function maintainAssistantAutoReplyRouteState(
           )
         : { records: [], trusted: true }
       input.signal?.throwIfAborted()
-      return await maintainAssistantAutoReplyRouteStateAtPaths({
+      const route = await maintainAssistantAutoReplyRouteStateAtPaths({
         outboxIntents: outbox.records.map(({ record }) => record),
         outboxTrusted: outbox.trusted,
         paths,
@@ -209,9 +227,35 @@ export async function maintainAssistantAutoReplyRouteState(
         receiptsTrusted: receipts.trusted,
         shouldYield,
       })
+      return {
+        changed: lookup.changed || route.changed,
+        lookup,
+        route,
+        trusted: lookup.trusted && route.trusted,
+      }
     },
     input.signal,
   )
+}
+
+function createEmptyAssistantOutboxDerivedStateMaintenanceResult(
+): AssistantOutboxDerivedStateMaintenanceResult {
+  return {
+    changed: false,
+    lookup: {
+      canonicalIntentsProcessed: 0,
+      changed: false,
+      generationsRemoved: 0,
+      lookupWrites: 0,
+      rebuildCompleted: false,
+      rebuildResumed: false,
+      rebuildStarted: false,
+      repairPerformed: false,
+      trusted: false,
+    },
+    route: { changed: false, trusted: false },
+    trusted: false,
+  }
 }
 
 async function pruneAssistantRuntimeResidueAtPaths(input: {
@@ -232,8 +276,15 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     vault: input.vault,
   })
   input.signal?.throwIfAborted()
+  const outboxIntents = inventory.outbox.records.map(({ record }) => record)
+  await maintainAssistantOutboxLookupProjectionAtPaths({
+    outboxIntents,
+    outboxTrusted: inventory.outbox.trusted,
+    paths: input.paths,
+  })
+  input.signal?.throwIfAborted()
   const autoReplyRouteState = await maintainAssistantAutoReplyRouteStateAtPaths({
-    outboxIntents: inventory.outbox.records.map(({ record }) => record),
+    outboxIntents,
     outboxTrusted: inventory.outbox.trusted,
     paths: input.paths,
     receipts: inventory.receipts.records.map(({ record }) => record),

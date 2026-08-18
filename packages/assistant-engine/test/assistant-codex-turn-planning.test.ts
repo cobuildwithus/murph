@@ -6618,6 +6618,14 @@ function createTrustedGroupImageCompletionCandidate(input: {
 function createEmptyAutoReplyHistoryReader() {
   return {
     readMetrics: () => ({
+      outboxLookupCanonicalValidationBytesRead: 0,
+      outboxLookupCanonicalValidationFilesRead: 0,
+      outboxLookupElapsedMs: 0,
+      outboxLookupFallbackCount: 0,
+      outboxLookupFilesRead: 0,
+      outboxLookupReads: 0,
+      outboxLookupPublicationRetries: 0,
+      outboxLookupBytesRead: 0,
       outboxScanPerformed: false,
       receiptScanPerformed: false,
     }),

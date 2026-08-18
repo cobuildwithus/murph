@@ -84,7 +84,7 @@ import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
-  maintainAssistantAutoReplyRouteState,
+  maintainAssistantOutboxDerivedState,
 } from "@murphai/assistant-engine/assistant-runtime-residue";
 import {
   resolveDeliveryCandidates,
@@ -3555,7 +3555,7 @@ async function withHostedAutoReplyRouteMaintenanceAfterDelivery(input: {
   result: HostedWorkspaceRunnerAssistantPhaseResult;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
   if (!input.result.afterCheckpoint) {
-    const changed = await maintainHostedAutoReplyRouteState(input.input);
+    const changed = await maintainHostedAssistantOutboxDerivedState(input.input);
     if (!changed || input.result.progressed === true) {
       return input.result;
     }
@@ -3571,7 +3571,7 @@ async function withHostedAutoReplyRouteMaintenanceAfterDelivery(input: {
     ...input.result,
     afterCheckpoint: async () => {
       const postDelivery = await afterDeliveryCheckpoint();
-      const changed = await maintainHostedAutoReplyRouteState(input.input);
+      const changed = await maintainHostedAssistantOutboxDerivedState(input.input);
       return postDelivery ?? (changed
         ? { checkpointReason: "assistant_runtime_commit" }
         : null);
@@ -3580,7 +3580,7 @@ async function withHostedAutoReplyRouteMaintenanceAfterDelivery(input: {
   };
 }
 
-async function maintainHostedAutoReplyRouteState(
+async function maintainHostedAssistantOutboxDerivedState(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<boolean> {
   if (input.shouldYieldBackgroundMaintenance?.() === true) {
@@ -3590,7 +3590,7 @@ async function maintainHostedAutoReplyRouteState(
     ?? input.signal
     ?? null;
   try {
-    const result = await maintainAssistantAutoReplyRouteState({
+    const result = await maintainAssistantOutboxDerivedState({
       shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
       signal: maintenanceSignal,
       vault: input.restored.vaultRoot,
@@ -3606,7 +3606,7 @@ async function maintainHostedAutoReplyRouteState(
     }
     const failure = buildHostedRuntimeFailureDiagnostics(
       error,
-      "Hosted auto-reply route maintenance failed.",
+      "Hosted assistant outbox derived-state maintenance failed.",
     );
     await writeHostedRuntimeLogBestEffort({
       entry: {

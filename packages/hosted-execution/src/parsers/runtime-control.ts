@@ -99,6 +99,7 @@ import {
   type HostedRuntimeIssueExportResponse,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyPhaseBreakdownPhase,
+  type HostedRuntimeOutboxLookupFallbackReason,
   type HostedRuntimeAssistantMilestone,
   type HostedRuntimeAssistantAskControlRequest,
   type HostedRuntimeAssistantAskControlResponse,
@@ -6020,6 +6021,33 @@ function requireOptionalBoolean(
   return { [key]: requireBoolean(record[key], `${label}.${key}`) };
 }
 
+function requireOptionalHostedRuntimeOutboxLookupFallbackReason(
+  record: Record<string, unknown>,
+  label: string,
+): { outboxLookupFallbackReason?: HostedRuntimeOutboxLookupFallbackReason } {
+  const value = record.outboxLookupFallbackReason;
+  if (value === undefined) {
+    return {};
+  }
+  if (!isHostedRuntimeOutboxLookupFallbackReason(value)) {
+    throw new TypeError(`${label}.outboxLookupFallbackReason is invalid.`);
+  }
+  return { outboxLookupFallbackReason: value };
+}
+
+function isHostedRuntimeOutboxLookupFallbackReason(
+  value: unknown,
+): value is HostedRuntimeOutboxLookupFallbackReason {
+  return value === "ambiguous"
+    || value === "canonical-validation"
+    || value === "incomplete"
+    || value === "lookup-record"
+    || value === "operation"
+    || value === "publication"
+    || value === "route-projection"
+    || value === "unknown";
+}
+
 function requireOptionalShellPrewarmOutcome(
   record: Record<string, unknown>,
   label: string,
@@ -6292,6 +6320,15 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationBootstrapMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxLookupBytesRead", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxLookupCanonicalValidationBytesRead", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxLookupCanonicalValidationFilesRead", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxLookupElapsedMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxLookupFallbackCount", preProviderLabel),
+      ...requireOptionalHostedRuntimeOutboxLookupFallbackReason(preProvider, preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxLookupFilesRead", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxLookupPublicationRetries", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxLookupReads", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "outboxScanBytesRead", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "outboxScanElapsedMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "outboxScanFilesRead", preProviderLabel),

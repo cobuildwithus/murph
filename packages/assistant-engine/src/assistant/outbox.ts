@@ -69,6 +69,7 @@ import { repairAssistantOutboxReceiptForIntent } from './outbox/receipt-repair.j
 import {
   findAssistantOutboxIntentByDedupeIdentity,
   listAssistantOutboxIntentsLocal as listAssistantOutboxIntentsLocalStore,
+  persistAssistantOutboxIntentAtPaths,
   readAssistantOutboxIntent as readAssistantOutboxIntentLocal,
   readAssistantOutboxIntentAtPath,
   saveAssistantOutboxIntent as saveAssistantOutboxIntentLocal,
@@ -94,10 +95,7 @@ import {
   type AssistantOutboxPreparedDispatchState,
   type AssistantOutboxPreparedMirrorDispatch,
 } from './outbox/dispatch-state.js'
-import {
-  normalizeNullableString,
-  writeJsonFileAtomic,
-} from './shared.js'
+import { normalizeNullableString } from './shared.js'
 import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
 import {
   normalizeAssistantResponseMediaList,
@@ -415,12 +413,15 @@ export async function createAssistantOutboxIntent(
               media,
               message,
             })
-    const existing = await findAssistantOutboxIntentByDedupeIdentity({
+    const dedupeResolution = await findAssistantOutboxIntentByDedupeIdentity({
       dedupeKey,
       deliveryIdempotencyKey,
       dedupeToken: input.dedupeToken,
       vault: input.vault,
     })
+    const existing = dedupeResolution.kind === 'found'
+      ? dedupeResolution.intent
+      : null
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
       assertAssistantOutboxDedupeEffectMatches({
@@ -428,10 +429,19 @@ export async function createAssistantOutboxIntent(
         operation,
         persistedTarget,
       })
+      const classifiedExisting = dedupeResolution.kind === 'found' &&
+          dedupeResolution.legacyDedupeLookupKeyUpgrade &&
+          existing.legacyDedupeLookupKey === undefined
+        ? assistantOutboxIntentSchema.parse({
+            ...existing,
+            legacyDedupeLookupKey:
+              dedupeResolution.legacyDedupeLookupKeyUpgrade,
+          })
+        : existing
       const idempotencyUpgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
         deliveryIdempotencyKey,
         deliveryTransportIdempotent,
-        intent: existing,
+        intent: classifiedExisting,
       })
       const authorityUpgradedExisting =
         maybeUpgradeAssistantOutboxIntentExternalThreadRouteAuthority({
@@ -466,12 +476,11 @@ export async function createAssistantOutboxIntent(
         })
       }
       if (upgradedExisting !== existing) {
-        const persistedUpgradedExisting =
-          sanitizeAssistantOutboxIntentForPersistence(upgradedExisting)
-        await writeJsonFileAtomic(
-          resolveAssistantOutboxIntentPath(paths.outboxDirectory, upgradedExisting.intentId),
-          persistedUpgradedExisting,
-        )
+        await persistAssistantOutboxIntentAtPaths({
+          intent: upgradedExisting,
+          paths,
+          previous: existing,
+        })
       }
       await repairAssistantOutboxReceiptForIntent({
         at: upgradedExisting.updatedAt,
@@ -503,6 +512,7 @@ export async function createAssistantOutboxIntent(
       subject,
       operation,
       dedupeKey,
+      legacyDedupeLookupKey: null,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
       automationAuthority: input.automationAuthority ?? null,
@@ -528,8 +538,6 @@ export async function createAssistantOutboxIntent(
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(intent),
     )
-    const persistedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
     if (isAutoReplyIntent) {
       await writeAssistantAutoReplyIntentProvenance({
         intentId: intent.intentId,
@@ -538,10 +546,11 @@ export async function createAssistantOutboxIntent(
         vault: input.vault,
       })
     }
-    await writeJsonFileAtomic(
-      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
-      persistedIntentValue,
-    )
+    await persistAssistantOutboxIntentAtPaths({
+      intent: persistedIntent,
+      paths,
+      previous: null,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: createdAt,
       intent: persistedIntent,
@@ -655,8 +664,11 @@ export async function saveAssistantOutboxIntentIfUnchanged(input: {
         'Assistant outbox intent id changed during approval reconciliation.',
       )
     }
-    const persisted = sanitizeAssistantOutboxIntentForPersistence(parsed)
-    await writeJsonFileAtomic(intentPath, persisted)
+    await persistAssistantOutboxIntentAtPaths({
+      intent: parsed,
+      paths,
+      previous: current,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: parsed.updatedAt,
       intent: parsed,
@@ -838,9 +850,11 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     const persistedSending = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(sending),
     )
-    const persistedSendingValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedSending)
-    await writeJsonFileAtomic(intentPath, persistedSendingValue)
+    await persistAssistantOutboxIntentAtPaths({
+      intent: persistedSending,
+      paths,
+      previous: intent,
+    })
     await appendAssistantTurnReceiptEvent({
       vault: input.vault,
       turnId: persistedSending.turnId,
@@ -2437,11 +2451,11 @@ export async function markAssistantOutboxMessageVolumeReceiptRecorded(input: {
         nextAttemptAt: null,
       }),
     )
-    await writeJsonFileAtomic(
-      intentPath,
-      sanitizeAssistantOutboxIntentForPersistence(recorded),
-    )
-    return recorded
+    return persistAssistantOutboxIntentAtPaths({
+      intent: recorded,
+      paths,
+      previous: current,
+    })
   })
 }
 
@@ -2474,11 +2488,11 @@ export async function rescheduleAssistantOutboxMessageVolumeReceipt(input: {
         nextAttemptAt: input.nextAttemptAt,
       }),
     )
-    await writeJsonFileAtomic(
-      intentPath,
-      sanitizeAssistantOutboxIntentForPersistence(rescheduled),
-    )
-    return rescheduled
+    return persistAssistantOutboxIntentAtPaths({
+      intent: rescheduled,
+      paths,
+      previous: current,
+    })
   })
 }
 

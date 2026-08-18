@@ -1646,6 +1646,15 @@ describe("hosted runtime control contracts", () => {
         systemMailboxMaintenanceMs: 3,
         memberPreferencesPrePlanningMs: 4,
         automationBootstrapMs: 5,
+        outboxLookupBytesRead: 1_024,
+        outboxLookupCanonicalValidationBytesRead: 512,
+        outboxLookupCanonicalValidationFilesRead: 2,
+        outboxLookupElapsedMs: 6,
+        outboxLookupFallbackCount: 1,
+        outboxLookupFallbackReason: "route-projection" as const,
+        outboxLookupFilesRead: 5,
+        outboxLookupPublicationRetries: 1,
+        outboxLookupReads: 2,
         outboxScanBytesRead: 8_192,
         outboxScanElapsedMs: 23,
         outboxScanFilesRead: 10,
@@ -1750,6 +1759,7 @@ describe("hosted runtime control contracts", () => {
       { outboxScanBytesRead: -1 }, // counts must be non-negative
       { receiptScanBytesRead: -1 }, // counts must be non-negative
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
+      { outboxLookupFallbackReason: "provider-secret-token" }, // reasons are a closed, non-secret enum
       { automationSessionPreflightMs: "2" }, // nested durations must stay numeric
       {
         automationLaneToAssistantServiceMs: 7,
@@ -2057,6 +2067,7 @@ describe("hosted runtime control contracts", () => {
       existing: {
         schemaVersion: 1,
         preProvider: {
+          outboxLookupFallbackReason: "unsafe-provider-string",
           outboxScanBytesRead: -1,
           outboxScanPerformed: true,
           receiptScanBytesRead: -1,
@@ -2067,6 +2078,15 @@ describe("hosted runtime control contracts", () => {
       incoming: {
         schemaVersion: 1,
         preProvider: {
+          outboxLookupBytesRead: 1_024,
+          outboxLookupCanonicalValidationBytesRead: 512,
+          outboxLookupCanonicalValidationFilesRead: 2,
+          outboxLookupElapsedMs: 6,
+          outboxLookupFallbackCount: 1,
+          outboxLookupFallbackReason: "route-projection",
+          outboxLookupFilesRead: 5,
+          outboxLookupPublicationRetries: 1,
+          outboxLookupReads: 2,
           outboxScanBytesRead: 8_192,
           outboxScanFilesRead: 10,
           outboxScanPerformed: false,
@@ -2079,6 +2099,15 @@ describe("hosted runtime control contracts", () => {
     });
 
     expect(historyMerged.value.preProvider).toEqual({
+      outboxLookupBytesRead: 1_024,
+      outboxLookupCanonicalValidationBytesRead: 512,
+      outboxLookupCanonicalValidationFilesRead: 2,
+      outboxLookupElapsedMs: 6,
+      outboxLookupFallbackCount: 1,
+      outboxLookupFallbackReason: "route-projection",
+      outboxLookupFilesRead: 5,
+      outboxLookupPublicationRetries: 1,
+      outboxLookupReads: 2,
       outboxScanBytesRead: 8_192,
       outboxScanFilesRead: 10,
       outboxScanPerformed: true,

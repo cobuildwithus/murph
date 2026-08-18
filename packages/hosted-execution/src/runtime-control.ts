@@ -2393,6 +2393,15 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
     automationBootstrapMs?: number;
+    outboxLookupBytesRead?: number;
+    outboxLookupCanonicalValidationBytesRead?: number;
+    outboxLookupCanonicalValidationFilesRead?: number;
+    outboxLookupElapsedMs?: number;
+    outboxLookupFallbackCount?: number;
+    outboxLookupFallbackReason?: HostedRuntimeOutboxLookupFallbackReason;
+    outboxLookupFilesRead?: number;
+    outboxLookupPublicationRetries?: number;
+    outboxLookupReads?: number;
     outboxScanBytesRead?: number;
     outboxScanElapsedMs?: number;
     outboxScanFilesRead?: number;
@@ -2437,6 +2446,20 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     linqEgressGuardMs?: number;
   };
 }
+
+export const HOSTED_RUNTIME_OUTBOX_LOOKUP_FALLBACK_REASONS = [
+  "ambiguous",
+  "canonical-validation",
+  "incomplete",
+  "lookup-record",
+  "operation",
+  "publication",
+  "route-projection",
+  "unknown",
+] as const;
+
+export type HostedRuntimeOutboxLookupFallbackReason =
+  (typeof HOSTED_RUNTIME_OUTBOX_LOOKUP_FALLBACK_REASONS)[number];
 
 export const HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS = [
   "automationReadinessMs",
@@ -2669,6 +2692,15 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
     "automationBootstrapMs",
+    "outboxLookupBytesRead",
+    "outboxLookupCanonicalValidationBytesRead",
+    "outboxLookupCanonicalValidationFilesRead",
+    "outboxLookupElapsedMs",
+    "outboxLookupFallbackCount",
+    "outboxLookupFallbackReason",
+    "outboxLookupFilesRead",
+    "outboxLookupPublicationRetries",
+    "outboxLookupReads",
     "outboxScanBytesRead",
     "outboxScanElapsedMs",
     "outboxScanFilesRead",
@@ -2745,6 +2777,8 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
       "woken",
       "already_running",
     ],
+    "preProvider.outboxLookupFallbackReason":
+      HOSTED_RUNTIME_OUTBOX_LOOKUP_FALLBACK_REASONS,
   };
 
 export type HostedRuntimeLatencyPhaseBreakdownLeafRule =

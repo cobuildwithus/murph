@@ -25,7 +25,7 @@ import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
 import {
-  maintainAssistantAutoReplyRouteState,
+  maintainAssistantOutboxDerivedState,
 } from '../runtime-residue.js'
 import { refreshAssistantStatusSnapshot } from '../status.js'
 import {
@@ -291,14 +291,14 @@ export async function runAssistantAutomation(
         && !controller.signal.aborted
         && !shouldYieldRouteMaintenance()
       ) {
-        await maintainAssistantAutoReplyRouteState({
+        await maintainAssistantOutboxDerivedState({
           shouldYield: shouldYieldRouteMaintenance,
           signal: controller.signal,
           vault: input.vault,
         }).catch((error) => {
           warnAssistantBestEffortFailure({
             error,
-            operation: 'auto-reply route maintenance',
+            operation: 'assistant outbox derived-state maintenance',
           })
         })
       }

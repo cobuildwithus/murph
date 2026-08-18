@@ -52,7 +52,7 @@ import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../src/assistant/generated-delivery-files.ts'
 import {
-  maintainAssistantAutoReplyRouteState,
+  maintainAssistantOutboxDerivedState,
   pruneAssistantRuntimeResidue,
 } from '../src/assistant/runtime-residue.ts'
 import {
@@ -1166,22 +1166,36 @@ describe('assistant runtime residue pruning', () => {
     )
     let observedPartialRouteState = false
     await expect(
-      maintainAssistantAutoReplyRouteState({
+      maintainAssistantOutboxDerivedState({
         shouldYield: () => {
           observedPartialRouteState = existsSync(routeStatePath)
           return observedPartialRouteState
         },
         vault: vaultRoot,
       }),
-    ).resolves.toEqual({ changed: true, trusted: false })
+    ).resolves.toEqual({
+      changed: true,
+      lookup: expect.objectContaining({
+        changed: true,
+        trusted: true,
+      }),
+      route: {
+        changed: true,
+        trusted: false,
+      },
+      trusted: false,
+    })
     expect(observedPartialRouteState).toBe(true)
     await expectPathMissing(
       resolveAssistantAutoReplyRouteMigrationPath(paths),
     )
 
-    await expect(maintainAssistantAutoReplyRouteState({
+    await expect(maintainAssistantOutboxDerivedState({
       vault: vaultRoot,
-    })).resolves.toEqual({ changed: true, trusted: true })
+    })).resolves.toEqual(expect.objectContaining({
+      changed: true,
+      trusted: true,
+    }))
 
     await expect(readAssistantAutoReplyRouteState({
       routeDigest: route.digest,
@@ -1199,9 +1213,12 @@ describe('assistant runtime residue pruning', () => {
       '{invalid receipt json',
       'utf8',
     )
-    await expect(maintainAssistantAutoReplyRouteState({
+    await expect(maintainAssistantOutboxDerivedState({
       vault: vaultRoot,
-    })).resolves.toEqual({ changed: false, trusted: true })
+    })).resolves.toEqual(expect.objectContaining({
+      changed: false,
+      trusted: true,
+    }))
   })
 
   it('retires a quiescent route claim while generic journal retention remains authoritative', async () => {

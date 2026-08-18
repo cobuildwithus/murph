@@ -76,7 +76,7 @@ const runLoopMocks = vi.hoisted(() => ({
   errorMessage: vi.fn(),
   formatStructuredErrorMessage: vi.fn(),
   getAssistantCronStatus: vi.fn(),
-  maintainAssistantAutoReplyRouteState: vi.fn(),
+  maintainAssistantOutboxDerivedState: vi.fn(),
   maybeRunAssistantRuntimeMaintenance: vi.fn(),
   maybeThrowInjectedAssistantFault: vi.fn(),
   processDueAssistantCronJobs: vi.fn(),
@@ -213,8 +213,8 @@ vi.mock('../src/assistant/runtime-budgets.ts', () => ({
 }))
 
 vi.mock('../src/assistant/runtime-residue.ts', () => ({
-  maintainAssistantAutoReplyRouteState:
-    runLoopMocks.maintainAssistantAutoReplyRouteState,
+  maintainAssistantOutboxDerivedState:
+    runLoopMocks.maintainAssistantOutboxDerivedState,
 }))
 
 vi.mock('../src/assistant/status.ts', () => ({
@@ -1070,6 +1070,14 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(() => ({
       readMetrics: vi.fn(() => ({
+        outboxLookupCanonicalValidationBytesRead: 0,
+        outboxLookupCanonicalValidationFilesRead: 0,
+        outboxLookupElapsedMs: 0,
+        outboxLookupFallbackCount: 0,
+        outboxLookupFilesRead: 0,
+        outboxLookupReads: 0,
+        outboxLookupPublicationRetries: 0,
+        outboxLookupBytesRead: 0,
         outboxScanPerformed: false,
         receiptScanPerformed: false,
       })),
@@ -1128,7 +1136,7 @@ beforeEach(() => {
   runLoopMocks.buildAssistantOutboxSummary.mockReset().mockResolvedValue({
     nextAttemptAt: null,
   })
-  runLoopMocks.maintainAssistantAutoReplyRouteState
+  runLoopMocks.maintainAssistantOutboxDerivedState
     .mockReset()
     .mockResolvedValue({ changed: false, trusted: true })
   runLoopMocks.maybeRunAssistantRuntimeMaintenance.mockReset().mockResolvedValue(undefined)
@@ -1661,6 +1669,14 @@ describe('assistant automation scanner', () => {
     })
     const historyReader = {
       readMetrics: vi.fn(() => ({
+        outboxLookupCanonicalValidationBytesRead: 0,
+        outboxLookupCanonicalValidationFilesRead: 0,
+        outboxLookupElapsedMs: 0,
+        outboxLookupFallbackCount: 0,
+        outboxLookupFilesRead: 0,
+        outboxLookupReads: 0,
+        outboxLookupPublicationRetries: 0,
+        outboxLookupBytesRead: 0,
         outboxScanPerformed: false,
         receiptScanPerformed: false,
       })),
@@ -4181,6 +4197,14 @@ describe('assistant auto-reply runtime', () => {
     const onProviderEvent = vi.fn()
     const onProviderRequestStarted = vi.fn()
     const historyMetrics = {
+      outboxLookupCanonicalValidationBytesRead: 0,
+      outboxLookupCanonicalValidationFilesRead: 0,
+      outboxLookupElapsedMs: 0,
+      outboxLookupFallbackCount: 0,
+      outboxLookupFilesRead: 0,
+      outboxLookupReads: 0,
+      outboxLookupPublicationRetries: 0,
+      outboxLookupBytesRead: 0,
       outboxScanElapsedMs: 7,
       outboxScanPerformed: true,
       receiptScanPerformed: false,
@@ -8101,6 +8125,36 @@ describe('assistant auto-reply runtime', () => {
       replied: 0,
       skipped: 1,
       stopScanning: true,
+    })
+  })
+
+  it('falls back to canonical reply history without initializing lookup state', async () => {
+    const canonicalIntent = createSentOutboxIntent({
+      message: 'canonical fallback reply',
+      providerMessageId: 'provider-canonical-fallback',
+      sentAt: '2026-04-08T00:00:00.000Z',
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([canonicalIntent])
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const history = reply.createAssistantAutoReplyHistoryReader({
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    await expect(history.readOutboxIntents({
+      channel: 'telegram',
+      kind: 'provider-message',
+      providerMessageIds: ['provider-canonical-fallback'],
+    })).resolves.toEqual([canonicalIntent])
+    expect(replyMocks.listAssistantOutboxIntents).toHaveBeenCalledWith(
+      '/tmp/assistant-automation-vault',
+      expect.any(Function),
+    )
+    expect(history.readMetrics()).toMatchObject({
+      outboxLookupFallbackCount: 1,
+      outboxLookupFallbackReason: 'publication-invalid',
+      outboxScanPerformed: true,
     })
   })
 
@@ -13592,7 +13646,7 @@ describe('assistant automation run loop', () => {
     expect(runLoopMocks.drainAssistantOutbox).toHaveBeenCalledTimes(2)
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
     expect(
-      runLoopMocks.maintainAssistantAutoReplyRouteState,
+      runLoopMocks.maintainAssistantOutboxDerivedState,
     ).toHaveBeenCalledWith(expect.objectContaining({
       shouldYield: expect.any(Function),
       signal: expect.any(AbortSignal),
@@ -13601,7 +13655,7 @@ describe('assistant automation run loop', () => {
     expect(
       runLoopMocks.drainAssistantOutbox.mock.invocationCallOrder.at(-1),
     ).toBeLessThan(
-      runLoopMocks.maintainAssistantAutoReplyRouteState
+      runLoopMocks.maintainAssistantOutboxDerivedState
         .mock.invocationCallOrder[0] ?? 0,
     )
     expect(runLoopMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
@@ -13646,7 +13700,7 @@ describe('assistant automation run loop', () => {
 
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
     expect(
-      runLoopMocks.maintainAssistantAutoReplyRouteState,
+      runLoopMocks.maintainAssistantOutboxDerivedState,
     ).toHaveBeenCalledOnce()
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledOnce()
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
@@ -13699,7 +13753,7 @@ describe('assistant automation run loop', () => {
 
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
     expect(
-      runLoopMocks.maintainAssistantAutoReplyRouteState,
+      runLoopMocks.maintainAssistantOutboxDerivedState,
     ).not.toHaveBeenCalled()
   })
 
@@ -14237,7 +14291,7 @@ describe('assistant automation run loop', () => {
     })
     let observedPreStagingYield = false
 
-    runLoopMocks.maintainAssistantAutoReplyRouteState.mockImplementationOnce(
+    runLoopMocks.maintainAssistantOutboxDerivedState.mockImplementationOnce(
       async (input: {
         shouldYield: () => boolean
         vault: string

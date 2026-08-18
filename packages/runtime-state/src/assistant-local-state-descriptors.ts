@@ -95,6 +95,15 @@ function defineMachineLocalAssistantSubtree(
 }
 
 export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescriptor[] = [
+  defineLocalStateSubtreeDescriptor({
+    classification: "projection",
+    description:
+      "Assistant-owned disposable exact-key and bounded-route lookup projections derived exclusively from canonical outbox intents.",
+    owner: ASSISTANT_OWNER,
+    portability: "machine_local",
+    rebuildable: true,
+    relativePath: ".runtime/projections/assistant-rebuildable-lookups",
+  }),
   definePortableAssistantDirectory(
     ".runtime/operations/assistant",
     "Assistant runtime residue root. The directory itself may travel in hosted snapshots, but descendant portability is descriptor-driven.",

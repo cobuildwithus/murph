@@ -120,7 +120,9 @@ export function resolveAssistantAutoReplyInputExactRoute(input: {
   conversation: AssistantInputConversationRef
   deliveryTarget: string | null
 }): AssistantAutoReplyExactRoute | null {
-  const channel = normalizeRouteChannel(input.conversation.source)
+  const channel = normalizeAssistantAutoReplyRouteChannel(
+    input.conversation.source,
+  )
   if (!channel) {
     return null
   }
@@ -184,7 +186,7 @@ export function resolveAssistantAutoReplyOutboxExactRoute(
     return null
   }
 
-  const channel = normalizeRouteChannel(delivery.channel)
+  const channel = normalizeAssistantAutoReplyRouteChannel(delivery.channel)
   if (!channel) {
     return null
   }
@@ -1127,7 +1129,7 @@ function maxAssistantAutoReplyDeliveryOrder(
     : left
 }
 
-function buildAssistantAutoReplyExactRoute(
+export function buildAssistantAutoReplyExactRoute(
   components: readonly string[],
 ): AssistantAutoReplyExactRoute {
   return {
@@ -1154,7 +1156,7 @@ function resolveExactLinqProviderThreadTarget(
     : null
 }
 
-function resolveAssistantAutoReplyActorScope(input: {
+export function resolveAssistantAutoReplyActorScope(input: {
   actorId: string | null | undefined
   channel: string
   threadIsDirect: boolean | null | undefined
@@ -1167,7 +1169,9 @@ function resolveAssistantAutoReplyActorScope(input: {
     )
 }
 
-function normalizeRouteChannel(value: string | null | undefined): string | null {
+export function normalizeAssistantAutoReplyRouteChannel(
+  value: string | null | undefined,
+): string | null {
   return normalizeNullableString(value)?.toLowerCase() ?? null
 }
 

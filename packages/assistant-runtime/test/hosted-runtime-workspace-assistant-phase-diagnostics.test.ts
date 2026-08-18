@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listAssistantInputEvents: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
-  maintainAssistantAutoReplyRouteState: vi.fn(async () => ({
+  maintainAssistantOutboxDerivedState: vi.fn(async () => ({
     changed: false,
     trusted: true,
   })),
@@ -69,8 +69,8 @@ vi.mock("@murphai/assistant-engine/assistant-runtime-residue", async (importOrig
   >();
   return {
     ...actual,
-    maintainAssistantAutoReplyRouteState:
-      mocks.maintainAssistantAutoReplyRouteState,
+    maintainAssistantOutboxDerivedState:
+      mocks.maintainAssistantOutboxDerivedState,
   };
 });
 

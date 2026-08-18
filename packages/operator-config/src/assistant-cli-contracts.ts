@@ -1010,6 +1010,14 @@ export const assistantOutboxIntentSchema = z
     subject: z.string().trim().min(1).nullable().default(null),
     operation: assistantOutboxOperationSchema.nullable().default(null),
     dedupeKey: z.string().min(1),
+    // Compatibility provenance for pre-stable media-sensitive dedupe keys.
+    // undefined is a legacy unclassified intent, null has no alias, and a
+    // SHA-1 value is the stable token-only key that aliases dedupeKey.
+    legacyDedupeLookupKey: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/u)
+      .nullable()
+      .optional(),
     targetFingerprint: z.string().min(1),
     channel: z.string().min(1).nullable(),
     identityId: z.string().min(1).nullable(),

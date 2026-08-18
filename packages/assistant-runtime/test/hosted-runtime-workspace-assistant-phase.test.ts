@@ -59,7 +59,7 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
-  maintainAssistantAutoReplyRouteState: vi.fn(),
+  maintainAssistantOutboxDerivedState: vi.fn(),
   prepareHostedAssistantAutomationForWake: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
   prepareHostedProviderCleanupPlan: vi.fn(),
@@ -111,8 +111,8 @@ vi.mock("@murphai/assistant-engine/assistant-runtime-residue", async (importOrig
   >();
   return {
     ...actual,
-    maintainAssistantAutoReplyRouteState:
-      mocks.maintainAssistantAutoReplyRouteState,
+    maintainAssistantOutboxDerivedState:
+      mocks.maintainAssistantOutboxDerivedState,
   };
 });
 
@@ -482,7 +482,7 @@ beforeEach(() => {
     linqMessageIds: [],
   });
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
-  mocks.maintainAssistantAutoReplyRouteState.mockResolvedValue({
+  mocks.maintainAssistantOutboxDerivedState.mockResolvedValue({
     changed: false,
     trusted: true,
   });
@@ -1712,7 +1712,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       recordUsage: expect.any(Function),
     });
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
-    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
+    expect(mocks.maintainAssistantOutboxDerivedState).not.toHaveBeenCalled();
     expect(deferredUsageRecords).toEqual([
       expect.objectContaining({
         usageId: "turn_direct_usage.attempt-1",
@@ -1723,8 +1723,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     events.push("checkpoint");
     await result.afterCheckpoint?.();
 
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
+    expect(mocks.maintainAssistantOutboxDerivedState).toHaveBeenCalledOnce();
+    expect(mocks.maintainAssistantOutboxDerivedState).toHaveBeenCalledWith({
       shouldYield: null,
       signal: null,
       vault: "/tmp/murph-vault",
@@ -1865,7 +1865,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: null,
       redactedLogEntries: [],
     });
-    mocks.maintainAssistantAutoReplyRouteState.mockResolvedValueOnce({
+    mocks.maintainAssistantOutboxDerivedState.mockResolvedValueOnce({
       changed: true,
       trusted: true,
     });
@@ -1876,7 +1876,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "assistant_runtime_commit",
       progressed: true,
     }));
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
+    expect(mocks.maintainAssistantOutboxDerivedState).toHaveBeenCalledOnce();
   });
 
   it("does not turn migration-only foreground progress into managed automation work", async () => {
@@ -1886,7 +1886,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: null,
       redactedLogEntries: [],
     });
-    mocks.maintainAssistantAutoReplyRouteState.mockResolvedValueOnce({
+    mocks.maintainAssistantOutboxDerivedState.mockResolvedValueOnce({
       changed: true,
       trusted: true,
     });
@@ -9848,9 +9848,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(
       mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.maintainAssistantAutoReplyRouteState.mock.invocationCallOrder[0] ?? 0,
+      mocks.maintainAssistantOutboxDerivedState.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
+    expect(mocks.maintainAssistantOutboxDerivedState).toHaveBeenCalledWith({
       shouldYield: shouldYieldBackgroundMaintenance,
       signal: backgroundMaintenanceController.signal,
       vault: "/tmp/murph-vault",
