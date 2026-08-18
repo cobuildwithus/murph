@@ -134,7 +134,6 @@ export async function createE2eDeployment({ correlationId, ref, sha }) {
       },
       name: requiredEnv("NATIVE_IOS_E2E_VERCEL_PROJECT_NAME"),
       project: projectId,
-      public: false,
     }),
     headers: vercelHeaders(token),
     method: "POST",

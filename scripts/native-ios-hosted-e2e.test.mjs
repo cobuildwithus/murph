@@ -21,6 +21,7 @@ import {
   inspectJunctionAppleHealthConnection,
   inspectNamespacedJunctionUsers,
   inspectResolvedJunctionUser,
+  withDedicatedDatabaseOwner,
 } from "./native-ios-hosted-e2e-identity.mjs";
 import {
   buildDispatchInputs,
@@ -33,6 +34,7 @@ import {
   runBoundedCommand,
 } from "./native-ios-hosted-e2e-support.mjs";
 import {
+  createE2eDeployment,
   inspectPublicCandidateResponse,
   inspectRetirableE2eDeployment,
   inspectVercelCustomEnvironment,
@@ -224,6 +226,60 @@ test("Vercel proof binds project, custom environment, ref, and exact PR SHA", ()
   }
 });
 
+test("Vercel deployment creation sends only current strict API fields", async () => {
+  const env = {
+    GITHUB_REPOSITORY_ID: "123456789",
+    NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: "env_e2e",
+    NATIVE_IOS_E2E_VERCEL_PROJECT_ID: "prj_e2e",
+    NATIVE_IOS_E2E_VERCEL_PROJECT_NAME: "murph-native-ios-e2e",
+    NATIVE_IOS_E2E_VERCEL_TOKEN: "vercel_test_token",
+  };
+  const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  let requestBody;
+  try {
+    Object.assign(process.env, env);
+    globalThis.fetch = async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ id: "dpl_123" }), {
+        headers: { "content-type": "application/json" },
+      });
+    };
+    console.log = () => undefined;
+
+    assert.deepEqual(await createE2eDeployment({
+      correlationId: "murph-pr-test",
+      ref: "feature/native-e2e",
+      sha: SHA,
+    }), { id: "dpl_123" });
+    assert.deepEqual(requestBody, {
+      customEnvironmentSlugOrId: "env_e2e",
+      gitSource: {
+        ref: "feature/native-e2e",
+        repoId: 123456789,
+        sha: SHA,
+        type: "github",
+      },
+      meta: {
+        murphNativeIosE2e: NATIVE_IOS_HOSTED_E2E_LANE_MARKER,
+        murphNativeIosE2eContract: NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
+        murphNativeIosE2eCorrelationId: "murph-pr-test",
+      },
+      name: "murph-native-ios-e2e",
+      project: "prj_e2e",
+    });
+    assert.equal(Object.hasOwn(requestBody, "public"), false);
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 test("Vercel native E2E migration failure stops ordinary migration and build", async () => {
   const config = JSON.parse(await readFile(path.join(WEB_ROOT, "vercel.json"), "utf8"));
   assert.equal(config.buildCommand, "sh scripts/vercel-build.sh");
@@ -370,6 +426,22 @@ test("destructive database reset is limited to an explicitly E2E-named database"
       directDatabaseUrl: `postgresql://owner@db.example.test/${databaseName}`,
     }), /explicitly E2E\/test database/u);
   }
+});
+
+test("destructive database reset assumes the canonical schema owner", () => {
+  const ownedConnectionString = withDedicatedDatabaseOwner(
+    "postgresql://credential@db.example.test/native_ios_e2e?sslmode=require&options=-c%20statement_timeout%3D10000",
+  );
+  const ownedUrl = new URL(ownedConnectionString);
+  assert.equal(ownedUrl.searchParams.get("sslmode"), "require");
+  assert.equal(
+    ownedUrl.searchParams.get("options"),
+    "-c statement_timeout=10000 -c role=postgres",
+  );
+  assert.equal(
+    ownedUrl.search,
+    "?sslmode=require&options=-c%20statement_timeout%3D10000%20-c%20role%3Dpostgres",
+  );
 });
 
 test("Junction cleanup isolates one E2E namespace inside a shared sandbox team", () => {
