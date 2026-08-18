@@ -52,6 +52,7 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentSentById,
   readAssistantContextSnapshotState,
+  refreshAssistantContextSnapshotBestEffort,
   recordHostedMailboxAssistantInputItem,
   saveAssistantOutboxIntent,
   saveAssistantSession,
@@ -36815,9 +36816,9 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
-      checkpointRuntimeWake: true,
+      checkpointRuntimeWake: false,
       generatedImageRetention: false,
-      handoff: "empty persisted-wake dispatch",
+      handoff: "no-signal reconciliation",
     },
     {
       checkpointConversation: true,
@@ -36836,11 +36837,11 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
-      checkpointRuntimeWake: true,
+      checkpointRuntimeWake: false,
       generatedImageRetention: true,
-      handoff: "empty persisted-wake dispatch after a status commit",
+      handoff: "no-signal reconciliation after a status commit",
     },
-  ])("older due assistant carry yields to a $handoff before persisting a later reminder", async (
+  ])("older due assistant carry honors $handoff before persisting a later reminder", async (
     {
       checkpointConversation,
       checkpointConversationInputAhead,
@@ -36860,17 +36861,18 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const idleCheckpointDelayMs = 180_000;
-    const olderDueWakeAt = TEST_NOW;
+    const olderDueWakeAt = new Date(Date.parse(TEST_NOW) - 60_000).toISOString();
+    const reconciliationWakeAt = TEST_NOW;
     const reminderWakeAt = new Date(
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs + 5_000,
+      Date.parse(TEST_NOW) + 5 * 60_000,
     ).toISOString();
+    const reminderAutomationId = "automation_01JQ8PWXP5A68SQM1W0GYM41V7";
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const olderWakeHotAttemptComplete = createDeferred<void>();
     const olderWakePersisted = createDeferred<void>();
     const reminderCreated = createDeferred<void>();
     const reminderWakePersisted = createDeferred<void>();
-    const canonicalWriteObserved = createDeferred<HostedWorkspaceCheckpointRequest>();
     const firstCheckpointConversationHandled = createDeferred<void>();
     const secondCheckpointConversationHandled = createDeferred<void>();
     const mailboxItems = [
@@ -36880,6 +36882,7 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ];
     let assistantPass = 0;
+    let reminderReconciled = false;
     let snapshotCount = 0;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
@@ -36890,7 +36893,7 @@ describe("hosted workspace runtime entrypoint", () => {
       if (generatedImageRetention) {
         const recordedAt = "2026-04-01T00:00:00.000Z";
         const sourceImagePath = path.join(workspaceRoot, "generated-image-source.webp");
-        await initializeVault({ createdAt: recordedAt, vaultRoot: sourceVaultRoot });
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceVaultRoot });
         await writeFile(sourceImagePath, "generated image bytes");
         await addCaptureWithLookup({
           attachments: [{ role: "media_1", sourcePath: sourceImagePath }],
@@ -36917,6 +36920,10 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot: sourceVaultRoot,
         });
         await rm(sourceImagePath);
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(sourceVaultRoot)).pending,
+          [],
+        );
         const baseBundle = await snapshotHostedBundleRoots({
           kind: "vault",
           roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
@@ -36985,7 +36992,6 @@ describe("hosted workspace runtime entrypoint", () => {
                   events.push(
                     `workspace.checkpoint:canonical_runtime_commit:${request.nextWakeAt ?? "none"}`,
                   );
-                  canonicalWriteObserved.resolve(request);
                 }
                 const idleCheckpointCount = checkpointRequests.filter(
                   (checkpointRequest) => checkpointRequest.reason === "idle_shutdown",
@@ -37008,7 +37014,8 @@ describe("hosted workspace runtime entrypoint", () => {
                 }
                 return {
                   conversationInputAhead:
-                    checkpointRequests.length === 1
+                    request.reason === "idle_shutdown"
+                    && idleCheckpointCount === 1
                     && checkpointConversationInputAhead,
                   checkpointed: true,
                   workspace,
@@ -37044,7 +37051,46 @@ describe("hosted workspace runtime entrypoint", () => {
 
             if (assistantPass === 3) {
               assert.equal(presentedWakeAt, "none");
+              await upsertAutomation({
+                automationId: reminderAutomationId,
+                continuityPolicy: "fresh",
+                instructions: "Send the scheduled reminder.",
+                now: new Date(TEST_NOW),
+                route: {
+                  channel: "linq",
+                  deliveryTarget: "synthetic_direct_chat",
+                  identityId: null,
+                  participantId: null,
+                  threadId: "synthetic_direct_chat",
+                  threadIsDirect: true,
+                },
+                schedule: {
+                  at: reminderWakeAt,
+                  kind: "at",
+                },
+                status: "active",
+                title: "Synthetic reminder",
+                vaultRoot: input.restored.vaultRoot,
+              });
               reminderCreated.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: reconciliationWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            if (presentedWakeAt === reconciliationWakeAt) {
+              if (generatedImageRetention) {
+                const refresh = await refreshAssistantContextSnapshotBestEffort({
+                  now: () => new Date(Date.now()).toISOString(),
+                  vaultRoot: input.restored.vaultRoot,
+                });
+                assert.equal(refresh.refreshed, true);
+                assert.deepEqual(refresh.pendingDirtyDomains, []);
+              }
+              reminderReconciled = true;
               return {
                 checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: reminderWakeAt,
@@ -37053,24 +37099,29 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
-            if (assistantPass === 4 || assistantPass === 5) {
-              const expectedMailboxItemId = assistantPass === 4
-                ? "mailbox_item_entrypoint_assistant_carry_mask_003"
-                : "mailbox_item_entrypoint_assistant_carry_mask_004";
+            if (checkpointConversation) {
+              const handlingSecondConversation = events.includes(
+                "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_004",
+              );
+              const expectedMailboxItemId = handlingSecondConversation
+                ? "mailbox_item_entrypoint_assistant_carry_mask_004"
+                : "mailbox_item_entrypoint_assistant_carry_mask_003";
               assert.ok(
                 events.includes(
                   `mailbox.importItem:${expectedMailboxItemId}`,
                 ),
                 events.join(","),
               );
-              if (assistantPass === 4) {
-                firstCheckpointConversationHandled.resolve();
-              } else {
+              if (handlingSecondConversation) {
                 secondCheckpointConversationHandled.resolve();
+              } else {
+                firstCheckpointConversationHandled.resolve();
               }
               return {
                 checkpointReason: "assistant_runtime_commit",
-                nextWakeAt: reminderWakeAt,
+                nextWakeAt: reminderReconciled
+                  ? reminderWakeAt
+                  : reconciliationWakeAt,
                 nextWakeReason: "assistant",
                 progressed: true,
               };
@@ -37103,17 +37154,25 @@ describe("hosted workspace runtime entrypoint", () => {
       await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
       await waitForFakeTimerScheduled(() => events.join(","));
       await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
-      if (generatedImageRetention) {
-        const canonicalWrite = await withRealTimeout(
-          canonicalWriteObserved.promise,
-          15_000,
-          () => events.join(","),
-        );
-        assert.equal(canonicalWrite.nextWakeAt, olderDueWakeAt);
-        assert.equal(canonicalWrite.nextWakeReason, "assistant");
-      }
       await withRealTimeout(olderWakePersisted.promise, 15_000, () => events.join(","));
       if (generatedImageRetention) {
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending,
+          [],
+        );
+        const cronStatus = await getAssistantCronStatus(vaultRoot);
+        assert.equal(cronStatus.dueJobs, 0);
+        assert.equal(cronStatus.nextRunAt, reminderWakeAt);
+        const firstIdleCheckpointIndex = checkpointRequests.findIndex(
+          (request) => request.reason === "idle_shutdown",
+        );
+        const retentionCanonicalWrite = checkpointRequests
+          .slice(0, firstIdleCheckpointIndex)
+          .filter((request) => request.reason === "canonical_runtime_commit")
+          .at(-1);
+        assert.ok(retentionCanonicalWrite);
+        assert.equal(retentionCanonicalWrite.nextWakeAt, olderDueWakeAt);
+        assert.equal(retentionCanonicalWrite.nextWakeReason, "assistant");
         const firstSnapshotIndex = events.findIndex((event) =>
           event.startsWith("snapshot:1:idle_shutdown:")
         );
@@ -37172,7 +37231,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await withRealTimeout(
         reminderWakePersisted.promise,
         15_000,
-        () => events.join(","),
+        () => JSON.stringify({ checkpointRequests, events }, null, 2),
       );
       const persistedWakes = checkpointRequests
         .filter((request) => request.reason === "idle_shutdown")
@@ -37197,23 +37256,28 @@ describe("hosted workspace runtime entrypoint", () => {
           false,
           events.join(","),
         );
-        assert.equal(
-          events.slice(persistedDispatchIndex + 1).some((event) =>
-            event.startsWith("assistant:")
-          ),
-          false,
+        const reconciliationAssistantIndex = events.findIndex((event) =>
+          event.includes(`:${reconciliationWakeAt}:`)
+        );
+        assert.ok(
+          reconciliationAssistantIndex > persistedDispatchIndex,
           events.join(","),
         );
+        assert.ok(reconciliationAssistantIndex < secondSnapshotIndex, events.join(","));
         return;
       }
       const firstForegroundAssistantIndex = events.findIndex((event) =>
         event.startsWith("assistant:4:")
       );
       const secondForegroundAssistantIndex = events.findIndex((event) =>
-        event.startsWith("assistant:5:")
+        event.startsWith("assistant:6:")
+      );
+      const reconciliationAssistantIndex = events.findIndex((event) =>
+        event.includes(`:${reconciliationWakeAt}:`)
       );
       assert.notEqual(firstForegroundAssistantIndex, -1, events.join(","));
       assert.notEqual(secondForegroundAssistantIndex, -1, events.join(","));
+      assert.notEqual(reconciliationAssistantIndex, -1, events.join(","));
       assert.equal(
         events[secondSnapshotIndex],
         `snapshot:2:idle_shutdown:${
@@ -37229,6 +37293,10 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.ok(
         firstForegroundAssistantIndex < secondSnapshotIndex,
+        events.join(","),
+      );
+      assert.ok(
+        reconciliationAssistantIndex < secondSnapshotIndex,
         events.join(","),
       );
       assert.ok(
