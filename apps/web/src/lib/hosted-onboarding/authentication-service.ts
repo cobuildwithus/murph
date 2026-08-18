@@ -6,6 +6,9 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
+  signalHostedPhoneCallResultNotificationRecovery,
+} from "../phone-calls/reconciliation-workflow-start";
+import {
   runWithFreshHostedDomainRootUnwrapCache,
   runWithHostedDomainRootUnwrapCache,
   runWithHostedDomainRootProviderCallsDisabled,
@@ -131,6 +134,17 @@ export async function completeHostedPrivyVerification(input: {
     const member = memberResolution.member;
 
     assertHostedMemberNotSuspended(member);
+    if (memberResolution.identity.telegram?.telegramUserId) {
+      try {
+        await signalHostedPhoneCallResultNotificationRecovery({
+          memberId: member.id,
+          prisma,
+        });
+      } catch {
+        // The per-call Workflow timer owns eventual recovery. Authentication
+        // must not fail after its durable identity/routing work committed.
+      }
+    }
 
     const messagingSetupState = await readHostedMemberMessagingSetupState({
       memberId: member.id,

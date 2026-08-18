@@ -50,8 +50,8 @@ function createDeployEnvironment() {
     compatibilityDate: "2026-03-27",
     containerInstanceType: {
       disk_mb: 6000,
-      memory_mib: 6144,
-      vcpu: 2,
+      memory_mib: 3072,
+      vcpu: 1,
     },
     containerMaxInstances: 1000,
     logHeadSamplingRate: 1,
@@ -963,8 +963,8 @@ describe("hosted runner container image contract", () => {
     expect(container.image_build_context).toBe("..");
     expect(container.instance_type).toEqual({
       disk_mb: 6000,
-      memory_mib: 6144,
-      vcpu: 2,
+      memory_mib: 3072,
+      vcpu: 1,
     });
     expect(container.max_instances).toBe(1000);
   });

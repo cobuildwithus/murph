@@ -66,7 +66,10 @@ type ReviewGptHarnessOptions = {
   closeCommandFails?: boolean
   closeCommandHangsAfterClosingAtAttempt?: number
   createCommandOmitsTargetId?: boolean
+  deepResearchConversationHrefs?: string[]
+  draftMode?: string
   draftTimeoutMs?: number
+  exposeConversationWait?: boolean
   failBrowserSocketOpen?: boolean
   failListAfterClose?: boolean
   failPageCommand?: boolean
@@ -154,8 +157,22 @@ function loadReviewGptOpenTargetHarness(
     'prepare-chatgpt-draft.js',
   )
   const requireFromDriver = createRequire(driverPath)
+  const conversationWaitExportAnchor = '\n  const autoSendDraftMessage = async () => {'
+  const installedDriverSource = readFileSync(driverPath, 'utf8')
+  if (!installedDriverSource.includes(conversationWaitExportAnchor)) {
+    throw new Error('ReviewGPT conversation-wait test anchor was not found')
+  }
   const driverSource = [
-    readFileSync(driverPath, 'utf8'),
+    installedDriverSource.replace(
+      conversationWaitExportAnchor,
+      [
+        '',
+        '  module.exports.__waitForConversationStateAfterSendTest = waitForConversationStateAfterSend;',
+        "  if (process.env.REVIEW_GPT_TEST_EXPOSE_CONVERSATION_WAIT === '1') return;",
+        '',
+        '  const autoSendDraftMessage = async () => {',
+      ].join('\n'),
+    ),
     'module.exports.__browserTransportTimeoutMsTest = browserTransportTimeoutMs;',
     'module.exports.__createWebSocketOwnerTest = createWebSocketOwner;',
     'module.exports.__pageCommandTimeoutMsTest = pageCommandTimeoutMs;',
@@ -176,6 +193,8 @@ function loadReviewGptOpenTargetHarness(
   const commands: BrowserCommand[] = []
   const idleDraftRegistrations: IdleDraftCleanupRegistration[] = []
   let closeCommandAttemptCount = 0
+  let conversationWaitActive = false
+  let conversationWaitRuntimeReadCount = 0
   let createSendAttemptCount = 0
   let createdTargetCount = 0
   let latestTargetId = ''
@@ -187,6 +206,19 @@ function loadReviewGptOpenTargetHarness(
   let versionFetchCount = 0
 
   const successfulDraftRuntimeValue = (expression: string) => {
+    if (conversationWaitActive) {
+      const hrefs = options.deepResearchConversationHrefs ?? []
+      const href = hrefs[Math.min(
+        Math.floor(conversationWaitRuntimeReadCount / 2),
+        Math.max(0, hrefs.length - 1),
+      )]
+      conversationWaitRuntimeReadCount += 1
+      return {
+        href: href ?? '',
+        inConversation: Boolean(href),
+        targetMatch: Boolean(href),
+      }
+    }
     if (!options.successfulDraft) return undefined
     if (expression.includes('/backend-api/me')) {
       return { ok: true, status: 200 }
@@ -511,6 +543,7 @@ function loadReviewGptOpenTargetHarness(
     value: {
       ...process.env,
       ORACLE_DRAFT_FILES: '',
+      ORACLE_DRAFT_MODE: options.draftMode ?? 'chat',
       ORACLE_DRAFT_MODEL: 'gpt-5.6-sol',
       ORACLE_DRAFT_PROMPT: options.prompt ?? 'Review the requested changes.',
       ORACLE_DRAFT_REMOTE_PORT: options.remotePort ?? '9999',
@@ -520,6 +553,7 @@ function loadReviewGptOpenTargetHarness(
       ORACLE_DRAFT_URL: 'https://chatgpt.com/',
       ORACLE_DRAFT_WAIT_RESPONSE: options.shouldWaitForResponse ? '1' : '0',
       REVIEW_GPT_IDLE_DRAFT_TIMEOUT_MS: String(options.idleDraftTimeoutMs ?? 0),
+      REVIEW_GPT_TEST_EXPOSE_CONVERSATION_WAIT: options.exposeConversationWait ? '1' : '0',
     },
   })
   const moduleRecord: { exports: Record<string, unknown> } = { exports: {} }
@@ -612,6 +646,7 @@ function loadReviewGptOpenTargetHarness(
       return Reflect.apply(connectTarget, undefined, [desiredUrl, socketOwner])
     },
     getCloseCommandAttemptCount: () => closeCommandAttemptCount,
+    getConversationWaitRuntimeReadCount: () => conversationWaitRuntimeReadCount,
     getCreateSendAttemptCount: () => createSendAttemptCount,
     getDraftPrompt: () => draftPrompt,
     getIdleDraftRegistrations: () => idleDraftRegistrations,
@@ -630,6 +665,30 @@ function loadReviewGptOpenTargetHarness(
     },
     mainWithRetry: async () => {
       await Reflect.apply(mainWithRetry, undefined, [])
+    },
+    waitForConversationStateAfterSend: async (
+      committedState: { href: string },
+      maxWaitMs: number,
+    ) => {
+      const waitForConversationStateAfterSend =
+        moduleRecord.exports.__waitForConversationStateAfterSendTest
+      if (typeof waitForConversationStateAfterSend !== 'function') {
+        throw new Error('ReviewGPT conversation wait was not exposed by the test harness')
+      }
+      conversationWaitRuntimeReadCount = 0
+      conversationWaitActive = true
+      try {
+        return await Reflect.apply(waitForConversationStateAfterSend, undefined, [
+          committedState,
+          maxWaitMs,
+        ]) as {
+          href: string
+          state: { href?: string }
+          status: string
+        }
+      } finally {
+        conversationWaitActive = false
+      }
     },
     markedResponseDurationFailure: (
       targetModel: string,
@@ -815,6 +874,19 @@ const reviewGptModelPickerModule = createRequire(import.meta.url)(
     summary: ReviewGptModelPickerSummary,
     target: ReviewGptModelPickerTarget,
   ) => boolean
+}
+
+const reviewGptDraftHelpersModule = createRequire(import.meta.url)(
+  path.join(
+    repoRoot,
+    'node_modules',
+    '@cobuild',
+    'review-gpt',
+    'src',
+    'prepare-chatgpt-draft-helpers.js',
+  ),
+) as {
+  buildAttachmentNameMatcher: (expectedName: string) => RegExp | null
 }
 
 const reviewGptDomSnapshotModule = createRequire(import.meta.url)(
@@ -1034,7 +1106,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
   })
 
-  it('exposes only the package-backed review-gpt runner', () => {
+  it('exposes only the package-backed review-gpt runner', async () => {
     const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const pnpmWorkspace = readFileSync(
       path.join(repoRoot, 'pnpm-workspace.yaml'),
@@ -1097,13 +1169,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.131')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.133')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.131'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.133'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1167,6 +1239,33 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain(
       'const minimumMarkedResponseMs = Number(process.env.ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS || 5 * 60 * 1000);',
     )
+    const attachmentNameMatcher = reviewGptDraftHelpersModule.buildAttachmentNameMatcher(
+      'codebase.zip',
+    )
+    expect(attachmentNameMatcher?.test('codebase 20260815 213012 zip')).toBe(true)
+    expect(attachmentNameMatcher?.test('different 20260815 213012 zip')).toBe(false)
+    const initialConversationHref = 'https://chatgpt.com/c/initial-conversation'
+    const stabilizedConversationHref = 'https://chatgpt.com/c/stabilized-conversation'
+    const deepResearchHarness = loadReviewGptOpenTargetHarness(1, undefined, {
+      deepResearchConversationHrefs: [
+        stabilizedConversationHref,
+        stabilizedConversationHref,
+      ],
+      draftMode: 'deep-research',
+      exposeConversationWait: true,
+    })
+    await deepResearchHarness.main()
+    await expect(
+      deepResearchHarness.waitForConversationStateAfterSend(
+        { href: initialConversationHref },
+        5_000,
+      ),
+    ).resolves.toMatchObject({
+      href: stabilizedConversationHref,
+      state: { href: stabilizedConversationHref },
+      status: 'ready',
+    })
+    expect(deepResearchHarness.getConversationWaitRuntimeReadCount()).toBe(4)
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
       wantsInstant: false,
@@ -1554,8 +1653,9 @@ describe('monorepo release flow coverage audit', () => {
       'A later full audit also\nuses `INVALID` for the mandatory prior-finding summary gap',
     )
     expect(prDeepReviewPrompt).toContain(
-      'Do not stop for a discrepancy confined to the descriptive content of',
+      'Do not audit or report discrepancies confined to descriptive PR-body content',
     )
+    expect(prDeepReviewPrompt).not.toContain('Body discrepancy:')
     expect(prDeepReviewPrompt).not.toContain('repo.snapshot.zip')
     expect(prDeepReviewPrompt).not.toContain('repo.repomix.zip')
     expect(prDeepReviewPrompt.toLowerCase()).not.toContain('repomix')
@@ -1619,6 +1719,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('at least 3,000 lines')
     expect(prDeepReviewPrompt).toContain('This is neither an automatic merge rejection')
     expect(prDeepReviewPrompt).toContain('do not emit a standalone Invariant Violation')
+    expect(prDeepReviewPrompt).toMatch(
+      /For this category, only report a finding when merging the PR would\s+cause concrete, realistically reachable, material production harm/u,
+    )
+    expect(prDeepReviewPrompt).toMatch(
+      /A contract\s+mismatch or theoretical concern is evidence, not a finding, unless it\s+establishes that harm/u,
+    )
     expect(prDeepReviewPrompt).toContain('current scale, event volume,')
     expect(prDeepReviewPrompt).toContain('never assume hypothetical future or internet')
     expect(prDeepReviewPrompt).toMatch(
@@ -1632,12 +1738,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toMatch(
       /does\s+not actually resolve counts as `REVIEW_INDUCED`/u,
     )
-    expect(prDeepReviewPrompt).toContain('change-shape breakdown')
+    expect(prDeepReviewPrompt).toContain('# Patch-size anomaly')
     expect(prDeepReviewPrompt).toContain('UX outline')
-    expect(prDeepReviewPrompt).toContain('`Non-obvious affected surfaces`')
+    expect(prDeepReviewPrompt).toMatch(/applicable\s+risk notes/u)
     expect(prDeepReviewPrompt).toContain('**Purpose Drift**')
     expect(prDeepReviewPrompt).toContain('disclosure-only verification retry')
-    expect(prDeepReviewPrompt).toContain('Do not reopen the\nfull patch')
+    expect(prDeepReviewPrompt).toMatch(/Do not reopen the\s+full patch/u)
     expect(prDeepReviewPrompt).toContain(
       'may select only the narrow retry scope defined above',
     )
@@ -1645,14 +1751,14 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain(
       'Every material behavior or ownership change is necessary',
     )
-    expect(prDeepReviewPrompt).toContain(
-      'Every non-obvious affected surface is also disclosed',
+    expect(prDeepReviewPrompt).toMatch(
+      /Every non-obvious affected surface is(?: also)?\s+disclosed/u,
     )
     expect(prDeepReviewPrompt).toContain(
-      'applicable frontend and product-experience lenses own rendered proof',
+      'applicable frontend and Product UX lenses own rendered proof',
     )
     expect(prDeepReviewPrompt).not.toContain(
-      'routed local product-experience review',
+      'routed local Product UX review',
     )
     expect(prDeepReviewPrompt).toContain(
       'Disclosure does not make\nan unsafe or needless change acceptable',
@@ -1673,10 +1779,10 @@ describe('monorepo release flow coverage audit', () => {
       '`review-gpt-pr-context/rendered-evidence.txt`',
     )
     expect(completionSpecialistsPrompt).toContain(
-      '`agent-docs/prompts/product-experience-review.md`',
+      '`agent-docs/operations/product-ux.md`',
     )
     expect(completionSpecialistsPrompt).toContain(
-      'Product experience lens: applicable|not applicable',
+      'Product UX lens: applicable|not applicable',
     )
     expect(completionSpecialistsPrompt).toContain(
       'Product purpose verdict:',
@@ -1757,7 +1863,7 @@ describe('monorepo release flow coverage audit', () => {
       'A different-lane retry must use a fresh',
     )
     expect(prReviewGptLoop).toContain('zero accepted findings')
-    expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
+    expect(prReviewGptLoop).toMatch(/non-obvious\s+affected\s+surfaces/iu)
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
     expect(prReviewGptLoop).toContain('disclosure-only finding')
     expect(prReviewGptLoop).toContain('retry the same substantive round number')
@@ -1817,8 +1923,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain(
       'Prompt-primary PRs still run the preliminary specialist prompt',
     )
-    expect(agentsGuide).toContain(
-      'One preliminary `completion-specialists` ReviewGPT pass replaces',
+    expect(agentsGuide).toMatch(
+      /One preliminary `completion-specialists` ReviewGPT pass\s+applies the relevant Product UX, prompt, frontend, and coverage lenses together/u,
     )
     expect(agentWorkflowRouting).toContain(
       'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
@@ -1828,7 +1934,7 @@ describe('monorepo release flow coverage audit', () => {
       'sensitive, undeclared, or large current PRs get a fresh full-patch audit',
     )
     expect(agentWorkflowRouting).toContain('final-ReviewGPT-eligible PR-lane work')
-    expect(agentWorkflowRouting).toContain('scope-anomaly signal')
+    expect(agentWorkflowRouting).toContain('cross-cutting trigger')
     expect(prReviewGptLoop).toContain('final cross-cutting gate for eligible work')
     expect(prReviewGptLoop).toContain(
       'Never combine local `deep-review` with the final ReviewGPT gate',
@@ -1908,7 +2014,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain(
-      'pass replaces the four former local `product-experience-review`,',
+      'Product UX, prompt, frontend, and coverage audits run together',
     )
     expect(completionWorkflow).toMatch(/do not also run local\s+`deep-review`/u)
     expect(completionWorkflow).not.toContain(
@@ -1918,19 +2024,24 @@ describe('monorepo release flow coverage audit', () => {
       'may skip the individual required local audit subagent passes',
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
-    expect(completionWorkflow).toContain('Change-shape breakdown')
+    expect(completionWorkflow).not.toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('ReviewGPT context sensitivity: sensitive')
-    expect(completionWorkflow).toContain('scope-anomaly signal')
-    expect(completionWorkflow).toContain('not a quality target or an automatic merge')
-    expect(completionWorkflow).toContain('evidenced current member/event volume')
+    expect(completionWorkflow).toContain('manual line-count table')
+    expect(completionWorkflow).toContain('evidenced current scale')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
-    expect(completionWorkflow).toContain('User experience (when applicable)')
-    expect(completionWorkflow).toContain('Non-obvious affected surfaces')
-    expect(completionWorkflow).toContain('If none exist,')
+    expect(completionWorkflow).not.toContain(
+      'User experience (when applicable)',
+    )
+    expect(prDeepReviewPrompt).toContain('expected timing class and longest')
+    expect(prDeepReviewPrompt).toContain(
+      'without requiring an unrelated new inbound action',
+    )
+    expect(completionWorkflow).toContain('direct journey proof')
+    expect(completionWorkflow).toContain('Add a **Risks** section only when')
     expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
     expect(completionWorkflow).toContain('`reviewgpt-coverage.patch`')
     expect(completionWorkflow).toContain(
-      'the parent must reapply `agent-docs/prompts/product-experience-review.md` to that corrected pushed head',
+      'the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to that corrected pushed head',
     )
     expect(completionWorkflow).toContain(
       'This is a bounded parent revalidation, not another subagent or ReviewGPT invocation.',
@@ -1942,7 +2053,6 @@ describe('monorepo release flow coverage audit', () => {
     const completionAuditPrompts = [
       'prompt-review.md',
       'frontend-review.md',
-      'product-experience-review.md',
       'coverage-write.md',
     ].map((fileName) =>
       readFileSync(
@@ -1954,20 +2064,27 @@ describe('monorepo release flow coverage audit', () => {
       expect(auditPrompt).not.toContain('Assume there is at least one')
       expect(auditPrompt).toContain('Stop rule:')
     }
+    const productUx = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'product-ux.md'),
+      'utf8',
+    )
+    expect(productUx).toContain('A valid review can\nhave zero findings.')
     expect(completionAuditPrompts[0]).toContain('prompt-guidance-gpt-5p6.md')
     expect(completionAuditPrompts[0]).toContain('latest-model.md')
     expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
     expect(completionAuditPrompts[1]).toContain('render and inspect')
-    expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
+    expect(completionAuditPrompts[1]).toContain(
+      'phone and desktop when responsive behavior can change',
+    )
     expect(completionAuditPrompts[2]).toContain(
       'inside the preliminary `completion-specialists`',
     )
     expect(completionAuditPrompts[2]).not.toContain(
       'Do not use `review:gpt`',
     )
-    expect(completionAuditPrompts[3]).toContain('Optional patch artifact:')
-    expect(completionAuditPrompts[3]).toContain('`reviewgpt-coverage.patch`')
-    expect(completionAuditPrompts[3]).toMatch(coverageAdmissionRule)
+    expect(completionAuditPrompts[2]).toContain('Optional patch artifact:')
+    expect(completionAuditPrompts[2]).toContain('`reviewgpt-coverage.patch`')
+    expect(completionAuditPrompts[2]).toMatch(coverageAdmissionRule)
     expect(
       existsSync(
         path.join(
@@ -2606,7 +2723,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     )
   })
 
-  it('keeps product-experience decisions distinct inside the unified specialist review', () => {
+  it('keeps Product UX decisions in one owner inside the unified specialist review', () => {
     const prDeepReview = readFileSync(
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
       'utf8',
@@ -2620,8 +2737,8 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       ),
       'utf8',
     )
-    const productExperienceReview = readFileSync(
-      path.join(repoRoot, 'agent-docs', 'prompts', 'product-experience-review.md'),
+    const productUx = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'product-ux.md'),
       'utf8',
     )
     const frontendReview = readFileSync(
@@ -2637,7 +2754,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       'utf8',
     )
 
-    expect(prDeepReview).toContain('## Product experience audit')
+    expect(prDeepReview).toContain('## Product UX audit')
     expect(prDeepReview).toMatch(
       /Frontend-facing changes express the feature's irreducible purpose with the\s+fewest necessary words, actions, choices, and screens/u,
     )
@@ -2653,28 +2770,27 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     expect(completionSpecialists).toContain(
       'rendered interactions, or design-system UI outside the tiny-copy fast path',
     )
-    expect(completionSpecialists).toContain(
-      'Missing readable, redacted desktop',
-    )
     expect(completionSpecialists).toContain('# Lens contract')
-    expect(completionSpecialists).toContain('- Product experience:')
+    expect(completionSpecialists).toContain('- Product UX:')
     expect(completionSpecialists).toContain(
-      '`agent-docs/prompts/product-experience-review.md`',
+      '`agent-docs/operations/product-ux.md`',
     )
     expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
-    expect(productExperienceReview).toContain('irreducible user purpose')
-    expect(productExperienceReview).toContain(
-      'Product-experience lens for the preliminary unified ReviewGPT completion pass',
+    expect(productUx).toContain('irreducible user purpose')
+    expect(productUx).toContain('Restore the existing promise: `Patch`.')
+    expect(productUx).toContain(
+      'Change the existing promise: `Product change`.',
     )
-    expect(productExperienceReview).toMatch(
-      /extra concept, screen, click, field, choice, setting,\s+confirmation, interruption, and block of explanatory text/u,
+    expect(productUx).toMatch(
+      /Create a promise, audience, authority relationship, or product meaning:\s+`Feature`\./u,
     )
-    expect(productExperienceReview).toMatch(
-      /waits behind unrelated idle or\s+maintenance work/u,
+    expect(productUx).toContain(
+      'The number of affected people changes walkthrough coverage, not the effort',
     )
-    expect(productExperienceReview).toContain(
-      'Defer component and token implementation',
+    expect(productUx).toMatch(
+      /Remove repeated copy, avoidable steps, screens, fields,\s+choices, concepts, and delays/u,
     )
+    expect(productUx).toContain('waits behind unrelated work')
     expect(frontendReview).toMatch(
       /do not duplicate subjective product-taste findings or\s+decide the copy, state selection, action count, or whether an element exists/u,
     )
@@ -2683,7 +2799,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     )
     expect(frontendReview).not.toContain('unrelated rendered elements')
     expect(completionWorkflow).toContain(
-      'rendered fidelity to the declared states and hierarchy, responsive behavior, accessibility, and design-system execution',
+      'require enough redacted rendered evidence to judge',
     )
     expect(completionWorkflow).not.toContain(
       'hierarchy, clarity, interaction, responsive behavior, accessibility, state and error handling',
@@ -2696,7 +2812,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       'asynchronous continuation or wake ownership;',
     )
     expect(completionWorkflow).toContain(
-      '| Any product-owned dimension, including one changed through a prompt | Run the product-experience lens in the preliminary specialist ReviewGPT pass |',
+      '| Any product-owned dimension, including one changed through a prompt | Run the Product UX lens in the preliminary specialist ReviewGPT pass |',
     )
     expect(completionWorkflow).toContain(
       '| Prompt-primary change with no product-owned dimension | No product-decision review | Run the preliminary prompt lens only |',
@@ -2715,10 +2831,10 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       'Semantic copy—including CTA, helper, onboarding,',
     )
     expect(completionWorkflow).toMatch(
-      /a prompt that changes a product-owned dimension also activates the\s+product-experience lens in the same preliminary pass/u,
+      /a prompt that changes a product-owned dimension also activates the\s+Product UX lens in the same preliminary pass/u,
     )
     expect(agentWorkflowRouting).not.toContain(
-      'runs local `product-experience-review`',
+      'runs local `Product UX review`',
     )
     expect(agentWorkflowRouting).toContain(
       'Any change to semantic user-facing copy; user-visible action purpose, count, or priority;',
@@ -2736,7 +2852,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       'trivial copy-only `apps/web` edits that change static text only',
     )
     expect(agentWorkflowRouting).not.toContain(
-      '`product-experience-review` for materially changed user-facing behavior',
+      '`Product UX review` for materially changed user-facing behavior',
     )
     expect(agentWorkflowRouting).not.toContain('trivial static copy')
     expect(completionWorkflow).toMatch(
@@ -4003,11 +4119,6 @@ printf 'ZIP: %s (%s bytes)\n' \
       writeHarnessFile(harnessRoot, 'package.json', '{"name":"review-harness"}\n')
       writeHarnessFile(
         harnessRoot,
-        'agent-docs/prompts/product-experience-review.md',
-        'product-experience lens\n',
-      )
-      writeHarnessFile(
-        harnessRoot,
         'agent-docs/prompts/prompt-review.md',
         'prompt lens\n',
       )
@@ -4027,6 +4138,11 @@ printf 'ZIP: %s (%s bytes)\n' \
         'profile: murph-verification\nprovider: blacksmith-testbox\nblacksmith:\n  ref: main\n',
       )
       writeHarnessFile(harnessRoot, 'agent-docs/FRONTEND.md', 'frontend workflow\n')
+      writeHarnessFile(
+        harnessRoot,
+        'agent-docs/operations/product-ux.md',
+        'product UX workflow\n',
+      )
       writeHarnessFile(harnessRoot, 'PRODUCT.md', 'product guidance\n')
       writeHarnessFile(harnessRoot, 'DESIGN.md', 'design guidance\n')
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
@@ -4229,9 +4345,9 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(preliminaryEntries).toEqual(
         expect.arrayContaining([
           'agent-docs/FRONTEND.md',
+          'agent-docs/operations/product-ux.md',
           'PRODUCT.md',
           'DESIGN.md',
-          'agent-docs/prompts/product-experience-review.md',
           'agent-docs/prompts/prompt-review.md',
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
@@ -4993,6 +5109,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(leanEntries).toContain('DESIGN.md')
       expect(leanEntries).toContain('agent-docs/ARCHITECTURE_GUIDANCE.md')
       expect(leanEntries).toContain('agent-docs/FRONTEND.md')
+      expect(leanEntries).toContain('agent-docs/operations/product-ux.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(leanEntries).toContain('Dockerfile.cloudflare-hosted-runner-base')
@@ -5027,6 +5144,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(fullEntries).toContain('DESIGN.md')
       expect(fullEntries).toContain('agent-docs/ARCHITECTURE_GUIDANCE.md')
       expect(fullEntries).toContain('agent-docs/FRONTEND.md')
+      expect(fullEntries).toContain('agent-docs/operations/product-ux.md')
       expect(fullEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(fullEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(fullEntries).not.toContain('apps/web/public/design-assets/hero-02.png')
@@ -5292,53 +5410,21 @@ exit 1
     }
   })
 
-  it('requires the Claude Code UI double-check at website UI completion', () => {
+  it('keeps Fable optional and outside the website UI completion gate', () => {
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
       'utf8',
     )
+    const productUx = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'product-ux.md'),
+      'utf8',
+    )
 
-    expect(completionWorkflow).toContain('## Claude Code UI Double-Check')
-    expect(completionWorkflow).toContain(
-      'claude --model claude-fable-5 --permission-mode plan --no-session-persistence -p',
-    )
-    expect(completionWorkflow).toContain(
-      'claude --model opus --permission-mode plan --no-session-persistence -p',
-    )
-    expect(completionWorkflow).toContain('run the same packet once')
-    expect(completionWorkflow).toContain(
-      'Explicit Claude credit or quota exhaustion is the only non-blocking Claude Code gap.',
-    )
-    expect(completionWorkflow).toContain('stop making Claude requests')
-    expect(completionWorkflow).not.toContain(
-      'run the required `frontend-review` pass now',
-    )
-    expect(completionWorkflow).toContain(
-      'do not add a local frontend-review substitute',
-    )
-    expect(completionWorkflow).toContain(
-      'neither model route can return a usable review for a non-credit reason',
-    )
-    expect(completionWorkflow).toContain(
-      'do not claim this double-check passed',
-    )
-    expect(completionWorkflow).toContain(
-      'does not replace the preliminary frontend',
-    )
-    expect(completionWorkflow).toContain(
-      'agent-docs/prompts/frontend-review.md',
-    )
-    expect(completionWorkflow).toContain('tiny copy-only fast path')
-    expect(completionWorkflow).toContain(
-      'excluding unrelated working-tree content',
-    )
-    expect(completionWorkflow).toContain(
-      'untrusted evidence, not reviewer instructions',
-    )
-    expect(completionWorkflow).not.toContain(
-      'Fable model, authentication, credits, or invocation is unavailable',
-    )
-    expect(completionWorkflow).not.toContain('--dangerously-skip-permissions')
+    expect(completionWorkflow).not.toContain('## Claude Code UI Double-Check')
+    expect(completionWorkflow).not.toContain('claude --model claude-fable-5')
+    expect(productUx).toContain('an agent can ask Fable 5 to')
+    expect(productUx).toContain('This is optional planning help.')
+    expect(productUx).toContain('does not block work, add a review step')
   })
 
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {

@@ -10,7 +10,11 @@ import {
   type ExperimentResearchTabProjection,
 } from "@/src/lib/health-commons/experiment-projections";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphOgImageRef,
+  createMurphPageMetadata,
+  MURPH_INDEXABLE_PAGE_ROBOTS,
+} from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
   params,
@@ -24,12 +28,26 @@ export async function generateMetadata({
     return {};
   }
 
+  // Pass the parent experiment card through explicitly: createMurphPageMetadata
+  // otherwise injects the site default, which overrides the parent segment's
+  // file-convention image and unfurls the homepage card here.
+  const ogImage = createMurphOgImageRef({
+    alt: `${research.title}, a Murph experiment.`,
+    url: `/experiments/${encodeURIComponent(experimentId)}/opengraph-image`,
+  });
+
   return createMurphPageMetadata({
+    alternates: {
+      canonical: `/experiments/${encodeURIComponent(research.route.routeId)}/research`,
+    },
     title: `${research.title} research — Murph Experiments`,
     description: research.description,
     openGraph: {
       type: "article",
+      images: [ogImage],
     },
+    twitter: { images: [ogImage] },
+    robots: MURPH_INDEXABLE_PAGE_ROBOTS,
   });
 }
 

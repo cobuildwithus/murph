@@ -411,6 +411,7 @@ export interface ExperimentSessionLogResult {
   ledgerFile: string
   created: boolean
   kind: "intervention_session"
+  progress?: QueryExperimentProgressSummary
 }
 
 export interface ExperimentSessionAttachResult {
@@ -1022,6 +1023,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   logExperimentSession(
     input: CommandContext & {
       lookup: string
+      reminderIntentId?: string
       date?: string
       occurredAt?: string
       source?: EventSource
@@ -1237,6 +1239,7 @@ export interface ImporterServices {
       occurredAt?: string
       note?: string
       source?: "manual" | "import" | "device" | "derived"
+      reuseExact?: boolean
     },
   ): Promise<DocumentImportResult>
   importSamplesCsv(
@@ -1308,6 +1311,15 @@ export interface QueryServices extends HealthQueryServiceMethods {
       to?: string
     },
   ): Promise<ListResult>
+  resolveWorkoutImportStatusForRawSource(
+    input: CommandContext & {
+      rawRef: string
+    },
+  ): Promise<{
+    vault: string
+    rawRef: string
+    status: 'not_imported' | 'completed' | 'partial_conflict'
+  }>
   showDocumentManifest(
     input: CommandContext & {
       id: string
@@ -1559,6 +1571,10 @@ export interface VaultServices {
 
 export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   REQUIRED_DIRECTORIES: readonly string[]
+  resolveWorkoutSourceImportStatus(input: {
+    vaultRoot: string
+    rawRef: string
+  }): Promise<'not_imported' | 'completed' | 'partial_conflict'>
   applyCanonicalWriteBatch(input: {
     vaultRoot: string
     operationType: string
@@ -1771,7 +1787,9 @@ export interface ImportersRuntime {
     occurredAt?: string
     note?: string
     source?: ImporterSource
+    reuseExact?: boolean
   }): Promise<{
+    created: boolean
     raw: {
       relativePath: string
     }

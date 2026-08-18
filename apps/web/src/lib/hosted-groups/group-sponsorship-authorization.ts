@@ -519,6 +519,18 @@ export async function manageHostedGroupSponsorshipAuthorization(input: {
       beneficiaryMemberId: input.beneficiaryMemberId,
       tx,
     });
+    if (!current && input.action.action === "cancel") {
+      const canceled = await tx.hostedGroupSponsorshipAuthorization.findUnique({
+        where: { id: input.action.authorizationId },
+      });
+      if (
+        canceled?.beneficiaryMemberId === input.beneficiaryMemberId &&
+        canceled.payerMemberId === input.payerMemberId &&
+        canceled.status === HostedGroupSponsorshipAuthorizationStatus.canceled
+      ) {
+        return null;
+      }
+    }
     if (!current || current.payerMemberId !== input.payerMemberId) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_SPONSORSHIP_NOT_FOUND",

@@ -12,9 +12,13 @@ import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
 const CLIENT_USER_ID_SECRET = "junction-client-user-id-secret";
 
-function createSdkJunctionProvider(fetchImpl: typeof fetch) {
+function createSdkJunctionProvider(
+  fetchImpl: typeof fetch,
+  clientUserIdNamespace?: string,
+) {
   return createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
+    ...(clientUserIdNamespace ? { clientUserIdNamespace } : {}),
     clientUserIdSecret: CLIENT_USER_ID_SECRET,
     environment: "sandbox",
     region: "us",
@@ -53,6 +57,27 @@ test("junction SDK ensureConnection resolves the same deterministic client_user_
   });
   assert.ok((connection.initialJobs?.length ?? 0) > 0, "ensure should seed initial jobs");
   assert.ok(connection.nextReconcileAt, "ensure should schedule the reconcile floor");
+});
+
+test("junction SDK ensureConnection applies the configured client user namespace", async () => {
+  const expectedClientUserId = buildJunctionClientUserId(
+    CLIENT_USER_ID_SECRET,
+    "member-1",
+    "e2e",
+  );
+  const provider = createSdkJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    assert.ok(url.includes(`/v2/user/resolve/${encodeURIComponent(expectedClientUserId)}`));
+    return createJsonResponse({ user_id: "junction-user-1" });
+  }, "e2e");
+
+  const handler = requireValue(provider.sdkConnectionHandler);
+  const connection = await handler.ensureConnection({
+    ownerId: "member-1",
+    now: "2026-06-11T00:00:00.000Z",
+  });
+
+  assert.equal(connection.externalAccountId, "junction-user-1");
 });
 
 test("junction SDK ensureConnection rejects a missing owner id", async () => {

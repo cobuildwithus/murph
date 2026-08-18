@@ -277,6 +277,24 @@ landing; record the chosen posture here so the decision is reviewable.
   marker. The steady-state file bound for the provider-cleanup family is
   asserted by the provider-cleanup unit tests.
 
+- `.runtime/operations/assistant/state/session-routing.sqlite` is one portable,
+  rebuildable projection per workspace. It stores hashed exact alias and
+  conversation-key routes plus at most 50 recent-session timestamps, while
+  durable assistant session files remain canonical session state. A complete
+  valid legacy aggregate converts directly so its effective route winners
+  survive duplicate durable claims; missing, malformed, or incomplete routing
+  state recovers from durable sessions. Route cardinality grows rows, not
+  workspace files. Rebuilds populate a temporary database and publish it with
+  one atomic rename; ordinary mutations share one SQLite transaction under the
+  existing assistant runtime write lock. The store uses `DELETE`
+  journaling and closes each handle before hosted checkpointing, so its steady
+  state is one database file with no WAL/SHM family. The legacy aggregate
+  `assistant/indexes.json` is one-way input for a workspace that has not yet
+  published the SQLite projection and is deleted only after migration
+  publishes. That first publication establishes the projection-capable runner
+  as the hard rollback floor; a pre-projection runtime must not reopen the
+  workspace.
+
 - `bank/habitat/*.md` (`murph.frontmatter.habitat.v1`) is canonical product
   truth included in hosted workspace snapshots. It stores one optional Markdown
   document per versioned habitat catalog aspect, and a habitat save creates at

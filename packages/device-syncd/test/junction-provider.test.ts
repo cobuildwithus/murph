@@ -675,7 +675,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
         return createJsonResponse({ groups: {} });
@@ -767,7 +767,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
   const correctionSweepRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
   assert.equal(
     correctionSweepRequests.length,
-    (JUNCTION_KNOWN_TIMESERIES_RESOURCES.length - 1) * 7,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 7,
   );
   assert.deepEqual(
     new Set(correctionSweepRequests.map((url) =>
@@ -775,13 +775,11 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
         /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
       )?.[1])
     )),
-    new Set(JUNCTION_KNOWN_TIMESERIES_RESOURCES.filter(
-      (resource) => resource !== "workout_stream",
-    )),
+    new Set(JUNCTION_DEFAULT_TIMESERIES_RESOURCES),
   );
   assert.equal(
     requests.filter((url) => url.includes("/v2/summary/workouts/")).length,
-    8,
+    1,
   );
 });
 
@@ -833,7 +831,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
         return createJsonResponse({ groups: {} });
@@ -883,7 +881,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_KNOWN_TIMESERIES_RESOURCES].sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
   );
   assert.equal(importedSnapshots.length, 0);
 });
@@ -1634,10 +1632,30 @@ test("Junction client_user_id is deterministic, bounded, and owner-blinded", () 
 
   assert.equal(clientUserId.length, 32);
   assert.ok(clientUserId.startsWith("murph_"));
+  assert.equal(clientUserId, "murph_jnqpm4zu2il556kgyffrxngz26");
   assert.doesNotMatch(clientUserId, /owner|internal|123/u);
   assert.equal(
     clientUserId,
     buildJunctionClientUserId("junction-client-user-id-secret", "owner-internal-id-123"),
+  );
+
+  const namespacedClientUserId = buildJunctionClientUserId(
+    "junction-client-user-id-secret",
+    "owner-internal-id-123",
+    "e2e",
+  );
+  assert.equal(namespacedClientUserId.length, 32);
+  assert.ok(namespacedClientUserId.startsWith("murph_e2e_"));
+  assert.equal(namespacedClientUserId, "murph_e2e_jnqpm4zu2il556kgyffrxn");
+  assert.doesNotMatch(namespacedClientUserId, /owner|internal|123/u);
+  assert.notEqual(namespacedClientUserId, clientUserId);
+  assert.throws(
+    () => buildJunctionClientUserId(
+      "junction-client-user-id-secret",
+      "owner-internal-id-123",
+      "Native-iOS",
+    ),
+    /JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
   );
 });
 
@@ -7479,6 +7497,55 @@ test("Junction provider cleanup deregisters only the requested source", async ()
   ]);
 });
 
+test("Junction provider proves source access only from explicit active statuses", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    assert.equal(
+      readUrl(input),
+      "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    );
+    return createJsonResponse({
+      data: [
+        { slug: "source_connected", status: "connected" },
+        { slug: "source_active", status: "active" },
+        { slug: "source_available", status: "available" },
+        { slug: "source_ok", status: "ok" },
+        { slug: "source_unknown", status: "unknown" },
+        { slug: "source_missing" },
+        { slug: "source_unrecognized", status: "settling" },
+        { slug: "source_error", status: "error" },
+        { slug: "source_failed", status: "failed" },
+        { slug: "source_disconnected", status: "disconnected" },
+        { slug: "source_revoked", status: "revoked" },
+        { slug: "source_inactive", status: "inactive" },
+      ],
+    });
+  });
+  const isSourceAccessActive = requireValue(
+    provider.connectionHandler?.isSourceAccessActive,
+  );
+
+  for (const slug of [
+    "source_connected",
+    "source_active",
+    "source_available",
+    "source_ok",
+  ]) {
+    assert.equal(await isSourceAccessActive(createAccount(), slug), true);
+  }
+  for (const slug of [
+    "source_unknown",
+    "source_missing",
+    "source_unrecognized",
+    "source_error",
+    "source_failed",
+    "source_disconnected",
+    "source_revoked",
+    "source_inactive",
+  ]) {
+    assert.equal(await isSourceAccessActive(createAccount(), slug), false);
+  }
+});
+
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
   assert.deepEqual(normalizeJunctionProviderFilter(["oura", "withings"]), ["oura", "withings"]);
 
@@ -8938,7 +9005,7 @@ test("Junction createLinkToken honors configured allowed Link hosts", async () =
   );
 });
 
-test("Junction beginConnection resolves or creates a user, returns Link URL, and seeds provider-config credentials", async () => {
+test("Junction beginConnection resolves or creates a namespaced user, returns Link URL, and seeds provider-config credentials", async () => {
   const requests: Array<{ body: unknown; headers: Headers; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const url = readUrl(input);
@@ -8959,7 +9026,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
     }
 
     throw new Error(`Unexpected request: ${url}`);
-  });
+  }, { clientUserIdNamespace: "e2e" });
 
   const started = await requireJunctionConnectionHandler(provider).beginConnection({
     state: "state-1",
@@ -8985,7 +9052,9 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.deepEqual(started.stateMetadata, undefined);
 
   const createUserBody = requests.find((request) => request.url.endsWith("/v2/user"))?.body;
-  assert.equal(typeof createUserBody === "object" && createUserBody !== null && "client_user_id" in createUserBody, true);
+  assert.deepEqual(createUserBody, {
+    client_user_id: "murph_e2e_jnqpm4zu2il556kgyffrxn",
+  });
   assert.doesNotMatch(JSON.stringify(createUserBody), /owner-internal-id-123/u);
 
   const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;
@@ -9145,6 +9214,15 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
     sourceConnection.initialJobs?.[0]?.dedupeKey,
     connection.initialJobs?.[0]?.dedupeKey,
   );
+  const sourceRecoveryWork = requireJunctionConnectionHandler(provider)
+    .buildSourceConnectionWork?.({
+      now: "2026-04-03T00:00:00.000Z",
+      sourceProviderSlug: "fitbit",
+    });
+  assert.deepEqual(sourceRecoveryWork, {
+    initialJobs: sourceConnection.initialJobs,
+    nextReconcileAt: sourceConnection.nextReconcileAt,
+  });
 
   // Every initial job crosses the configured-manifest boundary inside the OAuth
   // callback handler before the connection is persisted. An undeclared payload
@@ -18578,6 +18656,61 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
   assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });
 
+test("Junction known opt-in continuation restarts a narrowed default-only window", async () => {
+  const requests: URL[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    requests.push(url);
+    if (url.pathname.startsWith("/v2/timeseries/junction-user-1/")) {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES],
+  });
+  const context = createJunctionJobContext({ now: "2026-04-05T00:00:00.000Z" });
+  let result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-03T00:00:00.000Z",
+      timeseriesResourceCursor: "fat",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+  let continuationCount = 0;
+  while (result.scheduledJobs?.[0]) {
+    continuationCount += 1;
+    assert.ok(continuationCount < 100, "Narrowed continuation should terminate.");
+    result = await executeJunctionJob(
+      provider,
+      context,
+      createJobFromInput(result.scheduledJobs[0]),
+    );
+  }
+
+  const groupedRequests = requests.filter((url) => url.pathname.includes("/v2/timeseries/"));
+  assert.equal(
+    groupedRequests[0]?.searchParams.get("start_date"),
+    "2026-04-02",
+  );
+  assert.deepEqual(
+    new Set(groupedRequests.map((url) =>
+      normalizeJunctionResourceName(
+        url.pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1],
+      )
+    )),
+    new Set(JUNCTION_DEFAULT_TIMESERIES_RESOURCES),
+  );
+  assert.equal(
+    groupedRequests.length,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 2,
+  );
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+});
+
 test("Junction scalar timeseries resource continuation fails closed before provider egress", async () => {
   const requestUrls: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -18991,13 +19124,17 @@ test("Junction workout_stream carries the owning day when retryable failure prec
   assert.deepEqual(harness.streamRequests, ["workout-1"]);
 });
 
-test("Junction workout_stream carries exact progress with its retryable provider failure", async () => {
+test("Junction workout_stream carries exact progress and bounded context with its retryable provider failure", async () => {
   const importedWorkoutIds: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1", "workout-2"],
     streamResponse: (workoutId) => workoutId === "workout-2"
-      ? new Response(JSON.stringify({ error: "temporary provider failure" }), {
-          status: 503,
+      ? new Response(JSON.stringify({
+          error: "temporary provider failure",
+          privatePayloadMarker: "raw-workout-payload-must-not-escape",
+          workoutId,
+        }), {
+          status: 500,
           headers: {
             "Content-Type": "application/json",
             "Retry-After": "0",
@@ -19028,6 +19165,13 @@ test("Junction workout_stream carries exact progress with its retryable provider
       assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.ok(error.failure instanceof DeviceSyncError);
       assert.equal(error.failure.retryable, true);
+      assert.equal(error.failure.details?.status, 500);
+      assert.equal(error.failure.details?.requestCandidateAliasSource, "id");
+      assert.equal(error.failure.details?.requestCandidateCount, 2);
+      assert.equal(error.failure.details?.requestCandidateOrdinal, 2);
+      const serializedDetails = JSON.stringify(error.failure.details);
+      assert.equal(serializedDetails.includes("workout-2"), false);
+      assert.equal(serializedDetails.includes("raw-workout-payload-must-not-escape"), false);
       assert.deepEqual(readJunctionWorkoutProgressIdentities({
         workoutStreamCursor: error.workoutStreamCursor,
       }), [junctionWorkoutCandidateIdentity("workout-1")]);

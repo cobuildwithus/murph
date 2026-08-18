@@ -86,6 +86,7 @@ import {
 import {
   assertValidJunctionClientUserIdSecret,
   buildJunctionDeviceSyncRuntimeDescriptor,
+  normalizeJunctionClientUserIdNamespace,
   normalizeJunctionDeviceSyncRuntimeConfig,
 } from "../configured-provider-runtime-descriptors.ts";
 import {
@@ -142,6 +143,7 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
+  DeviceSyncProviderRequestCandidateAliasSource,
   DeviceSyncRestDiagnosticContext,
   ProviderBeginConnectionContext,
   ProviderBeginConnectionResult,
@@ -195,6 +197,11 @@ interface JunctionFullJobTimeseriesContinuation {
   timeseriesResourceCursor: string;
   timeseriesWindowHours: 1 | 24;
   workoutStreamCursor: string | null;
+}
+
+interface JunctionFullJobTimeseriesResourceCursor {
+  resource: string;
+  restartFromWindowStart: boolean;
 }
 
 interface JunctionWorkoutStreamImportResult extends JunctionTimeseriesImportResult {
@@ -553,6 +560,7 @@ export function createJunctionDeviceSyncProvider(
   const runtimeConfig = normalizeJunctionDeviceSyncRuntimeConfig(config);
   const client = new JunctionClient(toClientConfig(config));
   const {
+    clientUserIdNamespace,
     providerFilter,
     reconcileIntervalMs,
     summaryResources,
@@ -587,7 +595,11 @@ export function createJunctionDeviceSyncProvider(
       providerFilter,
       context.sourceProviderSlug,
     );
-    const clientUserId = buildJunctionClientUserId(config.clientUserIdSecret, ownerId);
+    const clientUserId = buildJunctionClientUserId(
+      config.clientUserIdSecret,
+      ownerId,
+      clientUserIdNamespace,
+    );
     const user = await client.createOrResolveUser(clientUserId);
     const linkToken = await client.createLinkToken({
       userId: user.userId,
@@ -633,7 +645,11 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    const clientUserId = buildJunctionClientUserId(config.clientUserIdSecret, ownerId);
+    const clientUserId = buildJunctionClientUserId(
+      config.clientUserIdSecret,
+      ownerId,
+      clientUserIdNamespace,
+    );
     const user = await client.createOrResolveUser(clientUserId);
 
     return {
@@ -700,6 +716,10 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
+    const sourceConnectionWork = buildSourceConnectionWork({
+      now: context.now,
+      sourceProviderSlug: context.sourceProviderSlug,
+    });
     return {
       externalAccountId,
       displayName: "Junction",
@@ -709,8 +729,7 @@ export function createJunctionDeviceSyncProvider(
         providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
       },
       setupPhase: "link_returned",
-      initialJobs: buildInitialJobs(context.now, context.sourceProviderSlug),
-      nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+      ...sourceConnectionWork,
     };
   }
 
@@ -812,7 +831,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return (await client.listUserProviders(userId)).some((provider) =>
-      mapJunctionSourceStatus(provider.status) !== "disconnected"
+      mapJunctionSourceStatus(provider.status) === "connected"
       && (
         normalizeProviderSlug(provider.origin.sourceProviderSlug)
         ?? normalizeProviderSlug(provider.slug)
@@ -3938,20 +3957,28 @@ export function createJunctionDeviceSyncProvider(
           subtractDays(window.windowEnd, timeseriesBackfillDays),
         )
       : window.windowStart;
-    const resource = readFullJobTimeseriesResourceCursor(job, timeseriesResources);
-    const timeseriesCursor = readFullJobTimeseriesCursor(job, {
+    const resourceCursor = readFullJobTimeseriesResourceCursor(job, timeseriesResources);
+    const persistedTimeseriesCursor = readFullJobTimeseriesCursor(job, {
       windowEnd: window.windowEnd,
       windowStart: baseTimeseriesWindowStart,
     });
-    const timeseriesWindowHours = readFullJobTimeseriesWindowHours(job);
-    if (!resource || !timeseriesCursor) {
+    const persistedTimeseriesWindowHours = readFullJobTimeseriesWindowHours(job);
+    if (!resourceCursor || !persistedTimeseriesCursor) {
       throw invalidJunctionTimeseriesResourceProgress();
     }
+    const timeseriesCursor = resourceCursor.restartFromWindowStart
+      ? baseTimeseriesWindowStart
+      : persistedTimeseriesCursor;
+    const timeseriesWindowHours = resourceCursor.restartFromWindowStart
+      ? 24
+      : persistedTimeseriesWindowHours;
+    const resource = resourceCursor.resource;
     const policy = resolveJunctionTimeseriesResourcePolicy(resource);
     if (
       (timeseriesWindowHours === 1
         && policy?.normalizationMode !== "hourly_or_session_feature")
-      || (resource !== "workout_stream"
+      || (!resourceCursor.restartFromWindowStart
+        && resource !== "workout_stream"
         && job.payload.workoutStreamCursor !== undefined)
     ) {
       throw invalidJunctionTimeseriesResourceProgress();
@@ -4206,7 +4233,7 @@ export function createJunctionDeviceSyncProvider(
       [...completedIdentities].filter((identity) => candidateIdentities.has(identity)),
     );
 
-    for (const candidate of candidates) {
+    for (const [candidateIndex, candidate] of candidates.entries()) {
       if (completedIdentities.has(candidate.identity)) {
         continue;
       }
@@ -4240,7 +4267,13 @@ export function createJunctionDeviceSyncProvider(
           input.context.account.externalAccountId,
         );
         if (!failure) {
-          return carryTerminalProgressOrThrow(error);
+          return carryTerminalProgressOrThrow(
+            addJunctionWorkoutStreamCandidateFailureContext(error, {
+              aliasSource: candidate.workoutIdAliasSource,
+              candidateCount: candidates.length,
+              candidateOrdinal: candidateIndex + 1,
+            }),
+          );
         }
         logSkippedOptionalJunctionResource(
           input.context,
@@ -4734,6 +4767,16 @@ export function createJunctionDeviceSyncProvider(
     ];
   }
 
+  function buildSourceConnectionWork(input: {
+    now: string;
+    sourceProviderSlug: string | null | undefined;
+  }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt"> {
+    return {
+      initialJobs: buildInitialJobs(input.now, input.sourceProviderSlug),
+      nextReconcileAt: addMilliseconds(input.now, reconcileIntervalMs),
+    };
+  }
+
   return {
     provider: "junction",
     descriptor: buildJunctionDeviceSyncRuntimeDescriptor(config),
@@ -4743,6 +4786,7 @@ export function createJunctionDeviceSyncProvider(
     },
     connectionHandler: {
       beginConnection,
+      buildSourceConnectionWork,
       completeConnection,
       isSourceAccessActive,
       revokeAccess,
@@ -4954,6 +4998,34 @@ function hasCheckedJunctionProfileSummary(metadata: Record<string, unknown>): bo
     && Number.isFinite(Date.parse(checkedAt))
     && metadata[JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY]
       === JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION;
+}
+
+function addJunctionWorkoutStreamCandidateFailureContext(
+  error: unknown,
+  input: {
+    aliasSource: DeviceSyncProviderRequestCandidateAliasSource;
+    candidateCount: number;
+    candidateOrdinal: number;
+  },
+): unknown {
+  if (!isDeviceSyncError(error) || error.code !== "JUNCTION_API_REQUEST_FAILED") {
+    return error;
+  }
+
+  return deviceSyncError({
+    accountStatus: error.accountStatus,
+    cause: error.cause,
+    code: error.code,
+    details: {
+      ...error.details,
+      requestCandidateAliasSource: input.aliasSource,
+      requestCandidateCount: input.candidateCount,
+      requestCandidateOrdinal: input.candidateOrdinal,
+    },
+    httpStatus: error.httpStatus,
+    message: error.message,
+    retryable: error.retryable,
+  });
 }
 
 function classifyOptionalJunctionResourceFailure(
@@ -6210,10 +6282,16 @@ function normalizeDiagnosticTimeseriesProbeDays(value: number | undefined): numb
   return Math.min(value, JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS);
 }
 
-export function buildJunctionClientUserId(secret: string, ownerId: string): string {
+export function buildJunctionClientUserId(
+  secret: string,
+  ownerId: string,
+  namespace?: string,
+): string {
   const normalizedSecret = assertValidJunctionClientUserIdSecret(secret);
+  const normalizedNamespace = normalizeJunctionClientUserIdNamespace(namespace);
   const digest = createHmac("sha256", normalizedSecret).update(ownerId).digest();
-  return `murph_${base32UrlEncode(digest)}`.slice(0, 32);
+  const prefix = normalizedNamespace ? `murph_${normalizedNamespace}_` : "murph_";
+  return `${prefix}${base32UrlEncode(digest)}`.slice(0, 32);
 }
 
 function resolveJunctionLinkDirectProvider(
@@ -7395,11 +7473,29 @@ function readFullJobTimeseriesWindowHours(job: DeviceSyncJobRecord): 1 | 24 {
 function readFullJobTimeseriesResourceCursor(
   job: DeviceSyncJobRecord,
   resources: readonly string[],
-): string | null {
-  return normalizeFullJobTimeseriesResourceCursor(
+): JunctionFullJobTimeseriesResourceCursor | null {
+  const configuredResource = normalizeFullJobTimeseriesResourceCursor(
     job.payload.timeseriesResourceCursor,
     resources,
   );
+  if (configuredResource) {
+    return {
+      resource: configuredResource,
+      restartFromWindowStart: false,
+    };
+  }
+
+  const previouslyConfiguredResource = normalizeFullJobTimeseriesResourceCursor(
+    job.payload.timeseriesResourceCursor,
+    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  );
+  const firstConfiguredResource = resources[0];
+  return previouslyConfiguredResource && firstConfiguredResource
+    ? {
+        resource: firstConfiguredResource,
+        restartFromWindowStart: true,
+      }
+    : null;
 }
 
 function normalizeFullJobTimeseriesResourceCursor(

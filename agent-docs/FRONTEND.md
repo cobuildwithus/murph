@@ -13,7 +13,7 @@ Design context lives in two files at the repo root. Read both before any UI work
 
 Both files are managed by the `impeccable` skill (`.agents/skills/impeccable/`). They are the single source of truth for product strategy and visual design. Don't duplicate their values into other docs or code comments.
 
-Colors and fonts are mapped to standard shadcn CSS variables in `apps/web/app/globals.css`. Brand guidelines and the reviewable UI catalog live at [localhost:3000/design](http://localhost:3000/design) when running the dev server (`?tab=brand` for visual identity, `?tab=components` for reusable components, and `?tab=sections` for composed page sections).
+Colors and fonts are mapped to standard shadcn CSS variables in `apps/web/app/globals.css`. Brand guidelines and reusable components live at [localhost:3000/design](http://localhost:3000/design) when running the dev server (`?tab=brand`, `?tab=components`, and `?tab=consent`). Unlinked, noindex presentation studies live under [localhost:3000/screenshots](http://localhost:3000/screenshots).
 
 ### Impeccable skill
 
@@ -81,14 +81,28 @@ cd apps/web && pnpm typecheck
 
 ## Rules
 
-- Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend implementation has no separate implementation-model requirement. Follow `agent-docs/operations/completion-workflow.md` for routed browser proof, the frontend lens inside the preliminary `completion-specialists` ReviewGPT pass, the separate UI double-check, and any applicable final ReviewGPT gate.
+- Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend implementation has no separate implementation-model requirement. Follow `agent-docs/operations/completion-workflow.md` for routed browser proof, the frontend lens inside the preliminary `completion-specialists` ReviewGPT pass, and any independently applicable final ReviewGPT gate.
+- Follow `agent-docs/operations/product-ux.md` before and after code. Treat
+  loading time, progress, skeletons, empty, partial, stale, error, and recovery
+  states as part of the product experience.
 - Use shadcn components and standard Tailwind classes. Arbitrary values for edge cases only.
 - No `@radix-ui/*` imports. We use base UI.
 - Motion restrained — only for hierarchy or affordance.
-- Verify UI changes in browser (desktop + mobile) before handoff.
-- Every pull request that changes user-facing frontend UI must update the reviewable catalog with the real production component: use [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) for reusable components, or [localhost:3000/design?tab=sections](http://localhost:3000/design?tab=sections) for a complete page section or flow.
-- Include desktop and mobile screenshots captured from the applicable design-page tab in the pull request. Use lossless PNG at 2x device scale or higher, crop to the changed component or section, and inspect the local and hosted images at native resolution so ordinary body copy is immediately legible. Show each materially changed component or section and every state needed to judge the change.
-- The `Frontend design proof` pull-request check enforces the catalog-file update and the required hosted screenshot links for user-facing UI diffs. Design-catalog-only changes are exempt so the catalog can be maintained independently.
+- Verify UI changes in the browser at every viewport where the result can
+  materially differ. Check phone and desktop when responsive behavior can
+  change.
+- Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate, and add each new shared component there. Do not update the catalog for every UI diff.
+- Add a `/screenshots` study only when a difficult or reusable state benefits from stable presentation proof. Render the real production component with synthetic props, no live data, no live requests, and all interactive controls `inert`. A screenshot study proves presentation only, not the complete product journey.
+- Treat the unlinked and noindex route as a discovery control, not security. Never put private member data or credentials there.
+- Match rendered evidence to the changed visual, state, interaction, and
+  responsive risk. A change can need no screenshots, one screenshot, or many.
+  Do not capture another viewport only to meet a quota. When a screenshot is
+  useful, crop it to the changed component or section and inspect it at native
+  resolution so ordinary body copy is legible.
+- The `Pull request evidence` check requires direct evidence and a coverage
+  explanation for user-facing UI diffs. It does not require a catalog update or
+  screenshot count. Design and screenshot-study changes are exempt so those
+  references can be maintained independently.
 
 ## Docs to update
 

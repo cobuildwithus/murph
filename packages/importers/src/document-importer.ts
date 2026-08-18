@@ -20,6 +20,7 @@ export interface DocumentImportInput {
   occurredAt?: string | number | Date;
   note?: string;
   source?: EventSource;
+  reuseExact?: boolean;
 }
 
 export interface ImporterExecutionOptions {
@@ -34,6 +35,7 @@ const documentImportInputSchema = z
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
     source: optionalEventSourceSchema("source"),
+    reuseExact: z.boolean().optional(),
   })
   .passthrough();
 
@@ -52,6 +54,7 @@ export async function prepareDocumentImport(input: unknown): Promise<DocumentImp
     occurredAt: request.occurredAt,
     note: request.note,
     source: request.source,
+    reuseExact: request.reuseExact,
   });
 }
 

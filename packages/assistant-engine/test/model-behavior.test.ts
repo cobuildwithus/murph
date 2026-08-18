@@ -108,6 +108,12 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'trim introductions, repetition, reassurance, optional background, and unrelated wellness advice first',
     )
+    expect(prompt).toContain(
+      'separate occurrence, runtime decision, provider acceptance, and delivery receipt',
+    )
+    expect(prompt).toContain(
+      'never call delivery "unconfirmed."',
+    )
     expect(prompt).not.toContain('Final replies should briefly state')
     expect(prompt).not.toContain('extra nudges')
   })
@@ -1334,7 +1340,7 @@ describe('assistant execution prompt contract', () => {
     expect(linqPrompt).toContain(
       'For Linq/iMessage and Telegram, native text styles are supported by the delivery layer',
     )
-    expect(linqPrompt).toContain('Prefer plain text')
+    expect(linqPrompt).toContain('For ordinary text messages, prefer plain text')
     expect(linqPrompt).toContain(
       'Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability',
     )
@@ -1794,13 +1800,13 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.',
+      'Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
     )
     expect(prompt).toContain(
       'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
     )
     expect(prompt).toContain(
-      'Live workout/card: read strength-training and tracked-table.',
+      'Live workout/card: read strength-training and tracked-table, including on a short follow-up in a conversation about a live workout.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',

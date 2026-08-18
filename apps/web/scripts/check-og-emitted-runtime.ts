@@ -90,6 +90,31 @@ const probeRoutes: ProbeRoute[] = [
     params: {},
     url: "http://localhost/opengraph-image",
   },
+  // The three cards whose routes once lived inside the (dashboard) route
+  // group, where metadata images get hash-suffixed URLs that 404 the exact
+  // URL pages advertise. Pinning the unhashed emitted entries makes any
+  // return of the suffix fail the build instead of shipping broken previews.
+  {
+    entry: "server/app/connect/opengraph-image/route.js",
+    expectedHeight: 630,
+    expectedWidth: 1200,
+    params: {},
+    url: "http://localhost/connect/opengraph-image",
+  },
+  {
+    entry: "server/app/biomarkers/[biomarkerId]/opengraph-image/route.js",
+    expectedHeight: 630,
+    expectedWidth: 1200,
+    params: { biomarkerId: "biomarker-probe" },
+    url: "http://localhost/biomarkers/biomarker-probe/opengraph-image",
+  },
+  {
+    entry: "server/app/experiments/[experimentId]/opengraph-image/route.js",
+    expectedHeight: 630,
+    expectedWidth: 1200,
+    params: { experimentId: "experiment-probe" },
+    url: "http://localhost/experiments/experiment-probe/opengraph-image",
+  },
   createIMessageCardProbe(),
 ];
 
