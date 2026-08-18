@@ -2022,11 +2022,16 @@ Current hosted billing assumptions:
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
   rows, and labels the mailbox retention boundary. The table and reset reuse the
   runtime's canonical allowance gate. A row reset verifies the displayed
-  current-period and usage-credit versions, then atomically clears current
-  included spend and the block while releasing only that capacity epoch's
-  logical notice claim. It preserves immutable usage, usage credit, billing
-  state, mailbox rows, and delivery history, and refuses to race an in-flight
-  notice dispatch. After commit it signals the existing runtime recheck; a
+  current-period and usage-credit versions. Paid, Family, and container resets
+  atomically clear current included spend and the block. An exhausted canonical
+  Starter reset instead appends one fresh $4.50 grant under the beneficiary
+  lock, keyed to the displayed ledger version, then clears the derived period.
+  The distinct Ops grant source is excluded from Starter enrollment and
+  conversion metrics. Both paths release only that capacity epoch's logical
+  notice claim, preserve immutable usage, prior grants and debits, purchased and
+  referral credit, billing state, mailbox rows, and delivery history, and refuse
+  to race an in-flight notice dispatch. After commit the route signals the
+  existing runtime recheck; a
   rejected or bounded-timeout wake is returned as a committed partial result
   with a wake-only retry. The table reads its decision and reset version from
   one repeatable database snapshot, and derives blocked/available only from

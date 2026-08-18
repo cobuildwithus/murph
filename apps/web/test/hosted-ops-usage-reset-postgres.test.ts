@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { resetHostedOpsMemberUsage } from "@/src/lib/hosted-ops/member-usage";
+import {
+  HostedOpsMemberUsageResetStaleError,
+  resetHostedOpsMemberUsage,
+} from "@/src/lib/hosted-ops/member-usage";
+import {
+  readHostedAiUsageGate,
+} from "@/src/lib/hosted-execution/usage-allowance";
 import { getHostedAiUsageMonthlyAllowanceUsdMicros } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   startHostedAiUsageLimitNoticeDispatchTx,
@@ -11,6 +17,12 @@ import {
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+  buildHostedStarterUsageLifetimePeriod,
+  buildHostedStarterUsageSemanticSourceKey,
+  buildHostedStarterUsageSourceReferenceLookupKey,
+} from "@/src/lib/hosted-onboarding/starter-usage";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -265,6 +277,180 @@ describe.skipIf(!runPostgresProof)(
             },
           });
         }
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("restores exhausted Starter capacity once without rewriting prior credit history", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_ops_starter_reset_${fixtureId}`;
+      const originalGrantEntryId = `huce_starter_${fixtureId}`;
+      const originalDebitEntryId = `huce_debit_${fixtureId}`;
+      const resetAt = new Date("2026-08-18T15:45:00.000Z");
+      const starterPeriod = buildHostedStarterUsageLifetimePeriod();
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            hostedAiUsagePeriods: {
+              create: {
+                billingPlanCode: "launch_monthly",
+                blockedAt: new Date("2026-08-18T15:30:00.000Z"),
+                limitUsdMicros: 0n,
+                periodEnd: starterPeriod.periodEnd,
+                periodStart: starterPeriod.periodStart,
+                spentUsdMicros: 0n,
+              },
+            },
+            id: memberId,
+            usageCreditBalanceUsdMicros: 0n,
+            usageCreditLedgerVersion: 2n,
+          },
+        });
+        await prisma.hostedUsageCreditEntry.create({
+          data: {
+            amountUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+            beneficiaryMemberId: memberId,
+            beneficiarySequence: 1n,
+            effectiveAt: new Date("2026-08-01T12:00:00.000Z"),
+            grant: {
+              create: {
+                beneficiaryMemberId: memberId,
+                beneficiarySequence: 1n,
+                remainingUsdMicros: 0n,
+              },
+            },
+            id: originalGrantEntryId,
+            kind: "starter_grant",
+            semanticSourceKey:
+              buildHostedStarterUsageSemanticSourceKey(memberId),
+            sourceReferenceLookupKey:
+              buildHostedStarterUsageSourceReferenceLookupKey(
+                "web_onboarding",
+              ),
+          },
+        });
+        await prisma.hostedUsageCreditEntry.create({
+          data: {
+            amountUsdMicros: -HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+            beneficiaryMemberId: memberId,
+            beneficiarySequence: 2n,
+            effectiveAt: new Date("2026-08-10T12:00:00.000Z"),
+            id: originalDebitEntryId,
+            kind: "usage_debit",
+            parentGrantEntryId: originalGrantEntryId,
+            semanticSourceKey: `hosted-usage-credit:usage:${fixtureId}`,
+            sourceUsageId: `usage_starter_${fixtureId}`,
+          },
+        });
+        const periodBefore = await prisma.hostedAiUsagePeriod.findUniqueOrThrow({
+          select: { updatedAt: true },
+          where: {
+            memberId_periodStart: {
+              memberId,
+              periodStart: starterPeriod.periodStart,
+            },
+          },
+        });
+        const historyBefore = await prisma.hostedUsageCreditEntry.findMany({
+          orderBy: { beneficiarySequence: "asc" },
+          where: { beneficiaryMemberId: memberId },
+        });
+
+        const result = await resetHostedOpsMemberUsage({
+          expectedPeriodUpdatedAt: periodBefore.updatedAt,
+          expectedUsageCreditLedgerVersion: 2n,
+          memberId,
+          now: resetAt,
+          periodStart: starterPeriod.periodStart,
+        }, prisma);
+
+        expect(result).toMatchObject({
+          outcome: "reset",
+          resetMode: "starter_allowance",
+          usageCreditGrantedUsdMicros:
+            HOSTED_STARTER_USAGE_GRANT_USD_MICROS.toString(),
+        });
+        await expect(prisma.hostedMember.findUniqueOrThrow({
+          select: {
+            usageCreditBalanceUsdMicros: true,
+            usageCreditLedgerVersion: true,
+          },
+          where: { id: memberId },
+        })).resolves.toEqual({
+          usageCreditBalanceUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+          usageCreditLedgerVersion: 3n,
+        });
+        const historyAfter = await prisma.hostedUsageCreditEntry.findMany({
+          orderBy: { beneficiarySequence: "asc" },
+          select: {
+            amountUsdMicros: true,
+            beneficiarySequence: true,
+            id: true,
+            kind: true,
+            semanticSourceKey: true,
+            sourceReferenceLookupKey: true,
+          },
+          where: { beneficiaryMemberId: memberId },
+        });
+        expect(historyAfter.slice(0, 2)).toEqual(historyBefore.map((entry) => ({
+          amountUsdMicros: entry.amountUsdMicros,
+          beneficiarySequence: entry.beneficiarySequence,
+          id: entry.id,
+          kind: entry.kind,
+          semanticSourceKey: entry.semanticSourceKey,
+          sourceReferenceLookupKey: entry.sourceReferenceLookupKey,
+        })));
+        expect(historyAfter[2]).toMatchObject({
+          amountUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+          beneficiarySequence: 3n,
+          kind: "starter_grant",
+          semanticSourceKey:
+            `hosted-ops-usage-reset:${memberId}:starter:after-ledger-2:v1`,
+          sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
+        });
+        await expect(readHostedAiUsageGate({
+          memberId,
+          now: resetAt,
+          prisma,
+        })).resolves.toMatchObject({
+          allowed: true,
+          allowanceSource: "direct_starter",
+          remainingUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+          usageCreditLedgerVersion: 3n,
+        });
+
+        await expect(resetHostedOpsMemberUsage({
+          expectedPeriodUpdatedAt: periodBefore.updatedAt,
+          expectedUsageCreditLedgerVersion: 2n,
+          memberId,
+          now: new Date(resetAt.getTime() + 1_000),
+          periodStart: starterPeriod.periodStart,
+        }, prisma)).rejects.toBeInstanceOf(
+          HostedOpsMemberUsageResetStaleError,
+        );
+        await expect(prisma.hostedUsageCreditEntry.count({
+          where: {
+            beneficiaryMemberId: memberId,
+            sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
+          },
+        })).resolves.toBe(1);
+      } finally {
+        await prisma.hostedUsageCreditGrant.deleteMany({
+          where: { beneficiaryMemberId: memberId },
+        });
+        await prisma.hostedUsageCreditEntry.deleteMany({
+          where: {
+            beneficiaryMemberId: memberId,
+            parentGrantEntryId: { not: null },
+          },
+        });
+        await prisma.hostedUsageCreditEntry.deleteMany({
+          where: { beneficiaryMemberId: memberId },
+        });
         await prisma.hostedMember.deleteMany({ where: { id: memberId } });
         await prisma.$disconnect();
       }

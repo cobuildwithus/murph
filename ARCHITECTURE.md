@@ -3358,7 +3358,12 @@ for bounded provider cleanup and audit compatibility; those fields never grant
 capacity. The ops growth read derives current starter activation from the
 immutable starter grant and maps invalid source references to Unknown while
 exposing only the existing masked phone hint; it never decrypts contact data
-for attribution.
+for attribution. Operator recovery is not acquisition: an exhausted canonical
+Starter member may receive one fresh policy-sized grant from `/ops/usage` under
+the same beneficiary ledger lock. Each reset is keyed to the displayed ledger
+version, appends immutable history with a distinct Ops source, and is excluded
+from enrollment and conversion metrics. It never replenishes an old grant
+projection or mutates purchased and referral credit.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

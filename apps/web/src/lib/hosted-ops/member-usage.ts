@@ -8,6 +8,9 @@ import {
   readHostedAiUsageGateSnapshots,
 } from "../hosted-execution/usage-allowance";
 import {
+  appendHostedUsageCreditGrantTx,
+} from "../hosted-execution/usage-credit-grant";
+import {
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   buildHostedAiUsageGateNoticeIdempotencyKey,
 } from "../hosted-onboarding/linq-delivery-store";
@@ -17,11 +20,16 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
+import {
+  HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+} from "../hosted-onboarding/starter-usage";
 import { getPrisma } from "../prisma";
 
 const HOSTED_CONVERSATION_MESSAGE_KIND = "conversation.message";
 const HOSTED_MESSAGE_RETENTION_DAYS = 30;
 const HOSTED_USAGE_REPORTING_WINDOW_DAYS = 7;
+const HOSTED_OPS_STARTER_RESET_SOURCE_REFERENCE_LOOKUP_KEY =
+  "hosted-ops-usage-reset:starter:v1";
 export const HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE = 25;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -39,8 +47,13 @@ export interface HostedOpsMemberUsageRow {
   messagesLast7Days: number;
   messagesRetained: number;
   participantCount: number | null;
+  resetMode: HostedOpsMemberUsageResetMode | null;
   suspended: boolean;
 }
+
+export type HostedOpsMemberUsageResetMode =
+  | "included_usage"
+  | "starter_allowance";
 
 export interface HostedOpsMemberUsagePeriod {
   blocked: boolean;
@@ -101,7 +114,9 @@ export interface HostedOpsMemberUsageResetResult {
   periodStart: string;
   previousSpentUsdMicros: string;
   resetAt: string;
+  resetMode: HostedOpsMemberUsageResetMode;
   updatedAt: string;
+  usageCreditGrantedUsdMicros: string;
 }
 
 export interface HostedOpsMemberUsageResetResponse
@@ -365,6 +380,13 @@ export async function readHostedOpsMemberUsage(
     const allowanceAvailable = decision !== null && (
       decision.allowed || decision.reason === "ai_usage_limit_exceeded"
     );
+    const resetMode = allowanceAvailable && decision && snapshot?.periodPersistedAt
+      ? decision.allowanceSource === "direct_starter"
+        ? !decision.allowed && decision.reason === "ai_usage_limit_exceeded"
+          ? "starter_allowance"
+          : null
+        : "included_usage"
+      : null;
     const noticeLookupKey = allowanceAvailable && snapshot?.periodPersistedAt
       ? buildHostedUsageNoticeLookupKey({
           memberId: member.id,
@@ -415,6 +437,7 @@ export async function readHostedOpsMemberUsage(
       participantCount: threadContainer?._count.participants
         ?? legacyGroupContainer?._count.members
         ?? null,
+      resetMode,
       suspended: member.suspendedAt !== null,
     };
   });
@@ -473,12 +496,21 @@ export async function resetHostedOpsMemberUsage(
 
   return prisma.$transaction(async (tx) => {
     const memberRows = await tx.$queryRaw<Array<{
+      hasActiveUsageCreditGrant: boolean;
+      usageCreditBalanceUsdMicros: bigint | null;
       usageCreditLedgerVersion: bigint | null;
     }>>`
       SELECT
+        EXISTS (
+          SELECT 1
+          FROM "hosted_usage_credit_grant" AS "grant_projection"
+          WHERE "grant_projection"."beneficiary_member_id" = "hosted_member"."id"
+            AND "grant_projection"."remaining_usd_micros" > 0
+        ) AS "hasActiveUsageCreditGrant",
+        "usage_credit_balance_usd_micros" AS "usageCreditBalanceUsdMicros",
         "usage_credit_ledger_version" AS "usageCreditLedgerVersion"
-      FROM "hosted_member"
-      WHERE "id" = ${input.memberId}
+      FROM "hosted_member" AS "hosted_member"
+      WHERE "hosted_member"."id" = ${input.memberId}
       FOR UPDATE
     `;
     const member = memberRows[0];
@@ -487,6 +519,9 @@ export async function resetHostedOpsMemberUsage(
     }
     const usageCreditLedgerVersion = normalizeNonNegativeBigInt(
       member.usageCreditLedgerVersion,
+    );
+    const usageCreditBalanceUsdMicros = normalizeNonNegativeBigInt(
+      member.usageCreditBalanceUsdMicros,
     );
     if (
       usageCreditLedgerVersion !== input.expectedUsageCreditLedgerVersion
@@ -503,10 +538,34 @@ export async function resetHostedOpsMemberUsage(
       (!canonicalGate.allowed
         && canonicalGate.reason !== "ai_usage_limit_exceeded")
       || canonicalGate.periodStart.getTime() !== input.periodStart.getTime()
+      || canonicalGate.usageCreditBalanceUsdMicros
+        !== usageCreditBalanceUsdMicros
       || canonicalGate.usageCreditLedgerVersion
         !== input.expectedUsageCreditLedgerVersion
     ) {
       throw new HostedOpsMemberUsageResetStaleError();
+    }
+    const resetMode: HostedOpsMemberUsageResetMode =
+      canonicalGate.allowanceSource === "direct_starter"
+        ? "starter_allowance"
+        : "included_usage";
+    if (
+      resetMode === "starter_allowance"
+      && (
+        canonicalGate.allowed
+        || canonicalGate.reason !== "ai_usage_limit_exceeded"
+        || usageCreditBalanceUsdMicros !== 0n
+      )
+    ) {
+      throw new HostedOpsMemberUsageResetStaleError();
+    }
+    if (
+      resetMode === "starter_allowance"
+      && member.hasActiveUsageCreditGrant
+    ) {
+      throw new TypeError(
+        "Hosted ops Starter reset found active credit with a zero balance.",
+      );
     }
 
     const periodRows = await tx.$queryRaw<Array<{
@@ -585,11 +644,40 @@ export async function resetHostedOpsMemberUsage(
       });
     }
 
-    const outcome = period.spentUsdMicros === 0n
+    const outcome = resetMode === "included_usage"
+        && period.spentUsdMicros === 0n
         && period.blockedAt === null
         && delivery === null
       ? "unchanged"
       : "reset";
+    let usageCreditGrantedUsdMicros = 0n;
+    if (resetMode === "starter_allowance") {
+      const grant = await appendHostedUsageCreditGrantTx({
+        effectiveAt: now,
+        grantUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+        lockedBeneficiary: {
+          balanceUsdMicros: usageCreditBalanceUsdMicros,
+          beneficiaryMemberId: input.memberId,
+          ledgerVersion: usageCreditLedgerVersion,
+        },
+        semanticSourceKey: buildHostedOpsStarterResetSemanticSourceKey({
+          memberId: input.memberId,
+          usageCreditLedgerVersion,
+        }),
+        source: {
+          kind: "starter",
+          sourceReferenceLookupKey:
+            HOSTED_OPS_STARTER_RESET_SOURCE_REFERENCE_LOOKUP_KEY,
+        },
+        tx,
+      });
+      if (!grant.granted) {
+        throw new TypeError(
+          "Hosted ops Starter reset unexpectedly replayed an existing grant.",
+        );
+      }
+      usageCreditGrantedUsdMicros = HOSTED_STARTER_USAGE_GRANT_USD_MICROS;
+    }
     if (outcome === "reset") {
       const updated = await tx.hostedAiUsagePeriod.updateMany({
         data: {
@@ -600,7 +688,9 @@ export async function resetHostedOpsMemberUsage(
         where: {
           memberId: input.memberId,
           periodStart: input.periodStart,
-          updatedAt: period.updatedAt,
+          ...(resetMode === "included_usage"
+            ? { updatedAt: period.updatedAt }
+            : {}),
         },
       });
       if (updated.count !== 1) {
@@ -615,14 +705,29 @@ export async function resetHostedOpsMemberUsage(
       periodStart: input.periodStart.toISOString(),
       previousSpentUsdMicros: period.spentUsdMicros.toString(),
       resetAt: now.toISOString(),
+      resetMode,
       updatedAt: outcome === "reset"
         ? now.toISOString()
         : period.updatedAt.toISOString(),
+      usageCreditGrantedUsdMicros: usageCreditGrantedUsdMicros.toString(),
     };
   }, {
     ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
+}
+
+function buildHostedOpsStarterResetSemanticSourceKey(input: {
+  memberId: string;
+  usageCreditLedgerVersion: bigint;
+}): string {
+  return [
+    "hosted-ops-usage-reset",
+    input.memberId,
+    "starter",
+    `after-ledger-${input.usageCreditLedgerVersion.toString()}`,
+    "v1",
+  ].join(":");
 }
 
 function buildHostedUsageNoticeLookupKey(input: {

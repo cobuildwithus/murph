@@ -37,6 +37,7 @@ interface UsageResetMessage {
 
 interface UsageResetRuntimeRetry {
   memberId: string;
+  resetMode: HostedOpsMemberUsageResetResponse["resetMode"];
 }
 
 interface UsageRuntimeRecheckResponse {
@@ -105,8 +106,9 @@ export function MemberUsageClient({
         setRuntimeRetry(null);
         setSelectedMemberId(null);
         setMessage({
-          text:
-            "The runtime recheck was accepted. The committed usage reset is unchanged.",
+          text: runtimeRetry.resetMode === "starter_allowance"
+            ? "The runtime recheck was accepted. The committed Starter allowance reset is unchanged."
+            : "The runtime recheck was accepted. The committed usage reset is unchanged.",
           tone: "success",
         });
         router.refresh();
@@ -117,10 +119,12 @@ export function MemberUsageClient({
       if (result.runtimeRecheckStatus === "pending") {
         setRuntimeRetry({
           memberId: result.memberId,
+          resetMode: result.resetMode,
         });
         setMessage({
-          text:
-            "Usage was reset, but the runtime did not accept its recheck yet. Retry the runtime wake; usage and credits will not be reset again.",
+          text: result.resetMode === "starter_allowance"
+            ? "The Starter allowance was reset, but the runtime did not accept its recheck yet. Retry only the runtime wake; another allowance will not be granted."
+            : "Usage was reset, but the runtime did not accept its recheck yet. Retry the runtime wake; usage and credits will not be reset again.",
           tone: "error",
         });
         router.refresh();
@@ -129,9 +133,13 @@ export function MemberUsageClient({
       setRuntimeRetry(null);
       setSelectedMemberId(null);
       setMessage({
-        text: result.noticeClaimReleased
-          ? "Current included usage was reset, the quota notice claim was released, and the runtime recheck was accepted."
-          : "Current included usage is clear and the runtime recheck was accepted.",
+        text: result.resetMode === "starter_allowance"
+          ? result.noticeClaimReleased
+            ? `Starter allowance was reset to ${formatUsdMicros(result.usageCreditGrantedUsdMicros)}, the quota notice claim was released, and the runtime recheck was accepted.`
+            : `Starter allowance was reset to ${formatUsdMicros(result.usageCreditGrantedUsdMicros)} and the runtime recheck was accepted.`
+          : result.noticeClaimReleased
+            ? "Current included usage was reset, the quota notice claim was released, and the runtime recheck was accepted."
+            : "Current included usage is clear and the runtime recheck was accepted.",
         tone: "success",
       });
       router.refresh();
@@ -171,9 +179,9 @@ export function MemberUsageClient({
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
             Whole-population usage totals with a bounded, ID-ordered view of
-            hosted members and synthetic group containers. Reset restores the
-            current included allowance without changing immutable usage history
-            or purchased credits.
+            hosted members and synthetic group containers. Reset clears current
+            included usage or restores one fresh Starter allowance without
+            changing immutable usage history or purchased credits.
           </p>
         </div>
       </header>
@@ -323,12 +331,16 @@ export function MemberUsageClient({
             <DialogTitle>
               {runtimeRetry?.memberId === selectedRow?.memberId
                 ? "Retry runtime wake?"
-                : "Reset current included usage?"}
+                : selectedRow?.resetMode === "starter_allowance"
+                  ? "Reset Starter allowance?"
+                  : "Reset current included usage?"}
             </DialogTitle>
             <DialogDescription>
               {runtimeRetry?.memberId === selectedRow?.memberId
                 ? "The allowance reset is already committed. Retry only the runtime recheck so already-accepted work can continue."
-                : "This sets current-period included spend to $0, clears the blocked state, releases the current quota notice claim, and wakes already-accepted work. Immutable AI usage and purchased-credit balance stay unchanged."}
+                : selectedRow?.resetMode === "starter_allowance"
+                  ? "This grants one fresh $4.50 Starter allowance, clears the blocked state, releases the current quota notice claim, and wakes already-accepted work. Immutable AI usage and purchased-credit balance stay unchanged."
+                  : "This sets current-period included spend to $0, clears the blocked state, releases the current quota notice claim, and wakes already-accepted work. Immutable AI usage and purchased-credit balance stay unchanged."}
             </DialogDescription>
           </DialogHeader>
           {runtimeRetry?.memberId === selectedRow?.memberId && message ? (
@@ -348,6 +360,12 @@ export function MemberUsageClient({
                   <dd className="font-serif font-semibold">
                     {formatUsdMicros(selectedRow.currentPeriod.spentUsdMicros)}
                   </dd>
+                  {selectedRow.resetMode === "starter_allowance" ? (
+                    <>
+                      <dt className="text-muted-foreground">Allowance added</dt>
+                      <dd className="font-serif font-semibold">$4.50</dd>
+                    </>
+                  ) : null}
                   <dt className="text-muted-foreground">Notice claim</dt>
                   <dd>
                     {selectedRow.currentPeriod.idempotencyClaimStatus
@@ -396,7 +414,9 @@ export function MemberUsageClient({
                 ? "Working"
                 : runtimeRetry?.memberId === selectedRow?.memberId
                 ? "Retry runtime wake"
-                : "Reset usage"}
+                : selectedRow?.resetMode === "starter_allowance"
+                  ? "Grant $4.50"
+                  : "Reset usage"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -413,7 +433,11 @@ function UsageRow(input: {
   const period = input.row.currentPeriod;
   const resettable = period !== null
     && input.row.allowanceStatus === "available"
+    && input.row.resetMode !== null
     && period.updatedAt !== null;
+  const actionLabel = input.row.resetMode === "starter_allowance"
+    ? "Reset Starter"
+    : "Reset";
 
   return (
     <TableRow>
@@ -465,6 +489,9 @@ function UsageRow(input: {
           {period?.blocked ? (
             <Badge variant="destructive">Blocked</Badge>
           ) : null}
+          {input.row.resetMode === "starter_allowance" ? (
+            <Badge variant="secondary">Starter exhausted</Badge>
+          ) : null}
           {period?.idempotencyClaimStatus ? (
             <Badge variant="secondary">Notice claimed</Badge>
           ) : null}
@@ -481,7 +508,9 @@ function UsageRow(input: {
       </TableCell>
       <TableCell className="text-right">
         <Button
-          aria-label={`Reset usage for ${input.row.memberId}`}
+          aria-label={input.row.resetMode === "starter_allowance"
+            ? `Reset Starter allowance for ${input.row.memberId}`
+            : `Reset usage for ${input.row.memberId}`}
           disabled={input.disabled || !resettable}
           onClick={input.onSelect}
           size="sm"
@@ -489,7 +518,7 @@ function UsageRow(input: {
           variant="outline"
         >
           <RotateCcwIcon data-icon="inline-start" />
-          Reset
+          {actionLabel}
         </Button>
       </TableCell>
     </TableRow>
@@ -600,6 +629,10 @@ function isHostedOpsMemberUsageResetResult(
       && typeof Reflect.get(value, "noticeClaimReleased") === "boolean"
       && typeof Reflect.get(value, "outcome") === "string"
       && typeof Reflect.get(value, "resetAt") === "string"
+      && ["included_usage", "starter_allowance"].includes(
+        String(Reflect.get(value, "resetMode")),
+      )
+      && typeof Reflect.get(value, "usageCreditGrantedUsdMicros") === "string"
       && ["accepted", "pending"].includes(
         String(Reflect.get(value, "runtimeRecheckStatus")),
       )

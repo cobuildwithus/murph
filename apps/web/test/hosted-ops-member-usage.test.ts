@@ -7,6 +7,9 @@ const usageAllowanceMocks = vi.hoisted(() => ({
   readHostedAiUsageGate: vi.fn(),
   readHostedAiUsageGateSnapshots: vi.fn(),
 }));
+const usageCreditGrantMocks = vi.hoisted(() => ({
+  appendHostedUsageCreditGrantTx: vi.fn(),
+}));
 
 vi.mock("../src/lib/hosted-execution/usage-allowance", async () => {
   const actual = await vi.importActual<
@@ -17,6 +20,17 @@ vi.mock("../src/lib/hosted-execution/usage-allowance", async () => {
     readHostedAiUsageGate: usageAllowanceMocks.readHostedAiUsageGate,
     readHostedAiUsageGateSnapshots:
       usageAllowanceMocks.readHostedAiUsageGateSnapshots,
+  };
+});
+
+vi.mock("../src/lib/hosted-execution/usage-credit-grant", async () => {
+  const actual = await vi.importActual<
+    typeof import("../src/lib/hosted-execution/usage-credit-grant")
+  >("../src/lib/hosted-execution/usage-credit-grant");
+  return {
+    ...actual,
+    appendHostedUsageCreditGrantTx:
+      usageCreditGrantMocks.appendHostedUsageCreditGrantTx,
   };
 });
 
@@ -53,6 +67,12 @@ describe("hosted ops member usage", () => {
     usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValue(
       new Map(),
     );
+    usageCreditGrantMocks.appendHostedUsageCreditGrantTx.mockResolvedValue({
+      balanceUsdMicros: 4_500_000n,
+      entryId: "huce_ops_starter_reset",
+      granted: true,
+      ledgerVersion: 5n,
+    });
   });
 
   test("rejects ambiguous cursor directions before database work", async () => {
@@ -161,6 +181,7 @@ describe("hosted ops member usage", () => {
       messagesLast7Days: 7,
       messagesRetained: 18,
       participantCount: 2,
+      resetMode: "included_usage",
     });
     expect(dashboard.rows[0]?.currentPeriod).toMatchObject({
       blocked: false,
@@ -288,6 +309,50 @@ describe("hosted ops member usage", () => {
 
     expect(dashboard.rows[0]?.currentPeriod).toMatchObject({
       blocked: true,
+    });
+    expect(dashboard.rows[0]?.resetMode).toBe("included_usage");
+  });
+
+  test("projects a distinct reset mode only for an exhausted Starter allowance", async () => {
+    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValue(
+      new Map([["hbm_person", {
+        decision: makeUsageGateDecision({
+          allowanceSource: "direct_starter",
+          limitUsdMicros: 0n,
+          memberId: "hbm_person",
+          periodEnd: new Date("2099-12-31T23:59:59.999Z"),
+          periodStart: new Date(0),
+          planResetAt: null,
+          remainingUsdMicros: 0n,
+          spentUsdMicros: 0n,
+          usageCreditBalanceUsdMicros: 0n,
+          usageCreditLedgerVersion: 43n,
+        }),
+        periodPersistedAt: PERIOD_UPDATED_AT,
+      }]]),
+    );
+    const prisma = asPrismaClientForHostedOpsTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: {
+        findMany: createPagedMemberFindManyMock([
+          makeMember({ id: "hbm_person" }),
+        ]),
+      },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({ now: NOW, prisma });
+
+    expect(dashboard.rows[0]).toMatchObject({
+      resetMode: "starter_allowance",
+      currentPeriod: {
+        blocked: true,
+        limitUsdMicros: "0",
+        remainingUsdMicros: "0",
+        usageCreditLedgerVersion: "43",
+      },
     });
   });
 
@@ -658,7 +723,9 @@ describe("hosted ops member usage", () => {
       periodStart: PERIOD_START.toISOString(),
       previousSpentUsdMicros: "4522964",
       resetAt: NOW.toISOString(),
+      resetMode: "included_usage",
       updatedAt: NOW.toISOString(),
+      usageCreditGrantedUsdMicros: "0",
     });
     expect(tx.hostedLinqDelivery.update).toHaveBeenCalledWith({
       data: { idempotencyKey: null },
@@ -685,6 +752,105 @@ describe("hosted ops member usage", () => {
       }),
     );
     expect(tx.$queryRaw.mock.calls[2]?.[1]).toBe(expectedNoticeLookupKey);
+    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
+      .not.toHaveBeenCalled();
+  });
+
+  test("appends one fresh Starter grant under the displayed credit epoch", async () => {
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(
+      makeUsageGateDecision({
+        allowanceSource: "direct_starter",
+        limitUsdMicros: 0n,
+        periodEnd: new Date("2099-12-31T23:59:59.999Z"),
+        periodStart: PERIOD_START,
+        planResetAt: null,
+        remainingUsdMicros: 0n,
+        spentUsdMicros: 0n,
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 4n,
+      }),
+    );
+    const tx = createResetTransactionFixture({
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+    });
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) =>
+        run(tx)),
+    });
+
+    const result = await resetHostedOpsMemberUsage({
+      expectedPeriodUpdatedAt: PERIOD_UPDATED_AT,
+      expectedUsageCreditLedgerVersion: 4n,
+      memberId: "hbm_container",
+      now: NOW,
+      periodStart: PERIOD_START,
+    }, prisma);
+
+    expect(result).toMatchObject({
+      outcome: "reset",
+      previousSpentUsdMicros: "0",
+      resetMode: "starter_allowance",
+      usageCreditGrantedUsdMicros: "4500000",
+    });
+    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
+      .toHaveBeenCalledWith({
+        effectiveAt: NOW,
+        grantUsdMicros: 4_500_000n,
+        lockedBeneficiary: {
+          balanceUsdMicros: 0n,
+          beneficiaryMemberId: "hbm_container",
+          ledgerVersion: 4n,
+        },
+        semanticSourceKey:
+          "hosted-ops-usage-reset:hbm_container:starter:after-ledger-4:v1",
+        source: {
+          kind: "starter",
+          sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
+        },
+        tx,
+      });
+    expect(
+      usageCreditGrantMocks.appendHostedUsageCreditGrantTx
+        .mock.invocationCallOrder[0],
+    )
+      .toBeLessThan(
+        Number(
+          tx.hostedAiUsagePeriod.updateMany.mock.invocationCallOrder[0],
+        ),
+      );
+  });
+
+  test("refuses to grant another Starter allowance while credit remains", async () => {
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(
+      makeUsageGateDecision({
+        allowed: true,
+        allowanceSource: "direct_starter",
+        limitUsdMicros: 0n,
+        remainingUsdMicros: 500_000n,
+        spentUsdMicros: 0n,
+        usageCreditBalanceUsdMicros: 500_000n,
+        usageCreditLedgerVersion: 4n,
+      }),
+    );
+    const tx = createResetTransactionFixture({
+      usageCreditBalanceUsdMicros: 500_000n,
+    });
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) =>
+        run(tx)),
+    });
+
+    await expect(resetHostedOpsMemberUsage({
+      expectedPeriodUpdatedAt: PERIOD_UPDATED_AT,
+      expectedUsageCreditLedgerVersion: 4n,
+      memberId: "hbm_container",
+      now: NOW,
+      periodStart: PERIOD_START,
+    }, prisma)).rejects.toBeInstanceOf(HostedOpsMemberUsageResetStaleError);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
+      .not.toHaveBeenCalled();
   });
 
   test("rejects a stale credit epoch before reading or releasing a notice claim", async () => {
@@ -936,12 +1102,16 @@ function createResetTransactionFixture(input: {
   memberExists?: boolean;
   periodUpdatedAt?: Date;
   spentUsdMicros?: bigint;
+  usageCreditBalanceUsdMicros?: bigint;
   usageCreditLedgerVersion?: bigint;
 } = {}) {
   const rows = [
     input.memberExists === false
       ? []
       : [{
+          hasActiveUsageCreditGrant: false,
+          usageCreditBalanceUsdMicros:
+            input.usageCreditBalanceUsdMicros ?? 0n,
           usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 4n,
         }],
     [{

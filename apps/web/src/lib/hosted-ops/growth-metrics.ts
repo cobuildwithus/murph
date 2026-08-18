@@ -39,6 +39,7 @@ import {
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
+  HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX,
   parseHostedStarterUsageSourceReferenceLookupKey,
   type HostedStarterUsageSource,
 } from "@/src/lib/hosted-onboarding/starter-usage";
@@ -77,6 +78,8 @@ const SNAPSHOT_COMPARE_MIN_DAYS = 6;
 const SNAPSHOT_COMPARE_MAX_DAYS = 8;
 export const HOSTED_GROWTH_CONVERSION_MATURITY_DAYS = 14;
 const TRIAL_ENDING_SOON_DAYS = 3;
+const HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX =
+  `${HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX}:`;
 
 const CHURN_STATUS_KEYS = [
   HostedBillingStatus.past_due,
@@ -1279,6 +1282,9 @@ export async function readHostedGrowthDashboard(
           lte: now,
         },
         kind: "starter_grant",
+        semanticSourceKey: {
+          startsWith: HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX,
+        },
       },
     }),
     // One snapshot read serves both the 30-day chart series and the
@@ -1318,6 +1324,9 @@ export async function readHostedGrowthDashboard(
           lt: getTrialMaturityCutoff(now),
         },
         kind: "starter_grant",
+        semanticSourceKey: {
+          startsWith: HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX,
+        },
       },
     }),
     prisma.hostedUsageCreditEntry.count({
@@ -1345,6 +1354,9 @@ export async function readHostedGrowthDashboard(
           lt: getTrialMaturityCutoff(now),
         },
         kind: "starter_grant",
+        semanticSourceKey: {
+          startsWith: HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX,
+        },
       },
     }),
     prisma.hostedGrowthAggregate.findUniqueOrThrow({

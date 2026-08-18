@@ -242,8 +242,10 @@ describe("MemberUsageClient", () => {
       periodStart: "2026-07-01T00:00:00.000Z",
       previousSpentUsdMicros: "4522964",
       resetAt: "2026-07-22T18:00:00.000Z",
+      resetMode: "included_usage",
       runtimeRecheckStatus: "accepted",
       updatedAt: "2026-07-22T18:00:00.000Z",
+      usageCreditGrantedUsdMicros: "0",
     }));
     const rendered = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),
@@ -278,6 +280,57 @@ describe("MemberUsageClient", () => {
     expect(routerRefresh).toHaveBeenCalledTimes(1);
   });
 
+  test("confirms and reports one fresh Starter allowance", async () => {
+    const dashboard = makeDashboard();
+    const row = dashboard.rows[0];
+    if (!row?.currentPeriod) {
+      throw new Error("Expected a usage fixture row.");
+    }
+    row.containerOwnerMemberId = null;
+    row.memberKind = "member";
+    row.participantCount = null;
+    row.resetMode = "starter_allowance";
+    row.currentPeriod.limitUsdMicros = "0";
+    row.currentPeriod.spentUsdMicros = "0";
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      memberId: "hbm_container",
+      noticeClaimReleased: true,
+      outcome: "reset",
+      periodStart: "2026-07-01T00:00:00.000Z",
+      previousSpentUsdMicros: "0",
+      resetAt: "2026-07-22T18:00:00.000Z",
+      resetMode: "starter_allowance",
+      runtimeRecheckStatus: "accepted",
+      updatedAt: "2026-07-22T18:00:00.000Z",
+      usageCreditGrantedUsdMicros: "4500000",
+    }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Reset Starter"),
+    );
+
+    expect(rendered.container.textContent).toContain("Starter exhausted");
+    expect(rendered.container.textContent).toContain("Reset Starter allowance?");
+    expect(rendered.container.textContent).toContain(
+      "one fresh $4.50 Starter allowance",
+    );
+    expect(rendered.container.textContent).toContain("Allowance added$4.50");
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Grant $4.50"),
+    );
+
+    expect(rendered.container.querySelector('[role="alert"]')?.textContent)
+      .toContain("Starter allowance was reset to $4.50");
+    expect(routerRefresh).toHaveBeenCalledTimes(1);
+  });
+
   test("keeps a committed reset open and retries only the runtime wake", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({
@@ -287,8 +340,10 @@ describe("MemberUsageClient", () => {
         periodStart: "2026-07-01T00:00:00.000Z",
         previousSpentUsdMicros: "4522964",
         resetAt: "2026-07-22T18:00:00.000Z",
+        resetMode: "included_usage",
         runtimeRecheckStatus: "pending",
         updatedAt: "2026-07-22T18:00:00.000Z",
+        usageCreditGrantedUsdMicros: "0",
       }, 202))
       .mockResolvedValueOnce(jsonResponse({
         memberId: "hbm_container",
@@ -389,6 +444,7 @@ function makeDashboard(): HostedOpsMemberUsageDashboard {
       messagesLast7Days: 7,
       messagesRetained: 18,
       participantCount: 2,
+      resetMode: "included_usage",
       suspended: false,
     }],
     summary: {
