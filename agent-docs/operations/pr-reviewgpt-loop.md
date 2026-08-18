@@ -1,13 +1,12 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-11
+Last verified: 2026-08-17
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
 
 1. One preliminary `completion-specialists` pass combines the applicable
-   product-experience, prompt, frontend, and coverage lenses. It replaces those
-   four former local audit subagents and may return one bounded coverage patch
+   Product UX, prompt, frontend, and coverage lenses. It may return one bounded coverage patch
    artifact.
 2. The separate `pr-review` loop is the final cross-cutting gate for eligible work
    and replaces local `deep-review`.
@@ -81,7 +80,7 @@ restart.
 
 Run one preliminary specialist pass when any of these lenses apply:
 
-- product experience: a product-owned journey, semantic-copy, required-action,
+- Product UX: a product-owned journey, semantic-copy, required-action,
   state-selection, visible-feedback, timing, delivery, permission, recovery,
   or interaction-economy dimension changed;
 - prompt: prompt text, instruction stacks, tool descriptions, prompt assembly,
@@ -96,12 +95,12 @@ and open or update the PR. The canonical `pnpm --silent review:gpt` command
 suppresses pnpm's pre-wrapper working-directory banner, recognizes the PR-only
 preset, resolves the current branch PR, checks the clean local head
 against its pushed head, and exports the required PR ref and phase before the
-package can create an attachment. The PR body must
-declare each lens `applicable` or `not applicable`, name the product outcome and
-direct journey evidence or exact gap when applicable, name the focused local
-proof and current exact-head CI status, and list the redacted rendered-evidence
-files for every applicable frontend state and viewport. CI may still be
-`pending`; the preliminary pass runs concurrently with it.
+package can create an attachment. The coordinator records the applicable lenses,
+product outcome, direct journey evidence, focused local proof, current exact-head
+CI status, and selected redacted rendered evidence in the review packet. The PR
+body supplies its short outcome, Product UX result, evidence, and applicable
+risk details. CI may still be `pending`; the preliminary pass runs concurrently
+with it.
 
 Do not add `ReviewGPT first-reviewed head` merely for the preliminary pass. When
 final round 1 starts concurrently, add it before launching both jobs and set it
@@ -114,20 +113,22 @@ The repo config defaults response capture to 180 minutes. The workflow commands
 inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
 
 ```bash
-REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-packages/<mobile>.png' \
-  pnpm --silent review:gpt completion-specialists \
+pnpm --silent review:gpt completion-specialists \
     --wait \
     --response-marker SPECIALIST_REVIEW_COMPLETE \
     --response-file audit-packages/pr-<number>-specialists.md \
-    --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply the product-experience, prompt, frontend, and coverage lenses declared in the PR body."
+    --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply every Product UX, prompt, frontend, and coverage lens that the changed dimensions require."
 ```
 
-Omit `REVIEW_GPT_RENDERED_EVIDENCE_PATHS` only when the frontend lens is not
-applicable. Evidence paths must be repo-relative PNG, JPEG, or WebP files under
-`.artifacts/review-gpt/` or `audit-packages/`; they stay ignored and uncommitted.
-Redact direct identifiers and private content before packaging them. The
-packager rejects absolute paths, traversal, symlinks, missing files, unsupported
-types, and paths outside those two roots.
+Set `REVIEW_GPT_RENDERED_EVIDENCE_PATHS` to newline-separated image paths only
+when images are part of the selected proof. It can contain zero, one, or many
+images. An applicable frontend lens can omit it only when the PR explains why
+images add no material proof and supplies another direct way to judge the
+changed claim. Evidence paths must be repo-relative PNG, JPEG, or WebP files
+under `.artifacts/review-gpt/` or `audit-packages/`; they stay ignored and
+uncommitted. Redact direct identifiers and private content before packaging
+them. The packager rejects absolute paths, traversal, symlinks, missing files,
+unsupported types, and paths outside those two roots.
 
 Set `REVIEW_GPT_PR_URL` only when intentionally targeting a PR other than the
 one associated with the current branch. The guard still requires the local
@@ -154,7 +155,8 @@ The guarded ZIP contains:
 - `review-gpt-pr-context/changed-files.txt`
 - `review-gpt-pr-context/review-phase.json`
 - `review-gpt-pr-context/rendered-evidence.txt`
-- the four lens references under `agent-docs/prompts/`
+- `agent-docs/operations/product-ux.md` and the applicable prompt, frontend, and
+  coverage references
 - every explicitly listed rendered-evidence image
 - current source, tests, and repository guidance
 
@@ -195,13 +197,13 @@ rerun the focused local proof for the affected behavior. Push the result so the
 required exact-head CI surface evaluates it. Never pipe a downloaded artifact
 directly into `git apply`, and never treat the attachment as landed code.
 
-Resolve accepted product-experience, prompt, and frontend findings in the
+Resolve accepted Product UX, prompt, and frontend findings in the
 parent, rerun focused proof, and push the resulting candidate. If final round 1
 ran concurrently, preserve its first-reviewed-head baseline and verify the
 combined behavior-bearing remediation in the next substantive round. If accepted
-product-experience remediation materially changed a product-owned dimension,
-the parent must reapply `agent-docs/prompts/product-experience-review.md` to that
-corrected pushed head and updated direct journey evidence, then record a
+Product UX remediation materially changed a product-owned dimension, the
+parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to
+that corrected pushed head and updated direct journey evidence, then record a
 refreshed product purpose verdict. This is parent-owned corrected-head
 revalidation, not another subagent or ReviewGPT invocation. Do not rerun the
 preliminary pass for those substantive corrections. Complete parent final
@@ -229,14 +231,10 @@ worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
 merge target all refer to the same commit. Do not run it on unpushed local
 changes, a dirty worktree, or a checkout that is not at the pushed head.
 
-The PR body must carry the intent contract, applicable preliminary specialist
-lenses, product-experience contract, and change-shape breakdown from
-`agent-docs/operations/completion-workflow.md` § PR Description: why the PR
-exists, the user-visible goal and smallest complete flow it is meant to ship,
-immediate feedback, timing and continuation ownership, terminal delivery or
-recovery, invariants to preserve, non-obvious affected surfaces, and
-added/deleted lines by source, tests, docs, config/tooling, and generated/other.
-Before firing a round, confirm that block is present and current.
+The PR body must carry the short intent, Product UX result, direct evidence,
+changelog decision, and any risk details required by
+`agent-docs/operations/completion-workflow.md` § PR Description. Before firing
+a round, confirm that information is present and current.
 
 Before the final gate starts, the PR body must also contain exactly one
 `ReviewGPT context sensitivity: routine` or
@@ -247,14 +245,12 @@ of patch size. A small cosmetic change or narrow bug fix is `routine` only when
 none apply. Missing, malformed, or duplicate declarations are packaged as
 `undeclared` and default to the full snapshot.
 
-At round 1, also record the exact first-reviewed head and its five-category
-change shape in the PR body. Include the exact machine-readable line
+At round 1, record the exact first-reviewed head in the PR body. Include the exact machine-readable line
 `ReviewGPT first-reviewed head: <full-sha>`. Keep that line and baseline
 immutable. The packager fails if its supplied first head differs from this
-persisted PR-body value. On later substantive rounds, update a separate
-current-head table and state the authored-source growth caused by review
-remediation. Base movement, generated churn, and file moves may explain counts,
-but they do not erase or reset the first-reviewed baseline.
+persisted PR-body value. Later substantive rounds report the remediation delta
+from that baseline without asking the author to maintain a manual line-count
+table.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. Final round 1 may run in parallel with both CI and the
@@ -316,7 +312,7 @@ the current user explicitly asks for it.
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
-       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: $(git rev-parse HEAD). Round 1 full-patch audit. Use the PR body as the intent contract and immutable first-review change-shape baseline."
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: $(git rev-parse HEAD). Round 1 full-patch audit. Use the PR body as the intent contract and this head as the immutable first-review baseline."
    ```
 
    ```bash
@@ -583,7 +579,7 @@ the current user explicitly asks for it.
    deletion or remove concrete concepts/owners without replacement machinery.
    Run the verification required by
    `agent-docs/operations/verification-and-runtime.md` for the touched owners,
-   update the current change-shape table, and push to the PR branch.
+   update the evidence and risk notes when they changed, and push to the PR branch.
 
 7. Fire the next substantive round immediately after a pushed accepted fix
    changes production source, runtime config, schema, behavior, or the

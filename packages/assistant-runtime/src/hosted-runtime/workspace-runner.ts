@@ -311,6 +311,7 @@ export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
 export interface HostedWorkspaceDurableCheckpointEffectResult {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
+  redactedStatus?: HostedRuntimeRedactedJson | null;
   requiresFollowUpCheckpoint?: boolean;
 }
 

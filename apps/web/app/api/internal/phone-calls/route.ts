@@ -31,6 +31,9 @@ export const POST = withJsonError(async (request: Request) => {
     memberId,
     originSessionId: payload.originSessionId,
     requestKey: payload.requestKey,
+    ...(payload.resultNotificationChannel
+      ? { resultNotificationChannel: payload.resultNotificationChannel }
+      : {}),
     signal: request.signal,
   });
 

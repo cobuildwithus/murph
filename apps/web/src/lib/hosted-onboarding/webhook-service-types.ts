@@ -1,5 +1,4 @@
 import type { HostedMailboxLane } from "@murphai/hosted-execution/runtime-control";
-
 import type { HostedOnboardingTelegramWebhookResponse } from "./webhook-provider-telegram";
 import type { HostedOnboardingLinqWebhookResponse } from "./webhook-provider-linq-types";
 import type { HostedLinqThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
@@ -18,6 +17,7 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
   linqReadReceiptRouteAuthority?: HostedLinqThreadRouteEgressAuthority;
   postCommitGroupJoinConfirmationMemberIds?: readonly string[];
+  postCommitPhoneCallResultRecoveryMemberIds?: readonly string[];
   postCommitUsageReferralIds?: readonly string[];
   response: TResult;
   wakeHandoffs?: readonly HostedWebhookWakeHandoff[];

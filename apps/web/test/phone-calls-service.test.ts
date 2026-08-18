@@ -22,9 +22,14 @@ import {
   reconcileHostedPhoneCallProviderAuthority,
 } from "@/src/lib/phone-calls/reconciliation";
 import {
+  HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS,
+} from "@/src/lib/phone-calls/reconciliation-workflow-steps";
+import { createRetellPhoneCallRuntime } from "@/src/lib/phone-calls/retell-runtime";
+import {
   markPhoneCallRuntimeNoActiveEffect,
   type PhoneCallRuntime,
 } from "@/src/lib/phone-calls/types";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 type CreateHostedPhoneCallInput = Parameters<typeof createHostedPhoneCallImpl>[0];
 type TestCreateHostedPhoneCallInput =
@@ -69,6 +74,22 @@ const DIRECT_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = 
     },
     identityId: "direct-identity",
     threadId: "direct-thread",
+    threadIsDirect: true,
+  },
+};
+
+const TELEGRAM_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
+  conversationShape: "direct-member",
+  externalThreadRouteAuthority: null,
+  route: {
+    actorId: "telegram-member-actor",
+    channel: "telegram",
+    delivery: {
+      kind: "thread",
+      target: "telegram-direct-chat",
+    },
+    identityId: "telegram-direct-identity",
+    threadId: "telegram-direct-thread",
     threadIsDirect: true,
   },
 };
@@ -139,6 +160,7 @@ describe("createHostedPhoneCall", () => {
       originSessionId: "session_phone_call",
       provider: "retell",
       requestKey: "phone_call_request_1",
+      resultNotificationChannel: "linq",
       status: "starting",
     });
     expect(store.createCalls[0]!.data).not.toHaveProperty("briefJson");
@@ -163,6 +185,292 @@ describe("createHostedPhoneCall", () => {
         status: "starting",
       },
     }]);
+  });
+
+  it("validates and persists a direct Telegram result route before provider dispatch", async () => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_telegram" });
+    const notificationDestinationResolver = vi.fn(async () =>
+      TELEGRAM_NOTIFICATION_DESTINATION);
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver,
+      prisma: store.prisma,
+      requestKey: "phone_call_telegram_request",
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).resolves.toMatchObject({ status: "calling" });
+
+    expect(notificationDestinationResolver).toHaveBeenCalledTimes(2);
+    expect(notificationDestinationResolver).toHaveBeenNthCalledWith(1, {
+      directChannel: "telegram",
+      memberId: "member_1",
+      signal: expect.any(AbortSignal),
+    });
+    expect(notificationDestinationResolver).toHaveBeenNthCalledWith(2, {
+      directChannel: "telegram",
+      memberId: "member_1",
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.createCalls[0]?.data).toMatchObject({
+      resultNotificationChannel: "telegram",
+    });
+    expect(runtime.startCalls).toHaveLength(1);
+  });
+
+  it.each([
+    { providerCallId: null, status: "starting" as const },
+    { providerCallId: "retell_calling", status: "calling" as const },
+    { providerCallId: "retell_completed", status: "completed" as const },
+  ])("replays a routed Telegram $status call after its live route is removed", async ({
+    providerCallId,
+    status,
+  }) => {
+    const existing = buildHostedPhoneCall({
+      providerCallId,
+      resultNotificationChannel: "telegram",
+      status,
+      ...(status === "starting" ? { updatedAt: new Date() } : {}),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const notificationDestinationResolver = vi.fn(async () => {
+      throw new Error("route removed");
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: existing.id,
+      status: status === "starting" ? "starting" : "calling",
+    });
+
+    expect(notificationDestinationResolver).not.toHaveBeenCalled();
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it.each([
+    { existingChannel: null, requestedChannel: "telegram" as const },
+  ])("permits a legacy $existingChannel/$requestedChannel replay before route admission", async ({
+    existingChannel,
+    requestedChannel,
+  }) => {
+    const existing = buildHostedPhoneCall({
+      resultNotificationChannel: existingChannel,
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const notificationDestinationResolver = vi.fn(async () => {
+      throw new Error("route removed");
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      resultNotificationChannel: requestedChannel,
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: existing.id,
+      status: "calling",
+    });
+
+    expect(notificationDestinationResolver).not.toHaveBeenCalled();
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("fails a newly reserved Telegram call without provider ambiguity when its route is revoked before dispatch", async () => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const routeRevoked = hostedOnboardingError({
+      code: "HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED",
+      httpStatus: 409,
+      message: "Hosted assistant delivery requires a durable notification route.",
+      retryable: true,
+    });
+    const notificationDestinationResolver = vi.fn()
+      .mockResolvedValueOnce(TELEGRAM_NOTIFICATION_DESTINATION)
+      .mockRejectedValueOnce(routeRevoked);
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver,
+      prisma: store.prisma,
+      requestKey: "phone_call_telegram_route_revoked",
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).rejects.toBe(routeRevoked);
+
+    expect(notificationDestinationResolver).toHaveBeenCalledTimes(2);
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: null,
+      status: "failed",
+    });
+  });
+
+  it("rejects a non-direct destination for a requested direct result channel before storage or dispatch", async () => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const notificationDestinationResolver = vi.fn(async () =>
+      GROUP_NOTIFICATION_DESTINATION);
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver,
+      prisma: store.prisma,
+      requestKey: "phone_call_invalid_telegram_route",
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).rejects.toThrow(
+      "result notification channel does not match the direct route",
+    );
+
+    expect(notificationDestinationResolver).toHaveBeenCalledWith({
+      directChannel: "telegram",
+      memberId: "member_1",
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it.each([
+    ["linq", DIRECT_NOTIFICATION_DESTINATION],
+    ["telegram", TELEGRAM_NOTIFICATION_DESTINATION],
+  ] as const)("persists the authenticated %s direct channel for asynchronous results", async (
+    resultNotificationChannel,
+    destination,
+  ) => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: `retell_${resultNotificationChannel}`,
+    });
+    const notificationDestinationResolver = vi.fn(async () => destination);
+
+    await createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver,
+      resultNotificationChannel,
+      originSessionId: `session_${resultNotificationChannel}`,
+      prisma: store.prisma,
+      reconciliationWorkflowStarter: async () => ({ runId: "run_route" }),
+      requestKey: `phone_call_${resultNotificationChannel}`,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver(null),
+    });
+
+    expect(notificationDestinationResolver).toHaveBeenCalledWith({
+      directChannel: resultNotificationChannel,
+      memberId: "member_1",
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.createCalls[0]?.data.resultNotificationChannel).toBe(
+      resultNotificationChannel,
+    );
+  });
+
+  it("rejects a new direct start without authenticated origin before mutable storage or provider work", async () => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+      originSessionId: "session_old_runner",
+      prisma: store.prisma,
+      reconciliationWorkflowStarter: async () => ({ runId: "run_unused" }),
+      requestKey: "phone_call_old_runner_direct",
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver(null),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_RESULT_CHANNEL_REQUIRED",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(store.findCalls).toHaveLength(1);
+    expect(store.findFirstCalls).toEqual([]);
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("allows an origin-less old runner to replay an existing legacy direct call", async () => {
+    const existing = buildHostedPhoneCall({
+      briefJson: null,
+      id: "hpc_legacy_direct_replay",
+      providerCallId: "retell_legacy_direct_replay",
+      status: "calling",
+    });
+    existing.briefEncrypted = await encryptHostedPhoneCallBrief({
+      callId: existing.id,
+      memberId: existing.memberId,
+      value: VALID_BRIEF,
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+      originSessionId: existing.originSessionId!,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: existing.id,
+      status: "calling",
+    });
+
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("rejects replay under a different direct channel instead of silently rerouting", async () => {
+    const existing = buildHostedPhoneCall({
+      briefJson: null,
+      id: "hpc_direct_route_collision",
+      resultNotificationChannel: "telegram",
+      providerCallId: "retell_direct_route_collision",
+      status: "calling",
+    });
+    existing.briefEncrypted = await encryptHostedPhoneCallBrief({
+      callId: existing.id,
+      memberId: existing.memberId,
+      value: VALID_BRIEF,
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+      resultNotificationChannel: "linq",
+      originSessionId: existing.originSessionId!,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    })).rejects.toThrow("Hosted phone call request key collision.");
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.createCalls).toEqual([]);
   });
 
   it.each([
@@ -268,7 +576,7 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
   });
 
-  it("retries stored unsafe cleanup authority without another provider create", async () => {
+  it("rearms stored unsafe cleanup authority without another provider create", async () => {
     const existing = buildHostedPhoneCall({
       briefJson: null,
       endedAt: null,
@@ -301,8 +609,8 @@ describe("createHostedPhoneCall", () => {
       phoneCallId: existing.id,
     }, { signal: expect.any(AbortSignal) });
     expect(runtime.startCalls).toEqual([]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
-    expect(store.currentCall().endedAt).toEqual(expect.any(Date));
+    expect(runtime.stopCalls).toEqual([]);
+    expect(store.currentCall().endedAt).toBeNull();
   });
 
   it("keeps exact unsafe-cleanup replay typed when rearm and stop both fail", async () => {
@@ -338,7 +646,7 @@ describe("createHostedPhoneCall", () => {
     });
 
     expect(runtime.startCalls).toEqual([]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(runtime.stopCalls).toEqual([]);
     expect(store.currentCall().endedAt).toBeNull();
   });
 
@@ -376,8 +684,12 @@ describe("createHostedPhoneCall", () => {
       ...store.prisma,
       recordTerminalUsage,
     };
+    const finalizeStartFailure = vi.fn()
+      .mockRejectedValueOnce(new Error("mailbox append unavailable"))
+      .mockResolvedValueOnce(undefined);
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -387,15 +699,33 @@ describe("createHostedPhoneCall", () => {
 
     stopUnavailable = false;
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(store.currentCall().endedAt).toBeNull();
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
       phoneCallId: existing.id,
       prisma,
       runtime,
       signal: new AbortController().signal,
     })).resolves.toBe("complete");
     expect(runtimeHarness.startCalls).toEqual([]);
-    expect(runtimeHarness.stopCalls).toEqual(["retell_unsafe", "retell_unsafe"]);
+    expect(runtimeHarness.stopCalls).toEqual([
+      "retell_unsafe",
+      "retell_unsafe",
+      "retell_unsafe",
+    ]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
     expect(recordTerminalUsage).toHaveBeenCalledWith({
-      call: existing,
+      call: expect.objectContaining({
+        endedAt: expect.any(Date),
+        id: existing.id,
+      }),
       usage: terminalUsage,
     });
     expect(store.currentCall()).toMatchObject({
@@ -403,6 +733,513 @@ describe("createHostedPhoneCall", () => {
       providerCallId: "retell_unsafe",
       status: "failed",
     });
+  });
+
+  it("observes a stop fence racing with cleanup finalization", async () => {
+    const existing = buildHostedPhoneCall({
+      endedAt: null,
+      id: "hpc_cleanup_stop_race",
+      providerCallId: "retell_unsafe",
+      status: "failed",
+      stopRequestedAt: null,
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const stopRequestedAt = new Date("2026-06-25T00:01:00.000Z");
+    const finalizeStartFailure = vi.fn(async () => {
+      store.advanceCurrentCall({ stopRequestedAt });
+    });
+    const finalizeStopSettlement = vi.fn(async () => undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(finalizeStartFailure).toHaveBeenCalledOnce();
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+    expect(finalizeStopSettlement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endedAt: expect.any(Date),
+        id: existing.id,
+        stopRequestedAt,
+      }),
+      { abortSignal: expect.any(AbortSignal) },
+    );
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      status: "failed",
+      stopRequestedAt,
+    });
+  });
+
+  it.each(["stopped", "already_terminal"] as const)(
+    "publishes cleanup uncertainty before settling an existing stop fence when provider is %s",
+    async (stopDisposition) => {
+      const stopRequestedAt = new Date("2026-06-25T00:01:00.000Z");
+      const existing = buildHostedPhoneCall({
+        endedAt: null,
+        id: "hpc_cleanup_stopped",
+        providerCallId: "retell_unsafe",
+        status: "failed",
+        stopRequestedAt,
+      });
+      const store = createPhoneCallStore({ existing });
+      const runtime = createPhoneCallRuntime({
+        providerCallId: "retell_unused",
+        stopDisposition,
+      });
+      const phases: string[] = [];
+      const finalizeStartFailure = vi.fn(async () => {
+        phases.push("ordinary-result");
+      });
+      const finalizeStopSettlement = vi.fn(async () => {
+        phases.push("stop-settlement");
+      });
+
+      await expect(processHostedPhoneCallRecoveryById({
+        finalizeStartFailure,
+        finalizeStopSettlement,
+        phoneCallId: existing.id,
+        prisma: store.prisma,
+        runtime: runtime.runtime,
+        signal: new AbortController().signal,
+      })).resolves.toBe("complete");
+
+      expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+      expect(phases).toEqual(["ordinary-result", "stop-settlement"]);
+      expect(store.currentCall()).toMatchObject({
+        endedAt: expect.any(Date),
+        status: "failed",
+        stopRequestedAt,
+      });
+    },
+  );
+
+  it("consumes a stop intent after reconciliation discovers an uncertain provider call", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_stop_reconcile",
+      providerCallId: null,
+      status: "starting",
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_stop_reconcile",
+      reconciliationResult: {
+        providerCallId: "retell_stop_reconcile",
+        state: "found",
+      },
+    });
+    const finalizeStopSettlement = vi.fn(async () => undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.resolveCalls).toEqual([existing.id]);
+    expect(runtime.stopCalls).toEqual(["retell_stop_reconcile"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      providerCallId: "retell_stop_reconcile",
+      status: "ended",
+      stopRequestedAt: existing.stopRequestedAt,
+    });
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+    expect(finalizeStopSettlement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: existing.id,
+        providerCallId: "retell_stop_reconcile",
+        status: "ended",
+      }),
+      { abortSignal: expect.any(AbortSignal) },
+    );
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+    expect(runtime.stopCalls).toEqual(["retell_stop_reconcile"]);
+    expect(finalizeStopSettlement).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a no-provider stop settlement until its required notification is durable", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_stop_no_provider",
+      providerCallId: null,
+      status: "starting",
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_unused",
+      reconciliationResult: { state: "not_found" },
+    });
+    const finalizeStopSettlement = vi.fn()
+      .mockRejectedValueOnce(new Error("mailbox append unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const finalizeStartFailure = vi.fn(async () => undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(store.currentCall()).toMatchObject({
+      endedAt: null,
+      providerCallId: null,
+      status: "failed",
+      stopRequestedAt: existing.stopRequestedAt,
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.resolveCalls).toEqual([existing.id]);
+    expect(runtime.stopCalls).toEqual([]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
+    expect(finalizeStartFailure).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: existing.id,
+        providerCallId: null,
+        status: "failed",
+      }),
+      {
+        abortSignal: expect.any(AbortSignal),
+        notifyResult: false,
+      },
+    );
+    expect(finalizeStopSettlement).toHaveBeenCalledTimes(2);
+    expect(finalizeStopSettlement).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: existing.id,
+        providerCallId: null,
+        status: "failed",
+      }),
+      { abortSignal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("retries a provider-less start failure until its required result notification is durable", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_start_failed",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_unused",
+      reconciliationResult: { state: "not_found" },
+    });
+    const finalizeStartFailure = vi.fn()
+      .mockRejectedValueOnce(new Error("mailbox append unavailable"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      providerCallId: null,
+      status: "failed",
+      stopRequestedAt: null,
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.resolveCalls).toEqual([existing.id]);
+    expect(runtime.stopCalls).toEqual([]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
+    expect(finalizeStartFailure).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: existing.id,
+        providerCallId: null,
+        status: "failed",
+      }),
+      {
+        abortSignal: expect.any(AbortSignal),
+        notifyResult: true,
+      },
+    );
+  });
+
+  it("consumes a stop intent after a successful start whose provider-id write failed", async () => {
+    const created = buildHostedPhoneCall({ id: "hpc_stop_after_write_failure" });
+    let rejectBinding = true;
+    const store = createPhoneCallStore({
+      created,
+      onUpdateMany: (update) => {
+        if (update.data.providerCallId && rejectBinding) {
+          rejectBinding = false;
+          throw new Error("database unavailable");
+        }
+      },
+    });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_stop_after_write_failure",
+      reconciliationResult: {
+        providerCallId: "retell_stop_after_write_failure",
+        state: "found",
+      },
+    });
+    const finalizeStopSettlement = vi.fn(async () => undefined);
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toMatchObject({ status: "starting" });
+    expect(runtime.startCalls).toHaveLength(1);
+
+    store.advanceCurrentCall({
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      updatedAt: new Date(0),
+    });
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: store.currentCall().id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.stopCalls).toEqual(["retell_stop_after_write_failure"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      providerCallId: "retell_stop_after_write_failure",
+      status: "ended",
+    });
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a requested stop durable until provider termination can be confirmed", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_stop_retry",
+      providerCallId: "retell_stop_retry",
+      status: "calling",
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+    });
+    const store = createPhoneCallStore({ existing });
+    let stopUnavailable = true;
+    const runtime = createPhoneCallRuntime({
+      onStop: () => {
+        if (stopUnavailable) {
+          throw new Error("provider unavailable");
+        }
+      },
+      providerCallId: "retell_unused",
+    });
+    const finalizeStopSettlement = vi.fn(async () => undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(store.currentCall().endedAt).toBeNull();
+    expect(finalizeStopSettlement).not.toHaveBeenCalled();
+
+    stopUnavailable = false;
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+    expect(runtime.stopCalls).toEqual(["retell_stop_retry", "retell_stop_retry"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      status: "ended",
+    });
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+  });
+
+  it("settles a fenced analyzed call without another provider stop and records usage", async () => {
+    const endedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt: endedAt,
+      endedAt,
+      id: "hpc_stop_analyzed",
+      providerCallId: "retell_stop_analyzed",
+      status: "completed",
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtimeHarness = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const terminalUsage = {
+      combinedCostUsdMicros: 25_000,
+      occurredAt: endedAt,
+      providerCallId: existing.providerCallId!,
+    };
+    const runtime = {
+      ...runtimeHarness.runtime,
+      resolveTerminalUsage: vi.fn(async () => ({
+        state: "ready" as const,
+        usage: terminalUsage,
+      })),
+    };
+    const finalizeStopSettlement = vi.fn(async () => undefined);
+    const recordTerminalUsage = vi.fn(async () => undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage,
+      },
+      runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtimeHarness.stopCalls).toEqual([]);
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+    expect(recordTerminalUsage).toHaveBeenCalledOnce();
+    expect(recordTerminalUsage).toHaveBeenCalledWith({
+      call: existing,
+      usage: terminalUsage,
+    });
+  });
+
+  it("lets the sole workflow owner complete near-timeout Retell stop, terminal write, and usage", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const controller = new AbortController();
+    const deadline = setTimeout(
+      () => controller.abort(new Error("workflow step deadline")),
+      HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS,
+    );
+    try {
+      const existing = buildHostedPhoneCall({
+        id: "hpc_stop_composed_deadline",
+        providerCallId: null,
+        status: "starting",
+        stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+        updatedAt: new Date(0),
+      });
+      const store = createPhoneCallStore({ existing });
+      const providerCallId = "retell_stop_composed_deadline";
+      let requestCount = 0;
+      const fetchImpl = vi.fn<typeof fetch>(async () => {
+        requestCount += 1;
+        await new Promise<void>((resolve) => setTimeout(resolve, 14_000));
+        if (requestCount === 1) {
+          return new Response(JSON.stringify({
+            has_more: false,
+            items: [{
+              call_id: providerCallId,
+              data_storage_setting: "basic_attributes_only",
+              metadata: { murph_phone_call_id: existing.id },
+            }],
+          }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        if (requestCount === 2) {
+          return new Response(JSON.stringify({
+            call_id: providerCallId,
+            call_status: "ongoing",
+          }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        if (requestCount === 3) {
+          return new Response(null, { status: 204 });
+        }
+        return new Response(JSON.stringify({
+          call_cost: {
+            combined_cost: 1.5,
+            product_costs: [],
+            total_duration_seconds: 30,
+            total_duration_unit_price: 0.05,
+          },
+          call_id: providerCallId,
+          call_status: "ended",
+          data_storage_setting: "basic_attributes_only",
+          disconnection_reason: "user_hangup",
+          duration_ms: 30_000,
+          end_timestamp: 1_782_386_400_000,
+          start_timestamp: 1_782_386_370_000,
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      });
+      const runtime = createRetellPhoneCallRuntime({ fetchImpl });
+      const finalizeStopSettlement = vi.fn(async () => undefined);
+      const recordTerminalUsage = vi.fn(async () => undefined);
+
+      const recovery = processHostedPhoneCallRecoveryById({
+        finalizeStopSettlement,
+        phoneCallId: existing.id,
+        prisma: {
+          ...store.prisma,
+          recordTerminalUsage,
+        },
+        runtime,
+        signal: controller.signal,
+      });
+      await vi.advanceTimersByTimeAsync(56_000);
+
+      await expect(recovery).resolves.toBe("complete");
+      expect(HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS).toBeGreaterThan(
+        60_000,
+      );
+      expect(controller.signal.aborted).toBe(false);
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+      expect(store.currentCall()).toMatchObject({
+        endedAt: expect.any(Date),
+        providerCallId,
+        status: "ended",
+      });
+      expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+      expect(recordTerminalUsage).toHaveBeenCalledOnce();
+    } finally {
+      clearTimeout(deadline);
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
   });
 
   it("keeps recovery pending until terminal Retell usage is durably recorded", async () => {
@@ -433,6 +1270,7 @@ describe("createHostedPhoneCall", () => {
     };
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure: vi.fn(async () => undefined),
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -456,6 +1294,526 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
+  it("settles delivered-result usage when provider readiness changes later", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: "hpc_existing",
+      providerCallId: "retell_call_123",
+      resultDeliveryStatus: "delivered",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const recordTerminalUsage = vi.fn(async () => undefined);
+    const resolveTerminalUsage = vi.fn()
+      .mockResolvedValueOnce({ state: "pending" })
+      .mockResolvedValueOnce({ state: "pending" })
+      .mockResolvedValueOnce({ state: "pending" })
+      .mockResolvedValueOnce({
+        state: "ready",
+        usage: {
+          combinedCostUsdMicros: 125_000,
+          occurredAt: new Date("2026-06-25T01:00:00.000Z"),
+          providerCallId: "retell_call_123",
+        },
+      });
+    const runtime = {
+      ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      resolveTerminalUsage,
+    };
+    const prisma = {
+      ...store.prisma,
+      recordTerminalUsage,
+    };
+    const finalizeStoredResult = vi.fn(async () => "complete" as const);
+    const signal = new AbortController().signal;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(processHostedPhoneCallRecoveryById({
+        finalizeStoredResult,
+        phoneCallId: existing.id,
+        prisma,
+        runtime,
+        signal,
+      })).resolves.toBe("pending");
+    }
+    expect(recordTerminalUsage).not.toHaveBeenCalled();
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("complete");
+    expect(resolveTerminalUsage).toHaveBeenCalledTimes(4);
+    expect(finalizeStoredResult).toHaveBeenCalledTimes(4);
+    expect(recordTerminalUsage).toHaveBeenCalledWith({
+      call: existing,
+      usage: {
+        combinedCostUsdMicros: 125_000,
+        occurredAt: new Date("2026-06-25T01:00:00.000Z"),
+        providerCallId: "retell_call_123",
+      },
+    });
+  });
+
+  it("keeps the tracked Workflow alive until Telegram result delivery is terminal", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_tracked_call",
+      providerCallId: "retell_tracked_call",
+      resultNotificationChannel: "telegram",
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const recordTerminalUsage = vi.fn(async () => undefined);
+    const runtime = {
+      ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      resolveTerminalUsage: vi.fn(async () => ({
+        state: "ready" as const,
+        usage: {
+          combinedCostUsdMicros: 125_000,
+          occurredAt: new Date("2026-06-25T01:00:00.000Z"),
+          providerCallId: "retell_tracked_call",
+        },
+      })),
+    };
+    const finalizeStoredResult = vi.fn(async () => "complete" as const);
+    const signal = new AbortController().signal;
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage,
+      },
+      runtime,
+      signal,
+    })).resolves.toBe("pending");
+
+    store.advanceCurrentCall({
+      analyzedAt: new Date("2026-06-25T01:00:00.000Z"),
+      resultDeliveryStatus: "delivered",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      status: "completed",
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage,
+      },
+      runtime,
+      signal,
+    })).resolves.toBe("complete");
+
+    expect(finalizeStoredResult).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a provider-identified failed call alive for its accepted late analysis", async () => {
+    const endedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      endedAt,
+      id: "hpc_failed_before_analysis",
+      providerCallId: "retell_failed_before_analysis",
+      resultNotificationChannel: "telegram",
+      status: "failed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const recordTerminalUsage = vi.fn(async () => undefined);
+    const runtime = {
+      ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      resolveTerminalUsage: vi.fn(async () => ({
+        state: "ready" as const,
+        usage: {
+          combinedCostUsdMicros: 125_000,
+          occurredAt: endedAt,
+          providerCallId: "retell_failed_before_analysis",
+        },
+      })),
+    };
+
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage,
+      },
+      runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+
+    expect(recordTerminalUsage).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a definitive pre-provider failure pending until its result is delivered", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      endedAt: analyzedAt,
+      id: "hpc_failed_without_provider",
+      providerCallId: null,
+      resultNotificationChannel: "telegram",
+      status: "failed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const finalizeStartFailure = vi.fn(async () => {
+      store.advanceCurrentCall({
+        analyzedAt,
+        resultDeliveryStatus: "pending",
+        resultEncrypted: "encrypted-start-failure",
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+      });
+    });
+    const finalizeStoredResult = vi.fn(async () => "pending" as const);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt,
+      resultDeliveryStatus: "pending",
+      status: "failed",
+    });
+    expect(finalizeStartFailure).toHaveBeenCalledOnce();
+    expect(finalizeStoredResult).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an analyzed result pending until its durable notification succeeds", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      providerCallId: null,
+      resultJson: {
+        outcome: "completed",
+        summary: "The pharmacy confirmed pickup readiness.",
+      },
+      resultDeliveryStatus: "pending",
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const finalizeStoredResult = vi.fn()
+      .mockRejectedValueOnce(new Error("route unavailable"))
+      .mockImplementation(async () => {
+        if (store.currentCall().resultDeliveryStatus === "pending") {
+          store.advanceCurrentCall({ resultDeliveryStatus: "queued" });
+        }
+        return store.currentCall().resultDeliveryStatus === "delivered"
+          ? "complete" as const
+          : "pending" as const;
+      });
+    const signal = new AbortController().signal;
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal,
+    })).resolves.toBe("pending");
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal,
+    })).resolves.toBe("pending");
+    store.advanceCurrentCall({ resultDeliveryStatus: "delivered" });
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal,
+    })).resolves.toBe("complete");
+
+    expect(finalizeStoredResult).toHaveBeenCalledTimes(3);
+    expect(finalizeStoredResult).toHaveBeenCalledWith(existing, {
+      abortSignal: signal,
+    });
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it.each([
+    "pending",
+    "retrieval-error",
+    "recording-error",
+  ] as const)("recovers a stored result independently when terminal usage is %s", async (
+    usageFailure,
+  ) => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const providerCallId = `retell_result_usage_${usageFailure}`;
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: `hpc_result_usage_${usageFailure}`,
+      providerCallId,
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "pending",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const usage = {
+      combinedCostUsdMicros: 125_000,
+      occurredAt: analyzedAt,
+      providerCallId,
+    };
+    let usageReady = false;
+    const resolveTerminalUsage = vi.fn(async () => {
+      if (!usageReady && usageFailure === "retrieval-error") {
+        throw new Error("Retell usage unavailable");
+      }
+      if (!usageReady && usageFailure === "pending") {
+        return { state: "pending" as const };
+      }
+      return {
+        state: "ready" as const,
+        usage,
+      };
+    });
+    const recordTerminalUsage = vi.fn(async () => {
+      if (!usageReady && usageFailure === "recording-error") {
+        throw new Error("usage ledger unavailable");
+      }
+    });
+    const runtime = {
+      ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      resolveTerminalUsage,
+    };
+    const prisma = {
+      ...store.prisma,
+      recordTerminalUsage,
+    };
+    let notificationSignals = 0;
+    const finalizeStoredResult = vi.fn(async (call: HostedPhoneCall) => {
+      if (call.resultDeliveryStatus === "pending") {
+        notificationSignals += 1;
+        store.advanceCurrentCall({ resultDeliveryStatus: "queued" });
+      }
+      return "complete" as const;
+    });
+    const signal = new AbortController().signal;
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("pending");
+
+    expect(notificationSignals).toBe(1);
+    expect(store.currentCall().resultDeliveryStatus).toBe("queued");
+    usageReady = true;
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("pending");
+
+    expect(notificationSignals).toBe(1);
+    store.advanceCurrentCall({ resultDeliveryStatus: "delivered" });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("complete");
+
+    expect(recordTerminalUsage).toHaveBeenLastCalledWith({
+      call: expect.objectContaining({ id: existing.id }),
+      usage,
+    });
+  });
+
+  it("starts terminal usage and stored-result recovery as independent siblings", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: "hpc_concurrent_recovery",
+      providerCallId: "retell_concurrent_recovery",
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "pending",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const usageResolution = createDeferred<{ state: "pending" }>();
+    const resultResolution = createDeferred<"complete">();
+    const resolveTerminalUsage = vi.fn(() => usageResolution.promise);
+    const finalizeStoredResult = vi.fn(() => resultResolution.promise);
+    const recovery = processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage: vi.fn(async () => undefined),
+      },
+      runtime: {
+        ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+        resolveTerminalUsage,
+      },
+      signal: new AbortController().signal,
+    });
+
+    await vi.waitFor(() => {
+      expect(resolveTerminalUsage).toHaveBeenCalledOnce();
+      expect(finalizeStoredResult).toHaveBeenCalledOnce();
+    });
+
+    resultResolution.resolve("complete");
+    usageResolution.resolve({ state: "pending" });
+    await expect(recovery).resolves.toBe("pending");
+  });
+
+  it("drains both recovery siblings before propagating an abort", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: "hpc_abort_drain",
+      providerCallId: "retell_abort_drain",
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "pending",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const usageResolution = createDeferred<{ state: "pending" }>();
+    const resultResolution = createDeferred<"pending">();
+    const resolveTerminalUsage = vi.fn(() => usageResolution.promise);
+    const finalizeStoredResult = vi.fn(() => resultResolution.promise);
+    const controller = new AbortController();
+    const recovery = processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage: vi.fn(async () => undefined),
+      },
+      runtime: {
+        ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+        resolveTerminalUsage,
+      },
+      signal: controller.signal,
+    });
+    let settled = false;
+    void recovery.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(resolveTerminalUsage).toHaveBeenCalledOnce();
+      expect(finalizeStoredResult).toHaveBeenCalledOnce();
+    });
+    controller.abort();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    usageResolution.resolve({ state: "pending" });
+    resultResolution.resolve("pending");
+    await expect(recovery).rejects.toMatchObject({ name: "AbortError" });
+    expect(settled).toBe(true);
+  });
+
+  it("keeps a stored result authoritative over a synthesized transfer result", async () => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: "hpc_stored_transfer_result",
+      providerCallId: "retell_stored_transfer_result",
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "delivered",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const finalizeResult = vi.fn(async () => undefined);
+    const finalizeStoredResult = vi.fn(async () => "complete" as const);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeResult,
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage: vi.fn(async () => undefined),
+      },
+      runtime: {
+        ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+        resolveTerminalUsage: vi.fn(async () => ({
+          state: "ready" as const,
+          terminalTransfer: {
+            endedAt: analyzedAt,
+            providerCallId: existing.providerCallId!,
+          },
+          usage: {
+            combinedCostUsdMicros: 125_000,
+            occurredAt: analyzedAt,
+            providerCallId: existing.providerCallId!,
+          },
+        })),
+      },
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(finalizeStoredResult).toHaveBeenCalledOnce();
+    expect(finalizeResult).not.toHaveBeenCalled();
+  });
+
   it("retries callback-loss recovery until a terminal transfer result is finalized", async () => {
     const existing = buildHostedPhoneCall({
       id: "hpc_transfer_recovery",
@@ -469,7 +1827,9 @@ describe("createHostedPhoneCall", () => {
       providerCallId: "retell_transfer_recovery",
     };
     const transferEndedAt = new Date("2026-06-25T01:05:00.000Z");
-    const recordTerminalUsage = vi.fn(async () => undefined);
+    const recordTerminalUsage = vi.fn()
+      .mockRejectedValueOnce(new Error("usage ledger unavailable"))
+      .mockResolvedValue(undefined);
     const runtime = {
       ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
       resolveTerminalUsage: vi.fn(async () => ({
@@ -500,10 +1860,12 @@ describe("createHostedPhoneCall", () => {
       ...store.prisma,
       recordTerminalUsage,
     };
+    const finalizeStoredResult = vi.fn(async () => "complete" as const);
     const signal = new AbortController().signal;
 
     await expect(processHostedPhoneCallRecoveryById({
       finalizeResult,
+      finalizeStoredResult,
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -511,6 +1873,7 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toBe("pending");
     await expect(processHostedPhoneCallRecoveryById({
       finalizeResult,
+      finalizeStoredResult,
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -518,6 +1881,7 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toBe("complete");
     await expect(processHostedPhoneCallRecoveryById({
       finalizeResult,
+      finalizeStoredResult,
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -525,7 +1889,7 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toBe("complete");
 
     expect(recordTerminalUsage).toHaveBeenCalledTimes(3);
-    expect(finalizeResult).toHaveBeenCalledTimes(3);
+    expect(finalizeResult).toHaveBeenCalledOnce();
     expect(finalizeResult).toHaveBeenCalledWith({
       call: expect.objectContaining({
         call_id: "retell_transfer_recovery",
@@ -534,10 +1898,11 @@ describe("createHostedPhoneCall", () => {
         end_timestamp: transferEndedAt.toISOString(),
         transfer_end_timestamp: transferEndedAt.toISOString(),
       }),
-      requiresTransferFollowUp: true,
+      completionPolicy: "transfer_follow_up_required",
     }, {
       abortSignal: signal,
     });
+    expect(finalizeStoredResult).toHaveBeenCalledTimes(2);
     expect(store.currentCall()).toMatchObject({
       analyzedAt: transferEndedAt,
       status: "needs_user",
@@ -860,7 +2225,7 @@ describe("createHostedPhoneCall", () => {
     }, { signal: expect.any(AbortSignal) });
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(runtime.stopCalls).toEqual([]);
   });
 
   it("allows a different request after unsafe provider cleanup records terminal proof", async () => {
@@ -872,7 +2237,20 @@ describe("createHostedPhoneCall", () => {
     });
     const store = createPhoneCallStore({ pending });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_new" });
-    const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({ runId: "run_123" });
+    const finalizeStartFailure = vi.fn(async () => undefined);
+    const reconciliationWorkflowStarter = vi.fn(async (
+      workflowInput: { phoneCallId: string },
+      options: { signal: AbortSignal },
+    ) => {
+      await processHostedPhoneCallRecoveryById({
+        finalizeStartFailure,
+        phoneCallId: workflowInput.phoneCallId,
+        prisma: store.prisma,
+        runtime: runtime.runtime,
+        signal: options.signal,
+      });
+      return { runId: "run_123" };
+    });
 
     await expect(createHostedPhoneCall({
       brief: VALID_BRIEF,
@@ -884,6 +2262,7 @@ describe("createHostedPhoneCall", () => {
     })).resolves.toMatchObject({ status: "calling" });
 
     expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(finalizeStartFailure).toHaveBeenCalledOnce();
     expect(runtime.startCalls).toHaveLength(1);
     expect(store.createCalls).toHaveLength(1);
     expect(reconciliationWorkflowStarter).toHaveBeenCalledTimes(2);
@@ -921,7 +2300,7 @@ describe("createHostedPhoneCall", () => {
     });
 
     expect(runtime.resolveCalls).toEqual([pending.id]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
+    expect(runtime.stopCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
     expect(store.currentCall()).toMatchObject({
       endedAt: null,
@@ -977,6 +2356,60 @@ describe("createHostedPhoneCall", () => {
 
     expect(runtime.startCalls).toEqual([]);
     expect(store.updateManyCalls).toEqual([]);
+  });
+
+  it("allows a legacy replay to include the newly authenticated result channel", async () => {
+    const existing = buildHostedPhoneCall({
+      providerCallId: "retell_existing",
+      resultNotificationChannel: null,
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver: async () =>
+        TELEGRAM_NOTIFICATION_DESTINATION,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: existing.id,
+      status: "calling",
+    });
+
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("replays an existing call only when the result notification channel matches", async () => {
+    const existing = buildHostedPhoneCall({
+      providerCallId: "retell_existing",
+      resultNotificationChannel: "telegram",
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver: async () =>
+        TELEGRAM_NOTIFICATION_DESTINATION,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: existing.id,
+      status: "calling",
+    });
+
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
   });
 
   it("replays one scheduled occurrence across resident sessions", async () => {
@@ -1253,7 +2686,7 @@ describe("createHostedPhoneCall", () => {
       start: vi.fn(async () => {
         throw new Error("Reconciliation must not dispatch a provider call.");
       }),
-      stopIfActive: vi.fn(async () => {}),
+      stopIfActive: vi.fn(async () => "stopped" as const),
     };
     const signal = new AbortController().signal;
 
@@ -1556,57 +2989,73 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toHaveLength(1);
   });
 
-  it("persists provider authority before unsafe storage cleanup", async () => {
-    const created = buildHostedPhoneCall();
-    const store = createPhoneCallStore({ created });
-    const cleanupError = new Error("unsafe provider storage");
-    const runtime = createPhoneCallRuntime({
-      cleanupRequiredError: cleanupError,
-      onStop: () => {
-        expect(store.currentCall()).toMatchObject({
+  it.each(["stopped", "already_terminal"] as const)(
+    "publishes foreground cleanup uncertainty before terminalizing when provider is %s",
+    async (stopDisposition) => {
+      const created = buildHostedPhoneCall();
+      const store = createPhoneCallStore({ created });
+      const cleanupError = new Error("unsafe provider storage");
+      const finalizeStartFailure = vi.fn(async (call: HostedPhoneCall) => {
+        expect(call).toMatchObject({
+          endedAt: null,
           providerCallId: "retell_cleanup_pending",
           status: "failed",
         });
-      },
-      providerCallId: "retell_cleanup_pending",
-    });
-    const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({ runId: "run_123" });
+        expect(store.currentCall().endedAt).toBeNull();
+      });
+      const runtime = createPhoneCallRuntime({
+        cleanupRequiredError: cleanupError,
+        onStop: () => {
+          expect(store.currentCall()).toMatchObject({
+            providerCallId: "retell_cleanup_pending",
+            status: "failed",
+          });
+        },
+        providerCallId: "retell_cleanup_pending",
+        stopDisposition,
+      });
+      const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({
+        runId: "run_123",
+      });
 
-    await expect(createHostedPhoneCall({
-      brief: VALID_BRIEF,
-      memberId: created.memberId,
-      prisma: store.prisma,
-      reconciliationWorkflowStarter,
-      requestKey: created.requestKey,
-      runtime: runtime.runtime,
-    })).resolves.toEqual({
-      phoneCallId: expect.stringMatching(/^hpc_/u),
-      status: "failed",
-    });
+      await expect(createHostedPhoneCall({
+        brief: VALID_BRIEF,
+        finalizeStartFailure,
+        memberId: created.memberId,
+        prisma: store.prisma,
+        reconciliationWorkflowStarter,
+        requestKey: created.requestKey,
+        runtime: runtime.runtime,
+      })).resolves.toEqual({
+        phoneCallId: expect.stringMatching(/^hpc_/u),
+        status: "failed",
+      });
 
-    expect(store.updateManyCalls).toEqual([{
-      data: {
+      expect(store.updateManyCalls).toEqual([{
+        data: {
+          providerCallId: "retell_cleanup_pending",
+          status: "failed",
+        },
+        where: {
+          analyzedAt: null,
+          id: store.createCalls[0]!.data.id,
+          provider: "retell",
+          providerCallId: null,
+          status: "starting",
+        },
+      }]);
+      expect(reconciliationWorkflowStarter).toHaveBeenCalledWith({
+        phoneCallId: store.createCalls[0]!.data.id,
+      }, { signal: expect.any(AbortSignal) });
+      expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
+      expect(finalizeStartFailure).toHaveBeenCalledOnce();
+      expect(store.currentCall()).toMatchObject({
+        endedAt: expect.any(Date),
         providerCallId: "retell_cleanup_pending",
         status: "failed",
-      },
-      where: {
-        analyzedAt: null,
-        id: store.createCalls[0]!.data.id,
-        provider: "retell",
-        providerCallId: null,
-        status: "starting",
-      },
-    }]);
-    expect(reconciliationWorkflowStarter).toHaveBeenCalledWith({
-      phoneCallId: store.createCalls[0]!.data.id,
-    }, { signal: expect.any(AbortSignal) });
-    expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
-    expect(store.currentCall()).toMatchObject({
-      endedAt: expect.any(Date),
-      providerCallId: "retell_cleanup_pending",
-      status: "failed",
-    });
-  });
+      });
+    },
+  );
 
   it("leaves unsafe cleanup authority pending for the durable retry owner", async () => {
     const created = buildHostedPhoneCall();
@@ -1635,6 +3084,59 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
     expect(store.currentCall()).toMatchObject({
       endedAt: null,
+      providerCallId: "retell_cleanup_pending",
+      status: "failed",
+    });
+  });
+
+  it("retries foreground cleanup result delivery before terminalizing", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const finalizeStartFailure = vi.fn()
+      .mockRejectedValueOnce(new Error("runtime wake unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const runtime = createPhoneCallRuntime({
+      cleanupRequiredError: new Error("unsafe provider storage"),
+      providerCallId: "retell_cleanup_pending",
+    });
+    const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({ runId: "run_123" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      finalizeStartFailure,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      reconciliationWorkflowStarter,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: expect.stringMatching(/^hpc_/u),
+      status: "failed",
+    });
+
+    expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
+    expect(finalizeStartFailure).toHaveBeenCalledOnce();
+    expect(store.currentCall()).toMatchObject({
+      endedAt: null,
+      providerCallId: "retell_cleanup_pending",
+      status: "failed",
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: store.currentCall().id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.stopCalls).toEqual([
+      "retell_cleanup_pending",
+      "retell_cleanup_pending",
+    ]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
       providerCallId: "retell_cleanup_pending",
       status: "failed",
     });
@@ -1676,13 +3178,35 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.stopCalls).toEqual([]);
 
     store.advanceCurrentCall({ updatedAt: new Date(0) });
+    const finalizeStartFailure = vi.fn()
+      .mockRejectedValueOnce(new Error("runtime wake unavailable"))
+      .mockResolvedValueOnce(undefined);
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: store.currentCall().id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: null,
+      providerCallId: "retell_cleanup_pending",
+      status: "failed",
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
       phoneCallId: store.currentCall().id,
       prisma: store.prisma,
       runtime: runtime.runtime,
       signal: new AbortController().signal,
     })).resolves.toBe("complete");
-    expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
+    expect(runtime.stopCalls).toEqual([
+      "retell_cleanup_pending",
+      "retell_cleanup_pending",
+    ]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
     expect(store.currentCall()).toMatchObject({
       endedAt: expect.any(Date),
       providerCallId: "retell_cleanup_pending",
@@ -1923,6 +3447,7 @@ describe("createHostedPhoneCall", () => {
       memberId: "member_1",
       signal: expect.any(AbortSignal),
     });
+    expect(store.createCalls[0]?.data.resultNotificationChannel).toBeNull();
     expect(groupRequesterActivationAsserter).toHaveBeenCalledTimes(2);
     expect(groupRequesterActivationAsserter).toHaveBeenNthCalledWith(1, {
       groupRequester: GROUP_REQUESTER,
@@ -2083,7 +3608,7 @@ describe("createHostedPhoneCall", () => {
       runtime: runtime.runtime,
     })).rejects.toBe(routeError);
 
-    expect(store.findCalls).toEqual([]);
+    expect(store.findCalls).toHaveLength(2);
     expect(store.findFirstCalls).toEqual([]);
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
@@ -2126,9 +3651,15 @@ describe("createHostedPhoneCall", () => {
 });
 
 function createHostedPhoneCall(input: TestCreateHostedPhoneCallInput) {
-  return createHostedPhoneCallDirect({
+  const directOrigin = input.groupRequester || input.inboundMailboxItemIds
+    ? {}
+    : { resultNotificationChannel: "linq" as const };
+  return createHostedPhoneCallImpl({
+    notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+    originSessionId: "session_phone_call",
     reconciliationWorkflowStarter: async () => ({ runId: "run_test" }),
     transferNumberResolver: createTransferNumberResolver(null),
+    ...directOrigin,
     ...input,
   });
 }
@@ -2136,6 +3667,7 @@ function createHostedPhoneCall(input: TestCreateHostedPhoneCallInput) {
 function createHostedPhoneCallDirect(input: TestCreateHostedPhoneCallInput) {
   return createHostedPhoneCallImpl({
     notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+    resultNotificationChannel: "linq",
     originSessionId: "session_phone_call",
     ...input,
   });
@@ -2169,6 +3701,22 @@ function createPhoneCallStore(input: {
       current = {
         ...current,
         endedAt: new Date(),
+      };
+      return { count: 1 };
+    },
+    markRequestedStopEnded: async (args) => {
+      if (
+        current.id !== args.id
+        || current.providerCallId !== args.providerCallId
+        || current.stopRequestedAt === null
+        || current.endedAt !== null
+      ) {
+        return { count: 0 };
+      }
+      current = {
+        ...current,
+        endedAt: new Date(),
+        status: args.status,
       };
       return { count: 1 };
     },
@@ -2282,6 +3830,7 @@ function createPhoneCallRuntime(input: {
   providerCallId: string;
   reconciliationError?: Error;
   reconciliationResult?: Awaited<ReturnType<PhoneCallRuntime["resolveProviderCall"]>>;
+  stopDisposition?: Awaited<ReturnType<PhoneCallRuntime["stopIfActive"]>>;
   stopError?: Error;
 }) {
   const resolveCalls: string[] = [];
@@ -2316,6 +3865,7 @@ function createPhoneCallRuntime(input: {
       if (input.stopError) {
         throw input.stopError;
       }
+      return input.stopDisposition ?? "stopped";
     },
   };
 
@@ -2360,10 +3910,29 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     provider: "retell",
     providerCallId: null,
     requestKey: "phone_call_request_1",
+    resultDeliveryGeneration: 0,
+    resultDeliveryStatus: null,
+    resultDeliveryTerminalAt: null,
     resultEncrypted: null,
     resultJson: null,
+    resultNotificationChannel: null,
     status: "starting",
+    stopRequestedAt: null,
     updatedAt: now,
     ...overrides,
   };
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  reject(error: unknown): void;
+  resolve(value: T | PromiseLike<T>): void;
+} {
+  let reject!: (error: unknown) => void;
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
 }

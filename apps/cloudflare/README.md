@@ -35,8 +35,9 @@ Internal control routes:
   hint (dispatched by presented credential, never falling through a failed
   one), records which trigger won as the `triggeredByWebDirect` orchestration
   latency leaf, and starts, wakes, or accepts a pending runtime wake for only
-  the bound user's runtime, returning after that start/wake intent is accepted,
-  not after the runtime reaches idle
+  the bound user's runtime. Both credentials receive the real accepted-or-retry
+  result after start/wake intent is accepted, not after the runtime reaches
+  idle; the direct path does not hide that result behind Worker `waitUntil()`
 - `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
   Vercel OIDC-authenticated typing/instant-start shell hint. Its bounded source
   distinguishes those two existing callers; an empty legacy request remains
@@ -231,23 +232,46 @@ usable observation, including a scrape with every required family absent,
 receives one bounded retry after one second; only an exhausted two-attempt
 collection counts as a failed check. A usable partial observation ordinarily
 remains single-pass so available unsafe evidence pages without delay. The
-connection-error family expects both ports, keyed by port and region so their
-series cannot collide. Missing either port keeps that family unknown. When a
-safe observation is otherwise complete, the monitor makes one confirmation
-scrape after the same one-second delay, evaluates every available confirmation
-signal, and composes complementary observed ports with the original complete
-gauge evidence. Each observed port advances only its own usable baseline; an
-omitted port retains its prior baseline, and new or reset region series are
-suppressed independently. A failed or still-incomplete confirmation retains
-the original incomplete observation, so absence never becomes zero, an old
-counter delta is never replayed, and two persistently incomplete checks still
-open the fallback monitoring incident. An acknowledged telemetry-only page is
+monitor retains every successfully parsed observation even when it contains no
+usable required family and its retry fails before parsing; `unavailable` is
+reserved for checks that produced no parsed observation. The
+connection-error family tracks both supported ports, keyed by port and region
+so their series cannot collide. Any observed supported port makes the family
+available. An absent port is diagnostic sparse label cardinality, not a
+collection failure. When a safe observation has the whole family absent, the
+monitor makes one confirmation scrape after one second. PlanetScale's
+[documented example Prometheus scrape configuration](https://planetscale.com/docs/postgres/monitoring/prometheus-postgres)
+uses 30 seconds, but that is not a provider freshness guarantee and does not
+justify another provider call. The monitor evaluates every available
+confirmation signal
+and composes any recovered supported port with the original complete gauge
+evidence, so a port first seen there advances its baseline. Each observed port
+advances only its own usable baseline;
+an omitted port retains its prior baseline, and new or reset region series are
+suppressed independently. A failed confirmation retains the original
+incomplete observation, so absence never becomes zero and an old counter delta
+is never replayed. Two checks with the whole family absent still open the
+fallback monitoring incident. This keeps the existing maximum of two
+observations and four provider requests; even two sequential ten-second fetch
+timeouts per observation plus the one-second wait remain below the two-minute
+run lease.
+Structured failure warnings retain the parsed-observation count and exact
+per-port omission counts without raw scrape content. An acknowledged
+telemetry-only page is
 one-shot for one unresolved operator-notification window.
 Crossing the two-failure threshold records one bounded alert obligation in the
 existing incident row. The first two-check window counts incomplete versus
-unavailable observations, unions only canonical missing families observed on
-partial checks, and identifies the threshold time as the window end. A bounded
-per-sample evidence value preserves that provenance across restart. An older
+unavailable observations, unions only canonical missing families, and sums
+parsed observations plus exact 5432/6432 omission counts from checks where the
+whole family was absent.
+It identifies the threshold time as the window end. A bounded per-sample evidence value preserves
+that provenance across restart. Structured warnings can retain a sparse-port
+omission during another collection failure, but durable evidence clears that
+diagnostic count unless the canonical connection-error family is missing. This
+preserves the legacy reader correlation invariant across rollback. Legacy
+evidence, including a single-port monitoring obligation, remains readable. Any
+window containing legacy evidence reports unavailable port detail
+rather than presenting a partial ratio as exact. An older
 pending page or connection-error priority cannot lose the obligation; recovery
 and another gap before acknowledgment coalesce into that same notification
 while the first threshold window remains authoritative. The obligation does
@@ -316,7 +340,7 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
   window before a dirty invocation checkpoints and returns; production rejects
   lower values so routine checkpoints cannot bypass the three-minute quiet floor
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the post-completion
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` for the post-completion
   conversation warm lease (code default is `300000` when unset)
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=45000` (must exceed the web-control timeout by at least 5 seconds)
@@ -373,6 +397,9 @@ unawaited, best-effort, and absent from successful processing. Run
 [`scripts/runtime-retry-reasons.sql`](./scripts/runtime-retry-reasons.sql)
 through the private Cloudflare Analytics Engine SQL API or dashboard to get a
 sampling-corrected 24-hour reason breakdown.
+The corresponding Workers structured log includes the bounded retry reason and
+`orchestrationAttemptId` for request-level joins. That identifier is never
+copied into Analytics Engine blobs, indexes, or doubles.
 
 For the primary production control database, run the identifier-free cold-start
 report through the read-only helper:
@@ -432,7 +459,21 @@ member, mailbox, trace, or attempt identifiers.
 
 ## Runner Container Lifecycle
 
-The native Cloudflare container is a warm per-user shell. Successful workspace
+The native Cloudflare container is a warm per-user shell. Startup readiness is
+allowed up to 15 wall-clock seconds, including lifecycle-lock queue time. Once
+readiness-triggered cleanup starts, one absolute five-second cleanup deadline covers both
+the pre-destroy state read and destroy settlement, with a distinct one-second
+caller guard margin. The command budget begins at runtime-control authorization,
+before route parsing, Durable Object dispatch, consent serialization, and
+health-data admission. A settled readiness
+failure compare-clears its fresh write fence. An
+unsettled cleanup result or outer-guard timeout preserves that fence because
+the container lifecycle RPC may still be completing; normal startup-grace
+convergence, not a second state owner, performs recovery. For shorter commands,
+readiness gets the smaller of 15 seconds and remaining budget minus the
+one-second guard. Cleanup is not subtracted before readiness; if it cannot fit
+after a failure, the guard preserves the fence. Deploy Web's backward-compatible
+bounded client first, then this Worker result boundary. Successful workspace
 invocations keep the same Durable Object write fence while the runtime waits
 through `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`. Coalesced foreground input
 may preempt that wait. While dirty, the exact assistant wake projected by the

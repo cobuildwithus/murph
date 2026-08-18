@@ -7,7 +7,7 @@ import {
   readRenderedSection,
   renderPrBody,
   renderedText,
-} from "./check-frontend-design-proof.mjs";
+} from "./pr-body-markdown.mjs";
 
 const CHANGELOG_ENTRY_PREFIX = "apps/web/changelog/entries/";
 const CHANGELOG_EDITION_PREFIX = "apps/web/changelog/editions/";

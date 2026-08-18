@@ -5,6 +5,7 @@ import type {
   HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionResolvedLinqDeliveryRoute,
   HostedExecutionStructuredLogDetails,
+  HostedExecutionTelegramExternalThreadRouteAuthority,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -36,6 +37,10 @@ import {
   parseHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
 import {
+  parseHostedPhoneCallResultDeliveryKey,
+  type HostedPhoneCallResultDeliveryOutcomeRequest,
+} from "@murphai/hosted-execution/phone-calls";
+import {
   applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
@@ -45,10 +50,12 @@ import {
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
+  hasPendingAssistantOutboxMessageVolumeReceipt,
   isAssistantOutboxReplyBubbleSuccessor,
   listAssistantCronPendingDeliveryIntentIds,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
+  markAssistantOutboxMessageVolumeReceiptRecorded,
   normalizeAssistantDeliveryError,
   persistAssistantPrivateCompletionContinuityAfterDelivery,
   readAssistantAutomationState,
@@ -59,12 +66,14 @@ import {
   sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById,
+  rescheduleAssistantOutboxMessageVolumeReceipt,
   saveAssistantOutboxIntentIfUnchanged,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantHostedProgressDeliveryDependencies,
   type AssistantOutboxDispatchPreflightResult,
   type AssistantOutboxPreparedDispatchState,
+  type AssistantOutboxTerminalOutcome,
 } from "@murphai/assistant-engine";
 import {
   parseHostedEmailThreadTarget,
@@ -141,11 +150,14 @@ const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // Bounds due approval reconciliation so a backlog cannot stall delivery with
 // an unbounded series of web-control round trips.
 const HOSTED_MAX_DUE_APPROVAL_RECONCILE = 4;
+const HOSTED_MAX_PENDING_MESSAGE_VOLUME_RECEIPTS = 8;
+const HOSTED_MESSAGE_VOLUME_RECEIPT_RETRY_DELAY_MS = 60_000;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
-const HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS = 2_000;
+const HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS = 2_000;
 const HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS = 1_500;
+const HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX = "phone-call-result:";
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | string>;
@@ -167,6 +179,10 @@ interface HostedAssistantDeliveryBoundaryFields {
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   includeBackgroundDueIntents: boolean;
+  messageVolumeReceiptPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "recordOutboundMessageVolumeReceipt"
+  > | null;
   preferredEffectIds?: readonly string[];
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
@@ -183,6 +199,14 @@ export async function collectHostedAssistantDeliverySideEffects(
   };
   const now = new Date();
   const storedIntents = await listAssistantOutboxIntents(request.vaultRoot);
+  if (request.includeBackgroundDueIntents) {
+    queueHostedAssistantPendingMessageVolumeReceipts({
+      effectsPort: input.messageVolumeReceiptPort ?? null,
+      intents: storedIntents,
+      now,
+      vaultRoot: request.vaultRoot,
+    });
+  }
   const reconcileTargets = selectHostedAssistantApprovalReconcileTargets({
     includeBackgroundDueIntents: request.includeBackgroundDueIntents,
     now,
@@ -260,7 +284,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       intent.status === "retryable"
       && !intent.deliveryTransportIdempotent
       && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
-      && !readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)
+      && !hasHostedAssistantOutboxConfirmationRetryPath(intent)
     ) {
       continue;
     }
@@ -1348,6 +1372,11 @@ function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
         // hide a ready approval-link reply queued later on the same boundary.
         continue;
       }
+      if (intent.status === "sent") {
+        // Receipt recovery shares the wake clock but is not an outbound
+        // delivery predecessor on this conversation boundary.
+        continue;
+      }
       if (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
         break;
       }
@@ -1702,6 +1731,7 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
   now: Date,
 ): string | null {
   let approvalFallbackWakeAt: string | null = null;
+  let receiptFallbackWakeAt: string | null = null;
   for (const intent of intents) {
     const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
     if (!wakeAt) {
@@ -1713,11 +1743,19 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
       }
       continue;
     }
-    return approvalFallbackWakeAt && approvalFallbackWakeAt < wakeAt
-      ? approvalFallbackWakeAt
-      : wakeAt;
+    if (intent.status === "sent") {
+      if (!receiptFallbackWakeAt || wakeAt < receiptFallbackWakeAt) {
+        receiptFallbackWakeAt = wakeAt;
+      }
+      continue;
+    }
+    return [approvalFallbackWakeAt, receiptFallbackWakeAt, wakeAt]
+      .filter((candidate): candidate is string => candidate !== null)
+      .sort()[0] ?? null;
   }
-  return approvalFallbackWakeAt;
+  return [approvalFallbackWakeAt, receiptFallbackWakeAt]
+    .filter((candidate): candidate is string => candidate !== null)
+    .sort()[0] ?? null;
 }
 
 function resolveHostedAssistantOutboxIntentWakeAt(
@@ -1732,7 +1770,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
         intent.status === "retryable"
         && !intent.deliveryTransportIdempotent
         && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
-        && !readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)
+        && !hasHostedAssistantOutboxConfirmationRetryPath(intent)
       ) {
         return null;
       }
@@ -1756,13 +1794,39 @@ function resolveHostedAssistantOutboxIntentWakeAt(
       const wakeMs = startedAtMs + HOSTED_SENDING_STALE_RECONCILIATION_MS;
       return new Date(Math.max(wakeMs, now.getTime())).toISOString();
     }
+    case "sent": {
+      if (!hasPendingAssistantOutboxMessageVolumeReceipt(intent)) {
+        return null;
+      }
+      const nextAttemptMs = intent.nextAttemptAt
+        ? Date.parse(intent.nextAttemptAt)
+        : Number.NaN;
+      if (!Number.isFinite(nextAttemptMs)) {
+        return now.toISOString();
+      }
+      return new Date(nextAttemptMs).toISOString();
+    }
     default:
       return null;
   }
 }
 
+function hasHostedAssistantOutboxConfirmationRetryPath(
+  intent: AssistantOutboxIntent,
+): boolean {
+  if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
+    return true;
+  }
+  return intent.deliveryConfirmationPending === true
+    && intent.delivery !== null
+    && parseHostedPhoneCallResultDeliveryKey(
+      intent.deliveryIdempotencyKey,
+    ) !== null;
+}
+
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  selectedNonIdempotentEffectIds?: readonly string[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
@@ -1770,12 +1834,18 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
+  const selectedNonIdempotentEffectIds = new Set(
+    input.selectedNonIdempotentEffectIds ?? [],
+  );
   const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
     context: input.linqDeliveryContext ?? null,
     contexts: input.linqDeliveryContexts ?? null,
   });
   for (const effect of input.assistantDeliveryEffects) {
-    if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
+    if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(
+      effect,
+      selectedNonIdempotentEffectIds.has(effect.effectId),
+    )) {
       continue;
     }
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
@@ -1818,9 +1888,11 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 
 function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
+  explicitlyPrepareNonIdempotent: boolean,
 ): boolean {
   return !hasHostedAssistantVaultFileMedia(effect.payload)
-    && (effect.payload.transportIdempotent
+    && (explicitlyPrepareNonIdempotent
+      || effect.payload.transportIdempotent
       || isHostedAssistantReactionOnlyEffect(effect)
       || hasHostedAssistantVoiceMemoMedia(effect.payload)
       || isHostedSignupWelcomeDeliveryPayload(effect.payload));
@@ -2439,6 +2511,25 @@ function markHostedDeliveryPreProvider(error: unknown): unknown {
   });
 }
 
+function markHostedPhoneCallResultRouteRevocationRetryable(input: {
+  error: unknown;
+  idempotencyKey: string | null | undefined;
+}): unknown {
+  const idempotencyKey = input.idempotencyKey?.trim() ?? "";
+  if (
+    !idempotencyKey.startsWith(HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX)
+    || idempotencyKey.length === HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX.length
+    || typeof input.error !== "object"
+    || input.error === null
+    || !("code" in input.error)
+    || input.error.code !== "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
+  ) {
+    return input.error;
+  }
+
+  return markHostedDeliveryPreProviderRetryable(input.error);
+}
+
 function createHostedEmailGroupRecipientAmbiguityError(): VaultCliError & {
   deliveryMayHaveSucceeded: true;
   retryable: false;
@@ -2716,6 +2807,11 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
         }
       : {}),
     signal: input.signal,
+  }).catch((error: unknown) => {
+    throw markHostedPhoneCallResultRouteRevocationRetryable({
+      error,
+      idempotencyKey: input.intent?.deliveryIdempotencyKey,
+    });
   });
   if (assertion?.assistantAskFallbackRequired === true) {
     if (!reviewedCompletion) {
@@ -3194,12 +3290,25 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         : null;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
+        confirmTerminalIntent: async ({ intent, outcome }) => {
+          await recordHostedPhoneCallResultTerminalConfirmationRequired({
+            effectsPort: input.effectsPort,
+            intent,
+            outcome,
+            signal: input.signal,
+          });
+        },
         persistDeliveredIntent: async ({ intent }) => {
           await confirmHostedAcceptedLinqReactionDelivery({
             effectsPort: input.effectsPort,
             intent,
             linqDeliveryContexts,
             timing: acceptedLinqReactionTiming,
+          });
+          queueHostedAssistantMessageVolumeReceiptWrite({
+            effectsPort: input.effectsPort,
+            intent,
+            vaultRoot: input.vaultRoot,
           });
         },
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) => {
@@ -3228,10 +3337,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             timing: null,
           });
         },
+        requiresTerminalConfirmation: ({ intent }) =>
+          parseHostedPhoneCallResultDeliveryKey(
+            intent.deliveryIdempotencyKey,
+          ) !== null,
         shouldRethrowDispatchError: ({ error }) =>
           input.preparedDispatch !== null
           && isHostedBackgroundDeliveryDeferredError(error),
       },
+      trackMessageVolumeReceipt:
+        input.effectsPort.recordOutboundMessageVolumeReceipt !== undefined,
       dependencies: {
         sendEmail: async (request) => {
           if (request.targetKind === "participant") {
@@ -3317,6 +3432,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegram: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
+          const trackedPhoneCallResult =
+            readHostedPhoneCallResultDeliveryFromEffect(
+              input.assistantDeliveryEffect,
+            );
           const privateCompletion = mirrorState.intent
             && isHostedPrivateAssistantAskCompletionIntent(mirrorState.intent)
             ? mirrorState.intent
@@ -3341,47 +3460,72 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               vaultRoot: input.vaultRoot,
             });
           }
-          const authorityBoundTarget =
-            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
-              assistantDeliveryEffect: input.assistantDeliveryEffect,
-              delivery: {
-                media: [],
-                message: request.message,
-              },
-              effectsPort: input.effectsPort,
-              intent: mirrorState.intent,
-              signal: input.signal,
-              target: request.target,
-              userId: input.userId,
-              vaultRoot: input.vaultRoot,
-            });
-          const providerFetch = privateCompletion
+          const trackedPhoneCallResultRouteAuthority = trackedPhoneCallResult
+            ? requireHostedPhoneCallResultTelegramRouteAuthority({
+                intent: mirrorState.intent,
+                target: request.target,
+                userId: input.userId,
+              })
+            : null;
+          const authorityBoundTarget = trackedPhoneCallResultRouteAuthority
+            ? trackedPhoneCallResultRouteAuthority.threadId
+            : await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+                assistantDeliveryEffect: input.assistantDeliveryEffect,
+                delivery: {
+                  media: [],
+                  message: request.message,
+                },
+                effectsPort: input.effectsPort,
+                intent: mirrorState.intent,
+                signal: input.signal,
+                target: request.target,
+                userId: input.userId,
+                vaultRoot: input.vaultRoot,
+              });
+          const rawProviderFetch = trackedPhoneCallResult
+            ? requireHostedProviderFetch(
+                input.providerFetch,
+                "Hosted phone-call result Telegram delivery",
+              )
+            : input.providerFetch;
+          const providerFetch = privateCompletion || trackedPhoneCallResult
               ? createHostedProviderFetchBoundary({
                 assertProviderEntryLive: async () => {
                   try {
                     await assertHostedDeliveryCanEnterProvider(input);
-                    await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
-                      actualRoute: {
-                        actorId: input.assistantDeliveryEffect.payload.actorId,
-                        channel: "telegram",
-                        delivery: {
-                          kind: "thread",
-                          target: request.target,
+                    if (privateCompletion) {
+                      await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
+                        actualRoute: {
+                          actorId: input.assistantDeliveryEffect.payload.actorId,
+                          channel: "telegram",
+                          delivery: {
+                            kind: "thread",
+                            target: request.target,
+                          },
+                          identityId:
+                            input.assistantDeliveryEffect.payload.identityId,
+                          threadId: input.assistantDeliveryEffect.payload.threadId,
+                          threadIsDirect:
+                            input.assistantDeliveryEffect.payload.threadIsDirect,
                         },
-                        identityId:
-                          input.assistantDeliveryEffect.payload.identityId,
-                        threadId: input.assistantDeliveryEffect.payload.threadId,
-                        threadIsDirect:
-                          input.assistantDeliveryEffect.payload.threadIsDirect,
-                      },
-                      effectsPort: input.effectsPort,
-                      intentId: privateCompletion.intentId,
-                      media: [],
-                      message: request.message,
-                      now: new Date(),
-                      signal: input.signal,
-                      vaultRoot: input.vaultRoot,
-                    });
+                        effectsPort: input.effectsPort,
+                        intentId: privateCompletion.intentId,
+                        media: [],
+                        message: request.message,
+                        now: new Date(),
+                        signal: input.signal,
+                        vaultRoot: input.vaultRoot,
+                      });
+                    }
+                    if (trackedPhoneCallResultRouteAuthority) {
+                      await recordHostedPhoneCallResultDeliverySendingRequired({
+                        effect: input.assistantDeliveryEffect,
+                        effectsPort: input.effectsPort,
+                        routeAuthority:
+                          trackedPhoneCallResultRouteAuthority,
+                        signal: input.signal,
+                      });
+                    }
                   } catch (error) {
                     throw markHostedDeliveryPreProvider(error);
                   }
@@ -3389,20 +3533,27 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 onProviderDispatchEntered: () => {
                   providerDispatchEntered = true;
                 },
-                operation: "Hosted private Assistant Ask Telegram delivery",
-                providerFetch: input.providerFetch,
+                operation: trackedPhoneCallResult
+                  ? "Hosted phone-call result Telegram delivery"
+                  : "Hosted private Assistant Ask Telegram delivery",
+                providerFetch: rawProviderFetch,
               })
-            : input.providerFetch;
+            : rawProviderFetch;
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
             env: input.telegramEnv,
             fetchImplementation: providerFetch,
             ...(input.signal ? { signal: input.signal } : {}),
           }, "Hosted assistant Telegram delivery");
-          if (!privateCompletion) {
+          if (!privateCompletion && !trackedPhoneCallResult) {
             providerDispatchEntered = true;
           }
           const result = await sendTelegramMessage(request, dependencies);
+          if (trackedPhoneCallResult) {
+            // Telegram has accepted the non-idempotent result; preserve the
+            // receipt through the existing outbox confirmation path.
+            return result;
+          }
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
@@ -3856,7 +4007,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         userId: input.userId,
       });
     }
-    assertHostedDeliveryLiveness(input.signal);
+    const trackedPhoneCallResultSent =
+      dispatched.intent.status === "sent"
+      && readHostedPhoneCallResultDeliveryFromEffect(
+        input.assistantDeliveryEffect,
+      ) !== null;
+    if (!trackedPhoneCallResultSent) {
+      assertHostedDeliveryLiveness(input.signal);
+    }
     return buildHostedAssistantDeliveryDispatchResult({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
@@ -3921,6 +4079,109 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       userId: input.userId,
     });
     throw enrichedError;
+  }
+}
+
+async function recordHostedPhoneCallResultDeliverySendingRequired(input: {
+  effect: HostedAssistantDeliveryEffect;
+  effectsPort: HostedRuntimeEffectsPort;
+  routeAuthority: HostedExecutionTelegramExternalThreadRouteAuthority;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  const delivery = readHostedPhoneCallResultDeliveryFromEffect(input.effect);
+  if (!delivery) {
+    return;
+  }
+  await recordHostedPhoneCallResultDeliveryOutcomeRequired({
+    effectsPort: input.effectsPort,
+    request: {
+      ...delivery,
+      routeAuthority: input.routeAuthority,
+      status: "sending",
+    },
+    signal: input.signal,
+  });
+}
+
+function requireHostedPhoneCallResultTelegramRouteAuthority(input: {
+  intent: AssistantOutboxIntent | null;
+  target: string;
+  userId: string;
+}): HostedExecutionTelegramExternalThreadRouteAuthority {
+  const authority = input.intent?.externalThreadRouteAuthority ?? null;
+  if (
+    authority?.channel !== "telegram"
+    || authority.containerMemberId !== input.userId
+    || authority.threadId !== input.target.trim()
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE",
+      "Hosted phone-call result route authority no longer matches its provider target.",
+      { retryable: false },
+    );
+  }
+  return {
+    ...authority,
+    channel: "telegram",
+  };
+}
+
+function readHostedPhoneCallResultDeliveryFromEffect(
+  effect: HostedAssistantDeliveryEffect,
+): { generation: number; phoneCallId: string } | null {
+  return parseHostedPhoneCallResultDeliveryKey(
+    effect.payload.idempotencyKey,
+  );
+}
+
+async function recordHostedPhoneCallResultTerminalConfirmationRequired(input: {
+  effectsPort: HostedRuntimeEffectsPort;
+  intent: AssistantOutboxIntent;
+  outcome: AssistantOutboxTerminalOutcome;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  const delivery = parseHostedPhoneCallResultDeliveryKey(
+    input.intent.deliveryIdempotencyKey,
+  );
+  if (!delivery) {
+    return;
+  }
+  await recordHostedPhoneCallResultDeliveryOutcomeRequired({
+    effectsPort: input.effectsPort,
+    request: {
+      deliveryErrorCode: input.outcome.deliveryError?.code ?? null,
+      ...delivery,
+      status: input.outcome.status,
+    },
+    signal: input.signal,
+  });
+}
+
+async function recordHostedPhoneCallResultDeliveryOutcomeRequired(input: {
+  effectsPort: HostedRuntimeEffectsPort;
+  request: HostedPhoneCallResultDeliveryOutcomeRequest;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  const recordOutcome =
+    input.effectsPort.recordPhoneCallResultDeliveryOutcome;
+  if (!recordOutcome) {
+    throw new VaultCliError(
+      "ASSISTANT_PHONE_CALL_RESULT_DELIVERY_OUTCOME_UNAVAILABLE",
+      "Hosted phone call result delivery requires durable outcome recording.",
+      { retryable: true },
+    );
+  }
+  try {
+    await recordOutcome(input.request, { signal: input.signal });
+  } catch (error) {
+    if (readHostedAssistantDeliveryRetryableFlag(error) === false) {
+      throw error;
+    }
+    throw new VaultCliError(
+      "ASSISTANT_PHONE_CALL_RESULT_DELIVERY_OUTCOME_RECORDING_FAILED",
+      "Hosted phone call result delivery outcome could not be recorded.",
+      { retryable: true },
+    );
   }
 }
 
@@ -5255,7 +5516,8 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   };
 }
 
-const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
+const pendingHostedAssistantDeliveryControlPlaneWrites = new Set<Promise<void>>();
+const pendingHostedAssistantMessageVolumeReceiptKeys = new Set<string>();
 
 async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
@@ -5325,7 +5587,7 @@ async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
       timer = setTimeout(() => {
         abortController.abort();
         resolve("timed_out");
-      }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
+      }, HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS);
       timer.unref?.();
     });
     const result = await Promise.race([
@@ -5338,7 +5600,7 @@ async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
         "Accepted Linq delivery outcome recording timed out before consume state could be stored.",
         {
           retryable: true,
-          timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
+          timeoutMs: HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS,
         },
       );
     }
@@ -5383,7 +5645,7 @@ function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
         timer = setTimeout(() => {
           abortController.abort();
           resolve("timed_out");
-        }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
+        }, HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS);
         timer.unref?.();
       });
       const result = await Promise.race([
@@ -5392,7 +5654,7 @@ function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
       ]);
       if (result === "timed_out") {
         console.warn("Hosted Linq delivery outcome recording timed out.", {
-          timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
+          timeoutMs: HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS,
         });
       }
     } catch (error) {
@@ -5403,13 +5665,190 @@ function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
       if (timer !== null) {
         clearTimeout(timer);
       }
-      pendingHostedAssistantLinqDeliveryOutcomeWrites.delete(write);
+      pendingHostedAssistantDeliveryControlPlaneWrites.delete(write);
     }
   });
-  pendingHostedAssistantLinqDeliveryOutcomeWrites.add(write);
+  pendingHostedAssistantDeliveryControlPlaneWrites.add(write);
 }
 
-export async function drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(
+function queueHostedAssistantPendingMessageVolumeReceipts(input: {
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "recordOutboundMessageVolumeReceipt"
+  > | null;
+  intents: readonly AssistantOutboxIntent[];
+  now: Date;
+  vaultRoot: string;
+}): number {
+  let queued = 0;
+  for (const intent of input.intents) {
+    if (
+      !hasPendingAssistantOutboxMessageVolumeReceipt(intent)
+      || !isHostedAssistantMessageVolumeReceiptDue(intent, input.now)
+    ) {
+      continue;
+    }
+    const queuedReceipt = queueHostedAssistantMessageVolumeReceiptWrite({
+      effectsPort: input.effectsPort,
+      intent,
+      vaultRoot: input.vaultRoot,
+    });
+    if (!queuedReceipt) {
+      continue;
+    }
+    queued += 1;
+    if (queued >= HOSTED_MAX_PENDING_MESSAGE_VOLUME_RECEIPTS) {
+      return queued;
+    }
+  }
+  return queued;
+}
+
+export async function queueHostedAssistantPendingMessageVolumeReceiptsForVault(input: {
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "recordOutboundMessageVolumeReceipt"
+  > | null;
+  now?: Date;
+  vaultRoot: string;
+}): Promise<number> {
+  const intents = await listAssistantOutboxIntents(input.vaultRoot);
+  return queueHostedAssistantPendingMessageVolumeReceipts({
+    effectsPort: input.effectsPort ?? null,
+    intents,
+    now: input.now ?? new Date(),
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+function isHostedAssistantMessageVolumeReceiptDue(
+  intent: AssistantOutboxIntent,
+  now: Date,
+): boolean {
+  const nextAttemptMs = intent.nextAttemptAt
+    ? Date.parse(intent.nextAttemptAt)
+    : Number.NaN;
+  return !Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime();
+}
+
+function queueHostedAssistantMessageVolumeReceiptWrite(input: {
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "recordOutboundMessageVolumeReceipt"
+  > | null;
+  intent: AssistantOutboxIntent;
+  vaultRoot: string;
+}): boolean {
+  const recordReceipt = input.effectsPort?.recordOutboundMessageVolumeReceipt;
+  if (!recordReceipt || !hasPendingAssistantOutboxMessageVolumeReceipt(input.intent)) {
+    return false;
+  }
+  const delivery = input.intent.delivery;
+  if (!delivery) {
+    return false;
+  }
+  const channel = delivery.channel.trim().toLowerCase();
+  if (channel !== "email" && channel !== "telegram") {
+    return false;
+  }
+  const receiptKey = [
+    input.vaultRoot,
+    input.intent.intentId,
+    input.intent.dedupeKey,
+  ].join("\u0000");
+  if (
+    pendingHostedAssistantMessageVolumeReceiptKeys.has(receiptKey)
+    || pendingHostedAssistantMessageVolumeReceiptKeys.size
+      >= HOSTED_MAX_PENDING_MESSAGE_VOLUME_RECEIPTS
+  ) {
+    return false;
+  }
+  pendingHostedAssistantMessageVolumeReceiptKeys.add(receiptKey);
+
+  const write = Promise.resolve().then(async () => {
+    const abortController = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const record = recordReceipt(
+        {
+          channel,
+          dedupeKey: input.intent.dedupeKey,
+        },
+        { signal: abortController.signal },
+      );
+      void record.catch(() => undefined);
+      const timeout = new Promise<"timed_out">((resolve) => {
+        timer = setTimeout(() => {
+          abortController.abort();
+          resolve("timed_out");
+        }, HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS);
+        timer.unref?.();
+      });
+      const result = await Promise.race([
+        record.then((receipt) => ({ receipt } as const)),
+        timeout,
+      ]);
+      if (result === "timed_out") {
+        await rescheduleHostedAssistantMessageVolumeReceipt({
+          dedupeKey: input.intent.dedupeKey,
+          intentId: input.intent.intentId,
+          vaultRoot: input.vaultRoot,
+        }).catch(() => undefined);
+        console.warn(
+          "Hosted outbound message-volume receipt recording timed out.",
+          { timeoutMs: HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS },
+        );
+        return;
+      }
+      if (!Number.isFinite(Date.parse(result.receipt.recordedAt))) {
+        throw new TypeError(
+          "Hosted outbound message-volume receipt response is invalid.",
+        );
+      }
+      await markAssistantOutboxMessageVolumeReceiptRecorded({
+        channel,
+        dedupeKey: input.intent.dedupeKey,
+        intentId: input.intent.intentId,
+        recordedAt: result.receipt.recordedAt,
+        vault: input.vaultRoot,
+      });
+    } catch (error) {
+      await rescheduleHostedAssistantMessageVolumeReceipt({
+        dedupeKey: input.intent.dedupeKey,
+        intentId: input.intent.intentId,
+        vaultRoot: input.vaultRoot,
+      }).catch(() => undefined);
+      console.warn("Hosted outbound message-volume receipt recording failed.", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      pendingHostedAssistantMessageVolumeReceiptKeys.delete(receiptKey);
+      pendingHostedAssistantDeliveryControlPlaneWrites.delete(write);
+    }
+  });
+  pendingHostedAssistantDeliveryControlPlaneWrites.add(write);
+  return true;
+}
+
+async function rescheduleHostedAssistantMessageVolumeReceipt(input: {
+  dedupeKey: string;
+  intentId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await rescheduleAssistantOutboxMessageVolumeReceipt({
+    dedupeKey: input.dedupeKey,
+    intentId: input.intentId,
+    nextAttemptAt: new Date(
+      Date.now() + HOSTED_MESSAGE_VOLUME_RECEIPT_RETRY_DELAY_MS,
+    ).toISOString(),
+    vault: input.vaultRoot,
+  });
+}
+
+export async function drainHostedAssistantDeliveryControlPlaneWritesBestEffort(
   options?: { timeoutMs?: number },
 ): Promise<void> {
   const timeoutMs = options?.timeoutMs;
@@ -5428,7 +5867,7 @@ export async function drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(
   try {
     let observed: Promise<void>[];
     do {
-      observed = Array.from(pendingHostedAssistantLinqDeliveryOutcomeWrites);
+      observed = Array.from(pendingHostedAssistantDeliveryControlPlaneWrites);
       if (observed.length === 0) {
         return;
       }
@@ -5436,18 +5875,21 @@ export async function drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(
       await (timeout ? Promise.race([observedSettled, timeout]) : observedSettled);
       if (timedOut) {
         console.warn(
-          "Hosted Linq delivery outcome drain timed out; queued writes continue in the background.",
+          "Hosted delivery control-plane drain timed out; queued writes continue in the background.",
           { timeoutMs },
         );
         return;
       }
-    } while (observed.some((write) => pendingHostedAssistantLinqDeliveryOutcomeWrites.has(write)));
+    } while (observed.some((write) => pendingHostedAssistantDeliveryControlPlaneWrites.has(write)));
   } finally {
     if (timer !== null) {
       clearTimeout(timer);
     }
   }
 }
+
+export const drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort =
+  drainHostedAssistantDeliveryControlPlaneWritesBestEffort;
 
 function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
   if (error && typeof error === "object" && "code" in error) {
@@ -5616,7 +6058,10 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       });
       return alreadyStarted;
     }
-    throw error;
+    throw markHostedPhoneCallResultRouteRevocationRetryable({
+      error,
+      idempotencyKey: input.idempotencyKey,
+    });
   }
   const normalized = normalizeHostedAssistantLinqEngagementResult(result);
   if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {

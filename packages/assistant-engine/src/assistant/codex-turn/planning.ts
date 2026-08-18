@@ -523,12 +523,27 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const telegramPresentationResponseCardsAvailable =
+    resolvedChannel?.trim().toLowerCase() === 'telegram' &&
+    (
+      responseCardsAvailable ||
+      (
+        authenticatedGroupChatRuntime &&
+        input.profile.promptProfile === 'conversation' &&
+        input.profile.toolProfile === 'provider-turn' &&
+        (
+          scheduledInvocationScope !== null ||
+          (
+            ordinaryInboundTurn &&
+            input.input.scheduledInvocationAuthority == null
+          )
+        )
+      )
+    )
   const exerciseRoutineResponseCardsAvailable =
-    responseCardsAvailable &&
-    resolvedChannel?.trim().toLowerCase() === 'telegram'
+    telegramPresentationResponseCardsAvailable
   const telegramRichContentResponseCardsAvailable =
-    responseCardsAvailable &&
-    resolvedChannel?.trim().toLowerCase() === 'telegram'
+    telegramPresentationResponseCardsAvailable
   const groupChallengeResponseCardsAvailable =
     authenticatedGroupChatRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
@@ -880,6 +895,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       threadId: currentAudienceDeliveryFields.threadId,
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })
+  const interactivePhoneCallAudience =
+    privateInteractiveAudience ||
+    (hostedGroupRuntime && messageTargetingAvailable)
   const productFeedbackAuthorized =
     resolveAssistantProductFeedbackAcceptedInputIds(
       input.acceptedInputItems ?? [],
@@ -979,15 +997,17 @@ export async function resolveAssistantRouteTurnPlan(input: {
             scheduledPhoneCallScope !== null ||
             (
               userActionAcceptedInputIds.length > 0 &&
-              (
-                privateInteractiveAudience ||
-                (
-                  hostedGroupRuntime &&
-                  messageTargetingAvailable
-                )
-              )
+              interactivePhoneCallAudience
             )
           ),
+        phoneCallStatusAvailable:
+          interactivePhoneCallAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          typeof input.hostedToolContext?.phoneCalls?.status === 'function',
+        phoneCallStopAvailable:
+          interactivePhoneCallAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,

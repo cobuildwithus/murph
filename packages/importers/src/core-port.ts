@@ -7,6 +7,7 @@ export interface DocumentImportPayload {
   occurredAt?: string;
   note?: string;
   source?: EventSource;
+  reuseExact?: boolean;
 }
 
 export interface MealImportPayload {
