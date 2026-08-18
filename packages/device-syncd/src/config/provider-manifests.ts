@@ -581,7 +581,7 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
   );
   const timeseriesResources = normalizeOptionalJunctionResourceList(
     config.timeseriesResources,
-    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
     JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
     "timeseries",
   );

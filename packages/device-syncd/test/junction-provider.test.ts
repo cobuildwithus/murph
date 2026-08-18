@@ -675,7 +675,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
         return createJsonResponse({ groups: {} });
@@ -767,7 +767,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
   const correctionSweepRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
   assert.equal(
     correctionSweepRequests.length,
-    (JUNCTION_KNOWN_TIMESERIES_RESOURCES.length - 1) * 7,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 7,
   );
   assert.deepEqual(
     new Set(correctionSweepRequests.map((url) =>
@@ -775,13 +775,11 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
         /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
       )?.[1])
     )),
-    new Set(JUNCTION_KNOWN_TIMESERIES_RESOURCES.filter(
-      (resource) => resource !== "workout_stream",
-    )),
+    new Set(JUNCTION_DEFAULT_TIMESERIES_RESOURCES),
   );
   assert.equal(
     requests.filter((url) => url.includes("/v2/summary/workouts/")).length,
-    8,
+    1,
   );
 });
 
@@ -833,7 +831,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
         return createJsonResponse({ groups: {} });
@@ -883,7 +881,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_KNOWN_TIMESERIES_RESOURCES].sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
   );
   assert.equal(importedSnapshots.length, 0);
 });
