@@ -24,6 +24,7 @@ import {
   normalizeHttpBaseUrlOption,
   requestIdFromOptions,
   resolveEffectiveTopLevelToken,
+  resolveVaultCliCommandPath,
   withBaseOptions,
 } from '../src/command-helpers.ts'
 import { readEnvValue } from '../src/env-values.ts'
@@ -248,6 +249,22 @@ test('command helpers normalize top-level tokens and request ids', () => {
   )
   assert.equal(resolveEffectiveTopLevelToken(['', '--token-offset', '5']), null)
   assert.equal(resolveEffectiveTopLevelToken(['--format', 'json', '--', 'show']), 'show')
+  assert.deepEqual(
+    resolveVaultCliCommandPath([
+      '--format',
+      'json',
+      '--token-count',
+      'meal',
+      'show',
+      '--id',
+      'private-id',
+    ]),
+    ['meal', 'show'],
+  )
+  assert.deepEqual(
+    resolveVaultCliCommandPath(['--format=json', '--', 'memory', 'show']),
+    ['memory', 'show'],
+  )
   assert.equal(firstString({ a: '   ', b: '  keep-me  ' }, ['a', 'b']), 'keep-me')
   assert.equal(firstString({ a: '   ', b: 1 }, ['a', 'b']), null)
   assert.equal(
