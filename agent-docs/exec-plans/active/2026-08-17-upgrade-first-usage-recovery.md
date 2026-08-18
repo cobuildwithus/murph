@@ -87,7 +87,7 @@ Updated: 2026-08-18
    desktop recovery states.
 6. [in progress] Run Product UX, preliminary specialist, and final cross-cutting ReviewGPT
    gates; address actionable findings.
-7. [pending] Commit with the authenticated approved Git identity, push, open a PR, monitor
+7. [in progress] Commit with the authenticated approved Git identity, push, open a PR, monitor
    CI/review automation, and archive the plan through `scripts/finish-task`.
 
 ## Decisions
