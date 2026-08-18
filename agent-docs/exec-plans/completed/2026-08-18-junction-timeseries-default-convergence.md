@@ -1,6 +1,6 @@
 # junction-timeseries-default-convergence
 
-Status: active
+Status: completed
 Created: 2026-08-18
 Updated: 2026-08-18
 
@@ -64,3 +64,4 @@ Updated: 2026-08-18
 - Required ReviewGPT/CI gates on the pushed PR head.
 - Redacted production aggregate showing durable completion and reconcile
   frontiers advance after deployment.
+Completed: 2026-08-18
