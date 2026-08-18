@@ -33,10 +33,11 @@ const OWNER_FILE_NAME = "owner.json";
 const invocationCwd = process.cwd();
 const invocation = parseInvocation(process.argv.slice(2));
 const useDetachedChildProcessGroup = process.platform !== "win32";
-// A configured command deadline arms whole-process-group ownership: the
-// deadline, KILL escalation, and post-exit group reaping all act on the one
-// detached group this supervisor already creates, so a wedged descendant
-// (for example a Webpack compiler worker) cannot outlive the command.
+// A configured command deadline arms whole-process-group termination: timeout,
+// cancellation, and failed-command cleanup act on the one detached group this
+// supervisor creates, so a wedged descendant (for example a Webpack compiler
+// worker) cannot outlive an unsuccessful command. A clean command exit returns
+// directly so platform-owned residual process state cannot stall completion.
 const commandTimeoutMs = useDetachedChildProcessGroup
   ? readPositiveInteger(process.env[COMMAND_TIMEOUT_ENV], 0)
   : 0;
@@ -269,10 +270,10 @@ async function runCommand(commandArgs, env) {
       clearTimeout(killTimer);
       reject(error);
     });
-    // The direct child's exit must not release process ownership yet: with a
-    // command deadline configured, a surviving descendant in the detached
-    // group is still owned work, and a termination signal arriving during
-    // reaping must keep targeting that group instead of exiting immediately.
+    // Classify the direct child's result before releasing process ownership.
+    // Unsuccessful commands still reap surviving descendants, and a
+    // termination signal arriving during that cleanup must keep targeting the
+    // detached group instead of exiting immediately.
     child.on("exit", (code, signal) => {
       clearTimeout(deadlineTimer);
       clearTimeout(killTimer);
@@ -280,8 +281,11 @@ async function runCommand(commandArgs, env) {
     });
   });
 
+  const commandSucceeded = forcedExitCode === null
+    && exitState.signal === null
+    && exitState.code === 0;
   try {
-    if (commandTimeoutMs > 0 && exitState.pid !== null) {
+    if (!commandSucceeded && commandTimeoutMs > 0 && exitState.pid !== null) {
       await reapCommandProcessGroup(exitState.pid);
     }
   } finally {

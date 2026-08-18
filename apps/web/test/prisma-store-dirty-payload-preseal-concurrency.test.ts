@@ -70,9 +70,14 @@ describe("PrismaHostedDirtyConnectionStore dirty payload preseal concurrency", (
     const prisma = {
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
       deviceSyncDirtyConnection: {
-        createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+        createManyAndReturn: vi.fn(async (input: { data: Record<string, unknown> }) => {
           createData = input.data;
-          return { count: 1 };
+          const dirtyAt = input.data.latestDirtyAt as Date;
+          return [{
+            ...input.data,
+            createdAt: dirtyAt,
+            updatedAt: dirtyAt,
+          }];
         }),
         findUnique: vi.fn(async () => {
           findCount += 1;
@@ -214,8 +219,8 @@ describe("PrismaHostedDirtyConnectionStore dirty payload preseal concurrency", (
     expect(sealState.maxActive).toBe(2);
     expect(sealState.revalidateInsideTransaction).toEqual([true]);
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(prisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(3);
-    expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.deviceSyncDirtyConnection.createManyAndReturn).toHaveBeenCalledTimes(1);
     expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
     expect(readPayloadCreateData()).toHaveLength(2);
   });

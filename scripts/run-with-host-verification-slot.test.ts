@@ -48,6 +48,19 @@ const exitingLeaderTreeSource = `
   process.stdout.write("pids " + process.pid + " " + grandchild.pid + "\\n");
   setInterval(() => {}, 1000);
 `;
+// A successful leader can leave a platform-owned process-group member behind.
+// The supervisor must return the successful result instead of treating that
+// residual member as unfinished application work.
+const residualDescendantTreeSource = `
+  import { spawn } from "node:child_process";
+  const grandchild = spawn(process.execPath, [
+    "-e",
+    "setInterval(() => {}, 1000);",
+  ], { stdio: "ignore" });
+  grandchild.unref();
+  process.stdout.write("pids " + process.pid + " " + grandchild.pid + "\\n");
+  process.exitCode = Number(process.env.MURPH_TEST_LEADER_EXIT_CODE ?? "0");
+`;
 
 afterEach(async () => {
   for (const child of children) {
@@ -305,16 +318,38 @@ describe("shared-host verification slots", () => {
     expect(readdirSync(targetRoot)).toEqual(["marker.txt"]);
   });
 
-  it("preserves a child failure code and releases its slot", () => {
+  it("preserves a child failure code while reaping its residual process group", async () => {
     const stateRoot = makeTempRoot();
-    const result = runSync(
-      "failing child",
-      [process.execPath, "-e", "process.exit(7)"],
-      stateRoot,
-    );
+    const child = startCommand("failing command", stateRoot, residualDescendantTreeSource, {
+      MURPH_TEST_LEADER_EXIT_CODE: "7",
+      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
+      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "600000",
+    });
 
-    expect(result.status).toBe(7);
+    const [, grandchildPid] = await waitForPids(child);
+    ownedDescendantPids.add(grandchildPid);
+
+    expect(await waitForExit(child)).toBe(7);
+    await waitForOwnedProcessExit(grandchildPid);
     expect(readdirSync(stateRoot)).toEqual([]);
+  });
+
+  it("does not reap a residual process-group member after a successful command", async () => {
+    const stateRoot = makeTempRoot();
+    const child = startCommand("successful command", stateRoot, residualDescendantTreeSource, {
+      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
+      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "600000",
+    });
+
+    const [, grandchildPid] = await waitForPids(child);
+    ownedDescendantPids.add(grandchildPid);
+
+    expect(await waitForExit(child)).toBe(0);
+    expect(isProcessRunning(grandchildPid)).toBe(true);
+    expect(readdirSync(stateRoot)).toEqual([]);
+
+    process.kill(grandchildPid, "SIGTERM");
+    await waitForOwnedProcessExit(grandchildPid);
   });
 
   it("a configured command deadline reaps the whole process group", async () => {
