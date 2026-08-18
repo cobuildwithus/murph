@@ -33,8 +33,8 @@ import {
   inspectAssistantSessionStorage,
   loadAndPersistResolvedSession,
   readAssistantRecentSessionIds,
-  readAssistantIndexStore,
   readAssistantSession,
+  readAssistantSessionRouting,
   readAssistantTranscriptEntries,
   readAssistantTranscriptTailEntries,
   readAutomationState,
@@ -164,16 +164,23 @@ export async function resolveAssistantSession(
       )
     }
 
-    const indexes = await readAssistantIndexStore(paths)
+    const routing = await readAssistantSessionRouting(paths, {
+      alias: manualAlias,
+      conversationKeys: [
+        ...conversationLookupEntries,
+        ...legacyConversationLookupEntries,
+      ].map((entry) => entry.key),
+    })
     const conversationLookupDiagnosticsInput = {
       conversationLookupEntries,
-      indexes,
+      conversationKeySessionIds: routing.conversationKeySessionIds,
     } as const
 
     if (manualAlias) {
-      const sessionId = indexes.aliases[manualAlias]
+      const sessionId = routing.aliasSessionId
       if (sessionId) {
         const resolved = await loadAndPersistResolvedSession({
+          expectedAlias: manualAlias,
           paths,
           sessionId,
           persistenceInput: {
@@ -194,9 +201,11 @@ export async function resolveAssistantSession(
     }
 
     for (const conversationLookupEntry of conversationLookupEntries) {
-      const sessionId = indexes.conversationKeys[conversationLookupEntry.key]
+      const sessionId =
+        routing.conversationKeySessionIds.get(conversationLookupEntry.key)
       if (sessionId) {
         const resolved = await loadAndPersistResolvedSession({
+          expectedConversationKey: conversationLookupEntry.key,
           paths,
           sessionId,
           persistenceInput: {
@@ -223,7 +232,8 @@ export async function resolveAssistantSession(
 
     const legacyResetSessions = new Map<string, AssistantSession>()
     for (const legacyLookupEntry of legacyConversationLookupEntries) {
-      const sessionId = indexes.conversationKeys[legacyLookupEntry.key]
+      const sessionId =
+        routing.conversationKeySessionIds.get(legacyLookupEntry.key)
       if (!sessionId) {
         continue
       }
@@ -241,6 +251,7 @@ export async function resolveAssistantSession(
         session: legacySession,
       })) {
         const resolved = await loadAndPersistResolvedSession({
+          expectedConversationKey: legacyLookupEntry.key,
           paths,
           sessionId,
           persistenceInput: {
@@ -347,9 +358,7 @@ function withAssistantSessionResolutionDiagnostics(
 
 function buildAssistantSessionResolutionDiagnostics(input: {
   conversationLookupEntries: readonly AssistantConversationLookupKeyEntry[]
-  indexes?: {
-    conversationKeys: Readonly<Record<string, string>>
-  }
+  conversationKeySessionIds?: ReadonlyMap<string, string>
   lookupSource: AssistantSessionResolutionLookupSource
   legacyAudienceContinuity?: 'migrated' | 'reset'
   matchedEntry?: AssistantConversationLookupKeyEntry | null
@@ -359,29 +368,30 @@ function buildAssistantSessionResolutionDiagnostics(input: {
     input.conversationLookupEntries.find(
       (entry, index) => index > 0 && entry.scope === 'actor',
     ) ?? null
-  const indexedSessionIds =
-    input.indexes
-      ? new Set(
-          input.conversationLookupEntries.flatMap((entry) => {
-            const sessionId = input.indexes?.conversationKeys[entry.key]
-            return sessionId ? [sessionId] : []
-          }),
-        )
-      : null
+  const indexedSessionIds = input.conversationKeySessionIds
+    ? new Set(
+        input.conversationLookupEntries.flatMap((entry) => {
+          const sessionId = input.conversationKeySessionIds?.get(entry.key)
+          return sessionId ? [sessionId] : []
+        }),
+      )
+    : null
 
   return {
-    actorFallbackConversationIndexed: input.indexes && actorFallbackEntry
-      ? input.indexes.conversationKeys[actorFallbackEntry.key] !== undefined
-      : null,
+    actorFallbackConversationIndexed:
+      input.conversationKeySessionIds && actorFallbackEntry
+        ? input.conversationKeySessionIds.has(actorFallbackEntry.key)
+        : null,
     conversationLookupIndexedCandidateCount:
       indexedSessionIds === null ? null : indexedSessionIds.size,
     conversationLookupKeyCount: input.conversationLookupEntries.length,
     conversationLookupMatchedScope: input.matchedEntry?.scope ?? (
       input.lookupSource === 'created' ? 'none' : null
     ),
-    primaryConversationIndexed: input.indexes && primaryEntry
-      ? input.indexes.conversationKeys[primaryEntry.key] !== undefined
-      : null,
+    primaryConversationIndexed:
+      input.conversationKeySessionIds && primaryEntry
+        ? input.conversationKeySessionIds.has(primaryEntry.key)
+        : null,
     ...(input.legacyAudienceContinuity
       ? { legacyAudienceContinuity: input.legacyAudienceContinuity }
       : {}),

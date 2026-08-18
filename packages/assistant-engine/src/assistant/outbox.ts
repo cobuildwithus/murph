@@ -50,6 +50,7 @@ import {
   type AssistantOutboxPersistedTarget,
   type AssistantOutboxRawTargetIdentityInput,
   hashAssistantOutboxIdentity,
+  hashAssistantOutboxLegacyMediaDedupeIdentity,
   hashAssistantOutboxTargetFingerprint,
   resolveAssistantOutboxIntentPath,
 } from './outbox/intents.js'
@@ -68,10 +69,15 @@ import { buildAssistantOutboxSummary as buildAssistantOutboxSummaryLocal } from 
 import { repairAssistantOutboxReceiptForIntent } from './outbox/receipt-repair.js'
 import {
   findAssistantOutboxIntentByDedupeIdentity,
+  listAssistantOutboxIntentsForAutoReplyRoute as listAssistantOutboxIntentsForAutoReplyRouteStore,
+  listAssistantOutboxIntentsForPrivateCompletionRoute as listAssistantOutboxIntentsForPrivateCompletionRouteStore,
   listAssistantOutboxIntentsLocal as listAssistantOutboxIntentsLocalStore,
+  persistAssistantOutboxIntentAtPath,
   readAssistantOutboxIntent as readAssistantOutboxIntentLocal,
   readAssistantOutboxIntentAtPath,
   saveAssistantOutboxIntent as saveAssistantOutboxIntentLocal,
+  type AssistantOutboxAutoReplyRouteQuery,
+  type AssistantOutboxPrivateCompletionRouteQuery,
   type AssistantOutboxInventoryScanMetrics,
 } from './outbox/store.js'
 import {
@@ -94,10 +100,7 @@ import {
   type AssistantOutboxPreparedDispatchState,
   type AssistantOutboxPreparedMirrorDispatch,
 } from './outbox/dispatch-state.js'
-import {
-  normalizeNullableString,
-  writeJsonFileAtomic,
-} from './shared.js'
+import { normalizeNullableString, writeJsonFileAtomic } from './shared.js'
 import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
 import {
   normalizeAssistantResponseMediaList,
@@ -415,8 +418,15 @@ export async function createAssistantOutboxIntent(
             })
     const existing = await findAssistantOutboxIntentByDedupeIdentity({
       dedupeKey,
-      deliveryIdempotencyKey,
       dedupeToken: input.dedupeToken,
+      deliveryIdempotencyKey:
+        normalizeNullableString(input.dedupeToken) === deliveryIdempotencyKey
+          ? deliveryIdempotencyKey
+          : null,
+      legacyDedupeKey: hashAssistantOutboxLegacyMediaDedupeIdentity({
+        dedupeToken: input.dedupeToken,
+        media,
+      }),
       vault: input.vault,
     })
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
@@ -464,12 +474,15 @@ export async function createAssistantOutboxIntent(
         })
       }
       if (upgradedExisting !== existing) {
-        const persistedUpgradedExisting =
-          sanitizeAssistantOutboxIntentForPersistence(upgradedExisting)
-        await writeJsonFileAtomic(
-          resolveAssistantOutboxIntentPath(paths.outboxDirectory, upgradedExisting.intentId),
-          persistedUpgradedExisting,
-        )
+        await persistAssistantOutboxIntentAtPath({
+          dedupeIdentityOrigin: 'current',
+          intent: upgradedExisting,
+          intentPath: resolveAssistantOutboxIntentPath(
+            paths.outboxDirectory,
+            upgradedExisting.intentId,
+          ),
+          paths,
+        })
       }
       await repairAssistantOutboxReceiptForIntent({
         at: upgradedExisting.updatedAt,
@@ -524,8 +537,6 @@ export async function createAssistantOutboxIntent(
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(intent),
     )
-    const persistedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
     if (isAutoReplyIntent) {
       await writeAssistantAutoReplyIntentProvenance({
         intentId: intent.intentId,
@@ -534,10 +545,15 @@ export async function createAssistantOutboxIntent(
         vault: input.vault,
       })
     }
-    await writeJsonFileAtomic(
-      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
-      persistedIntentValue,
-    )
+    await persistAssistantOutboxIntentAtPath({
+      dedupeIdentityOrigin: 'current',
+      intent: persistedIntent,
+      intentPath: resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        intent.intentId,
+      ),
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: createdAt,
       intent: persistedIntent,
@@ -651,8 +667,11 @@ export async function saveAssistantOutboxIntentIfUnchanged(input: {
         'Assistant outbox intent id changed during approval reconciliation.',
       )
     }
-    const persisted = sanitizeAssistantOutboxIntentForPersistence(parsed)
-    await writeJsonFileAtomic(intentPath, persisted)
+    await persistAssistantOutboxIntentAtPath({
+      intent: parsed,
+      intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: parsed.updatedAt,
       intent: parsed,
@@ -677,6 +696,18 @@ export async function listAssistantOutboxIntentsLocal(
   onScan?: (metrics: AssistantOutboxInventoryScanMetrics) => void,
 ): Promise<AssistantOutboxIntent[]> {
   return listAssistantOutboxIntentsLocalStore(vault, onScan)
+}
+
+export async function listAssistantOutboxIntentsForAutoReplyRoute(
+  input: AssistantOutboxAutoReplyRouteQuery,
+): Promise<AssistantOutboxIntent[]> {
+  return listAssistantOutboxIntentsForAutoReplyRouteStore(input)
+}
+
+export async function listAssistantOutboxIntentsForPrivateCompletionRoute(
+  input: AssistantOutboxPrivateCompletionRouteQuery,
+): Promise<AssistantOutboxIntent[]> {
+  return listAssistantOutboxIntentsForPrivateCompletionRouteStore(input)
 }
 
 export interface DispatchAssistantOutboxIntentInput {
@@ -834,9 +865,11 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     const persistedSending = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(sending),
     )
-    const persistedSendingValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedSending)
-    await writeJsonFileAtomic(intentPath, persistedSendingValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: persistedSending,
+      intentPath,
+      paths,
+    })
     await appendAssistantTurnReceiptEvent({
       vault: input.vault,
       turnId: persistedSending.turnId,

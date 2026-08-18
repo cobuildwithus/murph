@@ -68,6 +68,8 @@ vi.mock('../src/assistant/outbox.ts', async () => {
   return {
     ...actual,
     listAssistantOutboxIntents: replyEventPathMocks.listAssistantOutboxIntents,
+    listAssistantOutboxIntentsForAutoReplyRoute:
+      replyEventPathMocks.listAssistantOutboxIntents,
   }
 })
 

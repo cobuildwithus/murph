@@ -1236,6 +1236,19 @@ dependency. A rollback to the prior bundle is safe only before the first
 is the hard rollback floor because a workspace, checkpoint, or retained outbox
 intent may contain the marker. Do not try to prove an incident-time drain;
 forward-fix instead of adding a compatibility reader or dual writer.
+The session-routing and outbox-dedupe SQLite projections follow the same
+runtime-only hard-cut discipline. Deploy Cloudflare and the projection-capable
+runner together with `container_rollout=immediate`, require managed-container
+smoke to report the exact new runner-bundle fingerprint and assistant CLI
+surface, and let all old runners drain before any assistant turn can publish
+`session-routing.sqlite` or `outbox-dedupe.sqlite`. The first publication of
+either projection makes that runner bundle the hard rollback floor for the
+workspace. A pre-projection workspace may still migrate its complete valid
+`indexes.json` forward, but a migrated hosted workspace must forward-fix rather
+than reopen below the floor; local downgrades below the projection-capable
+release are unsupported after migration. The existing runner health gate
+replaces a below-floor warm shell before workspace invocation, so this contract
+needs no aggregate dual-write, compatibility marker, or reconciliation owner.
 Native iMessage response cards follow the same runtime-only hard-cut rule.
 Deploy Cloudflare and the runner bundle together with
 `container_rollout=immediate`, then require managed-container smoke to report
@@ -1319,6 +1332,11 @@ acknowledging that item or crossing its gap. Status-only assistant or
 canonical-runtime checkpoints never stamp conversation rows.
 
 The local hosted pending-input index uses schema v2 for this exact-ack protocol.
+Its fixed-size image-completion hint is a rebuildable foreground projection:
+the v2 index remains canonical, positive authority publishes first, negative
+authority publishes only after canonical state, and a missing hint rebuilds
+once from the complete index.
+
 Terminal conversation ids stay in the checkpointed snapshot until a later
 mailbox fetch returns a `consumedSeqByLane` floor covering them; the wake probe
 checks terminal evidence so those retained ids do not schedule another reply.

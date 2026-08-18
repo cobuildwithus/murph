@@ -45,6 +45,11 @@ export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA =
 export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION = 2;
 export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_RELATIVE_PATH =
   ".runtime/operations/assistant/hosted-pending-inputs.json";
+export const HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_SCHEMA =
+  "murph.hosted-pending-assistant-image-completion-hint.v1";
+export const HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_SCHEMA_VERSION = 1;
+export const HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_RELATIVE_PATH =
+  ".runtime/operations/assistant/hosted-pending-image-completion-hint.json";
 
 export interface HostedPendingAssistantInputState {
   backfilled: boolean;
@@ -100,6 +105,8 @@ export interface HostedConversationMailboxHandledItemSelection {
 
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
+const HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_LABEL =
+  "hosted pending assistant image completion hint";
 const HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA =
   "murph.hosted-pending-assistant-inputs.v1";
 const HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA_VERSION = 1;
@@ -110,6 +117,9 @@ const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
     "hasImageCompletionCandidate",
     "inputIds",
   ]);
+const HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_KEYS = new Set([
+  "hasImageCompletionCandidate",
+]);
 const HOSTED_PENDING_ASSISTANT_INPUT_INSPECTION_WAVE_SIZE = 8;
 const HOSTED_PENDING_INPUT_RETENTION_DELIVERABLE_STATUSES = [
   "awaiting_approval",
@@ -141,11 +151,31 @@ export async function readHostedPendingAssistantImageCompletionRecoveryInputIds(
     vaultRoot: string;
   },
 ): Promise<string[]> {
+  const hintFilePath = resolveHostedPendingAssistantImageCompletionHintPath(
+    input.vaultRoot,
+  );
+  const hint = await readHostedPendingAssistantImageCompletionHintAtPath({
+    filePath: hintFilePath,
+  });
+  if (hint === false) {
+    return [];
+  }
   const state = await readHostedPendingAssistantInputState(input);
+  if (hint === null || state.hasImageCompletionCandidate !== hint) {
+    return await reconcileHostedPendingAssistantImageCompletionHint(input);
+  }
   // Return the complete pending cohort only when completion recovery can use
   // it. This keeps route and post-origin selection in its existing owner while
-  // making the ordinary foreground case a single index-file read.
+  // making the ordinary foreground case a single fixed-size hint-file read.
   return state.hasImageCompletionCandidate ? [...state.inputIds] : [];
+}
+
+export function resolveHostedPendingAssistantImageCompletionHintPath(
+  vaultRoot: string,
+): string {
+  return resolveHostedPendingAssistantImageCompletionHintPathFromRoot(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+  );
 }
 
 export async function readExistingHostedPendingAssistantInputIds(input: {
@@ -1128,6 +1158,17 @@ async function writeHostedPendingAssistantInputStateAtPath(input: {
   state: HostedPendingAssistantInputState;
 }): Promise<void> {
   const state = parseHostedPendingAssistantInputState(input.state);
+  const hintFilePath = resolveHostedPendingAssistantImageCompletionHintPathFromRoot(
+    path.dirname(input.filePath),
+  );
+  if (state.hasImageCompletionCandidate) {
+    // Publish positive authority first. A crash can leave a false positive,
+    // which safely falls back to canonical state, but never a false negative.
+    await writeHostedPendingAssistantImageCompletionHintAtPath({
+      filePath: hintFilePath,
+      hasImageCompletionCandidate: true,
+    });
+  }
   await writeAssistantStateVersionedJson({
     filePath: input.filePath,
     schema: input.legacy
@@ -1143,12 +1184,109 @@ async function writeHostedPendingAssistantInputStateAtPath(input: {
         }
       : state,
   });
+  if (!state.hasImageCompletionCandidate) {
+    // Clear the hint only after canonical state no longer requires recovery.
+    await writeHostedPendingAssistantImageCompletionHintAtPath({
+      filePath: hintFilePath,
+      hasImageCompletionCandidate: false,
+    });
+  }
 }
 
 function resolveHostedPendingAssistantInputStatePathFromRoot(
   assistantStateRoot: string,
 ): string {
   return path.join(assistantStateRoot, "hosted-pending-inputs.json");
+}
+
+function resolveHostedPendingAssistantImageCompletionHintPathFromRoot(
+  assistantStateRoot: string,
+): string {
+  return path.join(
+    assistantStateRoot,
+    "hosted-pending-image-completion-hint.json",
+  );
+}
+
+async function reconcileHostedPendingAssistantImageCompletionHint(input: {
+  vaultRoot: string;
+}): Promise<string[]> {
+  return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
+    const state = (await readHostedPendingAssistantInputStateAtPath({
+      filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
+        paths.assistantStateRoot,
+      ),
+    })).state;
+    await writeHostedPendingAssistantImageCompletionHintAtPath({
+      filePath: resolveHostedPendingAssistantImageCompletionHintPathFromRoot(
+        paths.assistantStateRoot,
+      ),
+      hasImageCompletionCandidate: state.hasImageCompletionCandidate,
+    });
+    return state.hasImageCompletionCandidate ? [...state.inputIds] : [];
+  });
+}
+
+async function readHostedPendingAssistantImageCompletionHintAtPath(input: {
+  filePath: string;
+}): Promise<boolean | null> {
+  try {
+    const parsed = JSON.parse(
+      (await readLocalStateTextFile({ currentPath: input.filePath })).text,
+    );
+    return parseVersionedJsonStateEnvelope(parsed, {
+      label: HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_LABEL,
+      parseValue: parseHostedPendingAssistantImageCompletionHint,
+      schema: HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_SCHEMA,
+      schemaVersion:
+        HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_SCHEMA_VERSION,
+    }).hasImageCompletionCandidate;
+  } catch (error) {
+    if (isNodeFileNotFoundError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function writeHostedPendingAssistantImageCompletionHintAtPath(input: {
+  filePath: string;
+  hasImageCompletionCandidate: boolean;
+}): Promise<void> {
+  await writeAssistantStateVersionedJson({
+    filePath: input.filePath,
+    schema: HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_SCHEMA,
+    schemaVersion:
+      HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_SCHEMA_VERSION,
+    value: {
+      hasImageCompletionCandidate: input.hasImageCompletionCandidate,
+    },
+  });
+}
+
+function parseHostedPendingAssistantImageCompletionHint(value: unknown): {
+  hasImageCompletionCandidate: boolean;
+} {
+  const hint = assertPlainObject(
+    value,
+    HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_LABEL,
+  );
+  assertObjectKeys(
+    hint,
+    HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_KEYS,
+    `${HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_LABEL} value`,
+  );
+  if (!("hasImageCompletionCandidate" in hint)) {
+    throw new TypeError(
+      "hosted pending assistant image completion hint must contain hasImageCompletionCandidate.",
+    );
+  }
+  return {
+    hasImageCompletionCandidate: parseHostedPendingAssistantInputBoolean(
+      hint.hasImageCompletionCandidate,
+      HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_LABEL,
+    ),
+  };
 }
 
 async function createBackfilledHostedPendingAssistantInputState(input: {

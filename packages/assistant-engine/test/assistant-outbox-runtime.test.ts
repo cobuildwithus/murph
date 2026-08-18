@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -26,6 +26,7 @@ import {
   upsertAutomation,
 } from '@murphai/core'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
+import { openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
 import { readMaterializedExportPackReceipt } from '@murphai/vault-usecases/export-packs'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
@@ -382,6 +383,124 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-blank',
       }),
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
+  })
+
+  it('promotes the next oldest duplicate claim when the projected winner becomes terminal', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-duplicate-promotion-',
+    )
+    const first = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:30:00+01:00',
+      dedupeToken: 'duplicate-promotion-token',
+      message: 'duplicate promotion',
+      sessionId: 'session-duplicate-promotion',
+      turnId: 'turn-duplicate-promotion',
+    })
+    const duplicate = await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      createdAt: '2026-04-08T00:00:00.000Z',
+      intentId: 'outbox_duplicate_promotion_second',
+      updatedAt: '2026-04-08T00:00:00.000Z',
+    })
+
+    const beforeTerminal = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T01:00:00.000Z',
+      dedupeToken: 'duplicate-promotion-token',
+      message: 'duplicate promotion',
+      sessionId: 'session-duplicate-promotion',
+      turnId: 'turn-duplicate-promotion',
+    })
+    expect(beforeTerminal.intentId).toBe(first.intentId)
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      lastError: {
+        code: 'CHANNEL_REQUIRED',
+        message: 'channel required',
+      },
+      nextAttemptAt: null,
+      status: 'failed',
+      updatedAt: '2026-04-08T01:01:00.000Z',
+    })
+
+    const afterTerminal = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T01:02:00.000Z',
+      dedupeToken: 'duplicate-promotion-token',
+      message: 'duplicate promotion',
+      sessionId: 'session-duplicate-promotion',
+      turnId: 'turn-duplicate-promotion',
+    })
+    expect(afterTerminal.intentId).toBe(duplicate.intentId)
+  })
+
+  it('rebuilds a missing, invalid, or corrupt exact-key dedupe projection without duplicating an intent', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-projection-recovery-',
+    )
+    const first = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-projection-recovery-token',
+      message: 'projection recovery',
+      sessionId: 'session-projection-recovery',
+      turnId: 'turn-projection-recovery',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const projectionPath = path.join(
+      paths.stateDirectory,
+      'outbox-dedupe.sqlite',
+    )
+    expect((await stat(projectionPath)).mode & 0o777).toBe(0o600)
+
+    await rm(projectionPath, { force: true })
+    const afterMissingProjection = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-projection-recovery-token',
+      message: 'projection recovery',
+      sessionId: 'session-projection-recovery',
+      turnId: 'turn-projection-recovery',
+    })
+    expect(afterMissingProjection.intentId).toBe(first.intentId)
+
+    const invalidProjection = openSqliteRuntimeDatabase(projectionPath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    invalidProjection.prepare(`
+      UPDATE assistant_outbox_dedupe_routes
+      SET intent_id = '../invalid'
+      WHERE kind = 'dedupe-key'
+    `).run()
+    invalidProjection.close()
+    const afterInvalidProjection = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:01:30.000Z',
+      dedupeToken: 'stable-projection-recovery-token',
+      message: 'projection recovery',
+      sessionId: 'session-projection-recovery',
+      turnId: 'turn-projection-recovery',
+    })
+    expect(afterInvalidProjection.intentId).toBe(first.intentId)
+
+    await writeFile(projectionPath, 'not a sqlite database', 'utf8')
+    const afterCorruptProjection = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:02:00.000Z',
+      dedupeToken: 'stable-projection-recovery-token',
+      message: 'projection recovery',
+      sessionId: 'session-projection-recovery',
+      turnId: 'turn-projection-recovery',
+    })
+    expect(afterCorruptProjection.intentId).toBe(first.intentId)
+    expect(
+      (await readdir(paths.outboxQuarantineDirectory)).some(
+        (entry) =>
+          entry.startsWith('outbox-dedupe.sqlite.') &&
+          entry.endsWith('.invalid.sqlite'),
+      ),
+    ).toBe(true)
+    expect(
+      (await readdir(paths.outboxDirectory)).filter((entry) =>
+        entry.endsWith('.json'),
+      ),
+    ).toHaveLength(1)
   })
 
   it('persists native reply intent explicitly while omitting it from legacy messages', async () => {
@@ -2194,6 +2313,101 @@ describe('assistant outbox runtime', () => {
     expect(retryWithDifferentMedia.dedupeKey).toBe(legacyDedupeKey)
     expect(retryWithDifferentMedia.media).toEqual(first.media)
   })
+
+  it('does not count repeated rebuilt media identities toward the legacy candidate bound', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-media-dedupe-bound-',
+    )
+    const first = await createIntent(vaultRoot, {
+      dedupeToken: 'current-intent-before-legacy-candidates',
+      message: 'current intent',
+      sessionId: 'session-legacy-dedupe-bound',
+      turnId: 'turn-legacy-dedupe-bound',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await Promise.all(Array.from({ length: 101 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const intent = {
+        ...first,
+        createdAt: new Date(
+          Date.parse(first.createdAt) + index * 1_000,
+        ).toISOString(),
+        dedupeKey: index.toString(16).padStart(40, '0'),
+        intentId: `outbox_legacy_bound_${suffix}`,
+        updatedAt: new Date(
+          Date.parse(first.updatedAt) + index * 1_000,
+        ).toISOString(),
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+    const unmatched = await createIntent(vaultRoot, {
+      dedupeToken: 'unmatched-legacy-media-token',
+      message: 'new intent after repeated legacy media identities',
+      sessionId: 'session-legacy-dedupe-bound',
+      turnId: 'turn-legacy-dedupe-bound-new',
+    })
+    expect(unmatched.intentId).not.toBe(first.intentId)
+  }, 120_000)
+
+  it('fails closed when legacy media-key recovery exceeds its distinct identity bound', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-media-distinct-bound-',
+    )
+    const first = await createIntent(vaultRoot, {
+      dedupeToken: 'current-intent-before-distinct-legacy-candidates',
+      message: 'current intent',
+      sessionId: 'session-legacy-dedupe-distinct-bound',
+      turnId: 'turn-legacy-dedupe-distinct-bound',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await Promise.all(Array.from({ length: 101 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const intent = {
+        ...first,
+        createdAt: new Date(
+          Date.parse(first.createdAt) + index * 1_000,
+        ).toISOString(),
+        dedupeKey: index.toString(16).padStart(40, '0'),
+        intentId: `outbox_legacy_distinct_bound_${suffix}`,
+        media: [{
+          alt: `Legacy candidate ${suffix}`,
+          kind: 'image',
+          source: `legacy-distinct-bound-${suffix}`,
+          url: `https://cdn.example.test/legacy-bound/${suffix}.png`,
+        }],
+        updatedAt: new Date(
+          Date.parse(first.updatedAt) + index * 1_000,
+        ).toISOString(),
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+    await expect(createIntent(vaultRoot, {
+      dedupeToken: 'unmatched-distinct-legacy-media-token',
+      message: 'new intent that cannot bypass ambiguous legacy state',
+      sessionId: 'session-legacy-dedupe-distinct-bound',
+      turnId: 'turn-legacy-dedupe-distinct-bound-new',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_LEGACY_DEDUPE_BOUND_EXCEEDED',
+    })
+  }, 120_000)
 
   it('dedupes hosted-key retries against legacy no-token active intents', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-legacy-idempotency-dedupe-')
