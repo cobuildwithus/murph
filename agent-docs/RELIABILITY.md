@@ -1335,14 +1335,17 @@ Last verified: 2026-08-16
   without another repair loop or lifecycle manager.
 - Junction historical backfill and non-yieldable full jobs finish inventory,
   summary, profile, and historical scheduling once. A yieldable full reconcile
-  instead commits one configured summary resource per full-job continuation,
-  after a live provider inventory read for that attempt, before entering the
-  existing timeseries continuation. This bounds each summary collection to at
-  most three sequential pages with one eight-second request attempt per page;
-  a typed provider failure therefore reaches ordinary job backoff before the
+  instead commits one configured normalization-safe summary unit per full-job
+  continuation, after a live provider inventory read for that attempt, before
+  entering the existing timeseries continuation. Ordinary units contain one
+  resource and allow at most three sequential pages with one eight-second
+  request attempt per page. Sleep and sleep-cycle remain one canonical unit so
+  stage-owner suppression sees both resources; their one-attempt page timeout
+  is five seconds, bounding the paired six-page worst case at 30 seconds. A
+  typed provider failure therefore reaches ordinary job backoff before the
   hosted 45-second maintenance cancellation can release it as an unclassified
   yield. Each timeseries attempt owns one canonical resource and one complete
-  UTC day under the same three-page, single-attempt bound. Page-heavy active-
+  UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;
   no partial aggregate or vendor cursor is persisted. `summaryResourceCursor`,
   `summaryPhaseComplete`, `timeseriesCursor`, and `timeseriesResourceCursor`

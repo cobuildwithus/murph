@@ -1978,7 +1978,7 @@ test("Junction retrying historical backfill without attempts uses the first retr
   assert.equal(due?.nextReconcileAt, "2026-04-04T01:16:00.000Z");
 });
 
-test("Junction yieldable reconcile checkpoints one bounded summary resource per continuation", async () => {
+test("Junction yieldable reconcile checkpoints one bounded normalization-safe summary unit per continuation", async () => {
   const requestsByPass: string[][] = [];
   const importedSnapshots: unknown[] = [];
   let activePass = 0;
@@ -1994,6 +1994,7 @@ test("Junction yieldable reconcile checkpoints one bounded summary resource per 
             activity: true,
             body: true,
             sleep: true,
+            sleep_cycle: true,
           },
           slug: "garmin",
           status: "connected",
@@ -2014,7 +2015,7 @@ test("Junction yieldable reconcile checkpoints one bounded summary resource per 
     }
     throw new Error(`Unexpected request: ${url}`);
   }, {
-    summaryResources: ["activity", "sleep", "body"],
+    summaryResources: ["activity", "sleep", "sleep_cycle", "body"],
     timeseriesResources: [],
   });
   const context = createJunctionJobContext({
@@ -2052,7 +2053,7 @@ test("Junction yieldable reconcile checkpoints one bounded summary resource per 
     requestsByPass.map((requests) => requests
       .map((url) => new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1])
       .filter((resource): resource is string => Boolean(resource))),
-    [["activity"], ["sleep"], ["body"], []],
+    [["activity"], ["sleep", "sleep_cycle"], ["body"], []],
   );
   assert.deepEqual(
     continuationPayloads.map((payload) => ({
@@ -2066,6 +2067,10 @@ test("Junction yieldable reconcile checkpoints one bounded summary resource per 
     ],
   );
   assert.equal(importedSnapshots.length, 4);
+  assert.deepEqual(
+    Object.keys((importedSnapshots[1] as { summaries: Record<string, unknown> }).summaries),
+    ["sleep", "sleep_cycle"],
+  );
 });
 
 test("Junction yieldable summary continuation fails within its inner provider-attempt bound", async () => {

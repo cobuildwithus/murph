@@ -71,7 +71,8 @@ frontiers advance after deployment.
 - Product journeys replayed locally: a policy-blocked due assistant source stays
   durable while device work completes and the runner goes idle; a normal due
   assistant still preempts device work; a yieldable reconcile commits one
-  summary per continuation and reaches finalization; an inner summary provider
+  normalization-safe summary unit per continuation and reaches finalization;
+  sleep and sleep-cycle remain paired in one import; an inner summary provider
   failure performs one bounded attempt and reaches typed job failure.
 - `packages/hosted-execution` runtime-control tests pass (32 tests), including
   the exact-true request marker parser.
@@ -83,14 +84,17 @@ frontiers advance after deployment.
 - The full Junction provider suite passes (282 tests); device-syncd provider-
   manifest and config suites pass (73 tests); the full Cloudflare runner-alarm
   suite passes (152 tests).
+- The independent ReviewGPT incident review validated both root causes and
+  identified coupled sleep normalization as a required continuation invariant.
+  The remediation regression and the full 282-test Junction provider suite pass,
+  and the device-syncd typecheck remains green.
 - Typechecks pass for `apps/cloudflare`, `packages/assistant-runtime`,
   `packages/device-syncd`, and `packages/hosted-execution`.
 - The diff-scoped verifier completed shell syntax, Node syntax, and the hosted
   stale-name guard before its local run was manually stopped during the next
   guard after 161 seconds; required CI remains the broad verification owner.
-- Corrective pull request #1992 is open. An independent ReviewGPT incident trace
-  is still running against the sanitized production evidence. Exact-head PR
-  review, required CI, protected deployment, and production convergence proof
+- Corrective pull request #1992 is open. Exact-head PR review of the corrected
+  head, required CI, protected deployment, and production convergence proof
   remain pending.
 
 ## State

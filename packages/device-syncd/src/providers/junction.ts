@@ -538,13 +538,22 @@ const JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT = Object.freeze({
   maxPages: 3,
   requestTimeoutMs: 8_000,
 } satisfies JunctionCollectionWorkLimit);
-// Hosted reconciliation commits one summary resource per continuation. Match
-// the bounded timeseries contract so a complete three-page resource remains
-// below the 45-second outer maintenance budget and can persist its next cursor.
+// Most hosted summary continuation units contain one resource. Match the
+// bounded timeseries contract so a complete three-page unit remains below the
+// 45-second outer maintenance budget and can persist its next cursor.
 const JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
   requestTimeoutMs: 8_000,
+} satisfies JunctionCollectionWorkLimit);
+// Sleep summaries and sleep cycles share canonical stage ownership, so they
+// must be normalized in one import. Keep their combined worst-case provider
+// wait at 30 seconds to leave room for projection/import inside the hosted
+// worker's 45-second outer maintenance budget.
+const JUNCTION_FULL_JOB_COUPLED_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
+  maxAttemptsPerPage: 1,
+  maxPages: 3,
+  requestTimeoutMs: 5_000,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
@@ -3335,18 +3344,30 @@ export function createJunctionDeviceSyncProvider(
     const eligibleResources = summaryResources.filter((resource) =>
       !isJunctionProfileSummaryResource(resource) || !profileAlreadyChecked
     );
+    const eligibleUnits = eligibleResources.reduce<string[][]>((units, resource) => {
+      if (resource === "sleep_cycle" && eligibleResources.includes("sleep")) {
+        return units;
+      }
+      units.push(
+        resource === "sleep" && eligibleResources.includes("sleep_cycle")
+          ? ["sleep", "sleep_cycle"]
+          : [resource],
+      );
+      return units;
+    }, []);
     const requestedCursor = normalizeString(input.job.payload.summaryResourceCursor);
     const cursorIndex = requestedCursor
-      ? eligibleResources.indexOf(requestedCursor)
+      ? eligibleUnits.findIndex((unit) => unit.includes(requestedCursor))
       : 0;
-    const resource = eligibleResources[cursorIndex >= 0 ? cursorIndex : 0] ?? null;
-    if (!resource) {
+    const resources = eligibleUnits[cursorIndex >= 0 ? cursorIndex : 0] ?? null;
+    if (!resources) {
       return null;
     }
 
     const summaries: Record<string, unknown[]> = {};
     let profileMetadataPatch: Record<string, unknown> = {};
-    if (isJunctionProfileSummaryResource(resource)) {
+    const profileResource = resources.find(isJunctionProfileSummaryResource);
+    if (profileResource) {
       const profileSummaryResult = await fetchProfileSummaryOnce(
         input.context,
         input.skippedOptionalResources,
@@ -3358,24 +3379,29 @@ export function createJunctionDeviceSyncProvider(
         );
       }
       if (profileSummaryResult.records.length > 0) {
-        summaries[resource] = profileSummaryResult.records;
+        summaries[profileResource] = profileSummaryResult.records;
       }
     } else {
-      summaries[resource] = await fetchOptionalJunctionResourceRecords(
-        input.context,
-        "summary",
-        resource,
-        input.skippedOptionalResources,
-        () => client.listSummary({
-          collectionWorkLimit: JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT,
-          dateQueryFormat: input.dateQueryFormat,
+      const collectionWorkLimit = resources.length > 1
+        ? JUNCTION_FULL_JOB_COUPLED_SUMMARY_COLLECTION_WORK_LIMIT
+        : JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT;
+      for (const resource of resources) {
+        summaries[resource] = await fetchOptionalJunctionResourceRecords(
+          input.context,
+          "summary",
           resource,
-          signal: input.context.signal ?? null,
-          userId: input.context.account.externalAccountId,
-          windowEnd: input.summaryWindow.windowEnd,
-          windowStart: input.summaryWindow.windowStart,
-        }),
-      );
+          input.skippedOptionalResources,
+          () => client.listSummary({
+            collectionWorkLimit,
+            dateQueryFormat: input.dateQueryFormat,
+            resource,
+            signal: input.context.signal ?? null,
+            userId: input.context.account.externalAccountId,
+            windowEnd: input.summaryWindow.windowEnd,
+            windowStart: input.summaryWindow.windowStart,
+          }),
+        );
+      }
     }
 
     const preparedSummaryImport = await prepareJunctionImportSnapshot(
@@ -3395,7 +3421,7 @@ export function createJunctionDeviceSyncProvider(
       timeseries: {},
     });
 
-    const nextResource = eligibleResources[cursorIndex >= 0 ? cursorIndex + 1 : 1] ?? null;
+    const nextResource = eligibleUnits[cursorIndex >= 0 ? cursorIndex + 1 : 1]?.[0] ?? null;
     const sourceProviderSlug = normalizeProviderSlug(
       input.job.payload.sourceProviderSlug,
     );
