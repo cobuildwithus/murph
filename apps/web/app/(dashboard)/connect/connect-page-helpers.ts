@@ -1,4 +1,4 @@
-import { JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG } from "@murphai/device-syncd/connect-config";
+import { JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG } from "@murphai/device-syncd/fitbit-migration";
 
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 

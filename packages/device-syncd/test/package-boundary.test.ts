@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 
 import * as rootExports from "../src/index.ts";
+import { JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG } from "../src/fitbit-migration.ts";
 import { createSecretCodec } from "../src/local-secret-codec.ts";
 
 test("@murphai/device-syncd package manifest exposes narrow public subpaths", async () => {
@@ -118,6 +119,16 @@ test("@murphai/device-syncd root barrel exposes the local secret codec API", () 
   assert.equal(rootExports.createSecretCodec, createSecretCodec);
   assert.equal("buildDeviceSyncSecretAad" in rootExports, false);
   assert.equal("buildDeviceSyncTokenCipherOptions" in rootExports, false);
+});
+
+test("Fitbit migration public entrypoint stays browser-safe", async () => {
+  const source = await readFile(
+    new URL("../src/fitbit-migration.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG, "google_health");
+  assert.doesNotMatch(source, /["']\.\/connect-config\.ts["']/u);
 });
 
 test("Junction provider imports SDK resource subpaths without the aggregate root", async () => {
