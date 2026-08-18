@@ -550,6 +550,7 @@ export function GroupMemberPlanStudy() {
                 recurringAmountUsdCents: 4_900,
               },
             ]}
+            usageRecoveryAvailable
             usageRecoveryInitialOpen
             usageTopUpOffers={[{
               amountLabel: "$5",

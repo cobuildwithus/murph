@@ -114,6 +114,15 @@ Updated: 2026-08-18
   visibility and eligibility facts that render its plan cards. The usage
   projection does not resolve a second subscription quote or recommendation
   pipeline for this UI.
+- The recovery query requests presentation but never proves exhaustion. An exact
+  active or returned usage purchase opens first; otherwise Family recovery may
+  auto-open only while the live usage projection remains exhausted. The Family
+  owner banner remains available during ordinary exhausted Settings visits;
+  the query controls its initial dialog only. A stale query is inert after
+  reset, fulfillment, upgrade, or other recovery.
+- Recovery actions use the plain `Add usage` label. Supporting copy explains the
+  monthly benefit directly and avoids internal terms such as recurring option,
+  secondary option, or authorized option.
 - User messages should promise recovery, not a particular price or action; the
   signed-in UI owns the current recommendation.
 - Core exhaustion copy keeps the wearable-sync and authorized-group-update
@@ -154,6 +163,12 @@ Updated: 2026-08-18
   `usageRecovery=true#subscription` and `familyRecovery=true#family` handoffs
   resume after sign-in; repeated or augmented parameters fail closed to the
   normal Home route.
+- Member with a frozen purchase: the exact purchase dialog opens before Family
+  handoff or another recovery dialog and retains its resume, cancel, retry,
+  polling, failure, and completion behavior.
+- Member whose usage recovered while the URL stayed open: Settings ignores the
+  stale recovery query and shows the ordinary live usage state without opening
+  a dialog.
 - Presentation proof was inspected at phone and desktop widths from production
   components on the synthetic screenshot surface. Selected redacted evidence:
   `.artifacts/review-gpt/usage-recovery-sponsored-phone.png`,
@@ -199,3 +214,14 @@ Updated: 2026-08-18
   in the shared exhaustion copy. Added small shared variants that preserve the
   correct continuity and per-member boundaries without exposing authority,
   identifiers, prices, or plan recommendations.
+- ReviewGPT final round 2 found that the presentation query could override live
+  usage truth and hide a payer's frozen purchase after Family sponsorship.
+  Accepted: the query is now live-exhaustion-gated, and active or returned
+  purchases retain first presentation ownership without new state or lifecycle
+  machinery.
+- The specialist retry found that an exhausted Family owner's ordinary Settings
+  link pointed at a query-gated recovery banner. The banner now follows live
+  exhausted state, while only the confirmation dialog follows the exact query.
+- Direct screenshot feedback found `recurring option` and `secondary option when
+  authorized` to be implementation-facing copy. Replaced them with the concrete
+  monthly usage benefit and the shorter `Add usage` action.

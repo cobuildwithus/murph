@@ -195,6 +195,16 @@ its plan-card authority rather than from `subscriptionActionQuote`; the quote
 remains disclosure for an exact assistant-mediated choice, not a
 recommendation. An eligible one-time usage purchase remains secondary when a
 higher recurring tier exists and becomes primary only when none exists.
+The recovery query requests presentation; it is not proof that usage remains
+exhausted. Authenticated Settings auto-opens recovery only while the live usage
+projection is `exhausted`. An exact returned or nonterminal usage purchase owns
+presentation before plan or Family recovery, preserving its frozen-target
+resume, cancel, retry, polling, failure, and completion surfaces across later
+billing-relationship changes. Active, unavailable, reset, or otherwise
+recovered usage ignores a stale recovery query.
+An eligible Family-owner recovery banner follows that same current exhausted
+state during both ordinary and message-linked Settings visits; the exact query
+controls only whether its confirmation dialog opens initially.
 
 Family Settings may expose the same fixed-pack dialog beside each active member
 to the current active owner. That owner pays through the Family billing

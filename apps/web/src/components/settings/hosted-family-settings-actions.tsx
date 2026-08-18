@@ -214,11 +214,12 @@ export function HostedFamilyManager(props: {
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
+  usageRecoveryAvailable?: boolean;
   usageRecoveryInitialOpen?: boolean;
 }) {
   const router = useRouter();
   const familyRecoveryAction = resolveFamilyOwnerRecoveryAction(props);
-  const visibleFamilyRecoveryAction = props.usageRecoveryInitialOpen
+  const visibleFamilyRecoveryAction = props.usageRecoveryAvailable
     ? familyRecoveryAction
     : null;
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -237,7 +238,7 @@ export function HostedFamilyManager(props: {
   const [createdInvite, setCreatedInvite] = useState<CreatedFamilyInvite | null>(null);
   const [createdInviteCopied, setCreatedInviteCopied] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(() =>
-    visibleFamilyRecoveryAction
+    props.usageRecoveryInitialOpen ? visibleFamilyRecoveryAction : null
   );
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -501,11 +502,11 @@ export function HostedFamilyManager(props: {
         <div className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div>
             <p className="font-serif text-xl font-semibold tracking-tight text-foreground">
-              More recurring Family usage is available
+              Get more included usage each month
             </p>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Upgrade your access from {familyRecoverySourceTier.name} to {familyRecoveryTargetTier.name}.
-              One-time usage stays available as a secondary option when authorized.
+              Move your access from {familyRecoverySourceTier.name} to {familyRecoveryTargetTier.name}
+              {" "}for more included usage each month. You can still add usage when you need it.
             </p>
           </div>
           <Button
@@ -997,7 +998,7 @@ export function HostedFamilyManager(props: {
                 ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
                 : pendingAction?.kind === "change-plan"
                   ? pendingAction.recovery
-                    ? `Move your Family access from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. This is the recurring option with more included usage.`
+                    ? `Move your Family access from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. ${pendingTargetTier?.name} includes more usage each month.`
                     : pendingPlanChangeDirection === "upgrade"
                       ? `Upgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. The prorated difference will appear on your next invoice.`
                       : `Downgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. Any prorated credit will apply to your next invoice.`
@@ -1079,7 +1080,7 @@ export function HostedFamilyManager(props: {
                 scope="family"
                 targetLabel={pendingAction.label}
                 triggerClassName="w-full"
-                triggerLabel={pendingAction.recovery ? "Add one-time usage" : undefined}
+                triggerLabel={pendingAction.recovery ? "Add usage" : undefined}
                 triggerSize="xl"
                 triggerVariant={pendingAction.recovery ? "outline" : "secondary"}
               />

@@ -307,6 +307,23 @@ export default async function SettingsPage({
     : billingUsageTopUpUsesFamilyOwner
       ? familyOwnerUsageTopUpActivePurchase
       : personalUsageTopUpActivePurchase;
+  const usageRecoveryIsCurrent =
+    usageRecoveryInitialOpen && usageStatus?.status === "exhausted";
+  const usageRecoveryPresentationOpen =
+    usageRecoveryIsCurrent
+    && usageTopUpActivePurchase === null
+    && usageTopUpPurchaseReturn === null;
+  const familyUsageRecoveryAvailable =
+    activeFamilyOwner
+    && usageStatus?.status === "exhausted"
+    && usageTopUpActivePurchase === null
+    && usageTopUpPurchaseReturn === null;
+  const billingUsagePurchaseRecoveryOpen =
+    usageRecoveryIsCurrent
+    && (
+      billingUsageTopUpActivePurchase !== null
+      || billingUsageTopUpPurchaseReturn !== null
+    );
   const billingUsageTopUpOffers = billingUsageTopUpUsesFamilyOwner
     ? familyUsageTopUpOffers
     : usageTopUpOffers;
@@ -568,7 +585,7 @@ export default async function SettingsPage({
           payerMemberId={authenticatedMember?.id}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
-          usageRecoveryInitialOpen={usageRecoveryInitialOpen}
+          usageRecoveryInitialOpen={usageRecoveryPresentationOpen}
           usageStatus={usageStatus}
           usageTopUpActivePurchase={billingUsageTopUpActivePurchase}
           usageTopUpCheckoutUrl={
@@ -577,9 +594,11 @@ export default async function SettingsPage({
               : undefined
           }
           usageTopUpInitialOpen={
-            billingUsageTopUpUsesFamilyOwner
-              ? requestedFamilyOwnerUsageTopUp || openPersonalUsageTopUp
-              : openPersonalUsageTopUp
+            (
+              billingUsageTopUpUsesFamilyOwner
+                ? requestedFamilyOwnerUsageTopUp || openPersonalUsageTopUp
+                : openPersonalUsageTopUp
+            ) || billingUsagePurchaseRecoveryOpen
           }
           usageTopUpOffers={billingUsageTopUpOffers}
           usageTopUpPurchaseReturn={billingUsageTopUpPurchaseReturn}
@@ -648,7 +667,8 @@ export default async function SettingsPage({
             usageTopUpOffers={familyUsageTopUpOffers}
             usageTopUpPurchaseReturn={familySettingsUsageTopUpPurchaseReturn}
             usageTopUpReturnMemberId={familySettingsUsageTopUpReturnMemberId}
-            {...(usageRecoveryInitialOpen
+            usageRecoveryAvailable={familyUsageRecoveryAvailable}
+            {...(usageRecoveryPresentationOpen
               ? { usageRecoveryInitialOpen: true }
               : {})}
           />

@@ -176,10 +176,13 @@ export function HostedBillingSettings(props: {
     ?? (activeFamilyOwner && props.familyRecurringUpgradeAvailable === true
       ? "a higher Family tier"
       : null);
-  const showSponsoredRecovery = sponsoredMember && (
-    props.usageRecoveryInitialOpen === true
-    || props.usageStatus?.status === "exhausted"
+  const hasUsageTopUpOwner = Boolean(
+    props.usageTopUpActivePurchase || props.usageTopUpPurchaseReturn,
   );
+  const showSponsoredRecovery =
+    sponsoredMember
+    && props.usageStatus?.status === "exhausted"
+    && !hasUsageTopUpOwner;
 
   const hasPendingGroupSwitch =
     scheduledPlanCode === "launch_group_monthly" &&
@@ -640,8 +643,8 @@ export function HostedBillingSettings(props: {
               Keep Murph going
             </p>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Your Family owner controls recurring access. Send them a generic
-              Family Settings link so they can choose your account after signing in.
+              Your Family owner manages your plan. Send them this Family Settings
+              link so they can choose your account after signing in.
             </p>
           </div>
           <HostedSponsoredFamilyRecoveryDialog
@@ -865,26 +868,26 @@ function PlanUsageBand(props: {
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
         triggerClassName="min-h-11 w-full sm:w-auto"
-        triggerLabel="Add one-time usage"
+        triggerLabel="Add usage"
         triggerSize={topUpIsPrimary ? "xl" : "lg"}
         triggerVariant={topUpIsPrimary ? "default" : "outline"}
       />
     ) : null;
     const recoveryExplanation = hasRecurringRecovery
       ? props.recommendedRecurringPlanName === "a higher Family tier"
-        ? "A higher recurring Family tier is available. Upgrade it for more included usage each period."
-        : `${props.recommendedRecurringPlanName ?? "A recurring plan"} is the recommended recurring way to continue.`
+        ? "Your Family plan can be upgraded for more included usage each month."
+        : `${props.recommendedRecurringPlanName ?? "A higher plan"} includes more usage each month.`
       : props.planChangePending
         ? hasAuthorizedTopUp
-          ? "A recurring plan change is already in progress. Add one-time usage to continue while it finishes."
+          ? "A plan change is already in progress. Add usage to continue while it finishes."
           : status.periodKind === "monthly"
-            ? "A recurring plan change is already in progress. Murph will resume when new usage is available or this allowance resets."
-            : "A recurring plan change is already in progress. Murph will resume when new usage is available."
+            ? "A plan change is already in progress. Murph will resume when new usage is available or this allowance resets."
+            : "A plan change is already in progress. Murph will resume when new usage is available."
         : hasAuthorizedTopUp
-          ? "No higher recurring plan is available. Add one-time usage to continue."
+          ? "No higher plan is available. Add usage to continue."
           : status.periodKind === "monthly"
-            ? "No higher recurring plan or one-time usage is available. Murph will resume when this allowance resets."
-            : "No authorized recurring plan or one-time usage is available right now.";
+            ? "Murph will resume when this allowance resets."
+            : "No additional usage is available right now.";
 
     return (
       <div

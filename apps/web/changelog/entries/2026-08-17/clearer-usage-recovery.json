@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Usage recovery is clearer",
     "summary": "When AI usage runs out, Murph now sends one Settings link and highlights the best available way to continue.",
-    "details": "Eligible recurring upgrades appear first, one-time usage stays secondary, and Family members can send a generic Settings link to their plan owner.",
+    "details": "Eligible plan upgrades appear first, Add usage remains available when offered, and Family members can send a Settings link to their plan owner.",
     "relevanceTags": ["settings", "billing", "ai-usage", "family", "accessibility"],
     "sourcePullRequests": [1983]
   }

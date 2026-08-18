@@ -478,7 +478,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Keep Murph going/);
     assert.match(markup, /Core · Resets/);
-    assert.match(markup, /Pulse is the recommended recurring way to continue/);
+    assert.match(markup, /Pulse includes more usage each month/);
     assert.match(markup, />Upgrade to Pulse</);
     assert.doesNotMatch(markup, /Group · Resets/);
   });
@@ -539,11 +539,11 @@ describe("HostedBillingSettings", () => {
     }));
 
     const upgradeIndex = markup.indexOf("Upgrade Family access");
-    const topUpIndex = markup.indexOf("Add one-time usage");
+    const topUpIndex = markup.indexOf("Add usage");
     assert.ok(upgradeIndex >= 0);
     assert.ok(topUpIndex > upgradeIndex);
-    assert.match(markup, /A higher recurring Family tier is available/);
-    assert.match(markup, /aria-label="Add one-time usage for you"/);
+    assert.match(markup, /Family plan can be upgraded for more included usage each month/);
+    assert.match(markup, /aria-label="Add usage for you"/);
   });
 
   test("makes the best paid recurring upgrade primary and top-up secondary", async () => {
@@ -568,10 +568,10 @@ describe("HostedBillingSettings", () => {
     }));
 
     const upgradeIndex = markup.indexOf("Upgrade to Edge");
-    const topUpIndex = markup.indexOf("Add one-time usage");
+    const topUpIndex = markup.indexOf("Add usage");
     assert.ok(upgradeIndex >= 0);
     assert.ok(topUpIndex > upgradeIndex);
-    assert.match(markup, /Edge is the recommended recurring way to continue/);
+    assert.match(markup, /Edge includes more usage each month/);
     assert.match(markup, /min-h-11 w-full sm:w-auto/);
   });
 
@@ -596,9 +596,9 @@ describe("HostedBillingSettings", () => {
       }),
     }));
 
-    assert.match(markup, /Max is the recommended recurring way to continue/);
+    assert.match(markup, /Max includes more usage each month/);
     assert.match(markup, />Upgrade to Max</);
-    assert.doesNotMatch(markup, /Add one-time usage/);
+    assert.doesNotMatch(markup, /Add usage/);
   });
 
   test("promotes authorized one-time usage when no higher recurring plan exists", async () => {
@@ -624,8 +624,8 @@ describe("HostedBillingSettings", () => {
       }],
     }));
 
-    assert.match(markup, /No higher recurring plan is available/);
-    assert.match(markup, />Add one-time usage</);
+    assert.match(markup, /No higher plan is available/);
+    assert.match(markup, />Add usage</);
     assert.doesNotMatch(markup, /Upgrade to (?:Pulse|Edge|Max)/);
   });
 
@@ -646,12 +646,6 @@ describe("HostedBillingSettings", () => {
           status: "exhausted",
           usedPercent: 100,
         }),
-        usageTopUpActivePurchase: {
-          offerCode: "usage_5_usd",
-          purchaseId: "purchase_pending",
-          retryAllowed: false,
-          status: "checkout_open",
-        },
         usageTopUpOffers: [{
           amountLabel: "$5",
           offerCode: "usage_5_usd",
@@ -677,7 +671,7 @@ describe("HostedBillingSettings", () => {
         rendered.container.textContent ?? "",
         /choose your account and review the available plan options/,
       );
-      assert.doesNotMatch(rendered.container.textContent ?? "", /Add one-time usage/);
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Add usage/);
       findButtonByText(
         rendered.window.document,
         "Copy link for your Family owner",
@@ -686,6 +680,78 @@ describe("HostedBillingSettings", () => {
     } finally {
       await rendered.cleanup();
     }
+  });
+
+  test("keeps a sponsored member's frozen purchase ahead of the Family owner handoff", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedBillingSettings, {
+        authenticated: true,
+        familyState: "sponsored",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        usageRecoveryInitialOpen: true,
+        usageStatus: buildUsageStatus({
+          accessKind: "family_sponsored",
+          planName: "Family",
+          remainingPercent: 0,
+          status: "exhausted",
+          usedPercent: 100,
+        }),
+        usageTopUpActivePurchase: {
+          cancelAllowed: true,
+          offerCode: "usage_5_usd",
+          purchaseId: "purchase_pending",
+          retryAllowed: false,
+          status: "checkout_open",
+          url: "https://checkout.stripe.test/session",
+        },
+        usageTopUpInitialOpen: true,
+        usageTopUpOffers: [],
+      }),
+      { requireButton: false },
+    );
+    try {
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /Copy link for your Family owner|Your Family owner controls the plan/,
+      );
+      findButtonByText(
+        rendered.window.document,
+        "Resume checkout",
+        rendered.window,
+      );
+      findButtonByText(
+        rendered.window.document,
+        "Cancel checkout",
+        rendered.window,
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("ignores a stale sponsored recovery request after usage recovers", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      familyState: "sponsored",
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      usageRecoveryInitialOpen: true,
+      usageStatus: buildUsageStatus({
+        accessKind: "family_sponsored",
+        planName: "Family",
+      }),
+    }));
+
+    assert.match(markup, /aria-label="Family AI usage"/);
+    assert.doesNotMatch(
+      markup,
+      /Keep Murph going|Copy link for your Family owner|Send them this Family Settings link/,
+    );
   });
 
   test("copies only a generic Settings URL from the sponsored Family handoff", async () => {
@@ -820,7 +886,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /0% remaining/);
     assert.match(
       markup,
-      /No higher recurring plan or one-time usage is available\. Murph will resume when this allowance resets/,
+      /Murph will resume when this allowance resets/,
     );
     assert.doesNotMatch(markup, /Upgrade to (?:Pulse|Edge|Max)/);
     assert.doesNotMatch(markup, /recent pace/);
@@ -2253,7 +2319,7 @@ describe("HostedBillingSettings", () => {
       }),
     }));
 
-    assert.match(markup, /Pulse is the recommended recurring way to continue/);
+    assert.match(markup, /Pulse includes more usage each month/);
     assert.match(markup, />Upgrade to Pulse</);
     assert.doesNotMatch(markup, /Does not expire/);
     assert.doesNotMatch(markup, /resets? /i);
@@ -2275,7 +2341,7 @@ describe("HostedBillingSettings", () => {
       }),
     }));
 
-    assert.match(markup, /Core is the recommended recurring way to continue/);
+    assert.match(markup, /Core includes more usage each month/);
     assert.match(markup, />Upgrade to Core</);
     assert.doesNotMatch(markup, />Upgrade to Pulse</);
   });

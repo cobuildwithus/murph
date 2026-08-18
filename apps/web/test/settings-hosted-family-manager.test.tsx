@@ -689,6 +689,7 @@ test("HostedFamilyManager opens the eligible recurring owner recovery first", as
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedFamilyManager, {
       ...baseFamilyManagerProps(),
+      usageRecoveryAvailable: true,
       usageRecoveryInitialOpen: true,
       usageTopUpOffers: [
         { amountLabel: "$5", offerCode: "usage_5_usd" },
@@ -701,15 +702,15 @@ test("HostedFamilyManager opens the eligible recurring owner recovery first", as
   try {
     assert.match(
       container.textContent ?? "",
-      /More recurring Family usage is available/,
+      /Get more included usage each month/,
     );
     assert.match(container.textContent ?? "", /Upgrade your Family access/);
     assert.match(
       container.textContent ?? "",
-      /recurring option with more included usage/,
+      /Edge includes more usage each month/,
     );
     assert.ok(buttonByText(container, "Upgrade to Edge"));
-    assert.ok(buttonByText(container, "Add one-time usage"));
+    assert.ok(buttonByText(container, "Add usage"));
     expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
       expect.objectContaining({
         checkoutUrl:
@@ -717,7 +718,7 @@ test("HostedFamilyManager opens the eligible recurring owner recovery first", as
         offers: [{ amountLabel: "$5", offerCode: "usage_5_usd" }],
         scope: "family",
         targetLabel: "you",
-        triggerLabel: "Add one-time usage",
+        triggerLabel: "Add usage",
         triggerVariant: "outline",
       }),
     );
@@ -728,6 +729,36 @@ test("HostedFamilyManager opens the eligible recurring owner recovery first", as
       payload: { planCode: "edge" },
       url: "/api/settings/billing/family/members/member_owner",
     });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager shows current owner recovery without auto-opening it", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      usageRecoveryAvailable: true,
+      usageTopUpOffers: [
+        { amountLabel: "$5", offerCode: "usage_5_usd" },
+      ],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(
+      container.textContent ?? "",
+      /Get more included usage each month/,
+    );
+    assert.ok(buttonByText(container, "Upgrade to Edge"));
+    assert.doesNotMatch(
+      container.textContent ?? "",
+      /Upgrade your Family access/,
+    );
   } finally {
     await cleanup();
   }
