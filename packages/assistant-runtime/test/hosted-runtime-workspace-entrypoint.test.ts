@@ -36816,27 +36816,47 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: true,
+      generatedImageRetention: false,
       handoff: "empty persisted-wake dispatch",
     },
     {
       checkpointConversation: true,
       checkpointConversationInputAhead: true,
       checkpointRuntimeWake: false,
+      generatedImageRetention: false,
       handoff: "conversation input hint",
     },
     {
       checkpointConversation: true,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: true,
+      generatedImageRetention: false,
       handoff: "retained checkpoint wake",
     },
+    {
+      checkpointConversation: false,
+      checkpointConversationInputAhead: false,
+      checkpointRuntimeWake: true,
+      generatedImageRetention: true,
+      handoff: "empty persisted-wake dispatch after a status commit",
+    },
   ])("older due assistant carry yields to a $handoff before persisting a later reminder", async (
-    { checkpointConversation, checkpointConversationInputAhead, checkpointRuntimeWake },
+    {
+      checkpointConversation,
+      checkpointConversationInputAhead,
+      checkpointRuntimeWake,
+      generatedImageRetention,
+    },
   ) => {
     // The predecessor already received its one hot attempt. A later reminder
     // appears before checkpoint; when conversation input arrives while that
     // checkpoint commits, it must retain foreground priority.
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-entrypoint-"),
+    );
+    const sourceVaultRoot = path.join(workspaceRoot, "source-vault");
+    const vaultRoot = path.join(workspaceRoot, "live-vault");
+    const artifactBytesByHash = new Map<string, Uint8Array>();
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const idleCheckpointDelayMs = 180_000;
@@ -36850,6 +36870,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const olderWakePersisted = createDeferred<void>();
     const reminderCreated = createDeferred<void>();
     const reminderWakePersisted = createDeferred<void>();
+    const canonicalWriteObserved = createDeferred<HostedWorkspaceCheckpointRequest>();
     const firstCheckpointConversationHandled = createDeferred<void>();
     const secondCheckpointConversationHandled = createDeferred<void>();
     const mailboxItems = [
@@ -36859,12 +36880,58 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ];
     let assistantPass = 0;
+    let snapshotCount = 0;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      let initialSnapshotRef: HostedWorkspaceState["snapshotRef"] = null;
+      if (generatedImageRetention) {
+        const recordedAt = "2026-04-01T00:00:00.000Z";
+        const sourceImagePath = path.join(workspaceRoot, "generated-image-source.webp");
+        await initializeVault({ createdAt: recordedAt, vaultRoot: sourceVaultRoot });
+        await writeFile(sourceImagePath, "generated image bytes");
+        await addCaptureWithLookup({
+          attachments: [{ role: "media_1", sourcePath: sourceImagePath }],
+          draft: {
+            note: "Assistant-generated image saved for later visual reuse.",
+            occurredAt: recordedAt,
+            recordedAt,
+            source: "derived",
+            tags: ["assistant-generated-image", "generated-image"],
+            title: "Generated image",
+          },
+          lookupAttachmentRole: "media_1",
+          lookupKey: "generated:assistant-carry-status-commit",
+          rawImport: {
+            importKind: "capture",
+            importedAt: recordedAt,
+            provenance: {
+              family: "capture",
+              generatedImage: { schema: "murph.generated-image.v1" },
+              mediaCount: 1,
+            },
+            source: "murph.generate_image",
+          },
+          vaultRoot: sourceVaultRoot,
+        });
+        await rm(sourceImagePath);
+        const baseBundle = await snapshotHostedBundleRoots({
+          kind: "vault",
+          roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
+        });
+        assert.ok(baseBundle);
+        const baseHash = sha256HostedBundleHex(baseBundle);
+        artifactBytesByHash.set(baseHash, baseBundle);
+        initialSnapshotRef = createBundleRef({
+          hash: baseHash,
+          key: `synthetic/assistant-carry-status-commit/${baseHash}.bundle`,
+          size: baseBundle.byteLength,
+        });
+      } else {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      }
 
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -36878,16 +36945,17 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         {
           async createCheckpointSnapshot(snapshotInput) {
+            snapshotCount += 1;
             events.push(
-              `snapshot:${checkpointRequests.length + 1}:`
+              `snapshot:${snapshotCount}:`
               + `${snapshotInput.reason}:${Date.now()}`,
             );
             return {
               snapshotRef: createBundleRef({
-                hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
+                hash: `${snapshotCount}`.repeat(64).slice(0, 64),
                 key:
                   "users/bundles/member-synthetic/"
-                  + `assistant-carry-mask-${checkpointRequests.length + 1}.bundle.json`,
+                  + `assistant-carry-mask-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -36897,6 +36965,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return { status: "imported" };
           },
           platform: createPlatform({
+            artifactBytesByHash,
             mailboxPort: createMailboxPort({
               events,
               items: mailboxItems,
@@ -36912,7 +36981,16 @@ describe("hosted workspace runtime entrypoint", () => {
                   snapshotRef: request.snapshotRef,
                   version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
                 });
-                if (checkpointRequests.length === 1) {
+                if (request.reason === "canonical_runtime_commit") {
+                  events.push(
+                    `workspace.checkpoint:canonical_runtime_commit:${request.nextWakeAt ?? "none"}`,
+                  );
+                  canonicalWriteObserved.resolve(request);
+                }
+                const idleCheckpointCount = checkpointRequests.filter(
+                  (checkpointRequest) => checkpointRequest.reason === "idle_shutdown",
+                ).length;
+                if (request.reason === "idle_shutdown" && idleCheckpointCount === 1) {
                   events.push("runtime-wake:persisted-older-assistant");
                   if (checkpointConversation) {
                     mailboxItems.push(createMailboxItem({
@@ -36937,7 +37015,10 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
               events,
-              workspace: createWorkspaceState({ version: "0" }),
+              workspace: createWorkspaceState({
+                snapshotRef: initialSnapshotRef,
+                version: "0",
+              }),
             }),
           }),
           runtimeWakeSignal,
@@ -37023,7 +37104,29 @@ describe("hosted workspace runtime entrypoint", () => {
       await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
       await waitForFakeTimerScheduled(() => events.join(","));
       await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      if (generatedImageRetention) {
+        const canonicalWrite = await withRealTimeout(
+          canonicalWriteObserved.promise,
+          15_000,
+          () => events.join(","),
+        );
+        assert.equal(canonicalWrite.nextWakeAt, olderDueWakeAt);
+        assert.equal(canonicalWrite.nextWakeReason, "assistant");
+      }
       await withRealTimeout(olderWakePersisted.promise, 15_000, () => events.join(","));
+      if (generatedImageRetention) {
+        const firstSnapshotIndex = events.findIndex((event) =>
+          event.startsWith("snapshot:1:idle_shutdown:")
+        );
+        assert.notEqual(firstSnapshotIndex, -1, events.join(","));
+        assert.ok(
+          requireEventIndex(
+            events,
+            `workspace.checkpoint:canonical_runtime_commit:${olderDueWakeAt}`,
+          ) < firstSnapshotIndex,
+          events.join(","),
+        );
+      }
 
       const persistedDispatchIndex = events.indexOf(
         "runtime-wake:persisted-older-assistant",
@@ -37072,10 +37175,9 @@ describe("hosted workspace runtime entrypoint", () => {
         15_000,
         () => events.join(","),
       );
-      const persistedWakes = checkpointRequests.map((request) => [
-        request.nextWakeAt,
-        request.nextWakeReason,
-      ]);
+      const persistedWakes = checkpointRequests
+        .filter((request) => request.reason === "idle_shutdown")
+        .map((request) => [request.nextWakeAt, request.nextWakeReason]);
       assert.deepEqual(persistedWakes.slice(0, 2), [
         [olderDueWakeAt, "assistant"],
         [reminderWakeAt, "assistant"],
@@ -37145,7 +37247,7 @@ describe("hosted workspace runtime entrypoint", () => {
       runtimeAbortController.abort();
       vi.useRealTimers();
       await resultPromise?.catch(() => undefined);
-      await removeTempRoot(vaultRoot);
+      await removeTempRoot(workspaceRoot);
     }
   });
 

@@ -4164,6 +4164,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         wake: deferredDeviceSyncWake,
       };
     };
+    const resolveCanonicalWriteDueAssistantServiceBarrierKey = (): string | null => {
+      if (
+        pendingWakeAfterDueAssistantService === null
+        || hotProjectedAssistantWakeAttemptedKey === null
+        || buildHostedRuntimeWakeKey(pendingWake)
+          !== hotProjectedAssistantWakeAttemptedKey
+      ) {
+        return null;
+      }
+      return hotProjectedAssistantWakeAttemptedKey;
+    };
     const overlayPendingWakeOnCommittedWorkspace = (
       checkpointPendingBeforePass: boolean,
       presentedInvocationLocalProjectedAssistantWakeKey: string | null,
@@ -4220,7 +4231,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const canonicalWriteCount = await controller.flushCanonicalWrites(
           async (write, metadata) => {
             const workspace = mergeGeneratedImageRetentionWakeIntoWorkspace(
-              overlayPendingWakeOnCommittedWorkspace(runtimeStateDirty, null),
+              overlayPendingWakeOnCommittedWorkspace(
+                runtimeStateDirty,
+                resolveCanonicalWriteDueAssistantServiceBarrierKey(),
+              ),
               metadata.retentionWakeAt,
             );
             const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
@@ -5322,7 +5336,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               persistGeneratedImageRetention: async (write) => {
                 const workspace = overlayPendingWakeOnCommittedWorkspace(
                   runtimeStateDirty,
-                  null,
+                  resolveCanonicalWriteDueAssistantServiceBarrierKey(),
                 );
                 const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
                   previousRedactedStatus:
