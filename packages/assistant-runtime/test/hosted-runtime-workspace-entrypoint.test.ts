@@ -36811,10 +36811,31 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("older due assistant carry cannot mask a later reminder through an empty persisted-wake dispatch", async () => {
+  test.each([
+    {
+      checkpointConversation: false,
+      checkpointConversationInputAhead: false,
+      checkpointRuntimeWake: true,
+      handoff: "empty persisted-wake dispatch",
+    },
+    {
+      checkpointConversation: true,
+      checkpointConversationInputAhead: true,
+      checkpointRuntimeWake: false,
+      handoff: "conversation input hint",
+    },
+    {
+      checkpointConversation: true,
+      checkpointConversationInputAhead: false,
+      checkpointRuntimeWake: true,
+      handoff: "retained checkpoint wake",
+    },
+  ])("older due assistant carry yields to a $handoff before persisting a later reminder", async (
+    { checkpointConversation, checkpointConversationInputAhead, checkpointRuntimeWake },
+  ) => {
     // The predecessor already received its one hot attempt. A later reminder
-    // appears before checkpoint, then the predecessor's persisted dispatch
-    // reaches the same active invocation with empty mailboxes.
+    // appears before checkpoint; when conversation input arrives while that
+    // checkpoint commits, it must retain foreground priority.
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -36855,7 +36876,10 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         {
           async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}:${Date.now()}`);
+            events.push(
+              `snapshot:${checkpointRequests.length + 1}:`
+              + `${snapshotInput.reason}:${Date.now()}`,
+            );
             return {
               snapshotRef: createBundleRef({
                 hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
@@ -36877,7 +36901,7 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
-              checkpointWorkspace(request) {
+              checkpointResponse(request) {
                 const workspace = createWorkspaceState({
                   inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
                   nextWakeAt: request.nextWakeAt ?? null,
@@ -36888,13 +36912,27 @@ describe("hosted workspace runtime entrypoint", () => {
                 });
                 if (checkpointRequests.length === 1) {
                   events.push("runtime-wake:persisted-older-assistant");
+                  if (checkpointConversation) {
+                    mailboxItems.push(createMailboxItem({
+                      id: "mailbox_item_entrypoint_assistant_carry_mask_003",
+                      laneSeq: "3",
+                    }));
+                  }
                   olderWakePersisted.resolve();
-                  runtimeWakeSignal.notify(Date.now());
+                  if (checkpointRuntimeWake) {
+                    runtimeWakeSignal.notify(Date.now());
+                  }
                 }
                 if (request.nextWakeAt === reminderWakeAt) {
                   reminderWakePersisted.resolve();
                 }
-                return workspace;
+                return {
+                  conversationInputAhead:
+                    checkpointRequests.length === 1
+                    && checkpointConversationInputAhead,
+                  checkpointed: true,
+                  workspace,
+                };
               },
               events,
               workspace: createWorkspaceState({ version: "0" }),
@@ -36927,6 +36965,21 @@ describe("hosted workspace runtime entrypoint", () => {
               return {
                 checkpointReason: "assistant_runtime_commit",
                 invocationLocalAssistantWakeAt: reminderWakeAt,
+                nextWakeAt: reminderWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            if (assistantPass === 4) {
+              assert.ok(
+                events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_003",
+                ),
+                events.join(","),
+              );
+              return {
+                checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: reminderWakeAt,
                 nextWakeReason: "assistant",
                 progressed: true,
@@ -36966,22 +37019,6 @@ describe("hosted workspace runtime entrypoint", () => {
         "runtime-wake:persisted-older-assistant",
       );
       assert.notEqual(persistedDispatchIndex, -1, events.join(","));
-      assert.equal(
-        events.slice(persistedDispatchIndex + 1).some((event) =>
-          event.startsWith("mailbox.importItem:")
-        ),
-        false,
-        events.join(","),
-      );
-      // A source-blind empty wake still cannot authorize cron replay; the
-      // successor must survive at the existing wake owner instead.
-      assert.equal(
-        events.slice(persistedDispatchIndex + 1).some((event) =>
-          event.startsWith("assistant:")
-        ),
-        false,
-        events.join(","),
-      );
 
       await withRealTimeout(
         reminderWakePersisted.promise,
@@ -36996,6 +37033,42 @@ describe("hosted workspace runtime entrypoint", () => {
         [olderDueWakeAt, "assistant"],
         [reminderWakeAt, "assistant"],
       ]);
+      if (!checkpointConversation) {
+        assert.equal(
+          events.slice(persistedDispatchIndex + 1).some((event) =>
+            event.startsWith("mailbox.importItem:")
+          ),
+          false,
+          events.join(","),
+        );
+        assert.equal(
+          events.slice(persistedDispatchIndex + 1).some((event) =>
+            event.startsWith("assistant:")
+          ),
+          false,
+          events.join(","),
+        );
+        return;
+      }
+      const secondSnapshotIndex = events.findIndex((event) =>
+        event.startsWith("snapshot:2:")
+      );
+      const foregroundAssistantIndex = events.findIndex((event) =>
+        event.startsWith("assistant:4:")
+      );
+      assert.notEqual(secondSnapshotIndex, -1, events.join(","));
+      assert.notEqual(foregroundAssistantIndex, -1, events.join(","));
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_003",
+        ) < secondSnapshotIndex,
+        events.join(","),
+      );
+      assert.ok(
+        foregroundAssistantIndex < secondSnapshotIndex,
+        events.join(","),
+      );
     } finally {
       runtimeAbortController.abort();
       vi.useRealTimers();

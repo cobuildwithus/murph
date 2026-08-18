@@ -5574,10 +5574,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // re-mutating it here would be a duplicate state owner and is the seam
         // that previously let inboxMediaRetentionWakeAt drift.
         resumeDetachedAssistantAskAfterWorkspaceBoundary();
-        if (runtimeStateDirty) {
-          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
-          continue;
-        }
         const mayRunPostCheckpointWork = (): boolean =>
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
           && options.shutdownSignal?.aborted !== true;
@@ -5604,6 +5600,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             throw error;
           }
         };
+        const preserveImmediateDurableCheckpointFollowUp = (): void => {
+          if (!durableCheckpointFollowUpPending) {
+            return;
+          }
+          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
+          // Foreground work rearms the ordinary idle window; the promoted
+          // successor still needs its immediate durable checkpoint.
+          setIdleCheckpointStartBy(Date.now());
+        };
         if (conversationInputAhead && mayRunPostCheckpointWork()) {
           await runOptionalPostCheckpointWork(
             async () =>
@@ -5613,6 +5618,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               }),
           );
           if (runtimeStateDirty) {
+            preserveImmediateDurableCheckpointFollowUp();
             continue;
           }
         }
@@ -5680,10 +5686,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             if (checkpointWakeHandled === null && !mayRunPostCheckpointWork()) {
               mailboxWakeNeedsReplacement = true;
             }
-            if (runtimeStateDirty) {
-              continue;
+            if (checkpointWakeHandled !== null) {
+              checkpointWakeLatencySeed = null;
             }
           }
+        }
+        if (runtimeStateDirty) {
+          preserveImmediateDurableCheckpointFollowUp();
+          continue;
         }
         let vaultShareOpportunity: HostedVaultShareProjectionOpportunity | null = null;
         if (
