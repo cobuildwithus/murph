@@ -1468,16 +1468,17 @@ describe("hosted web production migration guard", () => {
       /node \.\.\/\.\.\/scripts\/rm-paths\.mjs "\$webpack_cache_dir"/u,
     );
 
-    // The production build deadline lives in the package-build process owner,
-    // not in the runner: vercel-build.sh arms it for production deployments
-    // only, and the supervisor owns whole-group termination and reaping.
+    // The hosted build deadline lives in the package-build process owner, not
+    // in the runner: vercel-build.sh arms it for production and the dedicated
+    // native iOS E2E target, and the supervisor owns whole-group termination
+    // and reaping.
     const vercelBuildScript = await readFile(
       path.join(appRoot, "scripts", "vercel-build.sh"),
       "utf8",
     );
     assert.match(
       vercelBuildScript,
-      /if \[ "\$\{VERCEL:-\}" = "1" \] && \[ "\$\{VERCEL_ENV:-\}" = "production" \]; then/u,
+      /\[ "\$\{VERCEL_ENV:-\}" = "production" \] \|\|\s+\[ "\$\{VERCEL_TARGET_ENV:-\}" = "native-ios-e2e" \]/u,
     );
     assert.match(
       vercelBuildScript,

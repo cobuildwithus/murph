@@ -230,25 +230,39 @@ test("Vercel native E2E migration failure stops ordinary migration and build", a
 
   const result = await runVercelBuild({
     FAIL_PNPM_COMMAND: "prisma:migrate:deploy",
+    VERCEL: "1",
     VERCEL_ENV: "preview",
     VERCEL_TARGET_ENV: "native-ios-e2e",
   });
   assert.equal(result.status, 42, result.stderr);
   assert.deepEqual(result.calls, [
-    "prisma:migrate:deploy|direct=1|generated=",
+    "prisma:migrate:deploy|direct=1|generated=|timeout=",
   ]);
 });
 
 test("Vercel native E2E migration success preserves custom, ordinary, build order", async () => {
   const result = await runVercelBuild({
+    VERCEL: "1",
     VERCEL_ENV: "preview",
     VERCEL_TARGET_ENV: "native-ios-e2e",
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.calls, [
-    "prisma:migrate:deploy|direct=1|generated=",
-    "release:production:migrate|direct=|generated=",
-    "build|direct=|generated=1",
+    "prisma:migrate:deploy|direct=1|generated=|timeout=",
+    "release:production:migrate|direct=|generated=|timeout=900000",
+    "build|direct=|generated=1|timeout=900000",
+  ]);
+});
+
+test("ordinary Vercel preview builds remain unbounded", async () => {
+  const result = await runVercelBuild({
+    VERCEL: "1",
+    VERCEL_ENV: "preview",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.calls, [
+    "release:production:migrate|direct=|generated=|timeout=",
+    "build|direct=|generated=1|timeout=",
   ]);
 });
 
@@ -811,7 +825,7 @@ async function runVercelBuild(environment) {
     await writeFile(fakePnpm, [
       "#!/bin/sh",
       "set -eu",
-      "printf '%s|direct=%s|generated=%s\\n' \"$*\" \"${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}\" \"${MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS:-}\" >> \"${PNPM_LOG}\"",
+      "printf '%s|direct=%s|generated=%s|timeout=%s\\n' \"$*\" \"${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}\" \"${MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS:-}\" \"${MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS:-}\" >> \"${PNPM_LOG}\"",
       "if [ -n \"${FAIL_PNPM_COMMAND:-}\" ] && [ \"$*\" = \"${FAIL_PNPM_COMMAND}\" ]; then",
       "  exit 42",
       "fi",
