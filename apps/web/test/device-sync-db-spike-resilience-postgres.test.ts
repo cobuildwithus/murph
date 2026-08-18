@@ -699,6 +699,15 @@ describe.skipIf(!runPostgresProof)(
           sourceInstanceKey: blockedSourceInstanceKey,
           status: "connected",
         });
+        await expect(store.resolveConnectionSourceAdmissionCandidate({
+          connectionId,
+          sourceInstanceKey: `${sourceInstanceKey}_missing`,
+          sourceProviderSlug: "garmin",
+        })).resolves.toMatchObject({
+          lastErrorCode: null,
+          sourceInstanceKey,
+          status: "connected",
+        });
         exactSourceRead.mockClear();
         await prisma.deviceSyncDirtyConnection.create({
           data: {

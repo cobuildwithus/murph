@@ -171,13 +171,17 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     const candidate = [...records.values()]
       .filter((record) => record.connectionId === connectionId)
       .filter((record) => record.sourceProviderSlug === sourceProviderSlug)
-      .filter((record) => sourceInstanceKey === null || record.sourceInstanceKey === sourceInstanceKey)
       .sort((left, right) => {
+        const leftExact = sourceInstanceKey !== null
+          && left.sourceInstanceKey === sourceInstanceKey;
+        const rightExact = sourceInstanceKey !== null
+          && right.sourceInstanceKey === sourceInstanceKey;
         const leftAdmitted = left.status === "connected"
           && (left.lastErrorCode === null || !disconnectFences.has(left.lastErrorCode));
         const rightAdmitted = right.status === "connected"
           && (right.lastErrorCode === null || !disconnectFences.has(right.lastErrorCode));
-        return Number(rightAdmitted) - Number(leftAdmitted)
+        return Number(rightExact) - Number(leftExact)
+          || Number(rightAdmitted) - Number(leftAdmitted)
           || right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
           || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
           || left.id.localeCompare(right.id);
@@ -505,7 +509,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     expect(sql).not.toContain("SELECT *");
   });
 
-  it("falls back to the latest exact row and can constrain the source instance", async () => {
+  it("prefers the canonical source row but falls back to the ranked same-slug row", async () => {
     const { queryRaw, store } = createSourceStore([
       createSourceRecord({
         id: "dcs_older",
@@ -516,12 +520,10 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
         status: "disconnected",
       }),
       createSourceRecord({
-        id: "dcs_latest",
-        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        id: "dcs_admitted_legacy",
         lastSeenAt: new Date("2026-03-25T02:00:00.000Z"),
-        sourceInstanceKey: "src_latest",
+        sourceInstanceKey: "src_admitted_legacy",
         sourceProviderSlug: "oura",
-        status: "disconnected",
       }),
     ]);
 
@@ -529,8 +531,8 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       connectionId: "dsc_parent",
       sourceProviderSlug: "oura",
     })).resolves.toEqual(expect.objectContaining({
-      id: "dcs_latest",
-      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      id: "dcs_admitted_legacy",
+      sourceInstanceKey: "src_admitted_legacy",
     }));
     await expect(store.resolveConnectionSourceAdmissionCandidate({
       connectionId: "dsc_parent",
@@ -540,9 +542,18 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       id: "dcs_older",
       sourceInstanceKey: "src_older",
     }));
-    expect(queryRaw).toHaveBeenCalledTimes(2);
+    await expect(store.resolveConnectionSourceAdmissionCandidate({
+      connectionId: "dsc_parent",
+      sourceInstanceKey: "src_missing_canonical",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dcs_admitted_legacy",
+      sourceInstanceKey: "src_admitted_legacy",
+    }));
+    expect(queryRaw).toHaveBeenCalledTimes(3);
     const exactSql = queryRaw.mock.calls[1]?.[0]?.strings.join("?") ?? "";
-    expect(exactSql).toContain('AND "source_instance_key" =');
+    expect(exactSql).toContain('("source_instance_key" =');
+    expect(exactSql).not.toContain('AND "source_instance_key" =');
   });
 
   it("marks all non-disconnected sources for one parent connection disconnected", async () => {

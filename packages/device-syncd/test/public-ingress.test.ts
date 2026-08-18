@@ -499,16 +499,17 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     sourceProviderSlug: string;
   }): PublicDeviceConnectionSource | null {
     return this.listConnectionSources(input)
-      .filter((source) =>
-        input.sourceInstanceKey === undefined
-        || source.sourceInstanceKey === input.sourceInstanceKey
-      )
       .sort((left, right) => {
+        const leftExact = input.sourceInstanceKey !== undefined
+          && left.sourceInstanceKey === input.sourceInstanceKey;
+        const rightExact = input.sourceInstanceKey !== undefined
+          && right.sourceInstanceKey === input.sourceInstanceKey;
         const leftAdmitted = left.status === "connected"
           && !isDeviceSyncSourceDisconnectFenced(left);
         const rightAdmitted = right.status === "connected"
           && !isDeviceSyncSourceDisconnectFenced(right);
-        return Number(rightAdmitted) - Number(leftAdmitted)
+        return Number(rightExact) - Number(leftExact)
+          || Number(rightAdmitted) - Number(leftAdmitted)
           || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
           || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
           || left.id.localeCompare(right.id);
@@ -1548,6 +1549,23 @@ test("starting another Junction source preserves an established shared account",
     firstSeenAt: concurrentCleanupAt,
     lastSeenAt: concurrentCleanupAt,
   });
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: `legacy:${established.account.id}:fitbit`,
+    sourceProviderSlug: "fitbit",
+    status: "connected",
+    firstSeenAt: "2026-03-25T12:00:00.000Z",
+    lastSeenAt: "2026-03-25T12:00:00.000Z",
+  });
+
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: `legacy:${established.account.id}:whoop_v2`,
+    sourceProviderSlug: "whoop_v2",
+    status: "connected",
+    firstSeenAt: "2026-03-25T12:00:00.000Z",
+    lastSeenAt: "2026-03-25T12:00:00.000Z",
+  });
 
   const fitbit = await ingress.startConnection({
     ownerId: "<REDACTED_OWNER_ID>",
@@ -1559,6 +1577,9 @@ test("starting another Junction source preserves an established shared account",
   await assert.doesNotReject(
     ingress.handleWebhook("junction", new Headers(), Buffer.from("garmin")),
   );
+  await assert.doesNotReject(
+    ingress.handleWebhook("junction", new Headers(), Buffer.from("whoop_v2")),
+  );
   await assert.rejects(
     ingress.handleWebhook("junction", new Headers(), Buffer.from("fitbit")),
     (error: unknown) =>
@@ -1567,7 +1588,7 @@ test("starting another Junction source preserves an established shared account",
       && error.httpStatus === 503
       && error.retryable === true,
   );
-  assert.equal(acceptedWebhookCount, 1);
+  assert.equal(acceptedWebhookCount, 2);
 
   const completedFitbit = await ingress.handleConnectionCallback({
     expectedOwnerId: "<REDACTED_OWNER_ID>",
@@ -1590,7 +1611,7 @@ test("starting another Junction source preserves an established shared account",
     })[0]?.status,
     "connected",
   );
-  assert.equal(acceptedWebhookCount, 2);
+  assert.equal(acceptedWebhookCount, 3);
 
   const appleHealthSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
     connectionId: established.account.id,
@@ -1627,7 +1648,7 @@ test("starting another Junction source preserves an established shared account",
     })[0]?.status,
     "connected",
   );
-  assert.equal(acceptedWebhookCount, 3);
+  assert.equal(acceptedWebhookCount, 4);
 
   store.upsertConnectionSource({
     connectionId: established.account.id,

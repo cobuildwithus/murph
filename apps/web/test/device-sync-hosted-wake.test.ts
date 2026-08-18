@@ -448,10 +448,12 @@ function buildHostedConnectionSource(
   connectionId: string,
   sourceProviderSlug: string,
   overrides: Partial<{
+    id: string;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSeenAt: string;
     resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+    sourceInstanceKey: string;
     status: "connected" | "disconnected" | "error" | "unavailable";
   }> = {},
 ) {
@@ -2188,8 +2190,15 @@ describe("hosted device-sync wakes", () => {
     );
   });
 
-  it("keeps established source webhooks off the recovery read path", async () => {
+  it("admits a legacy-key source without returning to the recovery read path", async () => {
+    const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: "dsc_123",
+      sourceProviderSlug: "garmin",
+    });
+    expect(canonicalSourceInstanceKey).not.toBeNull();
     const source = buildHostedConnectionSource("dsc_123", "garmin", {
+      id: "dcs_legacy_garmin",
+      sourceInstanceKey: "legacy:dsc_123:garmin",
       status: "connected",
     });
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
@@ -2228,13 +2237,21 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledTimes(2);
     expect(mocks.resolveConnectionSourceAdmissionCandidate).toHaveBeenCalledWith({
       connectionId: "dsc_123",
-      sourceInstanceKey: source.sourceInstanceKey,
+      sourceInstanceKey: canonicalSourceInstanceKey,
       sourceProviderSlug: "garmin",
       tx: mocks.prismaTx,
     });
     expect(mocks.getConnectionRecordForUser).not.toHaveBeenCalled();
     expect(mocks.materializeStoredConnectionAccount).not.toHaveBeenCalled();
     expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "junction",
+      "trace_established_source",
+      "claim-token",
+      mocks.prismaTx,
+    );
   });
 
   it("terminally settles prepared Junction work when the source epoch changes across provider I/O", async () => {

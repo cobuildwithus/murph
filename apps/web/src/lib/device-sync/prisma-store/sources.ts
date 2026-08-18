@@ -327,10 +327,10 @@ export class PrismaHostedConnectionSourceStore {
         FROM "device_connection_source"
         WHERE "connection_id" = ${connectionId}
           AND "source_provider_slug" = ${sourceProviderSlug}
+        ORDER BY
           ${sourceInstanceKey === null
             ? Prisma.empty
-            : Prisma.sql`AND "source_instance_key" = ${sourceInstanceKey}`}
-        ORDER BY
+            : Prisma.sql`("source_instance_key" = ${sourceInstanceKey}) DESC,`}
           (
             "status" = 'connected'
             AND (
