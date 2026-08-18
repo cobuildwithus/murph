@@ -230,12 +230,14 @@ member supplies the earlier workout's exact end time or exact total duration,
 Murph may compose the existing finish, start-from-format, and targeted set-log
 commands. Otherwise it makes no workout mutation, says the new set was not
 saved yet, and asks one narrow question for that time or duration while
-preserving the exact proposed routine, workout-format id, exercise, set, and
-result in text. That exact text remains available through committed transcript
-replay even when provider-thread continuity changes. Only the immediate answer
-may continue the proposal, after Murph exact-reads the recorded format id and
-re-reads the active workout. Missing or changed records, changed active state,
-an ambiguous answer, or an unrelated later message fail closed.
+preserving the exact proposed routine, workout-format id, active-workout event
+id, exercise, set, and result in text. That exact text remains available through
+committed transcript replay even when provider-thread continuity changes. Only
+the immediate answer may continue the proposal, after Murph exact-reads the
+recorded format and event ids and separately reads the sole active workout. It
+continues only when the recorded event remains active and is still the sole
+active workout. A completed, missing, replaced, or conflicting active event, an
+ambiguous answer, or an unrelated later message fails closed without mutation.
 
 Multiple active workouts, an unidentified routine or set, missing or
 conflicting relationship context, changed state, and insufficient finish timing

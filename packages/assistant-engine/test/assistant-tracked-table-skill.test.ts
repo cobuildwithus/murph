@@ -299,10 +299,20 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain("ask one narrow question for the earlier workout's end time or total duration")
     expect(skill).toContain('Make that question text-bearing even when voice is preferred')
     expect(skill).toContain('`Routine reference: <exact_format_id>`')
+    expect(skill).toContain(
+      '`Active workout reference: <exact_active_workout_id>`',
+    )
     expect(skill).toContain('committed transcript replay preserves the complete proposal')
     expect(skill).toContain('Only the immediate answer to that question may continue it')
     expect(skill).toContain('exact-read the recorded format id')
-    expect(skill).toContain('re-read the active workout before acting')
+    expect(skill).toContain(
+      'vault-cli workout active --workout-id <exact_active_workout_id> --format json',
+    )
+    expect(skill).toContain('separately read the sole active workout before acting')
+    expect(skill).toContain(
+      'that exact event remains active and is still the sole active workout',
+    )
+    expect(skill).toContain('fails closed without mutation')
     expect(skill).toContain('unrelated later message fails closed')
     expect(skill).toContain('Missing or conflicting references')
     expect(skill).toContain('multiple active workouts')
