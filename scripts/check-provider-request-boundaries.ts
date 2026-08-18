@@ -482,8 +482,7 @@ const potentialRawTransportRegex = new RegExp(potentialRawTransportPattern, "u")
 export async function collectProviderRequestBoundaryViolations(): Promise<
   ProviderRequestBoundaryViolation[]
 > {
-  const sourceFiles: string[] = [];
-  sourceFiles.push(...await listProviderRequestSourceFiles());
+  const sourceFiles = await listProviderRequestSourceFiles();
   const violations = await mapWithConcurrency(sourceFiles, 16, async (relativePath) => {
     let contents: string;
     try {
@@ -503,7 +502,7 @@ export function findProviderRequestBoundaryViolations(
   relativePath: string,
   contents: string,
 ): ProviderRequestBoundaryViolation[] {
-  if (!containsPotentialRawTransport(contents)) {
+  if (!potentialRawTransportRegex.test(contents)) {
     return [];
   }
 
@@ -803,10 +802,19 @@ function isTransportNamespace(
     return false;
   }
   const nextResolving = new Set(resolvingBindings).add(bindingKey);
-  if (binding.path.isImportNamespaceSpecifier()) {
+  if (
+    binding.path.isImportNamespaceSpecifier() ||
+    binding.path.isImportDefaultSpecifier() ||
+    (
+      binding.path.isImportSpecifier() &&
+      binding.path.node.importKind !== "type" &&
+      readImportedName(binding.path.node.imported) === "default"
+    )
+  ) {
     const declaration = binding.path.parentPath;
     return Boolean(
       declaration?.isImportDeclaration() &&
+      declaration.node.importKind !== "type" &&
       lowLevelTransportModules.has(declaration.node.source.value),
     );
   }
@@ -876,7 +884,16 @@ function collectRuntimeModules(sourceFile: File): Set<string> {
   const modules = new Set<string>();
   traverse(sourceFile, {
     ImportDeclaration(importPath) {
-      if (importPath.node.importKind !== "type") {
+      if (
+        importPath.node.importKind !== "type" &&
+        (
+          importPath.node.specifiers.length === 0 ||
+          importPath.node.specifiers.some(
+            (specifier) =>
+              specifier.type !== "ImportSpecifier" || specifier.importKind !== "type",
+          )
+        )
+      ) {
         modules.add(importPath.node.source.value);
       }
     },
@@ -1127,10 +1144,6 @@ function hasRuntimeModule(modules: ReadonlySet<string>, expected: string): boole
     }
   }
   return false;
-}
-
-function containsPotentialRawTransport(contents: string): boolean {
-  return potentialRawTransportRegex.test(contents);
 }
 
 function containsNormalizedIdentifier(text: string, identifier: string): boolean {

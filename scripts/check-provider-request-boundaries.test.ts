@@ -63,19 +63,18 @@ describe("check-provider-request-boundaries", () => {
 
   it("recognizes Node, Undici, CommonJS, and import-equals transports", () => {
     expect(violations(`
+      import httpsDefault from "node:https";
+      import { default as httpDefault } from "node:http";
       import { request as send } from "node:https";
       import { fetch as undiciFetch } from "undici";
+      httpsDefault.request("https://api.stripe.com/v1/customers");
+      httpDefault.request("https://api.openai.com/v1/responses");
       send("https://api.stripe.com/v1/customers");
       undiciFetch("https://api.openai.com/v1/responses");
       require("https").request("https://api.resend.com/emails");
       import http = require("node:http");
       http.request("https://api.exa.ai/search");
-    `)).toEqual([
-      "raw-provider-http",
-      "raw-provider-http",
-      "raw-provider-http",
-      "raw-provider-http",
-    ]);
+    `)).toEqual(Array(6).fill("raw-provider-http"));
   });
 
   it("recognizes destructured and namespace transport aliases", () => {
@@ -153,7 +152,7 @@ describe("check-provider-request-boundaries", () => {
 
   it("allows an exact SDK transport owner with its required runtime import", () => {
     expect(violations(`
-      import Composio from "@composio/client";
+      import { Composio, type ComposioConfig } from "@composio/client";
       function createBoundedComposioFetch(fetchImpl: typeof fetch) {
         const sdkFetch = (request: Request) => fetchImpl(request);
         return sdkFetch;
@@ -164,6 +163,7 @@ describe("check-provider-request-boundaries", () => {
 
   it("checks a provider-named owner's runtime import on a generic path", () => {
     expect(violations(`
+      import { type ElevenLabsClient } from "@murphai/operator-config/elevenlabs-runtime";
       function createTelegramElevenLabsFetchAdapter(fetchImpl: typeof fetch) {
         const sdkFetch = fetchImpl ?? fetch;
         return sdkFetch("https://api.elevenlabs.io/v1/text-to-speech");
