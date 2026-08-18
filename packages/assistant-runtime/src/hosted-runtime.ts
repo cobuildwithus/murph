@@ -3217,8 +3217,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       acceptedInputContext.conversationActivity,
                     );
                   }
-                  acceptedReadyImageCompletion ||=
+                  const consumedReadyImageCompletion =
                     consumeReadyImageCompletionInputs(assistantInputIds);
+                  acceptedReadyImageCompletion ||= consumedReadyImageCompletion;
                   return () => {
                     currentAssistantInputId = null;
                   };

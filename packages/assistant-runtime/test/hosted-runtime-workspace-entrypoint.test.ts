@@ -24705,7 +24705,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   }, 30_000);
 
-  test("admits a ready image completion before newly arrived conversation input", async () => {
+  test("accepts separately grouped ready image completions before newly arrived conversation input", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-completion-preemption-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -24713,16 +24713,28 @@ describe("hosted workspace runtime entrypoint", () => {
       id: "mailbox_item_image_completion_preemption_origin",
       laneSeq: "1",
     })];
-    const generatedMedia = {
-      alt: "Generated landscape",
-      contentType: "image/webp" as const,
-      filename: "generated-landscape.webp",
-      kind: "vault_image" as const,
-      ref: "raw/captures/2026/04/generated-landscape.webp",
-      sha256: "c".repeat(64),
-      sizeBytes: 18,
-      source: "gpt-image-2",
-    };
+    const generatedMedia = [
+      {
+        alt: "Generated landscape",
+        contentType: "image/webp" as const,
+        filename: "generated-landscape.webp",
+        kind: "vault_image" as const,
+        ref: "raw/captures/2026/04/generated-landscape.webp",
+        sha256: "c".repeat(64),
+        sizeBytes: 18,
+        source: "gpt-image-2",
+      },
+      {
+        alt: "Generated portrait",
+        contentType: "image/webp" as const,
+        filename: "generated-portrait.webp",
+        kind: "vault_image" as const,
+        ref: "raw/captures/2026/04/generated-portrait.webp",
+        sha256: "d".repeat(64),
+        sizeBytes: 20,
+        source: "gpt-image-2",
+      },
+    ];
     const imageReady = createDeferred<void>();
     const combinedPhaseObserved = createDeferred<void>();
     const runtimeAbortController = new AbortController();
@@ -24730,7 +24742,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const originalAutomationPass =
       mocks.runAssistantAutomationPass.getMockImplementation();
     let assistantPhaseCalls = 0;
-    let completionInputId: string | null = null;
+    let completionInputIds: readonly string[] = [];
     let freshInputId: string | null = null;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
@@ -24758,7 +24770,10 @@ describe("hosted workspace runtime entrypoint", () => {
           assistantPhaseCalls += 1;
           const providerInputDetails = await Promise.all(
             assistantInputIds.map(async (inputId) => {
-              const event = await readAssistantInputEvent({ inputId, vault: vaultRoot });
+              const event = await readAssistantInputEvent({
+                inputId,
+                vault: vaultRoot,
+              });
               return {
                 inputId,
                 payloadSchema: event?.sourceRef.kind === "hosted-mailbox"
@@ -24771,48 +24786,64 @@ describe("hosted workspace runtime entrypoint", () => {
           );
           assert.equal(
             assistantInputIds.length,
-            assistantPhaseCalls === 1 ? 1 : 2,
-            `provider turn ${assistantPhaseCalls}: ${JSON.stringify({ freshInputId, providerInputDetails })}`,
+            assistantPhaseCalls === 1 ? 1 : 3,
+            `provider turn ${assistantPhaseCalls}: ${JSON.stringify({
+              freshInputId,
+              providerInputDetails,
+            })}`,
           );
-          const releaseProviderInputs =
-            await input.beforeProviderAcceptedInputs?.({
-              turnId: "turn_hosted_runtime_test",
-              acceptedInputs: assistantInputIds.map((id) => ({
-                id,
-                source: "assistant-input" as const,
-              })),
-            });
+          const acceptedInputGroups = assistantPhaseCalls === 1
+            ? [assistantInputIds]
+            : assistantInputIds.map((assistantInputId) => [assistantInputId]);
+          const releaseProviderInputGroups = [];
+          for (const acceptedInputIds of acceptedInputGroups) {
+            releaseProviderInputGroups.push(
+              await input.beforeProviderAcceptedInputs?.({
+                turnId: "turn_hosted_runtime_test",
+                acceptedInputs: acceptedInputIds.map((id) => ({
+                  id,
+                  source: "assistant-input" as const,
+                })),
+              }),
+            );
+          }
 
           if (assistantPhaseCalls === 1) {
             const assistantInputId = assistantInputIds[0]!;
             const imageGenerationLauncher =
               input.executionContext?.hosted?.imageGenerationLauncher;
             assert.ok(imageGenerationLauncher);
-            assert.equal(
-              imageGenerationLauncher.launch({
-                continuationSessionId: "asst_image_completion_preemption",
-                operationId: "image_operation_completion_preemption",
-                originAssistantInputId: assistantInputId,
-                originAssistantInputIdExact: false,
-                scopeId: "session_image_completion_preemption",
-                async run() {
-                  await imageReady.promise;
-                  return {
-                    media: generatedMedia,
-                    runtimeIssue: null,
-                    savedImageRef: generatedMedia.ref,
-                  };
-                },
-              }),
-              "started",
-            );
+            for (const [index, media] of generatedMedia.entries()) {
+              assert.equal(
+                imageGenerationLauncher.launch({
+                  continuationSessionId:
+                    `asst_image_completion_preemption_${index + 1}`,
+                  operationId:
+                    `image_operation_completion_preemption_${index + 1}`,
+                  originAssistantInputId: assistantInputId,
+                  originAssistantInputIdExact: false,
+                  scopeId: `session_image_completion_preemption_${index + 1}`,
+                  async run() {
+                    await imageReady.promise;
+                    return {
+                      media,
+                      runtimeIssue: null,
+                      savedImageRef: media.ref,
+                    };
+                  },
+                }),
+                "started",
+              );
+            }
             imageReady.resolve();
             await withRealTimeout(
               (async () => {
                 while (
-                  imageGenerationLauncher.readStatus?.(
-                    "session_image_completion_preemption",
-                  ) !== "queued"
+                  generatedMedia.some((_media, index) =>
+                    imageGenerationLauncher.readStatus?.(
+                      `session_image_completion_preemption_${index + 1}`,
+                    ) !== "queued"
+                  )
                 ) {
                   await new Promise<void>((resolve) => setImmediate(resolve));
                 }
@@ -24827,19 +24858,24 @@ describe("hosted workspace runtime entrypoint", () => {
             }));
             runtimeWakeSignal.notify();
           } else if (assistantPhaseCalls === 2) {
-            completionInputId = assistantInputIds[0]!;
-            const completion = await readAssistantInputEvent({
-              inputId: completionInputId,
-              vault: vaultRoot,
-            });
-            assert.equal(
-              completion?.sourceRef.kind === "hosted-mailbox"
-                ? completion.sourceRef.payloadSchema
-                : null,
-              "murph.hosted-image-completion.v1",
-            );
+            completionInputIds = assistantInputIds.slice(0, 2);
+            for (const completionInputId of completionInputIds) {
+              const completion = await readAssistantInputEvent({
+                inputId: completionInputId,
+                vault: vaultRoot,
+              });
+              assert.equal(
+                completion?.sourceRef.kind === "hosted-mailbox"
+                  ? completion.sourceRef.payloadSchema
+                  : null,
+                "murph.hosted-image-completion.v1",
+              );
+            }
             assert.ok(freshInputId);
-            assert.deepEqual(assistantInputIds, [completionInputId, freshInputId]);
+            assert.deepEqual(assistantInputIds, [
+              ...completionInputIds,
+              freshInputId,
+            ]);
             combinedPhaseObserved.resolve();
           } else {
             throw new Error("Unexpected extra image completion preemption phase.");
@@ -24851,7 +24887,14 @@ describe("hosted workspace runtime entrypoint", () => {
               vaultRoot,
             });
           }
-          await releaseProviderInputs?.();
+          for (const releaseProviderInputs of releaseProviderInputGroups) {
+            await releaseProviderInputs?.();
+          }
+          if (assistantPhaseCalls === 2) {
+            runtimeAbortController.abort(
+              new DOMException("Synthetic test completed.", "AbortError"),
+            );
+          }
           return {
             currentTurnDeliveryIntentIds: [],
             nextWakeAt: null,
@@ -24923,7 +24966,9 @@ describe("hosted workspace runtime entrypoint", () => {
         15_000,
         () => events.join(","),
       );
+      await withRealTimeout(resultPromise, 15_000, () => events.join(","));
       assert.equal(assistantPhaseCalls, 2);
+      assert.equal(completionInputIds.length, 2);
     } finally {
       runtimeAbortController.abort(
         new DOMException("Synthetic test cleanup.", "AbortError"),
