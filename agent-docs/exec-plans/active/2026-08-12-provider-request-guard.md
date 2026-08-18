@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-17
+Updated: 2026-08-18
 
 ## Goal
 
@@ -79,12 +79,13 @@ of the tactical fix on the old implementation.
 | 25 | Return-local aggregate aliases could still lose provenance. Model confirmation was unknown, so the run was diagnostic and requested another retrospective. | Accepted as evidence that the custom engine should be removed; rejected another tactical patch. | Triggered the complexity collapse. |
 | 26 | The production source census, file-level provider gate, and AST owner analysis disagreed, skipping current `.call`, generic-path, nullish, and conditional owners; the third exception registry and configurable one-call fields were unused. | Accepted the coverage and deletion findings; rejected expanding this tooling PR to delete inert baseline comments from production files. | Deleted the duplicate gates, third registry, and repeated fields; added only two direct expression cases and four existing-owner records, for a net ten-line guard/test deletion. |
 | 27 | Default-import Node HTTP namespaces escaped transport classification, while inline type-only SDK imports counted as runtime owner evidence. | Accepted; reused Babel binding and per-specifier `importKind` data. | Added two bounded import conditions and compact fixtures; no new owner, state, or provenance machinery. |
+| 28 | Exact-head correction audit verified rounds 26-27 and found no remaining qualifying defect or complexity-collapse opportunity. | Accepted PASS; no change. | No fix or new machinery. |
 
 Two later simplification-design attempts on Phlebas failed before review because
 GitHub GraphQL returned HTTP 503; they produced no ReviewGPT findings and are not
 counted as rounds. Two exact-head round-26 staging attempts on Mountain and
-Hercules likewise failed before submission on browser socket timeouts and are
-not counted. The substantive Phlebas rounds completed with captured
+Hercules likewise failed before submission on browser socket timeouts and are not
+counted. The substantive Phlebas rounds completed with captured
 `gpt-5-6-pro` model slug while its response text reported model confirmation as
 unknown; their concrete findings were reproduced and corrected without
 restoring the old provenance engine.
@@ -96,7 +97,7 @@ restoring the old provenance engine.
 3. [x] Delete guard-driven production workarounds and collapse durable docs.
 4. [x] Run focused tests, the production scan, typecheck, diff checks, and
    relevant repository verification.
-5. [ ] Commit and push the round-26 correction candidate.
+5. [x] Commit and push the round-26 correction candidate.
 6. [ ] Run a non-Eragon ReviewGPT correction audit with exact-head CI and close
    the plan.
 
