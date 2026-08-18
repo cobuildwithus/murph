@@ -120,6 +120,10 @@ Updated: 2026-08-18
   owner banner remains available during ordinary exhausted Settings visits;
   the query controls its initial dialog only. A stale query is inert after
   reset, fulfillment, upgrade, or other recovery.
+- A successful Add usage return remains visibly purchase-owned while the live
+  meter is still exhausted. Quiet successful-return handling is reserved for a
+  refreshed non-exhausted meter, where the updated capacity itself is the
+  confirmation.
 - Recovery actions use the plain `Add usage` label. Supporting copy explains the
   monthly benefit directly and avoids internal terms such as recurring option,
   secondary option, or authorized option.
@@ -166,6 +170,10 @@ Updated: 2026-08-18
 - Member with a frozen purchase: the exact purchase dialog opens before Family
   handoff or another recovery dialog and retains its resume, cancel, retry,
   polling, failure, and completion behavior.
+- Member returning from a successful Add usage Checkout while the meter still
+  reads exhausted: the purchase dialog visibly owns checkout-open,
+  payment-pending, reconciling, and fulfilled states before the refreshed meter
+  restores the ordinary recovery hierarchy.
 - Member whose usage recovered while the URL stayed open: Settings ignores the
   stale recovery query and shows the ordinary live usage state without opening
   a dialog.
@@ -225,3 +233,8 @@ Updated: 2026-08-18
 - Direct screenshot feedback found `recurring option` and `secondary option when
   authorized` to be implementation-facing copy. Replaced them with the concrete
   monthly usage benefit and the shorter `Add usage` action.
+- ReviewGPT final round 3 found that the exhausted branch's quiet successful
+  return could hide payment acknowledgement behind another paid upgrade action.
+  Removed that presentation exception only from exhausted usage and added a
+  composed checkout-open through fulfilled regression test; quiet confirmation
+  remains limited to the already-refreshed meter branch.

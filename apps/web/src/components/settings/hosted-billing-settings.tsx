@@ -864,7 +864,6 @@ function PlanUsageBand(props: {
         offers={eligibleUsageTopUpOffers}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
-        quietSuccessfulReturn
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
         triggerClassName="min-h-11 w-full sm:w-auto"

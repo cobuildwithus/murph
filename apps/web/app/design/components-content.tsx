@@ -1639,8 +1639,8 @@ export function ComponentsContent() {
                 Keep the conversation going
               </p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Add one-time usage with a saved card or continue securely in
-                Stripe when needed.
+                Add usage with a saved card or continue securely in Stripe when
+                needed.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog

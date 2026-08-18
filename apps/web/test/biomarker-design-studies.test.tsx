@@ -216,7 +216,7 @@ test("screenshot categories keep the production studies available without one gi
   expect(sectionsMarkup).toContain("Preview Family member completion");
   expect(sectionsMarkup).toContain("Preview inactive account completion");
   expect(sectionsMarkup).toContain("Preview former member completion");
-  expect(sectionsMarkup).toContain("Add one-time usage");
+  expect(sectionsMarkup).toContain("Add usage");
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
   expect(sectionsMarkup).not.toContain("usage credit remaining");

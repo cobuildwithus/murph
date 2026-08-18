@@ -200,8 +200,11 @@ exhausted. Authenticated Settings auto-opens recovery only while the live usage
 projection is `exhausted`. An exact returned or nonterminal usage purchase owns
 presentation before plan or Family recovery, preserving its frozen-target
 resume, cancel, retry, polling, failure, and completion surfaces across later
-billing-relationship changes. Active, unavailable, reset, or otherwise
-recovered usage ignores a stale recovery query.
+billing-relationship changes. While the live projection remains exhausted, an
+exact successful return keeps that purchase dialog visibly open through
+confirmation and completion; Settings may use quiet successful-return handling
+only beside a recovered, non-exhausted meter. Active, unavailable, reset, or
+otherwise recovered usage ignores a stale recovery query.
 An eligible Family-owner recovery banner follows that same current exhausted
 state during both ordinary and message-linked Settings visits; the exact query
 controls only whether its confirmation dialog opens initially.

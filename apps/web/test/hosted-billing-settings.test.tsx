@@ -575,6 +575,91 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /min-h-11 w-full sm:w-auto/);
   });
 
+  test("keeps an exhausted top-up return visible through reconciliation", async () => {
+    vi.useFakeTimers();
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_exhausted_return",
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/exhausted-return",
+      })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_exhausted_return",
+        status: "payment_pending",
+      })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_exhausted_return",
+        status: "reconciling",
+      })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_exhausted_return",
+        status: "fulfilled",
+      });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedBillingSettings, {
+        authenticated: true,
+        billingStatus: "active",
+        canUpgradeToEdge: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        usageStatus: buildUsageStatus({
+          remainingPercent: 0,
+          status: "exhausted",
+          usedPercent: 100,
+        }),
+        usageTopUpOffers: [{
+          amountLabel: "$5",
+          offerCode: "usage_5_usd",
+        }],
+        usageTopUpPurchaseReturn: {
+          kind: "success",
+          purchaseId: "hucp_exhausted_return",
+        },
+      }),
+      {
+        location: {
+          href: "https://example.test/settings?usagePurchase=hucp_exhausted_return&usageCheckout=success#subscription",
+        },
+        requireButton: false,
+      },
+    );
+
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.ok(rendered.container.querySelector('[role="dialog"]'));
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Payment submitted\. We’re confirming it\./,
+      );
+
+      for (const expected of [
+        /Payment submitted\. We’re confirming it\./,
+        /We’re confirming your payment…/,
+        /Usage added/,
+      ]) {
+        await act(async () => {
+          vi.advanceTimersByTime(1_250);
+          await Promise.resolve();
+        });
+        assert.ok(rendered.container.querySelector('[role="dialog"]'));
+        assert.match(rendered.container.textContent ?? "", expected);
+      }
+
+      assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    } finally {
+      await rendered.cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   test("uses the Settings-owned Max eligibility for an Edge recovery", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
