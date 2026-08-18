@@ -127,15 +127,27 @@ Current evidence:
   advance, unchanged prior entries, canonical admission, stale-replay rejection
   with exactly one Ops grant, and a later new grant only after the first recovery
   is fully consumed and the gate is exhausted again.
-- Web typecheck, focused ESLint, and the initial exact-head broad CI pass.
-- The preliminary specialist audit identified losable Starter wake recovery and
-  contradictory product authority. The implementation now derives wake recovery
-  from durable work state, and the owning product specs contain the explicit
-  operator policy. The specialist retry and final ReviewGPT disposition remain
-  pending.
-- The synthetic design study now renders exhausted Starter, wake-pending Starter,
-  and paid/container rows through the production component. Browser evidence is
-  still pending because no in-app browser was attached during the first pass.
+- Web typecheck, focused ESLint, and the initial exact-head broad CI pass. The
+  corrected client and maximum-page query tests also pass locally; fresh
+  exact-head CI remains pending after the review-finding commit.
+- The preliminary specialist audit identified losable Starter wake recovery,
+  contradictory product authority, stale post-commit row claims, hidden
+  narrow-width actions, and missing maximum-page recovery-query proof. The
+  implementation now derives wake recovery from durable work state, defines the
+  operator policy in the owning product specs, replaces stale accepted rows with
+  one capture-epoch-scoped committed/refreshing state, exposes the same status
+  and action in compact rows, and exercises both recovery reads at 25 members.
+- Corrected-head Product UX verdict: **Ready**. The irreducible purpose remains
+  one explicit, audited operator recovery that cannot grant twice. The ordinary
+  exhausted-Starter, accepted-reset, pending-wake, reload-recovery, paid reset,
+  and narrow-width operator paths now provide truthful status and a reachable
+  next action. The member receives restored canonical capacity without a new
+  self-service entitlement or changed credit history.
+- Seven synthetic production-component captures cover the unscrolled 1184px
+  dashboard, Starter confirmation, committed/refreshing result, full 390px
+  dashboard, compact eligible row, pending wake, and reload-derived wake retry.
+  The corrected desktop and phone layouts keep status and actions visible
+  without horizontal panning or contradictory stale badges.
 
 ## Deployment
 

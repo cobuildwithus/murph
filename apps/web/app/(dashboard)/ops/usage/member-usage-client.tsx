@@ -40,6 +40,11 @@ interface UsageResetRuntimeRetry {
   resetMode: HostedOpsMemberUsageResetResponse["resetMode"];
 }
 
+interface UsageCommittedRefresh {
+  dashboardCapturedAt: string;
+  memberId: string;
+}
+
 interface UsageRuntimeRecheckResponse {
   memberId: string;
   runtimeRecheckStatus: "accepted" | "pending";
@@ -70,6 +75,8 @@ export function MemberUsageClient({
     useState<UsageResetRuntimeRetry | null>(null);
   const [acceptedRuntimeRecheckMemberId, setAcceptedRuntimeRecheckMemberId] =
     useState<string | null>(null);
+  const [committedRefresh, setCommittedRefresh] =
+    useState<UsageCommittedRefresh | null>(null);
   const selectedRow = useMemo(
     () => dashboard.rows.find((row) => row.memberId === selectedMemberId)
       ?? null,
@@ -122,6 +129,10 @@ export function MemberUsageClient({
           : "starter_allowance";
         setRuntimeRetry(null);
         setAcceptedRuntimeRecheckMemberId(row.memberId);
+        setCommittedRefresh({
+          dashboardCapturedAt: dashboard.capturedAt,
+          memberId: row.memberId,
+        });
         setSelectedMemberId(null);
         setMessage({
           text: completedResetMode === "starter_allowance"
@@ -153,6 +164,10 @@ export function MemberUsageClient({
       if (result.resetMode === "starter_allowance") {
         setAcceptedRuntimeRecheckMemberId(result.memberId);
       }
+      setCommittedRefresh({
+        dashboardCapturedAt: dashboard.capturedAt,
+        memberId: result.memberId,
+      });
       setSelectedMemberId(null);
       setMessage({
         text: result.resetMode === "starter_allowance"
@@ -258,11 +273,42 @@ export function MemberUsageClient({
           </p>
         </div>
 
-        <div className="mt-5 overflow-hidden rounded-xl border border-border/70 bg-card/90">
+        <div className="mt-5 grid gap-3 xl:hidden">
+          {dashboard.rows.length === 0 ? (
+            <div className="rounded-xl border border-border/70 bg-card/90 px-4 py-10 text-center text-sm text-muted-foreground">
+              No hosted members or group containers were found on this page.
+            </div>
+          ) : (
+            dashboard.rows.map((row) => (
+              <UsageCompactRow
+                disabled={isResetting}
+                key={row.memberId}
+                onSelect={() => {
+                  setMessage(null);
+                  setRuntimeRetry(null);
+                  setSelectedMemberId(row.memberId);
+                }}
+                refreshingAfterCommit={
+                  committedRefresh?.dashboardCapturedAt === dashboard.capturedAt
+                  && committedRefresh.memberId === row.memberId
+                }
+                row={row}
+                runtimeRecheckAvailable={
+                  row.runtimeRecheckAvailable
+                  && acceptedRuntimeRecheckMemberId !== row.memberId
+                }
+              />
+            ))
+          )}
+        </div>
+
+        <div className="mt-5 hidden overflow-hidden rounded-xl border border-border/70 bg-card/90 xl:block">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Member or container</TableHead>
+                <TableHead className="sticky left-0 z-20 bg-card">
+                  Member or container
+                </TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead className="text-right">
                   Inbound, {dashboard.messageRetentionDays} days
@@ -274,8 +320,9 @@ export function MemberUsageClient({
                 </TableHead>
                 <TableHead className="text-right">Current period</TableHead>
                 <TableHead className="text-right">Remaining</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Action</TableHead>
+                <TableHead className="sticky right-0 z-20 border-l border-border/70 bg-card text-right">
+                  Status and action
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -283,7 +330,7 @@ export function MemberUsageClient({
                 <TableRow>
                   <TableCell
                     className="py-10 text-center text-muted-foreground"
-                    colSpan={10}
+                    colSpan={9}
                   >
                     No hosted members or group containers were found on this page.
                   </TableCell>
@@ -298,6 +345,10 @@ export function MemberUsageClient({
                       setRuntimeRetry(null);
                       setSelectedMemberId(row.memberId);
                     }}
+                    refreshingAfterCommit={
+                      committedRefresh?.dashboardCapturedAt === dashboard.capturedAt
+                      && committedRefresh.memberId === row.memberId
+                    }
                     row={row}
                     runtimeRecheckAvailable={
                       row.runtimeRecheckAvailable
@@ -451,29 +502,77 @@ export function MemberUsageClient({
   );
 }
 
-function UsageRow(input: {
+interface UsageRowControlInput {
   disabled: boolean;
   onSelect: () => void;
+  refreshingAfterCommit: boolean;
   row: HostedOpsMemberUsageRow;
   runtimeRecheckAvailable: boolean;
-}) {
+}
+
+function UsageCompactRow(input: UsageRowControlInput) {
   const period = input.row.currentPeriod;
-  const resettable = period !== null
-    && input.row.allowanceStatus === "available"
-    && (
-      input.row.resetMode !== null
-      || input.runtimeRecheckAvailable
-    )
-    && period.updatedAt !== null;
-  const actionLabel = input.runtimeRecheckAvailable
-    ? "Recheck runtime"
-    : input.row.resetMode === "starter_allowance"
-      ? "Reset Starter"
-      : "Reset";
+
+  return (
+    <article className="grid gap-4 rounded-xl border border-border/70 bg-card/90 p-4 md:grid-cols-[minmax(12rem,1fr)_minmax(20rem,2fr)_auto] md:items-center">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span
+            className="truncate font-mono text-xs text-foreground"
+            title={input.row.memberId}
+          >
+            {input.row.memberId}
+          </span>
+          <Badge variant="outline">
+            {input.row.memberKind === "group_container" ? "Group" : "Member"}
+          </Badge>
+        </div>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {readEntitySecondaryLabel(input.row)}
+        </p>
+      </div>
+      <div className="min-w-0">
+        <UsageStatusBadges
+          refreshingAfterCommit={input.refreshingAfterCommit}
+          row={input.row}
+          runtimeRecheckAvailable={input.runtimeRecheckAvailable}
+        />
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+          <UsageCompactMetric
+            label="Current period"
+            value={period
+              ? `${formatUsdMicros(period.spentUsdMicros)} / ${
+                formatUsdMicros(period.limitUsdMicros)
+              }`
+              : "No period"}
+          />
+          <UsageCompactMetric
+            label="Remaining"
+            value={period
+              ? formatUsdMicros(period.remainingUsdMicros)
+              : "Not available"}
+          />
+          <UsageCompactMetric
+            label="All-time AI"
+            value={formatUsdMicros(input.row.allTimeUsageUsdMicros)}
+          />
+          <UsageCompactMetric
+            label="Inbound, 7 days"
+            value={formatInteger(input.row.messagesLast7Days)}
+          />
+        </dl>
+      </div>
+      <UsageActionButton {...input} className="w-full md:w-auto" />
+    </article>
+  );
+}
+
+function UsageRow(input: UsageRowControlInput) {
+  const period = input.row.currentPeriod;
 
   return (
     <TableRow>
-      <TableCell>
+      <TableCell className="sticky left-0 z-10 bg-card">
         <div className="flex max-w-64 flex-col gap-1">
           <span
             className="truncate font-mono text-xs text-foreground"
@@ -513,52 +612,120 @@ function UsageRow(input: {
       <TableCell className="text-right font-serif font-semibold tabular-nums">
         {period ? formatUsdMicros(period.remainingUsdMicros) : "Not available"}
       </TableCell>
-      <TableCell>
-        <div className="flex max-w-48 flex-wrap gap-1">
-          {input.row.suspended ? (
-            <Badge variant="destructive">Suspended</Badge>
-          ) : null}
-          {period?.blocked ? (
-            <Badge variant="destructive">Blocked</Badge>
-          ) : null}
-          {input.row.resetMode === "starter_allowance" ? (
-            <Badge variant="secondary">Starter exhausted</Badge>
-          ) : null}
-          {input.runtimeRecheckAvailable ? (
-            <Badge variant="secondary">Wake pending</Badge>
-          ) : null}
-          {period?.idempotencyClaimStatus ? (
-            <Badge variant="secondary">Notice claimed</Badge>
-          ) : null}
-          {input.row.allowanceStatus === "unavailable" ? (
-            <Badge variant="secondary">Unavailable</Badge>
-          ) : null}
-          {input.row.allowanceStatus === "available"
-              && period
-              && !input.row.suspended
-              && !period.blocked ? (
-            <Badge variant="outline">Available</Badge>
-          ) : null}
+      <TableCell className="sticky right-0 z-10 border-l border-border/70 bg-card text-right">
+        <div className="flex min-w-56 flex-col items-end gap-2">
+          <UsageStatusBadges
+            refreshingAfterCommit={input.refreshingAfterCommit}
+            row={input.row}
+            runtimeRecheckAvailable={input.runtimeRecheckAvailable}
+          />
+          <UsageActionButton {...input} />
         </div>
       </TableCell>
-      <TableCell className="text-right">
-        <Button
-          aria-label={input.runtimeRecheckAvailable
-            ? `Recheck runtime for ${input.row.memberId}`
-            : input.row.resetMode === "starter_allowance"
-              ? `Reset Starter allowance for ${input.row.memberId}`
-              : `Reset usage for ${input.row.memberId}`}
-          disabled={input.disabled || !resettable}
-          onClick={input.onSelect}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <RotateCcwIcon data-icon="inline-start" />
-          {actionLabel}
-        </Button>
-      </TableCell>
     </TableRow>
+  );
+}
+
+function UsageStatusBadges(input: {
+  refreshingAfterCommit: boolean;
+  row: HostedOpsMemberUsageRow;
+  runtimeRecheckAvailable: boolean;
+}) {
+  const period = input.row.currentPeriod;
+  if (input.refreshingAfterCommit) {
+    return (
+      <div className="flex flex-wrap gap-1">
+        <Badge variant="outline">Committed · refreshing</Badge>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {input.row.suspended ? (
+        <Badge variant="destructive">Suspended</Badge>
+      ) : null}
+      {period?.blocked ? (
+        <Badge variant="destructive">Blocked</Badge>
+      ) : null}
+      {input.row.resetMode === "starter_allowance" ? (
+        <Badge variant="secondary">Starter exhausted</Badge>
+      ) : null}
+      {input.runtimeRecheckAvailable ? (
+        <Badge variant="secondary">Wake pending</Badge>
+      ) : null}
+      {period?.idempotencyClaimStatus ? (
+        <Badge variant="secondary">Notice claimed</Badge>
+      ) : null}
+      {input.row.allowanceStatus === "unavailable" ? (
+        <Badge variant="secondary">Unavailable</Badge>
+      ) : null}
+      {input.row.allowanceStatus === "available"
+          && period
+          && !input.row.suspended
+          && !period.blocked ? (
+        <Badge variant="outline">Available</Badge>
+      ) : null}
+    </div>
+  );
+}
+
+function UsageActionButton(
+  input: UsageRowControlInput & { className?: string },
+) {
+  const period = input.row.currentPeriod;
+  const resettable = !input.refreshingAfterCommit
+    && period !== null
+    && input.row.allowanceStatus === "available"
+    && (
+      input.row.resetMode !== null
+      || input.runtimeRecheckAvailable
+    )
+    && period.updatedAt !== null;
+  const actionLabel = input.refreshingAfterCommit
+    ? "Refreshing"
+    : input.runtimeRecheckAvailable
+      ? "Recheck runtime"
+      : input.row.resetMode === "starter_allowance"
+        ? "Reset Starter"
+        : "Reset";
+
+  return (
+    <Button
+      aria-label={input.refreshingAfterCommit
+        ? `Committed update refreshing for ${input.row.memberId}`
+        : input.runtimeRecheckAvailable
+          ? `Recheck runtime for ${input.row.memberId}`
+          : input.row.resetMode === "starter_allowance"
+            ? `Reset Starter allowance for ${input.row.memberId}`
+            : `Reset usage for ${input.row.memberId}`}
+      className={input.className}
+      disabled={input.disabled || !resettable}
+      onClick={input.onSelect}
+      size="sm"
+      type="button"
+      variant="outline"
+    >
+      {input.refreshingAfterCommit ? (
+        <Spinner data-icon="inline-start" />
+      ) : (
+        <RotateCcwIcon data-icon="inline-start" />
+      )}
+      {actionLabel}
+    </Button>
+  );
+}
+
+function UsageCompactMetric(input: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+        {input.label}
+      </dt>
+      <dd className="mt-0.5 truncate font-medium tabular-nums text-foreground">
+        {input.value}
+      </dd>
+    </div>
   );
 }
 

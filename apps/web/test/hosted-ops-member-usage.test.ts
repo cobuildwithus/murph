@@ -442,13 +442,23 @@ describe("hosted ops member usage", () => {
     });
     const groupUsage = vi.fn(async () => []);
     const findDeliveries = vi.fn(async () => []);
+    const findOpsResetGrants = vi.fn(async () => admittedIds.map(
+      (beneficiaryMemberId) => ({ beneficiaryMemberId }),
+    ));
+    const findStalledMailboxItems = vi.fn(async () => admittedIds.map(
+      (userId) => ({ userId }),
+    ));
     const findMembers = createPagedMemberFindManyMock(memberCandidates);
     const prisma = asPrismaClientForHostedOpsDashboardTest({
       $queryRaw: readSummary,
       hostedAiUsage: { groupBy: groupUsage },
       hostedLinqDelivery: { findMany: findDeliveries },
-      hostedMailboxItem: { groupBy: groupMessages },
+      hostedMailboxItem: {
+        findMany: findStalledMailboxItems,
+        groupBy: groupMessages,
+      },
       hostedMember: { findMany: findMembers },
+      hostedUsageCreditEntry: { findMany: findOpsResetGrants },
     });
 
     const dashboard = await readHostedOpsMemberUsage({ now: NOW, prisma });
@@ -502,6 +512,26 @@ describe("hosted ops member usage", () => {
       });
     expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
       .toHaveBeenCalledTimes(1);
+    expect(findOpsResetGrants).toHaveBeenCalledWith({
+      select: { beneficiaryMemberId: true },
+      where: {
+        beneficiaryMemberId: { in: admittedIds },
+        grant: { remainingUsdMicros: { gt: 0n } },
+        kind: "starter_grant",
+        sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
+      },
+    });
+    expect(findOpsResetGrants).toHaveBeenCalledTimes(1);
+    expect(findStalledMailboxItems).toHaveBeenCalledWith({
+      distinct: ["userId"],
+      select: { userId: true },
+      where: {
+        aiUsageDeniedAt: { not: null },
+        consumedAt: null,
+        userId: { in: admittedIds },
+      },
+    });
+    expect(findStalledMailboxItems).toHaveBeenCalledTimes(1);
     expect(admittedIds).not.toContain(offPageMemberId);
     expect(readSummary).toHaveBeenCalledTimes(1);
     expect(findDeliveries).not.toHaveBeenCalled();

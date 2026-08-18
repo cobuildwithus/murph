@@ -329,6 +329,40 @@ describe("MemberUsageClient", () => {
     expect(rendered.container.querySelector('[role="alert"]')?.textContent)
       .toContain("Starter allowance was reset to $4.50");
     expect(routerRefresh).toHaveBeenCalledTimes(1);
+    expect(rendered.container.textContent).toContain("Committed · refreshing");
+    expect(rendered.container.textContent).not.toContain("Starter exhausted");
+    expect(rendered.container.textContent).not.toContain("Notice claimed");
+    expect(rendered.container.textContent).not.toContain("Blocked");
+    expect(() => getButton(rendered.container, "Reset Starter"))
+      .toThrow("Button not found: Reset Starter");
+    expect(getButton(rendered.container, "Refreshing").disabled).toBe(true);
+
+    const refreshedDashboard = makeDashboard();
+    const refreshedRow = refreshedDashboard.rows[0];
+    if (!refreshedRow?.currentPeriod) {
+      throw new Error("Expected a refreshed usage fixture row.");
+    }
+    refreshedDashboard.capturedAt = "2026-07-22T18:00:01.000Z";
+    refreshedRow.containerOwnerMemberId = null;
+    refreshedRow.memberKind = "member";
+    refreshedRow.participantCount = null;
+    refreshedRow.resetMode = null;
+    refreshedRow.currentPeriod.blocked = false;
+    refreshedRow.currentPeriod.idempotencyClaimStatus = null;
+    refreshedRow.currentPeriod.limitUsdMicros = "0";
+    refreshedRow.currentPeriod.remainingUsdMicros = "4500000";
+    refreshedRow.currentPeriod.spentUsdMicros = "0";
+    refreshedRow.currentPeriod.usageCreditBalanceUsdMicros = "4500000";
+    refreshedRow.currentPeriod.usageCreditLedgerVersion = "5";
+
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard: refreshedDashboard }),
+    );
+
+    expect(rendered.container.textContent).not.toContain("Committed · refreshing");
+    expect(rendered.container.textContent).toContain("Available");
+    expect(rendered.container.textContent).toContain("$4.50");
+    expect(getButton(rendered.container, "Reset").disabled).toBe(true);
   });
 
   test("reconstructs a pending Starter wake after close and remount", async () => {
@@ -486,6 +520,10 @@ describe("MemberUsageClient", () => {
     });
     expect(rendered.container.querySelector('[role="alert"]')?.textContent)
       .toContain("runtime recheck was accepted");
+    expect(rendered.container.textContent).toContain("Committed · refreshing");
+    expect(rendered.container.textContent).not.toContain("Blocked");
+    expect(rendered.container.textContent).not.toContain("Notice claimed");
+    expect(getButton(rendered.container, "Refreshing").disabled).toBe(true);
   });
 
   test("surfaces a stale reset without claiming success", async () => {
