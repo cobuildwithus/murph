@@ -68,6 +68,7 @@ export function withDedicatedDatabaseOwner(connectionString) {
       ? `${existingOptions} ${DB_OWNER_CONNECTION_OPTION}`
       : DB_OWNER_CONNECTION_OPTION,
   );
+  parsed.search = parsed.searchParams.toString().replaceAll("+", "%20");
   return parsed.toString();
 }
 
