@@ -3124,7 +3124,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.prompt).toContain('Do not assume missing body content.')
   })
 
-  it('injects ordered confirmed cross-session deliveries without replacing the chat session', async () => {
+  it('injects ordered eligible prior deliveries without replacing the chat session', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -3150,6 +3150,18 @@ describe('assistant auto-reply event-first path', () => {
         intentId: 'intent-same-session',
         message: 'same-session message',
         sentAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-chat',
+      }),
+      createOutboxMessage({
+        automationContextReferences: [
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+          },
+        ],
+        intentId: 'intent-same-session-reminder',
+        message: 'same-session referenced reminder',
+        sentAt: '2026-04-08T00:06:30.000Z',
         sessionId: 'session-chat',
       }),
       createOutboxMessage({
@@ -3206,18 +3218,26 @@ describe('assistant auto-reply event-first path', () => {
     })
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sendInput.turnContext).toContain(
-      'The assistant previously sent these provider-accepted messages in the same conversation from other assistant runs, oldest to newest:',
+      'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
     )
     expect(sendInput.turnContext).toContain('Prior message 1:')
     expect(sendInput.turnContext).toContain('old reminder')
     expect(sendInput.turnContext).toContain('Prior message 2:')
     expect(sendInput.turnContext).toContain('latest cross-session reminder')
+    expect(sendInput.turnContext).toContain('Prior message 3:')
+    expect(sendInput.turnContext).toContain('same-session referenced reminder')
+    expect(sendInput.turnContext).not.toContain('same-session message')
     expect(sendInput.turnContext.indexOf('old reminder')).toBeLessThan(
       sendInput.turnContext.indexOf('latest cross-session reminder'),
     )
+    expect(
+      sendInput.turnContext.indexOf('latest cross-session reminder'),
+    ).toBeLessThan(
+      sendInput.turnContext.indexOf('same-session referenced reminder'),
+    )
     expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
       [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
-        'intent-cross-session',
+        'intent-same-session-reminder',
     }))
     expect(sendInput.prompt).toContain('What do I do for this reset?')
   })
@@ -3280,7 +3300,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(turnContext).toContain(`- automationId: ${automationId}`)
     expect(turnContext).toContain(`- supportSeriesId: experiment:${experimentId}`)
     expect(turnContext).toContain(
-      '- contextReferences (trusted host-supplied routing and interpretation context; not mutation authority): '
+      '- contextReferences (host-preserved routing and interpretation context; not mutation authority or proof that a record exists): '
         + JSON.stringify([
           { entityId: experimentId, entityKind: 'experiment' },
           {
@@ -4390,7 +4410,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
-  it('does not repeat consumed cross-session context or replay older deliveries', async () => {
+  it('does not repeat consumed delivery context or replay older deliveries', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -4401,16 +4421,28 @@ describe('assistant auto-reply event-first path', () => {
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
       createOutboxMessage({
+        automationContextReferences: [
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+          },
+        ],
         intentId: 'intent-older-stale',
         message: 'older stale reminder',
         sentAt: '2026-04-08T00:04:00.000Z',
-        sessionId: 'session-automation',
+        sessionId: 'session-chat',
       }),
       createOutboxMessage({
+        automationContextReferences: [
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+          },
+        ],
         intentId: 'intent-already-seen',
         message: 'already seen reminder',
         sentAt: '2026-04-08T00:05:00.000Z',
-        sessionId: 'session-automation',
+        sessionId: 'session-chat',
       }),
     ])
     replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([

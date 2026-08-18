@@ -182,7 +182,7 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(skill).toContain('Use `--clear-workout` only')
     expect(skill).toContain('remove the entire record')
-    expect(skill).toContain('Finish only when the member explicitly says they are done')
+    expect(skill).toContain('member explicitly or unmistakably closes that session')
     expect(skill).toContain('already-completed return is convergence')
     expect(skill).not.toContain('Complete workout exercise')
     expect(skill).toContain('Never infer weight, repetitions, effort, assistance')
@@ -193,7 +193,7 @@ describe('assistant tracked workout table skill', () => {
       'ordinary set log, correction, clear, exercise addition, start, resume, or finish',
     )
     expect(skill).toContain(
-      'Do not send a text-only acknowledgement or companion prose.',
+      'Do not send a text-only acknowledgement or companion prose for an ordinary single-workout mutation.',
     )
     expect(skill).toContain(
       'After every verified ordinary free-form set log, correction, clear, or exercise addition',
@@ -280,12 +280,14 @@ describe('assistant tracked workout table skill', () => {
     )
 
     expect(skill).toContain('## Scheduled reminder relationship context')
-    expect(skill).toContain('trusted host-supplied `automationId`')
+    expect(skill).toContain('host-preserved `automationId`')
     expect(skill).toContain('exact `contextReferences`')
     expect(skill).toContain('routing and interpretation context only')
     expect(skill).toContain('do not require native iMessage Reply')
     expect(skill).toContain('next ordinary direct message after the reminder')
     expect(skill).toContain('one exact `workout_format` reference')
+    expect(skill).toContain('successful current `vault-cli workout format show <lookup> --format json` read or format-creation result')
+    expect(skill).toContain('If current evidence does not identify exactly one format, save no reference')
     expect(skill).toContain('vault-cli workout format show <exact_format_id> --format json')
     expect(skill).toContain('vault-cli workout active --format json')
     expect(skill).toContain('vault-cli workout finish --workout-id <earlier_evt_id> --ended-at <canonical_end_instant>')
@@ -302,6 +304,12 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('Explicit historical intent remains explicit targeting')
     expect(skill).toContain('existing exact-id path')
     expect(skill).toContain('not a composite command or reply capability')
+    expect(skill).toContain('one concise ordinary-text response as the complete channel result')
+    expect(skill).toContain('member-readable rendering of its exact recorded end time')
+    expect(skill).toContain('subsequent ordinary updates resume card-only responses')
+    expect(skill).toContain('under exactly two authorities')
+    expect(skill).toContain('No other implicit finish is allowed')
+    expect(skill).not.toContain('only after an explicit finish')
   })
 
   it('keeps set annotations canonical and preserves a fourth set', async () => {

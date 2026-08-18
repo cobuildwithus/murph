@@ -387,8 +387,9 @@ describe('experiment onboarding skill guidance', () => {
       'contextReferences: [{ "entityKind": "experiment", "entityId": "<experimentId>" }]',
     )
     expect(raw).toContain('exact canonical experiment id')
-    expect(raw).toContain('trusted host-supplied routing context')
-    expect(raw).toContain('not mutation authority')
+    expect(raw).toContain('successful current run-creation result or canonical experiment read')
+    expect(raw).toContain('host preserves the stored id as routing context')
+    expect(raw).toContain('grant mutation authority')
     expect(raw).toContain('ordinary direct-chat reply')
     expect(raw).toContain('does not require native iMessage Reply')
     expect(raw).toContain('supportKind: "reminder"')

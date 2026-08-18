@@ -191,6 +191,12 @@ continues to include its `supportSeriesId`. Each reference names an entity kind
 and the canonical id it concerns, such as a workout format, experiment, habit,
 or regimen. The host keeps those exact ids visible to the model.
 
+A model-authored reference copies an id returned by a successful current
+canonical read or create result that identifies exactly one record. When that
+evidence is missing or ambiguous, the automation stores no reference. The host
+preserves stored ids with the delivery; preservation is not proof that a record
+still exists or is the right mutation target.
+
 The metadata is relationship context, not side-effect authority. It does not
 confer read permission, mutation permission, or consent, and it does not select a
 write surface. The assistant must inspect the referenced canonical record and
@@ -218,6 +224,11 @@ it is never stretched to the next-day reply, reminder time, or local midnight.
 Every prior actual remains intact, every empty placeholder stays empty, and no
 planned target becomes an actual. The existing one-active-workout invariant and
 mutation lock remain the write owners throughout.
+
+Because this transition changes two workout records, its one complete response
+uses concise ordinary text rather than a single-workout card. It names the
+earlier workout and its exact recorded end time, the newly started routine, and
+the exact set result saved. Later ordinary updates return to card-only replies.
 
 Same-local-day ambiguity, multiple active workouts, an unidentified routine or
 set, missing or conflicting relationship context, and insufficient canonical
@@ -333,6 +344,16 @@ explicit restoration of the quarantined intent after the compatible bundle is
 live, not rollback below the floor. Focused static-route, local-outbox, and
 hosted-side-effect round-trip tests pin all three strict readers with the same
 expanded fixture shape.
+
+Reminder context references follow the same persisted-outbox rollout rule.
+Intents without references omit the optional field, so ordinary replies remain
+readable by the preceding strict reader. Deploy the reference-aware Worker and
+runner together with immediate container rollout before any reminder carrying
+references can fire, then prove the exact runner-bundle fingerprint. The first
+persisted non-empty reference list establishes that bundle as the hard rollback
+floor until every such intent and hosted checkpoint has drained; recovery below
+the floor requires the current compatible reader or a forward fix, never manual
+editing of assistant runtime state.
 
 Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store

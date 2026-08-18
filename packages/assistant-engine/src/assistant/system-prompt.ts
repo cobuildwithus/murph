@@ -1784,13 +1784,16 @@ function buildAssistantSharedAutomationActionText(
     : `Use ${code(
         "vault-cli automation save"
       )} with typed schedule and instruction fields to create or update ordinary automations.`;
+  const contextReferenceEvidenceGuidance = hostedRuntime
+    ? `Only save ${code("contextReferences")} by copying ids from successful current canonical reads or create results that identify exactly one record. The host preserves those ids for later context but does not prove that a referenced record exists or is the correct mutation target.`
+    : "";
   const strictScheduleGuidance = hostedRuntime
     ? `For recurring time-based schedules, use these exact canonical shapes: ${code("every")} ${code('{"kind":"every","everyMs":3600000}')}; ${code("cron")} ${code('{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}')}; ${code("dailyLocal")} ${code('{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}')}. Changes to an existing automation use ${code("action: patch")}, never ${code("action: update")}, and every patch requires ${code("lookup")} identifying the existing automation. Never invent schedule, update, or timezone fields outside the schema. The exact camel-case field ${code("schedule.timeZone")} is valid only for recurring ${code("cron")} and ${code("dailyLocal")} wall-clock schedules; never use ${code("timezone")}, ${code("schedule.timezone")}, top-level ${code("timeZone")}, or any other invented timezone field.`
     : "";
   const routeGuidance = hostedRuntime
     ? `A save always binds to the trusted current ${conversationScope === "group" ? "group room" : "conversation"}. A patch retargets only when ${code("retargetToCurrentConversation: true")} is explicit. The tool accepts no arbitrary route locator; do not target another route.${conversationScope === "group" ? " Never use saved personal/self targets in this group vault." : ""}`
     : `Local automation delivery supports Telegram or Linq, not email. If the user requests email delivery, explain that limitation and offer Telegram or Linq before asking for any routing details. For a supported route, pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
-  return `${actionGuidance} ${strictScheduleGuidance} ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
+  return `${actionGuidance} ${contextReferenceEvidenceGuidance} ${strictScheduleGuidance} ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
     "vault-cli automation import-json"
   )} for advanced payload imports that the typed surface cannot express.`}
 

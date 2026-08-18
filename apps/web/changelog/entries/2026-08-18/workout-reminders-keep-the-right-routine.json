@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Workout reminders keep the right routine",
-    "summary": "When you report a set after a new workout reminder, Murph can use that reminder’s saved routine instead of leaving an already completed earlier workout in the way.",
+    "summary": "When you report a set after a new workout reminder, Murph can use that reminder’s saved routine instead of letting an earlier workout that was left open block it.",
     "details": "This works in an ordinary private-chat reply without requiring the iMessage Reply feature. Murph still stops when the routine, set, timing, or active-workout state is ambiguous, and explicit corrections to an older workout stay attached to that workout.",
     "relevanceTags": ["assistant", "workouts", "automations", "reliability"],
     "sourcePullRequests": [1981]

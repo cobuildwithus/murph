@@ -402,6 +402,11 @@ export async function createAssistantOutboxIntent(
     const answeredMailboxItemIds = normalizeAssistantOutboxAnsweredMailboxItemIds(
       input.answeredMailboxItemIds ?? [],
     )
+    const automationContextReferences =
+      input.automationContextReferences?.map((reference) => ({
+        entityId: reference.entityId,
+        entityKind: reference.entityKind,
+      })) ?? []
     const deliveryTransportIdempotent =
       operation
         ? resolveAssistantOutboxReactionTransportIdempotent({
@@ -507,11 +512,9 @@ export async function createAssistantOutboxIntent(
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
       automationAuthority: input.automationAuthority ?? null,
-      automationContextReferences:
-        input.automationContextReferences?.map((reference) => ({
-          entityId: reference.entityId,
-          entityKind: reference.entityKind,
-        })) ?? null,
+      ...(automationContextReferences.length === 0
+        ? {}
+        : { automationContextReferences }),
       plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
       scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
       externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
@@ -1619,11 +1622,9 @@ export async function deliverAssistantOutboxMessage(input: {
     reviewedAssistantAskCompletionExpiresAt:
       input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.automationAuthority ?? null,
-    automationContextReferences:
-      input.automationContextReferences?.map((reference) => ({
-        entityId: reference.entityId,
-        entityKind: reference.entityKind,
-      })) ?? null,
+    ...(input.automationContextReferences?.length
+      ? { automationContextReferences: input.automationContextReferences }
+      : {}),
     plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     bindingDelivery: input.bindingDelivery,

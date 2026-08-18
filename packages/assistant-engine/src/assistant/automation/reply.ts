@@ -4663,9 +4663,17 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
         replyToMessageId,
       )
   const sessionEligible = matchingDeliveries
-    .filter((delivery) =>
-      input.session === null || delivery.sessionId !== input.session.sessionId,
-    )
+    .filter((delivery) => {
+      if (
+        input.session === null ||
+        delivery.sessionId !== input.session.sessionId
+      ) {
+        return true
+      }
+      // Ordinary same-session messages are already in transcript history, but
+      // scheduled prompts are not. Keep only their exact persisted references.
+      return delivery.automationContextReferences.length > 0
+    })
     .sort((left, right) =>
       compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
     )
@@ -5470,7 +5478,7 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
 
   return [
     'Conversation context:',
-    'The assistant previously sent these provider-accepted messages in the same conversation from other assistant runs, oldest to newest:',
+    'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
     '',
     ...deliveries.flatMap((delivery, index) => [
       `Prior message ${index + 1}${delivery.exactReplyTarget ? ' (native reply target)' : ''}:`,
@@ -5486,7 +5494,7 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
               '- contextReferences: none supplied; do not guess a canonical record',
             ]
         : [
-            `- contextReferences (trusted host-supplied routing and interpretation context; not mutation authority): ${JSON.stringify(delivery.automationContextReferences)}`,
+            `- contextReferences (host-preserved routing and interpretation context; not mutation authority or proof that a record exists): ${JSON.stringify(delivery.automationContextReferences)}`,
           ]),
       ...(delivery.supportSeriesId === null
         ? []
