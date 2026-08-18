@@ -27,15 +27,53 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
         ? body.action
         : null;
       const isCancellation = action === "cancel";
-      const attempt = isCancellation
-        ? ++cancellationRequests
-        : ++limitRequests;
-      if (attempt === 1) {
+      if (isCancellation) {
+        cancellationRequests += 1;
+        if (cancellationRequests === 1) {
+          await route.fulfill({
+            body: JSON.stringify({
+              error: {
+                code: "HOSTED_GROUP_SPONSORSHIP_STATE_CONFLICT",
+                message: "This monthly sponsorship changed. Refresh and try again.",
+              },
+            }),
+            contentType: "application/json",
+            status: 409,
+          });
+          return;
+        }
+        if (cancellationRequests === 2) {
+          await route.fulfill({
+            body: JSON.stringify({
+              error: {
+                code: "AUTH_REQUIRED",
+                message: "Sign in to continue.",
+              },
+            }),
+            contentType: "application/json",
+            status: 401,
+          });
+          return;
+        }
+        if (cancellationRequests === 3) {
+          await route.abort("connectionfailed");
+          return;
+        }
+        await route.fulfill({
+          body: JSON.stringify({ management: null }),
+          contentType: "application/json",
+          status: 200,
+        });
+        return;
+      }
+
+      limitRequests += 1;
+      if (limitRequests === 1) {
         await route.abort("connectionfailed");
         return;
       }
       await route.fulfill({
-        body: JSON.stringify({ management: isCancellation ? null : management }),
+        body: JSON.stringify({ management }),
         contentType: "application/json",
         status: 200,
       });
@@ -53,17 +91,22 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
   });
   expect(response?.status(), "design catalog should respond 200").toBe(200);
 
-  const study = page.locator("#group-sponsorship-management-component");
-  await expect(study).toHaveCount(1);
-  await page.waitForFunction(() => {
-    const element = document.querySelector(
-      "#group-sponsorship-management-component",
-    );
-    return element
-      ? Object.keys(element).some((key) => key.startsWith("__reactFiber$"))
-      : false;
-  });
-  await study.evaluate((element) => element.removeAttribute("inert"));
+  const enableStudy = async () => {
+    const currentStudy = page.locator("#group-sponsorship-management-component");
+    await expect(currentStudy).toHaveCount(1);
+    await page.waitForFunction(() => {
+      const element = document.querySelector(
+        "#group-sponsorship-management-component",
+      );
+      return element
+        ? Object.keys(element).some((key) => key.startsWith("__reactFiber$"))
+        : false;
+    });
+    await currentStudy.evaluate((element) => element.removeAttribute("inert"));
+    return currentStudy;
+  };
+
+  let study = await enableStudy();
 
   const reviewButton = study.getByRole("button", { name: "Review $20 limit" });
   await reviewButton.click();
@@ -112,6 +155,46 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
   });
   await dialog.getByRole("button", { name: "Cancel sponsorship" }).click();
   await expect(dialog.getByRole("alert")).toContainText(
+    "This monthly sponsorship changed. Refresh and try again.",
+  );
+  await expect(
+    dialog.getByRole("button", { name: "Refresh current setup" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Check cancellation status" }),
+  ).toHaveCount(0);
+  expect(cancellationRequests).toBe(1);
+
+  await Promise.all([
+    page.waitForEvent("framenavigated"),
+    dialog.getByRole("button", { name: "Refresh current setup" }).click(),
+  ]);
+  study = await enableStudy();
+  await study.getByRole("button", { name: "Cancel sponsorship" }).click();
+  dialog = page.getByRole("alertdialog", {
+    name: "Cancel monthly sponsorship?",
+  });
+  await dialog.getByRole("button", { name: "Cancel sponsorship" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Sign in to continue.");
+  await expect(
+    dialog.getByRole("button", { name: "Refresh current setup" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Check cancellation status" }),
+  ).toHaveCount(0);
+  expect(cancellationRequests).toBe(2);
+
+  await Promise.all([
+    page.waitForEvent("framenavigated"),
+    page.keyboard.press("Escape"),
+  ]);
+  study = await enableStudy();
+  await study.getByRole("button", { name: "Cancel sponsorship" }).click();
+  dialog = page.getByRole("alertdialog", {
+    name: "Cancel monthly sponsorship?",
+  });
+  await dialog.getByRole("button", { name: "Cancel sponsorship" }).click();
+  await expect(dialog.getByRole("alert")).toContainText(
     "We couldn’t confirm whether cancellation went through",
   );
   await expect(
@@ -120,7 +203,7 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
   await expect(
     dialog.getByRole("button", { name: "Check current setup" }),
   ).toHaveCount(0);
-  expect(cancellationRequests).toBe(1);
+  expect(cancellationRequests).toBe(3);
 
   await page.keyboard.press("Escape");
   await expect(dialog).toBeVisible();
@@ -129,5 +212,5 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
   await expect(study.getByRole("status")).toContainText(
     "Monthly sponsorship canceled",
   );
-  expect(cancellationRequests).toBe(2);
+  expect(cancellationRequests).toBe(4);
 });

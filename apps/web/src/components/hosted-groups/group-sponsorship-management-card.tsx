@@ -29,6 +29,11 @@ export interface GroupSponsorshipManagementProjection {
 
 type MonthlyCapMinor = GroupSponsorshipManagementProjection["monthlyCapMinor"];
 
+type GroupSponsorshipManagementError = {
+  certainty: "authoritative" | "indeterminate";
+  message: string;
+};
+
 export type GroupSponsorshipManagementConfirmation =
   | {
     currentMonthlyCapMinor: MonthlyCapMinor;
@@ -58,7 +63,7 @@ export function GroupSponsorshipManagementCard({
   );
   const [busy, setBusy] = useState(false);
   const [canceled, setCanceled] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<GroupSponsorshipManagementError | null>(null);
   const [confirmation, setConfirmation] = useState<
     GroupSponsorshipManagementConfirmation | null
   >(null);
@@ -80,6 +85,17 @@ export function GroupSponsorshipManagementCard({
         method: "POST",
       });
       const value: unknown = await response.json();
+      if (
+        !response.ok &&
+        response.status >= 400 &&
+        response.status < 500
+      ) {
+        setError({
+          certainty: "authoritative",
+          message: readManagementErrorMessage(value),
+        });
+        return false;
+      }
       if (!response.ok || !isRecord(value)) {
         throw new Error("That change didn’t go through. Try again.");
       }
@@ -112,11 +128,12 @@ export function GroupSponsorshipManagementCard({
       );
       return true;
     } catch (cause) {
-      setError(
-        cause instanceof Error
+      setError({
+        certainty: "indeterminate",
+        message: cause instanceof Error
           ? cause.message
           : "That change didn’t go through. Try again.",
-      );
+      });
       return false;
     } finally {
       setBusy(false);
@@ -301,7 +318,7 @@ export function GroupSponsorshipManagementCard({
 
       {error && confirmation === null ? (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {error.message}
         </p>
       ) : null}
 
@@ -350,7 +367,10 @@ export function GroupSponsorshipManagementCard({
         onOpenChange={(open) => {
           if (!open && !busy) {
             if (error) {
-              if (confirmation?.kind === "cancel") {
+              if (
+                confirmation?.kind === "cancel" &&
+                error.certainty === "indeterminate"
+              ) {
                 return;
               }
               window.location.reload();
@@ -374,7 +394,7 @@ export function GroupSponsorshipManagementConfirmationDialog({
 }: {
   busy: boolean;
   confirmation: GroupSponsorshipManagementConfirmation | null;
-  error?: string | null;
+  error?: GroupSponsorshipManagementError | null;
   inert?: boolean;
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
@@ -383,6 +403,9 @@ export function GroupSponsorshipManagementConfirmationDialog({
   const nextLimit = isIncrease
     ? formatMoney(confirmation.nextMonthlyCapMinor)
     : null;
+  const authoritativeRejection = error?.certainty === "authoritative";
+  const indeterminateCancellation =
+    error?.certainty === "indeterminate" && !isIncrease;
 
   return (
     <AlertDialogPrimitive.Root
@@ -418,37 +441,45 @@ export function GroupSponsorshipManagementConfirmationDialog({
 
           {error ? (
             <p role="alert" className="text-sm/6 text-destructive">
-              {isIncrease
+              {authoritativeRejection
+                ? error.message
+                : isIncrease
                 ? "We couldn’t confirm whether that change went through. Check your current setup or try again."
                 : "We couldn’t confirm whether cancellation went through. Check its status to see whether automatic refills stopped."}
             </p>
           ) : null}
 
           <footer className="-mx-5 -mb-5 flex flex-col-reverse gap-2 rounded-b-2xl border-t border-border bg-muted/50 p-5 sm:flex-row sm:justify-end">
-            {error && !isIncrease ? null : (
+            {indeterminateCancellation ? null : (
               <AlertDialogPrimitive.Close
                 disabled={busy}
                 render={<Button size="lg" variant="outline" />}
               >
-                {error ? "Check current setup" : "Keep current setup"}
+                {authoritativeRejection
+                  ? "Refresh current setup"
+                  : error
+                    ? "Check current setup"
+                    : "Keep current setup"}
               </AlertDialogPrimitive.Close>
             )}
-            <Button
-              data-slot="alert-dialog-action"
-              disabled={busy}
-              onClick={onConfirm}
-              size="lg"
-              variant={isIncrease ? "default" : "destructive"}
-            >
-              {busy ? <Spinner data-icon="inline-start" /> : null}
-              {busy
-                ? isIncrease ? "Updating limit" : "Canceling sponsorship"
-                : isIncrease
-                  ? `Increase to ${nextLimit}`
-                  : error
-                    ? "Check cancellation status"
-                    : "Cancel sponsorship"}
-            </Button>
+            {authoritativeRejection ? null : (
+              <Button
+                data-slot="alert-dialog-action"
+                disabled={busy}
+                onClick={onConfirm}
+                size="lg"
+                variant={isIncrease ? "default" : "destructive"}
+              >
+                {busy ? <Spinner data-icon="inline-start" /> : null}
+                {busy
+                  ? isIncrease ? "Updating limit" : "Canceling sponsorship"
+                  : isIncrease
+                    ? `Increase to ${nextLimit}`
+                    : error
+                      ? "Check cancellation status"
+                      : "Cancel sponsorship"}
+              </Button>
+            )}
           </footer>
         </AlertDialogPrimitive.Popup>
       </AlertDialogPrimitive.Portal>
@@ -508,6 +539,20 @@ function readManagementProjection(
     periodEnd: value.periodEnd,
     status,
   };
+}
+
+function readManagementErrorMessage(value: unknown): string {
+  const fallback =
+    "That change was not accepted. Refresh your current setup and try again.";
+  if (!isRecord(value) || !isRecord(value.error)) {
+    return fallback;
+  }
+  const message = value.error.message;
+  if (typeof message !== "string") {
+    return fallback;
+  }
+  const trimmed = message.trim();
+  return trimmed.length > 0 && trimmed.length <= 240 ? trimmed : fallback;
 }
 
 function readCap(value: unknown): MonthlyCapMinor | null {

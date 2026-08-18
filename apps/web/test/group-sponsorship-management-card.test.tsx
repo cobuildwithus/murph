@@ -537,3 +537,79 @@ test.each([false, true])(
     }
   }
 );
+
+test.each([
+  {
+    message: "Sign in to continue.",
+    status: 401,
+  },
+  {
+    message: "This monthly sponsorship changed. Refresh and try again.",
+    status: 409,
+  },
+])(
+  "reloads current state after an authoritative $status cancellation rejection",
+  async ({ message, status }) => {
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({
+        error: {
+          code: status === 401
+            ? "AUTH_REQUIRED"
+            : "HOSTED_GROUP_SPONSORSHIP_STATE_CONFLICT",
+          message,
+        },
+      }),
+      ok: false,
+      status,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { GroupSponsorshipManagementCard } = await import(
+      "@/src/components/hosted-groups/group-sponsorship-management-card"
+    );
+    const rendered = await renderClientComponent(createElement(
+      GroupSponsorshipManagementCard,
+      {
+        cancelOnly: true,
+        endpoint: "/api/groups/fund/example/sponsorship",
+        management: baseManagement,
+      },
+    ));
+    try {
+      const cancelButton = [...rendered.container.querySelectorAll("button")]
+        .find((candidate) => candidate.textContent === "Cancel sponsorship");
+      assert.ok(cancelButton);
+      await act(async () => {
+        cancelButton.click();
+      });
+
+      const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+        "[data-slot='alert-dialog-action']",
+      );
+      assert.ok(confirmButton);
+      await act(async () => {
+        confirmButton.click();
+      });
+
+      expect(rendered.container.textContent).toContain(message);
+      expect(rendered.container.textContent).not.toContain(
+        "Check cancellation status",
+      );
+      expect(
+        rendered.container.querySelector("[data-slot='alert-dialog-action']"),
+      ).toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const refreshButton = [...rendered.container.querySelectorAll("button")]
+        .find((candidate) => candidate.textContent === "Refresh current setup");
+      assert.ok(refreshButton);
+      await act(async () => {
+        refreshButton.click();
+      });
+      expect(rendered.reload).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
