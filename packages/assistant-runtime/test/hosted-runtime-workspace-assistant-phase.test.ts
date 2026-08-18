@@ -7162,6 +7162,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("services a queued device-sync wake after a legacy assistant alarm has no work", async () => {
     const dueAt = "2026-04-27T00:00:00.000Z";
+    const assistantContinuationAt = "2026-04-27T00:03:00.000Z";
     const deviceContinuationAt = "2026-04-27T00:05:00.000Z";
     const shouldYieldBackgroundMaintenance = vi.fn(() => false);
     const deviceSyncItem = {
@@ -7195,7 +7196,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
-      nextWakeAt: null,
+      nextWakeAt: assistantContinuationAt,
       parserProcessed: 0,
       postCheckpointRecord: null,
       progressed: false,
@@ -7252,16 +7253,108 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "canonical_runtime_commit",
       deviceSyncMaintenanceRan: true,
-      nextWakeAt: deviceContinuationAt,
-      nextWakeReason: "device-sync.reconcile",
+      nextWakeAt: assistantContinuationAt,
       progressed: true,
     }));
+    expect("nextWakeReason" in result).toBe(false);
     await result.afterCheckpoint?.();
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
         item: deviceSyncItem,
       }),
     );
+  });
+
+  it("leaves unrelated maintenance untouched when shadow recovery finds no device wake", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-shadow-recovery-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    mocks.getAssistantCronStatus
+      .mockResolvedValueOnce({
+        dueJobs: 1,
+        enabledJobs: 1,
+        nextRunAt: dueAt,
+        runningJobs: 0,
+        totalJobs: 1,
+      })
+      .mockResolvedValue({
+        dueJobs: 0,
+        enabledJobs: 1,
+        nextRunAt: "2026-04-28T00:00:00.000Z",
+        runningJobs: 0,
+        totalJobs: 1,
+      });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [],
+    });
+    mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault.mockResolvedValueOnce(1);
+
+    try {
+      await initializeVault({
+        createdAt: dueAt,
+        timezone: "America/New_York",
+        vaultRoot,
+      });
+      await writeHostedPhaseExperimentSource(vaultRoot);
+      await markAssistantContextSnapshotDirty({
+        domains: ["experiments"],
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        now: () => dueAt,
+        resolvedDeviceSync: {
+          providerConfigs: {
+            whoop: {
+              clientId: "synthetic-whoop-client",
+              clientSecret: "synthetic-whoop-secret",
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "synthetic-device-sync-secret",
+        },
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+
+      expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+      expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+      expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          allowedRouteActions: ["run-device-sync-wake"],
+          allowedWakeKinds: ["device-sync.wake"],
+        }),
+      );
+      expect(mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault)
+        .not.toHaveBeenCalled();
+      expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          allowedRouteActions: ["apply-member-preferences"],
+        }),
+      );
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      expect("deviceSyncMaintenanceRan" in result).toBe(false);
+      expect(result.redactedStatus).toEqual(expect.objectContaining({
+        hostedSystemMailboxPrepared: 0,
+      }));
+      await expect(readAssistantContextSnapshotState(vaultRoot)).resolves.toMatchObject({
+        pendingDirtyDomains: ["experiments"],
+      });
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
   });
 
   it("keeps queued device-sync recovery behind real assistant progress", async () => {
