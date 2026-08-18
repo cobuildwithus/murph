@@ -15156,28 +15156,57 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves an exact phone-call result queued behind pending assistant input", async () => {
+    const pendingInputAt = "2026-09-01T15:02:00.000Z";
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(
+      pendingInputAt,
+    );
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
+      pendingInputAt,
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 2,
+      now: () => "2026-09-01T15:03:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedMailboxDedupeKeyPrefixes: expect.arrayContaining([
+          "assistant.notification.requested:phone-call-result:",
+        ]),
+      }),
+    );
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      progressed: false,
+    }));
+  });
+
   it.each([
     {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_telegram:generation:1",
-      dispatchesBeforeIdle: true,
       label: "generation-scoped phone-call result",
     },
     {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_manual_telegram",
-      dispatchesBeforeIdle: false,
       label: "generationless manual phone-call result",
     },
     {
       dedupeKey:
         "assistant.notification.requested:usage-referral-reward:referral_telegram",
-      dispatchesBeforeIdle: false,
       label: "usage-referral reward",
     },
-  ])("routes an exact Telegram $label through its durability boundary", async ({
+  ])("keeps an exact Telegram $label in the ordinary background drain", async ({
     dedupeKey,
-    dispatchesBeforeIdle,
   }) => {
     const now = "2026-04-27T00:03:00.000Z";
     const completionItem = createExternalCompletionSystemMailboxItem({
@@ -15220,13 +15249,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
     ]);
-    if (dispatchesBeforeIdle) {
-      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
-        preparedDispatches: [],
-      });
-    } else {
-      mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(now);
-    }
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(now);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [],
@@ -15244,52 +15267,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preferredIntentIds: [deliveryIntentId],
       vaultRoot: "/tmp/murph-vault",
     });
-    if (dispatchesBeforeIdle) {
-      expect(mocks.resolveHostedAssistantOutboxNextWakeAt).not.toHaveBeenCalled();
-      expect(
-        mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
-      ).toHaveBeenCalledWith({
-        assistantDeliveryEffects: [deliveryEffect],
-        vaultRoot: "/tmp/murph-vault",
-      });
-      expect(result).toEqual(expect.objectContaining({
-        afterCheckpointKeepsForegroundImportLoop: true,
-        checkpointReason: "outbox_sending",
-        progressed: true,
-      }));
-    } else {
-      expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledWith({
-        vaultRoot: "/tmp/murph-vault",
-      });
-      expect(
-        mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
-      ).not.toHaveBeenCalled();
-      expect(result).toEqual(expect.objectContaining({
-        checkpointReason: "system_mailbox_receipt",
-        nextWakeAt: now,
-        progressed: true,
-        redactedStatus: expect.objectContaining({
-          hostedOutboxPendingDeliveryEffects: 1,
-        }),
-      }));
-      expect(result.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
-    }
+    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledWith({
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+    ).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: now,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedOutboxPendingDeliveryEffects: 1,
+      }),
+    }));
+    expect(result.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    if (dispatchesBeforeIdle) {
-      expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
-      expect(postCheckpoint).toEqual(expect.objectContaining({
-        checkpointReason: "outbox_receipt",
-      }));
-    } else {
-      expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
-      expect(postCheckpoint).toEqual(expect.objectContaining({
-        checkpointReason: "system_mailbox_receipt",
-        nextWakeAt: now,
-        nextWakeReason: "assistant",
-      }));
-    }
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: now,
+      nextWakeReason: "assistant",
+    }));
   });
 
   it("keeps managed setup out of a causal-only exact delivery pass", async () => {
@@ -15347,7 +15348,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("keeps assistant ask completions out when pending-input ordering is incomplete", async () => {
+  it("does not check external completions while assistant input is pending", async () => {
     const now = "2026-04-27T00:03:00.000Z";
     const armedWakeAt = "2026-04-27T00:08:00.000Z";
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
@@ -15378,12 +15379,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         assistantAskCompletionOccurredBefore: null,
       }),
     );
-    expect(
-      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.some(
-        ([request]) =>
-          Object.hasOwn(request, "allowedMailboxDedupeKeyPrefixes"),
-      ),
-    ).toBe(false);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedMailboxDedupeKeyPrefixes: expect.arrayContaining([
+          "assistant.notification.requested:phone-call-result:",
+        ]),
+      }),
+    );
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
       inspectOnly: true,
       now: expect.any(Function),

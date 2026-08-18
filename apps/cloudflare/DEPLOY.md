@@ -550,18 +550,83 @@ safe because Web does not require the runner to consume the header.
 
 A completed phone call delivers its result as a proactive
 `assistant.notification.requested` message: Murph composes the result in its own
-voice and may skip a non-meaningful call. This reuses the existing notification
-wake path, so no new mailbox kind or runtime consumer is introduced and there is
-no result-path old-runner/new-web compatibility window.
+voice and must send every terminal success, failure, needs-user, and
+not-completed outcome. A provider-less start without a stop fence publishes a
+required not-completed result; when a stop fence already owns that provider-less
+settlement, its independently deduped stop-settlement result is sufficient. A
+safety-rejected provider call instead publishes a required `needs_user` result:
+the call is no longer active, but its real-world outcome could not be safely
+verified, so the member should confirm before repeating the request. Foreground
+or workflow cleanup appends and signals that deterministic ordinary result
+before terminal cleanup; notification failure leaves the row retryable. The
+authenticated direct Linq or Telegram origin is
+stored on the call row and resolved again at delivery; group calls continue to
+use their existing thread-container route. A missing or revoked persisted route
+keeps delivery retryable instead of falling back to another channel. This reuses
+the existing notification wake path, so no new mailbox kind or runtime consumer
+is introduced.
 
-Apply the additive nullable `HostedPhoneCall.origin_session_id` migration; it is
-used only for phone-call request-key idempotency, not for delivery, so legacy
-rows without an origin session still deliver their result. The start schema
-still requires `originSessionId`, so `create_phone_call` fails closed during a
-runner-first window (a new runner sends the field to an old Web start endpoint
-that rejects it) — deploy Web and the runner together, or keep the window short.
-Delivery requires a resolvable member messaging route, exactly like every other
-proactive notification.
+Apply the additive nullable `HostedPhoneCall.result_notification_channel`,
+result-delivery state, and `HostedPhoneCall.stop_requested_at` migrations first.
+Deploy Web next so it can accept, persist, resolve, reconcile, and notify those
+fields. Finally deploy the
+Cloudflare Worker and runner with `container_rollout=immediate` to expose status,
+exact-stop, and result-channel-bound starts. New Web rejects channel-less new direct
+starts from an old warm runner, while group starts and idempotent replay of an
+existing legacy direct row remain compatible. Direct starts therefore fail
+retryably during the Web-first window; keep that window short, replace warm
+runners immediately, prove the new bundle fingerprint, and then run one Linq
+and one Telegram direct-call canary. A runner-first window also fails closed
+because old Web rejects the new strict start field.
+
+The stop endpoint only records durable intent and wakes the reconciliation
+workflow. That workflow alone owns Retell retrieve/stop and publishes a required
+idempotent `phone-call-result:${callId}:stop-settled` notification when the call
+is no longer active or no provider call exists. Its step timeout must remain
+larger than Retell's four possible serial 15-second request budgets—provider
+list, stop-status retrieve, conditional stop, and terminal-usage retrieve—plus
+database, notification, and wake settlement time. The current budget is 90
+seconds.
+
+Once any non-null stop fence is written, compatible Web is a hard rollback
+floor. A safe rollback below it requires disabling phone-call start, status, and
+stop capabilities, immediately recycling or draining warm runners, and
+retaining the compatible Web/reconciliation deployment until there are zero
+unsettled stop fences and every settled fence has its deterministic settlement
+mailbox item. After producer disablement and warm-runner drain, require this
+read-only rollback check to return zero before restoring Web that would use
+default-route fallback:
+
+```sql
+SELECT count(*) AS unresolved_result_bound_phone_calls
+FROM hosted_phone_call AS call
+WHERE call.result_notification_channel IS NOT NULL
+  AND (
+    (
+      call.result_notification_channel = 'linq'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM hosted_mailbox_item AS item
+        WHERE item.user_id = call.member_id
+          AND item.dedupe_key =
+            'assistant.notification.requested:phone-call-result:' || call.id
+      )
+    )
+    OR (
+      call.result_notification_channel = 'telegram'
+      AND (
+        call.result_delivery_status IS NULL
+        OR call.result_delivery_status NOT IN ('delivered', 'ambiguous')
+      )
+    )
+  );
+```
+
+Do not narrow this proof to active or analyzed rows. In particular, an ended
+call with delayed analysis remains a rollback blocker because provider analysis
+has no finite SLA. Materialize every ordinary deterministic result item under
+compatible Web or use a forward fix. Keep the nullable columns; do not drop them
+during rollback.
 
 Direct Linq scheduled phone-call availability is an additive Web-first rollout.
 Deploy Web so it recognizes the reserved scheduled-occurrence request-key
@@ -577,10 +642,9 @@ private Linq scheduled-call canary that proves a single Web call row and
 successful same-occurrence replay. A missed pre-deploy occurrence is rescheduled
 explicitly; do not add replay or backfill machinery.
 
-Scheduled email, Telegram, and group turns do not expose the phone tool. The
-existing Web call-result owner cannot guarantee return to those initiating
-surfaces without new durable route state, so they remain unavailable rather
-than starting a call whose completion could fail or arrive elsewhere.
+Scheduled email, Telegram, and group turns do not expose the phone tool. Direct
+attended Linq and Telegram calls are origin-bound; scheduled calls remain direct
+Linq only.
 
 ## Consented Group Disclosure Rollout
 

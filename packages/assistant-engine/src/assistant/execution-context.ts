@@ -59,6 +59,10 @@ import type {
 import type {
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
+  HostedPhoneCallStatusRequest,
+  HostedPhoneCallStatusResponse,
+  HostedPhoneCallStopRequest,
+  HostedPhoneCallStopResponse,
 } from '@murphai/hosted-execution/phone-calls'
 import type {
   HostedPhysicalNoteSendRequest,
@@ -398,6 +402,18 @@ export interface AssistantHostedGroupEmailEffect {
 }
 
 export interface AssistantPhoneCallPort {
+  stop?(
+    request: HostedPhoneCallStopRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhoneCallStopResponse>
+  status?(
+    request: HostedPhoneCallStatusRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhoneCallStatusResponse>
   start(
     request: HostedPhoneCallStartRequest,
     context?: {
@@ -817,6 +833,12 @@ function normalizeAssistantPhoneCallPort(
   }
 
   return {
+    ...(typeof input.stop === 'function'
+      ? { stop: input.stop.bind(input) }
+      : {}),
+    ...(typeof input.status === 'function'
+      ? { status: input.status.bind(input) }
+      : {}),
     start: input.start.bind(input),
   }
 }

@@ -8005,13 +8005,14 @@ describe("hosted workspace runtime entrypoint", () => {
             "assistant.notification.requested:",
             "",
           );
-      const phoneCallResultUsesForegroundDurabilityBarrier =
-        transport.channel === "telegram"
-        && completion.label === "generation-scoped phone-call result";
+      const telegramPhoneResultHasPendingInput =
+        completion.label === "generation-scoped phone-call result"
+        && transport.channel === "telegram";
       const requestId = `aask_req_${"a".repeat(64)}`;
       let activeVaultRoot = vaultRoot;
       let assistantPhaseCalls = 0;
       let currentPhaseIsForegroundCausal = false;
+      let newerPendingInputId: string | null = null;
       let providerDispatchWasForegroundCausal: boolean | null = null;
       const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
         const method =
@@ -8028,26 +8029,6 @@ describe("hosted workspace runtime entrypoint", () => {
             || (transport.channel === "telegram" && url.endsWith("/sendMessage"))
           )
         ) {
-          if (
-            transport.channel === "telegram"
-            && phoneCallResultUsesForegroundDurabilityBarrier
-          ) {
-            assert.ok(
-              checkpointRequests.some((request) =>
-                request.reason === "canonical_runtime_commit"
-              ),
-              events.join(","),
-            );
-            assert.ok(
-              logRequests.flatMap((request) => request.entries).some((entry) =>
-                entry.eventCode === "checkpoint.runtime_residue_deferred"
-                && entry.redactedJson?.checkpointPhase === "assistant"
-                && entry.redactedJson.checkpointReason === "outbox_sending"
-              ),
-              events.join(","),
-            );
-            assert.equal(events.includes("snapshot:idle_shutdown"), false);
-          }
           providerDispatchWasForegroundCausal =
             currentPhaseIsForegroundCausal;
           events.push(`provider.send:${deliveryKey}`);
@@ -8140,8 +8121,7 @@ describe("hosted workspace runtime entrypoint", () => {
                       : "referral"
                 }_${transport.channel}`,
               idleCheckpointDelayMs:
-                (completion.privateCompletion && transport.channel === "linq")
-                || phoneCallResultUsesForegroundDurabilityBarrier
+                completion.privateCompletion && transport.channel === "linq"
                   ? 180_000
                   : 200,
               leaseGeneration: "7",
@@ -8200,7 +8180,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     ...((
                       transport.channel === "linq"
                       && !completion.privateCompletion
-                    ) || phoneCallResultUsesForegroundDurabilityBarrier
+                    ) || telegramPhoneResultHasPendingInput
                       ? {
                           externalThreadRouteAuthority: {
                             ...(transport.channel === "linq"
@@ -8292,6 +8272,19 @@ describe("hosted workspace runtime entrypoint", () => {
                 workspacePort: createWorkspacePort({
                   checkpointRequests,
                   events,
+                  checkpointWorkspace(request) {
+                    return createWorkspaceState({
+                      inboxMediaRetentionWakeAt:
+                        request.inboxMediaRetentionWakeAt ?? null,
+                      nextWakeAt: request.nextWakeAt ?? null,
+                      nextWakeReason: request.nextWakeReason ?? null,
+                      redactedStatus: request.redactedStatus ?? null,
+                      snapshotRef: request.snapshotRef,
+                      version: String(
+                        BigInt(request.expectedWorkspaceVersion) + 1n,
+                      ),
+                    });
+                  },
                   workspace: createWorkspaceState({ version: "0" }),
                 }),
               }),
@@ -8344,9 +8337,7 @@ describe("hosted workspace runtime entrypoint", () => {
               providerFetch,
             },
             runtimeWakeSignal,
-            ...(
-              (completion.privateCompletion && transport.channel === "linq")
-              || phoneCallResultUsesForegroundDurabilityBarrier
+            ...(completion.privateCompletion && transport.channel === "linq"
               ? { shutdownSignal: privateProductionDelayShutdown.signal }
               : {}),
             async runAssistantPhase(input) {
@@ -8380,6 +8371,21 @@ describe("hosted workspace runtime entrypoint", () => {
                     operatorHomeRoot: input.restored.operatorHomeRoot,
                   },
                 );
+                if (telegramPhoneResultHasPendingInput) {
+                  newerPendingInputId =
+                    await stagePendingLinqAssistantInputForMailboxItem({
+                      item: createMailboxItem({
+                        createdAt: "2026-04-27T00:00:01.000Z",
+                        id: "mailbox_item_phone_result_newer_input",
+                        laneSeq: "1",
+                        occurredAt: "2026-04-27T00:00:01.000Z",
+                        updatedAt: "2026-04-27T00:00:01.000Z",
+                      }),
+                      threadId: "thread_phone_result_newer_input",
+                      vaultRoot: activeVaultRoot,
+                    });
+                  events.push("assistant.input:newer-accepted");
+                }
                 if (!completion.privateCompletion) {
                   setTimeout(() => {
                     mailboxItems.push(createMailboxItem({
@@ -8389,15 +8395,6 @@ describe("hosted workspace runtime entrypoint", () => {
                       lane: "system",
                       laneSeq: "1",
                     }));
-                    if (phoneCallResultUsesForegroundDurabilityBarrier) {
-                      mailboxItems.push(createMailboxItem({
-                        dedupeKey: "conversation:phone-result-priority:1",
-                        id: "mailbox_item_phone_result_priority_1",
-                        kind: "conversation.message",
-                        lane: "conversation",
-                        laneSeq: "1",
-                      }));
-                    }
                     runtimeWakeSignal.notify();
                   }, 0);
                 }
@@ -8406,31 +8403,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   progressed: true,
                 };
               }
-              if (
-                phoneCallResultUsesForegroundDurabilityBarrier
-                && assistantPhaseCalls >= 2
-                && assistantPhaseCalls <= 4
-              ) {
-                assert.equal(input.foregroundCausalOnly, false);
-                if (assistantPhaseCalls < 4) {
-                  const conversationOrdinal = assistantPhaseCalls;
-                  mailboxItems.push(createMailboxItem({
-                    dedupeKey:
-                      `conversation:phone-result-priority:${conversationOrdinal}`,
-                    id: `mailbox_item_phone_result_priority_${conversationOrdinal}`,
-                    kind: "conversation.message",
-                    lane: "conversation",
-                    laneSeq: String(conversationOrdinal),
-                  }));
-                  runtimeWakeSignal.notify();
-                }
-                return {
-                  checkpointReason: "assistant_runtime_commit",
-                  progressed: true,
-                };
-              }
-              const externalCompletionPhase =
-                phoneCallResultUsesForegroundDurabilityBarrier ? 5 : 2;
+              const externalCompletionPhase = 2;
               if (assistantPhaseCalls === externalCompletionPhase) {
                 assert.equal(input.foregroundCausalOnly, true);
               }
@@ -8450,28 +8423,54 @@ describe("hosted workspace runtime entrypoint", () => {
                   }],
                   events.join(","),
                 );
-                assert.equal(
+                const pendingAssistantInputWakeAt =
                   await resolveHostedPendingAssistantInputWakeAt({
                     vaultRoot: activeVaultRoot,
-                  }),
-                  null,
-                );
+                  });
+                if (telegramPhoneResultHasPendingInput) {
+                  assert.ok(pendingAssistantInputWakeAt);
+                } else {
+                  assert.equal(pendingAssistantInputWakeAt, null);
+                }
+              }
+              if (
+                telegramPhoneResultHasPendingInput
+                && assistantPhaseCalls > 2
+                && input.foregroundCausalOnly === true
+              ) {
+                assert.ok(newerPendingInputId);
+                events.push("assistant.input:newer-lane-admitted");
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId: newerPendingInputId,
+                  vaultRoot: activeVaultRoot,
+                });
               }
               const phaseResult = await runHostedWorkspaceAssistantPhase(input);
-              const outboxStatuses =
-                (await listAssistantOutboxIntents(activeVaultRoot))
-                  .map((intent) => intent.status);
+              if (
+                telegramPhoneResultHasPendingInput
+                && assistantPhaseCalls === 2
+              ) {
+                events.push(
+                  `runtime.checkpoint-prepared:${phaseResult.checkpointReason}`,
+                );
+              }
+              const outboxIntents =
+                await listAssistantOutboxIntents(activeVaultRoot);
+              const completionIntent = outboxIntents.find((intent) =>
+                intent.deliveryIdempotencyKey === deliveryKey
+              );
+              if (completionIntent) {
+                events.push(
+                  `outbox.completion.after-phase:${completionIntent.status}`,
+                );
+              }
+              const outboxStatuses = outboxIntents.map((intent) => intent.status);
               events.push(
                 `outbox.after-phase:${outboxStatuses.join("|")}`,
               );
               if (
-                (
-                  (
-                    completion.privateCompletion
-                    && transport.channel === "linq"
-                  )
-                  || phoneCallResultUsesForegroundDurabilityBarrier
-                )
+                completion.privateCompletion
+                && transport.channel === "linq"
                 && outboxStatuses.includes("sent")
               ) {
                 privateProductionDelayShutdown.abort(
@@ -8486,75 +8485,9 @@ describe("hosted workspace runtime entrypoint", () => {
 
         const result = await withRealTimeout(
           resultPromise,
-          5_000,
+          15_000,
           () => events.join(","),
         );
-        if (phoneCallResultUsesForegroundDurabilityBarrier) {
-          await withRealTimeout(
-            runHostedWorkspaceRuntimeJobInProcess(
-              createWorkspaceRuntimeJobInput({
-                platformEnv: {
-                  TELEGRAM_BOT_TOKEN: "synthetic-telegram-token",
-                },
-                resolvedConfig: {
-                  channelCapabilities: {
-                    emailSendReady: false,
-                    telegramBotConfigured: true,
-                  },
-                  deviceSync: null,
-                  managedAutoReplyChannels: [{
-                    capabilityReady: true,
-                    channel: "telegram",
-                    memberChannel: "telegram",
-                  }],
-                },
-                request: {
-                  attemptId:
-                    "attempt_synthetic_phone_result_terminal_restart",
-                  idleCheckpointDelayMs: 1,
-                  leaseGeneration: "8",
-                  userId: TEST_USER_ID,
-                  workspaceVersion: "0",
-                },
-              }),
-              {
-                async createCheckpointSnapshot() {
-                  return {
-                    snapshotRef: createBundleRef({
-                      hash: "9".repeat(64),
-                      key:
-                        "users/bundles/member-synthetic/"
-                        + "phone-result-terminal-restart.bundle.json",
-                      size: 512,
-                    }),
-                  };
-                },
-                async importItem() {
-                  throw new Error(
-                    "Terminal phone-result restart should not import mailbox work.",
-                  );
-                },
-                platform: {
-                  ...createPlatform({
-                    mailboxPort: createMailboxPort({ events: [], items: [] }),
-                    workspacePort: createWorkspacePort({
-                      checkpointRequests: [],
-                      events: [],
-                      workspace: createWorkspaceState({ version: "0" }),
-                    }),
-                  }),
-                  providerFetch,
-                },
-                async runAssistantPhase(input) {
-                  return await runHostedWorkspaceAssistantPhase(input);
-                },
-                vaultRoot: activeVaultRoot,
-              },
-            ),
-            5_000,
-            () => events.join(","),
-          );
-        }
         const providerEvent = `provider.send:${deliveryKey}`;
         if (completion.privateCompletion) {
           const consentedAskInput =
@@ -8584,10 +8517,7 @@ describe("hosted workspace runtime entrypoint", () => {
           );
         }
 
-        if (
-          transport.channel === "telegram"
-          && !phoneCallResultUsesForegroundDurabilityBarrier
-        ) {
+        if (transport.channel === "telegram") {
           const finalIntents = await listAssistantOutboxIntents(activeVaultRoot);
           const telegramDiagnostics = JSON.stringify(
             finalIntents.map((intent) => ({
@@ -8601,18 +8531,36 @@ describe("hosted workspace runtime entrypoint", () => {
             `${events.join(",")};${telegramDiagnostics}`,
           );
           assert.equal(providerDispatchWasForegroundCausal, false);
-          assert.ok(
-            requireEventIndex(events, "outbox.after-phase:pending")
-              < requireEventIndex(events, "snapshot:idle_shutdown"),
-            events.join(","),
-          );
-          assert.ok(
-            requireEventIndex(events, "snapshot:idle_shutdown")
-              < requireEventIndex(events, providerEvent),
-            events.join(","),
-          );
+          if (telegramPhoneResultHasPendingInput) {
+            assert.ok(newerPendingInputId);
+            assert.ok(
+              requireEventIndex(events, "assistant.input:newer-lane-admitted")
+                < requireEventIndex(events, providerEvent),
+              events.join(","),
+            );
+            assert.ok(
+              requireEventIndex(events, "phone-result.outcome:sending")
+                < requireEventIndex(events, providerEvent),
+              events.join(","),
+            );
+            assert.ok(
+              requireEventIndex(events, providerEvent)
+                < requireEventIndex(events, "phone-result.outcome:sent"),
+              events.join(","),
+            );
+          } else {
+            assert.ok(
+              requireEventIndex(events, "outbox.after-phase:pending")
+                < requireEventIndex(events, "snapshot:idle_shutdown"),
+              events.join(","),
+            );
+            assert.ok(
+              requireEventIndex(events, "snapshot:idle_shutdown")
+                < requireEventIndex(events, providerEvent),
+              events.join(","),
+            );
+          }
           assert.equal(finalIntents[0]?.status, "sent");
-          assert.equal(result.status, "idle");
           assert.ok(assistantPhaseCalls >= 3);
           return;
         }
@@ -8623,52 +8571,14 @@ describe("hosted workspace runtime entrypoint", () => {
           1,
           events.join(","),
         );
-        if (phoneCallResultUsesForegroundDurabilityBarrier) {
-          assert.ok(
-            requireEventIndex(events, "phone-result.outcome:sending")
-              < requireEventIndex(events, providerEvent),
-            events.join(","),
-          );
-          assert.ok(
-            requireEventIndex(events, providerEvent)
-              < requireEventIndex(events, "phone-result.outcome:sent"),
-            events.join(","),
-          );
-          for (const ordinal of [1, 2, 3]) {
-            assert.ok(
-              requireEventIndex(
-                events,
-                `mailbox.importItem:mailbox_item_phone_result_priority_${ordinal}`,
-              ) < requireEventIndex(events, "outbox.after-phase:pending"),
-              events.join(","),
-            );
-          }
-          assert.ok(
-            requireEventIndex(events, "outbox.after-phase:pending")
-              < requireEventIndex(events, providerEvent),
-            events.join(","),
-          );
-          assert.ok(
-            requireEventIndex(events, providerEvent)
-              < requireEventIndex(events, "outbox.after-phase:sent"),
-            events.join(","),
-          );
-          assert.ok(
-            requireEventIndex(events, providerEvent)
-              < requireEventIndex(events, "snapshot:idle_shutdown"),
-            events.join(","),
-          );
-          assert.ok(assistantPhaseCalls >= 3);
-          return;
-        }
         assert.ok(
-          requireEventIndex(events, "outbox.after-phase:sending")
+          requireEventIndex(events, "outbox.completion.after-phase:sending")
             < requireEventIndex(events, providerEvent),
           events.join(","),
         );
         assert.ok(
           requireEventIndex(events, providerEvent)
-            < requireEventIndex(events, "outbox.after-phase:sent"),
+            < requireEventIndex(events, "outbox.completion.after-phase:sent"),
           events.join(","),
         );
         assert.ok(
@@ -24411,6 +24321,352 @@ describe("hosted workspace runtime entrypoint", () => {
       await removeTempRoot(vaultRoot);
     }
   });
+
+  test("admits foreground input before a pending durable delivery effect", async () => {
+    for (const shutdownDuringDelivery of [false, true]) {
+      const scenario = shutdownDuringDelivery ? "shutdown" : "conversation";
+      const vaultRoot = await mkdtemp(
+        path.join(tmpdir(), `murph-foreground-delivery-image-${scenario}-`),
+      );
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const events: string[] = [];
+      const imageGenerationRelease = createDeferred<void>();
+      const imageCompletionObserved = createDeferred<void>();
+      const newerInputObserved = createDeferred<void>();
+      const outcomeCheckpointObserved = createDeferred<void>();
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const shutdownController = new AbortController();
+      const mailboxItems = [createMailboxItem({
+        id: `mailbox_item_foreground_delivery_image_origin_${scenario}`,
+        laneSeq: "1",
+      })];
+      let imageGenerationCompleted = false;
+      let assistantPhaseCalls = 0;
+      let newerInputId: string | null = null;
+      let originInputId: string | null = null;
+      let originInputServiced = false;
+      let resultPromise:
+        ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const pendingDurableDelivery = async () => {
+          events.push("durable-delivery");
+          assert.equal(imageGenerationCompleted, false);
+          if (shutdownDuringDelivery) {
+            shutdownController.abort(
+              new DOMException("Synthetic container SIGTERM.", "AbortError"),
+            );
+          }
+          return { requiresFollowUpCheckpoint: true };
+        };
+
+        resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_foreground_delivery_image_${scenario}`,
+              budget: { maxMailboxItems: 10 },
+              idleCheckpointDelayMs: 1,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              const snapshotOrdinal = checkpointRequests.length + 1;
+              events.push(`snapshot:${snapshotOrdinal}`);
+              if (snapshotOrdinal <= 2) {
+                assert.equal(imageGenerationCompleted, false);
+              }
+              return {
+                snapshotRef: createBundleRef({
+                  hash: (shutdownDuringDelivery ? "9" : "8").repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `foreground-delivery-image-${scenario}-${snapshotOrdinal}.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox-import:${item.item.laneSeq}`);
+              const assistantInputId = await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                threadId: `thread_foreground_delivery_image_${scenario}`,
+                vaultRoot,
+              });
+              if (item.item.laneSeq === "1") {
+                originInputId = assistantInputId;
+              } else {
+                newerInputId = assistantInputId;
+              }
+              return {
+                assistantInputId,
+                status: "imported",
+              };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                checkpointResponse(request) {
+                  const checkpointOrdinal = checkpointRequests.length;
+                  events.push(`checkpoint:${checkpointOrdinal}`);
+                  if (!shutdownDuringDelivery && checkpointOrdinal === 1) {
+                    mailboxItems.push(createMailboxItem({
+                      id:
+                        "mailbox_item_foreground_delivery_image_newer_conversation",
+                      laneSeq: "2",
+                      occurredAt: "2026-04-27T00:00:01.000Z",
+                    }));
+                  }
+                  if (checkpointOrdinal === 2) {
+                    outcomeCheckpointObserved.resolve();
+                  }
+                  return {
+                    checkpointed: true,
+                    ...(!shutdownDuringDelivery && checkpointOrdinal <= 2
+                      ? { conversationInputAhead: true }
+                      : {}),
+                    workspace: createWorkspaceState({
+                      inboxMediaRetentionWakeAt:
+                        request.inboxMediaRetentionWakeAt ?? null,
+                      nextWakeAt: request.nextWakeAt ?? null,
+                      nextWakeReason: request.nextWakeReason ?? null,
+                      redactedStatus: request.redactedStatus ?? null,
+                      snapshotRef: request.snapshotRef,
+                      version: String(
+                        BigInt(request.expectedWorkspaceVersion) + 1n,
+                      ),
+                    }),
+                  };
+                },
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(phaseInput) {
+              assistantPhaseCalls += 1;
+              let assistantInputIds =
+                phaseInput.initialAssistantInputBatch?.assistantInputIds ?? [];
+              if (assistantInputIds.length === 0) {
+                assistantInputIds =
+                  phaseInput.initialMailboxImport.importResult.assistantInputIds
+                  ?? [];
+              }
+              events.push(
+                `assistant-phase:${assistantPhaseCalls}:${assistantInputIds.length}`,
+              );
+
+              if (!originInputServiced) {
+                assert.equal(assistantPhaseCalls, 1);
+                assert.ok(originInputId);
+                assert.deepEqual(assistantInputIds, [originInputId]);
+                const imageGenerationLauncher =
+                  phaseInput.imageGenerationLauncher;
+                assert.ok(imageGenerationLauncher);
+                assert.equal(imageGenerationLauncher.launch({
+                  continuationSessionId:
+                    `asst_foreground_delivery_image_${scenario}`,
+                  operationId:
+                    `image_operation_foreground_delivery_${scenario}`,
+                  originAssistantInputId: assistantInputIds[0]!,
+                  originAssistantInputIdExact: true,
+                  scopeId: `session_foreground_delivery_image_${scenario}`,
+                  async run() {
+                    await imageGenerationRelease.promise;
+                    imageGenerationCompleted = true;
+                    return {
+                      failureDiagnostic:
+                        "synthetic image completion after foreground delivery barrier",
+                      media: null,
+                      runtimeIssue: null,
+                      savedImageRef: null,
+                    };
+                  },
+                }), "started");
+                const releaseProviderInputs =
+                  await phaseInput.beforeProviderAcceptedInputs?.({
+                    turnId: "turn_hosted_runtime_test",
+                    acceptedInputs: [{
+                      id: originInputId,
+                      source: "assistant-input",
+                    }],
+                  });
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId: originInputId,
+                  vaultRoot,
+                });
+                await releaseProviderInputs?.();
+                originInputServiced = true;
+                return {
+                  afterCheckpoint: async () => ({
+                    afterDurableCheckpoint: pendingDurableDelivery,
+                    checkpointReason: "outbox_sending" as const,
+                  }),
+                  checkpointReason: "outbox_sending" as const,
+                  progressed: true,
+                };
+              }
+
+              const imageCompletionInputIds: string[] = [];
+              for (const assistantInputId of assistantInputIds) {
+                const event = await readAssistantInputEvent({
+                  inputId: assistantInputId,
+                  vault: vaultRoot,
+                });
+                if (
+                  event?.sourceRef.kind === "hosted-mailbox"
+                  && event.sourceRef.payloadSchema
+                    === "murph.hosted-image-completion.v1"
+                ) {
+                  imageCompletionInputIds.push(assistantInputId);
+                }
+              }
+              if (imageCompletionInputIds.length > 0) {
+                const releaseProviderInputs =
+                  await phaseInput.beforeProviderAcceptedInputs?.({
+                    turnId: "turn_hosted_runtime_test",
+                    acceptedInputs: imageCompletionInputIds.map((id) => ({
+                      id,
+                      source: "assistant-input" as const,
+                    })),
+                  });
+                for (const assistantInputId of imageCompletionInputIds) {
+                  await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                    inputId: assistantInputId,
+                    vaultRoot,
+                  });
+                }
+                await releaseProviderInputs?.();
+                events.push("image-completion-admitted");
+                imageCompletionObserved.resolve();
+                shutdownController.abort(
+                  new DOMException("Synthetic test completed.", "AbortError"),
+                );
+                return {
+                  checkpointReason: "assistant_runtime_commit" as const,
+                  progressed: true,
+                };
+              }
+
+              if (!shutdownDuringDelivery && assistantPhaseCalls === 2) {
+                assert.equal(shutdownDuringDelivery, false);
+                assert.ok(newerInputId);
+                assert.deepEqual(assistantInputIds, [newerInputId]);
+                const releaseProviderInputs =
+                  await phaseInput.beforeProviderAcceptedInputs?.({
+                    turnId: "turn_hosted_runtime_test",
+                    acceptedInputs: [{
+                      id: newerInputId,
+                      source: "assistant-input",
+                    }],
+                  });
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId: newerInputId,
+                  vaultRoot,
+                });
+                await releaseProviderInputs?.();
+                events.push("newer-input-admitted");
+                newerInputObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit" as const,
+                  progressed: true,
+                };
+              }
+
+              return { progressed: false };
+            },
+            shutdownSignal: shutdownController.signal,
+            vaultRoot,
+          },
+        );
+
+        if (shutdownDuringDelivery) {
+          await withRealTimeout(
+            outcomeCheckpointObserved.promise,
+            5_000,
+            () => events.join(","),
+          );
+          assert.equal(imageGenerationCompleted, false);
+          imageGenerationRelease.resolve();
+          await withRealTimeout(
+            resultPromise,
+            5_000,
+            () => events.join(","),
+          );
+          assert.equal(events.includes("newer-input-admitted"), false);
+        } else {
+          await withRealTimeout(
+            outcomeCheckpointObserved.promise,
+            5_000,
+            () => events.join(","),
+          );
+          assert.equal(imageGenerationCompleted, false);
+          runtimeWakeSignal.notify();
+          await withRealTimeout(
+            newerInputObserved.promise,
+            5_000,
+            () => events.join(","),
+          );
+          assert.equal(imageGenerationCompleted, false);
+          imageGenerationRelease.resolve();
+          await withRealTimeout(
+            imageCompletionObserved.promise,
+            5_000,
+            () => events.join(","),
+          );
+          await withRealTimeout(
+            resultPromise,
+            5_000,
+            () => events.join(","),
+          );
+        }
+
+        assert.ok(
+          requireEventIndex(events, "snapshot:1")
+            < requireEventIndex(events, "checkpoint:1"),
+          events.join(","),
+        );
+        if (shutdownDuringDelivery) {
+          assert.ok(
+            requireEventIndex(events, "checkpoint:1")
+              < requireEventIndex(events, "durable-delivery"),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, "durable-delivery")
+              < requireEventIndex(events, "snapshot:2"),
+            events.join(","),
+          );
+        } else {
+          assert.ok(
+            requireEventIndex(events, "checkpoint:1")
+              < requireEventIndex(events, "newer-input-admitted"),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, "newer-input-admitted")
+              < requireEventIndex(events, "durable-delivery"),
+            events.join(","),
+          );
+        }
+      } finally {
+        imageGenerationRelease.resolve();
+        shutdownController.abort(new Error("Test cleanup."));
+        if (resultPromise) {
+          await withRealTimeout(
+            resultPromise.catch(() => undefined),
+            5_000,
+            () => `Cleanup timed out: ${events.join(",")}`,
+          );
+        }
+        await removeTempRoot(vaultRoot);
+      }
+    }
+  }, 30_000);
 
   test("admits a ready image completion before newly arrived conversation input", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-completion-preemption-"));

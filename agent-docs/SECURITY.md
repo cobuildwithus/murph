@@ -1269,15 +1269,18 @@ Last verified: 2026-08-16
   room runtime and must never resolve the visible sender to a private member.
 - The hosted `murph.create_phone_call` dynamic tool is a model-controlled side-effect surface for user-approved outbound phone calls only. Expose it only when the hosted runtime has the web-owned phone-call port, require a bounded E.164 destination plus compact call brief, and put only user-approved disclosable facts in `shareableFacts`. Cloudflare may reach only the signed web-control callback allowlist entries for `POST /api/internal/phone-calls` and the exact generation-scoped phone-call result delivery callback, both with runtime write-fence authority; `apps/web` owns the Retell API key, from number, agent id/version, verified member transfer-number resolution, member-bound `HostedPhoneCall` rows, and request-key idempotency. Retell may receive the bounded call brief as dynamic variables and may call only signed raw-body `ask_murph`, `call_ended`, and `call_analyzed` routes; Murph must not persist raw Retell transcripts, Retell request/response bodies, provider secrets, or call audio in logs, docs, fixtures, workspace state, or user-facing output. Store only the bounded call brief, exact initiating resident-session id, provider call id, status, final analysis result, trusted result channel, and delivery generation/disposition needed for member-bound retry/audit. Encrypt every newly written brief and result before persistence through the control-domain `hosted-member-private-field` secure-box lane with member/table/row/field/scope-bound AAD, never dual-write plaintext, prefer ciphertext on reads, and fail closed when a present ciphertext is empty or invalid. A completed tracked direct analysis persists the encrypted result and advances the Web-owned call row and mailbox append under one compare-and-set; each notification uses the deterministic `phone-call-result:${callId}:generation:${generation}` identity and requires a delivered message. The output-only notification turn treats provider and callee text as bounded untrusted data, never authority, exposes no tools, and includes no conversation history or private context. The persisted initiating-session id is used only for phone-call request-key idempotency, never as a delivery route. For a group call, Web reloads the exact selected accepted message, binds it to the callback channel, account, thread, and synthetic container, derives the participant from that server-owned evidence, requires one current joined unsuspended membership, and repeats the same authority check immediately before provider start; the existing request-key calculation does not change. Account deletion must process every retained Retell provider call id, stop active calls, delete each provider object, and clear the local id only after confirmed deletion or confirmed absence. Any ambiguous provider or local-write failure must keep the `HostedPhoneCall` row and provider id as retry ownership and block the destructive local account transaction; terminal call status must not exempt provider cleanup. Retell API-key rotation must remain within the same Retell workspace while durable call ids exist, because the provider's missing-asset response proves absence only within the workspace authorized by the current key. Nullable `brief_json` and `result_json` are migration debt only: the bounded operator backfill must prove replacement equality, update under full compare-and-set authority, scrub plaintext in the same write, and emit metadata counts only.
 - A direct phone call may additionally persist only the bounded trusted
-  initiating `telegram` channel enum and fixed-vocabulary delivery state needed
-  for asynchronous result routing. Only an exact canonical scheduled occurrence
-  may set that enum; manual direct calls retain the prior null behavior.
+  initiating `linq` or `telegram` channel enum and fixed-vocabulary delivery
+  state needed for asynchronous result routing. The authenticated runtime,
+  never the model, derives that channel; group calls leave it null.
   Never persist a result-routing phone number, account identifier, or thread id
   on the call row. Web requires the matching current direct-member route before
   reservation and revalidates it immediately before provider entry; exact
   request-key replay consults the durable call before mutable route admission.
-  At completion, Web resolves the persisted channel, binds a direct thread
-  authority into the generation-scoped queued notification. At the first
+  At completion, Web resolves the persisted channel. Linq uses the ordinary
+  durable notification outbox; Telegram binds direct thread authority into a
+  generation-scoped queued notification. Both remain background work: newer
+  conversation input is admitted before result delivery and no result-specific
+  checkpoint may block a foreground reply. At the first Telegram
   message-provider fetch, the runtime supplies that exact authority to the
   signed outcome callback; Web revalidates it and compare-and-sets the exact
   generation to `sending` in the same callback operation. The runtime may report only the exact call
@@ -1289,7 +1292,12 @@ Last verified: 2026-08-16
   disposition. Route restoration and terminal callbacks may re-arm only one
   oldest nonterminal call for that member, and restoration does not acknowledge
   success if that required re-arm fails. Group calls omit the enum and keep
-  their existing thread-container authority.
+  their existing thread-container authority. `murph.get_phone_call_status`
+  exposes only the bounded three-row member-owned projection and never provider
+  ids, briefs, ciphertext, recordings, or cross-member existence.
+  `murph.stop_phone_call` may persist only the exact member-owned stop intent
+  and wake reconciliation; the sole reconciliation owner stops Retell, records
+  terminal state, and appends the deduped settlement notification.
 - The mechanical private-storage field-classification guard currently covers `HostedPhoneCall` only. It is not evidence that every other Prisma model has completed the same field-by-field audit; extend or add an owner guard when another private-content model is materially changed.
 - Kernel browser automation is an `apps/web`-owned hosted control surface. `KERNEL_API_KEY` must stay in web environment configuration only and must not be forwarded into Cloudflare runner env, Codex prompts, dynamic tool payloads, logs, fixtures, or user-facing output. Cloudflare may proxy only the narrow signed `/api/internal/computer/**` routes through `web-control.worker`; it must not receive raw Kernel API credentials or raw live-view URLs.
 - The persistent Kernel profile requires `HOSTED_COMPUTER_PROFILE_NAMESPACE` in `apps/web`; set it to a stable value per trust boundary so production, previews, and other deployments do not share saved cookies or authenticated browser state. Keep production's namespace stable, and use branch/deployment-specific preview namespaces or disable the persistent computer-use profile outside production.
