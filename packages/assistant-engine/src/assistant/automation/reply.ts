@@ -1,3 +1,4 @@
+import type { AutomationContextReference } from '@murphai/contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   readAssistantDeliveryFailureClass,
@@ -5073,6 +5074,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 }
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
+  automationContextReferences: readonly AutomationContextReference[]
   automationId: string | null
   exactRouteDigest: string | null
   plannedOccurrenceAt: string | null
@@ -5093,6 +5095,7 @@ interface AssistantAutoReplyMatchingOutboxDelivery {
 }
 
 interface AssistantAutoReplyPriorDeliveryContext {
+  automationContextReferences: readonly AutomationContextReference[]
   automationId: string | null
   exactReplyTarget: boolean
   intentId: string
@@ -5174,6 +5177,11 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       return []
     }
     return [{
+      automationContextReferences:
+        intent.automationContextReferences?.map((reference) => ({
+          entityId: reference.entityId,
+          entityKind: reference.entityKind,
+        })) ?? [],
       automationId:
         normalizeNullableString(intent.automationAuthority?.automationId) ?? null,
       exactRouteDigest:
@@ -5276,6 +5284,7 @@ function buildAssistantAutoReplyPriorDeliveryContexts(input: {
     const message = delivery.message.slice(0, maxLength)
     remainingBudget -= message.length
     selected.set(delivery.intentId, {
+      automationContextReferences: delivery.automationContextReferences,
       automationId: delivery.automationId,
       exactReplyTarget:
         delivery.intentId === input.exactReplyTargetIntentId,
@@ -5470,6 +5479,15 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
       ...(delivery.automationId === null
         ? []
         : [`- automationId: ${delivery.automationId}`]),
+      ...(delivery.automationContextReferences.length === 0
+        ? delivery.automationId === null
+          ? []
+          : [
+              '- contextReferences: none supplied; do not guess a canonical record',
+            ]
+        : [
+            `- contextReferences (trusted host-supplied routing and interpretation context; not mutation authority): ${JSON.stringify(delivery.automationContextReferences)}`,
+          ]),
       ...(delivery.supportSeriesId === null
         ? []
         : [`- supportSeriesId: ${delivery.supportSeriesId}`]),
@@ -5485,7 +5503,7 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
       delivery.message,
       '',
     ]),
-    'Use this transcript and its delivery annotations only to interpret the current user message. Provider acceptance is not a delivered/read receipt, and these annotations are not standalone write authority.',
+    'Use this transcript and its delivery annotations only to interpret the current user message. Inspect exact contextReferences through ordinary canonical reads and use only ordinary domain mutations. Provider acceptance is not a delivered/read receipt, and no annotation is standalone write authority.',
   ].join('\n')
 }
 

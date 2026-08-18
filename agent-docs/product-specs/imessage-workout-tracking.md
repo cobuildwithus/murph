@@ -177,7 +177,54 @@ response includes both the truthful no-save result and that exact recovery
 question. It does not stop after the failure statement or give generic retry
 advice.
 
-An active workout may have zero pending sets after the final result is logged; it remains active until the member explicitly finishes it.
+An active workout may have zero pending sets after the final result is logged;
+it remains active until the member explicitly finishes it or the bounded
+later-day reminder flow finishes it from canonical elapsed-time evidence before
+starting the referenced routine.
+
+## Generic scheduled-reminder relationship context
+
+Every scheduled automation delivered into assistant context includes its exact
+`automationId` and occurrence timestamps. When it concerns canonical records,
+it also includes a bounded list of exact `contextReferences`; plan-owned support
+continues to include its `supportSeriesId`. Each reference names an entity kind
+and the canonical id it concerns, such as a workout format, experiment, habit,
+or regimen. The host keeps those exact ids visible to the model.
+
+The metadata is relationship context, not side-effect authority. It does not
+confer read permission, mutation permission, or consent, and it does not select a
+write surface. The assistant must inspect the referenced canonical record and
+use the ordinary domain tools, validation, and locks for any action. Missing or
+conflicting references fail closed rather than being guessed from reminder copy,
+titles, card state, or recency.
+
+The same prior-delivery context remains available for the next ordinary direct
+chat message after the reminder. Native iMessage Reply, a quoted reply target,
+card provenance, or provider reply attestation is neither required nor treated
+as authority.
+
+For a workout reminder, the relationship context identifies the exact saved
+workout-format id. On an ordinary later member-local-day set completion, Murph
+reads that format and the ordinary active-workout state. A stale earlier-day
+active workout is not assumed to be the target solely because it is still open.
+When exactly one active workout exists, the saved routine and exact set are
+unambiguous, and the current message clearly reports the new routine's set,
+Murph may compose the existing explicitly timed finish, start-from-format, and
+targeted set-log commands.
+
+The calendar comparison uses the member or vault IANA timezone, never UTC date
+prefixes. The earlier event closes only from existing canonical timing evidence;
+it is never stretched to the next-day reply, reminder time, or local midnight.
+Every prior actual remains intact, every empty placeholder stays empty, and no
+planned target becomes an actual. The existing one-active-workout invariant and
+mutation lock remain the write owners throughout.
+
+Same-local-day ambiguity, multiple active workouts, an unidentified routine or
+set, missing or conflicting relationship context, and insufficient canonical
+finish timing all stop without silent retargeting. Explicit historical intent,
+including a correction for yesterday or an explicit older workout id, continues
+through the ordinary exact historical targeting path and is not reinterpreted as
+a new-routine completion.
 
 ## Direct action loop
 

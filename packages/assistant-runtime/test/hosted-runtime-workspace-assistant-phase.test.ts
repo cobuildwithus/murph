@@ -5193,6 +5193,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           const saved = await executionContext.hosted?.automationTool?.request({
             action: "save",
             activeUntil: "2099-08-01T00:00:00.000Z",
+            contextReferences: [
+              { entityId: "wfmt_group_check_in", entityKind: "workout_format" },
+              { entityId: "exp_group_check_in", entityKind: "experiment" },
+            ],
             instructions: "Ask for one lightweight group check-in.",
             schedule: {
               kind: "dailyLocal",
@@ -5327,6 +5331,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(linqResult).toEqual(expect.objectContaining({
         action: "save",
         created: true,
+        contextReferences: [
+          { entityId: "wfmt_group_check_in", entityKind: "workout_format" },
+          { entityId: "exp_group_check_in", entityKind: "experiment" },
+        ],
         effectiveTimeZone: "America/Chicago",
         lookupId: "group-check-in",
         nextOccurrenceAt: expect.any(String),
@@ -5400,6 +5408,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({
         activeUntil: "2099-08-01T00:00:00.000Z",
+        contextReferences: [
+          { entityId: "wfmt_group_check_in", entityKind: "workout_format" },
+          { entityId: "exp_group_check_in", entityKind: "experiment" },
+        ],
         route: expect.objectContaining({
           channel: "linq",
           deliveryTarget: "linq_group_chat",
@@ -5734,6 +5746,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       })).resolves.toEqual({
         action: "inspect",
         automationId: beforeInspect.automationId,
+        contextReferences: [],
         effectiveTimeZone: "America/Chicago",
         lookupId: "daily-evening-reminder",
         nextOccurrenceAt: "2026-08-10T03:00:00.000Z",

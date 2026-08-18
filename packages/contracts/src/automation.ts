@@ -46,6 +46,41 @@ export const automationPlannedOccurrenceOffsetMsSchema = z
   .safe()
   .nonnegative();
 
+/**
+ * Exact canonical entity identity associated with one scheduled automation.
+ * This is routing and interpretation context only; consumers must still use
+ * the ordinary canonical read and mutation surfaces.
+ */
+export const automationContextReferenceSchema = z
+  .object({
+    entityKind: z
+      .string()
+      .min(1)
+      .max(80)
+      .regex(/^[a-z][a-z0-9_-]*$/u),
+    entityId: z.string().min(1).max(240).regex(/^\S+$/u),
+  })
+  .strict();
+
+export const automationContextReferencesSchema = z
+  .array(automationContextReferenceSchema)
+  .max(16)
+  .meta({ uniqueItems: true })
+  .superRefine((references, context) => {
+    const seen = new Set<string>();
+    for (const [index, reference] of references.entries()) {
+      const key = JSON.stringify([reference.entityKind, reference.entityId]);
+      if (seen.has(key)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Automation context references must be unique.",
+          path: [index],
+        });
+      }
+      seen.add(key);
+    }
+  });
+
 export const automationTimeScheduleKindValues = [
   "at",
   "every",
@@ -387,6 +422,7 @@ export const automationFrontmatterSchema = withContractMetadata(
       supportKind: z.enum(automationSupportKindValues).optional(),
       // Nonnegative lead from this notification to the event it supports.
       plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema.optional(),
+      contextReferences: automationContextReferencesSchema.optional(),
       continuityPolicy: z.enum(automationContinuityPolicyValues),
       tags: z.array(z.string().min(1)).optional(),
       createdAt: isoTimestampSchema(),
@@ -416,6 +452,7 @@ export const automationScaffoldPayloadSchema = z
     assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
     supportKind: z.enum(automationSupportKindValues).nullable().optional(),
     plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema.nullable().optional(),
+    contextReferences: automationContextReferencesSchema.optional(),
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),
     status: z.enum(automationStatusValues).default("active"),
@@ -429,6 +466,7 @@ export const automationScaffoldPayloadSchema = z
 export type AutomationStatus = (typeof automationStatusValues)[number];
 export type AutomationContinuityPolicy = (typeof automationContinuityPolicyValues)[number];
 export type AutomationSupportKind = (typeof automationSupportKindValues)[number];
+export type AutomationContextReference = z.infer<typeof automationContextReferenceSchema>;
 export type AutomationTimeScheduleKind = (typeof automationTimeScheduleKindValues)[number];
 export type AutomationScheduleKind = (typeof automationScheduleKindValues)[number];
 export type AutomationDeviceActivitySource = (typeof automationDeviceActivitySourceValues)[number];

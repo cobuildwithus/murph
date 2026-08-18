@@ -1715,6 +1715,7 @@ function createDeviceActivityAutomation(input: {
     automationId,
     assistantTargetOverride: input.assistantTargetOverride ?? null,
     continuityPolicy: input.continuityPolicy ?? 'preserve',
+    contextReferences: [],
     createdAt: '2026-06-07T10:00:00.000Z',
     docType: 'automation',
     instructions: input.instructions ?? 'Ask how the walk felt.',

@@ -1036,6 +1036,8 @@ export async function executeClaimedAssistantCronJob(
             },
             outboxAutomationAuthority:
               resolveAssistantCronOutboxAutomationAuthority(input.job),
+            outboxAutomationContextReferences:
+              resolveAssistantCronOutboxAutomationContextReferences(input.job),
             outboxPlannedOccurrenceAt:
               resolveAssistantCronOutboxPlannedOccurrenceAt({
                 job: input.job,
@@ -1734,6 +1736,16 @@ function resolveAssistantCronOutboxAutomationAuthority(
   }
 }
 
+function resolveAssistantCronOutboxAutomationContextReferences(
+  job: ResolvedAssistantCronJob,
+): AssistantOutboxIntent['automationContextReferences'] | undefined {
+  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
+    return undefined
+  }
+
+  return [...job.source.contextReferences]
+}
+
 function resolveAssistantCronOutboxPlannedOccurrenceAt(input: {
   job: ResolvedAssistantCronJob
   occurrenceAt: string
@@ -1780,6 +1792,8 @@ function buildAssistantCronExecutionInstructions(
           '- Do not interpret the absence of a user reply to that attempt as silence, disengagement, or non-adherence.',
           '- Treat this run as the next valid delivery attempt or check-in; do not claim the prior message reached the user.',
         ].join('\n')
+  const canonicalContext =
+    buildAssistantCronCanonicalContextInstructions(job)
   const supportScope = buildAssistantCronSupportScopeInstructions(job)
   const independentAuthority =
     buildAssistantCronIndependentAutomationAuthorityInstructions(job)
@@ -1787,6 +1801,7 @@ function buildAssistantCronExecutionInstructions(
     buildAssistantCronRecurringReminderConversationInstructions(job)
   const overlays = [
     retryEvidence,
+    canonicalContext,
     independentAuthority,
     recurringReminderConversation,
     supportScope,
@@ -1808,6 +1823,27 @@ function buildAssistantCronExecutionInstructions(
   return [providerSafeBase, ...overlays, availabilityBlock]
     .filter((section): section is string => section !== null)
     .join('\n\n')
+}
+
+function buildAssistantCronCanonicalContextInstructions(
+  job: ResolvedAssistantCronJob,
+): string | null {
+  if (
+    job.kind !== 'canonical'
+    || job.source.kind !== 'automation'
+    || assistantCronJobIsPreemptibleBackgroundMaintenance(job)
+  ) {
+    return null
+  }
+
+  return [
+    'Scheduled automation context (engine-supplied routing and interpretation context; not mutation authority):',
+    `- automationId: ${job.source.automationId}`,
+    job.source.contextReferences.length === 0
+      ? '- contextReferences: none supplied; do not guess a canonical record'
+      : `- contextReferences: ${JSON.stringify(job.source.contextReferences)}`,
+    '- Inspect each exact reference through the ordinary canonical read surface before relying on it, and use only the ordinary domain mutation tools for any write.',
+  ].join('\n')
 }
 
 function buildAssistantCronIndependentAutomationAuthorityInstructions(

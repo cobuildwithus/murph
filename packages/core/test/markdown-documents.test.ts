@@ -232,6 +232,9 @@ describe("markdown document primitives", () => {
     const result = await upsertAutomation({
       vaultRoot,
       ...scaffoldAutomationPayload(),
+      contextReferences: [
+        { entityKind: "workout_format", entityId: "wfmt_01JQ8PWXP5A68SQM1W0GYM41WA" },
+      ],
       plannedOccurrenceOffsetMs: 900_000,
     });
 
@@ -248,6 +251,10 @@ describe("markdown document primitives", () => {
     expect(parsed.attributes.slug).toBe(result.record.slug);
     expect(result.record.plannedOccurrenceOffsetMs).toBe(900_000);
     expect(parsed.attributes.plannedOccurrenceOffsetMs).toBe(900_000);
+    expect(result.record.contextReferences).toEqual([
+      { entityKind: "workout_format", entityId: "wfmt_01JQ8PWXP5A68SQM1W0GYM41WA" },
+    ]);
+    expect(parsed.attributes.contextReferences).toEqual(result.record.contextReferences);
     expect(parsed.body).toContain(result.record.instructions);
   });
 
@@ -256,6 +263,9 @@ describe("markdown document primitives", () => {
     const created = await upsertAutomation({
       vaultRoot,
       ...createAutomationPayload({
+        contextReferences: [
+          { entityKind: "experiment", entityId: "exp_01JQ8PWXP5A68SQM1W0GYM41WB" },
+        ],
         tags: ["sleep", "recovery"],
       }),
     });
@@ -274,6 +284,14 @@ describe("markdown document primitives", () => {
     });
 
     expect(updated.record.tags).toEqual(["sleep", "recovery"]);
+    expect(updated.record.contextReferences).toEqual(created.record.contextReferences);
+
+    const cleared = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      contextReferences: [],
+    });
+    expect(cleared.record.contextReferences).toEqual([]);
   });
 
   it("advances the schedule anchor only for timing transitions", async () => {

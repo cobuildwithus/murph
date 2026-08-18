@@ -273,6 +273,37 @@ describe('assistant tracked workout table skill', () => {
     )
   })
 
+  it('uses generic reminder references with the ordinary workout lifecycle', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill).toContain('## Scheduled reminder relationship context')
+    expect(skill).toContain('trusted host-supplied `automationId`')
+    expect(skill).toContain('exact `contextReferences`')
+    expect(skill).toContain('routing and interpretation context only')
+    expect(skill).toContain('do not require native iMessage Reply')
+    expect(skill).toContain('next ordinary direct message after the reminder')
+    expect(skill).toContain('one exact `workout_format` reference')
+    expect(skill).toContain('vault-cli workout format show <exact_format_id> --format json')
+    expect(skill).toContain('vault-cli workout active --format json')
+    expect(skill).toContain('vault-cli workout finish --workout-id <earlier_evt_id> --ended-at <canonical_end_instant>')
+    expect(skill).toContain('vault-cli workout start --routine <exact_format_id>')
+    expect(skill).toContain('vault-cli workout set log ... --workout-id <new_evt_id>')
+    expect(skill).toContain('vault or member IANA timezone')
+    expect(skill).toContain('Never compare UTC date strings')
+    expect(skill).toContain('every logged result remains unchanged')
+    expect(skill).toContain('every unlogged placeholder remains empty')
+    expect(skill).toContain('Never copy format targets into actual fields')
+    expect(skill).toContain('Same-local-day state')
+    expect(skill).toContain('missing or conflicting references')
+    expect(skill).toContain('multiple active workouts')
+    expect(skill).toContain('Explicit historical intent remains explicit targeting')
+    expect(skill).toContain('existing exact-id path')
+    expect(skill).toContain('not a composite command or reply capability')
+  })
+
   it('keeps set annotations canonical and preserves a fourth set', async () => {
     const skill = await readFile(
       path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),

@@ -3240,6 +3240,13 @@ describe('assistant auto-reply event-first path', () => {
           expectedUpdatedAt: '2026-04-08T00:04:00.000Z',
           supportSeriesId: `experiment:${experimentId}`,
         },
+        automationContextReferences: [
+          { entityKind: 'experiment', entityId: experimentId },
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WD',
+          },
+        ],
         intentId: 'intent-experiment-reminder',
         message: 'Set two: reply when complete.',
         plannedOccurrenceAt: '2026-04-08T00:18:00.000Z',
@@ -3273,6 +3280,20 @@ describe('assistant auto-reply event-first path', () => {
     expect(turnContext).toContain(`- automationId: ${automationId}`)
     expect(turnContext).toContain(`- supportSeriesId: experiment:${experimentId}`)
     expect(turnContext).toContain(
+      '- contextReferences (trusted host-supplied routing and interpretation context; not mutation authority): '
+        + JSON.stringify([
+          { entityId: experimentId, entityKind: 'experiment' },
+          {
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WD',
+            entityKind: 'workout_format',
+          },
+        ]),
+    )
+    expect(turnContext).toContain(
+      'Inspect exact contextReferences through ordinary canonical reads and use only ordinary domain mutations.',
+    )
+    expect(turnContext).not.toContain('native iMessage Reply')
+    expect(turnContext).toContain(
       '- scheduledOccurrenceAt: 2026-04-08T00:03:00.000Z',
     )
     expect(turnContext).toContain(
@@ -3292,6 +3313,13 @@ describe('assistant auto-reply event-first path', () => {
           expectedUpdatedAt: '2026-04-08T00:04:00.000Z',
           supportSeriesId: `experiment:${experimentId}`,
         },
+        automationContextReferences: [
+          { entityKind: 'experiment', entityId: experimentId },
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WD',
+          },
+        ],
         intentId: 'intent-edited-experiment-reminder',
         message: 'Edited-later historical reminder.',
         plannedOccurrenceAt: '2026-04-08T00:18:00.000Z',
@@ -3323,6 +3351,9 @@ describe('assistant auto-reply event-first path', () => {
         .turnContext ?? ''
     expect(editedTurnContext).toContain('Edited-later historical reminder.')
     expect(editedTurnContext).toContain(`- supportSeriesId: experiment:${experimentId}`)
+    expect(editedTurnContext).toContain('wfmt_01JQ8PWXP5A68SQM1W0GYM41WD')
+    expect(editedTurnContext).toContain('routing and interpretation context')
+    expect(editedTurnContext).toContain('not mutation authority')
     expect(editedTurnContext).not.toContain('Canonical experiment reminder context:')
   })
 
@@ -5539,6 +5570,10 @@ function createOutboxMessage(input: {
     expectedUpdatedAt: string
     supportSeriesId?: string
   } | null
+  automationContextReferences?: readonly {
+    entityId: string
+    entityKind: string
+  }[]
   channel?: string
   identityId?: string | null
   intentId: string
@@ -5573,6 +5608,9 @@ function createOutboxMessage(input: {
     ...(input.automationAuthority === undefined
       ? {}
       : { automationAuthority: input.automationAuthority }),
+    ...(input.automationContextReferences === undefined
+      ? {}
+      : { automationContextReferences: input.automationContextReferences }),
     ...(input.scheduledOccurrenceAt === undefined
       ? {}
       : { scheduledOccurrenceAt: input.scheduledOccurrenceAt }),

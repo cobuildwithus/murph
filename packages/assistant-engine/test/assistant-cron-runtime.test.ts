@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import type {
+  AutomationContextReference,
   AutomationRoute,
   AutomationSchedule,
   AutomationSupportKind,
@@ -45,6 +46,7 @@ type MockAutomationRecord = {
     reasoningEffort?: string | null
   } | null
   continuityPolicy: 'fresh' | 'preserve'
+  contextReferences?: readonly AutomationContextReference[]
   createdAt: string
   scheduleAnchorAt?: string
   instructions: string
@@ -4083,6 +4085,16 @@ describe('assistant cron runtime orchestration', () => {
         throw new Error('Expected the canonical automation to exist.')
       }
       canonicalAutomation.supportKind = supportKind
+      canonicalAutomation.contextReferences = [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+        {
+          entityKind: 'experiment',
+          entityId: 'exp_01JQ8PWXP5A68SQM1W0GYM41WB',
+        },
+      ]
       canonicalAutomation.tags.push(
         'system:support-series:habit:reg_sleep_support',
       )
@@ -4102,6 +4114,8 @@ describe('assistant cron runtime orchestration', () => {
             expectedUpdatedAt: canonicalAutomation.updatedAt,
             supportSeriesId: 'habit:reg_sleep_support',
           },
+          outboxAutomationContextReferences:
+            canonicalAutomation.contextReferences,
         }),
       )
       const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
@@ -4109,6 +4123,18 @@ describe('assistant cron runtime orchestration', () => {
         | undefined
       expect(providerInput?.instructions).toContain(expectedScope)
       expect(providerInput?.instructions).toContain(expectedBoundary)
+      expect(providerInput?.instructions).toContain(
+        `- automationId: ${canonicalAutomation.automationId}`,
+      )
+      expect(providerInput?.instructions).toContain(
+        `- contextReferences: ${JSON.stringify(canonicalAutomation.contextReferences)}`,
+      )
+      expect(providerInput?.instructions).toContain(
+        'routing and interpretation context; not mutation authority',
+      )
+      expect(providerInput?.instructions).toContain(
+        'ordinary canonical read surface',
+      )
       if (supportKind === 'review') {
         expect(providerInput?.instructions).toContain(
           "ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision",
