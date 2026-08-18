@@ -68,12 +68,21 @@ export function MemberUsageClient({
   const [message, setMessage] = useState<UsageResetMessage | null>(null);
   const [runtimeRetry, setRuntimeRetry] =
     useState<UsageResetRuntimeRetry | null>(null);
+  const [acceptedRuntimeRecheckMemberId, setAcceptedRuntimeRecheckMemberId] =
+    useState<string | null>(null);
   const selectedRow = useMemo(
     () => dashboard.rows.find((row) => row.memberId === selectedMemberId)
       ?? null,
     [dashboard.rows, selectedMemberId],
   );
   const isResetting = resettingMemberId !== null;
+  const selectedRuntimeRecheck = selectedRow !== null && (
+    runtimeRetry?.memberId === selectedRow.memberId
+    || (
+      selectedRow.runtimeRecheckAvailable
+      && acceptedRuntimeRecheckMemberId !== selectedRow.memberId
+    )
+  );
 
   function openPage(
     direction: "after" | "before",
@@ -93,7 +102,12 @@ export function MemberUsageClient({
     setResettingMemberId(row.memberId);
     setMessage(null);
     try {
-      if (runtimeRetry?.memberId === row.memberId) {
+      const runtimeRecheckOnly = runtimeRetry?.memberId === row.memberId
+        || (
+          row.runtimeRecheckAvailable
+          && acceptedRuntimeRecheckMemberId !== row.memberId
+        );
+      if (runtimeRecheckOnly) {
         const result = await requestRuntimeRecheck(row.memberId);
         if (result.runtimeRecheckStatus === "pending") {
           setMessage({
@@ -103,10 +117,14 @@ export function MemberUsageClient({
           });
           return;
         }
+        const completedResetMode = runtimeRetry?.memberId === row.memberId
+          ? runtimeRetry.resetMode
+          : "starter_allowance";
         setRuntimeRetry(null);
+        setAcceptedRuntimeRecheckMemberId(row.memberId);
         setSelectedMemberId(null);
         setMessage({
-          text: runtimeRetry.resetMode === "starter_allowance"
+          text: completedResetMode === "starter_allowance"
             ? "The runtime recheck was accepted. The committed Starter allowance reset is unchanged."
             : "The runtime recheck was accepted. The committed usage reset is unchanged.",
           tone: "success",
@@ -117,6 +135,7 @@ export function MemberUsageClient({
 
       const result = await requestUsageReset(row);
       if (result.runtimeRecheckStatus === "pending") {
+        setAcceptedRuntimeRecheckMemberId(null);
         setRuntimeRetry({
           memberId: result.memberId,
           resetMode: result.resetMode,
@@ -131,6 +150,9 @@ export function MemberUsageClient({
         return;
       }
       setRuntimeRetry(null);
+      if (result.resetMode === "starter_allowance") {
+        setAcceptedRuntimeRecheckMemberId(result.memberId);
+      }
       setSelectedMemberId(null);
       setMessage({
         text: result.resetMode === "starter_allowance"
@@ -277,6 +299,10 @@ export function MemberUsageClient({
                       setSelectedMemberId(row.memberId);
                     }}
                     row={row}
+                    runtimeRecheckAvailable={
+                      row.runtimeRecheckAvailable
+                      && acceptedRuntimeRecheckMemberId !== row.memberId
+                    }
                   />
                 ))
               )}
@@ -329,21 +355,21 @@ export function MemberUsageClient({
         <DialogContent showCloseButton={!isResetting}>
           <DialogHeader>
             <DialogTitle>
-              {runtimeRetry?.memberId === selectedRow?.memberId
+              {selectedRuntimeRecheck
                 ? "Retry runtime wake?"
                 : selectedRow?.resetMode === "starter_allowance"
                   ? "Reset Starter allowance?"
                   : "Reset current included usage?"}
             </DialogTitle>
             <DialogDescription>
-              {runtimeRetry?.memberId === selectedRow?.memberId
+              {selectedRuntimeRecheck
                 ? "The allowance reset is already committed. Retry only the runtime recheck so already-accepted work can continue."
                 : selectedRow?.resetMode === "starter_allowance"
                   ? "This grants one fresh $4.50 Starter allowance, clears the blocked state, releases the current quota notice claim, and wakes already-accepted work. Immutable AI usage and purchased-credit balance stay unchanged."
                   : "This sets current-period included spend to $0, clears the blocked state, releases the current quota notice claim, and wakes already-accepted work. Immutable AI usage and purchased-credit balance stay unchanged."}
             </DialogDescription>
           </DialogHeader>
-          {runtimeRetry?.memberId === selectedRow?.memberId && message ? (
+          {selectedRuntimeRecheck && message ? (
             <Alert variant="destructive">
               <AlertDescription>{message.text}</AlertDescription>
             </Alert>
@@ -354,7 +380,7 @@ export function MemberUsageClient({
               <dd className="max-w-56 break-all text-right font-mono text-xs">
                 {selectedRow.memberId}
               </dd>
-              {runtimeRetry?.memberId !== selectedRow.memberId ? (
+              {!selectedRuntimeRecheck ? (
                 <>
                   <dt className="text-muted-foreground">Current spend</dt>
                   <dd className="font-serif font-semibold">
@@ -386,7 +412,7 @@ export function MemberUsageClient({
               type="button"
               variant="outline"
             >
-              {runtimeRetry?.memberId === selectedRow?.memberId
+              {selectedRuntimeRecheck
                 ? "Close"
                 : "Cancel"}
             </Button>
@@ -395,7 +421,7 @@ export function MemberUsageClient({
                 !selectedRow?.currentPeriod
                 || (
                   selectedRow.currentPeriod.updatedAt === null
-                  && runtimeRetry?.memberId !== selectedRow.memberId
+                  && !selectedRuntimeRecheck
                 )
                 || isResetting
               }
@@ -405,14 +431,14 @@ export function MemberUsageClient({
                 }
               }}
               type="button"
-              variant="destructive"
+              variant={selectedRuntimeRecheck ? "default" : "destructive"}
             >
               {isResetting ? <Spinner data-icon="inline-start" /> : (
                 <RotateCcwIcon data-icon="inline-start" />
               )}
               {isResetting
                 ? "Working"
-                : runtimeRetry?.memberId === selectedRow?.memberId
+                : selectedRuntimeRecheck
                 ? "Retry runtime wake"
                 : selectedRow?.resetMode === "starter_allowance"
                   ? "Grant $4.50"
@@ -429,15 +455,21 @@ function UsageRow(input: {
   disabled: boolean;
   onSelect: () => void;
   row: HostedOpsMemberUsageRow;
+  runtimeRecheckAvailable: boolean;
 }) {
   const period = input.row.currentPeriod;
   const resettable = period !== null
     && input.row.allowanceStatus === "available"
-    && input.row.resetMode !== null
+    && (
+      input.row.resetMode !== null
+      || input.runtimeRecheckAvailable
+    )
     && period.updatedAt !== null;
-  const actionLabel = input.row.resetMode === "starter_allowance"
-    ? "Reset Starter"
-    : "Reset";
+  const actionLabel = input.runtimeRecheckAvailable
+    ? "Recheck runtime"
+    : input.row.resetMode === "starter_allowance"
+      ? "Reset Starter"
+      : "Reset";
 
   return (
     <TableRow>
@@ -492,6 +524,9 @@ function UsageRow(input: {
           {input.row.resetMode === "starter_allowance" ? (
             <Badge variant="secondary">Starter exhausted</Badge>
           ) : null}
+          {input.runtimeRecheckAvailable ? (
+            <Badge variant="secondary">Wake pending</Badge>
+          ) : null}
           {period?.idempotencyClaimStatus ? (
             <Badge variant="secondary">Notice claimed</Badge>
           ) : null}
@@ -508,9 +543,11 @@ function UsageRow(input: {
       </TableCell>
       <TableCell className="text-right">
         <Button
-          aria-label={input.row.resetMode === "starter_allowance"
-            ? `Reset Starter allowance for ${input.row.memberId}`
-            : `Reset usage for ${input.row.memberId}`}
+          aria-label={input.runtimeRecheckAvailable
+            ? `Recheck runtime for ${input.row.memberId}`
+            : input.row.resetMode === "starter_allowance"
+              ? `Reset Starter allowance for ${input.row.memberId}`
+              : `Reset usage for ${input.row.memberId}`}
           disabled={input.disabled || !resettable}
           onClick={input.onSelect}
           size="sm"

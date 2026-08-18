@@ -2033,8 +2033,11 @@ Current hosted billing assumptions:
   to race an in-flight notice dispatch. After commit the route signals the
   existing runtime recheck; a
   rejected or bounded-timeout wake is returned as a committed partial result
-  with a wake-only retry. The table reads its decision and reset version from
-  one repeatable database snapshot, and derives blocked/available only from
+  with a wake-only retry. For Starter recovery, the page reconstructs that
+  wake-only action after close or reload from the active Ops grant and
+  unconsumed mailbox work previously denied for usage. The table reads its
+  decision and reset version from one repeatable database snapshot, and derives
+  blocked/available only from
   that canonical decision rather than the potentially stale persisted marker.
   Historical notice status is displayed independently from current admission.
   A later crossing reuses the logical claim key but receives a fresh durable

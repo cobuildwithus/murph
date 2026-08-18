@@ -282,7 +282,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("restores exhausted Starter capacity once without rewriting prior credit history", async () => {
+    it("restores exhausted Starter capacity without rewriting prior credit history", async () => {
       const fixtureId = randomUUID();
       const memberId = `member_ops_starter_reset_${fixtureId}`;
       const originalGrantEntryId = `huce_starter_${fixtureId}`;
@@ -438,6 +438,87 @@ describe.skipIf(!runPostgresProof)(
             sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
           },
         })).resolves.toBe(1);
+
+        const firstRecoveryGrantEntryId = historyAfter[2]?.id;
+        if (!firstRecoveryGrantEntryId) {
+          throw new Error("Expected the first Ops recovery grant.");
+        }
+        const exhaustedAgainAt = new Date(resetAt.getTime() + 2_000);
+        await prisma.$transaction(async (tx) => {
+          await tx.hostedUsageCreditGrant.update({
+            data: { remainingUsdMicros: 0n },
+            where: { entryId: firstRecoveryGrantEntryId },
+          });
+          await tx.hostedUsageCreditEntry.create({
+            data: {
+              amountUsdMicros: -HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 4n,
+              effectiveAt: exhaustedAgainAt,
+              id: `huce_recovery_debit_${fixtureId}`,
+              kind: "usage_debit",
+              parentGrantEntryId: firstRecoveryGrantEntryId,
+              semanticSourceKey:
+                `hosted-usage-credit:usage:ops-recovery:${fixtureId}`,
+              sourceUsageId: `usage_ops_recovery_${fixtureId}`,
+            },
+          });
+          await tx.hostedMember.update({
+            data: {
+              usageCreditBalanceUsdMicros: 0n,
+              usageCreditLedgerVersion: 4n,
+            },
+            where: { id: memberId },
+          });
+          await tx.hostedAiUsagePeriod.update({
+            data: {
+              blockedAt: exhaustedAgainAt,
+              updatedAt: exhaustedAgainAt,
+            },
+            where: {
+              memberId_periodStart: {
+                memberId,
+                periodStart: starterPeriod.periodStart,
+              },
+            },
+          });
+        });
+        const secondPeriod = await prisma.hostedAiUsagePeriod.findUniqueOrThrow({
+          select: { updatedAt: true },
+          where: {
+            memberId_periodStart: {
+              memberId,
+              periodStart: starterPeriod.periodStart,
+            },
+          },
+        });
+
+        const secondResult = await resetHostedOpsMemberUsage({
+          expectedPeriodUpdatedAt: secondPeriod.updatedAt,
+          expectedUsageCreditLedgerVersion: 4n,
+          memberId,
+          now: new Date(exhaustedAgainAt.getTime() + 1_000),
+          periodStart: starterPeriod.periodStart,
+        }, prisma);
+
+        expect(secondResult).toMatchObject({
+          resetMode: "starter_allowance",
+          usageCreditGrantedUsdMicros:
+            HOSTED_STARTER_USAGE_GRANT_USD_MICROS.toString(),
+        });
+        await expect(prisma.hostedUsageCreditEntry.count({
+          where: {
+            beneficiaryMemberId: memberId,
+            sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
+          },
+        })).resolves.toBe(2);
+        await expect(prisma.hostedUsageCreditEntry.findUnique({
+          select: { beneficiarySequence: true },
+          where: {
+            semanticSourceKey:
+              `hosted-ops-usage-reset:${memberId}:starter:after-ledger-4:v1`,
+          },
+        })).resolves.toEqual({ beneficiarySequence: 5n });
       } finally {
         await prisma.hostedUsageCreditGrant.deleteMany({
           where: { beneficiaryMemberId: memberId },

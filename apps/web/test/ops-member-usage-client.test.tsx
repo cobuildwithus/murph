@@ -331,6 +331,108 @@ describe("MemberUsageClient", () => {
     expect(routerRefresh).toHaveBeenCalledTimes(1);
   });
 
+  test("reconstructs a pending Starter wake after close and remount", async () => {
+    const exhaustedDashboard = makeDashboard();
+    const exhaustedRow = exhaustedDashboard.rows[0];
+    if (!exhaustedRow?.currentPeriod) {
+      throw new Error("Expected a usage fixture row.");
+    }
+    exhaustedRow.containerOwnerMemberId = null;
+    exhaustedRow.memberKind = "member";
+    exhaustedRow.participantCount = null;
+    exhaustedRow.resetMode = "starter_allowance";
+    exhaustedRow.currentPeriod.limitUsdMicros = "0";
+    exhaustedRow.currentPeriod.spentUsdMicros = "0";
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        memberId: "hbm_container",
+        noticeClaimReleased: true,
+        outcome: "reset",
+        periodStart: "2026-07-01T00:00:00.000Z",
+        previousSpentUsdMicros: "0",
+        resetAt: "2026-07-22T18:00:00.000Z",
+        resetMode: "starter_allowance",
+        runtimeRecheckStatus: "pending",
+        updatedAt: "2026-07-22T18:00:00.000Z",
+        usageCreditGrantedUsdMicros: "4500000",
+      }, 202))
+      .mockResolvedValueOnce(jsonResponse({
+        memberId: "hbm_container",
+        runtimeRecheckStatus: "accepted",
+      }));
+    const firstRender = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: exhaustedDashboard }),
+    );
+
+    await clickButton(
+      firstRender.window,
+      getButton(firstRender.container, "Reset Starter"),
+    );
+    await clickButton(
+      firstRender.window,
+      getButton(firstRender.container, "Grant $4.50"),
+    );
+    expect(firstRender.container.textContent).toContain(
+      "Starter allowance was reset, but the runtime did not accept",
+    );
+    await clickButton(
+      firstRender.window,
+      getButton(firstRender.container, "Close"),
+    );
+    await firstRender.cleanup();
+
+    const recoveredDashboard = makeDashboard();
+    const recoveredRow = recoveredDashboard.rows[0];
+    if (!recoveredRow?.currentPeriod) {
+      throw new Error("Expected a recovered usage fixture row.");
+    }
+    recoveredRow.containerOwnerMemberId = null;
+    recoveredRow.memberKind = "member";
+    recoveredRow.participantCount = null;
+    recoveredRow.resetMode = null;
+    recoveredRow.runtimeRecheckAvailable = true;
+    recoveredRow.currentPeriod.blocked = false;
+    recoveredRow.currentPeriod.idempotencyClaimStatus = null;
+    recoveredRow.currentPeriod.limitUsdMicros = "0";
+    recoveredRow.currentPeriod.remainingUsdMicros = "4500000";
+    recoveredRow.currentPeriod.spentUsdMicros = "0";
+    recoveredRow.currentPeriod.usageCreditBalanceUsdMicros = "4500000";
+    recoveredRow.currentPeriod.usageCreditLedgerVersion = "5";
+    const recoveredRender = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: recoveredDashboard }),
+    );
+    cleanupRender = recoveredRender.cleanup;
+
+    expect(recoveredRender.container.textContent).toContain("Wake pending");
+    await clickButton(
+      recoveredRender.window,
+      getButton(recoveredRender.container, "Recheck runtime"),
+    );
+    expect(recoveredRender.container.textContent).toContain(
+      "The allowance reset is already committed.",
+    );
+    await clickButton(
+      recoveredRender.window,
+      getButton(recoveredRender.container, "Retry runtime wake"),
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        memberId: "hbm_container",
+        operation: "runtime_recheck",
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(recoveredRender.container.querySelector('[role="alert"]')?.textContent)
+      .toContain("runtime recheck was accepted");
+    expect(() => getButton(recoveredRender.container, "Recheck runtime"))
+      .toThrow("Button not found: Recheck runtime");
+  });
+
   test("keeps a committed reset open and retries only the runtime wake", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({
@@ -445,6 +547,7 @@ function makeDashboard(): HostedOpsMemberUsageDashboard {
       messagesRetained: 18,
       participantCount: 2,
       resetMode: "included_usage",
+      runtimeRecheckAvailable: false,
       suspended: false,
     }],
     summary: {

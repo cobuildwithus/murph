@@ -581,10 +581,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   dates, message counts, or whether effective room capacity is exhausted.
 - Starter usage capacity is an append-only ledger grant, not a mutable trial
   counter. Operator recovery of an exhausted canonical Starter member may append
-  exactly one policy-sized reset grant under the beneficiary lock for the
-  displayed ledger version. It never replenishes an exhausted grant projection,
-  changes purchased or referral credit, or counts as a new Starter enrollment.
-  A stale retry cannot append another grant.
+exactly one policy-sized reset grant under the beneficiary lock for the
+displayed ledger version. It never replenishes an exhausted grant projection,
+changes purchased or referral credit, or counts as a new Starter enrollment.
+A stale retry cannot append another grant, and a later operator reset is
+eligible only after the prior credit is consumed and the locked canonical
+direct-Starter gate is fully exhausted again.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal

@@ -48,6 +48,7 @@ export interface HostedOpsMemberUsageRow {
   messagesRetained: number;
   participantCount: number | null;
   resetMode: HostedOpsMemberUsageResetMode | null;
+  runtimeRecheckAvailable: boolean;
   suspended: boolean;
 }
 
@@ -323,6 +324,35 @@ export async function readHostedOpsMemberUsage(
         prisma,
       })
     : new Map<string, HostedAiUsageGateSnapshot>();
+  const activeOpsStarterResetGrants = memberIds.length > 0
+    ? await prisma.hostedUsageCreditEntry.findMany({
+        select: { beneficiaryMemberId: true },
+        where: {
+          beneficiaryMemberId: { in: memberIds },
+          grant: { remainingUsdMicros: { gt: 0n } },
+          kind: "starter_grant",
+          sourceReferenceLookupKey:
+            HOSTED_OPS_STARTER_RESET_SOURCE_REFERENCE_LOOKUP_KEY,
+        },
+      })
+    : [];
+  const activeOpsStarterResetMemberIds = new Set(
+    activeOpsStarterResetGrants.map((entry) => entry.beneficiaryMemberId),
+  );
+  const stalledOpsStarterMailboxItems = activeOpsStarterResetMemberIds.size > 0
+    ? await prisma.hostedMailboxItem.findMany({
+        distinct: ["userId"],
+        select: { userId: true },
+        where: {
+          aiUsageDeniedAt: { not: null },
+          consumedAt: null,
+          userId: { in: [...activeOpsStarterResetMemberIds] },
+        },
+      })
+    : [];
+  const runtimeRecheckMemberIds = new Set(
+    stalledOpsStarterMailboxItems.map((item) => item.userId),
+  );
 
   const retainedByMember = new Map(
     retainedMessageCounts.map((row) => [row.userId, row._count._all]),
@@ -438,6 +468,10 @@ export async function readHostedOpsMemberUsage(
         ?? legacyGroupContainer?._count.members
         ?? null,
       resetMode,
+      runtimeRecheckAvailable:
+        decision?.allowanceSource === "direct_starter"
+        && decision.allowed
+        && runtimeRecheckMemberIds.has(member.id),
       suspended: member.suspendedAt !== null,
     };
   });

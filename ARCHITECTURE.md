@@ -3362,8 +3362,10 @@ for attribution. Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under
 the same beneficiary ledger lock. Each reset is keyed to the displayed ledger
 version, appends immutable history with a distinct Ops source, and is excluded
-from enrollment and conversion metrics. It never replenishes an old grant
-projection or mutates purchased and referral credit.
+from enrollment and conversion metrics. A later discretionary reset requires
+the prior credit to be consumed and the current direct-Starter gate to be fully
+exhausted again; it is not an automatic or member-owned refill. Recovery never
+replenishes an old grant projection or mutates purchased and referral credit.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

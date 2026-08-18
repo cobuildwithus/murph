@@ -74,7 +74,21 @@ Success means:
 
 ## Product UX
 
-Effort: Patch.
+Effort: Feature. The operator gains a new billing-adjacent recovery authority,
+so the owning Starter and hosted-plan product specifications define its
+eligibility and repetition boundary.
+
+Product decision:
+
+- An authorized operator may grant one fresh $4.50 recovery allowance whenever
+  the locked canonical gate shows a direct Starter member fully exhausted with
+  zero total credit.
+- A later recovery is eligible only after the prior credit is genuinely
+  consumed and the current direct-Starter gate is fully exhausted again.
+- Historical paid, purchase, or referral activity does not independently admit
+  or deny recovery; current canonical state is the authority. Recovery is
+  discretionary support, not an automatic refill, scheduled cadence,
+  self-service entitlement, or member promise.
 
 - Operator, exhausted Starter member: the row offers `Reset Starter`; the
   confirmation states that one fresh $4.50 allowance is granted and that
@@ -83,7 +97,9 @@ Effort: Patch.
   remain focused on current included usage.
 - Starter member after commit: canonical admission sees positive ledger credit.
   If the runtime wake is pending, the operator retries only the wake and cannot
-  append a second grant.
+  append a second grant. After close or reload, the page reconstructs that
+  wake-only action from the active Ops grant and unconsumed mailbox work already
+  denied for usage.
 - Concurrent or stale operator: receives the existing refresh-and-review error;
   no partial grant, period, or notice mutation commits.
 
@@ -103,17 +119,23 @@ Effort: Patch.
 
 Current evidence:
 
-- 92 focused service, route, growth, and rendered-client tests pass.
+- 94 focused service, route, growth, and rendered-client tests pass, including
+  close/remount reconstruction of a Starter wake-only retry that sends no
+  second grant request and clears locally after acceptance.
 - The isolated local PostgreSQL proof passes both the existing paid-period reset
-  and the new exhausted-Starter flow. It proves a $4.50 balance, ledger version
-  advance, unchanged prior entries, canonical admission, and stale-replay
-  rejection with exactly one Ops grant.
-- Web typecheck and focused ESLint pass.
-- The synthetic design study now renders exhausted Starter and paid/container
-  rows through the production component. No in-app browser was attached for a
-  screenshot walkthrough; the rendered client test covers the Starter badge,
-  action, confirmation, success, and existing wake-only recovery interaction.
-- ReviewGPT, exact-head CI, and the parent final review remain pending.
+  and the exhausted-Starter flow. It proves a $4.50 balance, ledger version
+  advance, unchanged prior entries, canonical admission, stale-replay rejection
+  with exactly one Ops grant, and a later new grant only after the first recovery
+  is fully consumed and the gate is exhausted again.
+- Web typecheck, focused ESLint, and the initial exact-head broad CI pass.
+- The preliminary specialist audit identified losable Starter wake recovery and
+  contradictory product authority. The implementation now derives wake recovery
+  from durable work state, and the owning product specs contain the explicit
+  operator policy. The specialist retry and final ReviewGPT disposition remain
+  pending.
+- The synthetic design study now renders exhausted Starter, wake-pending Starter,
+  and paid/container rows through the production component. Browser evidence is
+  still pending because no in-app browser was attached during the first pass.
 
 ## Deployment
 
