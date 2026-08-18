@@ -35,14 +35,17 @@ interface UsageResetMessage {
   tone: "error" | "success";
 }
 
-interface UsageResetRuntimeRetry {
-  memberId: string;
-  resetMode: HostedOpsMemberUsageResetResponse["resetMode"];
-}
-
-interface UsageCommittedRefresh {
+interface UsagePostCommit {
   dashboardCapturedAt: string;
   memberId: string;
+  resetMode: HostedOpsMemberUsageResetResponse["resetMode"];
+  runtimeRecheckStatus: "accepted" | "pending";
+}
+
+interface UsageRowRecovery {
+  postCommitStatus: UsagePostCommit["runtimeRecheckStatus"] | null;
+  resetMode: HostedOpsMemberUsageResetResponse["resetMode"] | null;
+  runtimeRecheckAvailable: boolean;
 }
 
 interface UsageRuntimeRecheckResponse {
@@ -71,25 +74,18 @@ export function MemberUsageClient({
     null,
   );
   const [message, setMessage] = useState<UsageResetMessage | null>(null);
-  const [runtimeRetry, setRuntimeRetry] =
-    useState<UsageResetRuntimeRetry | null>(null);
-  const [acceptedRuntimeRecheckMemberId, setAcceptedRuntimeRecheckMemberId] =
-    useState<string | null>(null);
-  const [committedRefresh, setCommittedRefresh] =
-    useState<UsageCommittedRefresh | null>(null);
+  const [postCommit, setPostCommit] = useState<UsagePostCommit | null>(null);
   const selectedRow = useMemo(
     () => dashboard.rows.find((row) => row.memberId === selectedMemberId)
       ?? null,
     [dashboard.rows, selectedMemberId],
   );
   const isResetting = resettingMemberId !== null;
-  const selectedRuntimeRecheck = selectedRow !== null && (
-    runtimeRetry?.memberId === selectedRow.memberId
-    || (
-      selectedRow.runtimeRecheckAvailable
-      && acceptedRuntimeRecheckMemberId !== selectedRow.memberId
-    )
-  );
+  const selectedRecovery = selectedRow
+    ? readUsageRowRecovery(dashboard.capturedAt, postCommit, selectedRow)
+    : null;
+  const selectedRuntimeRecheck =
+    selectedRecovery?.runtimeRecheckAvailable ?? false;
 
   function openPage(
     direction: "after" | "before",
@@ -108,15 +104,23 @@ export function MemberUsageClient({
     }
     setResettingMemberId(row.memberId);
     setMessage(null);
+    const recovery = readUsageRowRecovery(
+      dashboard.capturedAt,
+      postCommit,
+      row,
+    );
+    const runtimeRecheckOnly = recovery.runtimeRecheckAvailable;
     try {
-      const runtimeRecheckOnly = runtimeRetry?.memberId === row.memberId
-        || (
-          row.runtimeRecheckAvailable
-          && acceptedRuntimeRecheckMemberId !== row.memberId
-        );
       if (runtimeRecheckOnly) {
         const result = await requestRuntimeRecheck(row.memberId);
+        const completedResetMode = recovery.resetMode ?? "starter_allowance";
         if (result.runtimeRecheckStatus === "pending") {
+          setPostCommit({
+            dashboardCapturedAt: dashboard.capturedAt,
+            memberId: row.memberId,
+            resetMode: completedResetMode,
+            runtimeRecheckStatus: "pending",
+          });
           setMessage({
             text:
               "The runtime still has not accepted its recheck. The committed usage reset is unchanged; retry the runtime wake.",
@@ -124,14 +128,11 @@ export function MemberUsageClient({
           });
           return;
         }
-        const completedResetMode = runtimeRetry?.memberId === row.memberId
-          ? runtimeRetry.resetMode
-          : "starter_allowance";
-        setRuntimeRetry(null);
-        setAcceptedRuntimeRecheckMemberId(row.memberId);
-        setCommittedRefresh({
+        setPostCommit({
           dashboardCapturedAt: dashboard.capturedAt,
           memberId: row.memberId,
+          resetMode: completedResetMode,
+          runtimeRecheckStatus: "accepted",
         });
         setSelectedMemberId(null);
         setMessage({
@@ -146,10 +147,11 @@ export function MemberUsageClient({
 
       const result = await requestUsageReset(row);
       if (result.runtimeRecheckStatus === "pending") {
-        setAcceptedRuntimeRecheckMemberId(null);
-        setRuntimeRetry({
+        setPostCommit({
+          dashboardCapturedAt: dashboard.capturedAt,
           memberId: result.memberId,
           resetMode: result.resetMode,
+          runtimeRecheckStatus: "pending",
         });
         setMessage({
           text: result.resetMode === "starter_allowance"
@@ -160,13 +162,11 @@ export function MemberUsageClient({
         router.refresh();
         return;
       }
-      setRuntimeRetry(null);
-      if (result.resetMode === "starter_allowance") {
-        setAcceptedRuntimeRecheckMemberId(result.memberId);
-      }
-      setCommittedRefresh({
+      setPostCommit({
         dashboardCapturedAt: dashboard.capturedAt,
         memberId: result.memberId,
+        resetMode: result.resetMode,
+        runtimeRecheckStatus: "accepted",
       });
       setSelectedMemberId(null);
       setMessage({
@@ -191,12 +191,11 @@ export function MemberUsageClient({
         error instanceof UsageResetRequestError
         && error.code === "HOSTED_OPS_USAGE_RESET_STALE"
       ) {
-        setRuntimeRetry(null);
         setSelectedMemberId(null);
         router.refresh();
         return;
       }
-      if (runtimeRetry?.memberId !== row.memberId) {
+      if (!runtimeRecheckOnly) {
         setSelectedMemberId(null);
       }
     } finally {
@@ -285,18 +284,14 @@ export function MemberUsageClient({
                 key={row.memberId}
                 onSelect={() => {
                   setMessage(null);
-                  setRuntimeRetry(null);
                   setSelectedMemberId(row.memberId);
                 }}
-                refreshingAfterCommit={
-                  committedRefresh?.dashboardCapturedAt === dashboard.capturedAt
-                  && committedRefresh.memberId === row.memberId
-                }
+                recovery={readUsageRowRecovery(
+                  dashboard.capturedAt,
+                  postCommit,
+                  row,
+                )}
                 row={row}
-                runtimeRecheckAvailable={
-                  row.runtimeRecheckAvailable
-                  && acceptedRuntimeRecheckMemberId !== row.memberId
-                }
               />
             ))
           )}
@@ -342,18 +337,14 @@ export function MemberUsageClient({
                     key={row.memberId}
                     onSelect={() => {
                       setMessage(null);
-                      setRuntimeRetry(null);
                       setSelectedMemberId(row.memberId);
                     }}
-                    refreshingAfterCommit={
-                      committedRefresh?.dashboardCapturedAt === dashboard.capturedAt
-                      && committedRefresh.memberId === row.memberId
-                    }
+                    recovery={readUsageRowRecovery(
+                      dashboard.capturedAt,
+                      postCommit,
+                      row,
+                    )}
                     row={row}
-                    runtimeRecheckAvailable={
-                      row.runtimeRecheckAvailable
-                      && acceptedRuntimeRecheckMemberId !== row.memberId
-                    }
                   />
                 ))
               )}
@@ -397,7 +388,6 @@ export function MemberUsageClient({
       <Dialog
         onOpenChange={(open) => {
           if (!open && !isResetting) {
-            setRuntimeRetry(null);
             setSelectedMemberId(null);
           }
         }}
@@ -457,7 +447,6 @@ export function MemberUsageClient({
             <Button
               disabled={isResetting}
               onClick={() => {
-                setRuntimeRetry(null);
                 setSelectedMemberId(null);
               }}
               type="button"
@@ -505,9 +494,8 @@ export function MemberUsageClient({
 interface UsageRowControlInput {
   disabled: boolean;
   onSelect: () => void;
-  refreshingAfterCommit: boolean;
+  recovery: UsageRowRecovery;
   row: HostedOpsMemberUsageRow;
-  runtimeRecheckAvailable: boolean;
 }
 
 function UsageCompactRow(input: UsageRowControlInput) {
@@ -533,9 +521,9 @@ function UsageCompactRow(input: UsageRowControlInput) {
       </div>
       <div className="min-w-0">
         <UsageStatusBadges
-          refreshingAfterCommit={input.refreshingAfterCommit}
+          postCommitStatus={input.recovery.postCommitStatus}
           row={input.row}
-          runtimeRecheckAvailable={input.runtimeRecheckAvailable}
+          runtimeRecheckAvailable={input.recovery.runtimeRecheckAvailable}
         />
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
           <UsageCompactMetric
@@ -615,9 +603,9 @@ function UsageRow(input: UsageRowControlInput) {
       <TableCell className="sticky right-0 z-10 border-l border-border/70 bg-card text-right">
         <div className="flex min-w-56 flex-col items-end gap-2">
           <UsageStatusBadges
-            refreshingAfterCommit={input.refreshingAfterCommit}
+            postCommitStatus={input.recovery.postCommitStatus}
             row={input.row}
-            runtimeRecheckAvailable={input.runtimeRecheckAvailable}
+            runtimeRecheckAvailable={input.recovery.runtimeRecheckAvailable}
           />
           <UsageActionButton {...input} />
         </div>
@@ -627,15 +615,19 @@ function UsageRow(input: UsageRowControlInput) {
 }
 
 function UsageStatusBadges(input: {
-  refreshingAfterCommit: boolean;
+  postCommitStatus: UsageRowRecovery["postCommitStatus"];
   row: HostedOpsMemberUsageRow;
   runtimeRecheckAvailable: boolean;
 }) {
   const period = input.row.currentPeriod;
-  if (input.refreshingAfterCommit) {
+  if (input.postCommitStatus !== null) {
     return (
       <div className="flex flex-wrap gap-1">
-        <Badge variant="outline">Committed · refreshing</Badge>
+        <Badge variant="outline">
+          {input.postCommitStatus === "pending"
+            ? "Committed · Wake pending"
+            : "Committed · refreshing"}
+        </Badge>
       </div>
     );
   }
@@ -674,17 +666,17 @@ function UsageActionButton(
   input: UsageRowControlInput & { className?: string },
 ) {
   const period = input.row.currentPeriod;
-  const resettable = !input.refreshingAfterCommit
+  const resettable = input.recovery.postCommitStatus !== "accepted"
     && period !== null
     && input.row.allowanceStatus === "available"
     && (
       input.row.resetMode !== null
-      || input.runtimeRecheckAvailable
+      || input.recovery.runtimeRecheckAvailable
     )
     && period.updatedAt !== null;
-  const actionLabel = input.refreshingAfterCommit
+  const actionLabel = input.recovery.postCommitStatus === "accepted"
     ? "Refreshing"
-    : input.runtimeRecheckAvailable
+    : input.recovery.runtimeRecheckAvailable
       ? "Recheck runtime"
       : input.row.resetMode === "starter_allowance"
         ? "Reset Starter"
@@ -692,9 +684,9 @@ function UsageActionButton(
 
   return (
     <Button
-      aria-label={input.refreshingAfterCommit
+      aria-label={input.recovery.postCommitStatus === "accepted"
         ? `Committed update refreshing for ${input.row.memberId}`
-        : input.runtimeRecheckAvailable
+        : input.recovery.runtimeRecheckAvailable
           ? `Recheck runtime for ${input.row.memberId}`
           : input.row.resetMode === "starter_allowance"
             ? `Reset Starter allowance for ${input.row.memberId}`
@@ -706,7 +698,7 @@ function UsageActionButton(
       type="button"
       variant="outline"
     >
-      {input.refreshingAfterCommit ? (
+      {input.recovery.postCommitStatus === "accepted" ? (
         <Spinner data-icon="inline-start" />
       ) : (
         <RotateCcwIcon data-icon="inline-start" />
@@ -714,6 +706,24 @@ function UsageActionButton(
       {actionLabel}
     </Button>
   );
+}
+
+function readUsageRowRecovery(
+  dashboardCapturedAt: string,
+  postCommit: UsagePostCommit | null,
+  row: HostedOpsMemberUsageRow,
+): UsageRowRecovery {
+  const activePostCommit = postCommit?.dashboardCapturedAt === dashboardCapturedAt
+      && postCommit.memberId === row.memberId
+    ? postCommit
+    : null;
+  return {
+    postCommitStatus: activePostCommit?.runtimeRecheckStatus ?? null,
+    resetMode: activePostCommit?.resetMode ?? null,
+    runtimeRecheckAvailable:
+      activePostCommit?.runtimeRecheckStatus === "pending"
+      || (activePostCommit === null && row.runtimeRecheckAvailable),
+  };
 }
 
 function UsageCompactMetric(input: { label: string; value: string }) {

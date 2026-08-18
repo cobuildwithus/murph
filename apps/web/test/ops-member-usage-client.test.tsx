@@ -365,7 +365,7 @@ describe("MemberUsageClient", () => {
     expect(getButton(rendered.container, "Reset").disabled).toBe(true);
   });
 
-  test("reconstructs a pending Starter wake after close and remount", async () => {
+  test("preserves a pending Starter wake until canonical captures take over", async () => {
     const exhaustedDashboard = makeDashboard();
     const exhaustedRow = exhaustedDashboard.rows[0];
     if (!exhaustedRow?.currentPeriod) {
@@ -413,6 +413,29 @@ describe("MemberUsageClient", () => {
       firstRender.window,
       getButton(firstRender.container, "Close"),
     );
+
+    expect(firstRender.container.textContent).toContain(
+      "Committed · Wake pending",
+    );
+    expect(firstRender.container.textContent).not.toContain("Starter exhausted");
+    expect(firstRender.container.textContent).not.toContain("Notice claimed");
+    expect(firstRender.container.textContent).not.toContain("Blocked");
+    expect(() => getButton(firstRender.container, "Reset Starter"))
+      .toThrow("Button not found: Reset Starter");
+    expect(getButton(firstRender.container, "Recheck runtime").disabled)
+      .toBe(false);
+
+    // A delayed or failed refresh can rerender the old capture. The committed
+    // result must still own this row and expose only the wake-safe action.
+    await firstRender.rerender(
+      createElement(MemberUsageClient, { dashboard: exhaustedDashboard }),
+    );
+    expect(firstRender.container.textContent).toContain(
+      "Committed · Wake pending",
+    );
+    expect(getButton(firstRender.container, "Recheck runtime").disabled)
+      .toBe(false);
+
     await firstRender.cleanup();
 
     const recoveredDashboard = makeDashboard();
@@ -432,6 +455,7 @@ describe("MemberUsageClient", () => {
     recoveredRow.currentPeriod.spentUsdMicros = "0";
     recoveredRow.currentPeriod.usageCreditBalanceUsdMicros = "4500000";
     recoveredRow.currentPeriod.usageCreditLedgerVersion = "5";
+    recoveredDashboard.capturedAt = "2026-07-22T18:00:01.000Z";
     const recoveredRender = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard: recoveredDashboard }),
     );
@@ -463,6 +487,29 @@ describe("MemberUsageClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(recoveredRender.container.querySelector('[role="alert"]')?.textContent)
       .toContain("runtime recheck was accepted");
+    expect(() => getButton(recoveredRender.container, "Recheck runtime"))
+      .toThrow("Button not found: Recheck runtime");
+
+    const stillPendingDashboard = structuredClone(recoveredDashboard);
+    stillPendingDashboard.capturedAt = "2026-07-22T18:00:02.000Z";
+    await recoveredRender.rerender(
+      createElement(MemberUsageClient, { dashboard: stillPendingDashboard }),
+    );
+    expect(recoveredRender.container.textContent).toContain("Wake pending");
+    expect(getButton(recoveredRender.container, "Recheck runtime").disabled)
+      .toBe(false);
+
+    const consumedDashboard = structuredClone(stillPendingDashboard);
+    consumedDashboard.capturedAt = "2026-07-22T18:00:03.000Z";
+    const consumedRow = consumedDashboard.rows[0];
+    if (!consumedRow) {
+      throw new Error("Expected a consumed recovery fixture row.");
+    }
+    consumedRow.runtimeRecheckAvailable = false;
+    await recoveredRender.rerender(
+      createElement(MemberUsageClient, { dashboard: consumedDashboard }),
+    );
+    expect(recoveredRender.container.textContent).not.toContain("Wake pending");
     expect(() => getButton(recoveredRender.container, "Recheck runtime"))
       .toThrow("Button not found: Recheck runtime");
   });
