@@ -521,6 +521,12 @@ test("database reset failure emits only the allowlisted command reason", async (
   }
 });
 
+test("database validator declares its PostgreSQL runtime at the controller root", async () => {
+  const rootPackage = JSON.parse(await readFile(path.join(REPO_ROOT, "package.json"), "utf8"));
+  assert.equal(rootPackage.devDependencies?.pg, "8.20.0");
+  assert.equal(typeof (await import("pg")).default?.Pool, "function");
+});
+
 test("database and child-command timeout contracts are explicit and fail closed", () => {
   assert.deepEqual(buildDedicatedDatabasePoolOptions("postgresql://owner@db.example.test/native_ios_e2e"), {
     connectionString: "postgresql://owner@db.example.test/native_ios_e2e",
