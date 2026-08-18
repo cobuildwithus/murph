@@ -252,7 +252,7 @@ it('preserves an older exact native-reply anchor beyond the route window', async
     channel: 'linq',
     deliveryTarget: 'real-native-reply-thread',
     identityId: 'identity-native-reply',
-    providerMessageId: 'provider-native-reply-anchor',
+    providerMessageIds: ['provider-native-reply-anchor'],
     threadId: 'hidden-native-reply-thread',
     vault: vaultRoot,
   })

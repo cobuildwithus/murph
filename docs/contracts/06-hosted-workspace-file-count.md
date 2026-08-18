@@ -300,13 +300,16 @@ landing; record the chosen posture here so the decision is reviewable.
   transport-idempotency keys plus hashed foreground route, provider-message,
   and private-completion tags to durable outbox intent ids. It retains normalized
   media only for the legacy media-sensitive key migration; the intent JSON files
-  remain canonical delivery state. Auto-reply history canonical-validates at most 100 projected candidates,
-  prioritizing an exact provider-message anchor before filling the remaining
-  optional context window with newest route history. Legacy media and
+  remain canonical delivery state. Auto-reply history canonical-validates at
+  most 100 projected candidates, prioritizing route-scoped exact
+  provider-message anchors before filling the remaining optional context window
+  with newest route history. Legacy media and
   private-completion verification each retain their fixed 100-candidate
   fail-closed bound.
   Route cardinality grows rows, not workspace files. A missing or positively
   corrupt projection is rebuilt from canonical intents and published atomically.
+  Interrupted rebuilds reuse and remove one excluded
+  `state/.tmp/outbox-dedupe.sqlite.rebuild` slot instead of accumulating files.
   Ordinary creates and lifecycle transitions update it under the existing
   assistant runtime write lock, while canonical validation removes stale routes
   after quarantine or pruning. The store uses

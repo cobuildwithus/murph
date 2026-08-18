@@ -180,7 +180,7 @@ type AssistantAutoReplyOutboxIntent =
 export interface AssistantAutoReplyOutboxHistoryQuery {
   conversation: AssistantInputConversationRef
   deliveryTarget: string
-  providerMessageId?: string | null
+  providerMessageIds?: readonly string[] | null
   source: string
 }
 
@@ -4372,7 +4372,7 @@ export function createAssistantAutoReplyHistoryReader(input: {
           channel: query.source,
           deliveryTarget: query.deliveryTarget,
           identityId: conversation.identityId,
-          providerMessageId: query.providerMessageId ?? null,
+          providerMessageIds: query.providerMessageIds ?? null,
           threadId: conversation.threadId,
         })
         let projected = projectedOutboxIntents.get(key)
@@ -4382,7 +4382,7 @@ export function createAssistantAutoReplyHistoryReader(input: {
             channel: query.source,
             deliveryTarget: query.deliveryTarget,
             identityId: conversation.identityId,
-            providerMessageId: query.providerMessageId,
+            providerMessageIds: query.providerMessageIds,
             threadId: conversation.threadId,
             vault: input.vault,
           })
@@ -4695,7 +4695,9 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
-      providerMessageId: replyToMessageId,
+      providerMessageIds: replyToMessageId === null
+        ? []
+        : [replyToMessageId],
     })).filter((delivery) => delivery.message !== null)
   const replyTargetDelivery = replyToMessageId === null
     ? null
@@ -4881,9 +4883,9 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
         deliveryTarget: input.deliveryTarget,
         historyReader: input.historyReader,
         input: input.input,
-        providerMessageId: replyToMessageIds.reduce<string | null>(
-          (selected, replyToMessageId) => replyToMessageId ?? selected,
-          null,
+        providerMessageIds: replyToMessageIds.filter(
+          (replyToMessageId): replyToMessageId is string =>
+            replyToMessageId !== null,
         ),
       })
     : []
@@ -5169,7 +5171,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
-  providerMessageId?: string | null
+  providerMessageIds?: readonly string[] | null
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery[]> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
@@ -5180,9 +5182,16 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   const intents = await input.historyReader.readOutboxIntents({
     conversation: input.input.conversation,
     deliveryTarget,
-    providerMessageId: input.providerMessageId === undefined
-      ? readAssistantTargetProviderScalar(input.input.replyTarget?.messageId)
-      : readAssistantTargetProviderScalar(input.providerMessageId),
+    providerMessageIds: input.providerMessageIds === undefined
+      ? [readAssistantTargetProviderScalar(input.input.replyTarget?.messageId)]
+          .filter((providerMessageId): providerMessageId is string =>
+            providerMessageId !== null
+          )
+      : input.providerMessageIds
+          .map(readAssistantTargetProviderScalar)
+          .filter((providerMessageId): providerMessageId is string =>
+            providerMessageId !== null
+          ),
     source: channel,
   })
   return intents.flatMap((intent) => {

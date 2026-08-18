@@ -1,4 +1,12 @@
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  access,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -528,6 +536,58 @@ describe('assistant outbox runtime', () => {
     ).toHaveLength(1)
   })
 
+  it('reuses one excluded rebuild slot after interrupted outbox projection recovery', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-rebuild-slot-',
+    )
+    const first = await createIntent(vaultRoot, {
+      dedupeToken: 'stable-outbox-rebuild-slot-token',
+      message: 'outbox rebuild slot',
+      sessionId: 'session-outbox-rebuild-slot',
+      turnId: 'turn-outbox-rebuild-slot',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const databasePath = path.join(
+      paths.stateDirectory,
+      'outbox-dedupe.sqlite',
+    )
+    const rebuildDirectory = path.join(paths.stateDirectory, '.tmp')
+    const rebuildPath = path.join(
+      rebuildDirectory,
+      'outbox-dedupe.sqlite.rebuild',
+    )
+    const rebuildPaths = [
+      rebuildPath,
+      `${rebuildPath}-journal`,
+      `${rebuildPath}-shm`,
+      `${rebuildPath}-wal`,
+    ]
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await writeFile(databasePath, 'not-a-complete-sqlite-projection', 'utf8')
+      await mkdir(rebuildDirectory, { recursive: true })
+      await Promise.all(rebuildPaths.map((rebuildArtifactPath) =>
+        writeFile(rebuildArtifactPath, `interrupted-rebuild-${attempt}`, 'utf8')
+      ))
+
+      const recovered = await createIntent(vaultRoot, {
+        dedupeToken: 'stable-outbox-rebuild-slot-token',
+        message: 'outbox rebuild slot',
+        sessionId: 'session-outbox-rebuild-slot',
+        turnId: 'turn-outbox-rebuild-slot',
+      })
+      expect(recovered.intentId).toBe(first.intentId)
+      await Promise.all(rebuildPaths.map((rebuildArtifactPath) =>
+        expect(access(rebuildArtifactPath)).rejects.toMatchObject({
+          code: 'ENOENT',
+        })
+      ))
+      await expect(access(rebuildDirectory)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+    }
+  })
+
   it.each(['missing', 'corrupt'] as const)(
     'serializes %s projection recovery with a concurrent outbox writer',
     async (projectionState) => {
@@ -599,7 +659,7 @@ describe('assistant outbox runtime', () => {
         channel: 'telegram',
         deliveryTarget: routeTarget,
         identityId: sent.identityId,
-        providerMessageId: null,
+        providerMessageIds: [],
         threadId: sent.threadId,
         vault: vaultRoot,
       })
@@ -694,6 +754,54 @@ describe('assistant outbox runtime', () => {
         'utf8',
       )
     }))
+    await Promise.all(Array.from({ length: 2 }, async (_, offset) => {
+      const suffix = (offset + 1).toString().padStart(3, '0')
+      const timestamp = new Date(
+        Date.parse(createdAt) + (101 + offset) * 1_000,
+      ).toISOString()
+      const delivery = expectMessageDelivery(sent.delivery)
+      const collisionTarget = `other-auto-reply-route-${suffix}`
+      const intent = {
+        ...sent,
+        createdAt: timestamp,
+        delivery: {
+          ...delivery,
+          providerMessageId: 'provider-auto-reply-route-bound-000',
+          providerThreadId: collisionTarget,
+          sentAt: timestamp,
+          target: collisionTarget,
+        },
+        intentId: `outbox_auto_reply_route_collision_${suffix}`,
+        sentAt: timestamp,
+        updatedAt: timestamp,
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+    const olderTimestamp = new Date(
+      Date.parse(createdAt) - 1_000,
+    ).toISOString()
+    const olderDelivery = expectMessageDelivery(sent.delivery)
+    const olderAnchor = {
+      ...sent,
+      createdAt: olderTimestamp,
+      delivery: {
+        ...olderDelivery,
+        providerMessageId: 'provider-auto-reply-route-bound-older',
+        sentAt: olderTimestamp,
+      },
+      intentId: 'outbox_auto_reply_route_bound_older',
+      sentAt: olderTimestamp,
+      updatedAt: olderTimestamp,
+    }
+    await writeFile(
+      path.join(paths.outboxDirectory, `${olderAnchor.intentId}.json`),
+      JSON.stringify(olderAnchor),
+      'utf8',
+    )
     await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
       force: true,
     })
@@ -703,7 +811,7 @@ describe('assistant outbox runtime', () => {
       channel: 'telegram',
       deliveryTarget: routeTarget,
       identityId: sent.identityId,
-      providerMessageId: null,
+      providerMessageIds: [],
       threadId: sent.threadId,
       vault: vaultRoot,
     })
@@ -719,7 +827,7 @@ describe('assistant outbox runtime', () => {
       channel: 'telegram',
       deliveryTarget: routeTarget,
       identityId: sent.identityId,
-      providerMessageId: 'provider-auto-reply-route-bound-000',
+      providerMessageIds: ['provider-auto-reply-route-bound-000'],
       threadId: sent.threadId,
       vault: vaultRoot,
     })
@@ -731,6 +839,31 @@ describe('assistant outbox runtime', () => {
     expect(nativeReplyHistory.at(-1)?.intentId).toBe(
       'outbox_auto_reply_route_bound_100',
     )
+
+    const groupedNativeReplyHistory =
+      await listAssistantOutboxIntentsForAutoReplyRoute({
+        actorId: sent.actorId,
+        channel: 'telegram',
+        deliveryTarget: routeTarget,
+        identityId: sent.identityId,
+        providerMessageIds: [
+          'provider-auto-reply-route-bound-000',
+          'provider-auto-reply-route-bound-older',
+        ],
+        threadId: sent.threadId,
+        vault: vaultRoot,
+      })
+    expect(groupedNativeReplyHistory).toHaveLength(100)
+    expect(groupedNativeReplyHistory.slice(0, 2).map((intent) =>
+      intent.intentId
+    )).toEqual([
+      olderAnchor.intentId,
+      sent.intentId,
+    ])
+    expect(groupedNativeReplyHistory.map((intent) => intent.intentId))
+      .not.toContain('outbox_auto_reply_route_bound_001')
+    expect(groupedNativeReplyHistory.map((intent) => intent.intentId))
+      .not.toContain('outbox_auto_reply_route_bound_002')
   }, 120_000)
 
   it('keeps accepted Linq media in native-reply history after a terminal rich-link failure', async () => {
@@ -806,7 +939,7 @@ describe('assistant outbox runtime', () => {
         threadIsDirect: false,
       },
       deliveryTarget: 'linq-terminal-partial-thread',
-      providerMessageId,
+      providerMessageIds: [providerMessageId],
       source: 'linq',
     })).resolves.toEqual([
       expect.objectContaining({

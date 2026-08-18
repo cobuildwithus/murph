@@ -48,6 +48,7 @@ const ASSISTANT_OUTBOX_DEDUPE_DATABASE_NAME = 'outbox-dedupe.sqlite'
 const ASSISTANT_OUTBOX_DEDUPE_DATABASE_VERSION = 1
 const ASSISTANT_OUTBOX_LEGACY_DEDUPE_FALLBACK_LIMIT = 100
 const ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT = 100
+const ASSISTANT_OUTBOX_FOREGROUND_PROVIDER_MESSAGE_LIMIT = 50
 
 type AssistantOutboxDedupeRouteKind =
   | 'dedupe-key'
@@ -75,7 +76,7 @@ export interface AssistantOutboxAutoReplyRouteQuery {
   channel: string
   deliveryTarget: string
   identityId?: string | null
-  providerMessageId?: string | null
+  providerMessageIds?: readonly string[] | null
   threadId?: string | null
   vault: string
 }
@@ -345,20 +346,29 @@ export async function listAssistantOutboxIntentsForAutoReplyRoute(
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
   const routeTags = resolveAssistantOutboxAutoReplyQueryTags(input)
-  const providerMessageId = normalizeNullableString(input.providerMessageId)
-  const providerTags = providerMessageId
-    ? [resolveAssistantOutboxForegroundTagDigest(
+  const providerTags = [...new Set(
+    (input.providerMessageIds ?? [])
+      .map(normalizeNullableString)
+      .filter((value): value is string => value !== null),
+  )]
+    .slice(0, ASSISTANT_OUTBOX_FOREGROUND_PROVIDER_MESSAGE_LIMIT)
+    .map((providerMessageId) => resolveAssistantOutboxForegroundTagDigest(
         'auto-provider-message',
         { providerMessageId },
-      )]
-    : []
-  const providerIntentIds = await readAssistantOutboxForegroundTagIntentIds({
-    // One match resolves an exact native-reply anchor; two prove ambiguity.
-    limit: 2,
-    newestFirst: true,
-    paths,
-    tagDigests: providerTags,
-  })
+      ))
+  const providerIntentIds: string[] = []
+  for (const providerTag of providerTags) {
+    providerIntentIds.push(
+      ...await readAssistantOutboxForegroundProviderIntentIds({
+        // One route-local match resolves an exact native-reply anchor; two
+        // prove ambiguity for that provider message id.
+        limit: 2,
+        paths,
+        providerTag,
+        routeTags,
+      }),
+    )
+  }
   const routeIntentIds = await readAssistantOutboxForegroundTagIntentIds({
     limit: ASSISTANT_OUTBOX_FOREGROUND_ROUTE_LIMIT,
     newestFirst: true,
@@ -617,6 +627,48 @@ async function readAssistantOutboxForegroundTagIntentIds(input: {
       } catch (error) {
         throw new AssistantOutboxDedupeDatabaseValidationError(
           'Assistant outbox dedupe database contains an invalid foreground route intent id.',
+          { cause: error },
+        )
+      }
+    })
+  })
+}
+
+async function readAssistantOutboxForegroundProviderIntentIds(input: {
+  limit: number
+  paths: AssistantStatePaths
+  providerTag: string
+  routeTags: readonly string[]
+}): Promise<string[]> {
+  const routeTags = [...new Set(input.routeTags)]
+  if (routeTags.length === 0) {
+    return []
+  }
+  return await withAssistantOutboxDedupeDatabase(input.paths, (database) => {
+    const routePlaceholders = routeTags.map(() => '?').join(', ')
+    const rows = database.prepare(`
+      SELECT provider.intent_id AS intentId
+      FROM assistant_outbox_foreground_tags AS provider
+      WHERE provider.tag_digest = ?
+        AND EXISTS (
+          SELECT 1
+          FROM assistant_outbox_foreground_tags AS route
+          WHERE route.intent_id = provider.intent_id
+            AND route.tag_digest IN (${routePlaceholders})
+        )
+      ORDER BY provider.created_at_ms DESC, provider.intent_id DESC
+      LIMIT ?
+    `).all(
+      input.providerTag,
+      ...routeTags,
+      input.limit,
+    ) as Array<{ intentId?: unknown }>
+    return rows.map((row) => {
+      try {
+        return assistantOutboxIntentIdSchema.parse(row.intentId)
+      } catch (error) {
+        throw new AssistantOutboxDedupeDatabaseValidationError(
+          'Assistant outbox dedupe database contains an invalid provider route intent id.',
           { cause: error },
         )
       }
@@ -1344,9 +1396,12 @@ async function rebuildAssistantOutboxDedupeDatabase(
 ): Promise<AssistantOutboxDedupeDatabase> {
   const intents = await collectAssistantOutboxIntentsForDedupeRebuild(paths)
   const databasePath = resolveAssistantOutboxDedupeDatabasePath(paths)
-  const rebuildPath = `${databasePath}.${randomUUID()}.rebuild`
-  await removeAssistantOutboxDedupeDatabaseSidecars(rebuildPath)
-  await rm(rebuildPath, { force: true })
+  const rebuildDirectory = path.join(path.dirname(databasePath), '.tmp')
+  const rebuildPath = path.join(
+    rebuildDirectory,
+    `${path.basename(databasePath)}.rebuild`,
+  )
+  await rm(rebuildDirectory, { force: true, recursive: true })
 
   let rebuilt: AssistantOutboxDedupeDatabase | null = null
   try {
@@ -1361,10 +1416,12 @@ async function rebuildAssistantOutboxDedupeDatabase(
 
     await removeAssistantOutboxDedupeDatabaseSidecars(databasePath)
     await rename(rebuildPath, databasePath)
+    await rm(rebuildDirectory, { force: true, recursive: true })
   } catch (error) {
     rebuilt?.close()
-    await rm(rebuildPath, { force: true }).catch(() => undefined)
-    await removeAssistantOutboxDedupeDatabaseSidecars(rebuildPath)
+    await rm(rebuildDirectory, { force: true, recursive: true }).catch(
+      () => undefined,
+    )
     throw error
   }
 
