@@ -878,10 +878,10 @@ describe("recordHostedAiUsageRecords", () => {
     }));
   });
 
-  it("persists the validated per-turn profile JSON and drops invalid profiles", async () => {
+  it("persists validated v1/v2 turn profiles and drops invalid v2 profiles", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
-    const turnProfileJson = {
+    const v1TurnProfileJson = {
       modelContextWindow: 258400,
       requestCount: 1,
       requests: [{ cachedInput: 12, input: 120, output: 45 }],
@@ -892,17 +892,55 @@ describe("recordHostedAiUsageRecords", () => {
       ],
       toolsTruncated: false,
     };
+    const v2TurnProfileJson = {
+      modelContextWindow: null,
+      requestCount: 0,
+      requests: [],
+      requestsTruncated: false,
+      schema: "murph.assistant-turn-profile.v2",
+      tools: [
+        {
+          calls: 2,
+          durationKnownCalls: 1,
+          durationMs: 420,
+          failedCalls: 1,
+          kind: "command",
+          label: "vault-cli memory show",
+          outputBytesMax: 8,
+          outputBytesTotal: 12,
+        },
+      ],
+      toolsTruncated: false,
+    };
 
-    const result = await recordHostedAiUsageRecords({
+    const v1Result = await recordHostedAiUsageRecords({
       prisma: prisma as never,
       trustedUserId: "member_123",
-      usage: [{ ...BASE_USAGE_RECORD, turnProfileJson }],
+      usage: [{ ...BASE_USAGE_RECORD, turnProfileJson: v1TurnProfileJson }],
     });
 
-    expect(result.recordedIds).toEqual(["turn_123.attempt-1"]);
-    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(v1Result.recordedIds).toEqual(["turn_123.attempt-1"]);
+    expect(hostedAiUsageUpsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
       create: expect.objectContaining({
-        turnProfileJson,
+        turnProfileJson: v1TurnProfileJson,
+      }),
+    }));
+
+    const v2Result = await recordHostedAiUsageRecords({
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [{
+        ...BASE_USAGE_RECORD,
+        turnId: "turn_124",
+        turnProfileJson: v2TurnProfileJson,
+        usageId: "turn_124.attempt-1",
+      }],
+    });
+
+    expect(v2Result.recordedIds).toEqual(["turn_124.attempt-1"]);
+    expect(hostedAiUsageUpsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      create: expect.objectContaining({
+        turnProfileJson: v2TurnProfileJson,
       }),
     }));
 
@@ -917,9 +955,12 @@ describe("recordHostedAiUsageRecords", () => {
       usage: [{
         ...BASE_USAGE_RECORD,
         turnProfileJson: {
-          ...turnProfileJson,
+          ...v2TurnProfileJson,
           tools: [
-            { calls: 1, durationMs: 0, label: "grep 'member glucose'", outputChars: 1 },
+            {
+              ...v2TurnProfileJson.tools[0],
+              outputBytesMax: 13,
+            },
           ],
         },
       }],

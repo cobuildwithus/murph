@@ -119,8 +119,8 @@ export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze(
   selectJunctionTimeseriesResources(() => true),
 );
 
-// Omitted configuration intentionally requests every canonical resource.
-// Explicit caller-provided lists remain exact.
+// Exhaustive canonical set for explicit production activation. Runtime callers
+// that omit this list use JUNCTION_DEFAULT_TIMESERIES_RESOURCES instead.
 export const JUNCTION_TIMESERIES_RESOURCES = JUNCTION_KNOWN_TIMESERIES_RESOURCES;
 
 export const JUNCTION_ALLOWED_TIMESERIES_RESOURCES = Object.freeze([

@@ -8,6 +8,7 @@ import { buildJunctionProviderSourceInstanceKey } from "../src/config/junction-c
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { mergeGuardedJunctionHistoricalBackfillMetadata } from "../src/junction-historical-backfill-progress.ts";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
+import { isDeviceSyncSourceDisconnectFenced } from "../src/public-account.ts";
 import { createDeviceSyncRegistry } from "../src/registry.ts";
 import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
 
@@ -435,6 +436,16 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     return id ? (this.accounts.get(id) ?? null) : null;
   }
 
+  getWebhookConnectionByExternalAccount(provider: string, externalAccountId: string) {
+    const account = this.getConnectionByExternalAccount(provider, externalAccountId);
+    return account
+      ? {
+          account,
+          connectionOwnerId: this.accountOwners.get(account.id) ?? null,
+        }
+      : null;
+  }
+
   getConnectionById(accountId: string): PublicDeviceSyncAccount | null {
     return this.accounts.get(accountId) ?? null;
   }
@@ -480,6 +491,29 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       )
       && (!input.status || source.status === input.status)
     );
+  }
+
+  resolveConnectionSourceAdmissionCandidate(input: {
+    connectionId: string;
+    sourceInstanceKey?: string;
+    sourceProviderSlug: string;
+  }): PublicDeviceConnectionSource | null {
+    return this.listConnectionSources(input)
+      .sort((left, right) => {
+        const leftExact = input.sourceInstanceKey !== undefined
+          && left.sourceInstanceKey === input.sourceInstanceKey;
+        const rightExact = input.sourceInstanceKey !== undefined
+          && right.sourceInstanceKey === input.sourceInstanceKey;
+        const leftAdmitted = left.status === "connected"
+          && !isDeviceSyncSourceDisconnectFenced(left);
+        const rightAdmitted = right.status === "connected"
+          && !isDeviceSyncSourceDisconnectFenced(right);
+        return Number(rightExact) - Number(leftExact)
+          || Number(rightAdmitted) - Number(leftAdmitted)
+          || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
+          || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
+          || left.id.localeCompare(right.id);
+      })[0] ?? null;
   }
 
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
@@ -1515,6 +1549,23 @@ test("starting another Junction source preserves an established shared account",
     firstSeenAt: concurrentCleanupAt,
     lastSeenAt: concurrentCleanupAt,
   });
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: `legacy:${established.account.id}:fitbit`,
+    sourceProviderSlug: "fitbit",
+    status: "connected",
+    firstSeenAt: "2026-03-25T12:00:00.000Z",
+    lastSeenAt: "2026-03-25T12:00:00.000Z",
+  });
+
+  store.upsertConnectionSource({
+    connectionId: established.account.id,
+    sourceInstanceKey: `legacy:${established.account.id}:whoop_v2`,
+    sourceProviderSlug: "whoop_v2",
+    status: "connected",
+    firstSeenAt: "2026-03-25T12:00:00.000Z",
+    lastSeenAt: "2026-03-25T12:00:00.000Z",
+  });
 
   const fitbit = await ingress.startConnection({
     ownerId: "<REDACTED_OWNER_ID>",
@@ -1526,6 +1577,9 @@ test("starting another Junction source preserves an established shared account",
   await assert.doesNotReject(
     ingress.handleWebhook("junction", new Headers(), Buffer.from("garmin")),
   );
+  await assert.doesNotReject(
+    ingress.handleWebhook("junction", new Headers(), Buffer.from("whoop_v2")),
+  );
   await assert.rejects(
     ingress.handleWebhook("junction", new Headers(), Buffer.from("fitbit")),
     (error: unknown) =>
@@ -1534,7 +1588,7 @@ test("starting another Junction source preserves an established shared account",
       && error.httpStatus === 503
       && error.retryable === true,
   );
-  assert.equal(acceptedWebhookCount, 1);
+  assert.equal(acceptedWebhookCount, 2);
 
   const completedFitbit = await ingress.handleConnectionCallback({
     expectedOwnerId: "<REDACTED_OWNER_ID>",
@@ -1557,7 +1611,7 @@ test("starting another Junction source preserves an established shared account",
     })[0]?.status,
     "connected",
   );
-  assert.equal(acceptedWebhookCount, 2);
+  assert.equal(acceptedWebhookCount, 3);
 
   const appleHealthSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
     connectionId: established.account.id,
@@ -1594,7 +1648,7 @@ test("starting another Junction source preserves an established shared account",
     })[0]?.status,
     "connected",
   );
-  assert.equal(acceptedWebhookCount, 3);
+  assert.equal(acceptedWebhookCount, 4);
 
   store.upsertConnectionSource({
     connectionId: established.account.id,
@@ -4126,26 +4180,44 @@ test("public ingress scopes durable webhook traces by external account while pre
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, claimToken, traceId, webhook }) {
+      onWebhookAccepted({
+        account,
+        claimToken,
+        connectionOwnerId,
+        traceId,
+        webhook,
+      }) {
         assert.equal("traceId" in webhook, false);
-        acceptedWebhooks.push(`${account.id}:${traceId}`);
+        acceptedWebhooks.push(`${connectionOwnerId}:${account.id}:${traceId}`);
         return completeWebhookAcceptDurably(store, account, traceId, claimToken);
       },
     },
   });
 
-  const firstConnection = await ingress.startConnection({ provider: "demo" });
+  const firstConnection = await ingress.startConnection({
+    ownerId: "member_a",
+    provider: "demo",
+  });
   await ingress.handleOAuthCallback({
     provider: "demo",
     state: firstConnection.state,
     code: "a",
   });
-  const secondConnection = await ingress.startConnection({ provider: "demo" });
+  const secondConnection = await ingress.startConnection({
+    ownerId: "member_b",
+    provider: "demo",
+  });
   await ingress.handleOAuthCallback({
     provider: "demo",
     state: secondConnection.state,
     code: "b",
   });
+
+  let legacyOwnerLookupCalls = 0;
+  store.getConnectionOwnerId = () => {
+    legacyOwnerLookupCalls += 1;
+    throw new Error("webhook admission must carry the owner from exact account lookup");
+  };
 
   const first = await ingress.handleWebhook(
     "demo",
@@ -4182,9 +4254,10 @@ test("public ingress scopes durable webhook traces by external account while pre
   assert.equal(second.traceId, scopeWebhookTraceId("demo", "demo-b", "provider-event-1"));
   assert.equal(duplicate.traceId, first.traceId);
   assert.deepEqual(acceptedWebhooks, [
-    `acct_01:${scopeWebhookTraceId("demo", "demo-a", "provider-event-1")}`,
-    `acct_02:${scopeWebhookTraceId("demo", "demo-b", "provider-event-1")}`,
+    `member_a:acct_01:${scopeWebhookTraceId("demo", "demo-a", "provider-event-1")}`,
+    `member_b:acct_02:${scopeWebhookTraceId("demo", "demo-b", "provider-event-1")}`,
   ]);
+  assert.equal(legacyOwnerLookupCalls, 0);
 });
 
 test("public ingress claims and completes already-satisfied dirty hints", async () => {
