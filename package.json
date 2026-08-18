@@ -97,7 +97,7 @@
     "@babel/types": "^7.29.0",
     "@types/babel__traverse": "^7.28.0",
     "@cobuild/repo-tools": "^0.1.17",
-    "@cobuild/review-gpt": "^0.5.133",
+    "@cobuild/review-gpt": "^0.5.134",
     "@elevenlabs/elevenlabs-js": "2.62.0",
     "@murphai/health-metrics": "workspace:*",
     "@murphai/hosted-local-harness": "workspace:*",
