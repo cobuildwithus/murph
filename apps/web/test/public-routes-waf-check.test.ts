@@ -565,10 +565,7 @@ describe("public routes WAF preflight", () => {
     expect(packageJson.scripts?.["public-routes:waf-check"]).toContain(
       "check-public-routes-waf.ts",
     );
-    const buildScript = packageJson.scripts?.build ?? "";
-    const wrappedBuildCommand =
-      /-- bash -c '(?<command>[^']+)'$/u.exec(buildScript)?.groups?.command;
-    expect(wrappedBuildCommand ?? buildScript).toMatch(
+    expect(packageJson.scripts?.build).toMatch(
       /^pnpm public-routes:waf-check &&/u,
     );
     expect(packageJson.scripts?.["companion-auth-diagnostics:waf-check"]).toBeUndefined();
