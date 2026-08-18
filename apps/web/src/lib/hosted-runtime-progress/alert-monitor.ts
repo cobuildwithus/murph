@@ -19,11 +19,12 @@ import {
 import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS = 15 * 60_000;
+export const HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
 
 const HOSTED_RUNTIME_PROGRESS_MONITOR_ID = "hosted-runtime-progress-monitor:v1";
 const HOSTED_RUNTIME_PROGRESS_MONITOR_KIND = "hosted_runtime_progress_monitor";
 const HOSTED_RUNTIME_PROGRESS_MONITOR_SCHEMA =
-  "murph.hosted-runtime-progress-monitor.v1";
+  "murph.hosted-runtime-progress-monitor.v2";
 const HOSTED_RUNTIME_PROGRESS_MONITOR_SUBJECT =
   "Hosted runtime progress stalled";
 const HOSTED_RUNTIME_PROGRESS_READ_LIMIT = 20_000;
@@ -100,6 +101,7 @@ const HOSTED_RUNTIME_PROGRESS_MONITOR_SPEC: HostedOperationalAlertMonitorSpec<
   idempotencyScope: "murph/runtime-progress",
   kind: HOSTED_RUNTIME_PROGRESS_MONITOR_KIND,
   readHealth: readHostedRuntimeProgressHealth,
+  reminderIntervalMs: HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS,
   status: MONITOR_STATUS,
   subject: HOSTED_RUNTIME_PROGRESS_MONITOR_SUBJECT,
 };
@@ -504,6 +506,10 @@ function buildHostedRuntimeProgressAlertDetails(input: {
   health: HostedRuntimeProgressHealth;
   incidentId: string | null;
   message?: string | null;
+  notification?: {
+    idempotencyKeySuffix: string;
+    kind: "alert" | "reminder";
+  } | null;
   now: Date;
   phase: "alert" | "healthy";
 }): Prisma.InputJsonObject {
@@ -525,6 +531,12 @@ function buildHostedRuntimeProgressAlertDetails(input: {
     incidentId: input.incidentId,
     lastEvaluatedAt: input.now.toISOString(),
     message: input.message ?? null,
+    notification: input.notification
+      ? {
+          idempotencyKeySuffix: input.notification.idempotencyKeySuffix,
+          kind: input.notification.kind,
+        }
+      : null,
     phase: input.phase,
     schema: HOSTED_RUNTIME_PROGRESS_MONITOR_SCHEMA,
     thresholdMs: input.health.thresholdMs,
@@ -533,6 +545,7 @@ function buildHostedRuntimeProgressAlertDetails(input: {
 
 function buildHostedRuntimeProgressAlertMessage(input: {
   health: HostedRuntimeProgressHealth;
+  notificationKind: "alert" | "reminder";
   now: Date;
 }): string {
   const evidence = [
@@ -559,7 +572,9 @@ function buildHostedRuntimeProgressAlertMessage(input: {
   ].filter((value): value is string => value !== null);
 
   return [
-    "Murph runtime progress alert.",
+    input.notificationKind === "reminder"
+      ? "Murph runtime progress reminder."
+      : "Murph runtime progress alert.",
     `${evidence.join("; ")}.`,
     timing.length > 0 ? `${timing.join(". ")}.` : null,
     `Checked ${formatAlertTime(input.now)}.`,

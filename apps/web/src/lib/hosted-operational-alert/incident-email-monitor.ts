@@ -39,6 +39,13 @@ interface HostedOperationalAlertHealth {
   anomalous: boolean;
 }
 
+export type HostedOperationalAlertNotificationKind = "alert" | "reminder";
+
+export interface HostedOperationalAlertNotification {
+  idempotencyKeySuffix: string;
+  kind: HostedOperationalAlertNotificationKind;
+}
+
 export interface HostedOperationalAlertMonitorSpec<
   Health extends HostedOperationalAlertHealth,
   Client extends HostedOperationalAlertPrismaClient,
@@ -47,10 +54,15 @@ export interface HostedOperationalAlertMonitorSpec<
     health: Health;
     incidentId: string | null;
     message?: string | null;
+    notification?: HostedOperationalAlertNotification | null;
     now: Date;
     phase: "alert" | "healthy";
   }): Prisma.InputJsonObject;
-  buildMessage(input: { health: Health; now: Date }): string;
+  buildMessage(input: {
+    health: Health;
+    notificationKind: HostedOperationalAlertNotificationKind;
+    now: Date;
+  }): string;
   error: {
     incidentInvalidCode: string;
     incidentInvalidMessage: string;
@@ -66,6 +78,7 @@ export interface HostedOperationalAlertMonitorSpec<
   idempotencyScope: string;
   kind: string;
   readHealth(input: { now: Date; prisma: Client }): Promise<Health>;
+  reminderIntervalMs?: number;
   status: {
     alertFailed: string;
     alertSending: string;
@@ -136,7 +149,7 @@ export async function runHostedOperationalEmailIncident<
     const sent = await sendAlert({
       config: input.alertConfig.email.resend,
       idempotencyKey:
-        `${input.spec.idempotencyScope}/${action.incidentId}/alert`,
+        `${input.spec.idempotencyScope}/${action.incidentId}/${action.idempotencyKeySuffix}`,
       signal: input.signal,
       subject: input.spec.subject,
       text: action.message,
@@ -237,7 +250,16 @@ async function prepareHostedOperationalAlertTransition<
 }> {
   if (input.health.anomalous) {
     if (input.state.status === input.spec.status.alerting) {
-      return { candidateState: null, outcome: "incident_active" };
+      const reminderDueAtMs = readHostedOperationalAlertReminderDueAtMs({
+        spec: input.spec,
+        state: input.state,
+      });
+      if (
+        reminderDueAtMs === null
+        || input.now.getTime() < reminderDueAtMs
+      ) {
+        return { candidateState: null, outcome: "incident_active" };
+      }
     }
     const deferred = readHostedOperationalAlertDeferral({
       now: input.now,
@@ -358,11 +380,17 @@ async function claimHostedOperationalAlertSend<
     });
   }
 
-  const message = input.state.status === input.spec.status.alertSending
-    || input.state.status === input.spec.status.alertFailed
+  const notification = readHostedOperationalAlertNotificationForClaim({
+    spec: input.spec,
+    state: input.state,
+  });
+  const retrying = input.state.status === input.spec.status.alertSending
+    || input.state.status === input.spec.status.alertFailed;
+  const message = retrying
     ? readHostedOperationalAlertMessage(input.state)
     : input.spec.buildMessage({
         health,
+        notificationKind: notification.kind,
         now: admissionCheckedAt,
       });
   if (!message) {
@@ -387,6 +415,7 @@ async function claimHostedOperationalAlertSend<
         health,
         incidentId,
         message,
+        notification,
         now: admissionCheckedAt,
         phase: "alert",
       }),
@@ -403,6 +432,7 @@ async function claimHostedOperationalAlertSend<
   return {
     action: {
       attemptedAt: admissionCheckedAt,
+      idempotencyKeySuffix: notification.idempotencyKeySuffix,
       incidentId,
       message,
     },
@@ -413,6 +443,7 @@ async function claimHostedOperationalAlertSend<
 
 interface HostedOperationalAlertClaimedAction {
   attemptedAt: Date;
+  idempotencyKeySuffix: string;
   incidentId: string;
   message: string;
 }
@@ -499,6 +530,99 @@ function readHostedOperationalAlertMessage(
     : null;
 }
 
+function readHostedOperationalAlertNotificationForClaim<
+  Health extends HostedOperationalAlertHealth,
+  Client extends HostedOperationalAlertPrismaClient,
+>(input: {
+  spec: HostedOperationalAlertMonitorSpec<Health, Client>;
+  state: HostedLinqAlert;
+}): HostedOperationalAlertNotification {
+  if (input.state.status === input.spec.status.alerting) {
+    if (
+      input.spec.reminderIntervalMs === undefined
+      || input.state.sentAt === null
+    ) {
+      throw hostedOnboardingError({
+        code: input.spec.error.incidentInvalidCode,
+        httpStatus: 500,
+        message: input.spec.error.incidentInvalidMessage,
+      });
+    }
+    return {
+      idempotencyKeySuffix: `reminder/${input.state.sentAt.getTime()}`,
+      kind: "reminder",
+    };
+  }
+
+  if (
+    input.state.status !== input.spec.status.alertSending
+    && input.state.status !== input.spec.status.alertFailed
+  ) {
+    return {
+      idempotencyKeySuffix: "alert",
+      kind: "alert",
+    };
+  }
+
+  const persisted = readHostedOperationalAlertNotification(input.state);
+  if (persisted === undefined) {
+    return {
+      idempotencyKeySuffix: "alert",
+      kind: "alert",
+    };
+  }
+  if (
+    persisted === null
+    || (
+      persisted.kind === "reminder"
+      && (
+        input.spec.reminderIntervalMs === undefined
+        || input.state.sentAt === null
+        || persisted.idempotencyKeySuffix
+          !== `reminder/${input.state.sentAt.getTime()}`
+      )
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: input.spec.error.stateInvalidCode,
+      httpStatus: 500,
+      message: input.spec.error.stateInvalidMessage,
+    });
+  }
+  return persisted;
+}
+
+function readHostedOperationalAlertNotification(
+  state: HostedLinqAlert,
+): HostedOperationalAlertNotification | null | undefined {
+  const details = readJsonObject(state.detailsJson);
+  if (!details || details.notification === undefined) {
+    return undefined;
+  }
+  const notification = readJsonObject(details.notification);
+  if (!notification) {
+    return null;
+  }
+  const kind = readJsonString(notification.kind);
+  const idempotencyKeySuffix = normalizeNullableString(
+    readJsonString(notification.idempotencyKeySuffix),
+  );
+  if (
+    kind === "alert"
+    && idempotencyKeySuffix === "alert"
+  ) {
+    return { idempotencyKeySuffix, kind };
+  }
+  if (
+    kind === "reminder"
+    && idempotencyKeySuffix !== null
+    && /^reminder\/\d+$/u.test(idempotencyKeySuffix)
+  ) {
+    return { idempotencyKeySuffix, kind };
+  }
+  return null;
+}
+
 function readHostedOperationalAlertFailure(input: {
   error: unknown;
   unknownErrorCode: string;
@@ -566,6 +690,34 @@ function readHostedOperationalAlertDeferral<
   return input.state.status === input.spec.status.alertSending
     ? "coalesced"
     : "deferred_rate_limit";
+}
+
+function readHostedOperationalAlertReminderDueAtMs<
+  Health extends HostedOperationalAlertHealth,
+  Client extends HostedOperationalAlertPrismaClient,
+>(input: {
+  spec: HostedOperationalAlertMonitorSpec<Health, Client>;
+  state: HostedLinqAlert;
+}): number | null {
+  const intervalMs = input.spec.reminderIntervalMs;
+  if (intervalMs === undefined) {
+    return null;
+  }
+  if (
+    !Number.isSafeInteger(intervalMs)
+    || intervalMs <= 0
+    || input.state.sentAt === null
+  ) {
+    throw hostedOnboardingError({
+      code: input.spec.error.stateInvalidCode,
+      httpStatus: 500,
+      message: input.spec.error.stateInvalidMessage,
+    });
+  }
+  const jitterMs = stableHostedOperationalAlertJitterMs(
+    `${input.spec.id}:reminder:${input.state.sentAt.toISOString()}`,
+  );
+  return input.state.sentAt.getTime() + intervalMs + jitterMs;
 }
 
 function isHostedOperationalAlertQuietTime<
