@@ -1043,7 +1043,7 @@ function resolveFitbitMigrationConnectionState(input: {
       ? normalizeDeviceSyncConnectTargetKey(legacy.connectProvider ?? "junction")
       : null,
     connectTarget: successorNeedsAuthorization
-      ? legacy.connectTarget ?? null
+      ? legacy.connectTarget ?? "fitbit"
       : null,
     ...(successorReady ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } : {}),
     ...(successorReady &&

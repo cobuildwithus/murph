@@ -16,7 +16,9 @@ import type {
 
 import { completeHostedGoogleHealthFitbitMigration } from "@/src/lib/device-sync/fitbit-migration-cutover";
 import type {
+  CreateHostedSignalInput,
   HostedDeviceConnectionSource,
+  HostedSignalRecord,
 } from "@/src/lib/device-sync/prisma-store";
 
 const NOW = "2026-08-17T18:00:00.000Z";
@@ -90,7 +92,7 @@ class FakeCutoverStore {
   ];
   pendingDirty = false;
   pendingDirtyChecks: boolean[] = [];
-  signals: Array<Record<string, unknown>> = [];
+  signals: HostedSignalRecord[] = [];
   writes: Array<{ code: string | null; status: string }> = [];
   lockDepth = 0;
 
@@ -169,10 +171,26 @@ class FakeCutoverStore {
     return structuredClone(current);
   }
 
-  async createSignal(input: Record<string, unknown>) {
+  async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
     expect(this.lockDepth).toBeGreaterThan(0);
-    this.signals.push(input);
-    return input;
+    const signal = {
+      id: this.signals.length + 1,
+      userId: input.userId,
+      connectionId: input.connectionId ?? null,
+      provider: input.provider,
+      kind: input.kind,
+      occurredAt: input.occurredAt ?? null,
+      traceId: input.traceId ?? null,
+      eventType: input.eventType ?? null,
+      resourceCategory: input.resourceCategory ?? null,
+      sourceProviderSlug: input.sourceProviderSlug ?? null,
+      reason: input.reason ?? null,
+      nextReconcileAt: input.nextReconcileAt ?? null,
+      revokeWarning: input.revokeWarning ?? null,
+      createdAt: input.createdAt ?? NOW,
+    } satisfies HostedSignalRecord;
+    this.signals.push(signal);
+    return structuredClone(signal);
   }
 }
 

@@ -54,6 +54,9 @@ const mocks = vi.hoisted(() => {
     scopedRegistryList: vi.fn(),
     resumeSdkSignInSession: vi.fn(),
     sha256Hex: vi.fn<(value: string) => string>(() => "a".repeat(64)),
+    toIsoTimestamp: vi.fn<(value: string | number | Date) => string>(
+      () => "2026-03-26T12:00:00.000Z",
+    ),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
     prepareDirtyConnectionUpsert: vi.fn(),
@@ -610,7 +613,7 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
           .replace(/([?&]?(?:access_token|refresh_token|id_token)=)[^\s]+/giu, "$1[redacted]")
       : null),
   sha256Hex: mocks.sha256Hex,
-  toIsoTimestamp: vi.fn(() => "2026-03-26T12:00:00.000Z"),
+  toIsoTimestamp: mocks.toIsoTimestamp,
   toJsonRecord: vi.fn((value: unknown) => value),
 }));
 
@@ -666,6 +669,8 @@ describe("hosted device-sync wakes", () => {
     mocks.revokeStravaDeviceSyncAccess.mockReset();
     mocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
     mocks.upsertConnectionSource.mockReset();
+    mocks.toIsoTimestamp.mockReset();
+    mocks.toIsoTimestamp.mockReturnValue("2026-03-26T12:00:00.000Z");
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
     mocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockImplementation(() => ({
       get: mocks.scopedRegistryGet,
@@ -2095,6 +2100,7 @@ describe("hosted device-sync wakes", () => {
     mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
       buildHostedConnectionSourceAdmissionCandidate(source),
     ]);
+    mocks.listConnectionSources.mockResolvedValue([source]);
     mocks.materializeStoredConnectionAccount.mockResolvedValue(
       buildProviderConfigStoredConnection({
         provider: "junction",
@@ -2307,6 +2313,7 @@ describe("hosted device-sync wakes", () => {
     mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
       buildHostedConnectionSourceAdmissionCandidate(source),
     ]);
+    mocks.listConnectionSources.mockResolvedValue([source]);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(buildStoredConnection({ provider: "junction" }));
     mocks.getConnectionRecordForUser.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction", setupPhase: "source_confirmed" }),
@@ -2424,9 +2431,11 @@ describe("hosted device-sync wakes", () => {
 
   it("preserves the sole Junction source on webhook receipt signals", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
+    const source = buildHostedConnectionSource(connection.id, "health_connect");
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({ provider: "junction" }),
     );
+    mocks.listConnectionSources.mockResolvedValue([source]);
 
     await handleHostedDeviceSyncWebhookAccepted({
       account: {
@@ -4413,6 +4422,9 @@ describe("hosted device-sync wakes", () => {
         method: "POST",
       }),
     );
+    mocks.toIsoTimestamp
+      .mockReturnValueOnce("2026-03-26T12:00:00.000Z")
+      .mockReturnValueOnce("2026-03-26T12:00:00.001Z");
 
     await expect(controlPlane.prepareConnectionStart("user-123", {
       connectSourceId: "withings",
@@ -8189,6 +8201,7 @@ describe("hosted device-sync wakes", () => {
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
       ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
       store,
       traceId: "trace_123",
       webhook: {
@@ -8253,6 +8266,7 @@ describe("hosted device-sync wakes", () => {
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
       ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
       store,
       traceId: "trace_123",
       webhook: {
@@ -8293,6 +8307,7 @@ describe("hosted device-sync wakes", () => {
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
       ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
       store,
       traceId: "trace_123",
       webhook: {
@@ -8346,6 +8361,7 @@ describe("hosted device-sync wakes", () => {
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
       ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
       store,
       traceId: "trace_123",
       webhook: {
@@ -8403,6 +8419,7 @@ describe("hosted device-sync wakes", () => {
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
       ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
       store,
       traceId: "trace_123",
       webhook: {
@@ -8450,6 +8467,7 @@ describe("hosted device-sync wakes", () => {
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
       ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
       store,
       traceId: "trace_123",
       webhook: {

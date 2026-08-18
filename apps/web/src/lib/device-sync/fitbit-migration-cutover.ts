@@ -61,8 +61,10 @@ type Claim = {
   storedAccount: StoredAccount;
 };
 type ClaimResult =
-  | { kind: "complete" | "pending" }
-  | ({ kind: "claimed" | "recover" } & Claim);
+  | { kind: "complete" }
+  | { kind: "pending" }
+  | ({ kind: "claimed" } & Claim)
+  | ({ kind: "recover" } & Claim);
 type LockedClaim = {
   connection: PublicDeviceSyncAccount;
   legacy: HostedDeviceConnectionSource;

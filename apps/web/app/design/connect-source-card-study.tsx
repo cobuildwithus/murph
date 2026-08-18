@@ -40,6 +40,20 @@ const APPLE_HEALTH_CONNECT_SOURCE: ConnectSource = {
   unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
 };
 
+const FITBIT_CONNECT_SOURCE: ConnectSource = {
+  connectTarget: "fitbit",
+  description:
+    "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+  id: "fitbit",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 36,
+    src: "/brand-logos/connect/fitbit.svg",
+    width: 128,
+  },
+  name: "Fitbit",
+};
+
 const DEXCOM_UNAVAILABLE_SOURCE: ConnectSource = {
   connectionAvailable: false,
   description: "CGM glucose readings and trends.",
@@ -146,6 +160,11 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     errorMessage: null,
     source: APPLE_HEALTH_CONNECT_SOURCE,
   },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: FITBIT_CONNECT_SOURCE,
+  },
   ...([
     ["fitbit-authorization", "authorization_required", null],
     ["fitbit-verifying", "verifying_successor", null],
@@ -159,20 +178,11 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     authenticated: true,
     errorMessage,
     source: {
-      connectTarget: "fitbit",
-      description:
-        "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+      ...FITBIT_CONNECT_SOURCE,
       disconnectConnectionId: "design-fitbit-migration",
       disconnectSourceProviderSlug: "fitbit",
       id,
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/fitbit.svg",
-        width: 128,
-      },
       migrationState,
-      name: "Fitbit",
     },
   })),
   {

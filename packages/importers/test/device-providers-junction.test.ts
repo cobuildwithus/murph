@@ -11715,7 +11715,7 @@ test("Junction migration daily coverage finalizes only after the provider-local 
   ] as const;
 
   for (const value of cases) {
-    const dayKey = value.dayKey ?? event.dayKey;
+    const dayKey = "dayKey" in value ? value.dayKey : event.dayKey;
     assert.deepEqual(
       deriveJunctionCanonicalCoverageEvidence([{ ...event, dayKey }], value.options),
       [{

@@ -105,7 +105,17 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   resolveHostedMurphContactOptions: vi.fn(),
+  routerRefresh: vi.fn(),
 }));
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+
+  return {
+    ...actual,
+    useRouter: () => ({ refresh: mocks.routerRefresh }),
+  };
+});
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: { open?: boolean }) {
@@ -5832,7 +5842,7 @@ test("ConnectPage keeps successful callbacks free of failure recovery actions", 
   assert.doesNotMatch(markup, /Go to home/);
 });
 
-test("resolveConfiguredConnectSources marks only Vital-backed actions", async () => {
+test("resolveConfiguredConnectSources keeps Fitbit on its dedicated Junction disclosure", async () => {
   vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
   vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
@@ -5865,7 +5875,7 @@ test("resolveConfiguredConnectSources marks only Vital-backed actions", async ()
         source.requiresVitalDisclosure === true,
       ]),
     ),
-    { fitbit: true, whoop: false },
+    { fitbit: false, whoop: false },
   );
 });
 
@@ -6201,7 +6211,7 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
     status: "connected" as const,
   };
   const successor = {
-    fitbitMigrationCoverageReady: true,
+    fitbitMigrationCoverageReady: true as const,
     firstSeenAt: "2026-08-11T10:00:00.000Z",
     historicalBackfillComplete: true,
     lastDataAt: "2026-08-11T10:05:00.000Z",
