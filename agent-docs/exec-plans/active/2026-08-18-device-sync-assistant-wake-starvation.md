@@ -113,14 +113,29 @@ frontiers advance after deployment.
   generic retained-wake parser, so recovery could reject an otherwise
   successful tranche at persistence time.
 - The remediation keeps assistant execution, preemption, and immediate-recheck
-  suppressed while policy is blocked, but projects all existing assistant wake
-  sources into the checkpoint. Its focused journey drains device work without
-  entering the model, retains an assistant wake, then sends exactly once after
-  policy restoration. The retained-wake allowlist now accepts the two
+  suppressed while policy is blocked, keeps every assistant source durable,
+  and projects the assistant wake when no model-free continuation remains. Its
+  focused journey drains device work without entering the model, retains an
+  assistant wake, then sends exactly once after policy restoration. The
+  retained-wake allowlist now accepts the two
   manifest-owned summary fields while continuing to reject unknown fields. A
   focused recovery test carries a Junction summary cursor through durable
   mailbox serialization, reload, and cold service reconstruction with the same
   dedupe and retry authority.
+- Final ReviewGPT round two accepted the retained-wake correction but required
+  a retrospective because merging every candidate into the scalar workspace
+  wake let an ineligible due assistant mask a future model-free device
+  continuation. The retrospective is recorded on the pull request: keep the
+  existing scalar owner, derive the next actionable obligation under current
+  policy, and add no queue, scheduler, polling loop, state field, or lifecycle.
+- The corrected blocked-policy journey now drains a due device item, publishes
+  an exact future retained device continuation ahead of the ineligible
+  assistant, restores that continuation from a persisted snapshot in a second
+  blocked pass, and only then falls back to the still-durable assistant wake.
+  Policy restoration produces one terminal reminder delivery and a later pass
+  cannot duplicate it. The full 327-test workspace-entrypoint suite, 103-test
+  hosted device-runtime suite, 152-test Cloudflare alarm suite, and all affected
+  typechecks pass on the correction.
 
 ## State
 

@@ -996,36 +996,50 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     vaultRoot: input.vaultRoot,
   });
 
+  const modelFreeWake = selectEarliestHostedRuntimeWake([
+    ...(input.extraCandidates ?? []),
+    {
+      at: systemMailboxWake.at,
+      reason: systemMailboxWake.reason,
+    },
+    {
+      at: input.mailboxImportRetryAt ?? null,
+      reason: input.mailboxImportRetryAt ? "mailbox" : null,
+    },
+  ]);
+  const assistantWake = selectEarliestHostedRuntimeWake([
+    {
+      at: outboxWakeAt,
+      reason: outboxWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+    },
+    {
+      at: pendingAssistantInputWakeAt,
+      reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+    },
+    {
+      at: providerCleanupWakeAt,
+      reason: providerCleanupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+    },
+    {
+      at: assistantCronWake.at,
+      reason: assistantCronWake.reason,
+    },
+  ]);
   const selectedWake = !input.assistantExecutionBlocked && assistantCronWake.dueNow
     ? {
         nextWakeAt: assistantCronWake.at,
         nextWakeReason: assistantCronWake.reason,
       }
+    : input.assistantExecutionBlocked && modelFreeWake.nextWakeAt
+    ? modelFreeWake
     : selectEarliestHostedRuntimeWake([
-        ...(input.extraCandidates ?? []),
         {
-          at: systemMailboxWake.at,
-          reason: systemMailboxWake.reason,
+          at: modelFreeWake.nextWakeAt,
+          reason: modelFreeWake.nextWakeReason,
         },
         {
-          at: input.mailboxImportRetryAt ?? null,
-          reason: input.mailboxImportRetryAt ? "mailbox" : null,
-        },
-        {
-          at: outboxWakeAt,
-          reason: outboxWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-        },
-        {
-          at: pendingAssistantInputWakeAt,
-          reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-        },
-        {
-          at: providerCleanupWakeAt,
-          reason: providerCleanupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-        },
-        {
-          at: assistantCronWake.at,
-          reason: assistantCronWake.reason,
+          at: assistantWake.nextWakeAt,
+          reason: assistantWake.nextWakeReason,
         },
       ]);
   return {

@@ -13878,6 +13878,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const now = "2026-04-27T14:00:00.000Z";
+    const retainedDeviceWakeAt = "2026-04-27T14:00:30.000Z";
     const staleDeviceSyncWakeAt = "2026-04-27T13:59:00.000Z";
     const automationId = "automation_01JQ8PWXP5A68SQM1W0GYM41WB";
     const deviceItem = createMailboxItem({
@@ -13886,6 +13887,13 @@ describe("hosted workspace runtime entrypoint", () => {
       kind: "device-sync.wake",
       lane: "system",
       laneSeq: "1",
+    });
+    const retainedDeviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:blocked-assistant-retained-continuation",
+      id: "mailbox_item_system_mailbox_device_blocked_assistant_retained_continuation",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "2",
     });
     const deviceSyncPort = createEmptyDeviceSyncPort();
 
@@ -13919,8 +13927,22 @@ describe("hosted workspace runtime entrypoint", () => {
         item: deviceItem,
         vaultRoot,
       });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: retainedDeviceItem,
+        vaultRoot,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === retainedDeviceItem.id
+            ? {
+                ...item,
+                nextAttemptAt: retainedDeviceWakeAt,
+              }
+            : item
+        ),
+      }));
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
+      importState.watermarks.system = "2";
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
         key: "users/bundles/member-synthetic/blocked-assistant-system-handoff-before.bundle.json",
@@ -13972,13 +13994,24 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({
+          itemId: item.itemId,
+          nextAttemptAt: item.nextAttemptAt,
+          wakeEventId: item.wake.eventId,
+        })),
+        [{
+          itemId: retainedDeviceItem.id,
+          nextAttemptAt: retainedDeviceWakeAt,
+          wakeEventId: retainedDeviceItem.dedupeKey,
+        }],
+      );
       assert.equal(result.immediateRecheckRequested, undefined);
-      assert.equal(result.nextWakeAt, now);
-      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.nextWakeAt, retainedDeviceWakeAt);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
       assert.equal(result.status, "scheduled");
-      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, now);
-      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, retainedDeviceWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
       const cronStatus = await getAssistantCronStatus(vaultRoot, {
         turnEnvironment: {
           currentWorkingDirectory: null,
@@ -13991,6 +14024,67 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(cronStatus.nextRunAt, "2026-04-27T13:59:30.000Z");
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
 
+      const retainedDeviceWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/blocked-assistant-retained-device-before.bundle.json",
+        vaultRoot,
+      });
+      vi.setSystemTime(new Date(retainedDeviceWakeAt));
+      const retainedDeviceResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            assistantExecutionBlocked: true,
+            attemptId: "attempt_synthetic_blocked_assistant_retained_device",
+            processingMode: "system_mailbox",
+            workspaceVersion: "1",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/blocked-assistant-retained-device.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Retained system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([
+              [retainedDeviceWorkspace.hash, retainedDeviceWorkspace.bytes],
+            ]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: result.nextWakeAt,
+                nextWakeReason: result.nextWakeReason ?? null,
+                snapshotRef: retainedDeviceWorkspace.snapshotRef,
+                version: "1",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Repeated blocked device work must not enter assistant execution.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 2);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(retainedDeviceResult.immediateRecheckRequested, undefined);
+      assert.equal(retainedDeviceResult.nextWakeAt, retainedDeviceWakeAt);
+      assert.equal(retainedDeviceResult.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, retainedDeviceWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "assistant");
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+
       const restoredPolicyWorkspace = await createVaultSnapshotBundle({
         key: "users/bundles/member-synthetic/blocked-assistant-policy-restored-before.bundle.json",
         vaultRoot,
@@ -14000,7 +14094,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_blocked_assistant_policy_restored",
-            workspaceVersion: "1",
+            workspaceVersion: "2",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
@@ -14027,10 +14121,10 @@ describe("hosted workspace runtime entrypoint", () => {
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
-                nextWakeAt: result.nextWakeAt,
-                nextWakeReason: result.nextWakeReason ?? null,
+                nextWakeAt: retainedDeviceResult.nextWakeAt,
+                nextWakeReason: retainedDeviceResult.nextWakeReason ?? null,
                 snapshotRef: restoredPolicyWorkspace.snapshotRef,
-                version: "1",
+                version: "2",
               }),
             }),
           }),
@@ -14068,7 +14162,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 messageLength: intent.message.length,
                 providerMessageId: "linq-blocked-assistant-policy-restored",
                 providerThreadId: "synthetic_direct_chat",
-                sentAt: now,
+                sentAt: retainedDeviceWakeAt,
                 target: "synthetic_direct_chat",
                 targetKind: "explicit",
               },
@@ -14078,7 +14172,7 @@ describe("hosted workspace runtime entrypoint", () => {
             assert.equal(sentIntent?.status, "sent");
             await patchAutomation({
               lookup: automationId,
-              now: new Date(now),
+              now: new Date(retainedDeviceWakeAt),
               status: "archived",
               vaultRoot,
             });
@@ -14119,7 +14213,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_blocked_assistant_policy_terminal",
-            workspaceVersion: "2",
+            workspaceVersion: "3",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
@@ -14147,7 +14241,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 nextWakeAt: null,
                 nextWakeReason: null,
                 snapshotRef: terminalWorkspace.snapshotRef,
-                version: "2",
+                version: "3",
               }),
             }),
           }),
