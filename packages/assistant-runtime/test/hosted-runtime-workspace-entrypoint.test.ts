@@ -7581,18 +7581,6 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
-            if (
-              item.item.id
-                === "mailbox_item_entrypoint_assistant_carry_mask_002"
-            ) {
-              return {
-                assistantInputId: await stagePendingLinqAssistantInputForMailboxItem({
-                  item: item.item,
-                  vaultRoot,
-                }),
-                status: "imported",
-              };
-            }
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -36847,9 +36835,7 @@ describe("hosted workspace runtime entrypoint", () => {
         laneSeq: "1",
       }),
     ];
-    const assistantPresentedWakeAts: string[] = [];
     let assistantPass = 0;
-    let completedNextWakeAt: string | null | undefined;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -36918,7 +36904,6 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase(input) {
             assistantPass += 1;
             const presentedWakeAt = input.workspace?.nextWakeAt ?? "none";
-            assistantPresentedWakeAts.push(presentedWakeAt);
             events.push(`assistant:${assistantPass}:${presentedWakeAt}:${Date.now()}`);
 
             if (assistantPass === 1) {
@@ -36958,10 +36943,7 @@ describe("hosted workspace runtime entrypoint", () => {
           signal: runtimeAbortController.signal,
           vaultRoot,
         },
-      ).then((result) => {
-        completedNextWakeAt = result.nextWakeAt;
-        return result;
-      });
+      );
 
       await withRealTimeout(
         olderWakeHotAttemptComplete.promise,
@@ -37001,32 +36983,19 @@ describe("hosted workspace runtime entrypoint", () => {
         events.join(","),
       );
 
-      await vi.advanceTimersByTimeAsync(5_000);
       await withRealTimeout(
         reminderWakePersisted.promise,
-        1_000,
+        15_000,
         () => events.join(","),
-      ).catch(() => undefined);
+      );
       const persistedWakes = checkpointRequests.map((request) => [
         request.nextWakeAt,
         request.nextWakeReason,
       ]);
-      assert.deepEqual(persistedWakes[0], [olderDueWakeAt, "assistant"]);
-      const reminderStillOwned =
-        completedNextWakeAt === reminderWakeAt
-        || assistantPresentedWakeAts.includes(reminderWakeAt)
-        || persistedWakes.some(([wakeAt, reason]) =>
-          wakeAt === reminderWakeAt && reason === "assistant"
-        );
-      assert.equal(
-        reminderStillOwned,
-        true,
-        `later reminder wake was masked: ${JSON.stringify({
-          assistantPresentedWakeAts,
-          completedNextWakeAt,
-          persistedWakes,
-        })}`,
-      );
+      assert.deepEqual(persistedWakes.slice(0, 2), [
+        [olderDueWakeAt, "assistant"],
+        [reminderWakeAt, "assistant"],
+      ]);
     } finally {
       runtimeAbortController.abort();
       vi.useRealTimers();
