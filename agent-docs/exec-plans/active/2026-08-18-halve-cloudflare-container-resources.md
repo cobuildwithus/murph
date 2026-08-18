@@ -24,6 +24,35 @@ disk allocation, and reduce the post-completion conversation idle lease from
   container rollout, then proves the requested Worker and runner version with
   the existing smoke contract.
 
+## Product UX Plan
+
+Effort: Product change. The user explicitly requested the smaller production
+resource and warm-lease footprint, which reverses the current two-vCPU
+performance allocation without changing delivery, recovery, or data semantics.
+
+- Outcome: hosted conversations remain functional and recoverable on the
+  previously deployed one-vCPU / 3-GiB shape, with the accepted trade-off that
+  heavier reads can take longer.
+- Entry and promise: ordinary hosted conversation ingress still reaches the
+  same reply destination; this change does not promise that latency is
+  unchanged.
+- Reaches: cold conversations, heavier established-member reads, and follow-ups
+  arriving 11–20 minutes after a completed turn. The last group moves from the
+  warm path to the cold path under the ten-minute lease.
+- Proof: the exact instance object has prior production history, the current
+  Wrangler build/dry-run must accept both bindings, and the protected managed
+  deployment must pass deployment-status, runner-bundle, direct-R2, and live
+  model-turn smoke on the exact reduced profile. Any provisioning, process,
+  retry, or smoke failure requires restoring the prior variables and
+  redeploying rather than adding compensating runtime machinery.
+
+Walkthrough: Ready for a controlled rollout. A follow-up inside ten minutes
+keeps the existing warm path. A follow-up after ten minutes may pay the existing
+cold-start cost and a heavier read may run more slowly, but delivery,
+exactly-once behavior, and recovery owners are unchanged. The requested shape
+was the production default before the two-vCPU upgrade, and the rollout remains
+incomplete until the exact managed smoke passes.
+
 ## Evidence
 
 - Public source and production currently configure the custom instance object
@@ -34,6 +63,16 @@ disk allocation, and reduce the post-completion conversation idle lease from
   so the source change must merge before deployment.
 - Cloudflare's current Containers limits document accepts the requested
   1 vCPU, 3,072 MiB memory, and 6,000 MB disk combination.
+- The same 1 vCPU, 3,072 MiB memory, and 6,000 MB disk tuple was the production
+  default before the two-vCPU upgrade merged in PR 878; the upgrade publicly
+  documented shorter heavier-read latency, so this rollback deliberately does
+  not claim latency neutrality.
+- Wrangler 4.90.0 completed a strict dry-run after assembling the canonical
+  runner bundle, building both container images and accepting the 600,000 ms
+  Worker lease. Local exact-limit image smoke reached the runner but could not
+  finish because Docker Desktop's AMD64 emulation cannot install the nested
+  seccomp profile; the native managed deployment smoke owns that remaining
+  proof.
 
 ## Steps
 
