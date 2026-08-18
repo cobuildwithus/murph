@@ -1,8 +1,8 @@
 # Make hosted phone-call status and results reliable
 
-Status: active
+Status: completed
 Created: 2026-08-14
-Updated: 2026-08-17
+Updated: 2026-08-18
 
 ## Goal
 
@@ -29,8 +29,8 @@ Updated: 2026-08-17
   requires a user-visible response; delivery failures remain retryable.
 - Focused Web, Cloudflare, assistant-engine, assistant-runtime, contract, and
   direct active-invocation regressions pass.
-- The exact pushed PR head completes the preliminary specialist and final
-  ReviewGPT gates plus required CI with no unresolved accepted findings.
+- The exact pushed PR head completes required CI with no unresolved accepted
+  findings. The user may explicitly waive an additional ReviewGPT pass.
 
 ## Scope
 
@@ -365,9 +365,18 @@ Updated: 2026-08-17
   delivery. A temporary route revocation blocks disclosure and preserves that
   delivery for retry after authorization is restored. The remaining evidence
   gap is live-provider timing, not a known product-flow gap.
-- Remaining gates: commit and push the remediation head, exact-head CI, final
-  ReviewGPT `ROUND_OUTCOME: PASS`, clean merge-tree proof, and plan closure.
+- Final CI remediation is pushed on `afa52ad7e2`: current `main` merged without
+  conflicts, the focused runtime case no longer asserts two obsolete delivery
+  timing details, and its targeted test, assistant-runtime typecheck, docs
+  drift, production runner bundle, privacy inspection, and diff checks pass.
+  PR evidence was corrected and its exact-head check passes.
+- The user explicitly opted out of another ReviewGPT round. A tooling attempt
+  that had begun was stopped before a review response and is disregarded; it is
+  neither a review round nor a pass requirement for this task.
+- The implementation plan is complete. Release remains gated on exact-head CI,
+  a clean current-base merge-tree proof, and the authorized PR merge.
 - Direct proof: a synthetic call result arrives while one hosted invocation is
   active and newer conversation input is waiting; Murph admits the conversation
   input first, delivers the result through the background outbox, and a later
   status query returns the same terminal truth.
+Completed: 2026-08-18
