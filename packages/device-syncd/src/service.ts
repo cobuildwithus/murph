@@ -1,3 +1,4 @@
+import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 import {
   createImporters,
   JunctionSparseCalendarRepairNormalizationError,
@@ -132,6 +133,8 @@ const DEVICE_SYNC_CONNECTION_MUTATION_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS = 50;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
+const JUNCTION_WORKOUT_STREAM_CANDIDATE_DIAGNOSTIC_LIMIT =
+  resolveJunctionTimeseriesResourcePolicy("workout_stream")?.maxRecordsPerWindow ?? 0;
 const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
   /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
 const DEVICE_SYNC_VALIDATION_METADATA_FIELDS = Object.freeze([
@@ -832,15 +835,23 @@ class DeviceSyncServiceController {
       retryable: boolean,
     ): boolean => {
       const failedAt = currentNow();
-      const failed = this.store.failJobIfOwned(job.id, this.workerId, failedAt, code, message, retryAt, retryable);
+      const failureTransition = this.store.failJobIfOwned(
+        job.id,
+        this.workerId,
+        failedAt,
+        code,
+        message,
+        retryAt,
+        retryable,
+      );
 
-      if (!failed) {
+      if (!failureTransition) {
         this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
           provider: job.provider,
           accountId: job.accountId,
           jobId: job.id,
         });
-        return failed;
+        return false;
       }
 
       // No summary here: these repo-authored messages can embed the local
@@ -850,15 +861,18 @@ class DeviceSyncServiceController {
         accountId: job.accountId,
         accountStatus: null,
         at: failedAt,
-        attempts: job.attempts,
+        attempts: failureTransition.attempts,
         code,
         details: {},
+        jobDisposition: failureTransition.disposition,
         jobKind: job.kind,
+        maxAttempts: failureTransition.maxAttempts,
         provider: job.provider,
+        remainingAttempts: failureTransition.remainingAttempts,
         ...(failedJobResource ? { resource: failedJobResource } : {}),
         retryable,
       });
-      return failed;
+      return true;
     };
 
     const provider = this.registry.get(job.provider);
@@ -1343,39 +1357,46 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
-      const failed = activeJobs
-        .map((activeJob) => {
-          const retryAt = retainedFailureRetryable
-            ? addMilliseconds(failureNow, computeRetryDelayMs(activeJob.attempts))
-            : null;
-          return this.store.failJobIfOwned(
-            activeJob.id,
-            this.workerId,
-            failureNow,
-            failure.code,
-            failure.message,
-            retryAt,
-            retainedFailureRetryable,
-            retainsAcceptedWorkUntilSuccess,
-            activeJob.id === job.id ? replacementPayload : undefined,
-          );
-        })
-        .some(Boolean);
+      const failureTransitions = activeJobs.flatMap((activeJob) => {
+        const retryAt = retainedFailureRetryable
+          ? addMilliseconds(failureNow, computeRetryDelayMs(activeJob.attempts))
+          : null;
+        const transition = this.store.failJobIfOwned(
+          activeJob.id,
+          this.workerId,
+          failureNow,
+          failure.code,
+          failure.message,
+          retryAt,
+          retainedFailureRetryable,
+          retainsAcceptedWorkUntilSuccess,
+          activeJob.id === job.id ? replacementPayload : undefined,
+        );
+        return transition ? [{ activeJob, transition }] : [];
+      });
 
-      if (!failed) {
+      if (failureTransitions.length === 0) {
         return finishPass();
       }
 
-      const failedJobResource = readSafeDiagnosticToken(job.payload.resource);
+      const diagnosticTransition = failureTransitions.find(({ activeJob }) => activeJob.id === job.id)
+        ?? failureTransitions[0];
+      if (!diagnosticTransition) {
+        return finishPass();
+      }
+      const failedJobResource = readSafeDiagnosticToken(diagnosticTransition.activeJob.payload.resource);
       this.recordJobFailureDiagnostic({
         accountId: storedAccount.id,
         accountStatus: failure.accountStatus ?? null,
         at: failureNow,
-        attempts: job.attempts,
+        attempts: diagnosticTransition.transition.attempts,
         code: failure.code,
         details: failure.details,
-        jobKind: job.kind,
+        jobDisposition: diagnosticTransition.transition.disposition,
+        jobKind: diagnosticTransition.activeJob.kind,
+        maxAttempts: diagnosticTransition.transition.maxAttempts,
         provider: provider.provider,
+        remainingAttempts: diagnosticTransition.transition.remainingAttempts,
         ...(failedJobResource ? { resource: failedJobResource } : {}),
         retryable: retainedFailureRetryable,
         summary: failure.message,
@@ -2043,6 +2064,11 @@ function buildDeviceSyncErrorFailureDiagnostics(
   error: DeviceSyncError,
 ): DeviceSyncJobFailureDiagnostic["details"] {
   const cause = toPlainRecord(error.cause);
+  const providerRequestEndpointKind = readSafeDiagnosticToken(error.details?.requestEndpointKind);
+  const workoutCandidateContext = readSafeWorkoutCandidateFailureContext(
+    error,
+    providerRequestEndpointKind,
+  );
 
   return compactFailureDiagnostics({
     failureCauseCode: readSafeDiagnosticToken(cause?.code),
@@ -2055,9 +2081,10 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerRequestBodyFieldCount: readSafeDiagnosticNumber(error.details?.requestBodyFieldCount),
     providerRequestBodyFieldNames: readSafeDiagnosticToken(error.details?.requestBodyFieldNames),
     providerRequestBodyKind: readSafeDiagnosticToken(error.details?.requestBodyKind),
+    ...workoutCandidateContext,
     providerRequestContentType: readSafeDiagnosticToken(error.details?.requestContentType),
     providerRequestCredentialPresent: readSafeDiagnosticBoolean(error.details?.requestCredentialPresent),
-    providerRequestEndpointKind: readSafeDiagnosticToken(error.details?.requestEndpointKind),
+    providerRequestEndpointKind,
     providerRequestMethod: readSafeDiagnosticToken(error.details?.requestMethod),
     providerRequestQueryParameterCount: readSafeDiagnosticNumber(error.details?.requestQueryParameterCount),
     providerRequestQueryParameterNames: readSafeDiagnosticToken(error.details?.requestQueryParameterNames),
@@ -2152,6 +2179,67 @@ function readSafeDiagnosticToken(value: unknown): string | null {
 
 function readSafeDiagnosticBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function readSafeWorkoutCandidateFailureContext(
+  error: DeviceSyncError,
+  providerRequestEndpointKind: string | null,
+): Partial<Pick<
+  DeviceSyncJobFailureDiagnostic["details"],
+  | "providerRequestCandidateAliasSource"
+  | "providerRequestCandidateCount"
+  | "providerRequestCandidateOrdinal"
+>> {
+  if (
+    error.code !== "JUNCTION_API_REQUEST_FAILED"
+    || providerRequestEndpointKind !== "junction_workout_stream"
+  ) {
+    return {};
+  }
+
+  const aliasSource = readSafeWorkoutCandidateAliasSource(
+    error.details?.requestCandidateAliasSource,
+  );
+  const candidateCount = readSafeWorkoutCandidateBoundedNumber(
+    error.details?.requestCandidateCount,
+  );
+  const candidateOrdinal = readSafeWorkoutCandidateBoundedNumber(
+    error.details?.requestCandidateOrdinal,
+  );
+  if (
+    !aliasSource
+    || candidateCount === null
+    || candidateOrdinal === null
+    || candidateOrdinal > candidateCount
+  ) {
+    return {};
+  }
+
+  return {
+    providerRequestCandidateAliasSource: aliasSource,
+    providerRequestCandidateCount: candidateCount,
+    providerRequestCandidateOrdinal: candidateOrdinal,
+  };
+}
+
+function readSafeWorkoutCandidateAliasSource(
+  value: unknown,
+): DeviceSyncJobFailureDiagnostic["details"]["providerRequestCandidateAliasSource"] | null {
+  return value === "id"
+    || value === "multiple_equal"
+    || value === "workoutId"
+    || value === "workout_id"
+    ? value
+    : null;
+}
+
+function readSafeWorkoutCandidateBoundedNumber(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 1
+    && value <= JUNCTION_WORKOUT_STREAM_CANDIDATE_DIAGNOSTIC_LIMIT
+    ? value
+    : null;
 }
 
 function readSafeDiagnosticNumber(value: unknown): number | null {

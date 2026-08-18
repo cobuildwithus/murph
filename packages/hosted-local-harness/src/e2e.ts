@@ -77,6 +77,7 @@ export type HostedLocalE2eScenarioName =
   | "foreground-reply-priority"
   | "hosted-web-browser-smoke"
   | "idle-checkpoint-deferred-progress"
+  | "imessage-member-action-timestamp"
   | "junction-link-connect"
   | "junction-wearable-fixture"
   | "mailbox-platform-env"
@@ -234,6 +235,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
     name: "mailbox-platform-env",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-imessage-member-action-timestamp-e2e.test.ts",
+    manualOnly: true,
+    name: "imessage-member-action-timestamp",
   },
   {
     file: "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",

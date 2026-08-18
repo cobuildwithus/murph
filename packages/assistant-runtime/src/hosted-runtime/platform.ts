@@ -87,8 +87,13 @@ import type {
   HostedRuntimeLinqDeliveryPosture,
 } from "@murphai/hosted-execution/routes";
 import type {
+  HostedPhoneCallResultDeliveryOutcomeRequest,
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
+  HostedPhoneCallStatusRequest,
+  HostedPhoneCallStatusResponse,
+  HostedPhoneCallStopRequest,
+  HostedPhoneCallStopResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
   HostedPhysicalNoteSendRequest,
@@ -328,6 +333,15 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   resolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
 }
 
+export interface HostedRuntimeOutboundMessageVolumeReceiptRequest {
+  channel: "email" | "telegram";
+  dedupeKey: string;
+}
+
+export interface HostedRuntimeOutboundMessageVolumeReceiptResult {
+  recordedAt: string;
+}
+
 export interface HostedRuntimeAssistantAskCompletionAuthority {
   answeredMailboxItemIds: readonly string[];
   assistantAskCompletionExpiresAt: string;
@@ -422,6 +436,14 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
+  recordPhoneCallResultDeliveryOutcome?(
+    request: HostedPhoneCallResultDeliveryOutcomeRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
+  recordOutboundMessageVolumeReceipt?(
+    request: HostedRuntimeOutboundMessageVolumeReceiptRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeOutboundMessageVolumeReceiptResult>;
   sendEmail(request: HostedEmailSendRequest): Promise<HostedEmailSendResult | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,
@@ -558,6 +580,18 @@ export interface HostedRuntimeCodexAuthPort {
 }
 
 export interface HostedRuntimePhoneCallPort {
+  stop?(
+    request: HostedPhoneCallStopRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhoneCallStopResponse>;
+  status?(
+    request: HostedPhoneCallStatusRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhoneCallStatusResponse>;
   start(
     request: HostedPhoneCallStartRequest,
     context?: {

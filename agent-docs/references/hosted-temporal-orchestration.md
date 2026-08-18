@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-11
+Last verified: 2026-08-16
 
 ## Decision
 
@@ -187,7 +187,9 @@ the owning marker is durable, then represented as a bounded `device-sync.wake`
 mailbox handoff keyed by connection and reconcile timestamp. Dirty webhook
 freshness is separate: web persists dirty state and appends one deterministic
 `device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
-selected by a global scheduled sweep. Historical `runtime.mailbox-lag-observed`
+selected by a global scheduled sweep. The existing shared mailbox-handoff sweep
+may re-signal one exact unconsumed `device-sync.wake` pointer per user; it reads
+mailbox and lane-watermark truth, not dirty rows. Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
 rows for drain compatibility, but web no longer produces them.
 
@@ -506,6 +508,29 @@ existing Temporal HTTP timeout:
 Cloudflare uses its existing web-control/readiness timeout values as per-step
 caps inside that budget and never lets unsigned timeout metadata increase the
 configured Cloudflare wait.
+The Web direct-wake lane supplies a 25-second end-to-end command budget inside
+a shared 29-second outer deadline. Cloudflare starts its server-side clock at
+runtime-control authorization, before route parsing, Durable Object dispatch,
+consent serialization, and health-data admission. Container readiness is capped at 20
+wall-clock seconds end to end: at most 15 seconds for readiness, including
+lifecycle-lock queue time, plus one absolute five-second deadline shared by a
+readiness-triggered cleanup state read and destroy settlement. Its caller guard adds a
+separate one-second margin, so the RPC can
+settle before the request deadline. Shorter command budgets keep the smaller of
+15 seconds and the remaining time minus that one-second guard for readiness;
+they do not subtract cleanup time before a start fails. If cleanup then outlives
+the short budget, the outer guard preserves the fence. A `retry_later` may trigger one retry only
+when its delay and the minimum command/response window fit the remaining outer
+deadline. This fast lane never replaces the accepted Temporal signal or owns
+durable retry state. The relational latency trace stores only the final parsed
+direct result kind and accepted action/runtime attempt id; retry reasons remain
+in orchestration-correlated Cloudflare structured logs.
+
+Roll this boundary out Web first, then Cloudflare. New Web sends the bounded
+timeout but still accepts the legacy `202 { accepted: true }`; old Cloudflare
+already accepts the additive timeout metadata. After Web converges, new
+Cloudflare can safely await and return the full result without exposing old-Web
+callers to the shorter default budget during a cold start.
 
 ## Runtime Status And Completion
 
@@ -569,8 +594,9 @@ The hard-cut architecture is accepted when:
   sleeps/retries.
 - Temporal has one global due-reconcile device-sync scheduled wakes Schedule that
   starts a short-lived reconciler workflow whose web command appends bounded
-  `device-sync.wake` handoffs and re-signals bounded, already-durable preference
-  and queued Clinical Records mailbox candidates through one shared sweep. It
+  `device-sync.wake` handoffs and re-signals bounded, already-durable
+  device-sync, preference, runtime-control, and queued Clinical Records mailbox
+  candidates through one shared sweep. It
   selects at most one exact pending item per user ahead of its lane watermark.
   Clinical recovery does not create a second run, wake, receipt, or generation.
   There is no Vercel device-sync dirty-sweeper cron cadence and no

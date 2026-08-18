@@ -44,8 +44,8 @@ export type HostedContainerInstanceType =
 
 const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
   disk_mb: 6000,
-  memory_mib: 6144,
-  vcpu: 2,
+  memory_mib: 3072,
+  vcpu: 1,
 };
 const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
 const RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;

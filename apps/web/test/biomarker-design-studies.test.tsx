@@ -94,19 +94,23 @@ import {
   BIOMARKER_STUDY_GROUPS,
 } from "@/src/components/biomarkers/biomarker-design-data";
 import { DesignPage } from "@/app/design/design-page";
-import DesignRoute from "@/app/design/page";
+import { SectionsContent } from "@/app/design/sections-content";
+import { SCREENSHOT_CATEGORIES } from "@/app/screenshots/categories";
+import { metadata as screenshotsMetadata } from "@/app/screenshots/page";
 
 beforeEach(() => {
   navigationMocks.replace.mockReset();
 });
 
-test("design page routes the biomarker studies through the dedicated sections tab", () => {
-  const sectionsMarkup = renderToStaticMarkup(
-    createElement(DesignPage, { activeTab: "sections" }),
-  );
+test("screenshot categories keep the production studies available without one giant page", () => {
+  expect(screenshotsMetadata.robots).toEqual({ follow: false, index: false });
 
-  expect(sectionsMarkup).toContain(">Sections<");
-  expect(sectionsMarkup).toContain('data-design-section="catalog-navigation"');
+  const sectionsMarkup = SCREENSHOT_CATEGORIES.map(({ id }) =>
+    renderToStaticMarkup(createElement(SectionsContent, { category: id })),
+  ).join("");
+
+  expect(sectionsMarkup).toContain('data-screenshot-category="home"');
+  expect(sectionsMarkup).toContain('data-screenshot-category="health"');
   expect(sectionsMarkup).toContain("Homepage security and privacy");
   expect(sectionsMarkup).toContain("Consumer Health Data Privacy Notice");
   expect(sectionsMarkup).toContain(
@@ -207,8 +211,12 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("76% used");
   expect(sectionsMarkup).toContain("24% remaining");
   expect(sectionsMarkup).toContain("0% used");
-  expect(sectionsMarkup).toContain("Fulfilled top-up with refreshed usage");
-  expect(sectionsMarkup).toContain("Preview fulfilled top-up");
+  expect(sectionsMarkup).toContain("Successful top-up return");
+  expect(sectionsMarkup).toContain("Preview quiet refresh");
+  expect(sectionsMarkup).toContain("Preview failed recovery");
+  expect(sectionsMarkup).toContain("Preview Family member completion");
+  expect(sectionsMarkup).toContain("Preview inactive account completion");
+  expect(sectionsMarkup).toContain("Preview former member completion");
   expect(sectionsMarkup).toContain("Add usage to continue");
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
@@ -233,6 +241,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   );
 
   expect(componentsMarkup).toContain(">Components<");
+  expect(componentsMarkup).not.toContain(">Sections<");
   expect(componentsMarkup).toContain("WHOOP Completion Dialog");
   expect(componentsMarkup).toContain("Preview WHOOP completion");
   expect(componentsMarkup).toContain("Preview capacity fallback");
@@ -293,7 +302,11 @@ test("design page routes the biomarker studies through the dedicated sections ta
     new URL("../app/design/group-usage-funding-study.tsx", import.meta.url),
     "utf8",
   );
-  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(1);
+  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(4);
+  expect(groupFundingStudySource).toContain('returnPreview === "failed"');
+  expect(groupFundingStudySource).toContain('returnPreview === "family"');
+  expect(groupFundingStudySource).toContain('returnPreview === "inactive"');
+  expect(groupFundingStudySource).toContain('returnPreview === "former"');
   expect(groupFundingStudySource).toContain(
     "<GroupSponsorshipManagementCard",
   );
@@ -302,13 +315,12 @@ test("design page routes the biomarker studies through the dedicated sections ta
   );
 });
 
-test("design sections keep the route footer as the sole canonical footer target", async () => {
-  const route = await DesignRoute({
-    searchParams: Promise.resolve({ tab: "sections" }),
-  });
-  const routeMarkup = renderToStaticMarkup(route);
+test("home screenshot studies keep their footer preview inert", () => {
+  const routeMarkup = renderToStaticMarkup(
+    createElement(SectionsContent, { category: "home" }),
+  );
 
-  expect(routeMarkup.match(/id="site-footer"/g)).toHaveLength(1);
+  expect(routeMarkup).not.toContain('id="site-footer"');
   expect(routeMarkup).toContain('id="design-site-footer-preview"');
   expect(routeMarkup).toContain('data-design-section="homepage-footer"');
   expect(routeMarkup).toContain("inert=");

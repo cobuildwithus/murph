@@ -1,0 +1,293 @@
+name: Native iOS Hosted E2E
+
+on:
+  workflow_run:
+    workflows:
+      - Repo Hygiene
+    types:
+      - completed
+  deployment_status:
+
+# Secret-bearing jobs execute only this trusted default-branch workflow. PR code
+# is sent to the dedicated Vercel custom environment by exact SHA; it is never
+# checked out on a runner holding E2E credentials.
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: native-ios-hosted-e2e-${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.deployment.sha || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  select-pr:
+    name: Select native iOS hosted E2E
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      head_ref: ${{ steps.select.outputs.head_ref }}
+      head_sha: ${{ steps.select.outputs.head_sha }}
+      selected: ${{ steps.select.outputs.selected }}
+      trusted: ${{ steps.select.outputs.trusted }}
+    steps:
+      - name: Resolve exact PR head and relevant owners
+        id: select
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          head_sha="$(jq -r '.head.sha' <<<"${pr}")"
+          head_ref="$(jq -r '.head.ref' <<<"${pr}")"
+          head_repo="$(jq -r '.head.repo.full_name // ""' <<<"${pr}")"
+          author_type="$(jq -r '.user.type // ""' <<<"${pr}")"
+
+          if [[ "${head_sha}" != "${EXPECTED_HEAD_SHA}" ]]; then
+            echo "::error::PR head changed after Repo Hygiene; rerun against the current head."
+            exit 1
+          fi
+
+          trusted=false
+          if [[ "${head_repo}" == "${GITHUB_REPOSITORY}" && "${author_type}" == "User" ]]; then
+            trusted=true
+          fi
+
+          changed_files="$(jq -r '.changed_files' <<<"${pr}")"
+          [[ "${changed_files}" =~ ^[0-9]+$ ]] || { echo "::error::PR changed-file count was invalid."; exit 1; }
+
+          # Any Web source can break native auth/control/device sync. The lower
+          # list is the current hosted-Web source-package closure plus root
+          # build/deploy files that can change the production-shaped candidate.
+          selected=false
+          if (( changed_files > 3000 )); then
+            selected=true
+          else
+            while IFS= read -r file; do
+              case "${file}" in
+                apps/web/*|\
+                packages/assistant-runtime/*|packages/clinical-records/*|packages/cloudflare-hosted-control/*|packages/contracts/*|packages/core/*|\
+                packages/device-syncd/*|packages/gateway-core/*|packages/health-commons/*|packages/health-metrics/*|\
+                packages/hosted-execution/*|packages/importers/*|packages/inboxd/*|packages/messaging-ingress/*|packages/parsers/*|packages/query/*|packages/runtime-state/*|\
+                .github/workflows/native-ios-hosted-e2e.yml|.github/workflows/repo-hygiene.yml|\
+                config/workspace-source-resolution.ts|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json)
+                  selected=true
+                  break
+                  ;;
+              esac
+            done < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
+          fi
+
+          {
+            echo "head_ref=${head_ref}"
+            echo "head_sha=${head_sha}"
+            echo "selected=${selected}"
+            echo "trusted=${trusted}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Mark required status pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_SHA: ${{ steps.select.outputs.head_sha }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${STATUS_SHA}" \
+            -f state=pending \
+            -f context='Native iOS hosted E2E' \
+            -f description='Native iOS hosted E2E gate is evaluating this commit.' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
+
+  pr-live:
+    name: Real hosted Web + native iOS lane
+    needs: select-pr
+    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
+    environment: native-ios-hosted-e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    concurrency:
+      group: native-ios-hosted-e2e-live
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted control plane
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install trusted control dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Revalidate exact PR head
+        env:
+          EXPECTED_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          [[ "${current}" == "${EXPECTED_HEAD_SHA}" ]] || { echo "::error::PR head changed before live E2E."; exit 1; }
+
+      - name: Mint private iOS workflow token
+        id: ios-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.NATIVE_IOS_E2E_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NATIVE_IOS_E2E_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}
+          repositories: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
+          permission-actions: write
+          permission-contents: read
+
+      - name: Run fresh hosted Web + real private iOS E2E
+        env:
+          NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}
+          NATIVE_IOS_E2E_DIRECT_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DIRECT_DATABASE_URL }}
+          NATIVE_IOS_E2E_JUNCTION_API_KEY: ${{ secrets.NATIVE_IOS_E2E_JUNCTION_API_KEY }}
+          NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET }}
+          NATIVE_IOS_E2E_JUNCTION_TEAM_ID: ${{ vars.NATIVE_IOS_E2E_JUNCTION_TEAM_ID }}
+          NATIVE_IOS_E2E_PRIVY_APP_ID: ${{ vars.NATIVE_IOS_E2E_PRIVY_APP_ID }}
+          NATIVE_IOS_E2E_PRIVY_APP_SECRET: ${{ secrets.NATIVE_IOS_E2E_PRIVY_APP_SECRET }}
+          NATIVE_IOS_E2E_PRIVY_TEST_PHONE: ${{ secrets.NATIVE_IOS_E2E_PRIVY_TEST_PHONE }}
+          NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID }}
+          NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID }}
+          NATIVE_IOS_E2E_VERCEL_PROJECT_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_PROJECT_ID }}
+          NATIVE_IOS_E2E_VERCEL_PROJECT_NAME: ${{ vars.NATIVE_IOS_E2E_VERCEL_PROJECT_NAME }}
+          NATIVE_IOS_E2E_VERCEL_TEAM_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_TEAM_ID }}
+          NATIVE_IOS_E2E_VERCEL_TOKEN: ${{ secrets.NATIVE_IOS_E2E_VERCEL_TOKEN }}
+          NATIVE_IOS_E2E_GITHUB_TOKEN: ${{ steps.ios-app-token.outputs.token }}
+          NATIVE_IOS_E2E_IOS_REF: ${{ vars.NATIVE_IOS_E2E_IOS_REF }}
+          NATIVE_IOS_E2E_IOS_EXPECTED_SHA: ${{ vars.NATIVE_IOS_E2E_IOS_EXPECTED_SHA }}
+          NATIVE_IOS_E2E_IOS_REPOSITORY: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}/${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
+          NATIVE_IOS_E2E_IOS_WORKFLOW: ${{ vars.NATIVE_IOS_E2E_IOS_WORKFLOW }}
+          PR_HEAD_REF: ${{ needs.select-pr.outputs.head_ref }}
+          PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
+        run: >-
+          node scripts/native-ios-hosted-e2e.mjs pr
+          --sha "${PR_HEAD_SHA}"
+          --ref "${PR_HEAD_REF}"
+          --correlation-id "murph-pr-${PR_HEAD_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"
+
+  pr-required:
+    name: Publish native iOS hosted E2E required status
+    needs:
+      - select-pr
+      - pr-live
+    if: ${{ always() && github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Publish stable required commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIVE_RESULT: ${{ needs.pr-live.result }}
+          SELECT_RESULT: ${{ needs.select-pr.result }}
+          SELECTED: ${{ needs.select-pr.outputs.selected }}
+          SOURCE_RESULT: ${{ github.event.workflow_run.conclusion }}
+          STATUS_SHA: ${{ needs.select-pr.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha }}
+          TRUSTED: ${{ needs.select-pr.outputs.trusted }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Native iOS hosted E2E control selection failed.'
+          if [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
+            description='Repo Hygiene must pass before native iOS hosted E2E.'
+          elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
+            state=success
+            description='PR does not require the hosted Web native E2E lane.'
+          elif [[ "${SELECT_RESULT}" == success && "${TRUSTED}" != true ]]; then
+            description='Selected PR requires a reviewed same-repository human-authored head.'
+          elif [[ "${SELECT_RESULT}" == success && "${LIVE_RESULT}" == success ]]; then
+            state=success
+            description='Exact hosted Web and real private iOS E2E passed.'
+          elif [[ "${SELECT_RESULT}" == success ]]; then
+            description='Selected native iOS hosted E2E lane did not pass.'
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${STATUS_SHA}" \
+            -f state="${state}" \
+            -f context='Native iOS hosted E2E' \
+            -f description="${description}" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
+          [[ "${state}" == success ]]
+
+  production-canary:
+    name: Non-destructive production native iOS canary
+    if: ${{ github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment_status.description == 'Deployment has completed' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]') }}
+    environment: native-ios-production-canary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    concurrency:
+      group: native-ios-production-canary-live
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install trusted control dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify deployed SHA is protected-main history
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+        run: |
+          set -euo pipefail
+          [[ "${DEPLOYED_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Production deployment must identify an exact Git SHA."; exit 1; }
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main || { echo "::error::Production canary refuses a deployment outside main history."; exit 1; }
+
+      - name: Mint private iOS workflow token
+        id: ios-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.NATIVE_IOS_E2E_GITHUB_APP_ID }}
+          private-key: ${{ secrets.NATIVE_IOS_E2E_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}
+          repositories: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
+          permission-actions: write
+          permission-contents: read
+
+      - name: Verify current production alias and dispatch non-destructive canary
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
+          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+          NATIVE_IOS_E2E_GITHUB_TOKEN: ${{ steps.ios-app-token.outputs.token }}
+          NATIVE_IOS_E2E_IOS_REF: ${{ vars.NATIVE_IOS_E2E_IOS_REF }}
+          NATIVE_IOS_E2E_IOS_EXPECTED_SHA: ${{ vars.NATIVE_IOS_E2E_IOS_EXPECTED_SHA }}
+          NATIVE_IOS_E2E_IOS_REPOSITORY: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}/${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
+          NATIVE_IOS_E2E_IOS_WORKFLOW: ${{ vars.NATIVE_IOS_E2E_IOS_WORKFLOW }}
+          PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/native-ios-hosted-e2e.mjs canary \
+            --web-sha "${DEPLOYED_SHA}" \
+            --web-base-url "${PRODUCTION_BASE_URL}" \
+            --correlation-id "murph-production-${DEPLOYED_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"

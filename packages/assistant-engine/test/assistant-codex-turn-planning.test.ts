@@ -2573,7 +2573,7 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('offers audience-scoped private and Linq group challenge cards only', async () => {
+  it('offers private semantic cards and Telegram presentation cards to their valid audiences', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -2753,7 +2753,7 @@ describe('assistant Codex turn planning', () => {
       threadId: 'telegram-group-challenge-card',
       threadIsDirect: false,
     })
-    await expect(cardTool({
+    const telegramGroupOptions = {
       executionContext: hostedExecutionContext,
       input: {
         ...linqGroupInput,
@@ -2761,7 +2761,32 @@ describe('assistant Codex turn planning', () => {
         threadId: 'telegram-group-challenge-card',
       },
       sharedPlan: telegramGroupPlan,
-    })).resolves.toBeUndefined()
+    } satisfies Parameters<typeof dynamicToolsFor>[0]
+    await expect(cardTool(telegramGroupOptions)).resolves.toBeUndefined()
+    await expect(dynamicToolsFor(telegramGroupOptions)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+        expect.objectContaining({ name: 'attach_telegram_rich_content' }),
+      ]),
+    )
+
+    await expect(dynamicToolsFor({
+      ...telegramGroupOptions,
+      input: {
+        ...telegramGroupOptions.input,
+        scheduledInvocationAuthority: {
+          automationId: 'automation_group_routine',
+          occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+        },
+        scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
+        turnTrigger: 'automation-cron',
+      },
+    })).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+        expect.objectContaining({ name: 'attach_telegram_rich_content' }),
+      ]),
+    )
   })
 
   it('offers scheduled image generation only on routes that can deliver vault images', async () => {
@@ -3503,6 +3528,10 @@ describe('assistant Codex turn planning', () => {
           ...createMessageInput(),
           ...(scheduledOccurrence
             ? {
+                scheduledInvocationAuthority: {
+                  automationId: 'automation_group_shared_read',
+                  occurrenceAt: '2026-07-18T13:00:00.000Z',
+                },
                 scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
                 turnTrigger: 'automation-cron' as const,
               }
@@ -4208,7 +4237,11 @@ describe('assistant Codex turn planning', () => {
       },
       hostedToolContext: {
         ...createHostedToolContext(),
-        phoneCalls: { start: vi.fn() },
+        phoneCalls: {
+          start: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+        },
       },
       messageTargetAuthorizerAvailable: true,
       input: {
@@ -4235,8 +4268,12 @@ describe('assistant Codex turn planning', () => {
       }),
     })
 
-    expect(plan.dynamicTools.map((tool) => tool.name)).toContain(
-      'create_phone_call',
+    expect(plan.dynamicTools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        'create_phone_call',
+        'get_phone_call_status',
+        'stop_phone_call',
+      ]),
     )
   })
 
@@ -4244,7 +4281,7 @@ describe('assistant Codex turn planning', () => {
     ['direct Linq', 'linq', true, true],
     ['group Linq', 'linq', false, false],
     ['direct email', 'email', true, false],
-    ['direct Telegram', 'telegram', true, false],
+    ['direct Telegram', 'telegram', true, true],
   ] as const)(
     'gates phone calls on a canonical scheduled %s turn',
     async (_scope, channel, threadIsDirect, expectedAvailable) => {
@@ -4354,7 +4391,11 @@ describe('assistant Codex turn planning', () => {
       },
       hostedToolContext: {
         ...createHostedToolContext(),
-        phoneCalls: { start: vi.fn() },
+        phoneCalls: {
+          start: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+        },
       },
       input: {
         ...createMessageInput(),
@@ -4382,6 +4423,12 @@ describe('assistant Codex turn planning', () => {
 
     expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
       'create_phone_call',
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'get_phone_call_status',
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'stop_phone_call',
     )
   })
 

@@ -402,6 +402,17 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
+    if (
+      prepared.routeAction === "run-device-sync-wake"
+      && metrics.backgroundMaintenanceYielded === true
+      && metrics.postCheckpointRecord == null
+      && input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        prepared,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
     if (postCheckpointRecord || input.retainProcessedItemUntilRecorded === true) {
       const processedItem: HostedSystemMailboxPendingItem = {
@@ -663,6 +674,8 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
   vaultRoot: string;
 }): Promise<{
+  errorCode?: string | null;
+  errorMessage?: string | null;
   failed: number;
   nextWakeAt: string | null;
   nextWakeReason?: string | null;
@@ -758,6 +771,8 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultRoot: input.vaultRoot,
     });
     return {
+      errorCode: normalized.code,
+      errorMessage: normalized.message,
       failed: 1,
       nextWakeAt: nextWakeAt ?? retryAt,
       nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),

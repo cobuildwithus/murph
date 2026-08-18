@@ -1,12 +1,14 @@
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { readFile, rename as renameFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AssistantChannelDelivery } from '@murphai/operator-config/assistant-cli-contracts'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS } from '../src/assistant/outbox/retry-policy.ts'
+import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intents.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
@@ -811,6 +813,106 @@ describe('assistant outbox thresholds', () => {
     })
   })
 
+  it('keeps a tracked provider receipt callback-replayable when its first checkpoint write fails', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-15T13:00:00.000Z'))
+    const deliveryIdempotencyKey =
+      'phone-call-result:hpc_checkpoint_recovery:generation:1'
+    let checkpointIntentPath: string | null = null
+    let providerDelivered = false
+    let failNextPostSendCheckpoint = true
+    const rename = vi.fn(async (...args: Parameters<typeof renameFile>) => {
+      if (
+        providerDelivered &&
+        failNextPostSendCheckpoint &&
+        args[1] === checkpointIntentPath
+      ) {
+        failNextPostSendCheckpoint = false
+        throw Object.assign(new Error('checkpoint write unavailable'), {
+          code: 'EIO',
+        })
+      }
+      return renameFile(...args)
+    })
+    const deliverAssistantMessageOverBinding = vi.fn(async () => {
+      providerDelivered = true
+      vi.setSystemTime(new Date('2026-08-15T13:00:30.000Z'))
+      return {
+        delivery: createDelivery({
+          idempotencyKey: deliveryIdempotencyKey,
+          providerMessageId: 'provider-phone-call-checkpoint-recovery',
+          sentAt: '2026-08-15T13:00:00.000Z',
+        }),
+        deliveryTransportIdempotent: false,
+        session: null,
+      }
+    })
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+      rename,
+    })
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-phone-call-checkpoint-recovery-',
+    )
+    const seeded = await createIntent(outbox, vaultRoot, {
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: false,
+      explicitTarget: 'telegram-call-result',
+      threadId: 'telegram-call-result',
+    })
+    checkpointIntentPath = resolveAssistantOutboxIntentPath(
+      paths.outboxDirectory,
+      seeded.intentId,
+    )
+    const confirmTerminalIntent = vi.fn()
+      .mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date(Date.now() + 45_000))
+        throw new Error('terminal callback deadline elapsed')
+      })
+      .mockResolvedValueOnce(undefined)
+    const dispatchHooks = {
+      confirmTerminalIntent,
+      requiresTerminalConfirmation: ({ intent }: {
+        intent: { deliveryIdempotencyKey: string | null }
+      }) => intent.deliveryIdempotencyKey === deliveryIdempotencyKey,
+    }
+
+    const first = await outbox.dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      force: true,
+      intentId: seeded.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(failNextPostSendCheckpoint).toBe(false)
+    expect(first.intent).toMatchObject({
+      delivery: expect.objectContaining({
+        providerMessageId: 'provider-phone-call-checkpoint-recovery',
+      }),
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+    })
+    expect(Date.parse(first.intent.nextAttemptAt ?? '')).toBeGreaterThan(
+      Date.parse('2026-08-15T13:01:15.000Z'),
+    )
+    expect(confirmTerminalIntent).toHaveBeenCalledOnce()
+
+    vi.setSystemTime(new Date(first.intent.nextAttemptAt!))
+    const restarted = await outbox.dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      intentId: seeded.intentId,
+      now: new Date(first.intent.nextAttemptAt!),
+      vault: vaultRoot,
+    })
+
+    expect(restarted.intent).toMatchObject({
+      deliveryConfirmationPending: false,
+      status: 'sent',
+    })
+    expect(deliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    expect(confirmTerminalIntent).toHaveBeenCalledTimes(2)
+  })
+
   it('preserves failed turn receipts after a later successful send', async () => {
     const deliverAssistantMessageOverBinding = vi.fn(async () => ({
       delivery: createDelivery({
@@ -869,6 +971,232 @@ describe('assistant outbox thresholds', () => {
     })
   })
 
+  it('does not opt local delivery into hosted message-volume receipts', async () => {
+    const deliverAssistantMessageOverBinding = vi.fn(async () => ({
+      delivery: createDelivery({
+        providerMessageId: 'local-telegram-message',
+        sentAt: '2026-08-15T18:55:00.000Z',
+      }),
+      deliveryTransportIdempotent: true,
+      session: null,
+    }))
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+    })
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-local-message-volume-',
+    )
+    const intent = await createIntent(outbox, vaultRoot, {
+      createdAt: '2026-08-15T18:54:00.000Z',
+      sessionId: 'session-local-message-volume',
+      turnId: 'turn-local-message-volume',
+    })
+
+    const sent = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(sent.intent.status).toBe('sent')
+    expect(sent.intent.messageVolumeReceiptRecordedAt).toBeUndefined()
+    expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(sent.intent))
+      .toBe(false)
+  })
+
+  it('records each successful conversational delivery once and excludes the group-email planning parent', async () => {
+    const parentTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group-message-volume',
+      subject: 'Weekly update',
+      targetKind: 'group',
+    })
+    const childOneTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group-message-volume',
+      recipientMemberId: 'member-one',
+      subject: 'Weekly update',
+      targetKind: 'group',
+    })
+    const childTwoTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group-message-volume',
+      recipientMemberId: 'member-two',
+      subject: 'Weekly update',
+      targetKind: 'group',
+    })
+    const deliverAssistantMessageOverBinding = vi.fn()
+      .mockResolvedValueOnce({
+        delivery: createDelivery({
+          channel: 'telegram',
+          providerMessageId: null,
+          providerMessageIds: [
+            'telegram-message-volume-1',
+            'telegram-message-volume-2',
+          ],
+          sentAt: '2026-08-15T19:00:00.000Z',
+        }),
+        deliveryTransportIdempotent: true,
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        delivery: createDelivery({
+          channel: 'email',
+          providerMessageId: 'email-parent-planned',
+          sentAt: '2026-08-15T19:01:00.000Z',
+          target: parentTarget,
+          targetKind: 'thread',
+        }),
+        deliveryTransportIdempotent: true,
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        delivery: createDelivery({
+          channel: 'email',
+          providerMessageId: 'email-child-one',
+          sentAt: '2026-08-15T19:02:00.000Z',
+          target: childOneTarget,
+          targetKind: 'thread',
+        }),
+        deliveryTransportIdempotent: true,
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        delivery: createDelivery({
+          channel: 'email',
+          providerMessageId: 'email-child-two',
+          sentAt: '2026-08-15T19:03:00.000Z',
+          target: childTwoTarget,
+          targetKind: 'thread',
+        }),
+        deliveryTransportIdempotent: true,
+        session: null,
+      })
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+    })
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-message-volume-',
+    )
+    const telegram = await createIntent(outbox, vaultRoot, {
+      channel: 'telegram',
+      createdAt: '2026-08-15T18:59:00.000Z',
+      sessionId: 'session-telegram-message-volume',
+      turnId: 'turn-telegram-message-volume',
+    })
+    const parent = await createIntent(outbox, vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-08-15T19:00:00.000Z',
+      explicitTarget: parentTarget,
+      sessionId: 'session-email-parent',
+      threadIsDirect: false,
+      turnId: 'turn-email-parent',
+    })
+    const childOne = await createIntent(outbox, vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-08-15T19:01:00.000Z',
+      explicitTarget: childOneTarget,
+      sessionId: 'session-email-child-one',
+      threadIsDirect: false,
+      turnId: 'turn-email-child-one',
+    })
+    const childTwo = await createIntent(outbox, vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-08-15T19:02:00.000Z',
+      explicitTarget: childTwoTarget,
+      sessionId: 'session-email-child-two',
+      threadIsDirect: false,
+      turnId: 'turn-email-child-two',
+    })
+
+    const telegramSent = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: telegram.intentId,
+      trackMessageVolumeReceipt: true,
+      vault: vaultRoot,
+    })
+    const parentSent = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: parent.intentId,
+      trackMessageVolumeReceipt: true,
+      vault: vaultRoot,
+    })
+    const childOneSent = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: childOne.intentId,
+      trackMessageVolumeReceipt: true,
+      vault: vaultRoot,
+    })
+    const childTwoSent = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: childTwo.intentId,
+      trackMessageVolumeReceipt: true,
+      vault: vaultRoot,
+    })
+
+    expect(telegramSent.intent.messageVolumeReceiptRecordedAt).toBeNull()
+    expect(telegramSent.intent.nextAttemptAt).toBe(
+      telegramSent.intent.sentAt,
+    )
+    expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(
+      telegramSent.intent,
+    )).toBe(true)
+    expect(parentSent.intent.messageVolumeReceiptRecordedAt).toBeUndefined()
+    expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(
+      parentSent.intent,
+    )).toBe(false)
+    expect(childOneSent.intent.messageVolumeReceiptRecordedAt).toBeNull()
+    expect(childTwoSent.intent.messageVolumeReceiptRecordedAt).toBeNull()
+    expect(childOneSent.intent.nextAttemptAt).toBe(childOneSent.intent.sentAt)
+    expect(childTwoSent.intent.nextAttemptAt).toBe(childTwoSent.intent.sentAt)
+    expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(
+      childOneSent.intent,
+    )).toBe(true)
+    expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(
+      childTwoSent.intent,
+    )).toBe(true)
+    expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt({
+      ...telegramSent.intent,
+      delivery: {
+        channel: 'telegram',
+        idempotencyKey: telegramSent.intent.deliveryIdempotencyKey ?? '',
+        kind: 'message-reaction',
+        reaction: 'heart',
+        sentAt: '2026-08-15T19:04:00.000Z',
+        target: 'telegram-chat',
+        targetKind: 'participant',
+        targetMessageId: 'telegram-message',
+      },
+      messageVolumeReceiptRecordedAt: null,
+    })).toBe(false)
+
+    const receiptRecordedAt = '2026-08-15T19:10:00.000Z'
+    const retryAt = '2026-08-15T19:09:00.000Z'
+    const rescheduled = await outbox.rescheduleAssistantOutboxMessageVolumeReceipt({
+      dedupeKey: telegramSent.intent.dedupeKey,
+      intentId: telegramSent.intent.intentId,
+      nextAttemptAt: retryAt,
+      vault: vaultRoot,
+    })
+    expect(rescheduled?.nextAttemptAt).toBe(retryAt)
+    await outbox.markAssistantOutboxMessageVolumeReceiptRecorded({
+      channel: 'telegram',
+      dedupeKey: telegramSent.intent.dedupeKey,
+      intentId: telegramSent.intent.intentId,
+      recordedAt: receiptRecordedAt,
+      vault: vaultRoot,
+    })
+    const replay = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: telegram.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(replay.intent.messageVolumeReceiptRecordedAt).toBe(receiptRecordedAt)
+    expect(replay.intent.nextAttemptAt).toBeNull()
+    expect(outbox.hasPendingAssistantOutboxMessageVolumeReceipt(
+      replay.intent,
+    )).toBe(false)
+    expect(deliverAssistantMessageOverBinding).toHaveBeenCalledTimes(4)
+  })
+
   it('runs required delivery persistence before the canonical sent mark', async () => {
     const delivery = createDelivery({
       providerMessageId: 'provider-raced-send',
@@ -893,6 +1221,7 @@ describe('assistant outbox thresholds', () => {
       expect(intent).toMatchObject({
         delivery,
         deliveryConfirmationPending: false,
+        nextAttemptAt: null,
         sentAt: null,
         status: 'sending',
       })
@@ -1059,7 +1388,7 @@ describe('assistant outbox thresholds', () => {
 async function loadOutboxModule(options: {
   deliverAssistantMessageOverBinding?: (...args: never[]) => Promise<unknown>
   readFile?: (filePath: string, encoding: 'utf8') => Promise<string>
-  rename?: (...args: never[]) => Promise<unknown>
+  rename?: typeof renameFile
   saveAssistantSession?: (...args: never[]) => Promise<unknown>
 } = {}) {
   vi.resetModules()
@@ -1121,6 +1450,8 @@ async function createIntent(
   overrides: Partial<{
     channel: string
     createdAt: string
+    deliveryIdempotencyKey: string | null
+    deliveryTransportIdempotent: boolean
     explicitTarget: string | null
     identityId: string
     message: string
@@ -1136,6 +1467,8 @@ async function createIntent(
   return outbox.createAssistantOutboxIntent({
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
+    deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: overrides.deliveryTransportIdempotent,
     explicitTarget: overrides.explicitTarget ?? null,
     identityId: overrides.identityId ?? 'participant-1',
     message: overrides.message ?? 'assistant outbox threshold coverage',

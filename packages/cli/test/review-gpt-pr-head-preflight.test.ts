@@ -183,6 +183,26 @@ describe('ReviewGPT PR context guard', () => {
     expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
   })
 
+  it.each([
+    ['--idle-draft-timeout', '30m'],
+    ['--idleDraftTimeout', '30m'],
+    ['--minimum-marked-response-time', '5m'],
+    ['--minimumMarkedResponseTime', '5m'],
+  ])('keeps PR context guarded when %s precedes the preset', (option, value) => {
+    const harness = createHarness()
+    const result = runHarness(harness, [
+      option,
+      value,
+      'completion-specialists',
+      '--dry-run',
+    ])
+
+    expect(result.status).toBe(0)
+    expect(readFileSync(harness.capturePath, 'utf8')).toBe(
+      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${option} ${value} completion-specialists --dry-run\n`,
+    )
+  })
+
   it('counts the accepted camelCase promptFile spelling in the specialist budget', () => {
     const harness = createHarness()
     const promptPath = path.join(harness.harnessRoot, 'oversized-prompt.md')

@@ -6,13 +6,34 @@ import {
   parseJoinInvitePreviewStage,
 } from "@/src/components/hosted-onboarding/join-invite-preview";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import { decodeURIComponentOrRaw } from "@/src/lib/http";
+import {
+  createMurphOgImageRef,
+  createMurphPageMetadata,
+} from "@/src/lib/site-metadata";
 import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
 
-export const metadata: Metadata = createMurphPageMetadata({
-  title: "Finishing setup — Murph",
-  description: "Finish setting up your Murph account after checkout.",
-});
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ inviteCode: string }>;
+}): Promise<Metadata> {
+  const { inviteCode } = await params;
+  // Keep the parent invite card: createMurphPageMetadata otherwise injects
+  // the site default, which overrides the parent segment's dedicated image.
+  // Tolerant decode: this page accepts malformed codes, so metadata must too.
+  const ogImage = createMurphOgImageRef({
+    alt: "You’re invited to Murph.",
+    url: `/join/${encodeURIComponent(decodeURIComponentOrRaw(inviteCode))}/opengraph-image`,
+  });
+
+  return createMurphPageMetadata({
+    title: "Finishing setup — Murph",
+    description: "Finish setting up your Murph account after checkout.",
+    openGraph: { images: [ogImage] },
+    twitter: { images: [ogImage] },
+  });
+}
 
 export default async function JoinInviteSuccessPage(input: {
   params: Promise<{ inviteCode: string }>;
@@ -54,12 +75,4 @@ export default async function JoinInviteSuccessPage(input: {
       sessionId={sessionId}
     />
   );
-}
-
-function decodeURIComponentOrRaw(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }

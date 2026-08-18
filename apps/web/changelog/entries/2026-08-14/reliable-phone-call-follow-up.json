@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 100,
+  "item": {
+    "id": "reliable-phone-call-follow-up",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Reliable phone-call follow-up",
+    "summary": "Murph can now check a recent phone call when you ask, report its final result promptly, and stop an exact active call on request.",
+    "details": "Call status stays tied to your account and distinguishes an active call, pending analysis, a completed outcome, and a failed attempt without guessing. Every final result now returns to the requesting conversation.",
+    "relevanceTags": ["phone-calls", "reliability", "follow-up"],
+    "sourcePullRequests": [1836]
+  }
+}

@@ -90,7 +90,15 @@ Current providers:
   Each present workout metric array must align with the timestamp array. A workout
   whose present metric arrays do not align is skipped so one malformed stream cannot
   block other workouts or replace a previously complete canonical measurement; the
-  skip emits a metadata-only cardinality warning for provider follow-up.
+  skip emits a metadata-only cardinality warning for provider follow-up. A
+  retryable per-workout request failure remains owned by the existing job retry
+  transition and still stops the serial loop. Its worker-attempt runtime
+  diagnostic records only the canonical-order candidate ordinal/count and which
+  supported summary-id alias selected the request; it never records the workout
+  id, summary, stream payload, URL, or provider response identifier.
+  Worker-attempt logs also report the committed `queued`/`dead` transition and
+  remaining bounded attempt budget, while a typed origin distinguishes them
+  from canonical-apply and checkpoint-side diagnostics.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day

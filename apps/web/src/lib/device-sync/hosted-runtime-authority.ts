@@ -5,7 +5,10 @@ import {
   requiresHistoricalResetDeviceSyncSource,
   sanitizeStoredDeviceSyncMetadata,
 } from "@murphai/device-syncd/public-account";
-import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
+import type {
+  DeviceSyncJobFailureEventOrigin,
+  PublicDeviceSyncAccount,
+} from "@murphai/device-syncd/types";
 import type {
   SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";

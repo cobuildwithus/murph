@@ -9,6 +9,8 @@ import {
 } from "@murphai/hosted-execution/clinical-records-boundary";
 import {
   HOSTED_PHONE_CALLS_PATH,
+  HOSTED_PHONE_CALL_STATUS_PATH,
+  HOSTED_PHONE_CALL_STOP_PATH,
 } from "@murphai/hosted-execution/phone-calls";
 import {
   HOSTED_PHYSICAL_NOTES_PATH,
@@ -49,7 +51,9 @@ import {
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
+  HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+  HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
@@ -105,11 +109,15 @@ export type HostedRunnerWebControlOperation =
   | "member_action_outcome"
   | "linq_delivery_outcome"
   | "linq_egress_engagement"
+  | "outbound_message_volume_receipt"
   | "plan_usage_tool"
   | "subscription_tool"
   | "thread_route_authority"
   | "phone_call_start"
+  | "phone_call_status"
+  | "phone_call_stop"
   | "physical_note_send"
+  | "phone_call_result_delivery"
   | "runtime_latency_trace"
   | "runtime_log_write"
   | "product_feedback_recording"
@@ -159,11 +167,18 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH, "member_action_outcome"],
   [HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH, "linq_delivery_outcome"],
   [HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH, "linq_egress_engagement"],
+  [HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH, "phone_call_result_delivery"],
+  [
+    HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+    "outbound_message_volume_receipt",
+  ],
   [HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH, "workspace_checkpoint"],
   [HOSTED_RUNTIME_ISSUE_RECORD_PATH, "assistant_runtime_issue_export"],
   [HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH, "product_feedback_recording"],
   [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
   [HOSTED_PHONE_CALLS_PATH, "phone_call_start"],
+  [HOSTED_PHONE_CALL_STATUS_PATH, "phone_call_status"],
+  [HOSTED_PHONE_CALL_STOP_PATH, "phone_call_stop"],
   [HOSTED_PHYSICAL_NOTES_PATH, "physical_note_send"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);

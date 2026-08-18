@@ -1605,12 +1605,25 @@ test.each(["resource"] as const)(
       assert.equal(streamRequests.filter((workoutId) => workoutId === "day-one-b").length, 1);
       assert.equal(streamRequests.filter((workoutId) => workoutId === "day-two-a").length, 1);
       assert.equal(streamRequests.filter((workoutId) => workoutId === "day-two-b").length, 5);
+      const failureDiagnostics = service.listJobFailureDiagnostics();
       assert.deepEqual(
-        service.listJobFailureDiagnostics().map((diagnostic) => diagnostic.attempts),
+        failureDiagnostics.map((diagnostic) => diagnostic.attempts),
         [1, 2, 3, 4, 5],
       );
+      assert.deepEqual(
+        failureDiagnostics.map((diagnostic) => diagnostic.jobDisposition),
+        ["queued", "queued", "queued", "queued", "dead"],
+      );
+      assert.deepEqual(
+        failureDiagnostics.map((diagnostic) => diagnostic.maxAttempts),
+        [5, 5, 5, 5, 5],
+      );
+      assert.deepEqual(
+        failureDiagnostics.map((diagnostic) => diagnostic.remainingAttempts),
+        [4, 3, 2, 1, 0],
+      );
       assert.ok(
-        service.listJobFailureDiagnostics().every((diagnostic) =>
+        failureDiagnostics.every((diagnostic) =>
           diagnostic.code === "TEST_WORKOUT_STREAM_RETRYABLE"
         ),
       );
@@ -7300,7 +7313,7 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
     now = new Date(retryDueAt);
     const claimedRetry = store.claimDueJob("worker-dead-junction-retry", retryDueAt, 60_000);
     assert.equal(claimedRetry?.id, retryJob.id);
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         retryJob.id,
         "worker-dead-junction-retry",
@@ -7310,7 +7323,12 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
         null,
         true,
       ),
-      true,
+      {
+        attempts: 1,
+        disposition: "dead",
+        maxAttempts: 1,
+        remainingAttempts: 0,
+      },
     );
     assert.equal(store.getJobById(retryJob.id)?.status, "dead");
 
@@ -9461,6 +9479,9 @@ test("device sync service exposes safe structured diagnostics for provider failu
   assert.equal(diagnostics[0]?.provider, "demo");
   assert.equal(diagnostics[0]?.jobKind, "backfill");
   assert.equal(diagnostics[0]?.attempts, 1);
+  assert.equal(diagnostics[0]?.jobDisposition, "dead");
+  assert.equal(diagnostics[0]?.maxAttempts, 5);
+  assert.equal(diagnostics[0]?.remainingAttempts, 0);
   assert.equal(typeof diagnostics[0]?.at, "string");
   assert.equal(
     diagnostics[0]?.summary,
@@ -9582,12 +9603,24 @@ test("device sync service keeps per-attempt failure diagnostics after a later jo
     providers: [
       createFakeProvider({
         async executeJob(_context, job) {
-          if (job.kind === "resource") {
+          if (job.kind === "reconcile") {
             throw deviceSyncError({
               code: "JUNCTION_API_REQUEST_FAILED",
-              message: "Junction summary request failed.",
+              details: {
+                requestCandidateAliasSource: "id",
+                requestCandidateCount: 8,
+                requestCandidateOrdinal: 3,
+                requestEndpointKind: "junction_workout_stream",
+                requestMethod: "GET",
+                responseBody: {
+                  privatePayloadMarker: "private-provider-payload-must-not-escape",
+                  workoutId: "private-workout-id-must-not-escape",
+                },
+                status: 500,
+              },
+              message: "Junction workout stream request failed.",
               retryable: true,
-              httpStatus: 503,
+              httpStatus: 500,
             });
           }
           return {};
@@ -9609,17 +9642,14 @@ test("device sync service keeps per-attempt failure diagnostics after a later jo
     store.enqueueJob({
       accountId: connected.account.id,
       provider: "demo",
-      kind: "resource",
-      payload: {
-        resource: "sleep",
-        resourceCategory: "summary",
-      },
+      kind: "reconcile",
+      payload: {},
+      priority: 100,
       availableAt: "2026-06-08T02:00:00.000Z",
     });
 
-    // The webhook-style resource job fails first; the initial backfill job for
-    // the same account succeeds afterwards and clears the account-level error
-    // state, mirroring the webhook-wake drains from the June 2026 incident.
+    // The high-priority reconcile fails first; the initial backfill job for the
+    // same account succeeds afterwards and clears the account-level error state.
     await service.drainWorker(10);
 
     const account = store.getAccountById(connected.account.id);
@@ -9632,12 +9662,26 @@ test("device sync service keeps per-attempt failure diagnostics after a later jo
     assert.equal(diagnostics[0]?.accountId, connected.account.id);
     assert.equal(diagnostics[0]?.code, "JUNCTION_API_REQUEST_FAILED");
     assert.equal(diagnostics[0]?.provider, "demo");
-    assert.equal(diagnostics[0]?.jobKind, "resource");
-    assert.equal(diagnostics[0]?.resource, "sleep");
+    assert.equal(diagnostics[0]?.jobKind, "reconcile");
+    assert.equal(diagnostics[0]?.resource, undefined);
     assert.equal(diagnostics[0]?.attempts, 1);
+    assert.equal(diagnostics[0]?.jobDisposition, "queued");
+    assert.equal(diagnostics[0]?.maxAttempts, 5);
+    assert.equal(diagnostics[0]?.remainingAttempts, 4);
     assert.equal(diagnostics[0]?.retryable, true);
     assert.equal(typeof diagnostics[0]?.at, "string");
-    assert.equal(diagnostics[0]?.summary, "Junction summary request failed.");
+    assert.equal(diagnostics[0]?.summary, "Junction workout stream request failed.");
+    assert.deepEqual(diagnostics[0]?.details, {
+      providerHttpStatus: 500,
+      providerRequestCandidateAliasSource: "id",
+      providerRequestCandidateCount: 8,
+      providerRequestCandidateOrdinal: 3,
+      providerRequestEndpointKind: "junction_workout_stream",
+      providerRequestMethod: "GET",
+    });
+    const serializedDiagnostics = JSON.stringify(diagnostics);
+    assert.equal(serializedDiagnostics.includes("private-workout-id-must-not-escape"), false);
+    assert.equal(serializedDiagnostics.includes("private-provider-payload-must-not-escape"), false);
   } finally {
     close();
   }

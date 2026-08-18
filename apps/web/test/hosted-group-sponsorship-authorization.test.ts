@@ -1407,12 +1407,15 @@ describe("hosted capped group sponsorship authorization", () => {
 
   it("applies confirmed increases immediately and preserves pause, resume, and cancel state", async () => {
     let authorization = buildAuthorization({ monthlyCapMinor: 500 });
+    let canceled = false;
     const tx = {
       hostedGroupSponsorshipAuthorization: {
-        findFirst: vi.fn(async () => authorization),
+        findFirst: vi.fn(async () => canceled ? null : authorization),
         findUnique: vi.fn(async () => authorization),
         updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
           authorization = { ...authorization, ...data };
+          canceled ||=
+            data.status === HostedGroupSponsorshipAuthorizationStatus.canceled;
           return { count: 1 };
         }),
       },
@@ -1453,6 +1456,11 @@ describe("hosted capped group sponsorship authorization", () => {
       ...base,
       action: { action: "cancel", authorizationId: "hgsa_abcdefghijklmnop" },
       now: new Date("2026-08-01T12:04:00.000Z"),
+    })).resolves.toBeNull();
+    await expect(manageHostedGroupSponsorshipAuthorization({
+      ...base,
+      action: { action: "cancel", authorizationId: "hgsa_abcdefghijklmnop" },
+      now: new Date("2026-08-01T12:05:00.000Z"),
     })).resolves.toBeNull();
     expect(authorization).toMatchObject({
       canceledAt: new Date("2026-08-01T12:04:00.000Z"),

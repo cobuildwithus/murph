@@ -1424,6 +1424,61 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("projects only normalized provider-plan reasoning effort", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_provider_plan_reasoning_effort",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_provider_plan_reasoning_effort",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-08-15T00:00:00.000Z",
+    });
+    const project = (reasoningEffort: unknown) =>
+      emitHostedAssistantProviderTraceLog({
+        event: {
+          rawEvent: {
+            schema: "murph.assistant-provider-plan-diagnostics.v1",
+            type: "assistant.provider.plan",
+            codexContinuation: "thread-start",
+            reasoningEffort,
+            workingDirectoryKind: "hosted-stable-proc-cwd",
+          },
+          updates: [],
+        },
+        wake,
+      });
+
+    expect(project("high")?.redacted).toMatchObject({
+      reasoningEffort: "high",
+    });
+    expect(project("low")?.redacted).toMatchObject({
+      reasoningEffort: "low",
+    });
+    expect(project(null)?.redacted).toMatchObject({
+      reasoningEffort: null,
+    });
+
+    for (const rejectedValue of [
+      "member-specific-private-value",
+      "/vaults/private/member",
+    ]) {
+      const rejected = project(rejectedValue);
+      expect(rejected?.redacted).not.toHaveProperty("reasoningEffort");
+      expect(JSON.stringify(rejected?.redacted)).not.toContain(rejectedValue);
+    }
+  });
+
   it("captures assistant context snapshot as a route-planning slowest stage", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_provider_plan_context_snapshot",

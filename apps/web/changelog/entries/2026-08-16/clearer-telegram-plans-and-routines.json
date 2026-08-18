@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-16",
+  "order": 100,
+  "item": {
+    "id": "clearer-telegram-plans-and-routines",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer Telegram plans and routines",
+    "summary": "Murph now prefers Rich Messages for structured plans, schedules, instructions, and exercise routines in direct and group Telegram conversations.",
+    "details": "Normal conversation can still stay as text. Existing card layouts are examples Murph can use or adapt, exercise images remain optional, and nutrition and tracked-workout safety rules stay unchanged.",
+    "relevanceTags": ["assistant", "messaging", "telegram", "exercise"],
+    "sourcePullRequests": [1926]
+  }
+}

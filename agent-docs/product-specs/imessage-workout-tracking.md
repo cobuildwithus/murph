@@ -154,6 +154,29 @@ This narrow same-conversation repetition rule does not create a card-level
 target, prior workout value, assistant suggestion, or non-repetition
 prescription into an actual set.
 
+A short acknowledgement after a set message or assistant reply is not another
+set completion. It cannot move the write target to the next set. The last set
+coordinate the member explicitly named remains the only candidate. If that set
+still needs a result, Murph asks one narrow question about it. If the canonical
+result already matches, the acknowledgement causes no workout mutation. The
+sole exception is a contextual affirmative that accepts the exact bounded
+missing-workout recovery offer below.
+
+Every completion, correction, and acknowledgement follow-up first resolves the
+canonical active workout. A missing active workout fails closed. Murph does not
+start a workout to make an earlier assistant confirmation appear true, does not
+write a later set, and does not claim that any set was saved. It states that no
+active tracked workout was found. A completion or correction alone never
+authorizes a new workout. Murph may start one only when the current message
+explicitly requests it or the member accepts one exact recovery offer. That
+offer repeats the proposed workout, exercise, set coordinate, and stated result.
+Acceptance creates only enough pending coordinates through that set and writes
+only the named set. Murph rechecks active state before acting and never retargets
+the accepted recovery if another active workout has appeared. The missing-state
+response includes both the truthful no-save result and that exact recovery
+question. It does not stop after the failure statement or give generic retry
+advice.
+
 An active workout may have zero pending sets after the final result is logged; it remains active until the member explicitly finishes it.
 
 ## Direct action loop
@@ -231,12 +254,25 @@ operations, assistant tools, or a new queue.
 
 ## Rollout
 
-For a new V4 workout, an expansion of V4's strict bounds, or the V6 editor,
-deploy the native reader first, the shared Web action and image routes second,
-and the Worker and runner producer last. Older app versions retain
-truthful captions and the static image but do not provide the drill-down workout
-interface. Keep the Web route available while any sent image URL may still be
-fetched.
+Backward compatibility is a permanent iMessage app-card contract, not a
+one-time V6 rollout step. Linq's app-capability result does not negotiate a
+decoder version, so every production card must remain readable by every
+previously released Murph Messages extension that can claim it. A new schema,
+discriminator, required field, stricter bound, or changed meaning may emit only
+when unknown clients keep receiving the last readable envelope, an explicit
+capability selects a compatible envelope, or every earlier claiming extension
+already renders the unknown shape as a complete non-interactive recovery. A
+new reader becoming available in TestFlight or the App Store is necessary when
+applicable but is never sufficient by itself because older installed builds
+remain active. Until compatibility is proven, emit the prior readable schema
+(V4 for workouts) or deterministic ordinary text.
+
+Within that compatibility gate, deploy the native reader first, the shared Web
+action and image routes second, and the Worker and runner producer last. Keep
+the Web route available while any sent image URL may still be fetched.
+Provider acceptance, delivery receipts, the provider's static layout, and
+new-build device proof do not prove old-extension rendering: an installed
+extension can claim the card before rejecting its envelope.
 
 The backend also has a persisted-state compatibility floor. Deploy a Worker and
 runner bundle that accepts the current V4 bounds and V6 before a card using

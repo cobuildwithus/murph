@@ -18,6 +18,17 @@ export const MURPH_DEFAULT_METADATA_DESCRIPTION =
 export const MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION =
   "Murph figures out what works for you—and gets your friends in on it. A personal health AI that runs experiments with you and challenges with your friends.";
 export const MURPH_IOS_APP_STORE_ID = "6786145859";
+export const MURPH_PUBLIC_SITE_URL = "https://www.withmurph.ai";
+
+export const MURPH_INDEXABLE_PAGE_ROBOTS = {
+  follow: true,
+  index: true,
+} as const;
+
+export const MURPH_NOINDEX_PAGE_ROBOTS = {
+  follow: false,
+  index: false,
+} as const;
 
 export const MURPH_DEFAULT_OPEN_GRAPH_IMAGE = {
   alt: MURPH_TAGLINE,
@@ -26,6 +37,23 @@ export const MURPH_DEFAULT_OPEN_GRAPH_IMAGE = {
   url: "/opengraph-image",
   width: 1200,
 } as const;
+
+/**
+ * Reference to a dedicated 1200x630 OG image route. Pass the result through
+ * `openGraph.images` AND `twitter.images`: `createMurphPageMetadata` injects
+ * the site default otherwise, and that explicit default also defeats Next's
+ * file-convention inheritance, so child routes of an OG-bearing parent must
+ * pass the parent's image through here or they fall back to the homepage card.
+ */
+export function createMurphOgImageRef(input: { alt: string; url: string }) {
+  return {
+    alt: input.alt,
+    height: 630,
+    type: "image/png",
+    url: input.url,
+    width: 1200,
+  } as const;
+}
 
 export function withMurphOpenGraphDefaults(
   openGraph: OpenGraphMetadata,
@@ -51,6 +79,7 @@ export function createMurphPageMetadata(input: {
   alternates?: Metadata["alternates"];
   description: string;
   openGraph?: OpenGraphMetadata;
+  robots?: Metadata["robots"];
   title: string;
   twitter?: TwitterMetadata;
 }): Metadata {
@@ -74,6 +103,10 @@ export function createMurphPageMetadata(input: {
 
   if (input.alternates) {
     metadata.alternates = input.alternates;
+  }
+
+  if (input.robots) {
+    metadata.robots = input.robots;
   }
 
   return metadata;
