@@ -1333,19 +1333,25 @@ Last verified: 2026-08-16
   late generation-1 completion cannot downgrade newer coverage. This keeps the
   rollout fence in the existing queue, scheduler, and account-metadata owners
   without another repair loop or lifecycle manager.
-- Junction full reconcile and backfill jobs finish inventory, summary, profile,
-  and historical scheduling once, then advance timeseries-only work through the
-  existing job payload. Each attempt owns one canonical resource and one
-  complete UTC day. A collection may use at most three sequential pages with one
-  bounded request attempt per page. Page-heavy active-calorie and heart-rate
-  days deterministically retry as complete UTC hours; no partial aggregate or
-  vendor cursor is persisted. `timeseriesCursor` and
-  `timeseriesResourceCursor` identify the next complete unit without changing
-  job dedupe identity. The deployed v1 resource envelope is read only at this
-  provider boundary, validated exactly, and projected immediately to its active
-  scalar resource; new successors never write the envelope or consult its
-  completed-resource names. Every partial continuation preserves
-  `lastSyncCompletedAt`; only terminal current full work may advance it.
+- Junction historical backfill and non-yieldable full jobs finish inventory,
+  summary, profile, and historical scheduling once. A yieldable full reconcile
+  instead commits one configured summary resource per full-job continuation,
+  after a live provider inventory read for that attempt, before entering the
+  existing timeseries continuation. This bounds each summary collection to at
+  most three sequential pages with one eight-second request attempt per page;
+  a typed provider failure therefore reaches ordinary job backoff before the
+  hosted 45-second maintenance cancellation can release it as an unclassified
+  yield. Each timeseries attempt owns one canonical resource and one complete
+  UTC day under the same three-page, single-attempt bound. Page-heavy active-
+  calorie and heart-rate days deterministically retry as complete UTC hours;
+  no partial aggregate or vendor cursor is persisted. `summaryResourceCursor`,
+  `summaryPhaseComplete`, `timeseriesCursor`, and `timeseriesResourceCursor`
+  identify the next complete unit without changing job dedupe identity. The
+  deployed v1 resource envelope is read only at this provider boundary,
+  validated exactly, and projected immediately to its active scalar resource;
+  new successors never write the envelope or consult its completed-resource
+  names. Every partial continuation preserves `lastSyncCompletedAt`; only
+  terminal current full work may advance it.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection

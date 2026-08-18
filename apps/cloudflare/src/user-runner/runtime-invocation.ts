@@ -253,6 +253,7 @@ export class RuntimeInvocationService {
         })
       : null;
     let platformAiUsageAllowed: boolean | null = null;
+    let assistantExecutionBlocked = false;
     let invocationProcessingMode = input.input.processingMode ?? null;
     if (hostedAssistantCustomInferenceOverride) {
       if (typeof workspaceRead.platformAiUsageAllowed !== "boolean") {
@@ -270,6 +271,7 @@ export class RuntimeInvocationService {
       // provider egress if one is reached unexpectedly. Explicit retention-only
       // work can also proceed because it needs no model call.
       platformAiUsageAllowed = false;
+      assistantExecutionBlocked = true;
       if ((invocationProcessingMode ?? "default") === "default") {
         invocationProcessingMode = "system_mailbox";
       }
@@ -299,6 +301,7 @@ export class RuntimeInvocationService {
         workspaceRead.hostedAssistantProviderOverride ?? null,
       hostedAssistantReasoningEffortOverride:
         workspaceRead.hostedAssistantReasoningEffortOverride ?? null,
+      assistantExecutionBlocked,
       processingMode: invocationProcessingMode,
       token,
       userId: input.input.userId,
@@ -820,6 +823,7 @@ export class RuntimeInvocationService {
   }
 
   private async prepareWorkspaceRunnerInvocation(input: {
+    assistantExecutionBlocked: boolean;
     commandBudget?: RuntimeProcessingCommandBudget;
     hostedAssistantCustomInferenceOverride:
       HostedAssistantCustomInferenceOverride | null;
@@ -998,6 +1002,9 @@ export class RuntimeInvocationService {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       ...(preparedSnapshotRestore ? { preparedSnapshotRestore } : {}),
       request: {
+        ...(input.assistantExecutionBlocked
+          ? { assistantExecutionBlocked: true as const }
+          : {}),
         attemptId: input.token.attemptId,
         idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,

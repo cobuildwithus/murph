@@ -205,6 +205,8 @@ async function executeFullJobTimeseriesContinuations(input: {
   for (let index = 0; index < 2_000; index += 1) {
     const continuation = result.scheduledJobs?.find((job) =>
       job.payload?.timeseriesResourceCursor !== undefined
+      || job.payload?.summaryResourceCursor !== undefined
+      || job.payload?.summaryPhaseComplete === true
     );
     if (!continuation) {
       return {
@@ -1974,6 +1976,135 @@ test("Junction retrying historical backfill without attempts uses the first retr
     ),
   );
   assert.equal(due?.nextReconcileAt, "2026-04-04T01:16:00.000Z");
+});
+
+test("Junction yieldable reconcile checkpoints one bounded summary resource per continuation", async () => {
+  const requestsByPass: string[][] = [];
+  const importedSnapshots: unknown[] = [];
+  let activePass = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    (requestsByPass[activePass] ??= []).push(url);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: {
+            activity: true,
+            body: true,
+            sleep: true,
+          },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    const summaryResource = new URL(url).pathname.match(
+      /^\/v2\/summary\/([^/]+)\//u,
+    )?.[1];
+    if (summaryResource) {
+      return createJsonResponse({
+        data: [{
+          connectionId: "provider-garmin-1",
+          id: `${summaryResource}-1`,
+          observedAt: "2026-04-02T12:00:00.000Z",
+        }],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity", "sleep", "body"],
+    timeseriesResources: [],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+    shouldYield: () => false,
+  });
+  let job = createJob("reconcile", {
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-03-27T00:00:00.000Z",
+  });
+  const continuationPayloads: Array<Record<string, unknown>> = [];
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    activePass = pass;
+    const result = await executeJunctionJob(provider, context, job);
+    const continuation = result.scheduledJobs?.find((candidate) =>
+      candidate.kind === "reconcile"
+      && (
+        candidate.payload?.summaryResourceCursor !== undefined
+        || candidate.payload?.summaryPhaseComplete === true
+      )
+    );
+    if (!continuation) {
+      assert.equal(pass, 3);
+      break;
+    }
+    continuationPayloads.push(continuation.payload ?? {});
+    job = createJobFromInput(continuation, pass);
+  }
+
+  assert.deepEqual(
+    requestsByPass.map((requests) => requests
+      .map((url) => new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1])
+      .filter((resource): resource is string => Boolean(resource))),
+    [["activity"], ["sleep"], ["body"], []],
+  );
+  assert.deepEqual(
+    continuationPayloads.map((payload) => ({
+      summaryPhaseComplete: payload.summaryPhaseComplete,
+      summaryResourceCursor: payload.summaryResourceCursor,
+    })),
+    [
+      { summaryPhaseComplete: undefined, summaryResourceCursor: "sleep" },
+      { summaryPhaseComplete: undefined, summaryResourceCursor: "body" },
+      { summaryPhaseComplete: true, summaryResourceCursor: undefined },
+    ],
+  );
+  assert.equal(importedSnapshots.length, 4);
+});
+
+test("Junction yieldable summary continuation fails within its inner provider-attempt bound", async () => {
+  let summaryAttempts = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { activity: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/")) {
+      summaryAttempts += 1;
+      return createJsonResponse({ error: "temporarily unavailable" }, 503);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({ shouldYield: () => false }),
+      createJob("reconcile", {
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-03-27T00:00:00.000Z",
+      }),
+    ),
+    { code: "JUNCTION_API_REQUEST_FAILED" },
+  );
+
+  assert.equal(summaryAttempts, 1);
 });
 
 test("Junction non-connect backfill window uses bounded job retry without historical metadata", async () => {

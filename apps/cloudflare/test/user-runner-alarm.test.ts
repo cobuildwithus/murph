@@ -2798,6 +2798,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await vi.waitFor(() => {
       expect(invoke).toHaveBeenCalledOnce();
+      expect(invoke.mock.calls[0]?.[0].job.request.assistantExecutionBlocked).toBe(true);
       expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
         "system_mailbox",
       );

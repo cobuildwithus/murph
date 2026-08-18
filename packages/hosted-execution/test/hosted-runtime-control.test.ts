@@ -722,6 +722,22 @@ describe("hosted runtime control contracts", () => {
       ...workspaceInvocationRequest,
       processingMode: "system_mailbox",
     });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      assistantExecutionBlocked: true,
+      processingMode: "system_mailbox",
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      assistantExecutionBlocked: true,
+      processingMode: "system_mailbox",
+    });
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      assistantExecutionBlocked: false,
+      processingMode: "system_mailbox",
+    })).toThrow(
+      "Hosted workspace invocation request assistantExecutionBlocked must be true.",
+    );
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       processingMode: "assistant",

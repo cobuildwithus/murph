@@ -13872,6 +13872,129 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("system mailbox runs durable device work when platform policy blocks a due assistant handoff", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const now = "2026-04-27T14:00:00.000Z";
+    const staleDeviceSyncWakeAt = "2026-04-27T13:59:00.000Z";
+    const automationId = "automation_01JQ8PWXP5A68SQM1W0GYM41WB";
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:blocked-assistant-handoff",
+      id: "mailbox_item_system_mailbox_device_blocked_assistant_handoff",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(now));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId,
+        continuityPolicy: "fresh",
+        instructions: "Send one synthetic experiment reminder.",
+        now: new Date("2026-04-27T13:58:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: {
+          at: "2026-04-27T13:59:30.000Z",
+          kind: "at",
+        },
+        status: "active",
+        title: "Synthetic blocked reminder",
+        vaultRoot,
+      });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/blocked-assistant-system-handoff-before.bundle.json",
+        vaultRoot,
+      });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            assistantExecutionBlocked: true,
+            attemptId: "attempt_synthetic_blocked_assistant_system_handoff",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/blocked-assistant-system-handoff.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported system mailbox work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleDeviceSyncWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("Blocked system mailbox work must not enter assistant execution.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(result.immediateRecheckRequested, undefined);
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.nextWakeReason, undefined);
+      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, null);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, null);
+      const cronStatus = await getAssistantCronStatus(vaultRoot, {
+        turnEnvironment: {
+          currentWorkingDirectory: null,
+          env: {
+            MURPH_HOSTED_RUNTIME_PROCESS: "1",
+            VAULT: vaultRoot,
+          },
+        },
+      });
+      assert.equal(cronStatus.nextRunAt, "2026-04-27T13:59:30.000Z");
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("system mailbox yields device sync when its projected assistant cron becomes due", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];

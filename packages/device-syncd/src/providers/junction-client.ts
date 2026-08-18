@@ -129,6 +129,7 @@ export interface JunctionWindowInput {
 }
 
 export interface JunctionProfileSummaryInput {
+  collectionWorkLimit?: JunctionCollectionWorkLimit;
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
   userId: string;
@@ -455,6 +456,12 @@ export class JunctionClient {
         endpointKind: "junction_summary_collection",
         queryParameterNames: provider ? ["provider"] : [],
         signal: input.signal ?? null,
+        ...(input.collectionWorkLimit
+          ? {
+              maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
       },
       (clientOptions, requestOptions) => {
         const request: GetProfileRequest = { userId: input.userId };
@@ -698,6 +705,12 @@ export class JunctionClient {
         endpointKind: "junction_summary_collection",
         queryParameterNames,
         signal: input.signal ?? null,
+        ...(input.collectionWorkLimit
+          ? {
+              maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
       },
       (clientOptions, requestOptions) => {
         if (cursor) {
