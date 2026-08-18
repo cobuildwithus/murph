@@ -294,6 +294,39 @@ forward fix. Retaining the new runner while Web is rolled back is safety
 preserving but intentionally fail-closed for legacy connection-scoped hints and
 may reject old-Web apply parsing, so restore compatible Web promptly.
 
+## Device-Sync Failure Telemetry Rollout
+
+This cutover is Web-first. The shared `@murphai/device-syncd` and
+`@murphai/hosted-execution` packages are build inputs compiled into the Web and
+runner artifacts; they are not a separately deployable third plane.
+
+First deploy Web with the expanded runtime-log event parser and the apply
+compatibility reader. That Web release accepts
+`device-sync.dirty_ack_persistence_failed`, `device-sync.maintenance_failed`,
+and `assistant.device_activity_automation_failed`, persists canonical device
+failure state without translating it into another job-attempt event, and still
+accepts and ignores the legacy optional `failureDiagnostic` apply field from an
+older runner. Then deploy Cloudflare and the runner bundle with
+`container_rollout=immediate`. Require managed-container smoke to report the
+exact new bundle fingerprint and verify stale warm runners have been recycled
+before declaring convergence.
+
+In the converged pair, assistant-runtime device-sync maintenance is the single
+emitter of per-attempt `device-sync.job_failed`; Web is never a second emitter.
+Keep the legacy apply parser until fleet evidence proves no rollback-eligible
+runner can still send `failureDiagnostic`, and remove it only in a later
+contracting release. During rollout, confirm a bounded failed-attempt sample
+produces one event per attempt, no duplicate Web-owned event, and no strict
+runtime-log parse failures.
+
+If rollback is required, reverse the deploy order: roll back Cloudflare and the
+runner first, verify the exact old runner fingerprint across the fleet, and
+only then roll back Web. The intermediate pair can have a bounded telemetry gap
+because new Web ignores the old runner's legacy diagnostic; canonical failure
+state still persists. Rolling Web back first is unsafe because its strict event
+parser does not accept the new runner's expanded taxonomy. After the old runner
+is proven active, the old Web translator resumes legacy event ownership.
+
 ## Group Room-Model Rollout
 
 Deploy the first group room-model release as a Cloudflare Worker and runner

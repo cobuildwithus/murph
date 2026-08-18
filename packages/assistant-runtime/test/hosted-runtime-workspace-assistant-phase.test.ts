@@ -2194,7 +2194,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("logs device activity automation scheduling failures and keeps device-sync continuation", async () => {
+  it("keeps activity-scheduling failures out of job-attempt telemetry", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
       deviceSyncProcessed: 1,
@@ -2205,12 +2205,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       postCheckpointRecord: null,
     });
     mocks.scheduleDeviceActivityTriggeredAutomations.mockRejectedValueOnce(
-      new Error("synthetic device activity automation failure"),
+      new Error("synthetic activity scheduling secret"),
     );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
         providerConfigs: {
           whoop: {
@@ -2239,29 +2240,27 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeReason: "device-sync.reconcile",
       progressed: true,
     }));
-    const failureLog = logRequests
-      .flatMap((request) => request.entries)
-      .find((entry) =>
-        entry.redactedJson?.failureEventOrigin === "device_activity_automation"
-      );
-    expect(failureLog).toEqual(expect.objectContaining({
-      component: "runtime",
-      errorCode: "runtime_error",
-      eventCode: "device-sync.job_failed",
-      level: "warn",
-      phase: "idle",
-      redactedJson: expect.objectContaining({
-        deviceActivityAutomationScheduleFailed: true,
+    const entries = logRequests.flatMap((request) => request.entries);
+    expect(entries.filter((entry) => entry.eventCode === "device-sync.job_failed"))
+      .toHaveLength(0);
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        component: "runtime",
         errorCode: "runtime_error",
-        errorMessagePresent: true,
-        failureEventOrigin: "device_activity_automation",
-        safeErrorMessage: "Hosted execution runtime failed.",
-        wakeKind: "runtime.timer",
+        eventCode: "assistant.device_activity_automation_failed",
+        level: "warn",
+        phase: "idle",
+        redactedJson: expect.objectContaining({
+          deviceActivityAutomationScheduleFailed: true,
+          errorCode: "runtime_error",
+          failureEventOrigin: "device_activity_automation",
+          safeErrorMessage: "Hosted execution runtime failed.",
+          wakeKind: "runtime.timer",
+        }),
       }),
-    }));
-    expect(JSON.stringify(logRequests)).not.toContain(
-      "synthetic device activity automation failure",
-    );
+    ]));
+    expect(JSON.stringify(entries)).not.toContain("synthetic activity scheduling secret");
+    expect(JSON.stringify(entries)).not.toContain("synthetic-device-sync-secret");
   });
 
   it("schedules an assistant wake when idle device sync matches device activity automation", async () => {
@@ -2482,15 +2481,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await Promise.resolve();
     expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
       "assistant.device_connect",
-      "device-sync.job_failed",
+      "device-sync.maintenance_failed",
     ]);
-    const failureLog = logRequests
-      .flatMap((request) => request.entries)
-      .find((entry) => entry.eventCode === "device-sync.job_failed");
+    const failureEntries = logRequests.flatMap((request) => request.entries);
+    const failureLog = failureEntries
+      .find((entry) => entry.eventCode === "device-sync.maintenance_failed");
+    expect(failureEntries).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventCode: "device-sync.job_failed" }),
+    ]));
     expect(failureLog).toEqual(expect.objectContaining({
       component: "device-sync",
       errorCode: "runtime_error",
-      eventCode: "device-sync.job_failed",
+      eventCode: "device-sync.maintenance_failed",
       level: "warn",
       phase: "idle",
       redactedJson: expect.objectContaining({
@@ -14635,6 +14637,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
@@ -14716,6 +14719,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
@@ -16428,6 +16432,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: ["intent_fresh"],
       vaultRoot: expect.any(String),
     });
@@ -16821,6 +16826,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
@@ -16862,6 +16868,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
@@ -17146,6 +17153,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
       includeBackgroundDueIntents: false,
+      messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
@@ -18128,7 +18136,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(failureLog).toEqual(expect.objectContaining({
       component: "device-sync",
       errorCode: "checkpoint_error",
-      eventCode: "device-sync.job_failed",
+      eventCode: "device-sync.dirty_ack_persistence_failed",
       level: "warn",
       phase: "checkpoint",
       redactedJson: expect.objectContaining({

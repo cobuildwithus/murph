@@ -48,7 +48,6 @@ describe("hosted device-sync runtime apply route", () => {
     });
     expect(mocks.applyHostedDeviceSyncRuntimeResult).toHaveBeenCalledWith({
       request,
-      scheduleFailureDiagnostics: expect.any(Function),
       trustedUserId: "member_runtime_1",
     });
   });
