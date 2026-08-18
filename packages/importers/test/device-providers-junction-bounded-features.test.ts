@@ -12,6 +12,7 @@ import {
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
   resolveJunctionBoundedFeatureRecords,
+  selectJunctionWorkoutStreamCandidates,
 } from "../src/device-providers/junction-bounded-features.ts";
 
 function assertNoSampleSizedValue(value: unknown): void {
@@ -172,6 +173,28 @@ test("raw receipt retention accepts only pre-reduced dense features", async () =
     assertNoSampleSizedValue(part.content);
     assert.equal(Buffer.byteLength(JSON.stringify(part.content), "utf8") < 16_384, true);
   }
+});
+
+test("workout stream candidates expose only the supported identifier alias source", () => {
+  const candidates = selectJunctionWorkoutStreamCandidates([
+    workoutFeature({ id: undefined, workoutId: "workout-camel" }),
+    workoutFeature({ id: undefined, workoutId: undefined, workout_id: "workout-snake" }),
+    workoutFeature({ workoutId: undefined, id: "workout-id" }),
+    workoutFeature({ id: "workout-equal", workoutId: "workout-equal" }),
+  ], 4);
+
+  assert.deepEqual(
+    Object.fromEntries(candidates.map((candidate) => [
+      candidate.workoutId,
+      candidate.workoutIdAliasSource,
+    ])),
+    {
+      "workout-camel": "workoutId",
+      "workout-equal": "multiple_equal",
+      "workout-id": "id",
+      "workout-snake": "workout_id",
+    },
+  );
 });
 
 test("workout stream reduction is bounded by admitted samples and never preserves points", () => {

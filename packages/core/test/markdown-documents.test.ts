@@ -261,6 +261,7 @@ describe("markdown document primitives", () => {
     const result = await upsertAutomation({
       vaultRoot,
       ...scaffoldAutomationPayload(),
+      plannedOccurrenceOffsetMs: 900_000,
     });
 
     expect(result.auditPath).toMatch(/^audit\//u);
@@ -274,6 +275,8 @@ describe("markdown document primitives", () => {
 
     expect(parsed.attributes.automationId).toBe(result.record.automationId);
     expect(parsed.attributes.slug).toBe(result.record.slug);
+    expect(result.record.plannedOccurrenceOffsetMs).toBe(900_000);
+    expect(parsed.attributes.plannedOccurrenceOffsetMs).toBe(900_000);
     expect(parsed.body).toContain(result.record.instructions);
   });
 

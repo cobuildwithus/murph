@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-13
+Last verified: 2026-08-16
 ## Local Frog Autofix
 
 Murph's optional local Frog repair loop is an operator-owned macOS process, not
@@ -814,7 +814,46 @@ mailbox receipt (`HostedMailboxItem.createdAt`) so a provider event delivered
 after the daily capture cannot later rewrite a completed day; provider event
 time remains payload/decryption and conversation evidence only. The date-keyed
 upsert makes
-same-day cron and ops-page retries idempotent. An attribution integrity failure
+same-day cron and ops-page retries idempotent. Public lifetime message volume
+stays in this existing growth projection rather than creating a separate
+analytics service. Successful Linq outbound remains owned by the Web delivery
+ledger. Successful conversational Telegram and email outbound remains owned by
+the runtime outbox: a newly delivered eligible intent carries a durable pending
+receipt marker, and a bounded best-effort signed Web-control callback records an
+anonymous SHA-256 lookup receipt keyed from the authenticated member, channel,
+and stable outbox dedupe key. One eligible outbox intent contributes one
+receipt regardless of provider chunk or message-id count. The receipt primary
+key makes retries, replay, and a crash after central commit count exactly once;
+a failed callback never changes provider delivery state. Pending receipts reuse
+the outbox intent's existing `nextAttemptAt` clock: the durable delivery write
+arms the first attempt, callback failure defers it by one bounded minute, and a
+successful callback clears both the marker and deadline. Sent pending receipts
+participate in the ordinary assistant wake projection without blocking later
+delivery on the same conversation boundary. Idle runtime passes scan at most
+eight due receipts, checkpoint that recovery pass, and preserve an immediate
+wake for any remainder, so a cold restore or a backlog converges without another
+mailbox item or user action. All recovery remains outside the foreground reply
+critical path and introduces no second queue or state owner. The strict persisted
+outbox marker advances hosted runner state schema to version 17 before any runner
+invocation. A version-16 Worker rejects that Durable Object state before it can
+restore and quarantine the newer outbox record, making version 17 the
+Cloudflare/runner rollback floor once deployed state is established. The
+Telegram/email receipt contribution excludes message reactions and ephemeral
+progress sends:
+neither is an outbox-backed conversational delivery, and those progress paths
+have no durable successful-delivery owner that can support truthful replay-safe
+accounting. The existing Linq ledger contribution remains unchanged.
+Group-email fanout counts one message for each successful recipient child and
+zero for the planning parent. The empty migration is the explicit
+Telegram/email cutover: no unavailable pre-cutover history is reconstructed.
+Growth snapshots count receipt rows by
+Web database `recorded_at` for `[prior_day_start, snapshot_date)`, while the live
+read begins inclusively at the latest snapshot date. A late acknowledgement
+therefore increases the live window monotonically and cannot rewrite a completed
+UTC day; the 5,000 historical base and all-channel inbound count remain
+unchanged.
+
+An attribution integrity failure
 is reported and creates null activity values only when no same-date row exists;
 on retry it leaves any existing activity values untouched while still updating
 the snapshot's revenue, member, and message aggregates. The cron returns a
@@ -859,15 +898,44 @@ advances; authority-owner unavailability keeps the ordinary same-item retry.
 There is no payload rewrite, replacement append, cursor rewind, migration, or
 second reconciliation owner.
 
+Tracked direct phone-call results use the Web-owned `HostedPhoneCall` row as
+their only durable delivery owner and are intentionally Telegram-only. The row
+stores one generation-scoped delivery disposition; a transaction advances a
+pending result to a queued generation with the matching mailbox append. The
+runtime then reports provider entry and terminal outcome through its existing
+signed, write-fenced Web control plane before checkpointing. Mailbox, outbox,
+journal, and Temporal state are transport and wake machinery, never delivery
+truth. Safe pre-provider route loss returns the row to pending for a new
+generation; provider success, definitive failure, and may-have-succeeded
+failure become terminal delivered, failed, or ambiguous dispositions. One
+route loss observed after that generation already crossed provider entry is
+also ambiguous, never permission to resend onto a new route. One
+terminal callback re-arms one oldest member-local obligation, so retention
+expiry cannot fabricate completion and recovery adds no queue or scheduler.
+The call result commits before its deterministic hook is signaled. That hook is
+only a latency hint: after the existing bounded active retry window, the same
+pre-armed per-call Workflow uses a 30-minute first durable timer and then a
+24-hour low-frequency timer to re-read its exact call row. A dropped hook can
+therefore delay recovery but cannot erase an accepted result or create another
+Workflow.
+The encrypted result itself owns the bounded optional direct-transfer follow-up
+policy, so same-version stored recovery cannot lose that obligation. A
+reader-only Web release must accept that field before this writer activates;
+after the first policy write, reader-plus-writer Web is the operational rollback
+floor independently of generation state. Group transfer authority is disabled
+at both normalization boundaries and is outside this policy evolution.
+
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 
 ### Canonical Automation Support Lifecycles
 
-The vault automation record is the only owner of a support automation's schedule, status, route, optional finite `activeUntil`, exact plan-support `supportKind`, and reserved `system:support-series:<seriesId>` ownership tag. An automation may have at most one support-series tag. Once assigned, ordinary patch or upsert operations cannot remove or replace it; legacy unowned records may receive their first owner. Exact-series reconciliation atomically archives every active member outside the desired automation-id set while leaving user-paused members paused, and namespace reconciliation rejects duplicate ownership or one desired id assigned to two series. Plan-owned experiment, habit, and supplement support revalidates the immutable owner and its active status before provider work, immediately before delivery, and before commit. The active automation's typed support kind is the exact persisted support consent for habit and supplement plans; experiment support also requires its matching live `assistantSupport` switch. Execution re-reads canonical state immediately before delivery, archives an elapsed record when `now >= activeUntil`, and never sends after that boundary. A one-shot `activeUntil` must be later than its scheduled instant. Required-send retries remain eligible only while that finite window is open.
+The vault automation record is the only owner of a support automation's schedule, status, route, optional finite `activeUntil`, exact plan-support `supportKind`, optional `plannedOccurrenceOffsetMs`, and reserved `system:support-series:<seriesId>` ownership tag. The offset preserves the relationship between a reminder and its planned event; execution resolves it against the exact scheduled occurrence and copies the resulting `plannedOccurrenceAt` into the outbox. Reminder-backed experiment completion identifies the canonical effect by experiment plus `plannedOccurrenceAt`, so multiple accepted notifications for one session still produce one event. Legacy reminder context without that planned time remains conversational only and uses ordinary plan-based session resolution. An automation may have at most one support-series tag. Once assigned, ordinary patch or upsert operations cannot remove or replace it; legacy unowned records may receive their first owner. Exact-series reconciliation atomically archives every active member outside the desired automation-id set while leaving user-paused members paused, and namespace reconciliation rejects duplicate ownership or one desired id assigned to two series. Plan-owned experiment, habit, and supplement support revalidates the immutable owner and its active status before provider work, immediately before delivery, and before commit. The active automation's typed support kind is the exact persisted support consent for habit and supplement plans; experiment support also requires its matching live `assistantSupport` switch. Execution re-reads canonical state immediately before delivery, archives an elapsed record when `now >= activeUntil`, and never sends after that boundary. A one-shot `activeUntil` must be later than its scheduled instant. Required-send retries remain eligible only while that finite window is open.
 
 Automation evidence distinguishes intent, dispatch, and receipt. Enqueue state, generated transcript, provider transcript, and a delivery attempt prove intent only. Provider acceptance or a runtime `sent` state proves dispatch, not handset receipt or reading. Only channel delivery/read evidence or a later member reply that refers to the message proves receipt. Silence without receipt evidence must not become ignored support, non-adherence, or refusal.
 
 Ordinary recurring reminder conversation policy is resident in scheduled execution rather than copied into each automation record. The current conversation and provider-accepted or runtime-sent outputs for the current automation revision provide the evidence: an unconfirmed immediately prior attempt sends normally; a relevant human reply informs the next cue; one unanswered dispatched cue may add a room- or member-scoped keep/change/pause question; and an unanswered cadence question skips later occurrences until someone replies about the reminder or explicitly resumes or changes it. The guarantee applies while the immediately prior confirmed output remains inside the ordinary 14-day cron-response evidence horizon, covering normal daily and weekly cadences. When that output has expired after a longer cadence or unusual delay, the scheduler sends the current cue normally rather than inferring silence. When any committed conversation detail is omitted by the existing age, count, or byte bounds, provider history includes one fixed privacy-safe incompleteness marker; the scheduler continues the cue instead of treating unavailable context as silence. The assistant transcript alone cannot prove dispatch because the notification path persists it before delivery. The cadence question administers reminder cadence only and cannot infer non-completion, assign group silence to an individual, or widen a reminder into a check-in or review. Medication, prescribed treatment, clinician-directed care, clinical monitoring, and safety-critical reminders are excluded: silence does not stop those cues without an explicit member change or pause or an existing authoritative skip condition. Known Murph-managed digests, maintenance, and closeout jobs are also excluded from the reminder decision tree. This uses the existing conversation, automation, run, and outbox owners without extending message-content retention or adding a reminder-specific state machine or history store; persisted automation instructions retain only the durable user request.
+
+Reply handling uses a different, historical boundary: the assistant receives a bounded ordered projection of provider-accepted outbox messages from the same conversation, oldest to newest, with an exact native reply or reaction target marked when one is attested. The model interprets the member's language against that transcript. For experiment adherence, the selected outbox intent id is only typed occurrence proof: the canonical experiment writer validates private delivery, the immutable support-series owner, and scheduled occurrence, derives one retry-stable event identity under the existing canonical write lock, and returns current progress. It does not re-read the current automation or hash mutable instructions, so a later edit, archival, or deletion changes future delivery but not what the member historically received.
 
 ### Provider-Neutral Wearable Sleep Pattern Read Model
 
@@ -1006,7 +1074,26 @@ enter runner env, prompts, diagnostics, or workspace state. Transfer numbers are
 resolved server-side from verified hosted member identity when the brief allows a
 live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
 call for request-key idempotency, provider call id, status, bounded call brief,
-and final analysis. Briefs and results are encrypted before persistence with the
+and final analysis. A direct Linq or Telegram call also stores only the bounded
+initiating channel enum, never a phone number or thread identifier. Web resolves
+that exact current direct route before provider dispatch and resolves the same
+channel again immediately before entering the provider. Exact request-key
+replays read the durable call before mutable route admission, so route removal
+cannot turn an already-started call into a definitive no-call result. When the
+asynchronous result is ready, Web binds the current direct thread as egress
+authority on the queued notification; provider entry revalidates that authority
+so a later route removal or rebind cannot disclose the result to a stale chat.
+The existing phone-call reconciliation workflow keeps an analyzed result
+pending until its deduped mailbox notification is durable, and a restored direct
+route signals the newest affected call without falling back to another surface.
+Its deterministic hook is a best-effort fast path; durable timers on that same
+Workflow re-derive an accepted pending result from `HostedPhoneCall` if the
+signal is dropped.
+Group calls keep the
+channel null and continue to use their durable thread-container authority.
+Request-key replay compares the stored channel exactly, including legacy null,
+so a retry cannot change the eventual result audience. Briefs and results are
+encrypted before persistence with the
 control-domain hosted secure-box lane and AAD bound to the member, table, row,
 field, and scope; only provider/status/timestamp identifiers remain operational
 metadata. During account deletion, the member is suspended before `apps/web`
@@ -2534,14 +2621,26 @@ epoch, and disconnect fences. It then commits `source_confirmed`, source
 admission, the callback-equivalent source-scoped initial jobs, a mandatory
 mailbox handoff, dirty state, and trace completion in one locked transaction.
 The initial handoff is committed even when the connection is already dirty. A
-failed or ambiguous provider read leaves setup pending and retryable. After an
-account reaches
+failed or ambiguous provider read leaves setup pending and retryable. That
+retry lifetime is bounded by the current persisted setup lifecycle at each
+delivery attempt. The authenticated prepared receipt remains frozen for
+provider event semantics, freshness, dirty state, signals, and receipt
+timestamps; it is neither setup-epoch identity nor retry-lifetime authority.
+The trace claim's one processing-attempt instant is used at shared ingress and
+both hosted database-lock rechecks. An expired pending setup completes only the
+existing trace before provider I/O and terminates transport handling without
+source admission, freshness, dirty, signal, mailbox, wake, job,
+canonical-health, or setup-state effects. After pending-setup classification,
+both hosted lock owners use the frozen receipt only as established-event
+ordering evidence: when the current `connectedAt` is later, they complete the
+trace before provider I/O or source/dirty admission so prior-connection work
+cannot inherit replacement authority. After an account reaches
 `source_confirmed`, adding or retrying another Junction-backed source preserves
 that account and its established siblings. The target `DeviceConnectionSource`
 stays `disconnected` and its webhook and pull work remain inert until callback
 completion or the same provider-verified hosted admission reaches the runtime
-owner. Shared ingress
-chooses one closed account write policy for every persistence request:
+owner. Shared ingress chooses one closed account write policy for every
+persistence request:
 `replace` for an account reconnect or `preserve_established` for a
 source-scoped addition. Hosted Prisma and local SQLite apply the same shared
 established-account predicate inside their persistence transactions; neither

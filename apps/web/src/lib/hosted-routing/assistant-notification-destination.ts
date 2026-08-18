@@ -111,12 +111,24 @@ export async function resolveHostedAssistantNotificationDestination(input: {
 }
 
 export async function requireHostedAssistantNotificationDestination(input: {
+  directChannel?: "linq" | "telegram";
   memberId: string;
   prisma?: HostedOnboardingReadClient;
   signal?: AbortSignal;
 }): Promise<HostedAssistantNotificationDestination> {
   const destination = await resolveHostedAssistantNotificationDestination(input);
-  if (destination) {
+  if (
+    destination
+    && (
+      input.directChannel === undefined
+      || (
+        destination.conversationShape === "direct-member"
+        && destination.externalThreadRouteAuthority === null
+        && destination.route.threadIsDirect === true
+        && destination.route.channel === input.directChannel
+      )
+    )
+  ) {
     return destination;
   }
 

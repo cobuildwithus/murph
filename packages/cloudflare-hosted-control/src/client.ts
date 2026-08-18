@@ -7,12 +7,14 @@ import {
   type HostedUserRecipientPublicKeyJwk,
 } from "@murphai/runtime-state";
 import {
+  assertHostedRuntimeProcessingTimeoutMs,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES,
   HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES,
   type HostedExecutionEnvironmentVoiceContentType,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
   HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
@@ -34,6 +36,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRuntimeEnsureProcessingResponse,
+  HostedRuntimeProcessingAcceptedAction,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedHealthDataConsentState,
@@ -260,8 +263,10 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<void>;
   ensureRuntimeProcessing(input: {
+    commandTimeoutMs?: number;
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
+    signal?: AbortSignal;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   prewarmRuntimeShell(input: {
@@ -312,13 +317,30 @@ export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
   | HostedRuntimeEnsureProcessingResponse
   | CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck;
 
-export interface CloudflareHostedControlRuntimeEnsureProcessingTiming {
+interface CloudflareHostedControlRuntimeEnsureProcessingTimingBase {
   directEnsureRequestStartedAtEpochMs: number;
   directEnsureResponseReceivedAtEpochMs: number;
   orchestrationAttemptId: string;
   tokenAcquiredAtEpochMs: number;
   tokenAcquireStartedAtEpochMs: number;
 }
+
+type CloudflareHostedControlRuntimeEnsureProcessingTimingResult =
+    | {
+        directEnsureResultKind: "legacy_accepted";
+      }
+    | {
+        directEnsureAction: HostedRuntimeProcessingAcceptedAction;
+        directEnsureResultKind: "runtime_processing_accepted";
+        directEnsureRuntimeAttemptId: string;
+      }
+    | {
+        directEnsureResultKind: "retry_later";
+      };
+
+export type CloudflareHostedControlRuntimeEnsureProcessingTiming =
+  CloudflareHostedControlRuntimeEnsureProcessingTimingBase
+  & CloudflareHostedControlRuntimeEnsureProcessingTimingResult;
 
 export interface CloudflareHostedControlClientOptions {
   allowHttpHosts?: readonly string[];
@@ -570,6 +592,12 @@ export function createCloudflareHostedControlClient(
     },
     ensureRuntimeProcessing(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
+      if (input.commandTimeoutMs !== undefined) {
+        assertHostedRuntimeProcessingTimeoutMs(
+          input.commandTimeoutMs,
+          "Cloudflare runtime ensure-processing commandTimeoutMs",
+        );
+      }
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -579,6 +607,8 @@ export function createCloudflareHostedControlClient(
         label: "runtime ensure-processing",
         onRuntimeEnsureProcessingTiming: input.onTiming,
         parse: parseCloudflareHostedControlRuntimeEnsureProcessingResponse,
+        readRuntimeEnsureProcessingTimingResult:
+          readCloudflareHostedControlRuntimeEnsureProcessingTimingResult,
         path: buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId),
         request: {
           body: JSON.stringify({
@@ -586,11 +616,16 @@ export function createCloudflareHostedControlClient(
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
+            ...(input.commandTimeoutMs === undefined ? {} : {
+              [HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER]:
+                String(input.commandTimeoutMs),
+            }),
           },
           method: "POST",
         },
         runtimeEnsureProcessingOrchestrationAttemptId:
           input.orchestrationAttemptId,
+        signal: input.signal,
         timeoutMs: options.timeoutMs,
       });
     },
@@ -1838,6 +1873,22 @@ function parseCloudflareHostedControlRuntimeEnsureProcessingResponse(
   return parseHostedRuntimeEnsureProcessingResponse(value);
 }
 
+function readCloudflareHostedControlRuntimeEnsureProcessingTimingResult(
+  response: CloudflareHostedControlRuntimeEnsureProcessingResponse,
+): CloudflareHostedControlRuntimeEnsureProcessingTimingResult {
+  if (!("kind" in response)) {
+    return { directEnsureResultKind: "legacy_accepted" };
+  }
+  if (response.kind === "retry_later") {
+    return { directEnsureResultKind: response.kind };
+  }
+  return {
+    directEnsureAction: response.action,
+    directEnsureResultKind: response.kind,
+    directEnsureRuntimeAttemptId: response.runtimeAttemptId,
+  };
+}
+
 function parseCloudflareHostedControlRuntimeShellPrewarmResponse(
   value: unknown,
 ): CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
@@ -2208,6 +2259,9 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   onRequestAttempted?: () => Promise<void> | void;
   runtimeEnsureProcessingOrchestrationAttemptId?: string;
   parse: (value: unknown) => TResponse;
+  readRuntimeEnsureProcessingTimingResult?: (
+    response: TResponse,
+  ) => CloudflareHostedControlRuntimeEnsureProcessingTimingResult;
   path: string;
   request: {
     body?: BodyInit;
@@ -2284,12 +2338,22 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   const directEnsureResponseReceivedAtEpochMs = directEnsureRequestStartedAtEpochMs === null
     ? null
     : Date.now();
+  if (!response.ok) {
+    throw new HostedExecutionHttpResponseError({
+      code: await readHostedExecutionStructuredErrorCode(response),
+      label: input.label,
+      status: response.status,
+    });
+  }
+
+  const parsed = input.parse(await response.json());
   if (
     tokenAcquireStartedAtEpochMs !== null
     && tokenAcquiredAtEpochMs !== null
     && directEnsureRequestStartedAtEpochMs !== null
     && directEnsureResponseReceivedAtEpochMs !== null
     && input.runtimeEnsureProcessingOrchestrationAttemptId !== undefined
+    && input.readRuntimeEnsureProcessingTimingResult !== undefined
   ) {
     try {
       input.onRuntimeEnsureProcessingTiming?.({
@@ -2299,21 +2363,14 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
           input.runtimeEnsureProcessingOrchestrationAttemptId,
         tokenAcquiredAtEpochMs,
         tokenAcquireStartedAtEpochMs,
-      });
+        ...input.readRuntimeEnsureProcessingTimingResult(parsed),
+      } as CloudflareHostedControlRuntimeEnsureProcessingTiming);
     } catch {
       // Timing callbacks are diagnostics-only and must not affect control requests.
     }
   }
 
-  if (!response.ok) {
-    throw new HostedExecutionHttpResponseError({
-      code: await readHostedExecutionStructuredErrorCode(response),
-      label: input.label,
-      status: response.status,
-    });
-  }
-
-  return input.parse(await response.json());
+  return parsed;
 }
 
 function createHostedExecutionRequestSignal(input: {

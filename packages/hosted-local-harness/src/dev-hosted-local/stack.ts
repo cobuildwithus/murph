@@ -1590,11 +1590,14 @@ function buildHostedWebProcessArgs(input: {
     ];
   }
 
+  // Keep the TypeScript loader to one Node option. The tsx CLI injects both a
+  // require and an import, which Next can merge with a harness-owned preload.
   return [
     "--dir",
     ".",
     "exec",
-    "tsx",
+    "node",
+    "--import=tsx",
     "apps/web/scripts/dev-local.ts",
     "--",
     ...serverArgs,

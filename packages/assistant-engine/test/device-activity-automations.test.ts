@@ -1742,6 +1742,7 @@ function createDeviceActivityAutomation(input: {
     status: 'active',
     summary: null,
     supportKind: null,
+    plannedOccurrenceOffsetMs: null,
     tags: input.tags ?? [],
     title: 'After walk',
     updatedAt: '2026-06-07T10:00:00.000Z',

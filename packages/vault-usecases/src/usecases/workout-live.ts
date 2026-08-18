@@ -86,6 +86,7 @@ export async function readLiveWorkoutCardEditor(input: {
 const MAX_LIVE_WORKOUT_EXERCISES = 100
 const MAX_LIVE_WORKOUT_SETS_PER_EXERCISE = 150
 const SCHEDULED_LIVE_WORKOUT_AUTHORITY_MAX_AGE_MS = 60 * 60 * 1000
+const SCHEDULED_LIVE_WORKOUT_OUTBOX_CLOCK_SKEW_MS = 30 * 1000
 
 export async function applyLiveWorkoutMemberAction(
   input: ApplyLiveWorkoutMemberActionInput,
@@ -1046,7 +1047,7 @@ function normalizeScheduledLiveWorkoutSetInput(
   const acceptedMs = Date.parse(acceptedAt)
   if (
     reminderSentMs < occurrenceMs ||
-    acceptedMs < reminderSentMs ||
+    acceptedMs + SCHEDULED_LIVE_WORKOUT_OUTBOX_CLOCK_SKEW_MS < reminderSentMs ||
     reminderSentMs - occurrenceMs >
       SCHEDULED_LIVE_WORKOUT_AUTHORITY_MAX_AGE_MS ||
     acceptedMs - reminderSentMs >

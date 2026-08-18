@@ -328,6 +328,65 @@ test("synthesizes legacy schedules into adherence targets", () => {
   });
 });
 
+test("uses protocol daily frequency for repeated explicit-occurrence adherence", () => {
+  const targets = synthesizeLegacySessionAdherenceTargets({
+    protocolSessionsPerDay: 8,
+    runPlan: {
+      modality: "Micro set",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "09:30",
+        timeZone: "America/New_York",
+      },
+      targetSessions: 2920,
+      minimumUsefulSessions: 2800,
+    },
+  });
+
+  assert.deepEqual(targets[0]?.calendar, {
+    kind: "daily",
+    timeZone: "America/New_York",
+    localTime: "09:30",
+    targetCountPerDay: 8,
+  });
+  assert.deepEqual(targets[0]?.evidence, {
+    kind: "linkedEventCount",
+    eventKind: "intervention_session",
+    missing: "missed_after_grace",
+  });
+});
+
+test("upgrades only the exact legacy generated single-occurrence target", () => {
+  const runPlan = {
+    modality: "Micro set",
+    schedule: {
+      kind: "dailyLocal" as const,
+      localTime: "09:30",
+      timeZone: "America/New_York",
+    },
+    targetSessions: 2920,
+    minimumUsefulSessions: 2800,
+  };
+  const legacyTargets = synthesizeLegacySessionAdherenceTargets({ runPlan });
+
+  const targets = resolveExperimentAdherenceTargets({
+    explicitTargets: legacyTargets,
+    protocolSessionsPerDay: 8,
+    runPlan,
+  });
+
+  assert.equal(targets[0]?.calendar?.kind, "daily");
+  if (targets[0]?.calendar?.kind !== "daily") {
+    throw new Error("expected daily adherence calendar");
+  }
+  assert.equal(targets[0].calendar.targetCountPerDay, 8);
+  assert.equal(targets[0].evidence.kind, "linkedEventCount");
+  if (targets[0].evidence.kind !== "linkedEventCount") {
+    throw new Error("expected linked event evidence");
+  }
+  assert.equal(targets[0].evidence.missing, "missed_after_grace");
+});
+
 test("synthesizes calendar-less count targets from legacy session counts", () => {
   const targets = synthesizeLegacySessionAdherenceTargets({
     runPlan: {

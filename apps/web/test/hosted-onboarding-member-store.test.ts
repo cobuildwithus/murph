@@ -2969,11 +2969,11 @@ describe("hosted-member-store", () => {
       },
     } as never;
 
-    await upsertHostedMemberTelegramRoutingBindingTx({
+    await expect(upsertHostedMemberTelegramRoutingBindingTx({
       memberId: "member_123",
       prisma,
       telegramUserId: "456",
-    });
+    })).resolves.toEqual({ effectiveRouteChanged: true });
 
     expect(queryRaw).toHaveBeenCalledWith(
       expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
@@ -3039,6 +3039,15 @@ describe("hosted-member-store", () => {
         v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
       },
     });
+    const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: "456",
+    });
 
     const findMany = vi.fn().mockResolvedValue([
       {
@@ -3053,16 +3062,19 @@ describe("hosted-member-store", () => {
       $queryRaw: queryRaw,
       hostedMemberRouting: {
         findMany,
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          telegramUserIdEncrypted: existingTelegramPrivateColumns.telegramUserIdEncrypted,
+        }),
         upsert,
       },
     } as never;
 
-    await upsertHostedMemberTelegramRoutingBindingTx({
+    await expect(upsertHostedMemberTelegramRoutingBindingTx({
       memberId: "member_123",
       prisma,
       telegramUserId: "456",
-    });
+    })).resolves.toEqual({ effectiveRouteChanged: false });
 
     expect(findMany).toHaveBeenCalledWith({
       where: {

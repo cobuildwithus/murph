@@ -5,6 +5,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   automationActiveUntilSchema,
   automationContinuityPolicyValues,
+  automationPlannedOccurrenceOffsetMsSchema,
   automationScheduleCronSchema,
   automationScheduleDailyLocalSchema,
   automationScheduleDeviceActivitySchema,
@@ -199,6 +200,25 @@ const automationDynamicToolScheduleSchema = z.union([
   automationLocalAtScheduleSchema,
 ])
 
+function validateAutomationSupportOwnershipPair(
+  value: {
+    supportKind?: (typeof automationSupportKindValues)[number] | null
+    supportSeriesId?: string
+  },
+  context: z.RefinementCtx,
+): void {
+  const supportKindPresent = value.supportKind !== undefined && value.supportKind !== null
+  const supportSeriesPresent = value.supportSeriesId !== undefined
+
+  if (supportKindPresent !== supportSeriesPresent) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Plan-owned support requires supportKind and supportSeriesId together.',
+      path: supportKindPresent ? ['supportSeriesId'] : ['supportKind'],
+    })
+  }
+}
+
 const saveAutomationArgumentsSchema = z.object({
   action: z.literal('save'),
   activeUntil: automationActiveUntilSchema.nullable().optional(),
@@ -208,6 +228,9 @@ const saveAutomationArgumentsSchema = z.object({
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
   instructions: automationInstructionsSchema,
   localAtRecoveryKey: automationLocalAtRecoveryKeySchema.optional(),
+  plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema
+    .optional()
+    .describe('Milliseconds from the reminder fire to the planned session occurrence.'),
   schedule: automationDynamicToolScheduleSchema,
   scheduledReply: automationScheduledReplySchema.nullable().optional(),
   slug: automationSlugSchema.optional(),
@@ -218,6 +241,7 @@ const saveAutomationArgumentsSchema = z.object({
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
 }).strict().superRefine((value, context) => {
+  validateAutomationSupportOwnershipPair(value, context)
   if (
     value.localAtRecoveryKey !== undefined
     && (
@@ -257,6 +281,10 @@ const patchAutomationArgumentsSchema = z.object({
   ),
   instructions: automationInstructionsSchema.optional(),
   localAtRecoveryKey: automationLocalAtRecoveryKeySchema.optional(),
+  plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema
+    .nullable()
+    .optional()
+    .describe('Replace or clear the planned session offset from the reminder fire.'),
   lookup: automationIdentifierSchema,
   retargetToCurrentConversation: z.literal(true).optional(),
   schedule: automationDynamicToolScheduleSchema.optional(),
@@ -274,6 +302,7 @@ const patchAutomationArgumentsSchema = z.object({
     'assistantTargetOverride',
     'continuityPolicy',
     'instructions',
+    'plannedOccurrenceOffsetMs',
     'retargetToCurrentConversation',
     'schedule',
     'scheduledReply',
@@ -359,6 +388,7 @@ const AUTOMATION_ARGUMENT_ROOT_KEYS = [
   'instructions',
   'localAtRecoveryKey',
   'lookup',
+  'plannedOccurrenceOffsetMs',
   'retargetToCurrentConversation',
   'resolvedLocalDate',
   'schedule',
@@ -844,6 +874,15 @@ export async function executeAutomationDynamicTool(input: {
     }
     return automationTextResult(true, text)
   } catch (error) {
+    if (
+      input.request.request.action === 'inspect'
+      && isAutomationNotFoundError(error)
+    ) {
+      return automationTextResult(
+        true,
+        JSON.stringify({ action: 'inspect', found: false }),
+      )
+    }
     if (isAutomationConflictError(error)) {
       return automationTextResult(
         false,
@@ -852,6 +891,12 @@ export async function executeAutomationDynamicTool(input: {
     }
     return automationTextResult(false, 'automation operation is unavailable')
   }
+}
+
+function isAutomationNotFoundError(
+  error: unknown,
+): error is { code: 'automation_not_found' } {
+  return isUnknownRecord(error) && error.code === 'automation_not_found'
 }
 
 function isAutomationConflictError(

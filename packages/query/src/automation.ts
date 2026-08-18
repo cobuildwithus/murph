@@ -69,6 +69,7 @@ export interface AutomationQueryRecord {
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
   scheduledReply: AutomationScheduledReply | null;
   supportKind: AutomationSupportKind | null;
+  plannedOccurrenceOffsetMs: number | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -177,6 +178,16 @@ function normalizeAutomationScheduledReply(
     );
   }
   return parsed.data;
+}
+
+function normalizeAutomationPlannedOccurrenceOffsetMs(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error("plannedOccurrenceOffsetMs must be a nonnegative safe integer.");
+  }
+  return value as number;
 }
 
 function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
@@ -532,6 +543,9 @@ function parseAutomationRecord(
     ),
     scheduledReply: normalizeAutomationScheduledReply(attributes.scheduledReply),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
+    plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
+      attributes.plannedOccurrenceOffsetMs,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),
     createdAt,

@@ -351,6 +351,13 @@ export const assistantExternalThreadRouteAuthoritySchema = z
 export const assistantOutboxAutomationAuthoritySchema = z
   .object({
     automationId: z.string().trim().min(1),
+    supportSeriesId: z.string().trim().min(1).optional(),
+    // Legacy parse-only fields retained for one 14-day terminal-outbox
+    // retention window after all writers stopped emitting them. They are inert:
+    // current delivery uses expectedUpdatedAt, while historical replies use
+    // supportSeriesId plus the delivered occurrence.
+    automationRelativePath: z.string().trim().min(1).optional(),
+    expectedSemanticRevision: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
     expectedUpdatedAt: isoTimestampSchema,
     scheduledReply: automationScheduledReplySchema.optional(),
     scheduledOccurrenceAt: isoTimestampSchema.optional(),
@@ -1019,6 +1026,9 @@ export const assistantOutboxIntentSchema = z
     automationAuthority: assistantOutboxAutomationAuthoritySchema
       .nullable()
       .optional(),
+    scheduledOccurrenceAt: isoTimestampSchema.nullable().optional(),
+    // Exact event time derived from the durable automation lead at fire time.
+    plannedOccurrenceAt: isoTimestampSchema.nullable().optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),
@@ -1026,6 +1036,12 @@ export const assistantOutboxIntentSchema = z
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
     deliveryConfirmationPending: z.boolean().default(false),
+    // Undefined means the delivery predates outbound message-volume cutover
+    // or is not an eligible conversational Telegram/email message. Null is a
+    // durable pending receipt; a timestamp confirms the anonymous Web-side
+    // receipt was recorded. The delivery owner keeps this marker so a crash
+    // cannot lose or duplicate accounting without changing send behavior.
+    messageVolumeReceiptRecordedAt: isoTimestampSchema.nullable().optional(),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
     groupEmailAuthorizationProof: z

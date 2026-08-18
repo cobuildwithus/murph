@@ -4330,7 +4330,7 @@ describe('assistant Codex turn planning', () => {
     ['direct Linq', 'linq', true, true],
     ['group Linq', 'linq', false, false],
     ['direct email', 'email', true, false],
-    ['direct Telegram', 'telegram', true, false],
+    ['direct Telegram', 'telegram', true, true],
   ] as const)(
     'gates phone calls on a canonical scheduled %s turn',
     async (_scope, channel, threadIsDirect, expectedAvailable) => {

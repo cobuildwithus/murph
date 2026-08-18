@@ -1,3 +1,5 @@
+import type { HostedPhoneCallResult } from "@murphai/hosted-execution/phone-calls";
+
 import {
   readRetellTransferEndAt,
   type RetellCallPayload,
@@ -13,7 +15,7 @@ type RetellResultWebhookEvent = "call_analyzed" | "transfer_ended";
 
 export interface PreparedRetellCallResult {
   call: RetellCallPayload;
-  requiresTransferFollowUp: boolean;
+  completionPolicy?: HostedPhoneCallResult["completionPolicy"];
 }
 
 /**
@@ -37,7 +39,6 @@ export function prepareRetellCallResult(input: {
     if (!isRetellTransferredCall(input.call)) {
       return {
         call: input.call,
-        requiresTransferFollowUp: false,
       };
     }
     if (!readRetellTransferEndAt(input.call)) {
@@ -58,7 +59,7 @@ export function prepareRetellCallResult(input: {
         },
       },
     },
-    requiresTransferFollowUp: true,
+    completionPolicy: "transfer_follow_up_required",
   };
 }
 

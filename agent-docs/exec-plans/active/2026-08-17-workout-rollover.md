@@ -125,14 +125,22 @@ Updated: 2026-08-18
   drives both receipt derivation and retry comparison; focused proof covers
   inherited-to-explicit and explicit-to-inherited retries after close, start,
   and set-log persistence, while a genuinely different unit still fails closed.
-- Current focused proof passes 5 Assistant Engine files / 187 tests and the 10-
-  case real Vault Usecases rollover suite. Typecheck passes for Vault Usecases
-  and Assistant Engine, CLI package-shape verification passes, and
-  `git diff --check` passes. The runner's vault CLI bundle is 9,180,489 bytes
-  against its 9,192,000-byte budget. The complete local runner build then hits
-  the pre-existing macOS static-closure variance (8,331,486 bytes against the
-  8,259,368-byte local budget); exact-head Linux CI remains the authoritative
-  runner check.
+- Final ReviewGPT round 4 accepted two findings. First, global provider-message
+  ambiguity could disappear after current-session filtering and revive workout
+  authority from an older reminder. Global exact resolution is now the sole
+  authority source; the session boundary only controls optional prior context.
+  Second, a provider-native reply can be accepted just before the outbound send
+  returns and stamps local `sentAt`. Host and vault validation now share the
+  existing 30-second bounded clock-skew policy while retaining both one-hour
+  freshness bounds. Focused proof rejects current/older-session duplicate
+  targets, accepts a one-second send-ack inversion through the real provider,
+  vault, and card path, and rejects a 31-second inversion before mutation.
+- Current focused proof passes 4 Assistant Engine files / 398 tests and the 11-
+  case real Vault Usecases rollover suite. Typecheck passes for Contracts, Core,
+  Query, Vault Usecases, and Assistant Engine; the incremental workspace build,
+  CLI schema generation, and `git diff --check` pass after merging current
+  `main`. Earlier package-shape and runner vault CLI bundle proof passed on the
+  pre-merge candidate; both will be rerun before the next exact-head review.
 - Complete first-provider request capture compares frozen base
   `17fa4a43091db5aa0d354bc26e4dacf908c26d80` with the remediated candidate using
   the pinned real Codex App Server, repository scripted Responses endpoint,

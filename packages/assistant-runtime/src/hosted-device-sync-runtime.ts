@@ -2601,10 +2601,17 @@ function toHostedRuntimeFailureDiagnostic(
     return null;
   }
 
+  const details = { ...diagnostic.details };
+  // Candidate position is incident telemetry only. Keep it out of the Web apply
+  // contract so a newer warm runner remains compatible with an older Web deploy.
+  delete details.providerRequestCandidateAliasSource;
+  delete details.providerRequestCandidateCount;
+  delete details.providerRequestCandidateOrdinal;
+
   return {
     accountStatus: diagnostic.accountStatus,
     code: diagnostic.code,
-    details: { ...diagnostic.details },
+    details,
     retryable: diagnostic.retryable,
   };
 }

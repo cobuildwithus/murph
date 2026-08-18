@@ -632,6 +632,33 @@ describe('scheduled live-workout rollover', () => {
     })
   })
 
+  it('accepts bounded send-ack skew and rejects a larger inversion without mutation', async () => {
+    const bounded = await createRolloverVault()
+    const rolled = await logScheduledLiveWorkoutSet({
+      ...scheduledInput(bounded),
+      acceptedAt: '2026-08-17T18:00:04.000Z',
+    })
+    expect(rolled.entity.id).not.toBe(bounded.previousWorkoutId)
+    expect(parseShownWorkout(rolled).exercises[0]?.sets[1]).toMatchObject({
+      reps: 9,
+      weight: 70,
+      weightUnit: 'lb',
+    })
+
+    const inverted = await createRolloverVault()
+    await expect(logScheduledLiveWorkoutSet({
+      ...scheduledInput(inverted),
+      acceptedAt: '2026-08-17T18:00:00.000Z',
+      reminderSentAt: '2026-08-17T18:00:31.000Z',
+    })).rejects.toThrow('stale or out of order')
+    expect(parseShownWorkout(
+      await showActiveLiveWorkout({
+        vault: inverted.vault,
+        workoutId: inverted.previousWorkoutId,
+      }),
+    ).endedAt).toBeUndefined()
+  })
+
   it('refuses pending prior sets, stale authority, missing actuals, ambiguous or mismatched coordinates, and unrelated multiple-active state without retargeting', async () => {
     const pending = await createRolloverVault({ logAllPriorSets: false })
     await expect(logScheduledLiveWorkoutSet(scheduledInput(pending))).rejects.toThrow(

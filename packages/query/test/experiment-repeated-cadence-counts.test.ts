@@ -7,6 +7,7 @@ import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import {
   buildExperimentAdherenceCalendar,
   countCalendarAdherenceSessions,
+  synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceObservation,
 } from "../src/experiment-adherence.ts";
 import { summarizeExperimentProgress } from "../src/experiments.ts";
@@ -215,7 +216,7 @@ test("progress counts explicit repeated occurrences instead of one partial day",
   );
 });
 
-test("progress preserves assumed pacing while labeling every assumed occurrence", () => {
+test("progress never infers repeated occurrences from silence", () => {
   const vault = createVaultReadModel({
     vaultRoot: "/vault",
     entities: [makeExperiment({ missing: "assumed_after_grace" })],
@@ -227,18 +228,18 @@ test("progress preserves assumed pacing while labeling every assumed occurrence"
 
   assert.deepEqual(
     {
-      assumedSessions: progress.adherence.assumedSessions,
+      assumedSessions: progress.adherence.assumedSessions ?? 0,
       completedSessions: progress.adherence.completedSessions,
       expectedSessionsByNow: progress.adherence.expectedSessionsByNow,
       loggedSessions: progress.adherence.loggedSessions,
       status: progress.adherence.status,
     },
     {
-      assumedSessions: 8,
-      completedSessions: 8,
+      assumedSessions: 0,
+      completedSessions: 0,
       expectedSessionsByNow: 8,
-      loggedSessions: 8,
-      status: "met_target",
+      loggedSessions: 0,
+      status: "not_started",
     },
   );
 });
@@ -316,7 +317,7 @@ test("missing repeated occurrences become missed only after grace", () => {
   assert.equal(counts.missedSessions, 5);
 });
 
-test("legacy assumed repeated targets assume only the unobserved remainder", () => {
+test("legacy assumed repeated targets never infer the unobserved remainder", () => {
   const counts = countRepeatedDay({
     asOf: "2026-08-02T01:00:00.000Z",
     graceHours: 4,
@@ -329,10 +330,66 @@ test("legacy assumed repeated targets assume only the unobserved remainder", () 
     ],
   });
 
-  assert.equal(counts.completedSessions, 8);
+  assert.equal(counts.completedSessions, 3);
   assert.equal(counts.confirmedSessions, 3);
-  assert.equal(counts.assumedSessions, 5);
+  assert.equal(counts.assumedSessions, 0);
   assert.equal(counts.expectedSessionsByNow, 8);
+  assert.equal(counts.missedSessions, 5);
+});
+
+test("server progress repairs a persisted legacy target from protocol sessions per day", () => {
+  const runPlan = {
+    interventionStart: "2026-08-01",
+    interventionEnd: "2026-08-01",
+    modality: "Strength practice",
+    schedule: {
+      kind: "dailyLocal" as const,
+      localTime: "09:00",
+      timeZone: "UTC",
+    },
+    targetSessions: 8,
+    minimumUsefulSessions: 6,
+  };
+  const legacyTargets = synthesizeLegacySessionAdherenceTargets({ runPlan });
+  const experiment = makeEntity({
+    entityId: EXPERIMENT_ID,
+    family: "experiment",
+    kind: "experiment_entry",
+    recordClass: "bank",
+    occurredAt: "2026-08-01T08:00:00.000Z",
+    date: "2026-08-01",
+    experimentSlug: EXPERIMENT_SLUG,
+    status: "active",
+    title: "Repeated strength",
+    attributes: {
+      schemaVersion: "murph.frontmatter.experiment.v1",
+      docType: "experiment",
+      experimentId: EXPERIMENT_ID,
+      slug: EXPERIMENT_SLUG,
+      title: "Repeated strength",
+      status: "active",
+      startedOn: "2026-08-01",
+      effectiveProtocolSnapshot: {
+        effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+        doseSignature: "Eight small strength sets daily",
+        frequency: { sessionsPerDay: 8 },
+      },
+      runPlan: { ...runPlan, adherenceTargets: legacyTargets },
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/repeated-strength-protocol-repair",
+    metadata: { timezone: "UTC" },
+    entities: [experiment],
+  });
+
+  const progress = summarizeExperimentProgress(vault, EXPERIMENT_SLUG, {
+    asOf: "2026-08-03",
+  });
+
+  assert.equal(progress.adherence.expectedSessionsByNow, 8);
+  assert.equal(progress.adherence.assumedSessions ?? 0, 0);
+  assert.equal(progress.adherence.completedSessions, 0);
 });
 
 test("explicit skipped occurrences preserve adherence v1 missed semantics", () => {

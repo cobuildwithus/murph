@@ -121,6 +121,7 @@ export interface AutomationRecord {
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
   scheduledReply: AutomationScheduledReply | null;
   supportKind: AutomationSupportKind | null;
+  plannedOccurrenceOffsetMs: number | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -169,6 +170,7 @@ export interface PatchAutomationInput {
   assistantTargetOverride?: AutomationAssistantTargetOverride | null;
   scheduledReply?: AutomationScheduledReply | null;
   supportKind?: AutomationSupportKind | null;
+  plannedOccurrenceOffsetMs?: number | null;
   schedule?: AutomationSchedule;
   slug?: string;
   status?: AutomationStatus;
@@ -317,6 +319,19 @@ function normalizeAutomationScheduledReply(
     );
   }
   return parsed.data;
+}
+
+function normalizeAutomationPlannedOccurrenceOffsetMs(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "plannedOccurrenceOffsetMs must be a nonnegative safe integer.",
+    );
+  }
+  return value as number;
 }
 
 function normalizeAutomationDeviceActivitySource(value: unknown): AutomationDeviceActivitySource | undefined {
@@ -799,6 +814,9 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
       ? {}
       : { scheduledReply: record.scheduledReply }),
     ...(record.supportKind === null ? {} : { supportKind: record.supportKind }),
+    ...(record.plannedOccurrenceOffsetMs === null
+      ? {}
+      : { plannedOccurrenceOffsetMs: record.plannedOccurrenceOffsetMs }),
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
     createdAt: record.createdAt,
@@ -846,6 +864,9 @@ function parseAutomationRecord(
     ),
     scheduledReply: normalizeAutomationScheduledReply(attributes.scheduledReply),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
+    plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
+      attributes.plannedOccurrenceOffsetMs,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
     createdAt,
@@ -1121,6 +1142,12 @@ export async function patchAutomation(
         input.supportKind === undefined
           ? existingRecord.supportKind
           : normalizeAutomationSupportKind(input.supportKind),
+      plannedOccurrenceOffsetMs:
+        input.plannedOccurrenceOffsetMs === undefined
+          ? existingRecord.plannedOccurrenceOffsetMs
+          : normalizeAutomationPlannedOccurrenceOffsetMs(
+              input.plannedOccurrenceOffsetMs,
+            ),
       schedule: input.schedule === undefined
         ? existingRecord.schedule
         : resolveAutomationPatchSchedule({
@@ -1706,6 +1733,12 @@ async function upsertAutomationWithLatestRegistry(
       input.supportKind === undefined
         ? existingRecord?.supportKind ?? null
         : normalizeAutomationSupportKind(input.supportKind),
+    plannedOccurrenceOffsetMs:
+      input.plannedOccurrenceOffsetMs === undefined
+        ? existingRecord?.plannedOccurrenceOffsetMs ?? null
+        : normalizeAutomationPlannedOccurrenceOffsetMs(
+            input.plannedOccurrenceOffsetMs,
+          ),
     continuityPolicy:
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
     tags,
@@ -1779,6 +1812,9 @@ export function buildAutomationMarkdownPreview(
     ),
     scheduledReply: normalizeAutomationScheduledReply(input.scheduledReply),
     supportKind: normalizeAutomationSupportKind(input.supportKind),
+    plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
+      input.plannedOccurrenceOffsetMs,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),
     createdAt: now,

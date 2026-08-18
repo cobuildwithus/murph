@@ -2877,6 +2877,12 @@ export async function executeMurphDynamicToolRequest(input: {
           )
         }
         if (scheduledScope) {
+          if (isHostedAssistantNotificationRouteRequiredError(error)) {
+            return toolTextResult(
+              false,
+              'no phone call was started for this scheduled occurrence because its direct result route was unavailable. Restore that messaging route and ask the requester to reschedule the call; do not retry automatically.',
+            )
+          }
           if (isHostedPhoneCallReconciliationWorkflowStartRetryRequiredError(error)) {
             return toolTextResult(
               false,
@@ -6375,6 +6381,8 @@ function safeToolPayloadText(payload: unknown): string {
 // than importing across the boundary.
 const HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE =
   'HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED'
+const HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED_CODE =
+  'HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED'
 const HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED_CODE =
   'HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED'
 
@@ -6386,6 +6394,16 @@ function isHostedGroupPhoneCallRequesterActivationRequiredError(
   }
   const code = (error as { code?: unknown }).code
   return code === HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE
+}
+
+function isHostedAssistantNotificationRouteRequiredError(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const code = (error as { code?: unknown }).code
+  return code === HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED_CODE
 }
 
 function isHostedPhoneCallReconciliationWorkflowStartRetryRequiredError(

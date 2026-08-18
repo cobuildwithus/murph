@@ -649,7 +649,7 @@ describe('real codex app-server with scripted provider', () => {
     const priorFinalActivityAt = '2026-08-16T18:42:00.000Z'
     const scheduledOccurrenceAt = '2026-08-17T18:00:00.000Z'
     const reminderSentAt = '2026-08-17T18:00:05.000Z'
-    const acceptedAt = '2026-08-17T18:07:00.000Z'
+    const acceptedAt = '2026-08-17T18:00:04.000Z'
     const assistantInputId = `ain_${'6'.repeat(32)}`
 
     await createIntegratedVaultServices().core.init({
@@ -4076,6 +4076,181 @@ text(JSON.stringify(result));
       'Your reminder is set for 10 PM Central.',
     )
   })
+
+  it.each([
+    {
+      create: true,
+      finalMessage: 'Saved the weekly movement check-in.',
+      prompt: 'Create a weekly movement check-in here. Save it after checking whether it already exists.',
+      scope: 'direct' as const,
+      shareSteps: false,
+    },
+    {
+      create: false,
+      finalMessage: 'There is no weekly movement check-in yet.',
+      prompt: 'Check whether I already have a weekly movement check-in. Do not create or change anything.',
+      scope: 'direct' as const,
+      shareSteps: false,
+    },
+    {
+      create: true,
+      finalMessage: 'Saved the group movement check-in without requesting health-data access.',
+      prompt: 'Create a weekly movement check-in for this group. Do not ask anyone to share health data.',
+      scope: 'group' as const,
+      shareSteps: false,
+    },
+    {
+      create: true,
+      finalMessage: 'Saved the group movement check-in and posted the steps access offer.',
+      prompt: 'Create a weekly movement check-in for this group and ask participants to share daily steps for it.',
+      scope: 'group' as const,
+      shareSteps: true,
+    },
+  ])(
+    'continues a missing $scope automation only for explicit create intent (shareSteps=$shareSteps)',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ create, finalMessage, prompt, scope, shareSteps }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      const permissionOffers: unknown[] = []
+      const scriptedResponses: ScriptedResponse[] = [
+        {
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation({
+  action: "inspect",
+  lookup: "weekly-movement-check-in",
+});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        },
+      ]
+      if (create) {
+        scriptedResponses.push({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send a short weekly movement check-in.",
+  schedule: { kind: "every", everyMs: 604800000 },
+  title: "Weekly movement check-in",
+});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (shareSteps) {
+        scriptedResponses.push({
+          functionCall: {
+            arguments: {
+              action: 'offer_access',
+              projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+            },
+            name: 'group',
+            namespace: 'murph',
+          },
+        })
+      }
+      scriptedResponses.push({ text: finalMessage })
+      scenario.stub.queue(...scriptedResponses)
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        baseInstructions: buildScriptedHostedSystemPrompt(scope, true),
+        dynamicTools: scope === 'group'
+          ? resolveMurphDynamicTools({
+              automationAvailable: true,
+              groupAvailable: true,
+              groupPermissionOfferAvailable: true,
+              progressUpdatesAvailable: false,
+            })
+          : [MURPH_AUTOMATION_TOOL],
+        groupConversation: scope === 'group',
+        hostedToolContext: {
+          automationTool: {
+            request: async (request) => {
+              automationRequests.push(request)
+              if (request.action === 'inspect') {
+                throw Object.assign(
+                  new Error('private missing automation detail'),
+                  { code: 'automation_not_found' as const },
+                )
+              }
+              if (request.action !== 'save') {
+                throw new Error('Expected only inspect or save requests.')
+              }
+              return {
+                action: 'save',
+                automationId: 'automation-weekly-movement',
+                created: true,
+                effectiveTimeZone: 'America/New_York',
+                lookupId: 'weekly-movement-check-in',
+                nextOccurrenceAt: '2026-08-24T13:00:00.000Z',
+                routeBinding: 'current_conversation',
+                schedule: request.schedule,
+                status: 'active',
+                timingVerified: true,
+                updatedAt: '2026-08-17T13:00:00.000Z',
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          groupPermissionOfferTool: {
+            request: async (request) => {
+              permissionOffers.push(request)
+              return {
+                action: 'post_join_offer',
+                result: {
+                  group: {
+                    displayName: 'Movement crew',
+                    id: 'group_synthetic_movement',
+                    kind: 'friends',
+                    memberCount: 0,
+                    members: [],
+                    requestedVaultShareProjectionKinds: ['steps-days.v0'],
+                    requestedVaultShareProjectionScopes: [
+                      { projectionKind: 'steps-days.v0' },
+                    ],
+                    status: 'active',
+                  },
+                  joinUrl: 'https://example.test/groups/join/movement',
+                  offerState: 'posted',
+                  offeredAt: '2026-08-17T13:00:00.000Z',
+                  status: 'sent',
+                },
+              }
+            },
+          },
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        prompt,
+      })
+
+      expect(automationRequests.map((request) => request.action)).toEqual(
+        create ? ['inspect', 'save'] : ['inspect'],
+      )
+      expect(permissionOffers).toEqual(
+        shareSteps
+          ? [{ projectionScopes: [{ projectionKind: 'steps-days.v0' }] }]
+          : [],
+      )
+      const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.customToolCallOutputs ?? [])
+        .join('\n')
+      expect(toolOutputs).toContain('\\"action\\":\\"inspect\\",\\"found\\":false')
+      expect(toolOutputs.includes('\\"created\\":true')).toBe(create)
+      expect(result.finalMessage).toBe(finalMessage)
+    },
+  )
 
   it('resolves a group one-shot local time before saving and exposes verified readback', {
     timeout: TURN_TIMEOUT_MS,

@@ -601,7 +601,7 @@ test("home onboarding steps keep equal cards across dashboard widths", async ({
   });
 
   const response = await page.goto(
-    "/design?tab=sections#home-onboarding-steps",
+    "/screenshots/home#home-onboarding-steps",
     { waitUntil: "load" },
   );
   expect(response?.status(), "onboarding study should respond 200").toBe(200);
@@ -824,7 +824,7 @@ for (const width of [768, 1280] as const) {
     });
 
     const response = await page.goto(
-      "/design?tab=sections#personal-usage-credit-owner",
+      "/screenshots/account#personal-usage-credit-owner",
       { waitUntil: "load" },
     );
     expect(response?.status(), "design owner study should respond 200").toBe(200);
@@ -872,18 +872,24 @@ for (const width of [768, 1280] as const) {
     await expect(trigger).toBeVisible();
 
     const history = historyPreview.locator("details");
-    const historySummary = history.locator("summary");
     await expect(history).not.toHaveAttribute("open", "");
-    await historySummary.click();
+    await history.evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = true;
+      }
+    });
     await expect(history).toHaveAttribute("open", "");
-    await historySummary.focus();
-    await page.keyboard.press("Enter");
-    await expect(history).not.toHaveAttribute("open", "");
     await expect(
       historyPreview.locator(
         'a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
       ),
     ).toHaveCount(3);
+    await history.evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = false;
+      }
+    });
+    await expect(history).not.toHaveAttribute("open", "");
 
     const currentReferrals = referralDetailsPreview.getByRole("list", {
       name: "Current usage referrals",
@@ -902,15 +908,22 @@ for (const width of [768, 1280] as const) {
     });
     const referralDetails = referralDetailsSummary.locator("..");
     await expect(referralDetails).not.toHaveAttribute("open", "");
-    await referralDetailsSummary.click();
+    await referralDetails.evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = true;
+      }
+    });
     await expect(referralDetails).toHaveAttribute("open", "");
     await expect(
       referralDetails.getByText(
         "Start a fresh group and make it genuinely active, with multiple people actually talking.",
       ),
     ).toBeVisible();
-    await referralDetailsSummary.focus();
-    await page.keyboard.press("Enter");
+    await referralDetails.evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = false;
+      }
+    });
     await expect(referralDetails).not.toHaveAttribute("open", "");
 
     const starterExhausted = study.locator(

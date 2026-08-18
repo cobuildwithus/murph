@@ -300,12 +300,25 @@ operations, assistant tools, or a new queue.
 
 ## Rollout
 
-For a new V4 workout, an expansion of V4's strict bounds, or the V6 editor,
-deploy the native reader first, the shared Web action and image routes second,
-and the Worker and runner producer last. Older app versions retain
-truthful captions and the static image but do not provide the drill-down workout
-interface. Keep the Web route available while any sent image URL may still be
-fetched.
+Backward compatibility is a permanent iMessage app-card contract, not a
+one-time V6 rollout step. Linq's app-capability result does not negotiate a
+decoder version, so every production card must remain readable by every
+previously released Murph Messages extension that can claim it. A new schema,
+discriminator, required field, stricter bound, or changed meaning may emit only
+when unknown clients keep receiving the last readable envelope, an explicit
+capability selects a compatible envelope, or every earlier claiming extension
+already renders the unknown shape as a complete non-interactive recovery. A
+new reader becoming available in TestFlight or the App Store is necessary when
+applicable but is never sufficient by itself because older installed builds
+remain active. Until compatibility is proven, emit the prior readable schema
+(V4 for workouts) or deterministic ordinary text.
+
+Within that compatibility gate, deploy the native reader first, the shared Web
+action and image routes second, and the Worker and runner producer last. Keep
+the Web route available while any sent image URL may still be fetched.
+Provider acceptance, delivery receipts, the provider's static layout, and
+new-build device proof do not prove old-extension rendering: an installed
+extension can claim the card before rejecting its envelope.
 
 The backend also has a persisted-state compatibility floor. Deploy a Worker and
 runner bundle that accepts the current V4 bounds and V6 before a card using
