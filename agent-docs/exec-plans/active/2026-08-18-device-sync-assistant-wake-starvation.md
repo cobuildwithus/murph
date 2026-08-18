@@ -88,9 +88,10 @@ frontiers advance after deployment.
 - The diff-scoped verifier completed shell syntax, Node syntax, and the hosted
   stale-name guard before its local run was manually stopped during the next
   guard after 161 seconds; required CI remains the broad verification owner.
-- An independent ReviewGPT incident trace is still running against the
-  sanitized production evidence. Exact-head PR review, required CI, protected
-  deployment, and production convergence proof remain pending.
+- Corrective pull request #1992 is open. An independent ReviewGPT incident trace
+  is still running against the sanitized production evidence. Exact-head PR
+  review, required CI, protected deployment, and production convergence proof
+  remain pending.
 
 ## State
 
