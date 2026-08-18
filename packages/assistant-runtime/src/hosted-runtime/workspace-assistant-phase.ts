@@ -26,6 +26,9 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
+  parseHostedPhoneCallResultDeliveryKey,
+} from "@murphai/hosted-execution/phone-calls";
+import {
   buildHostedVaultShareProjectionScopeKey,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -89,6 +92,7 @@ import {
 import {
   resolveDeliveryCandidates,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
+import type { DeviceSyncJobFailureEventOrigin } from "@murphai/device-syncd/types";
 import {
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
@@ -110,6 +114,7 @@ import {
   createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
+  queueHostedAssistantPendingMessageVolumeReceiptsForVault,
   resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantOutboxNextWakeAt,
   type HostedAssistantDeliveryPreparation,
@@ -1538,6 +1543,9 @@ function createHostedAssistantAutomationTool(input: {
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
+          ...(request.plannedOccurrenceOffsetMs === undefined
+            ? {}
+            : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
           route: currentRoute,
           schedule: request.schedule,
           ...(request.slug ? { slug: request.slug } : {}),
@@ -1613,6 +1621,9 @@ function createHostedAssistantAutomationTool(input: {
                 request.instructions,
               ),
             }),
+        ...(request.plannedOccurrenceOffsetMs === undefined
+          ? {}
+          : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
         lookup: request.lookup,
         ...(request.retargetToCurrentConversation === true
           ? { route: currentRoute }
@@ -2749,6 +2760,7 @@ export async function runHostedWorkspaceAssistantPhase(
       actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
       includeBackgroundDueIntents:
         input.shouldYieldBackgroundMaintenance?.() !== true,
+      messageVolumeReceiptPort: input.runtime.platform.effectsPort,
       preferredIntentIds: currentTurnDeliveryIntentIds,
       vaultRoot: input.restored.vaultRoot,
     });
@@ -4115,6 +4127,7 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
             phase: "checkpoint",
             redactedJson: {
               ...failure.redactedJson,
+              failureEventOrigin: "checkpoint" satisfies DeviceSyncJobFailureEventOrigin,
               nextWakeAtPresent: true,
             },
           },
@@ -4742,6 +4755,7 @@ async function writeHostedIdleDeviceSyncFailureRuntimeLog(input: {
         errorMessagePresent: input.error instanceof Error
           ? input.error.message.length > 0
           : input.error !== null && input.error !== undefined,
+        failureEventOrigin: "idle_maintenance" satisfies DeviceSyncJobFailureEventOrigin,
         idleMaintenanceFailed: true,
         retryAt: input.retryAt,
       },
@@ -4772,6 +4786,7 @@ async function writeHostedDeviceActivityAutomationScheduleFailureRuntimeLog(inpu
         errorMessagePresent: input.error instanceof Error
           ? input.error.message.length > 0
           : input.error !== null && input.error !== undefined,
+        failureEventOrigin: "device_activity_automation" satisfies DeviceSyncJobFailureEventOrigin,
         wakeKind: input.wake.kind,
       },
     },
@@ -5650,6 +5665,15 @@ async function runSystemMailboxMaintenancePhase(input: {
         result: mergeMemberPreferencesPrePlanningResult(null),
       };
     }
+    const queuedMessageVolumeReceipts =
+      phaseInput.foregroundCausalOnly !== true
+      && !backgroundMaintenanceYielded
+        ? await queueHostedAssistantPendingMessageVolumeReceiptsForVault({
+            effectsPort: phaseInput.runtime.platform.effectsPort,
+            now: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)),
+            vaultRoot: phaseInput.restored.vaultRoot,
+          })
+        : 0;
     if (dirtyDeviceSyncMetrics) {
       const dirtyAssistantCronWakeState = await readAssistantCronWakeState();
       const assistantCronWake = resolveHostedAssistantCronWakeCandidate({
@@ -5710,6 +5734,28 @@ async function runSystemMailboxMaintenancePhase(input: {
       };
     }
 
+    if (queuedMessageVolumeReceipts > 0) {
+      const backgroundWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
+        input: phaseInput,
+        pendingAssistantInputWakeAt,
+      });
+      return {
+        backgroundMaintenanceYielded,
+        continueAssistantLane: false,
+        deviceSyncMaintenanceRan: false,
+        initialProviderCleanupCheckpoint,
+        pendingAssistantInputWakeAt,
+        result: mergeMemberPreferencesPrePlanningResult({
+          checkpointReason: "outbox_receipt",
+          ...(backgroundWake.at ? { nextWakeAt: backgroundWake.at } : {}),
+          ...(shouldExposeHostedAssistantPhaseNextWakeReason(backgroundWake.reason)
+            ? { nextWakeReason: backgroundWake.reason }
+            : {}),
+          progressed: true,
+        }),
+      };
+    }
+
     return {
       backgroundMaintenanceYielded,
       continueAssistantLane: false,
@@ -5727,6 +5773,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       ? await collectHostedAssistantDeliverySideEffects({
         actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
         includeBackgroundDueIntents: phaseInput.foregroundCausalOnly !== true,
+        messageVolumeReceiptPort: phaseInput.runtime.platform.effectsPort,
         preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
           systemMailboxPreparation,
         ),
@@ -5739,7 +5786,10 @@ async function runSystemMailboxMaintenancePhase(input: {
   const systemMailboxDeliveryEffectsForDispatch =
     phaseInput.foregroundCausalOnly === true
       ? systemMailboxDeliveryEffects.filter(
-          (effect) => effect.payload.transportIdempotent === true,
+          (effect) => effect.payload.transportIdempotent === true
+            || parseHostedPhoneCallResultDeliveryKey(
+              effect.payload.idempotencyKey,
+            ) !== null,
         )
       : systemMailboxDeliveryEffects;
   const deferredSystemMailboxDeliveryWakeAt =
@@ -6177,6 +6227,8 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       deferredSystemMailboxRecord?.redactedStatus ?? {};
     await writeHostedSystemMailboxRuntimeLog({
       attemptCount: input.systemMailboxPreparation.item.attemptCount,
+      errorCode: statusCallback.errorCode ?? null,
+      errorMessage: statusCallback.errorMessage ?? null,
       input: input.input,
       legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: statusNextWakeAt,

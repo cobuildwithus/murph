@@ -9,7 +9,10 @@ import {
   isDeviceSyncSourceResourceAvailabilityMetadataKey,
   isGoogleHealthFitbitMigrationLegacyTerminal,
 } from "@murphai/device-syncd/fitbit-migration";
-import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
+import type {
+  DeviceSyncJobFailureEventOrigin,
+  PublicDeviceSyncAccount,
+} from "@murphai/device-syncd/types";
 import type {
   SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
@@ -1886,6 +1889,7 @@ function buildHostedRuntimeFailureApplyRedactedJson(input: {
 
   return {
     failureCode: toHostedRuntimeApplyLogCode(input.nextAccount.lastErrorCode ?? diagnostic?.code ?? null),
+    failureEventOrigin: "canonical_apply" satisfies DeviceSyncJobFailureEventOrigin,
     failureSummary: summary ?? "Hosted device-sync runtime failure state advanced.",
     ...buildHostedRuntimeFailureDiagnosticRedactedJson(diagnostic),
     hadPriorFailure: Boolean(input.baseline.localState.lastSyncErrorAt),

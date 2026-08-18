@@ -22,6 +22,7 @@ import type {
   TrendData,
 } from "@/src/types/experiments";
 import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment-status";
+import { countScheduleOccurrences } from "@/src/lib/experiments/schedule-occurrences";
 import { resolveBiomarkerDesiredDirection } from "@/src/lib/health-commons/biomarker-desired-direction";
 
 export interface ResolveBrowserVaultExperimentRunInput {
@@ -705,6 +706,7 @@ function buildScheduleWeeks(input: {
         kind: scheduledCell.kind,
         detail: formatScheduleCellDetail(scheduledCell.kind, scheduledCell),
         isToday: date === input.todayLocalDate,
+        occurrences: scheduledCell.occurrences,
       } satisfies ScheduleCell));
     });
 
@@ -761,6 +763,14 @@ function formatScheduleCellDetail(
   kind: ScheduleCellKind,
   scheduledCell?: BrowserVaultExperimentScheduleResult["cells"][number],
 ): string | undefined {
+  if (scheduledCell && scheduledCell.occurrences.expected > 1) {
+    const logged =
+      scheduledCell.occurrences.completed +
+      scheduledCell.occurrences.assumed +
+      scheduledCell.occurrences.partial;
+    return `${logged} of ${scheduledCell.occurrences.expected}`;
+  }
+
   switch (kind) {
     case "completed":
       return "Done";
@@ -791,13 +801,13 @@ function summarizeScheduleWeek(cells: readonly ScheduleCell[]): string | undefin
   }
 
   const parts = [
-    formatCount(countScheduleCells(cells, "completed"), "done"),
-    formatCount(countScheduleCells(cells, "assumed"), "assumed"),
-    formatCount(countScheduleCells(cells, "partial"), "partial"),
-    formatCount(countScheduleCells(cells, "missed"), "not logged"),
-    formatCount(countScheduleCells(cells, "failed"), "not met"),
-    formatCount(countScheduleCells(cells, "unknown"), "unknown"),
-    formatCount(countScheduleCells(cells, "scheduled"), "scheduled"),
+    formatCount(countScheduleOccurrences(cells, "completed"), "done"),
+    formatCount(countScheduleOccurrences(cells, "assumed"), "assumed"),
+    formatCount(countScheduleOccurrences(cells, "partial"), "partial"),
+    formatCount(countScheduleOccurrences(cells, "missed"), "not logged"),
+    formatCount(countScheduleOccurrences(cells, "failed"), "not met"),
+    formatCount(countScheduleOccurrences(cells, "unknown"), "unknown"),
+    formatCount(countScheduleOccurrences(cells, "scheduled"), "scheduled"),
   ].filter((part): part is string => Boolean(part));
 
   return parts.length > 0 ? parts.join(" · ") : undefined;
@@ -1414,10 +1424,6 @@ function formatWeekdayName(day: number): string {
 
 function formatCount(count: number, label: string): string | undefined {
   return count > 0 ? `${count} ${label}` : undefined;
-}
-
-function countScheduleCells(cells: readonly ScheduleCell[], kind: ScheduleCellKind): number {
-  return cells.filter((cell) => cell.kind === kind).length;
 }
 
 function extractIsoDate(value: string | null | undefined): string | null {

@@ -198,7 +198,14 @@ export function SourceCard({
                 .
               </p>
             ) : null}
-            {source.unavailableActionUrl && source.unavailableActionLabel ? (
+            {!authenticated ? (
+              <AuthButton
+                aria-label="Sign in to Murph"
+                className="self-end"
+              >
+                Sign in
+              </AuthButton>
+            ) : source.unavailableActionUrl && source.unavailableActionLabel ? (
               <Button
                 className="self-end"
                 render={(
@@ -215,13 +222,6 @@ export function SourceCard({
               >
                 {source.unavailableActionLabel}
               </Button>
-            ) : setupGuideId && setupGuideActionLabel && !authenticated ? (
-              <AuthButton
-                aria-label={`Log in or sign up to set up ${source.name}`}
-                className="self-end"
-              >
-                Log in or sign up
-              </AuthButton>
             ) : setupGuideId && setupGuideActionLabel ? (
               <Button
                 type="button"
@@ -242,13 +242,6 @@ export function SourceCard({
               >
                 {source.unavailableActionLabel}
               </Button>
-            ) : !authenticated ? (
-              <AuthButton
-                aria-label={`Sign in to connect ${source.name}`}
-                className="self-end"
-              >
-                Sign in
-              </AuthButton>
             ) : migrationState === "cutover_ready" ? (
               <Button
                 type="button"

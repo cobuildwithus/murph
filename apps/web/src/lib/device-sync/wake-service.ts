@@ -33,6 +33,7 @@ import {
   DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
   isDeviceSyncDisconnectInProgress,
   isHistoricalResetIncompleteDeviceSyncAccount,
@@ -1930,6 +1931,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   claimToken: string;
   now: string;
   ownerId: string | null;
+  processingAttemptedAt: string;
   registry?: DeviceSyncRegistry;
   sourceAdmissionDeferred?: boolean;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -1992,6 +1994,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     dirtyResources,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
+    processingAttemptedAt: input.processingAttemptedAt,
     provider: input.account.provider,
     resourceCategory,
     scopes: input.account.scopes ?? [],
@@ -2023,6 +2026,7 @@ async function prepareHostedWebhookSourceObservation(input: {
   claimToken: string;
   now: string;
   ownerId: string;
+  processingAttemptedAt: string;
   provider: string;
   registry?: DeviceSyncRegistry;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -2053,13 +2057,27 @@ async function prepareHostedWebhookSourceObservation(input: {
           || current.provider !== input.provider
           || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
           || current.connectedAt.toISOString() !== input.account.connectedAt
-          || current.connectedAt.getTime() > Date.parse(input.now)
           || current.providerApplicationId !== null
           || current.providerApplicationRevision !== null
         ) {
           await completeHostedWebhookTraceTx(input, tx);
           return { kind: "terminal" };
         }
+        const setup = {
+          setupExpiresAt: current.setupExpiresAt?.toISOString() ?? null,
+          setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
+        };
+        const setupPending = isDeviceSyncConnectionSetupPending(setup);
+        if (setupPending) {
+          if (isDeviceSyncConnectionSetupExpiredAt(setup, input.processingAttemptedAt)) {
+            await completeHostedWebhookTraceTx(input, tx);
+            return { kind: "terminal" };
+          }
+        } else if (current.connectedAt.getTime() > Date.parse(input.now)) {
+          await completeHostedWebhookTraceTx(input, tx);
+          return { kind: "terminal" };
+        }
+
         const matchingSources = await input.store.listConnectionSourceAdmissionCandidates({
           connectionId: input.account.id,
           sourceProviderSlug,
@@ -2741,6 +2759,7 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   eventType: string;
   expectedConnectedAt: string;
   occurredAt: string;
+  processingAttemptedAt: string;
   provider: string;
   resourceCategory?: string | null;
   scopes: string[];
@@ -3068,6 +3087,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       provider: true,
       providerApplicationId: true,
       providerApplicationRevision: true,
+      setupExpiresAt: true,
       setupPhase: true,
       status: true,
       userId: true,
@@ -3079,7 +3099,6 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     || current.provider !== input.provider
     || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
     || current.connectedAt.toISOString() !== input.expectedConnectedAt
-    || current.connectedAt.getTime() > Date.parse(input.acceptedAt)
   ) {
     await completeHostedWebhookTraceTx(input, tx);
     return { kind: "completed" };
@@ -3097,16 +3116,27 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     await completeHostedWebhookTraceTx(input, tx);
     return { kind: "completed" };
   }
-  const setupPending = isDeviceSyncConnectionSetupPending({
+  const setup = {
+    setupExpiresAt: current.setupExpiresAt?.toISOString() ?? null,
     setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
-  });
-  if (setupPending && !input.sourceObservation) {
-    throw deviceSyncError({
-      code: "WEBHOOK_ACCOUNT_NOT_READY",
-      message: "Device sync setup changed before webhook work could be committed.",
-      retryable: true,
-      httpStatus: 503,
-    });
+  };
+  const setupPending = isDeviceSyncConnectionSetupPending(setup);
+  if (setupPending) {
+    if (isDeviceSyncConnectionSetupExpiredAt(setup, input.processingAttemptedAt)) {
+      await completeHostedWebhookTraceTx(input, tx);
+      return { kind: "completed" };
+    }
+    if (!input.sourceObservation) {
+      throw deviceSyncError({
+        code: "WEBHOOK_ACCOUNT_NOT_READY",
+        message: "Device sync setup changed before webhook work could be committed.",
+        retryable: true,
+        httpStatus: 503,
+      });
+    }
+  } else if (current.connectedAt.getTime() > Date.parse(input.acceptedAt)) {
+    await completeHostedWebhookTraceTx(input, tx);
+    return { kind: "completed" };
   }
   const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (sourceProviderSlug) {

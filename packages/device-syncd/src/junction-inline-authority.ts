@@ -177,12 +177,17 @@ function classifyJunctionInlineRecordSource(
       if (
         explicitSourceProviderSlug
         && childClassification.status === "resolved"
-        && !areJunctionProviderSlugsDataEquivalent(
+      ) {
+        if (!areJunctionProviderSlugsDataEquivalent(
           childClassification.sourceProviderSlug,
           explicitSourceProviderSlug,
-        )
-      ) {
-        return { status: "ambiguous" };
+        )) {
+          return { status: "ambiguous" };
+        }
+        return {
+          sourceProviderSlug: explicitSourceProviderSlug,
+          status: "resolved",
+        };
       }
       return childClassification;
     }

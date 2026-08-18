@@ -339,6 +339,23 @@ export function isDeviceSyncConnectionSetupPending(connection: {
     || connection.setupPhase === "link_returned";
 }
 
+export function isDeviceSyncConnectionSetupExpiredAt(
+  connection: {
+    setupExpiresAt?: string | null;
+    setupPhase?: string | null;
+  },
+  at: string,
+): boolean {
+  if (
+    !isDeviceSyncConnectionSetupPending(connection)
+    || !connection.setupExpiresAt
+  ) {
+    return false;
+  }
+
+  return Date.parse(connection.setupExpiresAt) <= Date.parse(at);
+}
+
 // Provider/account metadata can include raw profile payloads, body measurements, or
 // other operator-supplied diagnostics that should not leak through outward-facing
 // control-plane responses. Keep the public account surface intentionally minimal.

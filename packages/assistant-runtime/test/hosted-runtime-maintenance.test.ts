@@ -3799,6 +3799,7 @@ describe("runHostedDeviceSyncPass", () => {
         {
           accountId: "local_account_sensitive",
           accountStatus: null,
+          attempts: 1,
           code: "SYNC_JOB_FAILED",
           details: {
             failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
@@ -3827,6 +3828,10 @@ describe("runHostedDeviceSyncPass", () => {
             providerOAuthResponseErrorFieldPresent: true,
             providerOAuthResponseShapeKind: "json_object",
           },
+          jobDisposition: "queued",
+          jobKind: "reconcile",
+          maxAttempts: 5,
+          remainingAttempts: 4,
           retryable: true,
         },
       ]),
@@ -3918,7 +3923,12 @@ describe("runHostedDeviceSyncPass", () => {
     assert.equal(entry.phase, "invoke");
     assert.deepEqual(entry.redactedJson, {
       failureCode: "SYNC_JOB_FAILED",
-      failureDisposition: "retry",
+      failureDisposition: "queued",
+      failureEventOrigin: "worker_attempt",
+      failureJobAttempts: 1,
+      failureJobKind: "reconcile",
+      failureJobMaxAttempts: 5,
+      failureJobRemainingAttempts: 4,
       failureSummary:
         "Importer failed reading <redacted-path> for <redacted-email> with <redacted-secret>",
       failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
@@ -3970,7 +3980,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("logs webhook-triggered job failures even when a later success cleared account error state", async () => {
+  it("logs an exhausted retryable workout-stream attempt as dead with bounded safe candidate context", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 2);
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -3986,18 +3996,28 @@ describe("runHostedDeviceSyncPass", () => {
           accountId: "local_account_sleep_sensitive",
           accountStatus: null,
           at: "2026-06-08T02:00:02.000Z",
-          attempts: 3,
+          attempts: 5,
           code: "JUNCTION_API_REQUEST_FAILED",
           details: {
-            providerHttpStatus: 503,
-            providerRequestEndpointKind: "junction_summary",
+            providerHttpStatus: 500,
+            providerRequestCandidateAliasSource: "id",
+            providerRequestCandidateCount: 8,
+            providerRequestCandidateOrdinal: 3,
+            providerRequestEndpointKind: "junction_workout_stream",
             providerRequestMethod: "GET",
+            providerResponseRequestId: "private-provider-request-id-must-not-escape",
+            rawProviderPayload: "private-provider-payload-must-not-escape",
+            rawRequestUrl: "https://junction.example/private-workout-id-must-not-escape",
+            rawWorkoutId: "private-workout-id-must-not-escape",
           },
-          jobKind: "resource",
+          jobDisposition: "dead",
+          jobKind: "reconcile",
+          maxAttempts: 5,
           provider: "junction",
-          resource: "sleep",
+          remainingAttempts: 0,
+          resource: "workout_stream",
           retryable: true,
-          summary: "Junction summary request failed with an ambiguous provider error.",
+          summary: "Junction workout stream request failed with an ambiguous provider error.",
         },
       ]),
       listAccounts: vi.fn(() => [
@@ -4082,11 +4102,14 @@ describe("runHostedDeviceSyncPass", () => {
     assert.equal(entry.phase, "invoke");
     assert.deepEqual(entry.redactedJson, {
       failureCode: "JUNCTION_API_REQUEST_FAILED",
-      failureDisposition: "retry",
-      failureJobAttempts: 3,
-      failureJobKind: "resource",
-      failureResource: "sleep",
-      failureSummary: "Junction summary request failed with an ambiguous provider error.",
+      failureDisposition: "dead",
+      failureEventOrigin: "worker_attempt",
+      failureJobAttempts: 5,
+      failureJobKind: "reconcile",
+      failureJobMaxAttempts: 5,
+      failureJobRemainingAttempts: 0,
+      failureResource: "workout_stream",
+      failureSummary: "Junction workout stream request failed with an ambiguous provider error.",
       failureRetryable: true,
       hadPriorFailure: false,
       hadPriorSuccess: true,
@@ -4094,8 +4117,11 @@ describe("runHostedDeviceSyncPass", () => {
       nextReconcileAt: "2026-06-08T03:00:00.000Z",
       processedJobs: 2,
       provider: "junction",
-      providerHttpStatus: 503,
-      providerRequestEndpointKind: "junction_summary",
+      providerHttpStatus: 500,
+      providerRequestCandidateAliasSource: "id",
+      providerRequestCandidateCount: 8,
+      providerRequestCandidateOrdinal: 3,
+      providerRequestEndpointKind: "junction_workout_stream",
       providerRequestMethod: "GET",
       setupPhase: null,
       status: "active",
@@ -4108,6 +4134,10 @@ describe("runHostedDeviceSyncPass", () => {
     const serializedWebhookFailureLogs = JSON.stringify(logRequests);
     expect(serializedWebhookFailureLogs).not.toContain("local_account_sleep_sensitive");
     expect(serializedWebhookFailureLogs).not.toContain("hosted_connection_sleep_sensitive");
+    expect(serializedWebhookFailureLogs).not.toContain("private-workout-id-must-not-escape");
+    expect(serializedWebhookFailureLogs).not.toContain("private-provider-payload-must-not-escape");
+    expect(serializedWebhookFailureLogs).not.toContain("private-provider-request-id-must-not-escape");
+    expect(serializedWebhookFailureLogs).not.toContain("junction.example");
     expect(close).toHaveBeenCalledTimes(1);
   });
 

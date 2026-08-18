@@ -50,11 +50,15 @@ programmatically appropriate.
    For a card, copy each selected catalog image URL, alt, and step exactly.
    Construct its source as
    `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>` and keep
-   the returned order. For Linq/iMessage, or when a card does not fit, use the
-   existing response-media path when images improve the instruction. Do not
-   paste image URLs into message text when media delivery exists. If an
-   important movement has no useful image, keep the written cue clear and never
-   imply that an image was attached.
+   the returned order. For Linq/iMessage, use the existing response-media path
+   when images improve the instruction. On Telegram, follow the routine-card
+   tool's per-movement mapping and bounded validation-repair guidance. Keep
+   catalog images inside that card and never use separate response media as its
+   fallback. If the card still cannot attach, use one complete generic Rich
+   Message without images and name every movement separately. Do not paste image
+   URLs into message text when media delivery exists. If an important movement
+   has no useful image, keep the written cue clear and never imply that an image
+   was attached.
 7. If acute pain or safety requires an immediate action, give the minimal plan
    now. For a known routine the user has already performed, send a concise
    reference. Provide full steps only when asked, accepted as a walkthrough, or

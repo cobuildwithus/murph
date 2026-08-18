@@ -138,6 +138,9 @@ import {
   startHostedRuntimeShellPrewarmBestEffort,
 } from "../hosted-execution/direct-runtime-wake";
 import {
+  signalHostedPhoneCallResultNotificationRecovery,
+} from "../phone-calls/reconciliation-workflow-start";
+import {
   assertHostedThreadRouteEgressAuthority,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
@@ -2007,8 +2010,25 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       referralIds: plan.postCommitUsageReferralIds ?? [],
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
+    await rearmHostedPhoneCallResultRecoveriesAfterCommitRequired({
+      memberIds: plan.postCommitPhoneCallResultRecoveryMemberIds ?? [],
+      prisma,
+    });
   }
   return plan.response;
+}
+
+async function rearmHostedPhoneCallResultRecoveriesAfterCommitRequired(input: {
+  prisma: PrismaClient;
+  memberIds: readonly string[];
+}): Promise<void> {
+  const memberIds = [...new Set(input.memberIds)];
+  for (const memberId of memberIds) {
+    await signalHostedPhoneCallResultNotificationRecovery({
+      memberId,
+      prisma: input.prisma,
+    });
+  }
 }
 
 async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {

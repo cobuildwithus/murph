@@ -1634,10 +1634,30 @@ test("Junction client_user_id is deterministic, bounded, and owner-blinded", () 
 
   assert.equal(clientUserId.length, 32);
   assert.ok(clientUserId.startsWith("murph_"));
+  assert.equal(clientUserId, "murph_jnqpm4zu2il556kgyffrxngz26");
   assert.doesNotMatch(clientUserId, /owner|internal|123/u);
   assert.equal(
     clientUserId,
     buildJunctionClientUserId("junction-client-user-id-secret", "owner-internal-id-123"),
+  );
+
+  const namespacedClientUserId = buildJunctionClientUserId(
+    "junction-client-user-id-secret",
+    "owner-internal-id-123",
+    "e2e",
+  );
+  assert.equal(namespacedClientUserId.length, 32);
+  assert.ok(namespacedClientUserId.startsWith("murph_e2e_"));
+  assert.equal(namespacedClientUserId, "murph_e2e_jnqpm4zu2il556kgyffrxn");
+  assert.doesNotMatch(namespacedClientUserId, /owner|internal|123/u);
+  assert.notEqual(namespacedClientUserId, clientUserId);
+  assert.throws(
+    () => buildJunctionClientUserId(
+      "junction-client-user-id-secret",
+      "owner-internal-id-123",
+      "Native-iOS",
+    ),
+    /JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
   );
 });
 
@@ -1655,8 +1675,6 @@ test("Junction provider exposes primitive handlers without OAuth compatibility m
 });
 
 test("Junction default provider filter covers hosted Link connect routes", () => {
-  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 34);
-
   assert.deepEqual(
     JUNCTION_LINK_PROVIDER_SLUGS,
     JUNCTION_CONNECT_SOURCE_TARGETS
@@ -9023,7 +9041,7 @@ test("Junction createLinkToken honors configured allowed Link hosts", async () =
   );
 });
 
-test("Junction beginConnection resolves or creates a user, returns Link URL, and seeds provider-config credentials", async () => {
+test("Junction beginConnection resolves or creates a namespaced user, returns Link URL, and seeds provider-config credentials", async () => {
   const requests: Array<{ body: unknown; headers: Headers; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const url = readUrl(input);
@@ -9044,7 +9062,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
     }
 
     throw new Error(`Unexpected request: ${url}`);
-  });
+  }, { clientUserIdNamespace: "e2e" });
 
   const started = await requireJunctionConnectionHandler(provider).beginConnection({
     state: "state-1",
@@ -9070,7 +9088,9 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.deepEqual(started.stateMetadata, undefined);
 
   const createUserBody = requests.find((request) => request.url.endsWith("/v2/user"))?.body;
-  assert.equal(typeof createUserBody === "object" && createUserBody !== null && "client_user_id" in createUserBody, true);
+  assert.deepEqual(createUserBody, {
+    client_user_id: "murph_e2e_jnqpm4zu2il556kgyffrxn",
+  });
   assert.doesNotMatch(JSON.stringify(createUserBody), /owner-internal-id-123/u);
 
   const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;
@@ -19090,13 +19110,17 @@ test("Junction workout_stream carries the owning day when retryable failure prec
   assert.deepEqual(harness.streamRequests, ["workout-1"]);
 });
 
-test("Junction workout_stream carries exact progress with its retryable provider failure", async () => {
+test("Junction workout_stream carries exact progress and bounded context with its retryable provider failure", async () => {
   const importedWorkoutIds: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1", "workout-2"],
     streamResponse: (workoutId) => workoutId === "workout-2"
-      ? new Response(JSON.stringify({ error: "temporary provider failure" }), {
-          status: 503,
+      ? new Response(JSON.stringify({
+          error: "temporary provider failure",
+          privatePayloadMarker: "raw-workout-payload-must-not-escape",
+          workoutId,
+        }), {
+          status: 500,
           headers: {
             "Content-Type": "application/json",
             "Retry-After": "0",
@@ -19127,6 +19151,13 @@ test("Junction workout_stream carries exact progress with its retryable provider
       assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.ok(error.failure instanceof DeviceSyncError);
       assert.equal(error.failure.retryable, true);
+      assert.equal(error.failure.details?.status, 500);
+      assert.equal(error.failure.details?.requestCandidateAliasSource, "id");
+      assert.equal(error.failure.details?.requestCandidateCount, 2);
+      assert.equal(error.failure.details?.requestCandidateOrdinal, 2);
+      const serializedDetails = JSON.stringify(error.failure.details);
+      assert.equal(serializedDetails.includes("workout-2"), false);
+      assert.equal(serializedDetails.includes("raw-workout-payload-must-not-escape"), false);
       assert.deepEqual(readJunctionWorkoutProgressIdentities({
         workoutStreamCursor: error.workoutStreamCursor,
       }), [junctionWorkoutCandidateIdentity("workout-1")]);

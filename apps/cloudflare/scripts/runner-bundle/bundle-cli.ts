@@ -76,14 +76,25 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // current main on 2026-08-14. The reviewed Junction temporal-fidelity and
 // source-authority graph measured 9,128,211 B on Linux CI and 9,175,594 B on
 // macOS after merging current main on 2026-08-14; no package entered the graph.
+// The reviewed cross-session context reply work measured 9,119,111 B after
+// normalizing the esbuild working directory on 2026-08-15; it grows the
+// existing Assistant Engine graph without adding a package. Preserving the
+// exact planned experiment occurrence measured 9,153,208 B on Linux CI; it
+// extends that same graph without adding a package.
 // The reviewed Telegram rich-response work measured 9,159,100 B in the Linux
 // deploy lane on 2026-08-16; it grows the existing Assistant Engine graph
-// without adding a package. The static startup closure still measured 24,950 B.
+// without adding a package. The reviewed Telegram phone-call result route adds
+// only bounded schemas and delivery handling within the already-bundled Hosted
+// Execution and Assistant Engine graphs; the combined graph measured
+// 9,165,765 B on 2026-08-16. The merged assistant execution graph, including
+// the session-routing SQLite projection, measured 9,209,386 B in the Linux
+// deploy lane on 2026-08-18; it extends existing graphs without adding a
+// package. The static startup closure still measured 24,950 B.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
-// an 8 KiB allowance. If a
-// violation fires, investigate the listed largest inputs first; only raise the
-// budget deliberately for understood, intended growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_192_000;
+// an 8 KiB allowance. If a violation fires, investigate the listed largest
+// inputs first; only raise the budget deliberately for understood, intended
+// growth.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_242_200;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

@@ -29,7 +29,6 @@ import {
   normalizeHostedTelegramUsernameForLookup,
 } from "@/src/lib/hosted-onboarding/contact-normalization";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 import {
@@ -170,7 +169,6 @@ export function HostedFamilyManager(props: {
   tiers: FamilyManagerTier[];
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
-  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
@@ -196,6 +194,13 @@ export function HostedFamilyManager(props: {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [isActing, setIsActing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const returnedActiveMember = props.usageTopUpReturnMemberId
+    ? props.members.find(
+        (member) =>
+          member.memberId === props.usageTopUpReturnMemberId &&
+          member.memberId !== props.payerMemberId,
+      ) ?? null
+    : null;
 
   const invitePlan = props.tiers.find((tier) => tier.planCode === invitePlanCode)
     ?? props.tiers[0];
@@ -633,6 +638,23 @@ export function HostedFamilyManager(props: {
       </table>
       </div>
 
+      {returnedActiveMember ? (
+        <HostedUsageTopUpDialog
+          activePurchase={
+            props.usageTopUpActiveMemberId === returnedActiveMember.memberId
+              ? props.usageTopUpActivePurchase
+              : null
+          }
+          checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(returnedActiveMember.memberId)}/usage-credit/checkout`}
+          deferTerminalRefreshUntilClose
+          offers={[]}
+          payerMemberId={props.payerMemberId}
+          purchaseReturn={props.usageTopUpPurchaseReturn}
+          scope="family"
+          targetLabel={returnedActiveMember.label ?? "your family member"}
+        />
+      ) : null}
+
       {[props.usageTopUpActiveMemberId, props.usageTopUpReturnMemberId]
         .filter((memberId, index, memberIds): memberId is string => Boolean(
           memberId
@@ -953,16 +975,20 @@ export function HostedFamilyManager(props: {
               <HostedUsageTopUpDialog
                 key={pendingAction.id}
                 activePurchase={
-                  props.usageTopUpActiveMemberId === pendingAction.id
+                  props.usageTopUpActiveMemberId === pendingAction.id &&
+                  returnedActiveMember?.memberId !== pendingAction.id
                     ? props.usageTopUpActivePurchase
                     : null
                 }
                 checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}/usage-credit/checkout`}
-                contactOptions={props.usageTopUpContactOptions}
+                deferTerminalRefreshUntilClose={
+                  pendingAction.id !== props.payerMemberId
+                }
                 offers={props.usageTopUpActivePurchase ? [] : props.usageTopUpOffers ?? []}
                 payerMemberId={props.payerMemberId}
                 purchaseReturn={
-                  props.usageTopUpReturnMemberId === pendingAction.id
+                  props.usageTopUpReturnMemberId === pendingAction.id &&
+                  returnedActiveMember?.memberId !== pendingAction.id
                     ? props.usageTopUpPurchaseReturn
                     : null
                 }

@@ -3,6 +3,9 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  resolveHostedExecutionRunnerContainerName,
+} from "../hosted-runner-container-identity.js";
+import {
   HostedUserRunner,
 } from "./hosted-user-runner.js";
 import {
@@ -24,12 +27,20 @@ export interface HostedRunnerActiveFenceTestResult {
   processingMode: RunnerWriteFenceToken["processingMode"];
 }
 
+export interface HostedRunnerAgedActiveFenceTestResult {
+  attemptId: string;
+  ok: true;
+  startedAt: string;
+}
+
 export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   private readonly testState: DurableObjectStateLike;
+  private readonly testRunnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
 
   constructor(...args: ConstructorParameters<typeof HostedUserRunner>) {
     super(...args);
     this.testState = args[0];
+    this.testRunnerRuntimeEnvSource = args[3] ?? {};
   }
 
   installRuntimeProcessingStateTimingHooksForTest(input: {
@@ -109,12 +120,18 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   }
 
   async startStuckInvocationForTest(input: {
+    sameWorkerVersion?: boolean;
     startedAgoMs?: number;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.stateStore.bindUser(input.userId);
     const token = await this.stateStore.beginWriteFence({
-      runnerContainerName: input.userId,
+      runnerContainerName: input.sameWorkerVersion
+        ? resolveHostedExecutionRunnerContainerName({
+            source: this.testRunnerRuntimeEnvSource,
+            userId: input.userId,
+          })
+        : input.userId,
       userId: input.userId,
     });
     if (typeof input.startedAgoMs === "number") {
@@ -141,6 +158,29 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
           processingMode: token.processingMode,
         }
       : null;
+  }
+
+  async ageActiveRuntimeFenceForTest(input: {
+    startedAgoMs: number;
+    userId: string;
+  }): Promise<HostedRunnerAgedActiveFenceTestResult> {
+    if (!Number.isSafeInteger(input.startedAgoMs) || input.startedAgoMs <= 0) {
+      throw new TypeError("Hosted runner active fence test age must be a positive integer.");
+    }
+    await this.stateStore.bindUser(input.userId);
+    const startedAt = new Date(Date.now() - input.startedAgoMs).toISOString();
+    const record = await this.ageActiveWriteFenceForHostedLocalTest({
+      startedAt,
+    });
+    const activeFence = record.writeFence;
+    if (!activeFence) {
+      throw new Error("Hosted runner active fence disappeared while aging it for test.");
+    }
+    return {
+      attemptId: activeFence.attemptId,
+      ok: true,
+      startedAt,
+    };
   }
 
   private async ageActiveWriteFenceForHostedLocalTest(input: {

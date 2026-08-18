@@ -93,10 +93,16 @@ describe("automation lifecycle contracts", () => {
     const parsed = automationScaffoldPayloadSchema.parse({
       ...automationPayload(),
       supportKind: "check_in",
+      plannedOccurrenceOffsetMs: 900_000,
       tags: [buildAutomationSupportSeriesTag("habit:reg_sleep")],
     });
 
     expect(parsed.supportKind).toBe("check_in");
+    expect(parsed.plannedOccurrenceOffsetMs).toBe(900_000);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      plannedOccurrenceOffsetMs: -1,
+    }).success).toBe(false);
     expect(automationScaffoldPayloadSchema.safeParse({
       ...automationPayload(),
       supportKind: "generic_support",

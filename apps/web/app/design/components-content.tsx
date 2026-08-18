@@ -157,6 +157,7 @@ import {
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
   GroupFundingSupportersStudy,
+  GroupSponsorshipManagementConfirmationStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import {
@@ -1622,7 +1623,9 @@ export function ComponentsContent() {
             and send card entry or verification to Stripe only when needed.
             Family owners reuse the standard amount dialog with an exact member
             label and status-only recovery when another target owns the active
-            checkout. Credit is added only after Stripe confirms payment.
+            checkout. Personal and Family success returns refresh the meter
+            quietly; only a failed or unresolved return opens compact recovery.
+            Credit is added only after Stripe confirms payment.
           </p>
           <div className="grid gap-6 xl:grid-cols-2 2xl:grid-cols-4">
             <div
@@ -1718,7 +1721,7 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
-                inert
+                initialSelectedMonthlyCapMinor={2_000}
                 management={{
                   authorizationId: "hgsa_design_component",
                   chargedThisPeriodMinor: 500,
@@ -1730,6 +1733,7 @@ export function ComponentsContent() {
                 }}
               />
             </div>
+            <GroupSponsorshipManagementConfirmationStudy />
             <div
               className="rounded-3xl border border-border bg-card p-6"
               data-design-component="family-member-usage-top-up"

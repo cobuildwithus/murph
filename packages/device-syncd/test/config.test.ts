@@ -337,6 +337,7 @@ test("shared provider runtime env key lists stay aligned with the configured pro
   ]);
   assert.deepEqual(deviceSyncProviderRuntimeVariableEnvKeys, [
     "JUNCTION_API_BASE_URL",
+    "JUNCTION_CLIENT_USER_ID_NAMESPACE",
     "JUNCTION_ENV",
     "JUNCTION_PROVIDER_FILTER",
     "JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED",

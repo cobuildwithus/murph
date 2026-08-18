@@ -3101,6 +3101,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         phase: "invoke",
         redactedJson: expect.objectContaining({
         failureCode: "WHOOP_TOKEN_REQUEST_FAILED",
+        failureEventOrigin: "canonical_apply",
         failureRetryable: false,
         failureSummary: "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
         hadPriorFailure: true,
