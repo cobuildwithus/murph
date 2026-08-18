@@ -4398,6 +4398,35 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nowMs: Date.now(),
         });
         pendingWake = wakeResolution.pendingWake;
+        // The older due token remains checkpoint authority until its hot
+        // service attempt is committed. Retain a distinct later assistant
+        // obligation in the existing successor slot instead of dropping it.
+        if (
+          checkpointPendingBeforePass
+          && presentedInvocationLocalProjectedAssistantWakeKey === null
+          && passProjectedAssistantWakeKey !== null
+          && previousPendingWake.nextWakeAt !== null
+          && hostedRuntimeWakeReasonIsAssistant(previousPendingWake.nextWakeReason)
+          && hostedRuntimeWakeIsDue(previousPendingWake.nextWakeAt)
+          && passWake.nextWakeAt !== null
+          && Date.parse(passWake.nextWakeAt)
+            > Date.parse(previousPendingWake.nextWakeAt)
+          && hostedRuntimePendingWakeMatches(pendingWake, previousPendingWake)
+        ) {
+          pendingWakeAfterDueAssistantService = {
+            durableWake: selectEarliestHostedRuntimeWake([
+              {
+                at: pendingWakeAfterDueAssistantService?.durableWake.nextWakeAt ?? null,
+                reason:
+                  pendingWakeAfterDueAssistantService?.durableWake.nextWakeReason ?? null,
+              },
+              {
+                at: passWake.nextWakeAt,
+                reason: passWake.nextWakeReason,
+              },
+            ]),
+          };
+        }
         if (passProducedDefaultWake && passWake.nextWakeAt !== null) {
           recordUnservicedRecheckWake(passWake);
         }
@@ -5511,13 +5540,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const conversationInputAhead = checkpoint.conversationInputAhead === true;
         const hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint =
           hotProjectedAssistantWakeAttemptedKey;
+        const checkpointCompletedDueAssistantServiceBarrier =
+          pendingWakeAfterDueAssistantService !== null
+          && hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint !== null
+          && buildHostedRuntimeWakeKey({
+            nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+            nextWakeReason: checkpoint.workspace.nextWakeReason ?? null,
+          }) === hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint;
         rebaseCommittedWorkspace(checkpoint.workspace);
         runtimeStateDirty = false;
         idleCheckpointStartByMs = null;
         hotProjectedAssistantWakeAttemptedKey = null;
         durableCheckpointFollowUpPending = false;
+        if (checkpointCompletedDueAssistantServiceBarrier) {
+          reconcilePendingWakeAfterDueAssistantPass({
+            preservedDueAssistantWakeOnNoProgress: true,
+          });
+          durableCheckpointFollowUpPending = true;
+        }
         if (
-          latestCheckpointSnapshotCleanForWarmReuse
+          !runtimeStateDirty
+          && latestCheckpointSnapshotCleanForWarmReuse
           && durableCheckpointEffectCount === 0
         ) {
           await writeHostedWorkspaceCleanCheckpointMarkerBestEffort({
@@ -5531,6 +5574,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // re-mutating it here would be a duplicate state owner and is the seam
         // that previously let inboxMediaRetentionWakeAt drift.
         resumeDetachedAssistantAskAfterWorkspaceBoundary();
+        if (runtimeStateDirty) {
+          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
+          continue;
+        }
         const mayRunPostCheckpointWork = (): boolean =>
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
           && options.shutdownSignal?.aborted !== true;

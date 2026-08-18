@@ -7581,6 +7581,18 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (
+              item.item.id
+                === "mailbox_item_entrypoint_assistant_carry_mask_002"
+            ) {
+              return {
+                assistantInputId: await stagePendingLinqAssistantInputForMailboxItem({
+                  item: item.item,
+                  vaultRoot,
+                }),
+                status: "imported",
+              };
+            }
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -36806,6 +36818,218 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, null);
     } finally {
       foregroundAfterCheckpointGate.resolve();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("older due assistant carry cannot mask a later reminder through an empty persisted-wake dispatch", async () => {
+    // The predecessor already received its one hot attempt. A later reminder
+    // appears before checkpoint, then the predecessor's persisted dispatch
+    // reaches the same active invocation with empty mailboxes.
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 180_000;
+    const olderDueWakeAt = TEST_NOW;
+    const reminderWakeAt = new Date(
+      Date.parse(TEST_NOW) + idleCheckpointDelayMs + 5_000,
+    ).toISOString();
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const olderWakeHotAttemptComplete = createDeferred<void>();
+    const olderWakePersisted = createDeferred<void>();
+    const reminderCreated = createDeferred<void>();
+    const reminderWakePersisted = createDeferred<void>();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_assistant_carry_mask_001",
+        laneSeq: "1",
+      }),
+    ];
+    const assistantPresentedWakeAts: string[] = [];
+    let assistantPass = 0;
+    let completedNextWakeAt: string | null | undefined;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_assistant_carry_mask",
+            idleCheckpointDelayMs,
+            leaseGeneration: "3",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}:${Date.now()}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
+                key:
+                  "users/bundles/member-synthetic/"
+                  + `assistant-carry-mask-${checkpointRequests.length + 1}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                const workspace = createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+                if (checkpointRequests.length === 1) {
+                  events.push("runtime-wake:persisted-older-assistant");
+                  olderWakePersisted.resolve();
+                  runtimeWakeSignal.notify(Date.now());
+                }
+                if (request.nextWakeAt === reminderWakeAt) {
+                  reminderWakePersisted.resolve();
+                }
+                return workspace;
+              },
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            assistantPass += 1;
+            const presentedWakeAt = input.workspace?.nextWakeAt ?? "none";
+            assistantPresentedWakeAts.push(presentedWakeAt);
+            events.push(`assistant:${assistantPass}:${presentedWakeAt}:${Date.now()}`);
+
+            if (assistantPass === 1) {
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                invocationLocalAssistantWakeAt: olderDueWakeAt,
+                nextWakeAt: olderDueWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            if (assistantPass === 2) {
+              olderWakeHotAttemptComplete.resolve();
+              return { progressed: false };
+            }
+
+            if (assistantPass === 3) {
+              assert.equal(presentedWakeAt, "none");
+              reminderCreated.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                invocationLocalAssistantWakeAt: reminderWakeAt,
+                nextWakeAt: reminderWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true,
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      ).then((result) => {
+        completedNextWakeAt = result.nextWakeAt;
+        return result;
+      });
+
+      await withRealTimeout(
+        olderWakeHotAttemptComplete.promise,
+        15_000,
+        () => events.join(","),
+      );
+      await waitForFakeTimerScheduled(() => events.join(","));
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_assistant_carry_mask_002",
+        laneSeq: "2",
+      }));
+      runtimeWakeSignal.notify(Date.parse(TEST_NOW));
+      await withRealTimeout(reminderCreated.promise, 15_000, () => events.join(","));
+      await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(olderWakePersisted.promise, 15_000, () => events.join(","));
+
+      const persistedDispatchIndex = events.indexOf(
+        "runtime-wake:persisted-older-assistant",
+      );
+      assert.notEqual(persistedDispatchIndex, -1, events.join(","));
+      assert.equal(
+        events.slice(persistedDispatchIndex + 1).some((event) =>
+          event.startsWith("mailbox.importItem:")
+        ),
+        false,
+        events.join(","),
+      );
+      // A source-blind empty wake still cannot authorize cron replay; the
+      // successor must survive at the existing wake owner instead.
+      assert.equal(
+        events.slice(persistedDispatchIndex + 1).some((event) =>
+          event.startsWith("assistant:")
+        ),
+        false,
+        events.join(","),
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await withRealTimeout(
+        reminderWakePersisted.promise,
+        1_000,
+        () => events.join(","),
+      ).catch(() => undefined);
+      const persistedWakes = checkpointRequests.map((request) => [
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]);
+      assert.deepEqual(persistedWakes[0], [olderDueWakeAt, "assistant"]);
+      const reminderStillOwned =
+        completedNextWakeAt === reminderWakeAt
+        || assistantPresentedWakeAts.includes(reminderWakeAt)
+        || persistedWakes.some(([wakeAt, reason]) =>
+          wakeAt === reminderWakeAt && reason === "assistant"
+        );
+      assert.equal(
+        reminderStillOwned,
+        true,
+        `later reminder wake was masked: ${JSON.stringify({
+          assistantPresentedWakeAts,
+          completedNextWakeAt,
+          persistedWakes,
+        })}`,
+      );
+    } finally {
+      runtimeAbortController.abort();
+      vi.useRealTimers();
       await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
