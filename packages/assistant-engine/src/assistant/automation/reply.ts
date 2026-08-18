@@ -5187,7 +5187,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
           .filter((providerMessageId): providerMessageId is string =>
             providerMessageId !== null
           )
-      : input.providerMessageIds
+      : (input.providerMessageIds ?? [])
           .map(readAssistantTargetProviderScalar)
           .filter((providerMessageId): providerMessageId is string =>
             providerMessageId !== null
