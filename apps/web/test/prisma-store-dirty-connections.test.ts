@@ -367,10 +367,8 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           findUnique: vi.fn(async () => null),
         },
         deviceSyncDirtyConnection: {
-          createMany: vi.fn(async () => ({ count: 1 })),
-          findUnique: vi.fn()
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce(createdRecord),
+          createManyAndReturn: vi.fn(async () => [createdRecord]),
+          findUnique: vi.fn(async () => null),
         },
         deviceSyncDirtyPayload: {
           createMany: vi.fn(async (createInput: {
@@ -521,7 +519,6 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     try {
       let createData: Record<string, unknown> | null = null;
       let payloadCreateData: Array<Record<string, unknown>> | null = null;
-      let findCount = 0;
       const prisma = {
         $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
           insideTransaction = true;
@@ -532,38 +529,16 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           }
         }),
         deviceSyncDirtyConnection: {
-          createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+          createManyAndReturn: vi.fn(async (input: { data: Record<string, unknown> }) => {
             createData = input.data;
-            return { count: 1 };
-          }),
-          findUnique: vi.fn(async () => {
-            findCount += 1;
-            if (findCount === 1 || !createData) {
-              return null;
-            }
-
-            const dirtyAt = createData.latestDirtyAt as Date;
-            return {
-              connectionId: createData.connectionId,
-              userId: createData.userId,
-              provider: createData.provider,
-              dirtyRevision: createData.dirtyRevision,
-              processedRevision: createData.processedRevision,
-              firstDirtyAt: createData.firstDirtyAt,
-              latestDirtyAt: createData.latestDirtyAt,
-              windowStart: createData.windowStart,
-              windowEnd: createData.windowEnd,
-              eventCount: createData.eventCount,
-              latestTraceId: createData.latestTraceId,
-              latestEventType: createData.latestEventType,
-              latestResourceCategory: createData.latestResourceCategory,
-              sourceProviderCountsJson: createData.sourceProviderCountsJson,
-              resourceCategoryCountsJson: createData.resourceCategoryCountsJson,
-              dirtyResourcesJson: createData.dirtyResourcesJson,
+            const dirtyAt = input.data.latestDirtyAt as Date;
+            return [{
+              ...input.data,
               createdAt: dirtyAt,
               updatedAt: dirtyAt,
-            };
+            }];
           }),
+          findUnique: vi.fn(async () => null),
         },
         deviceSyncDirtyPayload: {
           createMany: vi.fn(async (input: { data: Array<Record<string, unknown>> }) => {
@@ -600,7 +575,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
       expect(encryptInsideTransaction).toEqual([false]);
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      expect(prisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(3);
+      expect(prisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(2);
       expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
       const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
       expect(payloadRow.credentialIndependent).toBe(false);
@@ -610,6 +585,113 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     } finally {
       installHostedSecureBoxStringTestCodec();
     }
+  });
+
+  it("returns insert and revision-CAS winners without post-write dirty-row reads", async () => {
+    const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+    const insertRecord = {
+      connectionId: "dsc_returning_insert",
+      createdAt: dirtyAt,
+      dirtyResourcesJson: {},
+      dirtyRevision: 1n,
+      eventCount: 1n,
+      firstDirtyAt: dirtyAt,
+      latestDirtyAt: dirtyAt,
+      latestEventType: "sleep.updated",
+      latestResourceCategory: "sleep",
+      latestTraceId: "trace_returning_insert",
+      processedRevision: 0n,
+      provider: "oura",
+      resourceCategoryCountsJson: {},
+      sourceProviderCountsJson: {},
+      updatedAt: dirtyAt,
+      userId: "member_returning_insert",
+      windowEnd: null,
+      windowStart: null,
+    };
+    const insertTx = {
+      deviceSyncDirtyConnection: {
+        createManyAndReturn: vi.fn(async () => [insertRecord]),
+        findUnique: vi.fn(async () => null),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore({} as never);
+
+    const inserted = await store.upsertDirtyConnection({
+      connectionId: insertRecord.connectionId,
+      dirtyAt: dirtyAt.toISOString(),
+      eventType: insertRecord.latestEventType,
+      provider: insertRecord.provider,
+      resourceCategory: insertRecord.latestResourceCategory,
+      traceId: insertRecord.latestTraceId,
+      tx: insertTx as never,
+      userId: insertRecord.userId,
+    });
+
+    expect(insertTx.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(1);
+    expect(insertTx.deviceSyncDirtyConnection.createManyAndReturn).toHaveBeenCalledWith(
+      expect.objectContaining({ skipDuplicates: true }),
+    );
+    expect(inserted).toMatchObject({
+      dirty: {
+        connectionId: insertRecord.connectionId,
+        dirtyRevision: 1n,
+        processedRevision: 0n,
+      },
+      shouldRequestWake: true,
+    });
+
+    const existing = {
+      ...insertRecord,
+      connectionId: "dsc_returning_update",
+      latestTraceId: "trace_before_returning_update",
+      userId: "member_returning_update",
+    };
+    const updatedAt = new Date("2026-05-26T12:01:00.000Z");
+    const updatedRecord = {
+      ...existing,
+      dirtyRevision: 2n,
+      eventCount: 2n,
+      latestDirtyAt: updatedAt,
+      latestTraceId: "trace_returning_update",
+      updatedAt,
+    };
+    const updateTx = {
+      deviceSyncDirtyConnection: {
+        findUnique: vi.fn(async () => existing),
+        updateManyAndReturn: vi.fn(async () => [updatedRecord]),
+      },
+    };
+
+    const updated = await store.upsertDirtyConnection({
+      connectionId: existing.connectionId,
+      dirtyAt: updatedAt.toISOString(),
+      eventType: "sleep.updated",
+      provider: existing.provider,
+      resourceCategory: "sleep",
+      traceId: updatedRecord.latestTraceId,
+      tx: updateTx as never,
+      userId: existing.userId,
+    });
+
+    expect(updateTx.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(1);
+    expect(updateTx.deviceSyncDirtyConnection.updateManyAndReturn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          connectionId: existing.connectionId,
+          dirtyRevision: 1n,
+          processedRevision: 0n,
+        },
+      }),
+    );
+    expect(updated).toMatchObject({
+      dirty: {
+        connectionId: existing.connectionId,
+        dirtyRevision: 2n,
+        latestTraceId: updatedRecord.latestTraceId,
+      },
+      shouldRequestWake: false,
+    });
   });
 
   it("keeps retained nightly replays idempotent and rejects changed same-night content", async () => {
@@ -681,21 +763,20 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           )),
         },
         deviceSyncDirtyConnection: {
-          createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+          createManyAndReturn: vi.fn(async (input: { data: Record<string, unknown> }) => {
             if (dirtyRecord) {
-              return { count: 0 };
+              return [];
             }
             dirtyRecord = {
               ...input.data,
               createdAt: input.data.firstDirtyAt,
               updatedAt: input.data.latestDirtyAt,
             };
-            return { count: 1 };
+            return [dirtyRecord];
           }),
           findFirst: vi.fn(async () => dirtyRecord),
           findUnique: vi.fn(async () => dirtyRecord),
           updateMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
-            operationOrder.push("update-dirty-marker");
             if (!dirtyRecord) {
               return { count: 0 };
             }
@@ -704,6 +785,17 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
               ...input.data,
             };
             return { count: 1 };
+          }),
+          updateManyAndReturn: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            operationOrder.push("update-dirty-marker");
+            if (!dirtyRecord) {
+              return [];
+            }
+            dirtyRecord = {
+              ...dirtyRecord,
+              ...input.data,
+            };
+            return [dirtyRecord];
           }),
         },
         deviceSyncDirtyPayload: {
@@ -990,17 +1082,16 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         deviceSyncDirtyConnection: {
           findUnique: vi.fn()
             .mockResolvedValueOnce(existing)
-            .mockResolvedValueOnce(existing)
-            .mockResolvedValueOnce({
+            .mockResolvedValueOnce(existing),
+          updateManyAndReturn: vi.fn(async () => {
+            operationOrder.push("update-dirty-marker");
+            return [{
               ...existing,
               dirtyRevision: 3n,
               eventCount: 3n,
               latestTraceId: "trace_caller_owned_1",
               processedRevision: 2n,
-            }),
-          updateMany: vi.fn(async () => {
-            operationOrder.push("update-dirty-marker");
-            return { count: 1 };
+            }];
           }),
         },
         deviceSyncDirtyPayload: {
@@ -1109,7 +1200,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       traceId: "trace_prepared_stale_1",
       userId: existing.userId,
     });
-    const updateMany = vi.fn();
+    const updateManyAndReturn = vi.fn();
     const changed = {
       ...existing,
       dirtyRevision: 3n,
@@ -1119,7 +1210,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       $queryRaw: vi.fn(async () => [{ connectionId: existing.connectionId }]),
       deviceSyncDirtyConnection: {
         findUnique: vi.fn(async () => changed),
-        updateMany,
+        updateManyAndReturn,
       },
     };
 
@@ -1129,7 +1220,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH",
     });
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(updateManyAndReturn).not.toHaveBeenCalled();
 
     await expect(store.upsertDirtyConnectionWithPreparedPlanTx({
       prepared: {
@@ -1193,70 +1284,45 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         windowStart: null,
       });
     let payloadCreateData: Array<Record<string, unknown>> | null = null;
+    const concurrentRecord = {
+      connectionId: "dsc_preseal_retry_1",
+      createdAt: dirtyAt,
+      dirtyResourcesJson: {},
+      dirtyRevision: 3n,
+      eventCount: 3n,
+      firstDirtyAt: dirtyAt,
+      latestDirtyAt: dirtyAt,
+      latestEventType: "daily.data.steps.created",
+      latestResourceCategory: "timeseries",
+      latestTraceId: "trace_concurrent",
+      processedRevision: 3n,
+      provider: "junction",
+      resourceCategoryCountsJson: {},
+      sourceProviderCountsJson: {},
+      updatedAt: dirtyAt,
+      userId: "member_preseal_retry_1",
+      windowEnd: null,
+      windowStart: null,
+    };
+    const updatedRecord = {
+      ...concurrentRecord,
+      dirtyRevision: 4n,
+      eventCount: 4n,
+      latestDirtyAt: new Date("2026-05-26T12:01:00.000Z"),
+      latestTraceId: "trace_preseal_retry_1",
+      resourceCategoryCountsJson: { timeseries: 1 },
+      sourceProviderCountsJson: { garmin: 1 },
+      updatedAt: new Date("2026-05-26T12:01:00.000Z"),
+      windowEnd: new Date("2026-05-27T00:00:00.000Z"),
+      windowStart: new Date("2026-05-26T00:00:00.000Z"),
+    };
     const tx = {
       deviceSyncDirtyConnection: {
         findUnique: vi.fn()
-          .mockResolvedValueOnce({
-            connectionId: "dsc_preseal_retry_1",
-            createdAt: dirtyAt,
-            dirtyResourcesJson: {},
-            dirtyRevision: 3n,
-            eventCount: 3n,
-            firstDirtyAt: dirtyAt,
-            latestDirtyAt: dirtyAt,
-            latestEventType: "daily.data.steps.created",
-            latestResourceCategory: "timeseries",
-            latestTraceId: "trace_concurrent",
-            processedRevision: 3n,
-            provider: "junction",
-            resourceCategoryCountsJson: {},
-            sourceProviderCountsJson: {},
-            updatedAt: dirtyAt,
-            userId: "member_preseal_retry_1",
-            windowEnd: null,
-            windowStart: null,
-          })
-          .mockResolvedValueOnce({
-            connectionId: "dsc_preseal_retry_1",
-            createdAt: dirtyAt,
-            dirtyResourcesJson: {},
-            dirtyRevision: 3n,
-            eventCount: 3n,
-            firstDirtyAt: dirtyAt,
-            latestDirtyAt: dirtyAt,
-            latestEventType: "daily.data.steps.created",
-            latestResourceCategory: "timeseries",
-            latestTraceId: "trace_concurrent",
-            processedRevision: 3n,
-            provider: "junction",
-            resourceCategoryCountsJson: {},
-            sourceProviderCountsJson: {},
-            updatedAt: dirtyAt,
-            userId: "member_preseal_retry_1",
-            windowEnd: null,
-            windowStart: null,
-          })
-          .mockResolvedValueOnce({
-            connectionId: "dsc_preseal_retry_1",
-            createdAt: dirtyAt,
-            dirtyResourcesJson: {},
-            dirtyRevision: 4n,
-            eventCount: 4n,
-            firstDirtyAt: dirtyAt,
-            latestDirtyAt: new Date("2026-05-26T12:01:00.000Z"),
-            latestEventType: "daily.data.steps.created",
-            latestResourceCategory: "timeseries",
-            latestTraceId: "trace_preseal_retry_1",
-            processedRevision: 3n,
-            provider: "junction",
-            resourceCategoryCountsJson: { timeseries: 1 },
-            sourceProviderCountsJson: { garmin: 1 },
-            updatedAt: new Date("2026-05-26T12:01:00.000Z"),
-            userId: "member_preseal_retry_1",
-            windowEnd: new Date("2026-05-27T00:00:00.000Z"),
-            windowStart: new Date("2026-05-26T00:00:00.000Z"),
-          }),
-        updateMany: vi.fn(async () => ({ count: 1 })),
+          .mockResolvedValueOnce(concurrentRecord)
+          .mockResolvedValueOnce(concurrentRecord)
+          .mockResolvedValueOnce(concurrentRecord),
+        updateManyAndReturn: vi.fn(async () => [updatedRecord]),
       },
       deviceSyncDirtyPayload: {
         createMany: vi.fn(async (input: { data: Array<Record<string, unknown>> }) => {
@@ -1302,9 +1368,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
       expect(rootFindUnique).toHaveBeenCalledTimes(2);
       expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-      expect(tx.deviceSyncDirtyConnection.updateMany).toHaveBeenCalledTimes(1);
+      expect(tx.deviceSyncDirtyConnection.updateManyAndReturn).toHaveBeenCalledTimes(1);
       expect(tx.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
-      expect(tx.deviceSyncDirtyConnection.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(tx.deviceSyncDirtyConnection.updateManyAndReturn.mock.invocationCallOrder[0]).toBeLessThan(
         tx.deviceSyncDirtyPayload.createMany.mock.invocationCallOrder[0] ?? 0,
       );
       expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
@@ -1325,31 +1391,24 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     ) => {
       let createData: Record<string, unknown> | null = null;
       let persistedDirtyResources: object = {};
-      let findCount = 0;
       const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
       const prisma = {
         $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
         deviceSyncDirtyConnection: {
-          createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+          createManyAndReturn: vi.fn(async (input: { data: Record<string, unknown> }) => {
             createData = input.data;
             const dirtyResourcesJson = input.data.dirtyResourcesJson;
             persistedDirtyResources = dirtyResourcesJson
                 && typeof dirtyResourcesJson === "object"
               ? dirtyResourcesJson
               : {};
-            return { count: 1 };
-          }),
-          findUnique: vi.fn(async () => {
-            findCount += 1;
-            if (findCount === 1 || !createData) {
-              return null;
-            }
-            return {
-              ...createData,
+            return [{
+              ...input.data,
               createdAt: dirtyAt,
               updatedAt: dirtyAt,
-            };
+            }];
           }),
+          findUnique: vi.fn(async () => null),
         },
         deviceSyncDirtyPayload: {
           createMany: vi.fn(async () => ({ count: 0 })),
@@ -1420,42 +1479,19 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     installHostedSecureBoxStringTestCodec();
     let createData: Record<string, unknown> | null = null;
     let payloadCreateData: Array<Record<string, unknown>> | null = null;
-    let findCount = 0;
     const prisma = {
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
       deviceSyncDirtyConnection: {
-        createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+        createManyAndReturn: vi.fn(async (input: { data: Record<string, unknown> }) => {
           createData = input.data;
-          return { count: 1 };
-        }),
-        findUnique: vi.fn(async () => {
-          findCount += 1;
-          if (findCount === 1 || !createData) {
-            return null;
-          }
-
-          const dirtyAt = createData.latestDirtyAt as Date;
-          return {
-            connectionId: createData.connectionId,
-            userId: createData.userId,
-            provider: createData.provider,
-            dirtyRevision: createData.dirtyRevision,
-            processedRevision: createData.processedRevision,
-            firstDirtyAt: createData.firstDirtyAt,
-            latestDirtyAt: createData.latestDirtyAt,
-            windowStart: createData.windowStart,
-            windowEnd: createData.windowEnd,
-            eventCount: createData.eventCount,
-            latestTraceId: createData.latestTraceId,
-            latestEventType: createData.latestEventType,
-            latestResourceCategory: createData.latestResourceCategory,
-            sourceProviderCountsJson: createData.sourceProviderCountsJson,
-            resourceCategoryCountsJson: createData.resourceCategoryCountsJson,
-            dirtyResourcesJson: createData.dirtyResourcesJson,
+          const dirtyAt = input.data.latestDirtyAt as Date;
+          return [{
+            ...input.data,
             createdAt: dirtyAt,
             updatedAt: dirtyAt,
-          };
+          }];
         }),
+        findUnique: vi.fn(async () => null),
       },
       deviceSyncDirtyPayload: {
         createMany: vi.fn(async (input: { data: Array<Record<string, unknown>> }) => {
@@ -1530,7 +1566,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       providerSendToWebhookMs: 60_000,
       timingSourceProviderSlug: "garmin",
     });
-    expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.deviceSyncDirtyConnection.createManyAndReturn).toHaveBeenCalledTimes(1);
     expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
   });
 
@@ -2505,7 +2541,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     const store = new PrismaHostedDirtyConnectionStore(prisma as never);
     const createTx = {
       deviceSyncDirtyConnection: {
-        createMany: vi.fn(async () => ({ count: 0 })),
+        createManyAndReturn: vi.fn(async () => []),
         findUnique: vi.fn(async () => null),
       },
       deviceSyncDirtyPayload: {
@@ -2555,7 +2591,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       });
 
       expect(prisma.$transaction).not.toHaveBeenCalled();
-      expect(createTx.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
+      expect(createTx.deviceSyncDirtyConnection.createManyAndReturn).toHaveBeenCalledTimes(1);
       expect(ackTx.deviceSyncDirtyConnection.updateMany).toHaveBeenCalledTimes(1);
       expect(setTimeoutSpy).not.toHaveBeenCalled();
     } finally {
