@@ -28,6 +28,7 @@ import {
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import {
   isDeviceSyncConnectionSetupPending,
+  isDeviceSyncSourceDisconnectFenced,
   toRedactedPublicDeviceSyncAccount,
 } from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
@@ -397,8 +398,34 @@ class DeviceSyncServiceController {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
         },
+        getWebhookConnectionByExternalAccount: (provider, externalAccountId) => {
+          const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
+          return account
+            ? {
+                account: this.toPublicAccount(account),
+                connectionOwnerId: null,
+              }
+            : null;
+        },
         upsertConnectionSource: (input) => this.store.upsertConnectionSource(input),
         listConnectionSources: (input) => this.store.listConnectionSources(input),
+        resolveConnectionSourceAdmissionCandidate: (input) =>
+          this.store.listConnectionSources(input)
+            .sort((left, right) => {
+              const leftExact = input.sourceInstanceKey !== undefined
+                && left.sourceInstanceKey === input.sourceInstanceKey;
+              const rightExact = input.sourceInstanceKey !== undefined
+                && right.sourceInstanceKey === input.sourceInstanceKey;
+              const leftAdmitted = left.status === "connected"
+                && !isDeviceSyncSourceDisconnectFenced(left);
+              const rightAdmitted = right.status === "connected"
+                && !isDeviceSyncSourceDisconnectFenced(right);
+              return Number(rightExact) - Number(leftExact)
+                || Number(rightAdmitted) - Number(leftAdmitted)
+                || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
+                || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
+                || left.id.localeCompare(right.id);
+            })[0] ?? null,
         claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
         completeWebhookTrace: (provider, traceId, claimToken) =>
           this.store.completeWebhookTrace(provider, traceId, claimToken),
