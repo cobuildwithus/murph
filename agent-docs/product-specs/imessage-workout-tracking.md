@@ -177,10 +177,11 @@ response includes both the truthful no-save result and that exact recovery
 question. It does not stop after the failure statement or give generic retry
 advice.
 
-An active workout may have zero pending sets after the final result is logged;
-it remains active until the member explicitly finishes it or the bounded
-later-day reminder flow finishes it from canonical elapsed-time evidence before
-starting the referenced routine.
+When a member's current completion fills the final unlogged placeholder across
+the active workout, Murph finishes that workout in the same turn and returns the
+completed card. The member does not need to send a separate finish command.
+A correction to an already logged set, a reminder by itself, plan targets,
+elapsed time, or an earlier-day active record does not prove completion.
 
 ## Generic scheduled-reminder relationship context
 
@@ -212,32 +213,30 @@ card provenance, or provider reply attestation is neither required nor treated
 as authority.
 
 For a workout reminder, the relationship context identifies the exact saved
-workout-format id. On an ordinary later member-local-day set completion, Murph
-reads that format and the ordinary active-workout state. A stale earlier-day
-active workout is not assumed to be the target solely because it is still open.
-When exactly one active workout exists, the saved routine and exact set are
-unambiguous, and the current message clearly reports the new routine's set,
-Murph may compose the existing explicitly timed finish, start-from-format, and
-targeted set-log commands.
+workout-format id. On an ordinary set completion, Murph reads that format and
+the ordinary active-workout state. If no workout is active, the current
+completion plus that exact inspected reference authorizes starting only the
+referenced routine and logging only the stated set. If the active workout
+already references that routine, the exact active event is targeted normally.
 
-The calendar comparison uses the member or vault IANA timezone, never UTC date
-prefixes. The earlier event closes only from existing canonical timing evidence;
-it is never stretched to the next-day reply, reminder time, or local midnight.
-Every prior actual remains intact, every empty placeholder stays empty, and no
-planned target becomes an actual. The existing one-active-workout invariant and
-mutation lock remain the write owners throughout.
+A different active workout is not assumed to be the reminder target, but the
+reminder also does not establish when that earlier workout ended. Active
+`durationMinutes` is elapsed time at the latest mutation, not an end
+observation. Murph never derives an end from that value, a last-write time, a
+plan target, the reminder time, the later reply time, or local midnight. If the
+member supplies the earlier workout's exact end time or exact total duration,
+Murph may compose the existing finish, start-from-format, and targeted set-log
+commands. Otherwise it makes no workout mutation, says the new set was not
+saved yet, and asks one narrow question for that time or duration while
+preserving the exact proposed routine, exercise, set, and result.
 
-Because this transition changes two workout records, its one complete response
-uses concise ordinary text rather than a single-workout card. It names the
-earlier workout and its exact recorded end time, the newly started routine, and
-the exact set result saved. Later ordinary updates return to card-only replies.
-
-Same-local-day ambiguity, multiple active workouts, an unidentified routine or
-set, missing or conflicting relationship context, and insufficient canonical
-finish timing all stop without silent retargeting. Explicit historical intent,
+Multiple active workouts, an unidentified routine or set, missing or
+conflicting relationship context, changed state, and insufficient finish timing
+all stop without silent retargeting. The existing one-active-workout invariant
+and mutation lock remain the write owners. Explicit historical intent,
 including a correction for yesterday or an explicit older workout id, continues
-through the ordinary exact historical targeting path and is not reinterpreted as
-a new-routine completion.
+through the ordinary exact historical targeting path and is not reinterpreted
+as a new-routine completion.
 
 ## Direct action loop
 
