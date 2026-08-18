@@ -101,10 +101,13 @@ An eligible paid Pulse or Edge member can:
 4. Explicitly authorize the selected amount. Murph charges one canonical saved
    card when available; otherwise Stripe Checkout collects card details or
    verification.
-5. Return to Settings with an honest pending state while webhook fulfillment
-   completes.
-6. See fulfilled credit move that same usage bar immediately without exposing
-   an exact balance.
+5. Return to Settings while bounded browser reconciliation observes webhook
+   fulfillment; the browser never treats the success URL as payment proof.
+6. For personal and owner-seat Family credit, see fulfilled credit move the
+   authenticated beneficiary's existing usage bar without a success dialog or
+   exact balance when that bar is present. If personal usage status is
+   unavailable, or for another active or former Family member, see one concise
+   close-owned result because no beneficiary meter is present.
 7. If usage was blocked, have pending accepted work become runnable after the
    verified grant restores capacity.
 8. Continue using that credit after an included-usage reset until the credit is
@@ -146,7 +149,10 @@ An active Family owner can use the same dialog from an exact active member row
 in Settings. The fixed pack is credited only to that selected member. A
 sponsored member cannot buy a personal pack, and Family credit is neither
 shared nor transferable. The same conservative saved-card selection and
-Checkout fallback apply.
+Checkout fallback apply. A sessionless saved-card fulfillment initiated inside
+Manage keeps its verified result visible in that dialog until the payer closes
+it; the page meter does not replace feedback while the broader Manage dialog is
+still active.
 
 ## Capped Monthly Group Sponsorship
 
@@ -463,6 +469,21 @@ The browser renders only server-read status:
 | Fulfilled | **Usage added.** |
 | Payment failed | **The payment did not complete. No usage was added.** |
 | Reconciliation delayed | **Your payment is still being confirmed. You can safely leave this page.** |
+
+Personal and owner-seat Family success returns keep the dialog visually quiet
+while the authenticated beneficiary's existing usage meter refreshes. Their
+fulfilled transition updates one visually hidden polite status region that was
+already mounted before reconciliation, but shows no visible success modal or
+post-purchase messaging handoff. Failed or exhausted reconciliation opens the
+compact recovery dialog. If personal usage status is unavailable, the existing
+off-meter host instead keeps a compact result visible until Close and confirms
+only that durable credit reached the account. Another active Family member and
+former-member recovery use the same close-owned pattern because Settings does
+not render that beneficiary's usage meter. The Family roster mounts the exact
+active member's returned-purchase owner independently of its Manage dialog;
+the result's Close action owns terminal refresh so the confirmation cannot
+disappear before the payer dismisses it. Group funding retains its separately
+owned receipt and Messages handoff.
 
 A success query parameter is never proof of payment. Settings polls a bounded
 authenticated purchase-status endpoint and refreshes its server projection. It

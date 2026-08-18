@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-17",
+  "order": 200,
+  "item": {
+    "id": "clearer-sponsorship-limit-changes",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer sponsorship limit changes",
+    "summary": "When you raise a group’s monthly sponsorship limit, the review action is now easier to spot and the confirmation clearly shows the old and new maximum.",
+    "details": "Murph makes no change until you choose the new limit. If a billing result is uncertain, the confirmation stays open so you can check the current limit or confirm cancellation status. If the request is rejected, Murph shows the reason and refreshes the current setup; canceling a sponsorship now uses the same in-page confirmation pattern.",
+    "relevanceTags": ["groups", "funding", "accessibility"],
+    "sourcePullRequests": [1955]
+  }
+}

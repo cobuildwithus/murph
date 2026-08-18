@@ -92,15 +92,30 @@ describe("deviceSyncProviderManifests", () => {
 
     const config = junctionManifest.readConfig({
       JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_NAMESPACE: "e2e",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
       JUNCTION_ENV: "sandbox",
       JUNCTION_REGION: "us",
     });
 
     expect(config).toMatchObject({
+      clientUserIdNamespace: "e2e",
       environment: "sandbox",
       region: "us",
     });
+    const invalidNamespaceConfig = junctionManifest.readConfig({
+      JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_NAMESPACE: "Native-iOS",
+      JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    });
+    if (!invalidNamespaceConfig) {
+      throw new Error("Expected invalid Junction namespace config to be present.");
+    }
+    expect(() => createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: invalidNamespaceConfig,
+    })).toThrow(/JUNCTION_CLIENT_USER_ID_NAMESPACE/u);
     expect(config).not.toHaveProperty("allowCustomBaseUrl");
     expect(config).not.toHaveProperty("baseUrl");
   });
@@ -404,6 +419,7 @@ describe("deviceSyncProviderManifests", () => {
       junction: {
         allowedLinkHosts: ["junction.com", "tryvital.io"],
         apiKey: "sk_us_test_runtime",
+        clientUserIdNamespace: "e2e",
         clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
         environment: "sandbox",
         region: "us",
@@ -469,6 +485,7 @@ describe("deviceSyncProviderManifests", () => {
     expect(cloned.junction).not.toHaveProperty("webhookSecret");
     expect(cloned.junction).toMatchObject({
       allowedLinkHosts: ["junction.com", "tryvital.io"],
+      clientUserIdNamespace: "e2e",
       environment: "sandbox",
       region: "us",
       providerFilter: ["oura", "withings"],

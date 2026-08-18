@@ -181,6 +181,7 @@ export type AssistantHostedAutomationToolRequest =
       automationId?: string
       continuityPolicy?: AutomationContinuityPolicy
       instructions: string
+      plannedOccurrenceOffsetMs?: number | null
       schedule: AutomationSchedule
       slug?: string
       status?: AutomationStatus
@@ -198,6 +199,7 @@ export type AssistantHostedAutomationToolRequest =
       expectedUpdatedAt: string
       instructions?: string
       lookup: string
+      plannedOccurrenceOffsetMs?: number | null
       retargetToCurrentConversation?: boolean
       schedule?: AutomationSchedule
       slug?: string

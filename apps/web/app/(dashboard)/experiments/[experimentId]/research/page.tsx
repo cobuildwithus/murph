@@ -13,6 +13,7 @@ import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/
 import {
   createMurphOgImageRef,
   createMurphPageMetadata,
+  MURPH_INDEXABLE_PAGE_ROBOTS,
 } from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
@@ -36,6 +37,9 @@ export async function generateMetadata({
   });
 
   return createMurphPageMetadata({
+    alternates: {
+      canonical: `/experiments/${encodeURIComponent(research.route.routeId)}/research`,
+    },
     title: `${research.title} research — Murph Experiments`,
     description: research.description,
     openGraph: {
@@ -43,6 +47,7 @@ export async function generateMetadata({
       images: [ogImage],
     },
     twitter: { images: [ogImage] },
+    robots: MURPH_INDEXABLE_PAGE_ROBOTS,
   });
 }
 

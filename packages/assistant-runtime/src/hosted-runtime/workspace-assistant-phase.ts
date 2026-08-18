@@ -89,6 +89,7 @@ import {
 import {
   resolveDeliveryCandidates,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
+import type { DeviceSyncJobFailureEventOrigin } from "@murphai/device-syncd/types";
 import {
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
@@ -1541,6 +1542,9 @@ function createHostedAssistantAutomationTool(input: {
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
+          ...(request.plannedOccurrenceOffsetMs === undefined
+            ? {}
+            : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
           route: currentRoute,
           schedule: request.schedule,
           ...(request.slug ? { slug: request.slug } : {}),
@@ -1616,6 +1620,9 @@ function createHostedAssistantAutomationTool(input: {
                 request.instructions,
               ),
             }),
+        ...(request.plannedOccurrenceOffsetMs === undefined
+          ? {}
+          : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
         lookup: request.lookup,
         ...(request.retargetToCurrentConversation === true
           ? { route: currentRoute }
@@ -4119,6 +4126,7 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
             phase: "checkpoint",
             redactedJson: {
               ...failure.redactedJson,
+              failureEventOrigin: "checkpoint" satisfies DeviceSyncJobFailureEventOrigin,
               nextWakeAtPresent: true,
             },
           },
@@ -4757,6 +4765,7 @@ async function writeHostedIdleDeviceSyncFailureRuntimeLog(input: {
         errorMessagePresent: input.error instanceof Error
           ? input.error.message.length > 0
           : input.error !== null && input.error !== undefined,
+        failureEventOrigin: "idle_maintenance" satisfies DeviceSyncJobFailureEventOrigin,
         idleMaintenanceFailed: true,
         retryAt: input.retryAt,
       },
@@ -4787,6 +4796,7 @@ async function writeHostedDeviceActivityAutomationScheduleFailureRuntimeLog(inpu
         errorMessagePresent: input.error instanceof Error
           ? input.error.message.length > 0
           : input.error !== null && input.error !== undefined,
+        failureEventOrigin: "device_activity_automation" satisfies DeviceSyncJobFailureEventOrigin,
         wakeKind: input.wake.kind,
       },
     },
@@ -6239,6 +6249,8 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       deferredSystemMailboxRecord?.redactedStatus ?? {};
     await writeHostedSystemMailboxRuntimeLog({
       attemptCount: input.systemMailboxPreparation.item.attemptCount,
+      errorCode: statusCallback.errorCode ?? null,
+      errorMessage: statusCallback.errorMessage ?? null,
       input: input.input,
       legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: statusNextWakeAt,

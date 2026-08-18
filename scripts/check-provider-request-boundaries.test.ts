@@ -1,409 +1,289 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  approvedProviderRawHttpOwners,
   findProviderRequestBoundaryViolations,
-  providerRequestScanRoots,
+  isProviderRequestGuardEntrypoint,
+  listProviderRequestSourceFiles,
+  providerBoundaryRegistry,
   providerRequestSourceExtensions,
-  shouldSkipProviderRequestDirectory,
   shouldScanProviderRequestSourceFile,
-} from "./check-provider-request-boundaries.ts";
-
-function blockedLines(source: string): number[] {
-  return findProviderRequestBoundaryViolations(
-    "apps/web/src/example.ts",
-    source,
-  ).filter((violation) => violation.kind === "object-spread").map(
-    (violation) => violation.line,
-  );
-}
-
-function rawHttpViolations(source: string, relativePath = "scripts/example.mjs") {
-  return findProviderRequestBoundaryViolations(relativePath, source).filter(
-    (violation) => violation.kind === "raw-provider-http",
-  );
-}
+  shouldSkipProviderRequestDirectory,
+} from "./check-provider-request-boundaries.js";
 
 describe("check-provider-request-boundaries", () => {
-  it("scans production provider request owners", () => {
-    expect(providerRequestScanRoots).toContain("apps");
-    expect(providerRequestScanRoots).toContain("packages");
-    expect(
-      findProviderRequestBoundaryViolations(
-        "apps/web/app/api/settings/billing/portal/route.ts",
-        [
-          "stripe.billingPortal.sessions.create({",
-          "  ...(configuration ? { configuration } : {}),",
-          "  customer,",
-          "});",
-        ].join("\n"),
-      ).map((match) => match.line),
-    ).toEqual([2]);
+  it("recognizes direct execution even when the module URL has loader metadata", () => {
+    expect(isProviderRequestGuardEntrypoint(
+      "/repo/scripts/check-provider-request-boundaries.ts",
+      "file:///repo/scripts/check-provider-request-boundaries.ts?tsx=1",
+    )).toBe(true);
+    expect(isProviderRequestGuardEntrypoint(
+      "/repo/scripts/other.ts",
+      "file:///repo/scripts/check-provider-request-boundaries.ts",
+    )).toBe(false);
   });
 
-  it("includes JavaScript operational scripts in the production scan", () => {
-    expect(providerRequestSourceExtensions).toContain(".cjs");
-    expect(providerRequestSourceExtensions).toContain(".js");
-    expect(providerRequestSourceExtensions).toContain(".mjs");
-  });
-
-  it("does not treat assembled deployment output as authored provider source", () => {
-    expect(shouldSkipProviderRequestDirectory(".deploy")).toBe(true);
-  });
-
-  it("excludes JavaScript tests and TypeScript declaration variants", () => {
-    for (const relativePath of [
-      "scripts/example.spec.cjs",
-      "scripts/example.test.cjs",
-      "scripts/example.spec.js",
-      "scripts/example.test.js",
-      "scripts/example.spec.mjs",
-      "scripts/example.test.mjs",
-      "scripts/example.d.cts",
-      "scripts/example.d.mts",
-      "scripts/example.d.ts",
-    ]) {
-      expect(shouldScanProviderRequestSourceFile(relativePath)).toBe(false);
+  it("scans authored production modules and excludes generated or test sources", () => {
+    for (const extension of providerRequestSourceExtensions) {
+      expect(shouldScanProviderRequestSourceFile(`packages/example/src/client${extension}`))
+        .toBe(true);
     }
-    for (const relativePath of [
-      "scripts/example.cjs",
-      "scripts/example.js",
-      "scripts/example.mjs",
-      "scripts/example.mts",
-      "scripts/example.ts",
-    ]) {
-      expect(shouldScanProviderRequestSourceFile(relativePath)).toBe(true);
-    }
+    expect(shouldScanProviderRequestSourceFile("packages/example/test/client.ts")).toBe(true);
+    expect(shouldScanProviderRequestSourceFile("packages/example/src/client.test.ts")).toBe(false);
+    expect(shouldScanProviderRequestSourceFile("packages/example/src/client.generated.ts")).toBe(false);
+    expect(shouldScanProviderRequestSourceFile("packages/example/src/client.d.ts")).toBe(false);
+    expect(shouldSkipProviderRequestDirectory("test")).toBe(true);
+    expect(shouldSkipProviderRequestDirectory(".next-build")).toBe(true);
+    expect(shouldSkipProviderRequestDirectory("src")).toBe(false);
   });
 
-  it("blocks direct provider fetches without an SDK import", () => {
-    expect(rawHttpViolations([
-      "const openAiBaseUrl = 'https://api.openai.com/v1';",
-      "await fetch(`${openAiBaseUrl}/responses`, { method: 'POST' });",
-      "const resendRequest = new Request('https://api.resend.com/emails');",
-    ].join("\n"))).toEqual([
-      expect.objectContaining({
-        boundary: "Direct OpenAI provider HTTP",
-        line: 2,
-      }),
-      expect.objectContaining({
-        boundary: "Direct Resend provider HTTP",
-        line: 3,
-      }),
+  it("rejects registered provider hosts on global and injected fetch", () => {
+    expect(violations(`
+      fetch("https://api.openai.com/v1/responses");
+      async function requestJunction(fetchImpl: typeof fetch, baseUrl: string) {
+        return fetchImpl(baseUrl + "/v1/patients");
+      }
+    `, "packages/example/src/openai-junction.ts")).toEqual([
+      "raw-provider-http",
+      "raw-provider-http",
     ]);
   });
 
-  it("resolves direct provider origins through URL and request variables", () => {
-    expect(rawHttpViolations([
-      "const baseUrl = new URL('https://api.sandbox.eu.junction.com');",
-      "const target = new URL('/v2/users', baseUrl);",
-      "const request = new Request(target);",
-      "await globalThis.fetch(request);",
-    ].join("\n"))).toEqual([
-      expect.objectContaining({
-        boundary: "Direct Junction provider HTTP",
-        line: 3,
-      }),
-      expect.objectContaining({
-        boundary: "Direct Junction provider HTTP",
-        line: 4,
-      }),
-    ]);
-  });
+  it("uses Babel bindings for direct transport aliases without crossing shadows", () => {
+    expect(violations(`
+      const send = fetch;
+      send("https://api.openai.com/v1/responses");
+    `)).toEqual(["raw-provider-http"]);
 
-  it("allows only a matching official SDK transport adapter exception", () => {
-    expect(rawHttpViolations([
-      "import { Exa } from 'exa-js';",
-      "const baseUrl = 'https://api.exa.ai';",
-      "// provider-request-boundary-allow-next-line: sdk-transport-adapter",
-      "await fetchImpl(`${baseUrl}/search`, { method: 'POST' });",
-    ].join("\n"))).toEqual([]);
-
-    expect(rawHttpViolations([
-      "import { Resend } from 'resend';",
-      "// provider-request-boundary-allow-next-line: sdk-transport-adapter",
-      "await fetchImpl('https://api.exa.ai/search', { method: 'POST' });",
-    ].join("\n"))).toEqual([
-      expect.objectContaining({
-        boundary: "Invalid provider HTTP exception sdk-transport-adapter",
-        line: 3,
-      }),
-    ]);
-  });
-
-  it("allows only SDK-owned Linq presigned byte URL variables", () => {
-    expect(rawHttpViolations([
-      "import LinqAPIV3 from '@linqapp/sdk';",
-      "const uploadUrl = await prepareUploadUrl();",
-      "// provider-request-boundary-allow-next-line: linq-presigned-bytes",
-      "await fetch(uploadUrl, { body: bytes, method: 'PUT' });",
-    ].join("\n"))).toEqual([]);
-
-    expect(rawHttpViolations([
-      "import LinqAPIV3 from '@linqapp/sdk';",
-      "const apiUrl = 'https://api.linqapp.com/api/partner/v3/chats';",
-      "// provider-request-boundary-allow-next-line: linq-presigned-bytes",
-      "await fetch(apiUrl, { method: 'GET' });",
-    ].join("\n"))).toEqual([
-      expect.objectContaining({
-        boundary: "Invalid provider HTTP exception linq-presigned-bytes",
-        line: 4,
-      }),
-    ]);
-  });
-
-  it("rejects unknown provider HTTP exception reasons", () => {
-    expect(rawHttpViolations([
-      "import OpenAI from 'openai';",
-      "// provider-request-boundary-allow-next-line: legacy-client",
-      "await fetch('https://api.openai.com/v1/responses');",
-    ].join("\n"))).toEqual([
-      expect.objectContaining({
-        boundary: "Invalid provider HTTP exception legacy-client",
-        line: 3,
-      }),
-    ]);
-  });
-
-  it("blocks direct and nested object spreads in Stripe request arguments", () => {
-    expect(blockedLines([
-      "stripe.checkout.sessions.create({",
-      "  mode: 'subscription',",
-      "  ...(customerId ? { customer: customerId } : {}),",
-      "  metadata: { ...metadata },",
-      "});",
-    ].join("\n"))).toEqual([3, 4]);
-  });
-
-  it("follows local request and nested metadata variables", () => {
-    expect(blockedLines([
-      "const metadata = { ...baseMetadata, source: 'settings' };",
-      "const params = { customer, metadata };",
-      "input.stripe.subscriptions.create(params);",
-    ].join("\n"))).toEqual([1]);
-  });
-
-  it("does not resolve request variables through an inaccessible inner scope", () => {
-    expect(blockedLines([
-      "const params = { ...unsafe };",
-      "function unrelated() {",
-      "  const params: Stripe.SubscriptionRetrieveParams = { expand: ['customer'] };",
-      "  return params;",
-      "}",
-      "stripe.subscriptions.retrieve(subscriptionId, params);",
-    ].join("\n"))).toEqual([1]);
-  });
-
-  it("follows locally aliased official Stripe clients", () => {
-    expect(blockedLines([
-      "const api = requireHostedStripeApi();",
-      "api.subscriptions.update(subscriptionId, { ...params });",
-    ].join("\n"))).toEqual([2]);
-  });
-
-  it("blocks spreads on direct hosted Stripe factory chains", () => {
-    expect(blockedLines([
-      "requireHostedStripeApi().subscriptions.update(subscriptionId, { ...params });",
-    ].join("\n"))).toEqual([1]);
-  });
-
-  it("blocks spreads in Stripe request options", () => {
-    expect(blockedLines([
-      "const options = { ...baseOptions, idempotencyKey: key };",
-      "stripe.subscriptions.update(subscriptionId, params, options);",
-    ].join("\n"))).toEqual([1]);
-  });
-
-  it("blocks payload and option spreads at typed custom Stripe client boundaries", () => {
-    expect(blockedLines([
-      "interface HostedPulseTrialExtensionStripeClient {",
-      "  resumeSubscription(id: string, params: Stripe.SubscriptionResumeParams, options: Stripe.RequestOptions): Promise<Stripe.Subscription>;",
-      "}",
-      "async function resume(input: { stripe: HostedPulseTrialExtensionStripeClient }) {",
-      "  await input.stripe.resumeSubscription(subscriptionId, { ...params }, { ...options });",
-      "}",
-    ].join("\n"))).toEqual([5, 5]);
-  });
-
-  it("blocks spreads hidden inside Stripe-typed parameter builders", () => {
-    expect(blockedLines([
-      "function buildCheckout(input: Input): Stripe.Checkout.SessionCreateParams {",
-      "  return { mode: 'payment', ...(input.customer ? { customer: input.customer } : {}) };",
-      "}",
-    ].join("\n"))).toEqual([2]);
-  });
-
-  it("blocks spreads in official non-Stripe provider request builders", () => {
-    expect(blockedLines([
-      "import type { MessageSendParams } from '@linqapp/sdk/resources/chats';",
-      "function buildMessage(idempotencyKey: string | null): MessageSendParams {",
-      "  return { message: { parts: [], ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}) } };",
-      "}",
-      "import type { ConnectionOptions } from '@temporalio/client';",
-      "const options: ConnectionOptions = { address, ...(apiKey ? { apiKey } : {}) };",
-    ].join("\n"))).toEqual([3, 6]);
-  });
-
-  it("covers OpenAI typed builders and the Junction provider client", () => {
-    expect(blockedLines([
-      "import type { ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses';",
-      "function buildResponse(): ResponseCreateParamsNonStreaming {",
-      "  return { model, input, ...options };",
-      "}",
-      "import type { Junction } from '@junction-api/sdk';",
-      "const client = new JunctionClient(config);",
-      "client.listSummary({ resource, userId, ...window });",
-    ].join("\n"))).toEqual([3, 7]);
-  });
-
-  it("covers Resend typed request builders and client operations", () => {
-    expect(blockedLines([
-      "import { Resend, type CreateBatchOptions, type CreateEmailOptions } from 'resend';",
-      "const email: CreateEmailOptions = { from, subject, text, to, ...optional };",
-      "const batch: CreateBatchOptions = [{ from, subject, text, to, ...optional }];",
-      "const resend = new Resend(apiKey);",
-      "resend.emails.send(email, { ...requestOptions });",
-      "resend.batch.send(batch);",
-    ].join("\n"))).toEqual([2, 3, 5]);
-  });
-
-  it("covers the newly adopted official provider clients", () => {
-    expect(blockedLines([
-      "import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';",
-      "import { KeyManagementServiceClient } from '@google-cloud/kms';",
-      "import { LettersApi } from '@lob/lob-typescript-sdk';",
-      "import { Exa } from 'exa-js';",
-      "import { GoogleAuth } from 'google-auth-library';",
-      "const elevenLabs = new ElevenLabsClient({ apiKey });",
-      "const kms = new KeyManagementServiceClient();",
-      "const letters = new LettersApi(configuration);",
-      "const exa = new Exa(apiKey);",
-      "const auth = new GoogleAuth(options);",
-      "elevenLabs.textToSpeech.convert(voiceId, { ...speech });",
-      "kms.encrypt({ ...request });",
-      "letters.create({ ...letter });",
-      "exa.search(query, { ...searchOptions });",
-      "auth.getClient({ ...authOptions });",
-    ].join("\n"))).toEqual([11, 12, 13, 14, 15]);
-  });
-
-  it("covers Composio typed builders and the generated provider client", () => {
-    expect(blockedLines([
-      "import Composio from '@composio/client';",
-      "import type { ToolExecuteParams } from '@composio/client/resources/tools';",
-      "function buildExecute(): ToolExecuteParams {",
-      "  return { arguments, ...identity };",
-      "}",
-      "const composio = new Composio({ apiKey });",
-      "composio.tools.execute(toolSlug, { arguments, ...identity });",
-    ].join("\n"))).toEqual([4, 7]);
-  });
-
-  it("rejects inferred Composio request variables", () => {
-    expect(
-      findProviderRequestBoundaryViolations(
-        "apps/web/src/example.ts",
-        [
-          "import Composio from '@composio/client';",
-          "const composio = new Composio({ apiKey });",
-          "const params = { arguments, user_id: userId, version };",
-          "composio.tools.execute(toolSlug, params);",
-        ].join("\n"),
-      ).map((violation) => ({
-        kind: violation.kind,
-        line: violation.line,
-      })),
-    ).toEqual([{ kind: "untyped-request-object", line: 3 }]);
-  });
-
-  it("blocks spreads in Kernel SDK request arguments", () => {
-    expect(blockedLines([
-      "import Kernel from '@onkernel/sdk';",
-      "class Client {",
-      "  private readonly kernel: Kernel;",
-      "  move(sessionId: string) {",
-      "    return this.kernel.browsers.computer.moveMouse(sessionId, { ...params });",
-      "  }",
-      "}",
-    ].join("\n"))).toEqual([5]);
-  });
-
-  it("recognizes computed, aliased, and parameter-named Stripe clients", () => {
-    expect(blockedLines([
-      "import Stripe from 'stripe';",
-      "const create = stripe.paymentIntents['create'];",
-      "create({ ...aliased });",
-      "function createAccount(api: Stripe) {",
-      "  return api.accounts.create({ ...account });",
-      "}",
-    ].join("\n"))).toEqual([3, 5]);
-  });
-
-  it("rejects untyped object-literal variables passed as provider request params", () => {
-    expect(
-      findProviderRequestBoundaryViolations(
-        "apps/web/src/example.ts",
-        [
-          "import Stripe from 'stripe';",
-          "const retrieveParams = { expand: ['customer'] };",
-          "stripe.subscriptions.retrieve(subscriptionId, retrieveParams);",
-        ].join("\n"),
-      ).map((violation) => ({
-        kind: violation.kind,
-        line: violation.line,
-      })),
-    ).toEqual([{ kind: "untyped-request-object", line: 2 }]);
-  });
-
-  it("blocks Object.assign at provider request boundaries", () => {
-    expect(
-      findProviderRequestBoundaryViolations(
-        "apps/web/src/example.ts",
-        [
-          "import type { CallCreatePhoneCallParams } from 'retell-sdk/resources/call';",
-          "function build(): CallCreatePhoneCallParams {",
-          "  return Object.assign({ from_number: from }, optional);",
-          "}",
-        ].join("\n"),
-      ).map((violation) => violation.kind),
-    ).toEqual(["object-assign"]);
-  });
-
-  it("allows SDK-typed objects with explicit optional-field assignments", () => {
-    expect(blockedLines(`
-      const params: Stripe.SubscriptionListParams = { customer, status: "all" };
-      if (startingAfter) params.starting_after = startingAfter;
-      input.stripe.subscriptions.list(params);
+    expect(violations(`
+      function fetch(_url: string): void {}
+      fetch("https://api.openai.com/v1/responses");
     `)).toEqual([]);
   });
 
-  it("allows array spreads and unrelated object spreads", () => {
-    expect(blockedLines(`
-      const result = { ...input, status: "ready" };
-      stripe.subscriptions.retrieve(subscriptionId, {
-        expand: [...SUBSCRIPTION_EXPANSIONS],
-      });
+  it("recognizes Node, Undici, CommonJS, and import-equals transports", () => {
+    expect(violations(`
+      import httpsDefault from "node:https";
+      import { default as httpDefault } from "node:http";
+      import { request as send } from "node:https";
+      import { fetch as undiciFetch } from "undici";
+      httpsDefault.request("https://api.stripe.com/v1/customers");
+      httpDefault.request("https://api.openai.com/v1/responses");
+      send("https://api.stripe.com/v1/customers");
+      undiciFetch("https://api.openai.com/v1/responses");
+      require("https").request("https://api.resend.com/emails");
+      import http = require("node:http");
+      http.request("https://api.exa.ai/search");
+    `)).toEqual(Array(6).fill("raw-provider-http"));
+  });
+
+  it("recognizes destructured and namespace transport aliases", () => {
+    expect(violations(`
+      import * as https from "node:https";
+      const { request: send } = require("node:http");
+      const { fetch: webFetch } = globalThis;
+      https.request("https://api.stripe.com/v1/customers");
+      send("https://api.openai.com/v1/responses");
+      webFetch("https://api.resend.com/emails");
+    `)).toEqual([
+      "raw-provider-http",
+      "raw-provider-http",
+      "raw-provider-http",
+    ]);
+  });
+
+  it("rejects call/apply indirection at provider-owned boundaries", () => {
+    expect(violations(`
+      fetch.call(undefined, "https://api.openai.com/v1/responses");
+      fetch.apply(undefined, ["https://api.openai.com/v1/responses"]);
+    `, "packages/example/src/openai-client.ts")).toEqual([
+      "raw-provider-http",
+      "raw-provider-http",
+    ]);
+  });
+
+  it("uses a provider SDK import as local provider ownership evidence", () => {
+    expect(violations(`
+      import OpenAI from "openai";
+      async function request(fetchImpl: typeof fetch, url: string) {
+        return fetchImpl(url);
+      }
+      void OpenAI;
+    `, "packages/example/src/client.ts")).toEqual(["raw-provider-http"]);
+  });
+
+  it("does not mistake official SDK operations for raw HTTP", () => {
+    expect(violations(`
+      import OpenAI from "openai";
+      const sdkFetch = globalThis.fetch.bind(globalThis);
+      const client = new OpenAI({ apiKey: "test", fetch: sdkFetch });
+      await client.responses.create({ model: "gpt", input: "hello" });
     `)).toEqual([]);
   });
 
-  it("ignores helpers whose names merely mention Stripe", () => {
-    expect(blockedLines(`
-      logHostedStripeFailure({ ...details });
-      describeHostedStripeError({ ...errorFields });
+  it("keeps providers without a verified TypeScript SDK outside the ban", () => {
+    expect(violations(`
+      fetch("https://api.telegram.org/bot/example/sendMessage");
+      fetch("https://api.ouraring.com/v2/usercollection/sleep");
+      fetch("https://api.prod.whoop.com/developer/v1/cycle");
+      fetch("https://www.strava.com/api/v3/athlete");
     `)).toEqual([]);
   });
 
-  it("reports the SDK callee and normalized source location", () => {
-    expect(
-      findProviderRequestBoundaryViolations(
-        "apps\\web\\src\\example.ts",
-        "stripe.refunds.create({ ...payment });",
-      ),
-    ).toEqual([{
-      boundary: "stripe.refunds.create",
-      column: 25,
-      filePath: "apps/web/src/example.ts",
-      kind: "object-spread",
-      line: 1,
-    }]);
+  it("allows only statically proven single-slash same-origin traffic", () => {
+    expect(violations(`
+      import OpenAI from "openai";
+      const route = "/api/internal/provider-status";
+      fetch(route);
+      fetch(new URL("/api/internal/provider-status", location.origin));
+    `)).toEqual([]);
+    expect(violations(`
+      import OpenAI from "openai";
+      fetch("//api.openai.com/v1/responses");
+    `)).toEqual(["raw-provider-http"]);
   });
+
+  it("does not treat comments as authorization", () => {
+    expect(violations(`
+      // provider-request-boundary-allow-next-line: sdk-transport-adapter
+      fetch("https://api.openai.com/v1/responses");
+    `)).toEqual(["raw-provider-http"]);
+  });
+
+  it("allows an exact SDK transport owner with its required runtime import", () => {
+    expect(violations(`
+      import { Composio, type ComposioConfig } from "@composio/client";
+      function createBoundedComposioFetch(fetchImpl: typeof fetch) {
+        const sdkFetch = (request: Request) => fetchImpl(request);
+        return sdkFetch;
+      }
+      void Composio;
+    `, "apps/web/src/lib/connected-apps/composio.ts")).toEqual([]);
+  });
+
+  it("checks a provider-named owner's runtime import on a generic path", () => {
+    expect(violations(`
+      import { type ElevenLabsClient } from "@murphai/operator-config/elevenlabs-runtime";
+      function createTelegramElevenLabsFetchAdapter(fetchImpl: typeof fetch) {
+        const sdkFetch = fetchImpl ?? fetch;
+        return sdkFetch("https://api.elevenlabs.io/v1/text-to-speech");
+      }
+    `, "packages/assistant-engine/src/assistant/channels/runtime.ts")).toEqual([
+      "invalid-approved-owner",
+    ]);
+  });
+
+  it("caps every exact owner at its registered raw-call count", () => {
+    expect(violations(`
+      import Composio from "@composio/client";
+      function createBoundedComposioFetch(fetchImpl: typeof fetch, useGlobal: boolean) {
+        const sdkFetch = useGlobal ? fetch : (fetchImpl ?? fetch);
+        sdkFetch("https://backend.composio.dev/api/v3/one");
+        return sdkFetch("https://backend.composio.dev/api/v3/two");
+      }
+      void Composio;
+    `, "apps/web/src/lib/connected-apps/composio.ts")).toEqual([
+      "approved-owner-overflow",
+    ]);
+  });
+
+  it("does not let one owner's provider approval cover another provider", () => {
+    expect(violations(`
+      import Composio from "@composio/client";
+      function createBoundedComposioFetch(fetchImpl: typeof fetch) {
+        return fetchImpl("https://api.openai.com/v1/responses");
+      }
+      void Composio;
+    `, "apps/web/src/lib/connected-apps/composio.ts")).toEqual([
+      "raw-provider-http",
+    ]);
+  });
+
+  it("does not transfer an approval to the same function name in another file", () => {
+    expect(violations(`
+      import Composio from "@composio/client";
+      function createBoundedComposioFetch(fetchImpl: typeof fetch) {
+        return fetchImpl("https://backend.composio.dev/api/v3/tools");
+      }
+      void Composio;
+    `, "packages/example/src/composio.ts")).toEqual(["raw-provider-http"]);
+  });
+
+  it("allows the exact presigned transfer owner without duplicating runtime validation", () => {
+    expect(violations(`
+      async function sendHostedLinqAttachmentMessage(
+        fetchImpl: typeof fetch,
+        uploadUrl: string,
+        bytes: Uint8Array,
+      ) {
+        return fetchImpl(uploadUrl, { body: bytes, method: "PUT" });
+      }
+    `, "apps/web/src/lib/hosted-onboarding/linq-client.ts")).toEqual([]);
+  });
+
+  it("allows xAI only in the exact runtime-validated owner", () => {
+    expect(violations(`
+      async function executeAskGrokTool(fetchImpl: typeof fetch) {
+        return fetchImpl("https://api.x.ai/v1/responses", { method: "POST" });
+      }
+    `, "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts")).toEqual([]);
+    expect(violations(`
+      async function askGrok(fetchImpl: typeof fetch) {
+        return fetchImpl("https://api.x.ai/v1/responses", { method: "POST" });
+      }
+    `, "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts")).toEqual([
+      "raw-provider-http",
+    ]);
+  });
+
+  it("reports the primitive once inside a local wrapper", () => {
+    const result = findProviderRequestBoundaryViolations(
+      "packages/example/src/openai-client.ts",
+      `
+        function providerFetch(url: string) {
+          return fetch(url);
+        }
+        providerFetch("https://api.openai.com/v1/responses");
+      `,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      boundary: "Direct OpenAI provider HTTP in providerFetch",
+      kind: "raw-provider-http",
+    });
+  });
+
+  it("uses the production source census for registered owner shapes", async () => {
+    const sourceFiles = await listProviderRequestSourceFiles();
+    expect(sourceFiles).toEqual(expect.arrayContaining([
+      "apps/cloudflare/src/container-entrypoint.ts",
+      "apps/cloudflare/src/runner-egress-intercept.ts",
+      "apps/web/src/lib/hosted-onboarding/linq-contact-card.ts",
+      "apps/web/src/lib/linq/api.ts",
+      "packages/assistant-engine/src/assistant/channels/runtime.ts",
+      "packages/operator-config/src/linq-runtime.ts",
+      "scripts/linq-typing-repro.ts",
+      "scripts/native-ios-hosted-e2e-identity.mjs",
+    ]));
+  });
+
+  it("keeps the provider and owner registries explicit and duplicate-free", () => {
+    expect(new Set(providerBoundaryRegistry.map((provider) => provider.id)).size)
+      .toBe(providerBoundaryRegistry.length);
+    const hosts = providerBoundaryRegistry.flatMap((provider) => provider.hosts);
+    expect(new Set(hosts).size).toBe(hosts.length);
+    const ownerKeys = approvedProviderRawHttpOwners.map(
+      (owner) => `${owner.relativePath}:${owner.ownerName}`,
+    );
+    expect(new Set(ownerKeys).size).toBe(ownerKeys.length);
+  });
+
 });
+
+function violations(
+  source: string,
+  relativePath = "packages/example/src/provider.ts",
+): string[] {
+  return findProviderRequestBoundaryViolations(relativePath, source)
+    .map((violation) => violation.kind);
+}

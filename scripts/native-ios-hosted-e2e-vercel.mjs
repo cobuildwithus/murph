@@ -14,6 +14,8 @@ import {
 } from "./native-ios-hosted-e2e-support.mjs";
 
 const DEPLOY_TIMEOUT_MS = 25 * 60_000;
+const JUNCTION_NAMESPACE_ENV_KEY = "JUNCTION_CLIENT_USER_ID_NAMESPACE";
+const JUNCTION_NAMESPACE_ENV_VALUE = "e2e";
 
 export function inspectVercelCustomEnvironment(raw, { customEnvironmentId }) {
   assertRecord(raw, "Vercel custom environment");
@@ -23,6 +25,29 @@ export function inspectVercelCustomEnvironment(raw, { customEnvironmentId }) {
     throw new Error("Vercel custom environment does not match the dedicated E2E target.");
   }
   return true;
+}
+
+export function inspectVercelJunctionNamespaceVariable(
+  raw,
+  { customEnvironmentId, environmentVariableId },
+) {
+  assertRecord(raw, "Vercel Junction namespace variable");
+  const targets = Array.isArray(raw.target) ? raw.target : [raw.target];
+  if (raw.id !== environmentVariableId
+      || raw.key !== JUNCTION_NAMESPACE_ENV_KEY
+      || raw.type !== "encrypted"
+      || raw.decrypted !== true
+      || targets.length !== 0
+      || !Array.isArray(raw.customEnvironmentIds)
+      || raw.customEnvironmentIds.length !== 1
+      || raw.customEnvironmentIds[0] !== customEnvironmentId) {
+    throw new Error("Vercel Junction namespace variable does not match the dedicated E2E target.");
+  }
+  const value = requiredString(raw.value, "Vercel Junction namespace variable value");
+  if (value !== JUNCTION_NAMESPACE_ENV_VALUE) {
+    throw new Error("Vercel Junction namespace variable does not match the dedicated E2E lane.");
+  }
+  return value;
 }
 
 export function inspectVercelDeployment(raw, expected) {
@@ -109,7 +134,6 @@ export async function createE2eDeployment({ correlationId, ref, sha }) {
       },
       name: requiredEnv("NATIVE_IOS_E2E_VERCEL_PROJECT_NAME"),
       project: projectId,
-      public: false,
     }),
     headers: vercelHeaders(token),
     method: "POST",
@@ -117,6 +141,23 @@ export async function createE2eDeployment({ correlationId, ref, sha }) {
   assertRecord(created, "Vercel create response");
   console.log("::notice::native-ios-e2e stage=web_deploy_create result=success");
   return { id: requiredString(created.id, "Vercel deployment id") };
+}
+
+export async function readE2eJunctionClientUserIdNamespace() {
+  const token = requiredEnv("NATIVE_IOS_E2E_VERCEL_TOKEN");
+  const projectId = requiredEnv("NATIVE_IOS_E2E_VERCEL_PROJECT_ID");
+  const customEnvironmentId = requiredEnv("NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID");
+  const environmentVariableId = requiredEnv(
+    "NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID",
+  );
+  const namespace = inspectVercelJunctionNamespaceVariable(await fetchJson(vercelUrl(
+    `https://api.vercel.com/v1/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(environmentVariableId)}`,
+  ), { headers: vercelHeaders(token) }, "Vercel Junction namespace variable lookup"), {
+    customEnvironmentId,
+    environmentVariableId,
+  });
+  console.log("::notice::native-ios-e2e stage=junction_namespace_preflight result=success");
+  return namespace;
 }
 
 export async function waitForE2eDeployment({ deploymentId, ref, sha }) {
