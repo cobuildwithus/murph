@@ -17,6 +17,7 @@ import {
   buildIntegrationIngestRecord,
   findCaptureByLookup,
   initializeVault,
+  patchAutomation,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -13872,7 +13873,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("system mailbox runs durable device work when platform policy blocks a due assistant handoff", async () => {
+  test("blocked system mailbox device work replays its due reminder once after policy restoration", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -13989,6 +13990,199 @@ describe("hosted workspace runtime entrypoint", () => {
       });
       assert.equal(cronStatus.nextRunAt, "2026-04-27T13:59:30.000Z");
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+
+      const restoredPolicyWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/blocked-assistant-policy-restored-before.bundle.json",
+        vaultRoot,
+      });
+      let assistantPhaseCalls = 0;
+      const restoredResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_blocked_assistant_policy_restored",
+            workspaceVersion: "1",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/blocked-assistant-policy-restored.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Policy restoration should not import duplicate mailbox work.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([
+              [restoredPolicyWorkspace.hash, restoredPolicyWorkspace.bytes],
+            ]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: null,
+                nextWakeReason: null,
+                snapshotRef: restoredPolicyWorkspace.snapshotRef,
+                version: "1",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            assert.equal(
+              (await getAssistantCronStatus(vaultRoot, {
+                turnEnvironment: {
+                  currentWorkingDirectory: null,
+                  env: {
+                    MURPH_HOSTED_RUNTIME_PROCESS: "1",
+                    VAULT: vaultRoot,
+                  },
+                },
+              })).nextRunAt,
+              "2026-04-27T13:59:30.000Z",
+            );
+            const intent = await createAssistantOutboxIntent({
+              channel: "linq",
+              dedupeToken: `automation:${automationId}:2026-04-27T13:59:30.000Z`,
+              explicitTarget: "synthetic_direct_chat",
+              identityId: null,
+              message: "Synthetic reminder delivered after policy restoration.",
+              sessionId: "session_blocked_assistant_policy_restored",
+              threadId: "synthetic_direct_chat",
+              threadIsDirect: true,
+              turnId: "turn_blocked_assistant_policy_restored",
+              turnTrigger: "automation-auto-reply",
+              vault: vaultRoot,
+            });
+            const sentIntent = await markAssistantOutboxIntentSentById({
+              delivery: {
+                channel: "linq",
+                idempotencyKey: "linq-blocked-assistant-policy-restored",
+                messageLength: intent.message.length,
+                providerMessageId: "linq-blocked-assistant-policy-restored",
+                providerThreadId: "synthetic_direct_chat",
+                sentAt: now,
+                target: "synthetic_direct_chat",
+                targetKind: "explicit",
+              },
+              intentId: intent.intentId,
+              vault: vaultRoot,
+            });
+            assert.equal(sentIntent?.status, "sent");
+            await patchAutomation({
+              lookup: automationId,
+              now: new Date(now),
+              status: "archived",
+              vaultRoot,
+            });
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(restoredResult.status, "idle");
+      const sentIntents = (await listAssistantOutboxIntents(vaultRoot))
+        .filter((intent) => intent.status === "sent");
+      assert.equal(sentIntents.length, 1);
+      assert.equal((await showAutomation({ automationId, vaultRoot }))?.status, "archived");
+      assert.equal(
+        (await getAssistantCronStatus(vaultRoot, {
+          turnEnvironment: {
+            currentWorkingDirectory: null,
+            env: {
+              MURPH_HOSTED_RUNTIME_PROCESS: "1",
+              VAULT: vaultRoot,
+            },
+          },
+        })).nextRunAt,
+        null,
+      );
+
+      const terminalWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/blocked-assistant-policy-terminal-before.bundle.json",
+        vaultRoot,
+      });
+      let terminalAssistantPhaseCalls = 0;
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_blocked_assistant_policy_terminal",
+            workspaceVersion: "2",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/blocked-assistant-policy-terminal.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Terminal replay should not import mailbox work.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[terminalWorkspace.hash, terminalWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: null,
+                nextWakeReason: null,
+                snapshotRef: terminalWorkspace.snapshotRef,
+                version: "2",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            terminalAssistantPhaseCalls += 1;
+            assert.equal(
+              (await getAssistantCronStatus(vaultRoot, {
+                turnEnvironment: {
+                  currentWorkingDirectory: null,
+                  env: {
+                    MURPH_HOSTED_RUNTIME_PROCESS: "1",
+                    VAULT: vaultRoot,
+                  },
+                },
+              })).nextRunAt,
+              null,
+            );
+            assert.equal(
+              (await listAssistantOutboxIntents(vaultRoot)).filter((intent) =>
+                intent.status === "sent"
+              ).length,
+              1,
+            );
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+      assert.equal(terminalAssistantPhaseCalls, 1);
+      assert.equal(
+        (await listAssistantOutboxIntents(vaultRoot)).filter((intent) =>
+          intent.status === "sent"
+        ).length,
+        1,
+      );
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

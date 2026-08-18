@@ -1337,9 +1337,13 @@ Last verified: 2026-08-16
   summary, profile, and historical scheduling once. A yieldable full reconcile
   instead commits one configured normalization-safe summary unit per full-job
   continuation, after a live provider inventory read for that attempt, before
-  entering the existing timeseries continuation. Ordinary units contain one
-  resource and allow at most three sequential pages with one eight-second
-  request attempt per page. Sleep and sleep-cycle remain one canonical unit so
+  entering the existing timeseries continuation. The inventory read is one
+  attempt capped at eight seconds, accepts at most 64 provider rows, and its
+  source projection reads the current local source set once before at most 64
+  serial upserts; summary admission adds one fixed local-source read independent
+  of provider cardinality. Ordinary units contain one resource and allow at
+  most three sequential pages with one eight-second request attempt per page.
+  Sleep and sleep-cycle remain one canonical unit so
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the

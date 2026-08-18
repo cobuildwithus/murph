@@ -216,6 +216,7 @@ const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
+export const JUNCTION_MAX_USER_PROVIDERS = 64;
 const MAX_SDK_COMPAT_RESPONSE_BYTES = 32 * 1_024 * 1_024;
 // These summary endpoints declare `start_date`/`end_date` as YYYY-MM-DD dates
 // (not datetimes) in the Junction API reference.
@@ -389,11 +390,23 @@ export class JunctionClient {
 
   async listUserProviders(
     userId: string,
-    options: { signal?: AbortSignal | null } = {},
+    options: {
+      collectionWorkLimit?: JunctionCollectionWorkLimit;
+      signal?: AbortSignal | null;
+    } = {},
   ): Promise<JunctionProviderConnection[]> {
     const payload = await this.requestSdkResource<unknown>(
       "GET",
-      { endpointKind: "junction_user_providers", signal: options.signal ?? null },
+      {
+        endpointKind: "junction_user_providers",
+        signal: options.signal ?? null,
+        ...(options.collectionWorkLimit
+          ? {
+              maxAttempts: options.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: options.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
+      },
       (clientOptions, requestOptions) => new UserClient(clientOptions)
         .getConnectedProviders({ userId }, requestOptions),
     );
@@ -1432,7 +1445,16 @@ function parseJunctionUser(payload: Record<string, unknown>, label: string): Jun
 }
 
 function parseJunctionProviders(payload: unknown): JunctionProviderConnection[] {
-  return extractCollectionRecords(payload)
+  const records = extractCollectionRecords(payload);
+  if (records.length > JUNCTION_MAX_USER_PROVIDERS) {
+    throw deviceSyncError({
+      code: "JUNCTION_USER_PROVIDER_LIMIT",
+      message: "Junction connected-provider response exceeded the supported provider bound.",
+      retryable: true,
+      httpStatus: 502,
+    });
+  }
+  return records
     .map(parseJunctionProviderConnection)
     .filter((provider): provider is JunctionProviderConnection => Boolean(provider));
 }

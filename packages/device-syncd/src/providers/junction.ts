@@ -111,6 +111,7 @@ import {
 } from "../junction-resources.ts";
 import {
   JunctionClient,
+  JUNCTION_MAX_USER_PROVIDERS,
   type JunctionClientConfig,
   type JunctionCollectionWorkLimit,
   type JunctionDateQueryFormat,
@@ -554,6 +555,11 @@ const JUNCTION_FULL_JOB_COUPLED_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
   requestTimeoutMs: 5_000,
+} satisfies JunctionCollectionWorkLimit);
+const JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT = Object.freeze({
+  maxAttemptsPerPage: 1,
+  maxPages: 1,
+  requestTimeoutMs: 8_000,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
@@ -1281,6 +1287,9 @@ export function createJunctionDeviceSyncProvider(
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
     const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
+      ...(job.kind === "reconcile" && context.shouldYield
+        ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
+        : {}),
       signal: context.signal ?? null,
     });
     await projectJunctionSources(context, sourceProviders);
@@ -10180,17 +10189,21 @@ async function projectJunctionSources(
     options.preserveHistoricalReconnectProviderSlugs === undefined
       ? null
       : new Set(options.preserveHistoricalReconnectProviderSlugs);
-  for (const source of projectJunctionSourcesByProviderSlug(
+  const projectedSources = projectJunctionSourcesByProviderSlug(
     context.account.id,
     providers,
-  )) {
-    const existingSources = context.listConnectionSources
-      ? await context.listConnectionSources()
-      : [];
-    const admissionSources: readonly JunctionImportAdmissionSource[] =
-      context.listConnectionSources
-        ? existingSources
-        : context.account.sources ?? [];
+  );
+  if (projectedSources.length > JUNCTION_MAX_USER_PROVIDERS) {
+    throw new TypeError("Junction projected sources exceeded the connected-provider bound.");
+  }
+  const existingSources = context.listConnectionSources
+    ? [...await context.listConnectionSources()]
+    : [];
+  const admissionSources: readonly JunctionImportAdmissionSource[] =
+    context.listConnectionSources
+      ? existingSources
+      : context.account.sources ?? [];
+  for (const source of projectedSources) {
     const listedOnly = context.connectionSourceAdmissionMode === "listed_only";
     if (
       (
@@ -10231,7 +10244,7 @@ async function projectJunctionSources(
           : requiresHistoricalResetDeviceSyncSource(existing)
       );
     const historicalReconnectError = keepHistoricalReconnect ? existing : null;
-    await context.upsertConnectionSource({
+    const persistedSource = await context.upsertConnectionSource({
       sourceInstanceKey:
         accountSourceIdentity?.sourceInstanceKey ?? source.sourceInstanceKey,
       sourceProviderSlug:
@@ -10255,6 +10268,14 @@ async function projectJunctionSources(
         : {}),
       lastSeenAt: context.now,
     });
+    const persistedIndex = existingSources.findIndex((candidate) =>
+      candidate.sourceInstanceKey === persistedSource.sourceInstanceKey
+    );
+    if (persistedIndex >= 0) {
+      existingSources[persistedIndex] = persistedSource;
+    } else {
+      existingSources.push(persistedSource);
+    }
   }
 }
 

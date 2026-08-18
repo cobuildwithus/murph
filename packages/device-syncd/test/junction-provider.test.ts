@@ -29,7 +29,7 @@ import {
   resolveJunctionTimeseriesResourcePolicy,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { JUNCTION_PRODUCTION_TIMESERIES_RESOURCES } from "../src/config/junction-config.ts";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
@@ -71,6 +71,7 @@ import {
 import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
+  JUNCTION_MAX_USER_PROVIDERS,
   JunctionClient,
   parseJunctionHistoricalPullSnapshot,
 } from "../src/providers/junction-client.ts";
@@ -2110,6 +2111,143 @@ test("Junction yieldable summary continuation fails within its inner provider-at
   );
 
   assert.equal(summaryAttempts, 1);
+});
+
+test("Junction yieldable reconcile times out provider inventory once before the hosted deadline", async () => {
+  vi.useFakeTimers();
+  let inventoryAttempts = 0;
+  let summaryAttempts = 0;
+  try {
+    const provider = createJunctionProvider(async (input, init) => {
+      const url = readUrl(input);
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        inventoryAttempts += 1;
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) {
+            reject(new Error("Expected the bounded inventory request to carry an abort signal."));
+            return;
+          }
+          const rejectAborted = () => reject(signal.reason);
+          if (signal.aborted) {
+            rejectAborted();
+            return;
+          }
+          signal.addEventListener("abort", rejectAborted, { once: true });
+        });
+      }
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/")) {
+        summaryAttempts += 1;
+        return createJsonResponse({ data: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const execution = executeJunctionJob(
+      provider,
+      createJunctionJobContext({ shouldYield: () => false }),
+      createJob("reconcile", {
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-03-27T00:00:00.000Z",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    await assert.rejects(execution, { code: "JUNCTION_API_REQUEST_FAILED" });
+    assert.equal(inventoryAttempts, 1);
+    assert.equal(summaryAttempts, 0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Junction yieldable reconcile bounds maximum provider projection to fixed source reads", async () => {
+  const providers = Array.from({ length: JUNCTION_MAX_USER_PROVIDERS }, (_, index) => ({
+    id: `provider-${index}`,
+    name: `Provider ${index}`,
+    resource_availability: { activity: true },
+    slug: `provider-${index}`,
+    status: "connected",
+  }));
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/")) {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const baseContext = createJunctionJobContext({ shouldYield: () => false });
+  let sourceReads = 0;
+  let sourceUpserts = 0;
+  const result = await executeJunctionJob(
+    provider,
+    {
+      ...baseContext,
+      async listConnectionSources() {
+        sourceReads += 1;
+        return [];
+      },
+      async upsertConnectionSource(input) {
+        sourceUpserts += 1;
+        return baseContext.upsertConnectionSource!(input);
+      },
+    },
+    createJob("reconcile", {
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-03-27T00:00:00.000Z",
+    }),
+  );
+
+  // One read projects the inventory and one fixed read admits the imported
+  // summary; neither count grows with provider cardinality.
+  assert.equal(sourceReads, 2);
+  assert.equal(sourceUpserts, JUNCTION_MAX_USER_PROVIDERS);
+  assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+});
+
+test("Junction rejects provider inventory above the projection bound before local source work", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+          id: `provider-${index}`,
+          name: `Provider ${index}`,
+          slug: `provider-${index}`,
+          status: "connected",
+        })),
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  let sourceReads = 0;
+  let sourceUpserts = 0;
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        async listConnectionSources() {
+          sourceReads += 1;
+          return [];
+        },
+        async upsertConnectionSource(input) {
+          sourceUpserts += 1;
+          return createJunctionJobContext().upsertConnectionSource!(input);
+        },
+        shouldYield: () => false,
+      }),
+      createJob("reconcile", {
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-03-27T00:00:00.000Z",
+      }),
+    ),
+    { code: "JUNCTION_USER_PROVIDER_LIMIT" },
+  );
+  assert.equal(sourceReads, 0);
+  assert.equal(sourceUpserts, 0);
 });
 
 test("Junction non-connect backfill window uses bounded job retry without historical metadata", async () => {

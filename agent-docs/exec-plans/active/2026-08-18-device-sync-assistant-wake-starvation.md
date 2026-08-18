@@ -86,8 +86,18 @@ frontiers advance after deployment.
   suite passes (152 tests).
 - The independent ReviewGPT incident review validated both root causes and
   identified coupled sleep normalization as a required continuation invariant.
-  The remediation regression and the full 282-test Junction provider suite pass,
+  The remediation regression and the full 285-test Junction provider suite pass,
   and the device-syncd typecheck remains green.
+- The preliminary specialist review found three accepted gaps. The restored-
+  policy journey now proves a default pass sends one terminal reminder intent
+  and a later pass cannot duplicate it. The yieldable provider inventory is one
+  eight-second attempt with a 64-provider admission bound and fixed local-source
+  reads. A real SQLite service test reconstructs the service between summary
+  continuations and proves one successor, stable window/dedupe/cadence, one
+  fetch per resource, and no watermark advance before terminal timeseries work.
+- The exact remediation suites pass: all 406 Junction provider and service
+  tests, all 327 hosted workspace-entrypoint tests, all 152 Cloudflare runner-
+  alarm tests, and the focused two-test Web owner-release route selection.
 - Typechecks pass for `apps/cloudflare`, `packages/assistant-runtime`,
   `packages/device-syncd`, and `packages/hosted-execution`.
 - The diff-scoped verifier completed shell syntax, Node syntax, and the hosted
