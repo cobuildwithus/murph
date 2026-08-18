@@ -11,7 +11,7 @@
     "dev:local-env": "bash -c 'pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
     "dev:prepared-local-env": "bash -c 'pnpm changelog:generate && pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
     "prebuild": "pnpm --dir ../../packages/runtime-state build",
-    "build": "node ../../scripts/run-with-host-verification-slot.mjs 'apps/web build' -- bash -c 'pnpm public-routes:waf-check && pnpm product-labels:env-check && pnpm hosted-crypto:env-check && pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate:build && pnpm typecheck:prepared && bash scripts/run-production-next-build.sh && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check && pnpm og-assets:trace-check && pnpm og-assets:runtime-check'",
+    "build": "pnpm public-routes:waf-check && pnpm product-labels:env-check && pnpm hosted-crypto:env-check && pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate:build && pnpm typecheck:prepared && bash scripts/run-production-next-build.sh && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check && pnpm og-assets:trace-check && pnpm og-assets:runtime-check",
     "changelog:generate": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-changelog-fragments.ts",
     "health-commons:generate": "pnpm --dir ../.. health-commons:generate",
     "health-commons:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-health-commons-traces.ts",

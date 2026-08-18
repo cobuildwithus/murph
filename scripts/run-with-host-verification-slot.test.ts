@@ -24,44 +24,6 @@ const holderSource = `
   process.stdout.write("ready\\n");
   process.stdin.resume();
 `;
-// A TERM-ignoring parent with a TERM-ignoring grandchild: the wedged-compile
-// topology the command deadline must terminate as one process group.
-const wedgedTreeSource = `
-  import { spawn } from "node:child_process";
-  process.on("SIGTERM", () => {});
-  const grandchild = spawn(process.execPath, [
-    "-e",
-    "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);",
-  ], { stdio: "ignore" });
-  process.stdout.write("pids " + process.pid + " " + grandchild.pid + "\\n");
-  setInterval(() => {}, 1000);
-`;
-// A leader that exits on the deadline's TERM while its grandchild ignores it:
-// the descendant-outlives-leader topology that motivated supervisor-owned
-// group reaping.
-const exitingLeaderTreeSource = `
-  import { spawn } from "node:child_process";
-  const grandchild = spawn(process.execPath, [
-    "-e",
-    "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);",
-  ], { stdio: "ignore" });
-  process.stdout.write("pids " + process.pid + " " + grandchild.pid + "\\n");
-  setInterval(() => {}, 1000);
-`;
-// A successful leader can leave a platform-owned process-group member behind.
-// The supervisor must return the successful result instead of treating that
-// residual member as unfinished application work.
-const residualDescendantTreeSource = `
-  import { spawn } from "node:child_process";
-  const grandchild = spawn(process.execPath, [
-    "-e",
-    "setInterval(() => {}, 1000);",
-  ], { stdio: "ignore" });
-  grandchild.unref();
-  process.stdout.write("pids " + process.pid + " " + grandchild.pid + "\\n");
-  process.exitCode = Number(process.env.MURPH_TEST_LEADER_EXIT_CODE ?? "0");
-`;
-
 afterEach(async () => {
   for (const child of children) {
     child.stdin?.end();
@@ -318,125 +280,15 @@ describe("shared-host verification slots", () => {
     expect(readdirSync(targetRoot)).toEqual(["marker.txt"]);
   });
 
-  it("preserves a child failure code while reaping its residual process group", async () => {
+  it("preserves a child failure code and releases the slot", () => {
     const stateRoot = makeTempRoot();
-    const child = startCommand("failing command", stateRoot, residualDescendantTreeSource, {
-      MURPH_TEST_LEADER_EXIT_CODE: "7",
-      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
-      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "600000",
-    });
+    const result = runSync(
+      "failing command",
+      [process.execPath, "-e", "process.exit(7)"],
+      stateRoot,
+    );
 
-    const [, grandchildPid] = await waitForPids(child);
-    ownedDescendantPids.add(grandchildPid);
-
-    expect(await waitForExit(child)).toBe(7);
-    await waitForOwnedProcessExit(grandchildPid);
-    expect(readdirSync(stateRoot)).toEqual([]);
-  });
-
-  it("does not reap a residual process-group member after a successful command", async () => {
-    const stateRoot = makeTempRoot();
-    const child = startCommand("successful command", stateRoot, residualDescendantTreeSource, {
-      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
-      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "600000",
-    });
-
-    const [, grandchildPid] = await waitForPids(child);
-    ownedDescendantPids.add(grandchildPid);
-
-    expect(await waitForExit(child)).toBe(0);
-    expect(isProcessRunning(grandchildPid)).toBe(true);
-    expect(readdirSync(stateRoot)).toEqual([]);
-
-    process.kill(grandchildPid, "SIGTERM");
-    await waitForOwnedProcessExit(grandchildPid);
-  });
-
-  it("a configured command deadline reaps the whole process group", async () => {
-    const stateRoot = makeTempRoot();
-    const child = startCommand("deadline command", stateRoot, wedgedTreeSource, {
-      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
-      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "300",
-    });
-
-    const [parentPid, grandchildPid] = await waitForPids(child);
-    ownedDescendantPids.add(parentPid);
-    ownedDescendantPids.add(grandchildPid);
-
-    await waitForStderrLine(child, "terminating its process group");
-    const status = await waitForExit(child);
-    expect(status).toBe(124);
-    await waitForOwnedProcessExit(parentPid);
-    await waitForOwnedProcessExit(grandchildPid);
-    expect(readdirSync(stateRoot)).toEqual([]);
-  });
-
-  it("a deadline whose group leader exits on TERM still reaps a surviving descendant", async () => {
-    const stateRoot = makeTempRoot();
-    const child = startCommand("exiting leader", stateRoot, exitingLeaderTreeSource, {
-      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
-      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "300",
-    });
-
-    const [parentPid, grandchildPid] = await waitForPids(child);
-    ownedDescendantPids.add(parentPid);
-    ownedDescendantPids.add(grandchildPid);
-
-    const status = await waitForExit(child);
-    expect(status).toBe(124);
-    await waitForOwnedProcessExit(parentPid);
-    await waitForOwnedProcessExit(grandchildPid);
-    expect(readdirSync(stateRoot)).toEqual([]);
-  });
-
-  it("a cancellation during post-leader reaping keeps ownership until the descendant is dead", async () => {
-    const stateRoot = makeTempRoot();
-    const child = startCommand("cancelled during reap", stateRoot, exitingLeaderTreeSource, {
-      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "600",
-      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "300",
-    });
-
-    const [parentPid, grandchildPid] = await waitForPids(child);
-    ownedDescendantPids.add(parentPid);
-    ownedDescendantPids.add(grandchildPid);
-
-    // Wait for the deadline to fell the leader while the TERM-ignoring
-    // grandchild survives into the reaping grace, then cancel externally.
-    const reapWindowDeadline = Date.now() + 2_000;
-    while (isProcessRunning(parentPid) || !isProcessRunning(grandchildPid)) {
-      if (Date.now() > reapWindowDeadline) {
-        throw new Error("Never reached the post-leader reaping window");
-      }
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    child.kill("SIGTERM");
-
-    const status = await waitForExit(child);
-    expect(status).toBe(143);
-    // Ownership must have been held until the whole group was gone: the
-    // grandchild is already dead by the time the supervisor returns.
-    expect(isProcessRunning(grandchildPid)).toBe(false);
-    ownedDescendantPids.delete(grandchildPid);
-    await waitForOwnedProcessExit(parentPid);
-    expect(readdirSync(stateRoot)).toEqual([]);
-  });
-
-  it("external cancellation with a configured deadline escalates to KILL and reaps the group", async () => {
-    const stateRoot = makeTempRoot();
-    const child = startCommand("cancelled command", stateRoot, wedgedTreeSource, {
-      MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS: "300",
-      MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS: "600000",
-    });
-
-    const [parentPid, grandchildPid] = await waitForPids(child);
-    ownedDescendantPids.add(parentPid);
-    ownedDescendantPids.add(grandchildPid);
-
-    child.kill("SIGTERM");
-    const status = await waitForExit(child);
-    expect(status).toBe(143);
-    await waitForOwnedProcessExit(parentPid);
-    await waitForOwnedProcessExit(grandchildPid);
+    expect(result.status, result.stderr).toBe(7);
     expect(readdirSync(stateRoot)).toEqual([]);
   });
 });
@@ -528,27 +380,6 @@ function startRawCommand(source: string): ChildProcess {
 
 async function waitForLine(child: ChildProcess, line: string): Promise<void> {
   await waitForStreamLine(child, child.stdout, line);
-}
-
-async function waitForPids(child: ChildProcess): Promise<[number, number]> {
-  let output = "";
-  return await new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error(`Timed out waiting for pids; output=${output}`)),
-      2_000,
-    );
-    const onData = (chunk: Buffer | string) => {
-      output += chunk.toString();
-      const match = output.match(/pids (\d+) (\d+)/u);
-      if (match) {
-        clearTimeout(timeout);
-        child.stdout?.off("data", onData);
-        resolve([Number(match[1]), Number(match[2])]);
-      }
-    };
-    child.stdout?.on("data", onData);
-    child.once("error", reject);
-  });
 }
 
 async function waitForStderrLine(child: ChildProcess, line: string): Promise<void> {

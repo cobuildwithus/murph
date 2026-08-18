@@ -1,4 +1,4 @@
-# Restore Vercel build completion on Standard machines
+# Simplify Vercel builds on Standard machines
 
 Status: active
 Created: 2026-08-18
@@ -6,17 +6,18 @@ Updated: 2026-08-18
 
 ## Goal
 
-- Let a successful hosted Web production build return immediately after the
-  package-build leader exits, while preserving whole-group termination for
-  timed-out, cancelled, and failed commands so Vercel Standard builders can
-  complete instead of waiting for the platform ceiling.
+- Give Next and Vercel sole ownership of the hosted Web production build:
+  compile Webpack in the Next CLI process and remove the production-only local
+  verification supervisor, deadline, and process-group reaper.
 
 ## Success criteria
 
-- A configured deadline does not make a successful command reap or wait on a
-  residual descendant process.
-- Deadline, cancellation, and failed-command process-group cleanup remains
-  targeted at the owned group and covered by the supervisor tests.
+- Production builds do not use the shared-host verification slot or custom
+  command deadlines.
+- The Workflow-customized Webpack build runs in the Next CLI process instead
+  of a separately forced build worker.
+- The local verification slot retains admission, status propagation, and
+  external-signal forwarding without production lifecycle behavior.
 - Focused supervisor and production build-contract tests pass.
 - The required direct-main acceptance gate passes on the final reconciled
   candidate.
@@ -26,20 +27,21 @@ Updated: 2026-08-18
 ## Scope
 
 - In scope:
-  - `scripts/run-with-host-verification-slot.mjs` success-path ownership.
-  - A focused integration regression for a successful leader with a live
-    same-group descendant.
+  - Hosted Web package, Vercel entrypoint, Next config, and production runner.
+  - Deletion of production deadline/reaper behavior from the local verification
+    slot.
+  - Focused build-contract and verification-slot regressions.
 - Out of scope:
-  - Next.js compiler, cache, and heap-policy changes.
   - Vercel project machine-size configuration.
-  - Changes to non-production deadline admission.
+  - Changes to shared-host slot admission.
 
 ## Constraints
 
 - Technical constraints:
-  - Keep timeout and external-cancellation cleanup targeted at the exact
-    detached process group created by the supervisor.
-  - Preserve the successful command's exit status and shared-slot release.
+  - Keep the cold Webpack cache policy that prevents the proven warm-cache OOM.
+  - Preserve explicit route-aware TypeScript validation before compilation.
+  - Keep Webpack and TypeScript heap limits sequential and within the Standard
+    builder's 8 GB boundary.
 - Product/process constraints:
   - Preserve unrelated primary-checkout work by implementing in the sanctioned
     task worktree.
@@ -48,32 +50,30 @@ Updated: 2026-08-18
 
 ## Risks and mitigations
 
-1. Risk: Skipping cleanup too broadly could leave failed build descendants
-   running.
-   Mitigation: Exempt only clean exit code zero; retain reaping for timeout,
-   cancellation, signal, and nonzero exit paths.
-2. Risk: A timing-only regression could pass without proving the descendant
-   survived.
-   Mitigation: Capture the exact descendant PID, assert it remains alive after
-   the successful supervisor exit, then terminate that owned test process.
+1. Risk: The in-process compiler could exhaust its heap.
+   Mitigation: Give the single compiler the previously proven 3 GiB worker
+   budget, retain Next's memory optimizations and cold Webpack cache, and prove
+   the exact path locally and on a Standard deployment.
+2. Risk: Removing the supervisor could weaken local verification admission.
+   Mitigation: Keep the slot's local admission and signal-forwarding behavior
+   intact and run its focused suite.
 
 ## Tasks
 
-1. Add a failing clean-success residual-descendant regression.
-2. Restrict post-exit process-group reaping to unsuccessful or forced exits.
-3. Run focused syntax, supervisor, and production build-contract checks.
-4. Complete the routed review, reconcile the exact candidate, and run
-   `pnpm verify:acceptance` once for the direct-main attempt.
-5. Land the exact commit on `main` and monitor the production deployment.
+1. Remove the production wrapper and timeout environment contract.
+2. Delete deadline/reaper machinery from the local verification slot.
+3. Let Next's custom-Webpack default keep compilation in-process and use one
+   compiler heap budget.
+4. Run focused syntax, supervisor, build-contract, and production-build proof.
+5. Complete routed review and CI, land the exact commit, and monitor Standard.
 
 ## Decisions
 
-- Keep the existing 15-minute production deadline and cold-Webpack memory
-  policy; live deployment evidence shows the application build itself completes
-  comfortably within the Standard-machine window.
-- Do not infer group liveness after a clean package-build exit as unfinished
-  application compilation. Vercel owns residual platform process cleanup once
-  the successful command returns.
+- Keep the cold-Webpack cache policy; prior live deployments prove restored warm
+  Webpack caches can exceed the Standard builder memory boundary.
+- Do not force `webpackBuildWorker`: Next 16.3 disables it when the application
+  supplies custom Webpack configuration, which keeps one compiler owner.
+- Vercel owns production cancellation and build deadlines.
 
 ## Verification
 
@@ -84,9 +84,7 @@ Updated: 2026-08-18
     current app test configuration.
   - `pnpm verify:acceptance`
 - Expected outcomes:
-  - The clean-success regression proves the wrapper exits without signaling its
-    residual descendant.
-  - Existing timeout and cancellation tests continue proving full group
-    cleanup and their exact exit codes.
-  - Production build scripts retain the intended Webpack, cache, heap, migration,
-    and deadline contract.
+  - Local verification-slot tests prove admission, status propagation, and
+    signal forwarding without any production deadline contract.
+  - Production build scripts retain the intended Webpack, cache, heap,
+    migration, and prepared-TypeScript contract with one compiler process.

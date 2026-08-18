@@ -21,30 +21,13 @@ const ENABLED_ENV = "MURPH_VERIFY_SHARED_HOST";
 const HELD_ENV = "MURPH_VERIFY_HOST_SLOT_HELD";
 const TEST_STATE_ROOT_ENV = "MURPH_VERIFY_SHARED_HOST_TEST_STATE_ROOT";
 const CODEX_THREAD_ENV = "CODEX_THREAD_ID";
-const COMMAND_TIMEOUT_ENV = "MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS";
-const COMMAND_KILL_GRACE_ENV = "MURPH_VERIFY_HOST_COMMAND_KILL_GRACE_MS";
 const DEFAULT_POLL_INTERVAL_MS = 250;
 const DEFAULT_STALE_METADATA_GRACE_MS = 10_000;
-const DEFAULT_COMMAND_KILL_GRACE_MS = 30_000;
-const COMMAND_TIMEOUT_EXIT_CODE = 124;
-const GROUP_EXIT_POLL_INTERVAL_MS = 100;
 const WAIT_LOG_INTERVAL_MS = 60_000;
 const OWNER_FILE_NAME = "owner.json";
 const invocationCwd = process.cwd();
 const invocation = parseInvocation(process.argv.slice(2));
 const useDetachedChildProcessGroup = process.platform !== "win32";
-// A configured command deadline arms whole-process-group termination: timeout,
-// cancellation, and failed-command cleanup act on the one detached group this
-// supervisor creates, so a wedged descendant (for example a Webpack compiler
-// worker) cannot outlive an unsuccessful command. A clean command exit returns
-// directly so platform-owned residual process state cannot stall completion.
-const commandTimeoutMs = useDetachedChildProcessGroup
-  ? readPositiveInteger(process.env[COMMAND_TIMEOUT_ENV], 0)
-  : 0;
-const commandKillGraceMs = readPositiveInteger(
-  process.env[COMMAND_KILL_GRACE_ENV],
-  DEFAULT_COMMAND_KILL_GRACE_MS,
-);
 let activeChild = null;
 let forcedExitCode = null;
 let heldSlot = null;
@@ -248,49 +231,15 @@ async function runCommand(commandArgs, env) {
       writeOwnerMetadata(heldSlot.slotPath, heldSlot.owner);
     }
 
-    let deadlineTimer = null;
-    let killTimer = null;
-    if (commandTimeoutMs > 0) {
-      deadlineTimer = setTimeout(() => {
-        forcedExitCode = COMMAND_TIMEOUT_EXIT_CODE;
-        console.error(
-          `[host-verification] Command exceeded ${commandTimeoutMs}ms; terminating its process group before the platform build ceiling.`,
-        );
-        signalProcessGroup(child.pid, "SIGTERM");
-        killTimer = setTimeout(
-          () => signalProcessGroup(child.pid, "SIGKILL"),
-          commandKillGraceMs,
-        );
-      }, commandTimeoutMs);
-    }
-
     child.on("error", (error) => {
       activeChild = null;
-      clearTimeout(deadlineTimer);
-      clearTimeout(killTimer);
       reject(error);
     });
-    // Classify the direct child's result before releasing process ownership.
-    // Unsuccessful commands still reap surviving descendants, and a
-    // termination signal arriving during that cleanup must keep targeting the
-    // detached group instead of exiting immediately.
     child.on("exit", (code, signal) => {
-      clearTimeout(deadlineTimer);
-      clearTimeout(killTimer);
-      resolve({ code, pid: child.pid ?? null, signal });
+      activeChild = null;
+      resolve({ code, signal });
     });
   });
-
-  const commandSucceeded = forcedExitCode === null
-    && exitState.signal === null
-    && exitState.code === 0;
-  try {
-    if (!commandSucceeded && commandTimeoutMs > 0 && exitState.pid !== null) {
-      await reapCommandProcessGroup(exitState.pid);
-    }
-  } finally {
-    activeChild = null;
-  }
 
   if (forcedExitCode !== null) {
     return forcedExitCode;
@@ -301,11 +250,6 @@ async function runCommand(commandArgs, env) {
   return exitState.code ?? 1;
 }
 
-// Group signals tolerate EPERM as well as ESRCH: on macOS a killed group
-// member that has not been reaped yet (a zombie) makes kill(-pgid, ...)
-// return EPERM even though there is nothing left to signal. The group probe
-// treats that same state as "still draining" so the reaper keeps waiting
-// until the member is reaped and the group reports ESRCH.
 function signalProcessGroup(pid, signalName) {
   if (!pid) {
     return;
@@ -316,39 +260,6 @@ function signalProcessGroup(pid, signalName) {
     if (!isMissingProcessError(error) && !isNotPermittedProcessError(error)) {
       throw error;
     }
-  }
-}
-
-function isProcessGroupRunning(pid) {
-  if (!pid) {
-    return false;
-  }
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (error) {
-    return !isMissingProcessError(error);
-  }
-}
-
-// With a command deadline configured, the direct child's exit is not enough:
-// a wedged descendant in the detached group must also be gone before the
-// supervisor returns and releases any held slot.
-async function reapCommandProcessGroup(pid) {
-  if (!isProcessGroupRunning(pid)) {
-    return;
-  }
-  signalProcessGroup(pid, "SIGTERM");
-  const killDeadline = Date.now() + commandKillGraceMs;
-  while (Date.now() < killDeadline) {
-    if (!isProcessGroupRunning(pid)) {
-      return;
-    }
-    await delay(GROUP_EXIT_POLL_INTERVAL_MS);
-  }
-  signalProcessGroup(pid, "SIGKILL");
-  while (isProcessGroupRunning(pid)) {
-    await delay(GROUP_EXIT_POLL_INTERVAL_MS);
   }
 }
 
@@ -458,13 +369,6 @@ function handleTerminationSignal(signalName, exitCode) {
     }
   }
 
-  // With a command deadline configured, external cancellation must also be
-  // bounded: a group member that ignores the forwarded signal is force-killed
-  // after the same grace the deadline path uses.
-  if (commandTimeoutMs > 0) {
-    const cancelledPid = activeChild.pid;
-    setTimeout(() => signalProcessGroup(cancelledPid, "SIGKILL"), commandKillGraceMs).unref();
-  }
 }
 
 function parseInvocation(argv) {
