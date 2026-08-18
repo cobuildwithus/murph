@@ -36817,6 +36817,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: false,
+      checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
       generatedImageRetention: false,
       handoff: "no-signal reconciliation",
@@ -36825,6 +36826,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: true,
       checkpointConversationInputAhead: true,
       checkpointRuntimeWake: false,
+      checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
       generatedImageRetention: false,
       handoff: "conversation input hint",
@@ -36833,6 +36835,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: true,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: true,
+      checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
       generatedImageRetention: false,
       handoff: "retained checkpoint wake",
@@ -36841,6 +36844,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: false,
+      checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
       generatedImageRetention: true,
       handoff: "no-signal reconciliation after a status commit",
@@ -36849,15 +36853,26 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: true,
+      checkpointTrustedCompletion: false,
       checkpointSystemControl: true,
       generatedImageRetention: false,
       handoff: "system-only runtime control",
+    },
+    {
+      checkpointConversation: false,
+      checkpointConversationInputAhead: false,
+      checkpointRuntimeWake: true,
+      checkpointTrustedCompletion: true,
+      checkpointSystemControl: false,
+      generatedImageRetention: false,
+      handoff: "trusted completion quiet window",
     },
   ])("older due assistant carry honors $handoff before persisting a later reminder", async (
     {
       checkpointConversation,
       checkpointConversationInputAhead,
       checkpointRuntimeWake,
+      checkpointTrustedCompletion,
       checkpointSystemControl,
       generatedImageRetention,
     },
@@ -36886,6 +36901,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const olderWakePersisted = createDeferred<void>();
     const reminderCreated = createDeferred<void>();
     const reminderWakePersisted = createDeferred<void>();
+    const trustedCompletionHandled = createDeferred<void>();
     const firstCheckpointConversationHandled = createDeferred<void>();
     const secondCheckpointConversationHandled = createDeferred<void>();
     const mailboxItems = [
@@ -36983,6 +36999,9 @@ describe("hosted workspace runtime entrypoint", () => {
           async importItem(item, context) {
             events.push(`mailbox.importItem:${item.item.id}`);
             if (item.item.lane === "system") {
+              if (item.item.kind === "assistant.notification.requested") {
+                return { status: "imported" };
+              }
               return await importRuntimeControlSystemMailboxItemForTest({
                 item: item.item,
                 vaultRoot,
@@ -37038,6 +37057,19 @@ describe("hosted workspace runtime entrypoint", () => {
                       laneSeq: "1",
                     }));
                   }
+                  if (checkpointTrustedCompletion) {
+                    mailboxItems.push(createMailboxItem({
+                      dedupeKey:
+                        "assistant.notification.requested:phone-call-result:"
+                        + "assistant_carry_mask:generation:1",
+                      id:
+                        "mailbox_item_entrypoint_assistant_carry_mask_"
+                        + "trusted_completion_001",
+                      kind: "assistant.notification.requested",
+                      lane: "system",
+                      laneSeq: "1",
+                    }));
+                  }
                   olderWakePersisted.resolve();
                   if (checkpointRuntimeWake) {
                     runtimeWakeSignal.notify(Date.now());
@@ -37067,6 +37099,25 @@ describe("hosted workspace runtime entrypoint", () => {
             assistantPass += 1;
             const presentedWakeAt = input.workspace?.nextWakeAt ?? "none";
             events.push(`assistant:${assistantPass}:${presentedWakeAt}:${Date.now()}`);
+
+            const handlesTrustedCompletion =
+              checkpointTrustedCompletion
+              && events.includes(
+                "mailbox.importItem:"
+                + "mailbox_item_entrypoint_assistant_carry_mask_"
+                + "trusted_completion_001",
+              )
+              && !events.includes("trusted-completion:handled");
+            if (handlesTrustedCompletion) {
+              events.push("trusted-completion:handled");
+              trustedCompletionHandled.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: reconciliationWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
 
             if (assistantPass === 1) {
               return {
@@ -37133,7 +37184,7 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
-            if (checkpointConversation) {
+            if (checkpointConversation || checkpointTrustedCompletion) {
               const handlingSecondConversation = events.includes(
                 "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_004",
               );
@@ -37225,6 +37276,43 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.notEqual(persistedDispatchIndex, -1, events.join(","));
 
+      if (checkpointTrustedCompletion) {
+        await withRealTimeout(
+          trustedCompletionHandled.promise,
+          15_000,
+          () => events.join(","),
+        );
+        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+        await waitForFakeTimerScheduled(() => events.join(","));
+        assert.equal(
+          events.some((event) => event.startsWith("snapshot:2:")),
+          false,
+          events.join(","),
+        );
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        mailboxItems.push(createMailboxItem({
+          id: "mailbox_item_entrypoint_assistant_carry_mask_004",
+          laneSeq: "3",
+        }));
+        runtimeWakeSignal.notify(Date.now());
+        await withRealTimeout(
+          secondCheckpointConversationHandled.promise,
+          15_000,
+          () => events.join(","),
+        );
+        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+        await waitForFakeTimerScheduled(() => events.join(","));
+
+        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+        assert.equal(
+          events.some((event) => event.startsWith("snapshot:2:")),
+          false,
+          events.join(","),
+        );
+        await vi.advanceTimersByTimeAsync(1);
+      }
+
       if (checkpointConversation) {
         await withRealTimeout(
           firstCheckpointConversationHandled.promise,
@@ -37278,6 +37366,42 @@ describe("hosted workspace runtime entrypoint", () => {
         event.startsWith("snapshot:2:")
       );
       assert.notEqual(secondSnapshotIndex, -1, events.join(","));
+      if (checkpointTrustedCompletion) {
+        const trustedCompletionImportIndex = requireEventIndex(
+          events,
+          "mailbox.importItem:"
+          + "mailbox_item_entrypoint_assistant_carry_mask_"
+          + "trusted_completion_001",
+        );
+        const trustedCompletionHandledIndex = requireEventIndex(
+          events,
+          "trusted-completion:handled",
+        );
+        const reconciliationAssistantIndex = events.findIndex((event) =>
+          event.includes(`:${reconciliationWakeAt}:`)
+        );
+        assert.ok(trustedCompletionImportIndex > persistedDispatchIndex, events.join(","));
+        assert.ok(trustedCompletionHandledIndex > trustedCompletionImportIndex, events.join(","));
+        assert.ok(reconciliationAssistantIndex >= trustedCompletionHandledIndex, events.join(","));
+        assert.ok(reconciliationAssistantIndex < secondSnapshotIndex, events.join(","));
+        assert.ok(
+          requireEventIndex(
+            events,
+            "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_004",
+          ) < secondSnapshotIndex,
+          events.join(","),
+        );
+        assert.equal(
+          events[secondSnapshotIndex],
+          `snapshot:2:idle_shutdown:${
+            Date.parse(TEST_NOW)
+            + idleCheckpointDelayMs
+            + 1_000
+            + idleCheckpointDelayMs
+          }`,
+        );
+        return;
+      }
       if (!checkpointConversation) {
         assert.equal(
           events[secondSnapshotIndex],
