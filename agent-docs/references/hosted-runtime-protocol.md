@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-14
+Last verified: 2026-08-16
 
 ## Decision
 
@@ -24,7 +24,9 @@ The live ownership split is:
   appends one deterministic `device-sync.wake` mailbox handoff if the connection
   transitioned from clean to dirty, and completes trace acceptance in the same
   transaction. The post-commit Temporal signal carries only the mailbox pointer.
-  There is no periodic dirty-row recovery sweep.
+  There is no periodic dirty-row recovery sweep. The existing scheduled
+  mailbox-handoff sweep may re-signal one exact unconsumed `device-sync.wake`
+  pointer per user after a failed first signal; it does not scan dirty state.
   The runtime pulls pending dirty rows through the required signed dirty-pending
   callback and acks checkpoint-safe handoff through the required dirty-ack
   callback.
@@ -101,7 +103,8 @@ Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
 `assistant.ask.completed` mailbox items. After each append, Web first signals
 Temporal and then starts the existing payloadless direct `ensure-processing`
-latency hint; the hint has no retry or durable authority. The group runtime may
+latency hint; the hint may make one deadline-bounded retry after an explicit
+`retry_later`, but has no durable authority. The group runtime may
 answer one request in a separate read-only one-shot Codex child while its
 resident foreground assistant continues to own writes and sends. The mailbox
 remains the only durable queue and operation state; Cloudflare gains no second
@@ -1457,8 +1460,15 @@ orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. Linq webhook ingress and Assistant Ask request/completion append
 handlers may additionally fire one best-effort direct
-`ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
-message payload). Linq first proves the committed known-checkpoint owner and
+`ensure-processing` request (Vercel OIDC, no message payload). The post-response
+helper waits for the real accepted-or-retry outcome, stays inside a 29-second
+outer deadline, and may make exactly one retry only when the returned
+`retryAt` plus a minimum command/response window still fits that deadline.
+The relational latency phase records the final parsed direct result kind and,
+only for `runtime_processing_accepted`, its bounded action and runtime attempt
+id. Retry reasons and raw errors stay out of the trace; Cloudflare structured
+logs carry retry reasons under the direct orchestration attempt id.
+Linq first proves the committed known-checkpoint owner and
 canonical live active access; Assistant Ask first completes its normal
 server-bound append checks. Web always awaits the applicable Temporal
 `signalWithStart`; only after Temporal accepts that durable signal does Web
@@ -2023,16 +2033,19 @@ reconciliation retryable, and replay reuses the deterministic mailbox and
 delivery identities.
 
 Because completion reuses the existing notification wake path, phone-call
-results add no new mailbox kind, runtime consumer, or checkpoint boundary.
-Apply the additive nullable `origin_direct_channel` and `stop_requested_at`
-migrations first, then deploy the Web reader/reconciliation/notification owner,
-then expose the updated runner tools with an immediate runner rollout. New Web
-rejects a new direct call that omits authenticated origin, but still accepts
+results add no new mailbox kind or runtime consumer. Result delivery remains
+ordinary background work and never delays admission of newer conversation
+input. Apply the additive nullable `result_notification_channel`, result
+delivery state, and `stop_requested_at` migrations first, then deploy the Web
+reader/reconciliation/notification owner, then expose the updated runner tools
+with an immediate runner rollout. New Web rejects a new direct call that omits
+its authenticated result channel, but still accepts
 group starts and idempotent replay of an existing legacy direct row. Therefore
 an old warm runner cannot create a newly ambiguous direct route during the
 Web-first window; direct starts fail retryably until that runner is replaced.
-A new runner sends `originDirectChannel`, which an old strict Web endpoint also
-rejects, so either misordered mixed-version direct-start window is fail-closed.
+A new runner sends `resultNotificationChannel`, which an old strict Web endpoint
+also rejects, so either misordered mixed-version direct-start window is
+fail-closed.
 Keep the Web/runner cutover contiguous and prove the new runner fingerprint
 before restoring direct-call availability.
 
@@ -2044,13 +2057,12 @@ keep compatible Web plus reconciliation running until the database proves zero
 unsettled rows with `stop_requested_at IS NOT NULL` and neither an end timestamp
 nor a provider-less failed state. Every settled fence must also have its stable
 stop-settlement mailbox item before the compatible workflow is drained. For a
-non-null origin channel, the rollback gate is the ordinary deterministic result
-mailbox item itself, not active, ended, or analyzed status: every such call must
-have `assistant.notification.requested:phone-call-result:${callId}` before old
-Web can be restored. An ended-but-unanalysed call therefore keeps compatible Web
-as the floor for the provider's unbounded analysis delay. If the item cannot be
-materialized, use a forward fix; do not weaken the gate. Only then may Web roll
-back, and both nullable columns remain in place.
+non-null result channel, the rollback gate is either the ordinary Linq
+deterministic result mailbox item or a terminal Telegram delivery disposition,
+not active, ended, or analyzed status. An ended-but-unanalyzed call therefore
+keeps compatible Web as the floor for the provider's unbounded analysis delay.
+If the result cannot be settled, use a forward fix; do not weaken the gate. Only
+then may Web roll back, and the nullable columns remain in place.
 
 Approval decisions always append the generation-scoped reconciliation wake in
 the same transaction as the decision. Browser returns use a bare conversation
@@ -2349,6 +2361,21 @@ This matches the runner readiness ceiling without weakening invalidated-shell
 or destroy-settlement checks. Accepted background invocations begin their
 pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
+Container readiness receives at most 15 wall-clock seconds, including time
+queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
+allows one absolute five-second fail-closed cleanup deadline shared by the
+pre-destroy state read and destroy settlement, and its caller-side guard keeps
+a separate one-second margin. If the container RPC settles
+with a timeout or transport failure, the fresh fence is compare-cleared as
+before. If cleanup remains unsettled at its deadline or only the outer guard
+elapses, Cloudflare preserves the fresh fence: the lifecycle RPC has not proved
+that cleanup is safe, and the existing startup-grace convergence path remains
+the sole recovery owner.
+When a shorter command budget applies, readiness receives the smaller of 15
+seconds and the remaining command time minus the one-second caller guard. The
+cleanup allowance is not subtracted up front: a healthy 7–8 second cold start
+can still succeed under the default ten-second command, while cleanup that
+cannot fit causes the outer guard to preserve the fence.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
 same-version runtime fence whose child is missing remains protected by the

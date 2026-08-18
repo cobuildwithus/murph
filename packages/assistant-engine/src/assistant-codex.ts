@@ -4656,6 +4656,14 @@ async function runCodexAppServerTurnOnProcess(
             ),
           groupSharedReadTurnState,
           privateDirectResponseCardAllowed: input.groupConversation === false,
+          telegramPresentationResponseCardAllowed:
+            input.dynamicTools.some((tool) =>
+              tool.namespace === 'murph' &&
+              (
+                tool.name === 'attach_exercise_routine_card' ||
+                tool.name === 'attach_telegram_rich_content'
+              )
+            ),
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           onboardingFirstReadCompletionTransitionAvailable:

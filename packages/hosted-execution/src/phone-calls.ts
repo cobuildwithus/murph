@@ -1,6 +1,7 @@
 import * as z from "@murphai/contracts/zod-runtime";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
+  HostedExecutionTelegramExternalThreadRouteAuthority,
 } from "./contracts.ts";
 
 // Starting a call can perform one bounded control-root unwrap before the
@@ -13,6 +14,18 @@ export const HOSTED_PHONE_CALL_STATUS_MAX_ITEMS = 3;
 export const HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX = 32;
 export const HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX =
   "phone_call_scheduled_";
+export const HOSTED_PHONE_CALL_RESULT_NOTIFICATION_CHANNELS = [
+  "linq",
+  "telegram",
+] as const;
+export const HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX =
+  "phone-call-result:";
+export const HOSTED_PHONE_CALL_RESULT_DELIVERY_OUTCOME_STATUSES = [
+  "sending",
+  "sent",
+  "failed",
+  "failed_ambiguous",
+] as const;
 
 // Murph must never dial emergency or crisis dispatch: it is an unattended
 // caller that cannot hold a line, give a location, or stay reachable, so an
@@ -36,9 +49,41 @@ const hostedPhoneCallBriefFactKeySchema = z
   .max(80)
   .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u);
 
-export const hostedPhoneCallOriginDirectChannelSchema = z.enum([
-  "linq",
-  "telegram",
+export const hostedPhoneCallResultNotificationChannelSchema = z.enum(
+  HOSTED_PHONE_CALL_RESULT_NOTIFICATION_CHANNELS,
+);
+
+export const hostedPhoneCallResultDeliveryOutcomeStatusSchema = z.enum(
+  HOSTED_PHONE_CALL_RESULT_DELIVERY_OUTCOME_STATUSES,
+);
+
+const hostedPhoneCallResultDeliveryKeySchema = z
+  .object({
+    generation: z.number().int().positive(),
+    phoneCallId: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+const hostedPhoneCallResultDeliveryRouteAuthoritySchema: z.ZodType<
+  HostedExecutionTelegramExternalThreadRouteAuthority
+> = z
+  .object({
+    accountLookupKey: z.string().trim().min(1).nullable().optional(),
+    channel: z.literal("telegram"),
+    containerMemberId: z.string().trim().min(1).max(200),
+    threadId: z.string().trim().min(1).max(512),
+  })
+  .strict();
+
+export const hostedPhoneCallResultDeliveryOutcomeRequestSchema = z.union([
+  hostedPhoneCallResultDeliveryKeySchema.extend({
+    routeAuthority: hostedPhoneCallResultDeliveryRouteAuthoritySchema,
+    status: z.literal("sending"),
+  }).strict(),
+  hostedPhoneCallResultDeliveryKeySchema.extend({
+    deliveryErrorCode: z.string().trim().min(1).max(200).nullable().optional(),
+    status: z.enum(["sent", "failed", "failed_ambiguous"]),
+  }).strict(),
 ]);
 
 export const hostedPhoneCallBriefSchema = z
@@ -83,13 +128,14 @@ export const hostedPhoneCallStartRequestSchema = z
       .min(1)
       .max(HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX)
       .optional(),
-    // The hosted runtime derives this from authenticated turn context. It is
-    // never model-controlled and lets asynchronous results retain the direct
-    // channel that originated the call. Group destinations keep using their
-    // existing durable thread-container authority instead.
-    originDirectChannel: hostedPhoneCallOriginDirectChannelSchema.optional(),
     originSessionId: z.string().trim().min(1).max(200),
     requestKey: z.string().trim().min(1).max(200),
+    // Direct calls complete asynchronously after the initiating turn is gone.
+    // Persist only the bounded source channel so Web can resolve the current
+    // authorized destination on that same surface. Group calls omit this and
+    // continue to use their durable thread-container route authority.
+    resultNotificationChannel:
+      hostedPhoneCallResultNotificationChannelSchema.optional(),
   })
   .strict();
 
@@ -102,6 +148,7 @@ export const hostedPhoneCallStartResponseSchema = z
 
 export const hostedPhoneCallResultSchema = z
   .object({
+    completionPolicy: z.enum(["transfer_follow_up_required"]).optional(),
     followUp: z.string().trim().max(1_000).optional(),
     outcome: z.enum(["completed", "not_completed", "needs_user"]),
     summary: z.string().trim().min(1).max(2_000),
@@ -184,8 +231,11 @@ export const HOSTED_PHONE_CALL_STOP_PATH =
 export type HostedPhoneCallBrief = z.infer<typeof hostedPhoneCallBriefSchema>;
 export type HostedPhoneCallGroupRequester =
   HostedExecutionAcceptedGroupMessageParticipant;
-export type HostedPhoneCallOriginDirectChannel = z.infer<
-  typeof hostedPhoneCallOriginDirectChannelSchema
+export type HostedPhoneCallResultNotificationChannel = z.infer<
+  typeof hostedPhoneCallResultNotificationChannelSchema
+>;
+export type HostedPhoneCallResultDeliveryOutcomeRequest = z.infer<
+  typeof hostedPhoneCallResultDeliveryOutcomeRequestSchema
 >;
 export type HostedPhoneCallStartRequest = z.infer<
   typeof hostedPhoneCallStartRequestSchema
@@ -213,6 +263,61 @@ export type HostedPhoneCallResult = z.infer<typeof hostedPhoneCallResultSchema>;
 
 export function parseHostedPhoneCallBrief(value: unknown): HostedPhoneCallBrief {
   return hostedPhoneCallBriefSchema.parse(value);
+}
+
+export function parseHostedPhoneCallResultNotificationChannel(
+  value: unknown,
+): HostedPhoneCallResultNotificationChannel | null {
+  return value === null || value === undefined
+    ? null
+    : hostedPhoneCallResultNotificationChannelSchema.parse(value);
+}
+
+export function buildHostedPhoneCallResultDeliveryKey(input: {
+  generation: number;
+  phoneCallId: string;
+}): string {
+  const generation = z.number().int().positive().parse(input.generation);
+  const phoneCallId = z.string().trim().min(1).max(200).parse(input.phoneCallId);
+  return `${HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX}${phoneCallId}:generation:${generation}`;
+}
+
+export function parseHostedPhoneCallResultDeliveryKey(
+  value: string | null | undefined,
+): { generation: number; phoneCallId: string } | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized.startsWith(HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX)) {
+    return null;
+  }
+  const suffix = normalized.slice(
+    HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX.length,
+  );
+  const marker = ":generation:";
+  const markerIndex = suffix.lastIndexOf(marker);
+  if (markerIndex <= 0) {
+    return null;
+  }
+  const phoneCallId = suffix.slice(0, markerIndex);
+  const generationText = suffix.slice(markerIndex + marker.length);
+  if (!/^\d+$/u.test(generationText)) {
+    return null;
+  }
+  const parsed = hostedPhoneCallResultDeliveryKeySchema.safeParse({
+    generation: Number(generationText),
+    phoneCallId,
+  });
+  return parsed.success
+    ? {
+        generation: parsed.data.generation,
+        phoneCallId: parsed.data.phoneCallId,
+      }
+    : null;
+}
+
+export function parseHostedPhoneCallResultDeliveryOutcomeRequest(
+  value: unknown,
+): HostedPhoneCallResultDeliveryOutcomeRequest {
+  return hostedPhoneCallResultDeliveryOutcomeRequestSchema.parse(value);
 }
 
 export function parseHostedPhoneCallStartRequest(

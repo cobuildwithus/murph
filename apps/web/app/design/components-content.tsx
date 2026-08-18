@@ -163,7 +163,11 @@ import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
-import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
+import {
+  HostedAccountDeletionErrorAlert,
+  HostedAccountDeletionStatus,
+} from "@/src/components/settings/hosted-data-privacy-settings";
+import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
   EnvironmentCaptureCard,
@@ -1396,6 +1400,16 @@ export function ComponentsContent() {
           <div className="grid gap-4 lg:grid-cols-2">
             <HostedAccountDeletionStatus cleanupPending={false} />
             <HostedAccountDeletionStatus cleanupPending />
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Account Deletion Recovery Alert">
+          <div className="max-w-md">
+            <HostedAccountDeletionErrorAlert
+              message={HOSTED_STRIPE_EFFECT_PENDING_MESSAGE}
+            />
           </div>
         </Section>
 

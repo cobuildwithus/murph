@@ -6557,6 +6557,19 @@ function resolvePendingWakeAfterForegroundPass(input: {
   preserveDueAssistantWakeOnNoProgress: boolean;
   replaceWake: boolean;
 }): HostedRuntimePendingWakeResolution {
+  // A due wake observed by the current pass supersedes a carried due token:
+  // the carry is only the restored projection echo, while a due pass wake is
+  // durably owned (canonical automation commits checkpoint assistant-now
+  // before the tool returns). Without this, a stale already-due carry wins
+  // the preserve branch and the checkpoint silently disarms fresh due work.
+  const carriedWakeIsDue =
+    input.previousPendingWake.nextWakeAt !== null
+    && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs);
+  const freshDueSupersedesCarriedDue =
+    carriedWakeIsDue
+    && !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
+    && input.passWake.nextWakeAt !== null
+    && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs);
   const preservePendingWakeThroughPreCheckpointPass =
     input.checkpointPendingBeforePass
     && input.presentedInvocationLocalProjectedAssistantWakeKey === null
@@ -6564,7 +6577,8 @@ function resolvePendingWakeAfterForegroundPass(input: {
     && (
       !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
       || hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs)
-    );
+    )
+    && !freshDueSupersedesCarriedDue;
   if (preservePendingWakeThroughPreCheckpointPass) {
     return {
       pendingWake: copyHostedRuntimePendingWake(input.previousPendingWake),
@@ -6575,6 +6589,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
   const previousWakeAt =
     input.checkpointPendingBeforePass
       && input.presentedInvocationLocalProjectedAssistantWakeKey === null
+      && !freshDueSupersedesCarriedDue
     ? input.previousPendingWake.nextWakeAt
     : normalizeHostedFutureWakeAt(input.previousPendingWake.nextWakeAt, input.nowMs);
   const previousWake = {

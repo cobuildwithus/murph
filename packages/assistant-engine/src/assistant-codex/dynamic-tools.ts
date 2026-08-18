@@ -54,7 +54,7 @@ import {
 } from '@murphai/hosted-execution/assistant-model'
 import type {
   HostedPhoneCallBrief,
-  HostedPhoneCallOriginDirectChannel,
+  HostedPhoneCallResultNotificationChannel,
 } from '@murphai/hosted-execution/phone-calls'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
@@ -2035,6 +2035,7 @@ export async function executeMurphDynamicToolRequest(input: {
   groupChallengeResponseCardAllowed?: boolean | null
   knowledgePageReadTextFile?: KnowledgeServiceDependencies['readTextFile'] | null
   privateDirectResponseCardAllowed?: boolean | null
+  telegramPresentationResponseCardAllowed?: boolean | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
@@ -2226,7 +2227,16 @@ export async function executeMurphDynamicToolRequest(input: {
           'challenge standings response cards require page-authorized observation input',
         )
       }
-      if (input.privateDirectResponseCardAllowed !== true) {
+      const telegramPresentationAllowed =
+        input.telegramPresentationResponseCardAllowed === true &&
+        (
+          input.request.card.kind === 'exercise_routine' ||
+          input.request.card.kind === 'telegram_rich_content'
+        )
+      if (
+        input.privateDirectResponseCardAllowed !== true &&
+        !telegramPresentationAllowed
+      ) {
         return toolTextResult(
           false,
           'response cards require a private direct conversation',
@@ -2750,7 +2760,8 @@ export async function executeMurphDynamicToolRequest(input: {
         : hostedToolContext.currentScheduledPhoneCallScope?.() ?? null
       const phoneCallAuthority = userActionScope
         ? {
-            originDirectChannel: userActionScope.originDirectChannel ?? null,
+            resultNotificationChannel:
+              userActionScope.resultNotificationChannel ?? null,
             originSessionId: userActionScope.originSessionId,
             requestKey: (brief: HostedPhoneCallBrief) =>
               createPhoneCallRequestKey({
@@ -2760,7 +2771,8 @@ export async function executeMurphDynamicToolRequest(input: {
           }
         : scheduledScope
           ? {
-              originDirectChannel: scheduledScope.originDirectChannel ?? null,
+              resultNotificationChannel:
+                scheduledScope.resultNotificationChannel ?? null,
               originSessionId: scheduledScope.originSessionId,
               requestKey: (_brief: HostedPhoneCallBrief) =>
                 createScheduledPhoneCallRequestKey({
@@ -2780,7 +2792,7 @@ export async function executeMurphDynamicToolRequest(input: {
           userActionScope?.conversationScope ?? 'direct'
         if (
           conversationScope === 'direct'
-          && phoneCallAuthority.originDirectChannel === null
+          && phoneCallAuthority.resultNotificationChannel === null
         ) {
           return toolTextResult(
             false,
@@ -2822,10 +2834,10 @@ export async function executeMurphDynamicToolRequest(input: {
         const result = await phoneCalls.start({
           brief,
           ...(groupRequester ? { groupRequester } : {}),
-          ...(phoneCallAuthority.originDirectChannel
+          ...(phoneCallAuthority.resultNotificationChannel
             ? {
-                originDirectChannel:
-                  phoneCallAuthority.originDirectChannel satisfies HostedPhoneCallOriginDirectChannel,
+                resultNotificationChannel:
+                  phoneCallAuthority.resultNotificationChannel satisfies HostedPhoneCallResultNotificationChannel,
               }
             : {}),
           originSessionId: phoneCallAuthority.originSessionId,
@@ -2855,6 +2867,12 @@ export async function executeMurphDynamicToolRequest(input: {
           )
         }
         if (scheduledScope) {
+          if (isHostedAssistantNotificationRouteRequiredError(error)) {
+            return toolTextResult(
+              false,
+              'no phone call was started for this scheduled occurrence because its direct result route was unavailable. Restore that messaging route and ask the requester to reschedule the call; do not retry automatically.',
+            )
+          }
           if (isHostedPhoneCallReconciliationWorkflowStartRetryRequiredError(error)) {
             return toolTextResult(
               false,
@@ -6422,6 +6440,8 @@ function safeToolPayloadText(payload: unknown): string {
 // than importing across the boundary.
 const HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE =
   'HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED'
+const HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED_CODE =
+  'HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED'
 const HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED_CODE =
   'HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED'
 
@@ -6433,6 +6453,16 @@ function isHostedGroupPhoneCallRequesterActivationRequiredError(
   }
   const code = (error as { code?: unknown }).code
   return code === HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE
+}
+
+function isHostedAssistantNotificationRouteRequiredError(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const code = (error as { code?: unknown }).code
+  return code === HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED_CODE
 }
 
 function isHostedPhoneCallReconciliationWorkflowStartRetryRequiredError(

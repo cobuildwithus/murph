@@ -60,6 +60,7 @@ type TelegramExactRootUnwrapper = (input: TelegramRootReference & {
 
 const mocks = vi.hoisted(() => {
   const state = {
+    acceptHostedFamilyInviteFromTelegramTx: vi.fn(),
     activeRootKeyIdsByDomain: new Map<string, string[]>(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
@@ -145,6 +146,7 @@ const mocks = vi.hoisted(() => {
       qualificationCandidateReferralIds: [],
     })),
     reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
+    rearmHostedPhoneCallResultNotificationRecovery: vi.fn(async () => true),
     readHostedThreadRouteByThreadIdentity: vi.fn(async (): Promise<{
       channel: "telegram";
       containerMemberId: string;
@@ -231,6 +233,7 @@ const mocks = vi.hoisted(() => {
         throw new Error("Expected a hosted mailbox append eventId.");
       }
       return {
+        duplicate: false,
         item: {
           dedupeKey: eventId,
           id: `mailbox_${eventId}`,
@@ -311,8 +314,14 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/family-plan")
   >("@/src/lib/hosted-onboarding/family-plan");
+  mocks.acceptHostedFamilyInviteFromTelegramTx.mockImplementation(
+    actual.acceptHostedFamilyInviteFromTelegramTx,
+  );
+
   return {
     ...actual,
+    acceptHostedFamilyInviteFromTelegramTx:
+      mocks.acceptHostedFamilyInviteFromTelegramTx,
     resolveHostedFamilyInviteCodeFromTelegramStartFallback: (
       ...args: Parameters<
         typeof actual.resolveHostedFamilyInviteCodeFromTelegramStartFallback
@@ -342,6 +351,11 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
+vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
+  signalHostedPhoneCallResultNotificationRecovery:
+    mocks.rearmHostedPhoneCallResultNotificationRecovery,
+}));
+
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(
     "@/src/lib/hosted-crypto/domain-root-store",
@@ -369,6 +383,9 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
 });
 
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { parseHostedTelegramWebhookUpdate } from "@/src/lib/hosted-onboarding/telegram";
+import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
 
 const actualThreadContainerService = await vi.importActual<
   typeof import("@/src/lib/hosted-routing/thread-container-service")
@@ -514,6 +531,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       qualificationCandidateReferralIds: [],
     });
     mocks.reconcileHostedUsageReferralRewardAfterCommit.mockResolvedValue(null);
+    mocks.rearmHostedPhoneCallResultNotificationRecovery.mockResolvedValue(true);
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
@@ -532,11 +550,65 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     vi.useRealTimers();
   });
 
+  it("classifies an accepted-member Stripe effect as visible Family recovery", async () => {
+    mocks.acceptHostedFamilyInviteFromTelegramTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        httpStatus: 409,
+        message: "Billing is already changing. Try again shortly.",
+        retryable: true,
+      }),
+    );
+    const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
+      message: {
+        chat: { id: 123, type: "private" },
+        date: 1_774_522_600,
+        from: {
+          first_name: "Invitee",
+          id: 456,
+          username: "invitee_user",
+        },
+        message_id: 4,
+        text: "/start family_pending_effect",
+      },
+      update_id: 333,
+    }));
+    const hostedAccountGroupInviteFindUnique = vi.fn().mockResolvedValue({
+      id: "invite_pending_effect",
+    });
+    const prisma = withPrismaTransaction({
+      hostedAccountGroupInvite: {
+        findUnique: hostedAccountGroupInviteFindUnique,
+      },
+    });
+
+    await expect(planHostedOnboardingTelegramWebhook({
+      prisma: prisma as never,
+      update,
+    })).resolves.toEqual({
+      desiredSideEffects: [],
+      response: {
+        ignored: true,
+        ok: true,
+        reason: "stripe-effect-pending",
+      },
+    });
+    expect(mocks.acceptHostedFamilyInviteFromTelegramTx).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
   it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
     const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    let telegramUserIdEncrypted: string | null = null;
+    const hostedMemberRoutingUpsert = vi.fn(async (input: {
+      update: { telegramUserIdEncrypted: string };
+    }) => {
+      telegramUserIdEncrypted = input.update.telegramUserIdEncrypted;
+      return {};
+    });
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: hostedWebhookReceiptCreate,
@@ -554,53 +626,55 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         updateMany: hostedWebhookReceiptUpdateMany,
       },
       hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
+        findUnique: vi.fn(async () => ({
           member: {
             billingStatus: HostedBillingStatus.active,
             id: "member_telegram_123",
             suspendedAt: null,
           },
           memberId: "member_telegram_123",
-        }),
+          telegramUserIdEncrypted,
+        })),
         upsert: hostedMemberRoutingUpsert,
       },
     });
 
-    const response = await handleHostedOnboardingTelegramWebhook({
-      prisma,
-      rawBody: JSON.stringify({
-        message: {
+    const rawBody = JSON.stringify({
+      message: {
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        date: 1_774_522_600,
+        from: {
+          first_name: "Alice",
+          id: 456,
+        },
+        message_id: 1,
+        quote: {
+          text: "quoted",
+        },
+        reply_to_message: {
           chat: {
             id: 123,
             type: "private",
           },
-          date: 1_774_522_600,
+          date: 1_774_522_599,
           from: {
-            first_name: "Alice",
-            id: 456,
+            first_name: "Casey",
+            id: 457,
+            username: "casey",
           },
-          message_id: 1,
-          quote: {
-            text: "quoted",
-          },
-          reply_to_message: {
-            chat: {
-              id: 123,
-              type: "private",
-            },
-            date: 1_774_522_599,
-            from: {
-              first_name: "Casey",
-              id: 457,
-              username: "casey",
-            },
-            message_id: 0,
-            text: "Earlier message",
-          },
-          text: "hello",
+          message_id: 0,
+          text: "Earlier message",
         },
-        update_id: 321,
-      }),
+        text: "hello",
+      },
+      update_id: 321,
+    });
+    const response = await handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody,
       secretToken: "telegram-secret",
     });
 
@@ -641,6 +715,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId: "member_telegram_123",
+      prisma,
+    });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
     );
@@ -650,6 +730,168 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
     );
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
+
+    const rearmError = Object.assign(
+      new Error("phone-call result recovery unavailable"),
+      { retryable: true },
+    );
+    mocks.rearmHostedPhoneCallResultNotificationRecovery.mockRejectedValueOnce(
+      rearmError,
+    );
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          business_connection_id: "biz-restored",
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_601,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 2,
+          text: "restored route",
+        },
+        update_id: 322,
+      }),
+      secretToken: "telegram-secret",
+    })).rejects.toBe(rearmError);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[1],
+    ).toBeLessThan(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery.mock.invocationCallOrder[1]
+      ?? Number.POSITIVE_INFINITY,
+    );
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces 100 unique unchanged messages but retries a failed route-restoration signal on exact replay", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let reconciliationHookSignals = 0;
+    mocks.rearmHostedPhoneCallResultNotificationRecovery.mockImplementation(
+      async () => {
+        reconciliationHookSignals += 1;
+        return true;
+      },
+    );
+    const memberId = "member_telegram_route_recovery";
+    const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId,
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: "123",
+      telegramUserId: "456",
+    });
+    let telegramUserIdEncrypted =
+      existingTelegramPrivateColumns.telegramUserIdEncrypted;
+    const hostedMemberRoutingUpsert = vi.fn(async (input: {
+      update: { telegramUserIdEncrypted: string };
+    }) => {
+      telegramUserIdEncrypted = input.update.telegramUserIdEncrypted;
+      return {};
+    });
+    const hostedMemberRoutingFindUnique = vi.fn(async () => ({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: memberId,
+        suspendedAt: null,
+      },
+      memberId,
+      telegramUserIdEncrypted,
+    }));
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    for (let index = 0; index < 100; index += 1) {
+      await expect(handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: buildDirectTelegramWebhookRawBody({
+          updateId: 800_000 + index,
+        }),
+        secretToken: "telegram-secret",
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+    }
+
+    expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(100);
+    expect(hostedMemberRoutingFindUnique).toHaveBeenCalledTimes(700);
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).not.toHaveBeenCalled();
+    expect(reconciliationHookSignals).toBe(0);
+
+    const buildRestoredRouteWebhook = (updateId: number) => JSON.stringify({
+      message: {
+        business_connection_id: "biz-restored",
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        date: 1_776_000_000,
+        from: {
+          first_name: "Alice",
+          id: 456,
+        },
+        message_id: updateId,
+        text: "hello",
+      },
+      update_id: updateId,
+    });
+
+    const routeSignalError = new Error("route signal unavailable");
+    mocks.rearmHostedPhoneCallResultNotificationRecovery
+      .mockRejectedValueOnce(routeSignalError);
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildRestoredRouteWebhook(800_100),
+      secretToken: "telegram-secret",
+    })).rejects.toBe(routeSignalError);
+
+    const defaultAppend = mocks.appendHostedMailboxEnvelopeTx
+      .getMockImplementation();
+    if (!defaultAppend) {
+      throw new Error("Expected the Telegram mailbox append mock.");
+    }
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementationOnce(async (input) => ({
+      ...(await defaultAppend(input)),
+      duplicate: true,
+    }));
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildRestoredRouteWebhook(800_100),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(102);
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledTimes(2);
+    expect(reconciliationHookSignals).toBe(1);
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId,
+      prisma,
+    });
   });
 
   it("opens zero transactions when direct Telegram root preparation fails", async () => {
@@ -2677,6 +2919,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     const hostedAccountGroupMembershipFindFirst = vi.fn().mockResolvedValue(null);
     const prisma = withPrismaTransaction({
       hostedAccountGroupBillingRef: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue({
           billedSeatCount: 2,
         }),
@@ -2708,6 +2951,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           billingRef: null,
           billingStatus: HostedBillingStatus.not_started,
         }),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMemberIdentity: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -2823,6 +3069,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       abortSignal: expect.any(AbortSignal),
       expectedUserId: acceptedMemberId,
       mailboxItemId: "mailbox_assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
+    });
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId: acceptedMemberId,
+      prisma,
     });
   });
 
@@ -2941,6 +3193,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           suspendedAt: null,
         }),
       },
+      hostedAccountGroupBillingRef: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedAccountGroupInvite: {
         count: vi.fn().mockResolvedValue(0),
         findMany: vi.fn().mockResolvedValue([{ inviteCode: invite.inviteCode }]),
@@ -2969,6 +3224,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           billingRef: null,
           billingStatus: HostedBillingStatus.not_started,
         }),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMemberIdentity: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -3027,6 +3285,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedAccountGroupDeleteMany).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId: acceptedMemberId,
+      prisma,
+    });
   });
 
   it("routes unknown token-shaped Telegram text to the assistant", async () => {
@@ -4033,6 +4297,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId: "member_telegram_123",
+      prisma,
+    });
   });
 
   it("does not mutate direct routing after explicit health-data withdrawal", async () => {

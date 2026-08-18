@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertNoHostedMemberStripeEffectTx: vi.fn(),
   bindHostedMemberStripeCustomerIdIfMissingTx: vi.fn(),
   createStripeCustomer: vi.fn(),
   getPrisma: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  assertNoHostedMemberStripeEffectTx: mocks.assertNoHostedMemberStripeEffectTx,
   bindHostedMemberStripeCustomerIdIfMissingTx:
     mocks.bindHostedMemberStripeCustomerIdIfMissingTx,
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
@@ -42,6 +44,7 @@ import { ensureHostedMemberStripeCustomer } from "@/src/lib/hosted-onboarding/ho
 describe("ensureHostedMemberStripeCustomer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertNoHostedMemberStripeEffectTx.mockResolvedValue(undefined);
     mocks.requireHostedStripeApiMode.mockReturnValue({
       stripe: { customers: { create: mocks.createStripeCustomer } },
     });
@@ -99,6 +102,28 @@ describe("ensureHostedMemberStripeCustomer", () => {
       stripeCustomerId: "cus_candidate",
       tx: prisma.tx,
     });
+  });
+
+  it("does not create a customer while a future Stripe effect owns the member", async () => {
+    const prisma = createPrisma();
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(null);
+    mocks.assertNoHostedMemberStripeEffectTx.mockRejectedValueOnce(
+      Object.assign(new Error("Billing is already changing."), {
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        retryable: true,
+      }),
+    );
+
+    await expect(ensureHostedMemberStripeCustomer({
+      memberId: "member_payer",
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.createStripeCustomer).not.toHaveBeenCalled();
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).not.toHaveBeenCalled();
   });
 
   it("uses a customer that won the lock race instead of rebinding", async () => {

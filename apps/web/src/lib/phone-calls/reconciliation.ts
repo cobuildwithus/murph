@@ -1,7 +1,7 @@
 import type { HostedPhoneCall } from "@prisma/client";
 import type { HostedPhoneCallStartResponse } from "@murphai/hosted-execution/phone-calls";
 
-import { waitForAbortableOperation } from "../hosted-onboarding/abortable-settlement";
+import { waitForAbortableOperationAndDrain } from "../hosted-onboarding/abortable-settlement";
 import { getPrisma } from "../prisma";
 import {
   isHostedPhoneCallProviderCleanupPending,
@@ -11,6 +11,7 @@ import {
   finalizeHostedPhoneCallStartFailure,
   finalizeHostedPhoneCallStopSettlement,
   finalizePreparedRetellCallResult,
+  finalizeStoredHostedPhoneCallResult,
 } from "./result";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import {
@@ -65,6 +66,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
   finalizeResult?: typeof finalizePreparedRetellCallResult;
   finalizeStartFailure?: typeof finalizeHostedPhoneCallStartFailure;
   finalizeStopSettlement?: typeof finalizeHostedPhoneCallStopSettlement;
+  finalizeStoredResult?: typeof finalizeStoredHostedPhoneCallResult;
   phoneCallId: string;
   prisma?: HostedPhoneCallReconciliationStore;
   runtime?: PhoneCallRuntime;
@@ -77,7 +79,9 @@ export async function processHostedPhoneCallRecoveryById(input: {
     ?? finalizeHostedPhoneCallStartFailure;
   const finalizeStopSettlement = input.finalizeStopSettlement
     ?? finalizeHostedPhoneCallStopSettlement;
-  let call = await waitForAbortableOperation(input.signal, () =>
+  const finalizeStoredResult = input.finalizeStoredResult
+    ?? finalizeStoredHostedPhoneCallResult;
+  let call = await waitForAbortableOperationAndDrain(input.signal, () =>
     store.hostedPhoneCall.findUnique({
       where: { id: input.phoneCallId },
     }));
@@ -102,7 +106,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
     if (!stopped) {
       return "pending";
     }
-    const current = await waitForAbortableOperation(input.signal, () =>
+    const current = await waitForAbortableOperationAndDrain(input.signal, () =>
       store.hostedPhoneCall.findUnique({
         where: { id: input.phoneCallId },
       }));
@@ -120,7 +124,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
     if (!disposition) {
       return "pending";
     }
-    const current = await waitForAbortableOperation(input.signal, () =>
+    const current = await waitForAbortableOperationAndDrain(input.signal, () =>
       store.hostedPhoneCall.findUnique({
         where: { id: input.phoneCallId },
       }));
@@ -141,7 +145,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
       return "pending";
     }
 
-    const current = await waitForAbortableOperation(input.signal, () =>
+    const current = await waitForAbortableOperationAndDrain(input.signal, () =>
       store.hostedPhoneCall.findUnique({
         where: { id: input.phoneCallId },
       }));
@@ -171,7 +175,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
       if (!stopped) {
         return "pending";
       }
-      const current = await waitForAbortableOperation(input.signal, () =>
+      const current = await waitForAbortableOperationAndDrain(input.signal, () =>
         store.hostedPhoneCall.findUnique({
           where: { id: input.phoneCallId },
         }));
@@ -189,7 +193,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
       if (!disposition) {
         return "pending";
       }
-      const stopped = await waitForAbortableOperation(input.signal, () =>
+      const stopped = await waitForAbortableOperationAndDrain(input.signal, () =>
         store.hostedPhoneCall.findUnique({
           where: { id: input.phoneCallId },
         }));
@@ -205,31 +209,40 @@ export async function processHostedPhoneCallRecoveryById(input: {
     && call.providerCallId === null
     && call.analyzedAt === null
   ) {
+    const failedCall = call;
     try {
-      await waitForAbortableOperation(input.signal, () =>
-        finalizeStartFailure(call, {
+      await waitForAbortableOperationAndDrain(input.signal, () =>
+        finalizeStartFailure(failedCall, {
           abortSignal: input.signal,
-          notifyResult: call.stopRequestedAt === null,
+          notifyResult: failedCall.stopRequestedAt === null,
         }));
     } catch {
       input.signal.throwIfAborted();
-      const current = await waitForAbortableOperation(input.signal, () =>
+      const current = await waitForAbortableOperationAndDrain(input.signal, () =>
         store.hostedPhoneCall.findUnique({
           where: { id: input.phoneCallId },
         }));
       return current ? "pending" : "missing";
     }
+    const current = await waitForAbortableOperationAndDrain(input.signal, () =>
+      store.hostedPhoneCall.findUnique({
+        where: { id: input.phoneCallId },
+      }));
+    if (!current) {
+      return "missing";
+    }
+    call = current;
   }
 
   if (isHostedPhoneCallStopSettled(call)) {
     try {
-      await waitForAbortableOperation(input.signal, () =>
+      await waitForAbortableOperationAndDrain(input.signal, () =>
         finalizeStopSettlement(call, {
           abortSignal: input.signal,
         }));
     } catch {
       input.signal.throwIfAborted();
-      const current = await waitForAbortableOperation(input.signal, () =>
+      const current = await waitForAbortableOperationAndDrain(input.signal, () =>
         store.hostedPhoneCall.findUnique({
           where: { id: input.phoneCallId },
         }));
@@ -240,55 +253,144 @@ export async function processHostedPhoneCallRecoveryById(input: {
   const providerCallId = call.providerCallId;
   const resolveTerminalUsage = runtime.resolveTerminalUsage;
   const recordTerminalUsage = store.recordTerminalUsage;
+  const hasStoredResult = hasStoredHostedPhoneCallResult(call);
+  const [usageSettlement, resultSettlement] = await Promise.allSettled([
+    settleHostedPhoneCallTerminalUsage({
+      call,
+      finalizeResult,
+      providerCallId,
+      recordTerminalUsage,
+      resolveTerminalUsage,
+      runtime,
+      signal: input.signal,
+      synthesizeTerminalTransfer: !hasStoredResult,
+    }),
+    hasStoredResult
+      ? finalizeStoredResult(call, { abortSignal: input.signal })
+      : Promise.resolve("complete" as const),
+  ]);
+  // Both siblings have settled or drained their own bounded work before an
+  // outer abort escapes the Workflow step.
+  input.signal.throwIfAborted();
+  if (
+    isHostedPhoneCallRecoverySettlementPending(usageSettlement)
+    || isHostedPhoneCallRecoverySettlementPending(resultSettlement)
+  ) {
+    return "pending";
+  }
+  if (isHostedPhoneCallTrackedResultOutstanding(call)) {
+    return "pending";
+  }
   if (providerCallId && resolveTerminalUsage && recordTerminalUsage) {
-    let resolution;
-    try {
-      resolution = await waitForAbortableOperation(input.signal, () =>
-        resolveTerminalUsage.call(runtime, providerCallId, {
-          signal: input.signal,
-        }));
-    } catch {
-      input.signal.throwIfAborted();
-      return "pending";
-    }
-    if (resolution.state === "pending") {
-      return "pending";
-    }
-    try {
-      await waitForAbortableOperation(input.signal, () =>
-        recordTerminalUsage({
-          call,
-          usage: resolution.usage,
-        }));
-    } catch {
-      input.signal.throwIfAborted();
-      return "pending";
-    }
-    if (resolution.terminalTransfer) {
-      const prepared = prepareRetellCallResult({
-        call: {
-          call_id: resolution.terminalTransfer.providerCallId,
-          data_storage_setting: "basic_attributes_only",
-          disconnection_reason: "call_transfer",
-          end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
-          transfer_end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
-        },
-        event: "transfer_ended",
-      });
-      try {
-        await waitForAbortableOperation(input.signal, () =>
-          finalizeResult(prepared, {
-            abortSignal: input.signal,
-          }));
-      } catch {
-        input.signal.throwIfAborted();
-        return "pending";
-      }
-    }
+    return "complete";
+  }
+  return hasPhoneCallAdvancedBeyondStart(call)
+    ? "complete"
+    : "pending";
+}
+
+type HostedPhoneCallRecoverySettlement = "complete" | "pending";
+
+function isHostedPhoneCallRecoverySettlementPending(
+  settlement: PromiseSettledResult<HostedPhoneCallRecoverySettlement>,
+): boolean {
+  return settlement.status === "rejected" || settlement.value === "pending";
+}
+
+async function settleHostedPhoneCallTerminalUsage(input: {
+  call: HostedPhoneCall;
+  finalizeResult: typeof finalizePreparedRetellCallResult;
+  providerCallId: string | null;
+  recordTerminalUsage: HostedPhoneCallReconciliationStore["recordTerminalUsage"];
+  resolveTerminalUsage: PhoneCallRuntime["resolveTerminalUsage"];
+  runtime: PhoneCallRuntime;
+  signal: AbortSignal;
+  synthesizeTerminalTransfer: boolean;
+}): Promise<HostedPhoneCallRecoverySettlement> {
+  const providerCallId = input.providerCallId;
+  const recordTerminalUsage = input.recordTerminalUsage;
+  const resolveTerminalUsage = input.resolveTerminalUsage;
+  if (
+    !providerCallId
+    || !resolveTerminalUsage
+    || !recordTerminalUsage
+  ) {
     return "complete";
   }
 
-  return hasPhoneCallAdvancedBeyondStart(call) ? "complete" : "pending";
+  let resolution: Awaited<ReturnType<NonNullable<
+    PhoneCallRuntime["resolveTerminalUsage"]
+  >>>;
+  try {
+    resolution = await waitForAbortableOperationAndDrain(input.signal, () =>
+      resolveTerminalUsage.call(input.runtime, providerCallId, {
+        signal: input.signal,
+      }));
+  } catch {
+    input.signal.throwIfAborted();
+    return "pending";
+  }
+  if (resolution.state === "pending") {
+    return "pending";
+  }
+
+  const usageWrite = async () => {
+    await waitForAbortableOperationAndDrain(input.signal, () =>
+      recordTerminalUsage({
+        call: input.call,
+        usage: resolution.usage,
+      }));
+  };
+  const terminalTransfer = async () => {
+    if (!input.synthesizeTerminalTransfer || !resolution.terminalTransfer) {
+      return;
+    }
+    const prepared = prepareRetellCallResult({
+      call: {
+        call_id: resolution.terminalTransfer.providerCallId,
+        data_storage_setting: "basic_attributes_only",
+        disconnection_reason: "call_transfer",
+        end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
+        transfer_end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
+      },
+      event: "transfer_ended",
+    });
+    await input.finalizeResult(prepared, { abortSignal: input.signal });
+  };
+  const settlements = await Promise.allSettled([
+    usageWrite(),
+    terminalTransfer(),
+  ]);
+  input.signal.throwIfAborted();
+  return settlements.some((settlement) => settlement.status === "rejected")
+    ? "pending"
+    : "complete";
+}
+
+function isHostedPhoneCallTrackedResultOutstanding(
+  call: HostedPhoneCall,
+): boolean {
+  if (call.resultNotificationChannel !== "telegram") {
+    return false;
+  }
+  if (call.resultDeliveryStatus !== null) {
+    return ![
+      "ambiguous",
+      "delivered",
+    ].includes(call.resultDeliveryStatus);
+  }
+  return call.status === "calling"
+    || call.status === "ended"
+    || (
+      call.status === "failed"
+      && call.endedAt !== null
+      && call.providerCallId !== null
+    );
+}
+
+function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {
+  return call.analyzedAt !== null
+    && (call.resultEncrypted !== null || call.resultJson !== null);
 }
 
 export async function stopHostedPhoneCallRequestedAuthority(input: {
@@ -309,7 +411,7 @@ export async function stopHostedPhoneCallRequestedAuthority(input: {
   }
   let disposition: PhoneCallRuntimeStopDisposition;
   try {
-    disposition = await waitForAbortableOperation(input.signal, () =>
+    disposition = await waitForAbortableOperationAndDrain(input.signal, () =>
       input.runtime.stopIfActive(input.call.providerCallId!, {
         signal: input.signal,
       }));
@@ -317,7 +419,7 @@ export async function stopHostedPhoneCallRequestedAuthority(input: {
     input.signal.throwIfAborted();
     return null;
   }
-  const updated = await waitForAbortableOperation(input.signal, () =>
+  const updated = await waitForAbortableOperationAndDrain(input.signal, () =>
     input.store.markRequestedStopEnded({
       id: input.call.id,
       providerCallId: input.call.providerCallId!,
@@ -337,18 +439,21 @@ export async function stopHostedPhoneCallCleanupAuthority(input: {
   store: Pick<HostedPhoneCallReconciliationStore, "markCleanupEnded">;
 }): Promise<boolean> {
   try {
-    await waitForAbortableOperation(input.signal, () =>
+    await waitForAbortableOperationAndDrain(input.signal, () =>
       input.runtime.stopIfActive(input.call.providerCallId, {
         signal: input.signal,
       }));
     if (input.finalizeBeforeEnd) {
-      await waitForAbortableOperation(input.signal, input.finalizeBeforeEnd);
+      await waitForAbortableOperationAndDrain(
+        input.signal,
+        input.finalizeBeforeEnd,
+      );
     }
   } catch {
     input.signal.throwIfAborted();
     return false;
   }
-  await waitForAbortableOperation(input.signal, () =>
+  await waitForAbortableOperationAndDrain(input.signal, () =>
     input.store.markCleanupEnded(input.call));
   return true;
 }
@@ -361,7 +466,7 @@ export async function reconcileHostedPhoneCallProviderAuthority(input: {
 }): Promise<HostedPhoneCallStartResponse> {
   let resolution: Awaited<ReturnType<PhoneCallRuntime["resolveProviderCall"]>>;
   try {
-    resolution = await waitForAbortableOperation(input.signal, () =>
+    resolution = await waitForAbortableOperationAndDrain(input.signal, () =>
       input.runtime.resolveProviderCall(input.call.id, {
         signal: input.signal,
       }));
@@ -375,7 +480,7 @@ export async function reconcileHostedPhoneCallProviderAuthority(input: {
 
   let updated: { count: number };
   try {
-    updated = await waitForAbortableOperation(input.signal, () =>
+    updated = await waitForAbortableOperationAndDrain(input.signal, () =>
       input.store.hostedPhoneCall.updateMany({
         data: resolution.state === "not_found"
           ? { status: "failed" }
@@ -406,7 +511,7 @@ export async function reconcileHostedPhoneCallProviderAuthority(input: {
   }
 
   try {
-    const current = await waitForAbortableOperation(input.signal, () =>
+    const current = await waitForAbortableOperationAndDrain(input.signal, () =>
       input.store.hostedPhoneCall.findUniqueOrThrow({
         where: { id: input.call.id },
       }));

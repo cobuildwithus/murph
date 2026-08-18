@@ -28,7 +28,7 @@ import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
-  readHostedPendingAssistantInputIds,
+  readHostedPendingAssistantImageCompletionRecoveryInputIds,
   runHostedPendingAssistantInputContentRetention,
 } from "./pending-input-index.ts";
 
@@ -366,9 +366,12 @@ export async function selectHostedAssistantInputIds(
   let restoredCompletionRequiredInputIds: string[] | undefined;
   if (!hasFreshImageCompletion) {
     try {
-      const pendingInputIds = await readHostedPendingAssistantInputIds({
-        vaultRoot: input.vaultRoot,
-      });
+      const pendingInputIds =
+        await readHostedPendingAssistantImageCompletionRecoveryInputIds({
+          vaultRoot: input.vaultRoot,
+        });
+      // A positive hint deliberately keeps the existing full cohort recovery:
+      // same-route events after the trusted origin must remain eligible.
       const pendingEvents =
         await readHostedReplyablePendingAssistantInputEvents({
           inputIds: pendingInputIds,

@@ -12,6 +12,7 @@ import {
   compareAssistantInputCursors,
   createStoreBackedAssistantInputSource,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+  isAssistantHostedImageCompletionEvent,
   listAssistantInputEvents,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItemDetails,
@@ -47,6 +48,7 @@ export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_RELATIVE_PATH =
 
 export interface HostedPendingAssistantInputState {
   backfilled: boolean;
+  hasImageCompletionCandidate: boolean;
   handledBatchCursorInputId: string | null;
   inputIds: string[];
 }
@@ -102,7 +104,12 @@ const HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA =
   "murph.hosted-pending-assistant-inputs.v1";
 const HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA_VERSION = 1;
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
-  new Set(["backfilled", "handledBatchCursorInputId", "inputIds"]);
+  new Set([
+    "backfilled",
+    "handledBatchCursorInputId",
+    "hasImageCompletionCandidate",
+    "inputIds",
+  ]);
 const HOSTED_PENDING_ASSISTANT_INPUT_INSPECTION_WAVE_SIZE = 8;
 const HOSTED_PENDING_INPUT_RETENTION_DELIVERABLE_STATUSES = [
   "awaiting_approval",
@@ -127,6 +134,18 @@ export async function readHostedPendingAssistantInputIds(input: {
   vaultRoot: string;
 }): Promise<string[]> {
   return [...(await readHostedPendingAssistantInputState(input)).inputIds];
+}
+
+export async function readHostedPendingAssistantImageCompletionRecoveryInputIds(
+  input: {
+    vaultRoot: string;
+  },
+): Promise<string[]> {
+  const state = await readHostedPendingAssistantInputState(input);
+  // Return the complete pending cohort only when completion recovery can use
+  // it. This keeps route and post-origin selection in its existing owner while
+  // making the ordinary foreground case a single index-file read.
+  return state.hasImageCompletionCandidate ? [...state.inputIds] : [];
 }
 
 export async function readExistingHostedPendingAssistantInputIds(input: {
@@ -521,6 +540,13 @@ export async function enqueueHostedPendingAssistantInputId(input: {
   vaultRoot: string;
 }): Promise<string[]> {
   const inputId = parseHostedPendingAssistantInputId(input.inputId);
+  const indexedEvent = await readAssistantInputEvent({
+    inputId,
+    vault: input.vaultRoot,
+  });
+  const hasImageCompletionCandidate =
+    indexedEvent === null
+    || isAssistantHostedImageCompletionEvent(indexedEvent);
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
     const existing = await readHostedPendingAssistantInputStateForWrite({
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
@@ -532,6 +558,7 @@ export async function enqueueHostedPendingAssistantInputId(input: {
     });
     const state = existing.state;
     const nextState = appendHostedPendingAssistantInputId({
+      hasImageCompletionCandidate,
       inputId,
       state,
     });
@@ -814,6 +841,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
   const runnable: { cursor: AssistantInputCursor; inputId: string }[] = [];
   const unresolved: { cursor: AssistantInputCursor; inputId: string }[] = [];
   const missingInputIds: string[] = [];
+  let hasImageCompletionCandidate = false;
   const handledConversationInputs: {
     cursor: AssistantInputCursor;
     inputId: string;
@@ -843,6 +871,9 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
         cursor: event.cursor,
         inputId,
       });
+      if (isAssistantHostedImageCompletionEvent(event)) {
+        hasImageCompletionCandidate = true;
+      }
       if (
         isHostedPendingAssistantInputStillReplyable({
           enabledAutoReplyChannels,
@@ -885,6 +916,12 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       }
     }
   }
+  if (
+    missingInputIds.length > 0
+    && input.state.hasImageCompletionCandidate
+  ) {
+    hasImageCompletionCandidate = true;
+  }
 
   const runnableInputIds = runnable
     .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
@@ -899,6 +936,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     ],
     {
       backfilled: input.backfilled,
+      hasImageCompletionCandidate,
       handledBatchCursorInputId:
         input.state.handledBatchCursorInputId !== null
         && unresolvedInputIds.includes(input.state.handledBatchCursorInputId)
@@ -975,6 +1013,16 @@ export function parseHostedPendingAssistantInputState(
       "hosted pending assistant input state backfilled",
     )
     : false;
+  const hasImageCompletionCandidate =
+    "hasImageCompletionCandidate" in state
+      ? parseHostedPendingAssistantInputBoolean(
+        state.hasImageCompletionCandidate,
+        "hosted pending assistant input image completion candidate",
+      )
+      : true;
+  // State written before this projection existed is conservatively positive.
+  // That preserves completion-first rollout behavior; the existing background
+  // compaction pass rewrites the exact value without a foreground migration.
   const handledBatchCursorInputId = "handledBatchCursorInputId" in state
     ? parseHostedPendingAssistantInputNullableId(
       state.handledBatchCursorInputId,
@@ -992,6 +1040,7 @@ export function parseHostedPendingAssistantInputState(
 
   return {
     backfilled,
+    hasImageCompletionCandidate,
     handledBatchCursorInputId,
     inputIds,
   };
@@ -1118,6 +1167,7 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
   const source = createStoreBackedAssistantInputSource({
     vault: input.vaultRoot,
   });
+  let hasImageCompletionCandidate = false;
   const pending: { cursor: AssistantInputCursor; inputId: string }[] = [];
 
   for (const channelState of automationState.autoReply) {
@@ -1157,6 +1207,9 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
             cursor: candidate.event.cursor,
             inputId: candidate.event.inputId,
           });
+          if (isAssistantHostedImageCompletionEvent(candidate.event)) {
+            hasImageCompletionCandidate = true;
+          }
         }
       }
 
@@ -1184,6 +1237,7 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
 
   return createHostedPendingAssistantInputState(inputIds, {
     backfilled: true,
+    hasImageCompletionCandidate,
   });
 }
 
@@ -1244,6 +1298,7 @@ function createEmptyHostedPendingAssistantInputState(input: {
 }): HostedPendingAssistantInputState {
   return {
     backfilled: input.backfilled,
+    hasImageCompletionCandidate: false,
     handledBatchCursorInputId: null,
     inputIds: [],
   };
@@ -1253,11 +1308,13 @@ function createHostedPendingAssistantInputState(
   inputIds: readonly string[],
   input?: {
     backfilled?: boolean;
+    hasImageCompletionCandidate?: boolean;
     handledBatchCursorInputId?: string | null;
   },
 ): HostedPendingAssistantInputState {
   return {
     backfilled: input?.backfilled ?? false,
+    hasImageCompletionCandidate: input?.hasImageCompletionCandidate ?? false,
     handledBatchCursorInputId:
       parseHostedPendingAssistantInputNullableId(
         input?.handledBatchCursorInputId ?? null,
@@ -1268,11 +1325,21 @@ function createHostedPendingAssistantInputState(
 }
 
 function appendHostedPendingAssistantInputId(input: {
+  hasImageCompletionCandidate: boolean;
   inputId: string;
   state: HostedPendingAssistantInputState;
 }): HostedPendingAssistantInputState {
   const existingIndex = input.state.inputIds.indexOf(input.inputId);
   if (existingIndex >= 0) {
+    if (
+      input.hasImageCompletionCandidate
+      && !input.state.hasImageCompletionCandidate
+    ) {
+      return {
+        ...input.state,
+        hasImageCompletionCandidate: true,
+      };
+    }
     return input.state;
   }
   return createHostedPendingAssistantInputState([
@@ -1280,6 +1347,9 @@ function appendHostedPendingAssistantInputId(input: {
     input.inputId,
   ], {
     backfilled: input.state.backfilled,
+    hasImageCompletionCandidate:
+      input.state.hasImageCompletionCandidate
+      || input.hasImageCompletionCandidate,
     handledBatchCursorInputId: input.state.handledBatchCursorInputId,
   });
 }
@@ -1295,6 +1365,9 @@ function mergeHostedPendingAssistantInputBackfill(input: {
     ]),
     {
       backfilled: true,
+      hasImageCompletionCandidate:
+        input.state.hasImageCompletionCandidate
+        || input.backfilledState.hasImageCompletionCandidate,
       handledBatchCursorInputId: input.state.handledBatchCursorInputId,
     },
   );
@@ -1385,6 +1458,7 @@ function sameHostedPendingAssistantInputState(
   right: HostedPendingAssistantInputState,
 ): boolean {
   return left.backfilled === right.backfilled
+    && left.hasImageCompletionCandidate === right.hasImageCompletionCandidate
     && left.handledBatchCursorInputId === right.handledBatchCursorInputId
     && sameStringArray(left.inputIds, right.inputIds);
 }

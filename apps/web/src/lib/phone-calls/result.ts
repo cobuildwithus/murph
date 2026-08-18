@@ -1,6 +1,7 @@
 import {
   Prisma,
   type HostedPhoneCall,
+  type HostedPhoneCallResultDeliveryStatus,
   type HostedPhoneCallStatus,
   type PrismaClient,
 } from "@prisma/client";
@@ -8,9 +9,12 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   hostedPhoneCallResultSchema,
   type HostedPhoneCallBrief,
-  type HostedPhoneCallOriginDirectChannel,
   type HostedPhoneCallResult,
 } from "@murphai/hosted-execution";
+import {
+  buildHostedPhoneCallResultDeliveryKey,
+  parseHostedPhoneCallResultNotificationChannel,
+} from "@murphai/hosted-execution/phone-calls";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
@@ -50,6 +54,12 @@ import { isHostedPhoneCallProviderCleanupPending } from "./authority";
 import {
   readRetellWebhookCallTarget,
 } from "./webhook-target";
+import {
+  signalHostedPhoneCallReconciliation,
+} from "./reconciliation-workflow-signal";
+import {
+  HOSTED_PHONE_CALL_RECONCILIATION_SIGNAL_TIMEOUT_MS,
+} from "./reconciliation-workflow-types";
 
 interface HostedPhoneCallWebhookDatabase {
   hostedPhoneCall: {
@@ -63,6 +73,7 @@ interface HostedPhoneCallWebhookDatabase {
         analyzedAt?: Date;
         endedAt?: Date;
         providerCallId?: string;
+        resultDeliveryStatus?: HostedPhoneCallResultDeliveryStatus;
         resultEncrypted?: string;
         resultJson?: Prisma.NullTypes.DbNull;
         status: HostedPhoneCallStatus;
@@ -80,6 +91,8 @@ interface HostedPhoneCallWebhookUpdateWhere {
   providerCallId?: string | null;
   resultEncrypted?: null;
   resultJson?: Prisma.JsonNullableFilter<"HostedPhoneCall">;
+  resultDeliveryGeneration?: number;
+  resultDeliveryStatus?: HostedPhoneCallResultDeliveryStatus;
   status?: { in: HostedPhoneCallStatus[] };
 }
 
@@ -90,11 +103,12 @@ interface HostedPhoneCallWebhookStore extends HostedPhoneCallWebhookDatabase {
   appendResultNotification(
     call: HostedPhoneCall,
     result?: HostedPhoneCallResult,
-    requiresTransferFollowUp?: boolean,
+    options?: { signal?: AbortSignal },
   ): Promise<HostedPhoneCallResultNotificationAppend>;
   encryptResult(input: {
     callId: string;
     memberId: string;
+    signal?: AbortSignal;
     value: HostedPhoneCallResult;
   }): Promise<string>;
 }
@@ -105,8 +119,8 @@ export interface RetellCallAnalyzedHandlingResult {
 }
 
 interface HostedPhoneCallResultNotificationAppend {
-  notificationMailboxItemId: string;
-  notificationUserId: string;
+  notificationMailboxItemId: string | null;
+  notificationUserId: string | null;
 }
 
 const HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH = 2_000;
@@ -167,15 +181,23 @@ export async function handleRetellCallEnded(input: {
 }
 
 export async function handleRetellCallAnalyzed(input: {
+  abortSignal?: AbortSignal;
   call: RetellCallPayload;
+  completionPolicy?: HostedPhoneCallResult["completionPolicy"];
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedPhoneCallWebhookStore;
-  requiresTransferFollowUp?: boolean;
+  signalReconciliation?: typeof signalHostedPhoneCallReconciliation;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   assertRetellStorageMode(input.call);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const prisma = resolveHostedPhoneCallWebhookStore(input.prisma, crypto);
-  const result = mapRetellCallAnalysis(input.call);
+  const mappedResult = mapRetellCallAnalysis(input.call);
+  const result: HostedPhoneCallResult = input.completionPolicy
+    ? {
+        ...mappedResult,
+        completionPolicy: input.completionPolicy,
+      }
+    : mappedResult;
 
   return runWithHostedDomainRootUnwrapCache(async () => {
     const target = await readRetellWebhookCallTarget({
@@ -187,10 +209,12 @@ export async function handleRetellCallAnalyzed(input: {
     }
 
     if (target.call.analyzedAt && hasStoredHostedPhoneCallResult(target.call)) {
-      return appendRetellCallAnalyzedNotification({
+      return appendRetellCallAnalyzedNotificationWithRecoveryHint({
         call: target.call,
         prisma,
-        requiresTransferFollowUp: input.requiresTransferFollowUp === true,
+        signal: input.abortSignal ?? new AbortController().signal,
+        signalReconciliation: input.signalReconciliation
+          ?? signalHostedPhoneCallReconciliation,
       });
     }
 
@@ -210,6 +234,7 @@ export async function handleRetellCallAnalyzed(input: {
       resultEncrypted = await prisma.encryptResult({
         callId: target.call.id,
         memberId: target.call.memberId,
+        ...(input.abortSignal ? { signal: input.abortSignal } : {}),
         value: result,
       });
     } catch (error) {
@@ -225,12 +250,16 @@ export async function handleRetellCallAnalyzed(input: {
     // Provider analysis and synthetic cleanup/start-failure results share the
     // existing result columns as one first-writer fence. An analyzed callback
     // must not replace a fallback that became canonical while crypto ran.
+    const resultDeliveryStatus = target.call.resultNotificationChannel === "telegram"
+      ? "pending" as const
+      : null;
     const updated = await prisma.hostedPhoneCall.updateMany({
       data: {
         ...target.providerCallIdData,
         analyzedAt,
         endedAt:
           readRetellCallEndAt(input.call) ?? target.call.endedAt ?? analyzedAt,
+        ...(resultDeliveryStatus ? { resultDeliveryStatus } : {}),
         resultEncrypted,
         resultJson: Prisma.DbNull,
         status: mapPhoneCallStatus(result.outcome),
@@ -262,12 +291,12 @@ export async function handleRetellCallAnalyzed(input: {
         isRetellWebhookCallAuthorityCurrent(stored, input.call.call_id)
         && hasStoredHostedPhoneCallResult(stored)
       ) {
-        return appendRetellCallAnalyzedNotification({
+        return appendRetellCallAnalyzedNotificationWithRecoveryHint({
           call: stored,
           prisma,
-          requiresTransferFollowUp:
-            stored.analyzedAt !== null
-            && input.requiresTransferFollowUp === true,
+          signal: input.abortSignal ?? new AbortController().signal,
+          signalReconciliation: input.signalReconciliation
+            ?? signalHostedPhoneCallReconciliation,
         });
       }
       throw hostedOnboardingError({
@@ -278,14 +307,23 @@ export async function handleRetellCallAnalyzed(input: {
       });
     }
 
-    // The result is durable before notification preparation and append. A
-    // mailbox failure therefore keeps the webhook retryable, and replay reads
-    // the canonical stored result before retrying the stable deduped append.
-    return appendRetellCallAnalyzedNotification({
-      call: target.call,
+    // The result is durable before either operational hint. A mailbox failure
+    // keeps the webhook retryable, while this call's existing Workflow also
+    // derives the pending obligation from the row on its durable timer.
+    return appendRetellCallAnalyzedNotificationWithRecoveryHint({
+      call: {
+        ...target.call,
+        analyzedAt,
+        resultDeliveryStatus,
+        resultEncrypted,
+        resultJson: null,
+        status: mapPhoneCallStatus(result.outcome),
+      },
       prisma,
-      requiresTransferFollowUp: input.requiresTransferFollowUp === true,
       result,
+      signal: input.abortSignal ?? new AbortController().signal,
+      signalReconciliation: input.signalReconciliation
+        ?? signalHostedPhoneCallReconciliation,
     });
   });
 }
@@ -299,9 +337,10 @@ export async function finalizePreparedRetellCallResult(
   } = {},
 ): Promise<void> {
   const result = await handleRetellCallAnalyzed({
+    ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
     call: prepared.call,
-    ...(prepared.requiresTransferFollowUp
-      ? { requiresTransferFollowUp: true }
+    ...(prepared.completionPolicy
+      ? { completionPolicy: prepared.completionPolicy }
       : {}),
     ...(options.prisma ? { prisma: options.prisma } : {}),
   });
@@ -328,6 +367,9 @@ export async function finalizeHostedPhoneCallStopSettlement(
     call,
     prisma,
   });
+  if (!result.notificationMailboxItemId) {
+    return;
+  }
   await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
     abortSignal: options.abortSignal,
     expectedUserId: result.notificationUserId,
@@ -344,11 +386,17 @@ export async function finalizeHostedPhoneCallStartFailure(
     signalRuntime?: typeof signalHostedMailboxAppendRuntime;
   } = {},
 ): Promise<void> {
+  const hasStoredResult = hasStoredHostedPhoneCallResult(call);
   const providerCleanupPending = isHostedPhoneCallProviderCleanupPending(call);
   if (
     call.status !== "failed"
-    || call.analyzedAt !== null
-    || (call.providerCallId !== null && !providerCleanupPending)
+    || (
+      !hasStoredResult
+      && (
+        call.analyzedAt !== null
+        || (call.providerCallId !== null && !providerCleanupPending)
+      )
+    )
   ) {
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_START_FAILURE_REQUIRED",
@@ -382,6 +430,9 @@ export async function finalizeHostedPhoneCallStartFailure(
     prisma,
     result: persisted.result,
   });
+  if (!result.notificationMailboxItemId) {
+    return;
+  }
   await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
     abortSignal: options.abortSignal,
     expectedUserId: result.notificationUserId,
@@ -425,14 +476,23 @@ async function persistHostedPhoneCallFallbackResult(input: {
     }
     throw error;
   }
+  // A provider-backed cleanup remains unanalyzed until the provider has been
+  // stopped and its exact call id is durably marked ended. Releasing that
+  // authority earlier could admit another paid call during cleanup.
+  const analyzedAt = input.call.providerCallId === null ? new Date() : null;
+  const resultDeliveryStatus = input.call.resultNotificationChannel === "telegram"
+    ? "pending" as const
+    : null;
   const updated = await input.prisma.hostedPhoneCall.updateMany({
     data: {
+      ...(analyzedAt ? { analyzedAt } : {}),
+      ...(resultDeliveryStatus ? { resultDeliveryStatus } : {}),
       resultEncrypted,
       resultJson: Prisma.DbNull,
     },
     where: {
       analyzedAt: null,
-      endedAt: null,
+      ...(input.call.providerCallId !== null ? { endedAt: null } : {}),
       id: input.call.id,
       provider: "retell",
       providerCallId: input.call.providerCallId,
@@ -447,6 +507,8 @@ async function persistHostedPhoneCallFallbackResult(input: {
     return {
       call: {
         ...input.call,
+        analyzedAt,
+        resultDeliveryStatus,
         resultEncrypted,
         resultJson: null,
       },
@@ -498,19 +560,134 @@ async function requireStoredHostedPhoneCallResult(input: {
   });
 }
 
+async function signalTrackedRetellCallReconciliation(input: {
+  call: HostedPhoneCall;
+  signal: AbortSignal;
+  signalReconciliation: typeof signalHostedPhoneCallReconciliation;
+}): Promise<void> {
+  if (
+    input.call.resultNotificationChannel !== "telegram"
+    || isHostedPhoneCallResultDeliveryTerminal(input.call.resultDeliveryStatus)
+  ) {
+    return;
+  }
+  const timeoutSignal = AbortSignal.timeout(
+    HOSTED_PHONE_CALL_RECONCILIATION_SIGNAL_TIMEOUT_MS,
+  );
+  try {
+    await input.signalReconciliation({
+      phoneCallId: input.call.id,
+      signal: AbortSignal.any([input.signal, timeoutSignal]),
+    });
+  } catch {
+    // This is a droppable latency hint. The HostedPhoneCall row remains the
+    // durable owner and its sole Workflow also rechecks that owner on a timer.
+  }
+}
+
+async function appendRetellCallAnalyzedNotificationWithRecoveryHint(input: {
+  call: HostedPhoneCall;
+  prisma: HostedPhoneCallWebhookStore;
+  result?: HostedPhoneCallResult;
+  signal: AbortSignal;
+  signalReconciliation: typeof signalHostedPhoneCallReconciliation;
+}): Promise<RetellCallAnalyzedHandlingResult> {
+  const [, notification] = await Promise.all([
+    signalTrackedRetellCallReconciliation(input),
+    appendRetellCallAnalyzedNotification(input),
+  ]);
+  return notification;
+}
+
+export async function finalizeStoredHostedPhoneCallResult(
+  call: HostedPhoneCall,
+  options: {
+    abortSignal?: AbortSignal;
+    prisma?: HostedPhoneCallWebhookStore;
+    signalRuntime?: typeof signalHostedMailboxAppendRuntime;
+  } = {},
+): Promise<"complete" | "pending"> {
+  if (!call.analyzedAt || !hasStoredHostedPhoneCallResult(call)) {
+    return "complete";
+  }
+  const prisma = resolveHostedPhoneCallWebhookStore(options.prisma);
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const result = await appendRetellCallAnalyzedNotification({
+      call,
+      prisma,
+      ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+    });
+    if (!result.notificationMailboxItemId) {
+      return await readHostedPhoneCallResultDeliveryCompletion({
+        callId: call.id,
+        prisma,
+        ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+      });
+    }
+    await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
+      abortSignal: options.abortSignal,
+      expectedUserId: result.notificationUserId,
+      mailboxItemId: result.notificationMailboxItemId,
+    });
+    options.abortSignal?.throwIfAborted();
+    return await readHostedPhoneCallResultDeliveryCompletion({
+      callId: call.id,
+      prisma,
+      ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+    });
+  });
+}
+
+async function readHostedPhoneCallResultDeliveryCompletion(input: {
+  callId: string;
+  prisma: HostedPhoneCallWebhookStore;
+  signal?: AbortSignal;
+}): Promise<"complete" | "pending"> {
+  input.signal?.throwIfAborted();
+  const current = await input.prisma.hostedPhoneCall.findUnique({
+    where: { id: input.callId },
+  });
+  input.signal?.throwIfAborted();
+  if (!current || current.resultNotificationChannel !== "telegram") {
+    return "complete";
+  }
+  return isHostedPhoneCallResultDeliveryTerminal(current.resultDeliveryStatus)
+    ? "complete"
+    : "pending";
+}
+
+function isHostedPhoneCallResultDeliveryTerminal(
+  status: HostedPhoneCallResultDeliveryStatus | null,
+): boolean {
+  return status === "delivered" || status === "ambiguous";
+}
+
+function requireHostedPhoneCallResultDeliveryGeneration(
+  call: HostedPhoneCall,
+): number {
+  if (call.resultDeliveryGeneration === null) {
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_RESULT_DELIVERY_STATE_INVALID",
+      "Hosted phone call result delivery state is invalid.",
+    );
+  }
+  return call.resultDeliveryGeneration;
+}
+
 async function appendRetellCallAnalyzedNotification(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallWebhookStore;
-  requiresTransferFollowUp: boolean;
   result?: HostedPhoneCallResult;
+  signal?: AbortSignal;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   try {
     return await input.prisma.appendResultNotification(
       input.call,
       input.result,
-      input.requiresTransferFollowUp,
+      input.signal ? { signal: input.signal } : undefined,
     );
   } catch (error) {
+    input.signal?.throwIfAborted();
     // Account deletion can cascade the call away during route resolution or
     // mailbox append. Confirm that exact terminal race before suppressing the
     // failure; every failure for a surviving call remains retryable.
@@ -525,23 +702,50 @@ async function appendRetellCallAnalyzedNotification(input: {
 }
 
 async function appendPhoneCallResultNotification(input: {
+  casAttempt?: number;
   call: HostedPhoneCall;
   prisma: PrismaClient;
-  requiresTransferFollowUp?: boolean;
   result?: HostedPhoneCallResult;
+  signal?: AbortSignal;
 }): Promise<HostedPhoneCallResultNotificationAppend> {
+  input.signal?.throwIfAborted();
   const call = input.call;
-  const notificationEventId = buildPhoneCallResultNotificationEventId(call.id);
-  const existing = await readHostedMailboxItemByDedupeKey({
-    dedupeKey: notificationEventId,
+  const trackedTelegramResult = call.resultNotificationChannel === "telegram";
+  if (
+    trackedTelegramResult
+    && isHostedPhoneCallResultDeliveryTerminal(call.resultDeliveryStatus)
+  ) {
+    return emptyRetellCallAnalyzedHandlingResult();
+  }
+  if (trackedTelegramResult && call.resultDeliveryStatus === "sending") {
+    const existing = await readExistingPhoneCallResultNotification({
+      call,
+      generation: requireHostedPhoneCallResultDeliveryGeneration(call),
+      prisma: input.prisma,
+    });
+    input.signal?.throwIfAborted();
+    return existing;
+  }
+
+  const deliveryGeneration = trackedTelegramResult
+    ? call.resultDeliveryStatus === "pending"
+      ? requireHostedPhoneCallResultDeliveryGeneration(call) + 1
+      : requireHostedPhoneCallResultDeliveryGeneration(call)
+    : null;
+  if (trackedTelegramResult && (!deliveryGeneration || deliveryGeneration < 1)) {
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_RESULT_DELIVERY_STATE_INVALID",
+      "Hosted phone call result delivery state is invalid.",
+    );
+  }
+  const existing = await readExistingPhoneCallResultNotification({
+    call,
+    generation: deliveryGeneration,
     prisma: input.prisma,
-    userId: call.memberId,
   });
-  if (existing) {
-    return {
-      notificationMailboxItemId: existing.id,
-      notificationUserId: existing.userId,
-    };
+  input.signal?.throwIfAborted();
+  if (existing.notificationMailboxItemId) {
+    return existing;
   }
 
   let result: HostedPhoneCallResult | null = input.result ?? null;
@@ -550,8 +754,10 @@ async function appendPhoneCallResultNotification(input: {
       result = await readHostedPhoneCallResult({
         call,
         prisma: input.prisma,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
     } catch {
+      input.signal?.throwIfAborted();
       throw hostedPhoneCallResultNotificationError(
         "HOSTED_PHONE_CALL_RESULT_INVALID",
         "Hosted phone call result notification requires a valid stored result.",
@@ -570,26 +776,35 @@ async function appendPhoneCallResultNotification(input: {
     brief = await readHostedPhoneCallBrief({
       call,
       prisma: input.prisma,
+      ...(input.signal ? { signal: input.signal } : {}),
     });
   } catch {
+    input.signal?.throwIfAborted();
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_BRIEF_INVALID",
       "Hosted phone call result notification requires a valid stored brief.",
     );
   }
 
+  const resultNotificationChannel =
+    parseHostedPhoneCallResultNotificationChannel(
+      call.resultNotificationChannel,
+    );
   const destination = await requireHostedAssistantNotificationDestination({
-    ...readHostedPhoneCallDirectChannelInput(call),
+    ...(resultNotificationChannel
+      ? { directChannel: resultNotificationChannel }
+      : {}),
     memberId: call.memberId,
     prisma: input.prisma,
   });
+  input.signal?.throwIfAborted();
 
   const envelope = buildPhoneCallResultNotificationWake({
     brief,
     callId: call.id,
     destination,
     memberId: call.memberId,
-    requiresTransferFollowUp: input.requiresTransferFollowUp === true,
+    ...(deliveryGeneration ? { resultDeliveryGeneration: deliveryGeneration } : {}),
     result,
   });
 
@@ -601,16 +816,61 @@ async function appendPhoneCallResultNotification(input: {
     domain: getHostedCryptoDomainForLane("mailbox-payload"),
     prisma: input.prisma,
     retainFailureInScopedCache: true,
+    ...(input.signal ? { signal: input.signal } : {}),
     userId: call.memberId,
   });
   mailboxRoot.rootKey.fill(0);
 
-  const appended = await input.prisma.$transaction((tx) =>
-    appendHostedMailboxEnvelopeTx({
-      envelope,
-      tx,
-    })
-  );
+  const appended = await input.prisma.$transaction(async (tx) => {
+    if (trackedTelegramResult && call.resultDeliveryStatus === "pending") {
+      if (deliveryGeneration === null) {
+        throw hostedPhoneCallResultNotificationError(
+          "HOSTED_PHONE_CALL_RESULT_DELIVERY_STATE_INVALID",
+          "Hosted phone call result delivery state is invalid.",
+        );
+      }
+      const advanced = await tx.hostedPhoneCall.updateMany({
+        data: {
+          resultDeliveryGeneration: deliveryGeneration,
+          resultDeliveryStatus: "queued",
+          resultDeliveryTerminalAt: null,
+        },
+        where: {
+          id: call.id,
+          memberId: call.memberId,
+          resultDeliveryGeneration:
+            requireHostedPhoneCallResultDeliveryGeneration(call),
+          resultDeliveryStatus: "pending",
+          resultNotificationChannel: "telegram",
+        },
+      });
+      if (advanced.count === 0) {
+        return null;
+      }
+    }
+    return await appendHostedMailboxEnvelopeTx({ envelope, tx });
+  });
+  input.signal?.throwIfAborted();
+  if (!appended) {
+    if ((input.casAttempt ?? 0) >= 2) {
+      throw hostedPhoneCallResultNotificationError(
+        "HOSTED_PHONE_CALL_RESULT_DELIVERY_CONFLICT",
+        "Hosted phone call result delivery changed concurrently.",
+      );
+    }
+    const current = await input.prisma.hostedPhoneCall.findUnique({
+      where: { id: call.id },
+    });
+    input.signal?.throwIfAborted();
+    if (!current) {
+      return emptyRetellCallAnalyzedHandlingResult();
+    }
+    return await appendPhoneCallResultNotification({
+      ...input,
+      casAttempt: (input.casAttempt ?? 0) + 1,
+      call: current,
+    });
+  }
   return {
     notificationMailboxItemId: appended.item.id,
     notificationUserId: appended.item.userId,
@@ -650,8 +910,14 @@ async function appendPhoneCallStopSettlementNotification(input: {
     };
   }
 
+  const resultNotificationChannel =
+    parseHostedPhoneCallResultNotificationChannel(
+      call.resultNotificationChannel,
+    );
   const destination = await requireHostedAssistantNotificationDestination({
-    ...readHostedPhoneCallDirectChannelInput(call),
+    ...(resultNotificationChannel
+      ? { directChannel: resultNotificationChannel }
+      : {}),
     memberId: call.memberId,
     prisma: input.prisma,
   });
@@ -682,44 +948,84 @@ async function appendPhoneCallStopSettlementNotification(input: {
   };
 }
 
+async function readExistingPhoneCallResultNotification(input: {
+  call: HostedPhoneCall;
+  generation: number | null;
+  prisma: PrismaClient;
+}): Promise<HostedPhoneCallResultNotificationAppend> {
+  const existing = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: buildPhoneCallResultNotificationEventId(
+      input.call.id,
+      input.generation,
+    ),
+    prisma: input.prisma,
+    userId: input.call.memberId,
+  });
+  return existing
+    ? {
+        notificationMailboxItemId: existing.id,
+        notificationUserId: existing.userId,
+      }
+    : emptyRetellCallAnalyzedHandlingResult();
+}
+
 export function buildPhoneCallResultNotificationWake(input: {
   brief: HostedPhoneCallBrief;
   callId: string;
   destination: HostedAssistantNotificationDestination;
   memberId: string;
-  requiresTransferFollowUp?: boolean;
+  resultDeliveryGeneration?: number;
   result: HostedPhoneCallResult;
 }) {
-  const notificationKey = buildPhoneCallResultNotificationKey(input.callId);
-  const isGroup = isHostedThreadContainerNotificationDestination(input.destination);
-  const destination = bindHostedAssistantNotificationDestination({
-    destination: input.destination,
-    memberId: input.memberId,
-  });
+  const notificationKey = buildPhoneCallResultNotificationKey(
+    input.callId,
+    input.resultDeliveryGeneration ?? null,
+  );
+  const trackedDirectResult = input.resultDeliveryGeneration !== undefined;
+  const requiresTransferFollowUp =
+    input.result.completionPolicy === "transfer_follow_up_required";
+  const requireSend = trackedDirectResult
+    || requiresTransferFollowUp
+    || input.destination.conversationShape === "direct-member"
+    || isHostedThreadContainerNotificationDestination(input.destination);
+  const boundDestination = requireSend
+    ? bindHostedAssistantNotificationDestination({
+        destination: input.destination,
+        memberId: input.memberId,
+      })
+    : {
+        externalThreadRouteAuthority:
+          input.destination.externalThreadRouteAuthority,
+        route: input.destination.route,
+      };
   return buildHostedExecutionAssistantNotificationRequestedWake({
-    eventId: buildPhoneCallResultNotificationEventId(input.callId),
+    eventId: buildPhoneCallResultNotificationEventId(
+      input.callId,
+      input.resultDeliveryGeneration ?? null,
+    ),
     memberId: input.memberId,
     notification: {
       deliveryDedupeToken: notificationKey,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: notificationKey,
-      ...(destination.externalThreadRouteAuthority
+      ...(boundDestination.externalThreadRouteAuthority
         ? {
             externalThreadRouteAuthority:
-              destination.externalThreadRouteAuthority,
+              boundDestination.externalThreadRouteAuthority,
           }
         : {}),
       instructions: buildPhoneCallResultNotificationInstructions({
         brief: input.brief,
-        isGroup,
-        requiresTransferFollowUp: input.requiresTransferFollowUp === true,
+        requireSend,
         result: input.result,
       }),
-      // A call is a paid, externally visible action. Every direct member and
-      // group requester must hear how it ended; omission recreates the exact
-      // uncertainty the result notification exists to resolve.
-      responsePolicy: { kind: "require_send" },
-      route: destination.route,
+      // A room must always hear how its call ended. A successful direct
+      // transfer must also ask the member what happened after Murph left;
+      // either omission would be an unrecoverable silent failure.
+      responsePolicy: requireSend
+        ? { kind: "require_send" }
+        : { kind: "allow_send_or_skip" },
+      route: boundDestination.route,
     },
     occurredAt: new Date().toISOString(),
   });
@@ -771,12 +1077,23 @@ export function buildPhoneCallStopSettlementNotificationWake(input: {
   });
 }
 
-function buildPhoneCallResultNotificationKey(callId: string): string {
-  return `phone-call-result:${callId}`;
+function buildPhoneCallResultNotificationKey(
+  callId: string,
+  generation: number | null,
+): string {
+  return generation === null
+    ? `phone-call-result:${callId}`
+    : buildHostedPhoneCallResultDeliveryKey({
+        generation,
+        phoneCallId: callId,
+      });
 }
 
-function buildPhoneCallResultNotificationEventId(callId: string): string {
-  return `assistant.notification.requested:${buildPhoneCallResultNotificationKey(callId)}`;
+export function buildPhoneCallResultNotificationEventId(
+  callId: string,
+  generation: number | null = null,
+): string {
+  return `assistant.notification.requested:${buildPhoneCallResultNotificationKey(callId, generation)}`;
 }
 
 function buildPhoneCallStopSettlementNotificationKey(callId: string): string {
@@ -787,22 +1104,6 @@ function buildPhoneCallStopSettlementNotificationEventId(
   callId: string,
 ): string {
   return `assistant.notification.requested:${buildPhoneCallStopSettlementNotificationKey(callId)}`;
-}
-
-function readHostedPhoneCallDirectChannelInput(
-  call: HostedPhoneCall,
-): { directChannel?: HostedPhoneCallOriginDirectChannel } {
-  const channel = call.originDirectChannel;
-  if (channel === null) {
-    return {};
-  }
-  if (channel === "linq" || channel === "telegram") {
-    return { directChannel: channel };
-  }
-  throw hostedPhoneCallResultNotificationError(
-    "HOSTED_PHONE_CALL_ORIGIN_CHANNEL_INVALID",
-    "Hosted phone-call origin channel is invalid.",
-  );
 }
 
 function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {
@@ -842,12 +1143,12 @@ function resolveHostedPhoneCallWebhookStore(
     $transaction: (callback) => prisma.$transaction((tx) =>
       callback(buildHostedPhoneCallWebhookDatabase(tx))
     ),
-    appendResultNotification: (call, result, requiresTransferFollowUp) =>
+    appendResultNotification: (call, result, options) =>
       appendPhoneCallResultNotification({
         call,
         prisma,
-        requiresTransferFollowUp,
         result,
+        ...(options?.signal ? { signal: options.signal } : {}),
       }),
     encryptResult: (input) => crypto.encryptResult({
       ...input,
@@ -887,6 +1188,8 @@ function buildHostedPhoneCallWebhookDatabase(
           providerCallId: args.where.providerCallId,
           resultEncrypted: args.where.resultEncrypted,
           resultJson: args.where.resultJson,
+          resultDeliveryGeneration: args.where.resultDeliveryGeneration,
+          resultDeliveryStatus: args.where.resultDeliveryStatus,
           status: args.where.status,
         },
       }),
@@ -917,12 +1220,11 @@ export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallR
 
 export function buildPhoneCallResultNotificationInstructions(input: {
   brief: HostedPhoneCallBrief;
-  isGroup?: boolean;
-  requiresTransferFollowUp?: boolean;
+  requireSend?: boolean;
   result: HostedPhoneCallResult;
 }): string {
   const target = input.brief.to.label?.trim() || "the requested phone number";
-  const lines = input.requiresTransferFollowUp
+  const lines = input.result.completionPolicy === "transfer_follow_up_required"
     ? [
         "The Murph phone call successfully transferred the user to the call recipient, and that human conversation has now ended.",
         "Always send one concise follow-up. State that Murph completed the handoff and left the conversation, and that what happened afterward is unknown.",
@@ -930,12 +1232,12 @@ export function buildPhoneCallResultNotificationInstructions(input: {
         "Do not claim that the post-handoff goal was completed or failed.",
       ]
     : [
-        input.isGroup
-          ? "The Murph phone call has finished. Report the final result to this group chat."
-          : "The Murph phone call has finished. Report the final result to the user.",
-        input.isGroup
-          ? "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. The group asked for this call, so never stay silent about it."
-          : "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. Never leave the user uncertain about the result.",
+        input.requireSend
+          ? "The Murph phone call has finished. Report the final result in this conversation."
+          : "The Murph phone call has finished. Notify the user of the final result if it is worth sharing.",
+        input.requireSend
+          ? "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. The requester asked for this call, so never stay silent about it."
+          : "If there is nothing meaningful to report, you may skip sending a message.",
       ];
   lines.push(
     "Use normal Murph wording; do not send a hard-coded template.",

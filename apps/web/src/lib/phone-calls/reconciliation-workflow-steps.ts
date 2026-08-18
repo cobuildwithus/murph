@@ -20,9 +20,12 @@ export async function reconcileHostedPhoneCallStep(
 ): Promise<void> {
   "use step";
 
+  const signal = AbortSignal.timeout(
+    HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS,
+  );
   const result = await processHostedPhoneCallRecoveryById({
     phoneCallId: input.phoneCallId,
-    signal: AbortSignal.timeout(HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS),
+    signal,
   });
   if (result === "pending") {
     throw new RetryableError(
@@ -38,3 +41,19 @@ withHostedWorkflowStepMaxRetries(
   reconcileHostedPhoneCallStep,
   HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_STEP_MAX_RETRIES,
 );
+
+export async function reconcileHostedPhoneCallDurableStep(
+  input: HostedPhoneCallReconciliationWorkflowInput,
+): Promise<"complete" | "missing" | "pending"> {
+  "use step";
+
+  const signal = AbortSignal.timeout(
+    HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS,
+  );
+  return processHostedPhoneCallRecoveryById({
+    phoneCallId: input.phoneCallId,
+    signal,
+  });
+}
+
+withHostedWorkflowStepMaxRetries(reconcileHostedPhoneCallDurableStep, 0);

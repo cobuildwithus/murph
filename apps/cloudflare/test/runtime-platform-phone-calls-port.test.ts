@@ -77,7 +77,7 @@ describe("hosted Web phone-call port", () => {
           phoneNumber: "+15550102020",
         },
       },
-      originDirectChannel: "telegram" as const,
+      resultNotificationChannel: "telegram" as const,
       originSessionId: "session_phone_call_route",
       requestKey: "request_phone_call_route",
     };

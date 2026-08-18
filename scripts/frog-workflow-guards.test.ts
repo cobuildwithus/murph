@@ -424,9 +424,8 @@ fi
     expect(normalizeFrogPullRequestBody(normalizedBody, footer)).toBe(
       normalizedBody,
     );
-    expect(normalizedBody.match(/^## Architecture and reuse$/gmu)).toHaveLength(
-      1,
-    );
+    expect(normalizedBody.match(/^## Why and outcome$/gmu)).toHaveLength(1);
+    expect(normalizedBody.match(/^## Evidence$/gmu)).toHaveLength(1);
     expect(normalizedBody.match(/^## Changelog$/gmu)).toHaveLength(1);
     expect(
       normalizedBody.match(/<!-- murph:frog-pr-context:start -->/gu),
@@ -434,19 +433,6 @@ fi
     expect(
       normalizedBody.match(/<!-- murph:frog-pr-context:end -->/gu),
     ).toHaveLength(1);
-    const architectureValidation = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "check-pr-architecture-summary.mjs")],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: { ...process.env, MURPH_PR_BODY: normalizedBody },
-      },
-    );
-    expect(
-      architectureValidation.status,
-      architectureValidation.stderr,
-    ).toBe(0);
     const changelogValidation = spawnSync(
       process.execPath,
       [path.join(repoRoot, "scripts", "check-pr-changelog.mjs")],

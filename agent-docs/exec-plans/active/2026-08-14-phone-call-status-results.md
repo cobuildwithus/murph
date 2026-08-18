@@ -359,14 +359,15 @@ Updated: 2026-08-17
   evidence rather than the required Sol gate.
 - Corrected-head product-experience revalidation finds the implementation is
   again the smallest complete experience for the incident: status is durable,
-  stop state is truthful, fallback outcomes are canonical, and an exact result
-  reaches the member before Murph admits a newer message on both supported
-  direct transports. A temporary route revocation now blocks disclosure and
-  preserves the exact deterministic delivery for retry after authorization is
-  restored. The remaining evidence gap is live-provider timing, not a known
-  product-flow gap.
+  stop state is truthful, fallback outcomes are canonical, and newer foreground
+  input is admitted before an exact result enters provider delivery on both
+  supported direct transports. The result remains a deterministic background
+  delivery. A temporary route revocation blocks disclosure and preserves that
+  delivery for retry after authorization is restored. The remaining evidence
+  gap is live-provider timing, not a known product-flow gap.
 - Remaining gates: commit and push the remediation head, exact-head CI, final
   ReviewGPT `ROUND_OUTCOME: PASS`, clean merge-tree proof, and plan closure.
 - Direct proof: a synthetic call result arrives while one hosted invocation is
-  active and newer conversation input is waiting; Murph receives the result in
-  the next turn and a later status query returns the same terminal truth.
+  active and newer conversation input is waiting; Murph admits the conversation
+  input first, delivers the result through the background outbox, and a later
+  status query returns the same terminal truth.

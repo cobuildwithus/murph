@@ -16,7 +16,7 @@ import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
 import type {
-  HostedPhoneCallOriginDirectChannel,
+  HostedPhoneCallResultNotificationChannel,
 } from '@murphai/hosted-execution/phone-calls'
 import type {
   AssistantSession,
@@ -77,13 +77,13 @@ export interface AssistantHostedToolRequestKeyScope {
 export interface AssistantHostedUserActionScope
   extends AssistantHostedToolRequestKeyScope {
   conversationScope: AssistantConversationScope
-  originDirectChannel?: HostedPhoneCallOriginDirectChannel | null
+  resultNotificationChannel?: HostedPhoneCallResultNotificationChannel | null
   originSessionId: string
 }
 
 export interface AssistantHostedScheduledPhoneCallScope
   extends HostedRuntimeScheduledAutomationAuthority {
-  originDirectChannel?: HostedPhoneCallOriginDirectChannel
+  resultNotificationChannel?: HostedPhoneCallResultNotificationChannel
   originSessionId: string
 }
 
@@ -333,10 +333,11 @@ export function createAssistantHostedToolContext(input: {
     return {
       ...buildRequestKeyScope(acceptedInputIds),
       conversationScope,
-      originDirectChannel: resolveAssistantHostedPhoneCallOriginDirectChannel({
-        channel: deliveryContext.messageInput.channel,
-        conversationScope,
-      }),
+      resultNotificationChannel:
+        resolveAssistantHostedPhoneCallResultNotificationChannel({
+          channel: deliveryContext.messageInput.channel,
+          conversationScope,
+        }),
       originSessionId: deliveryContext.session.sessionId,
     }
   }
@@ -380,6 +381,8 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     })
   }
+  const phoneCalls: AssistantPhoneCallPort | null =
+    executionContext?.phoneCalls ?? null
   let subscriptionActionClaimed = false
   let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
@@ -433,7 +436,7 @@ export function createAssistantHostedToolContext(input: {
     privateImageUrlPublisher:
       executionContext?.privateImageUrlPublisher ?? null,
     subscriptionTool: executionContext?.subscriptionTool ?? null,
-    phoneCalls: executionContext?.phoneCalls ?? null,
+    phoneCalls,
     ...(executionContext?.usageRecorder && route
       ? {
           recordDetachedUsage(usageInput) {
@@ -628,8 +631,9 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   originSessionId: string
 }): AssistantHostedScheduledPhoneCallScope | null {
   const scope = resolveAssistantHostedScheduledInvocationScope(input)
+  const channel = input.channel?.trim().toLowerCase()
   if (
-    input.channel?.trim().toLowerCase() !== 'linq'
+    (channel !== 'linq' && channel !== 'telegram')
     || scope?.conversationScope !== 'direct'
   ) {
     return null
@@ -638,15 +642,15 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   return {
     automationId: scope.origin.automationId,
     occurrenceAt: scope.origin.occurrenceAt,
-    originDirectChannel: 'linq',
+    resultNotificationChannel: channel,
     originSessionId: scope.originSessionId ?? input.originSessionId,
   }
 }
 
-export function resolveAssistantHostedPhoneCallOriginDirectChannel(input: {
+export function resolveAssistantHostedPhoneCallResultNotificationChannel(input: {
   channel: AssistantMessageInput['channel']
   conversationScope: AssistantConversationScope
-}): HostedPhoneCallOriginDirectChannel | null {
+}): HostedPhoneCallResultNotificationChannel | null {
   if (input.conversationScope !== 'direct') {
     return null
   }
