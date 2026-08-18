@@ -657,6 +657,8 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
   vaultRoot: string;
 }): Promise<{
+  errorCode?: string | null;
+  errorMessage?: string | null;
   failed: number;
   nextWakeAt: string | null;
   nextWakeReason?: string | null;
@@ -746,6 +748,8 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultRoot: input.vaultRoot,
     });
     return {
+      errorCode: normalized.code,
+      errorMessage: normalized.message,
       failed: 1,
       nextWakeAt: nextWakeAt ?? retryAt,
       nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
