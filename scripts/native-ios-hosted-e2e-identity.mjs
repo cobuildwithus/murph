@@ -187,7 +187,15 @@ export async function cleanupE2e(junctionClientUserIdNamespace) {
   }
   console.log(`::notice::native-ios-e2e stage=junction_cleanup result=${junction ? "success" : "absent"}`);
 
-  await resetDedicatedDatabase(config.directDatabaseUrl);
+  console.log("::notice::native-ios-e2e stage=database_reset result=started");
+  try {
+    await resetDedicatedDatabase(config.directDatabaseUrl);
+  } catch (error) {
+    console.log(`::error::native-ios-e2e stage=database_reset result=failure reason=${boundedCommandFailureReason(error)}`);
+    throw error;
+  }
+  console.log("::notice::native-ios-e2e stage=database_reset result=success");
+  console.log("::notice::native-ios-e2e stage=database_validation result=started");
   if (await readDedicatedMemberRecord(config)) {
     throw new Error("Dedicated E2E database still contains a member after reset.");
   }
@@ -401,6 +409,15 @@ function privyHeaders() {
 function requireE164(value) {
   if (!/^\+[1-9][0-9]{7,14}$/u.test(value)) throw new Error("NATIVE_IOS_E2E_PRIVY_TEST_PHONE must be an E.164 phone number.");
   return value;
+}
+
+function boundedCommandFailureReason(error) {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "E2E database reset timed out.") return "timeout";
+  if (message === "E2E database reset could not start.") return "spawn";
+  if (message === "E2E database reset process supervision failed.") return "supervision";
+  if (message === "E2E database reset failed.") return "command_exit";
+  return "unknown";
 }
 
 function assertUuid(value, label) {

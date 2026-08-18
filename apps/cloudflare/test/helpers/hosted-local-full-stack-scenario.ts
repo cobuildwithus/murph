@@ -60,6 +60,7 @@ import {
   bindHostedActiveTelegramMember,
   ensureHostedRuntimeLogDatabaseForTest,
   issueHostedAppSessionForTest,
+  issueHostedIMessageMiniAppCredentialForTest,
   listHostedRuntimeLogsForTest,
   readHostedDeviceSyncConnectionForTest,
   readHostedLinqWorkspaceIsolationStateForTest,
@@ -183,6 +184,12 @@ export interface HostedLocalFullStackScenario {
     memberId: string;
     privyUserId: string;
   }): Promise<HostedAppSessionForTest>;
+  issueHostedIMessageMiniAppCredential(input: {
+    memberId: string;
+  }): Promise<{
+    expiresAt: string;
+    token: string;
+  }>;
   readHostedDeviceSyncConnection(input: {
     memberId: string;
     provider?: string;
@@ -505,6 +512,11 @@ async function startHostedLocalFullStackScenarioAttempt(
           memberId: sessionInput.memberId,
           privyUserId: sessionInput.privyUserId,
           secureCookieMode: scenarioHarness.webUsesProductionArtifact,
+        }),
+      issueHostedIMessageMiniAppCredential: async (credentialInput) =>
+        await issueHostedIMessageMiniAppCredentialForTest({
+          environment: buildScenarioSeedEnvironment(),
+          memberId: credentialInput.memberId,
         }),
       readHostedDeviceSyncConnection: async (connectionInput) =>
         await readHostedDeviceSyncConnectionForTest({

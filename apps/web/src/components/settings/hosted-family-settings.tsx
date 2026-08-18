@@ -1,6 +1,5 @@
 import { HOSTED_FAMILY_PLAN_DISPLAY } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedFamilyOwnerSnapshot } from "@/src/lib/hosted-onboarding/family-plan";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type {
   HostedUsageTopUpActivePurchase,
   HostedUsageTopUpOffer,
@@ -18,7 +17,6 @@ export function HostedFamilySettings(props: {
   payerMemberId: string;
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
-  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
@@ -63,7 +61,6 @@ export function HostedFamilySettings(props: {
         }))}
         usageTopUpActiveMemberId={props.usageTopUpActiveMemberId}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
-        usageTopUpContactOptions={props.usageTopUpContactOptions}
         usageTopUpOffers={props.usageTopUpOffers ?? []}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
         usageTopUpReturnMemberId={props.usageTopUpReturnMemberId}

@@ -14,6 +14,7 @@ import {
 import {
   buildDedicatedDatabasePoolOptions,
   buildJunctionClientUserId,
+  cleanupE2e,
   inspectDedicatedMemberIdentity,
   inspectE2eDatabaseUrls,
   inspectFreshPrivyPrincipal,
@@ -467,6 +468,59 @@ test("cleanup ownership enumerates the namespace before and after deletion", asy
   );
 });
 
+test("database reset failure emits only the allowlisted command reason", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-database-reset-"));
+  const binDir = path.join(tempDir, "bin");
+  const fakePnpm = path.join(binDir, "pnpm");
+  const envNames = [
+    "NATIVE_IOS_E2E_DATABASE_URL",
+    "NATIVE_IOS_E2E_DIRECT_DATABASE_URL",
+    "NATIVE_IOS_E2E_JUNCTION_API_KEY",
+    "NATIVE_IOS_E2E_JUNCTION_TEAM_ID",
+    "PATH",
+  ];
+  const originalEnv = new Map(envNames.map((name) => [name, process.env[name]]));
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const logs = [];
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakePnpm, [
+      "#!/bin/sh",
+      "printf 'provider output must stay hidden\\n' >&2",
+      "exit 42",
+    ].join("\n") + "\n", { mode: 0o755 });
+    process.env.NATIVE_IOS_E2E_DATABASE_URL = "postgresql://owner@db.example.test/native_ios_e2e";
+    process.env.NATIVE_IOS_E2E_DIRECT_DATABASE_URL = "postgresql://owner@db.example.test/native_ios_e2e";
+    process.env.NATIVE_IOS_E2E_JUNCTION_API_KEY = "sk_us_test";
+    process.env.NATIVE_IOS_E2E_JUNCTION_TEAM_ID = "11111111-1111-4111-8111-111111111111";
+    process.env.PATH = `${binDir}:${originalEnv.get("PATH") ?? ""}`;
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      limit: 500,
+      offset: 0,
+      total: 0,
+      users: [],
+    }), { headers: { "content-type": "application/json" } });
+    console.log = (...args) => logs.push(args.join(" "));
+
+    await assert.rejects(() => cleanupE2e("e2e"), /E2E database reset failed/u);
+    assert.deepEqual(logs, [
+      "::notice::native-ios-e2e stage=junction_cleanup result=absent",
+      "::notice::native-ios-e2e stage=database_reset result=started",
+      "::error::native-ios-e2e stage=database_reset result=failure reason=command_exit",
+    ]);
+    assert.doesNotMatch(logs.join("\n"), /provider output/u);
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("database and child-command timeout contracts are explicit and fail closed", () => {
   assert.deepEqual(buildDedicatedDatabasePoolOptions("postgresql://owner@db.example.test/native_ios_e2e"), {
     connectionString: "postgresql://owner@db.example.test/native_ios_e2e",
@@ -775,7 +829,29 @@ test("PR lifecycle stays red when final cleanup fails", async () => {
     now: () => 123,
     postconditions: async () => undefined,
     retire: async () => undefined,
-  }), /final cleanup did not complete/u);
+  }), /finalization failed at cleanup_after_run/u);
+});
+
+test("PR lifecycle retains secret-safe primary and finalization stage names", async () => {
+  let cleanupCalls = 0;
+  await assert.rejects(() => runPrLifecycle({
+    cleanup: async () => {
+      cleanupCalls += 1;
+      if (cleanupCalls === 2) throw new Error("provider payload must stay hidden");
+    },
+    deploy: async () => { throw new Error("candidate payload must stay hidden"); },
+    dispatch: async () => undefined,
+    now: () => 123,
+    postconditions: async () => undefined,
+    retire: async () => undefined,
+  }), (error) => {
+    assert.equal(
+      error.message,
+      "Native iOS E2E failed at deploy; fail-closed finalization failed at cleanup_after_run.",
+    );
+    assert.doesNotMatch(error.message, /provider payload|candidate payload/u);
+    return true;
+  });
 });
 
 function runWorkflowSelector(workflow, file) {
