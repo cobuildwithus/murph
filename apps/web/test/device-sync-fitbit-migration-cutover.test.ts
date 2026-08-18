@@ -145,7 +145,6 @@ class FakeCutoverStore {
   ): Promise<HostedDeviceConnectionSource[]>;
   async listConnectionSources(
     input: string | ListDeviceConnectionSourcesInput,
-    _tx?: HostedPrismaTransactionClient,
   ): Promise<HostedDeviceConnectionSource[]> {
     expect(this.lockDepth).toBeGreaterThan(0);
     const connectionId = typeof input === "string" ? input : input.connectionId;
