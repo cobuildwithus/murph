@@ -18656,6 +18656,61 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
   assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });
 
+test("Junction known opt-in continuation restarts a narrowed default-only window", async () => {
+  const requests: URL[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    requests.push(url);
+    if (url.pathname.startsWith("/v2/timeseries/junction-user-1/")) {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES],
+  });
+  const context = createJunctionJobContext({ now: "2026-04-05T00:00:00.000Z" });
+  let result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-03T00:00:00.000Z",
+      timeseriesResourceCursor: "fat",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+  let continuationCount = 0;
+  while (result.scheduledJobs?.[0]) {
+    continuationCount += 1;
+    assert.ok(continuationCount < 100, "Narrowed continuation should terminate.");
+    result = await executeJunctionJob(
+      provider,
+      context,
+      createJobFromInput(result.scheduledJobs[0]),
+    );
+  }
+
+  const groupedRequests = requests.filter((url) => url.pathname.includes("/v2/timeseries/"));
+  assert.equal(
+    groupedRequests[0]?.searchParams.get("start_date"),
+    "2026-04-02",
+  );
+  assert.deepEqual(
+    new Set(groupedRequests.map((url) =>
+      normalizeJunctionResourceName(
+        url.pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1],
+      )
+    )),
+    new Set(JUNCTION_DEFAULT_TIMESERIES_RESOURCES),
+  );
+  assert.equal(
+    groupedRequests.length,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 2,
+  );
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+});
+
 test("Junction scalar timeseries resource continuation fails closed before provider egress", async () => {
   const requestUrls: string[] = [];
   const provider = createJunctionProvider(async (input) => {

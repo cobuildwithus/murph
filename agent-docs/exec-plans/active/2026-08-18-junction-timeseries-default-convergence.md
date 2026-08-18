@@ -16,11 +16,14 @@ Updated: 2026-08-18
   excludes resources whose contracts policy marks as explicit opt-ins.
 - Explicit resource lists, including the code-owned production list, remain
   unchanged.
+- A durable pre-deploy continuation whose cursor names a now-opt-in resource
+  restarts its same owner window on the curated defaults and terminates.
 - Focused tests prove both behaviors, and required ReviewGPT and CI gates pass.
 
 ## Scope
 
-- In scope: Junction runtime-config normalization and focused tests.
+- In scope: hosted Junction platform-config assembly, runtime-config
+  normalization, and focused owner-boundary tests.
 - Out of scope: resource-policy changes, scheduler recovery semantics, schema
   changes, and unrelated iOS checks.
 
@@ -35,7 +38,8 @@ Updated: 2026-08-18
 
 1. Prove the live non-convergence and trace the hosted runtime configuration.
 2. Have ReviewGPT independently audit the evidence and exact code path.
-3. Add a focused failing regression and implement the smallest correction.
+3. Add focused failing regressions at the hosted assembly and provider
+   continuation boundaries, then implement the smallest correction.
 4. Run focused tests/typechecks, required review gates, and exact-head CI.
 5. Merge/deploy and confirm the affected connection advances its durable
    completion and reconcile frontiers.
@@ -44,12 +48,18 @@ Updated: 2026-08-18
 
 - Treat repeated due-reconcile signals as secondary recovery churn, not the
   root cause: retained continuations already suppress duplicate provider roots.
-- Change only the omitted-list fallback. Explicit all-resource configuration
-  remains available and unchanged.
+- Preserve omission through hosted platform hydration, then apply the curated
+  fallback at normalization. Explicit all-resource configuration remains
+  available and unchanged.
+- Reuse the full-job continuation decoder for deployment compatibility: a
+  structurally valid code-known cursor outside the narrowed configured set
+  restarts the same owner window; unknown or malformed cursors still fail
+  closed.
 
 ## Verification
 
-- Focused device-sync configuration and provider-manifest tests.
+- Focused hosted-runtime provider-config, device-sync configuration, and
+  provider-continuation tests.
 - Relevant package typecheck and diff checks.
 - Required ReviewGPT/CI gates on the pushed PR head.
 - Redacted production aggregate showing durable completion and reconcile
