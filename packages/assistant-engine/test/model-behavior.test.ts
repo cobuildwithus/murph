@@ -108,6 +108,12 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'trim introductions, repetition, reassurance, optional background, and unrelated wellness advice first',
     )
+    expect(prompt).toContain(
+      'separate occurrence, runtime decision, provider acceptance, and delivery receipt',
+    )
+    expect(prompt).toContain(
+      'never call delivery "unconfirmed."',
+    )
     expect(prompt).not.toContain('Final replies should briefly state')
     expect(prompt).not.toContain('extra nudges')
   })

@@ -54,11 +54,103 @@ const ASSISTANT_USAGE_RAW_TTS_KEYS = new Set<string>([
 const ASSISTANT_USAGE_RAW_COST_KEYS = new Set<string>([
   "cost_in_usd_ticks",
 ]);
-export const ASSISTANT_TURN_PROFILE_SCHEMA = "murph.assistant-turn-profile.v1";
+export const ASSISTANT_TURN_PROFILE_SCHEMA_V1 = "murph.assistant-turn-profile.v1";
+export const ASSISTANT_TURN_PROFILE_SCHEMA = "murph.assistant-turn-profile.v2";
 export const ASSISTANT_TURN_PROFILE_MAX_REQUESTS = 32;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOLS = 16;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH = 64;
 const ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/ -]*$/u;
+const ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+const ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_MAX_LENGTH = 48;
+const ASSISTANT_TURN_PROFILE_TOOL_KINDS = new Set([
+  "command",
+  "dynamic_tool",
+  "mcp_tool",
+]);
+export const ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES = [
+  "cat",
+  "command",
+  "curl",
+  "food.search-labels",
+  "food.search-labels-batch",
+  "goal.list",
+  "goal.show",
+  "head",
+  "jq",
+  "meal.add",
+  "meal.edit",
+  "meal.nutrients",
+  "meal.show",
+  "meal.totals",
+  "node",
+  "other",
+  "printf",
+  "python",
+  "python3",
+  "search",
+  "sed",
+  "tail",
+  "vault-cli audit",
+  "vault-cli automation",
+  "vault-cli blood-test",
+  "vault-cli event",
+  "vault-cli exercise",
+  "vault-cli food",
+  "vault-cli knowledge",
+  "vault-cli meal",
+  "vault-cli batch",
+  "vault-cli memory show",
+  "vault-cli wearables",
+  "vault-cli workout",
+] as const;
+export type AssistantTurnProfileCommandFamily =
+  (typeof ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES)[number];
+const ASSISTANT_TURN_PROFILE_COMMAND_FAMILY_SET = new Set<string>(
+  ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES,
+);
+
+export function isAssistantTurnProfileCommandFamily(
+  value: unknown,
+): value is AssistantTurnProfileCommandFamily {
+  return typeof value === "string"
+    && ASSISTANT_TURN_PROFILE_COMMAND_FAMILY_SET.has(value);
+}
+
+export function buildAssistantTurnProfileToolIdentityLabel(input: {
+  kind: "dynamic_tool" | "mcp_tool";
+  tool: string | null;
+}): string {
+  const genericLabel = input.kind;
+  if (
+    input.tool === null
+    || !isAssistantTurnProfileIdentifierComponent(input.tool)
+  ) {
+    return genericLabel;
+  }
+
+  const label = `t_${input.tool}`;
+  return label.length <= ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
+    ? label
+    : genericLabel;
+}
+
+function isAssistantTurnProfileIdentifierComponent(value: string): boolean {
+  return value.length <= ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_MAX_LENGTH
+    && ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_PATTERN.test(value);
+}
+
+function isAssistantTurnProfileToolIdentityLabel(
+  kind: "dynamic_tool" | "mcp_tool",
+  label: string,
+): boolean {
+  if (label === kind) {
+    return true;
+  }
+
+  return label.startsWith("t_")
+    && isAssistantTurnProfileIdentifierComponent(label.slice(2));
+}
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
 export type AssistantProviderRequestOutcome =
@@ -1114,8 +1206,13 @@ function requireValidTurnProfileJson(
   }
 
   const record = requireRecord(value, label);
-  if (record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${ASSISTANT_TURN_PROFILE_SCHEMA}.`);
+  if (
+    record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA_V1
+    && record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA
+  ) {
+    throw new TypeError(
+      `${label}.schema must be ${ASSISTANT_TURN_PROFILE_SCHEMA_V1} or ${ASSISTANT_TURN_PROFILE_SCHEMA}.`,
+    );
   }
   if (!isNonNegativeInteger(record.requestCount)) {
     throw new TypeError(`${label}.requestCount must be a non-negative integer.`);
@@ -1137,6 +1234,49 @@ function requireValidTurnProfileJson(
     );
   }
 
+  const isV2 = record.schema === ASSISTANT_TURN_PROFILE_SCHEMA;
+  if (
+    isV2
+    && (
+      record.requestCount < record.requests.length
+      || (
+        record.requestsTruncated
+          ? (
+            record.requests.length !== ASSISTANT_TURN_PROFILE_MAX_REQUESTS
+            || record.requestCount <= record.requests.length
+          )
+          : record.requestCount !== record.requests.length
+      )
+    )
+  ) {
+    throw new TypeError(`${label} request count and truncation fields are inconsistent.`);
+  }
+
+  const seenV2Tools = new Set<string>();
+  const tools = record.tools.map((entry, index) => {
+    const toolLabel = `${label}.tools[${index}]`;
+    const tool = requireRecord(entry, toolLabel);
+    if (record.schema === ASSISTANT_TURN_PROFILE_SCHEMA_V1) {
+      if (
+        typeof tool.label !== "string"
+        || tool.label.length === 0
+        || tool.label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
+        || !ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN.test(tool.label)
+      ) {
+        throw new TypeError(`${toolLabel}.label must be a short sanitized tool label.`);
+      }
+      return normalizeTurnProfileV1Tool(tool, toolLabel);
+    }
+
+    const normalized = normalizeTurnProfileV2Tool(tool, toolLabel);
+    const identity = JSON.stringify([normalized.kind, normalized.label]);
+    if (seenV2Tools.has(identity)) {
+      throw new TypeError(`${toolLabel} duplicates an existing kind and label.`);
+    }
+    seenV2Tools.add(identity);
+    return normalized;
+  });
+
   return {
     modelContextWindow: record.modelContextWindow,
     requestCount: record.requestCount,
@@ -1148,43 +1288,116 @@ function requireValidTurnProfileJson(
       ),
     ),
     requestsTruncated: record.requestsTruncated,
-    schema: ASSISTANT_TURN_PROFILE_SCHEMA,
-    tools: record.tools.map((entry, index) => {
-      const toolLabel = `${label}.tools[${index}]`;
-      const tool = requireRecord(entry, toolLabel);
-      if (
-        typeof tool.label !== "string"
-        || tool.label.length === 0
-        || tool.label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
-        || !ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN.test(tool.label)
-      ) {
-        throw new TypeError(`${toolLabel}.label must be a short sanitized tool label.`);
-      }
-      if (tool.failedCalls !== undefined && !isNonNegativeInteger(tool.failedCalls)) {
-        throw new TypeError(`${toolLabel}.failedCalls must be a non-negative integer.`);
-      }
-      if (
-        typeof tool.failedCalls === "number"
-        && typeof tool.calls === "number"
-        && tool.failedCalls > tool.calls
-      ) {
-        throw new TypeError(`${toolLabel}.failedCalls must not exceed calls.`);
-      }
-
-      return {
-        ...normalizeTurnProfileIntegerRecord(tool, toolLabel, [
-          "calls",
-          "durationMs",
-          "outputChars",
-        ]),
-        ...(tool.failedCalls === undefined
-          ? {}
-          : { failedCalls: tool.failedCalls }),
-        label: tool.label,
-      };
-    }),
+    schema: record.schema,
+    tools,
     toolsTruncated: record.toolsTruncated,
   };
+}
+
+function normalizeTurnProfileV1Tool(
+  tool: Record<string, unknown>,
+  label: string,
+): Record<string, unknown> {
+  validateTurnProfileFailedCalls(tool, label, false);
+  return {
+    ...normalizeTurnProfileIntegerRecord(tool, label, [
+      "calls",
+      "durationMs",
+      "outputChars",
+    ]),
+    ...(tool.failedCalls === undefined
+      ? {}
+      : { failedCalls: tool.failedCalls }),
+    label: tool.label,
+  };
+}
+
+function normalizeTurnProfileV2Tool(
+  tool: Record<string, unknown>,
+  label: string,
+): Record<string, unknown> {
+  if (
+    typeof tool.kind !== "string"
+    || !ASSISTANT_TURN_PROFILE_TOOL_KINDS.has(tool.kind)
+  ) {
+    throw new TypeError(`${label}.kind must be a supported tool kind.`);
+  }
+  if (
+    tool.kind === "command"
+    && !isAssistantTurnProfileCommandFamily(tool.label)
+  ) {
+    throw new TypeError(`${label}.label must be a supported command family.`);
+  }
+  if (
+    (tool.kind === "dynamic_tool" || tool.kind === "mcp_tool")
+    && (
+      typeof tool.label !== "string"
+      || tool.label.length === 0
+      || tool.label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
+      || !isAssistantTurnProfileToolIdentityLabel(tool.kind, tool.label)
+    )
+  ) {
+    throw new TypeError(`${label}.label must be a canonical tool identity label.`);
+  }
+  validateTurnProfileFailedCalls(tool, label, true);
+  const normalized = normalizeTurnProfileIntegerRecord(tool, label, [
+    "calls",
+    "durationKnownCalls",
+    "durationMs",
+    "failedCalls",
+    "outputBytesMax",
+    "outputBytesTotal",
+  ]);
+  if (normalized.durationKnownCalls > normalized.calls) {
+    throw new TypeError(`${label}.durationKnownCalls must not exceed calls.`);
+  }
+  if (normalized.calls < 1) {
+    throw new TypeError(`${label}.calls must be at least one.`);
+  }
+  if (normalized.durationKnownCalls === 0 && normalized.durationMs !== 0) {
+    throw new TypeError(`${label}.durationMs must be zero when no durations are known.`);
+  }
+  if (normalized.outputBytesMax > normalized.outputBytesTotal) {
+    throw new TypeError(`${label}.outputBytesMax must not exceed outputBytesTotal.`);
+  }
+  if (
+    normalized.outputBytesMax > 0
+    && normalized.calls > Math.floor(
+      Number.MAX_SAFE_INTEGER / normalized.outputBytesMax,
+    )
+  ) {
+    throw new TypeError(`${label} output byte capacity must be a safe integer.`);
+  }
+  const outputByteCapacity = normalized.calls * normalized.outputBytesMax;
+  if (normalized.outputBytesTotal > outputByteCapacity) {
+    throw new TypeError(`${label}.outputBytesTotal exceeds calls times outputBytesMax.`);
+  }
+
+  return {
+    ...normalized,
+    kind: tool.kind,
+    label: tool.label,
+  };
+}
+
+function validateTurnProfileFailedCalls(
+  tool: Record<string, unknown>,
+  label: string,
+  required: boolean,
+): void {
+  if (
+    (required && tool.failedCalls === undefined)
+    || (tool.failedCalls !== undefined && !isNonNegativeInteger(tool.failedCalls))
+  ) {
+    throw new TypeError(`${label}.failedCalls must be a non-negative integer.`);
+  }
+  if (
+    typeof tool.failedCalls === "number"
+    && typeof tool.calls === "number"
+    && tool.failedCalls > tool.calls
+  ) {
+    throw new TypeError(`${label}.failedCalls must not exceed calls.`);
+  }
 }
 
 function normalizeTurnProfileIntegerRecord(

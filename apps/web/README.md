@@ -982,7 +982,7 @@ Hosted AI usage metering:
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
-- Settings keeps the aggregate usage meter as the only current-capacity view. A fulfilled purchase starts a fresh 0%-used display window, and later counted usage advances it without changing admission or ledger accounting. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
+- Settings keeps the aggregate usage meter as the only current-capacity view. Personal and owner-seat Family checkout success returns reconcile and refresh the authenticated beneficiary's present meter without a confirmation modal or messaging handoff, while one pre-mounted visually hidden polite status region announces fulfillment; only a failed or unresolved return opens compact payment recovery. A personal return with unavailable usage status, another active Family member, and former-member recovery retain one compact close-owned result because their meter is not present; the personal copy confirms durable account credit without claiming current availability. The Family roster owns an exact active-member return without requiring its Manage dialog to open, and closing an off-meter result owns terminal refresh so it cannot disappear before dismissal. A fulfilled purchase starts a fresh 0%-used display window, and later counted usage advances it without changing admission or ledger accounting. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
 - Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment or refill-specific room notification. Assistant-visible group usage exposes only whether a funding ask is timely and the first-party funding URL: low capacity stays quiet while an automatic refill is available or pending, otherwise it uses the ordinary group funding heads-up, and every exhausted room receives the ordinary pause copy plus the link. The funding page separately preserves the single-automatic-sponsor invariant and private payer management.
 - Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
@@ -1666,33 +1666,25 @@ machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
-The production build launches the parent Next process explicitly through Node
-with `--max-old-space-size=1024` while appending
-`--max-old-space-size=3072` to `NODE_OPTIONS` for the Webpack build worker. The
-same runner first performs route type generation and an explicit app-local
-generated-contract TypeScript check with a 3.5 GiB limit, then marks only that
-prepared check complete before starting the Webpack build. Node gives the direct
-CLI flag precedence in the parent. Next 16.3 reconstructs non-isolated child
-options from the parent arguments followed by `NODE_OPTIONS`, so the sequential
-Webpack compiler workers receive the 3 GiB limit while the separate TypeScript
-validation child receives 3.5 GiB. Next removes that option from its isolated
-static workers. The existing caller options are preserved. The shared script is
-used by the Vercel package build and the CI
-memory-observation lane. This bounds the compile parent without starving the
-later validation worker or changing the compiled application. The worker was
-ratcheted from 3 GiB only after an exact cold generated-contract check
-deterministically exhausted that heap and passed at the next 512 MiB step.
-Repeated
-forced-cold Standard previews remain the direct acceptance evidence, and a Next
-upgrade must revalidate this worker boundary.
+The production runner first performs route type generation and an explicit
+app-local generated-contract TypeScript check with a 3.5 GiB limit. It marks
+only that prepared check complete before starting Webpack. Compilation then
+runs in the Next CLI process with a 3 GiB old-space limit; the runner preserves
+unrelated inherited Node options while replacing inherited old-space flags.
+These phases are sequential, so their limits do not compose. The same runner is
+used by the Vercel package build and the CI memory-observation lane. Forced-cold
+Standard previews remain the direct acceptance evidence, and a Next upgrade
+must revalidate the heap boundary.
 
 Production builds use Next 16.3's supported Webpack fallback. The production
-script passes `--webpack`, and the Next config explicitly enables
-`webpackBuildWorker` plus `webpackMemoryOptimizations` because the Workflow
-integration contributes Webpack configuration that otherwise prevents Next
-from selecting the isolated build worker automatically. The hosted local-
-development wrapper remains on Turbopack and rejects an explicit Webpack flag.
-The production runner also owns a versioned cache epoch inside `.next/cache`.
+script passes `--webpack` and enables `webpackMemoryOptimizations`. The Workflow
+integration contributes custom Webpack configuration, so Next's canonical
+default is to compile in the CLI process. Do not force `webpackBuildWorker`:
+that creates a second compiler-process owner and previously left Standard
+deployments stuck inside an opaque worker after compilation stopped making
+progress. The hosted local-development wrapper remains on Turbopack and rejects
+an explicit Webpack flag. The production runner also owns a versioned cache
+epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
 compilation and writes the epoch only after Next succeeds. Production Webpack
 compiles are additionally cold-cache by policy: the runner removes
@@ -1702,24 +1694,11 @@ Webpack cache can never reach the compiler regardless of what an earlier
 deployment uploaded. Warm restored Webpack caches on Vercel's 8 GB Standard builder
 were the trigger for the August 2026 steady-state OOM kills and silent
 compile hangs; only the cold path is proven. Other cache subtrees such as SWC
-remain warm. On Vercel production builds (`VERCEL=1` with
-`VERCEL_ENV=production`) and the dedicated native iOS E2E target
-(`VERCEL_TARGET_ENV=native-ios-e2e`), `scripts/vercel-build.sh` arms a 15-minute
-whole-build deadline (`MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS=900000`) that the
-package-build process owner, `scripts/run-with-host-verification-slot.mjs`,
-enforces on the one detached process group it already creates: at the deadline
-it TERMs the entire group, force-kills survivors with KILL (each phase bounded
-by a 30-second grace, so a leader that exits mid-grace hands surviving
-descendants to one fresh grace before their KILL), waits until the group has
-fully exited, and returns exit 124 with an explicit
-diagnostic. Because the deadline owns the whole group, a wedged Webpack
-compiler worker descendant is terminated too, and an externally cancelled
-build is reaped with the same escalation instead of orphaning the compile.
-Either way a wedged compile fails the build in minutes instead of occupying
-the deploy queue until Vercel's 45-minute ceiling. Ordinary preview, local,
-and CI verify invocations do not set the dedicated target and never arm the
-deadline. Bump the epoch only
-when a proven compiler/cache transition requires another full invalidation.
+remain warm. Vercel owns cancellation and build deadlines. The production
+package script therefore runs directly instead of passing through the local
+shared-host verification slot or adding a second watchdog and process-group
+reaper. Bump the epoch only when a proven compiler/cache transition requires
+another full invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions
@@ -2043,14 +2022,22 @@ Current hosted billing assumptions:
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
   rows, and labels the mailbox retention boundary. The table and reset reuse the
   runtime's canonical allowance gate. A row reset verifies the displayed
-  current-period and usage-credit versions, then atomically clears current
-  included spend and the block while releasing only that capacity epoch's
-  logical notice claim. It preserves immutable usage, usage credit, billing
-  state, mailbox rows, and delivery history, and refuses to race an in-flight
-  notice dispatch. After commit it signals the existing runtime recheck; a
+  current-period and usage-credit versions. Paid, Family, and container resets
+  atomically clear current included spend and the block. An exhausted canonical
+  Starter reset instead appends one fresh $4.50 grant under the beneficiary
+  lock, keyed to the displayed ledger version, then clears the derived period.
+  The distinct Ops grant source is excluded from Starter enrollment and
+  conversion metrics. Both paths release only that capacity epoch's logical
+  notice claim, preserve immutable usage, prior grants and debits, purchased and
+  referral credit, billing state, mailbox rows, and delivery history, and refuse
+  to race an in-flight notice dispatch. After commit the route signals the
+  existing runtime recheck; a
   rejected or bounded-timeout wake is returned as a committed partial result
-  with a wake-only retry. The table reads its decision and reset version from
-  one repeatable database snapshot, and derives blocked/available only from
+  with a wake-only retry. For Starter recovery, the page reconstructs that
+  wake-only action after close or reload from the active Ops grant and
+  unconsumed mailbox work previously denied for usage. The table reads its
+  decision and reset version from one repeatable database snapshot, and derives
+  blocked/available only from
   that canonical decision rather than the potentially stale persisted marker.
   Historical notice status is displayed independently from current admission.
   A later crossing reuses the logical claim key but receives a fresh durable

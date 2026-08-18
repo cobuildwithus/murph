@@ -74,11 +74,13 @@ export const POST = withJsonError(async (request: Request) => {
       }, 202);
     }
 
-    console.info("Hosted ops current usage period reset completed.", {
+    console.info("Hosted ops usage reset completed.", {
       noticeClaimReleased: result.noticeClaimReleased,
       outcome: result.outcome,
+      resetMode: result.resetMode,
       runtimeRecheckStatus: "accepted",
       timestamp: result.resetAt,
+      usageCreditGrantedUsdMicros: result.usageCreditGrantedUsdMicros,
     });
     return jsonOk({
       ...result,

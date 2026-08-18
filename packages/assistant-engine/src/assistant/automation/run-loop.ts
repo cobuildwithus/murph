@@ -730,7 +730,8 @@ function createLocalCaptureAssistantInputSourceMetadata(
   const replyContext = sanitizeLocalAssistantInputMetadataText(
     raw.reply_context_preview,
   )
-  if (!mediaGroupId && !replyContext) {
+  const replyToMessageId = readLocalTelegramCaptureReplyToMessageId(raw)
+  if (!mediaGroupId && !replyContext && !replyToMessageId) {
     return null
   }
 
@@ -738,7 +739,22 @@ function createLocalCaptureAssistantInputSourceMetadata(
     kind: 'telegram',
     mediaGroupId,
     replyContext,
+    ...(replyToMessageId ? { replyToMessageId } : {}),
   }
+}
+
+function readLocalTelegramCaptureReplyToMessageId(
+  raw: Record<string, unknown>,
+): string | null {
+  const value = raw.reply_to_message_id
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return String(value)
+  }
+  if (typeof value !== 'string') {
+    return null
+  }
+  const normalized = value.trim()
+  return /^\d+$/u.test(normalized) ? normalized : null
 }
 
 function readLocalLinqCaptureReplyToMessageId(

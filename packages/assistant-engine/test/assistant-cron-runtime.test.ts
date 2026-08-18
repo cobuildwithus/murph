@@ -48,6 +48,7 @@ type MockAutomationRecord = {
   createdAt: string
   scheduleAnchorAt?: string
   instructions: string
+  plannedOccurrenceOffsetMs?: number | null
   route: AutomationRoute
   schedule: AutomationSchedule
   relativePath?: string
@@ -4096,6 +4097,11 @@ describe('assistant cron runtime orchestration', () => {
           instructions: expect.stringContaining(
             `Persisted support kind: ${supportKind}.`,
           ),
+          outboxAutomationAuthority: {
+            automationId: canonicalAutomation.automationId,
+            expectedUpdatedAt: canonicalAutomation.updatedAt,
+            supportSeriesId: 'habit:reg_sleep_support',
+          },
         }),
       )
       const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
@@ -11291,9 +11297,11 @@ describe('assistant cron runtime orchestration', () => {
     )
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-pinned-mixed-route',
+      relativePath: 'bank/automations/stand-up-reminder.md',
       continuityPolicy: 'preserve',
       createdAt: '2026-05-03T22:17:55.000Z',
       instructions: 'Remind me to stand up.',
+      plannedOccurrenceOffsetMs: 900_000,
       route: {
         channel: 'linq',
         deliverySource: {
@@ -11319,8 +11327,8 @@ describe('assistant cron runtime orchestration', () => {
 
     const paths = resolveAssistantStatePaths(vaultRoot)
     const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
-    if (!source) {
-      throw new Error('Expected canonical source to exist.')
+    if (!source || source.kind !== 'automation') {
+      throw new Error('Expected canonical automation source to exist.')
     }
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const baseRuntimeState = resolveCanonicalRuntimeState(source, runtimeStore)
@@ -11369,6 +11377,7 @@ describe('assistant cron runtime orchestration', () => {
           automationId: 'automation-linq-pinned-mixed-route',
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
         },
+        outboxPlannedOccurrenceAt: '2026-05-04T16:15:00.000Z',
         participantId: 'participant-1',
         threadId: 'thread-1',
         turnTrigger: 'automation-cron',
@@ -11434,6 +11443,7 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-kl-pending-sent-')
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-kl-pending-sent',
+      relativePath: 'bank/automations/midnight-sleep-reminder.md',
       continuityPolicy: 'preserve',
       createdAt: '2026-05-03T22:17:55.000Z',
       instructions: 'Remind me to sleep.',

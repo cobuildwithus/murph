@@ -29,13 +29,19 @@ export {
 
 export async function runPrLifecycle({ cleanup, deploy, dispatch, now, postconditions, retire }) {
   let primaryError = null;
+  let primaryStage = "retire_before_run";
   let finalizationError = null;
+  let finalizationStage = "retire_after_run";
   try {
     await retire();
+    primaryStage = "cleanup_before_run";
     await cleanup();
     const startedAtMs = now();
+    primaryStage = "deploy";
     const webBaseUrl = await deploy();
+    primaryStage = "dispatch";
     await dispatch(webBaseUrl);
+    primaryStage = "postconditions";
     await postconditions(startedAtMs);
   } catch (error) {
     primaryError = error;
@@ -43,6 +49,7 @@ export async function runPrLifecycle({ cleanup, deploy, dispatch, now, postcondi
     try {
       // Retire callback-capable Web deployments before provider or database state.
       await retire();
+      finalizationStage = "cleanup_after_run";
       await cleanup();
     } catch (error) {
       finalizationError = error;
@@ -50,8 +57,8 @@ export async function runPrLifecycle({ cleanup, deploy, dispatch, now, postcondi
   }
   if (finalizationError) {
     throw new Error(primaryError
-      ? "Native iOS E2E failed and fail-closed final cleanup did not complete."
-      : "Native iOS E2E final cleanup did not complete.");
+      ? `Native iOS E2E failed at ${primaryStage}; fail-closed finalization failed at ${finalizationStage}.`
+      : `Native iOS E2E finalization failed at ${finalizationStage}.`);
   }
   if (primaryError) throw primaryError;
 }

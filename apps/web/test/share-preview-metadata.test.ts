@@ -120,6 +120,10 @@ describe("share preview metadata", () => {
       alt: expect.stringMatching(/^.+, a Murph biomarker\.$/),
       url: "/biomarkers/deep-sleep-minutes/opengraph-image",
     });
+    expect(metadata.alternates?.canonical).toBe(
+      "/biomarkers/deep-sleep-minutes/research",
+    );
+    expect(metadata.robots).toEqual({ follow: true, index: true });
     expectRouteFile("../app/biomarkers/[biomarkerId]/opengraph-image.tsx");
   });
 

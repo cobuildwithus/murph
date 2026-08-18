@@ -386,10 +386,10 @@ test("next.config leaves agent guidance under repository ownership", () => {
   assert.equal(productionNextConfig.agentRules, false);
 });
 
-test("production build config enables the bounded Webpack worker path", () => {
+test("production build config keeps Webpack compilation in the Next process", () => {
   assert.equal(productionNextConfig.experimental?.turbopackFileSystemCacheForBuild, false);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
-  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
+  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, undefined);
   assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);
 });
 

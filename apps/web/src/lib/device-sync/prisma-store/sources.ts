@@ -54,8 +54,15 @@ const hostedConnectionSourceAdmissionArgs = {
   },
 } satisfies Prisma.DeviceConnectionSourceDefaultArgs;
 
-export type HostedConnectionSourceAdmissionCandidate =
+type HostedConnectionSourceAdmissionRecord =
   Prisma.DeviceConnectionSourceGetPayload<typeof hostedConnectionSourceAdmissionArgs>;
+
+export type HostedConnectionSourceAdmissionCandidate = Omit<
+  HostedConnectionSourceAdmissionRecord,
+  "status"
+> & {
+  status: DeviceConnectionSourceStatus;
+};
 
 export interface HostedDeviceConnectionSource {
   id: string;
@@ -295,59 +302,59 @@ export class PrismaHostedConnectionSourceStore {
     return records.map(mapHostedConnectionSourceRecord);
   }
 
-  async listConnectionSourceAdmissionCandidates(input: {
+  async resolveConnectionSourceAdmissionCandidate(input: {
     connectionId: string;
+    sourceInstanceKey?: string;
     sourceProviderSlug: string;
     tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
+  }): Promise<HostedConnectionSourceAdmissionCandidate | null> {
     const prisma = input.tx ?? this.prisma;
     const connectionId = requireConnectionId(input.connectionId);
+    const sourceInstanceKey = input.sourceInstanceKey === undefined
+      ? null
+      : normalizeSourceInstanceKey(input.sourceInstanceKey);
     const sourceProviderSlug = normalizeSourceProviderSlug(input.sourceProviderSlug);
-    const admitted = await prisma.deviceConnectionSource.findMany({
-      where: {
-        connectionId,
-        sourceProviderSlug,
-        status: "connected",
-        OR: [
-          { lastErrorCode: null },
-          {
-            NOT: {
-              lastErrorCode: {
-                in: [
-                  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
-                  DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
-                  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
-                ],
-              },
-            },
-          },
-        ],
-      },
-      orderBy: [
-        { lastSeenAt: "desc" },
-        { sourceInstanceKey: "asc" },
-        { id: "asc" },
-      ],
-      take: 1,
-      ...hostedConnectionSourceAdmissionArgs,
-    });
-    if (admitted.length > 0) {
-      return admitted;
-    }
+    const [candidate] = await prisma.$queryRaw<HostedConnectionSourceAdmissionRecord[]>(
+      Prisma.sql`
+        SELECT
+          "id",
+          "last_error_code" AS "lastErrorCode",
+          "last_error_message" AS "lastErrorMessage",
+          "last_seen_at" AS "lastSeenAt",
+          "source_instance_key" AS "sourceInstanceKey",
+          "source_provider_slug" AS "sourceProviderSlug",
+          "status"
+        FROM "device_connection_source"
+        WHERE "connection_id" = ${connectionId}
+          AND "source_provider_slug" = ${sourceProviderSlug}
+        ORDER BY
+          ${sourceInstanceKey === null
+            ? Prisma.empty
+            : Prisma.sql`("source_instance_key" = ${sourceInstanceKey}) DESC,`}
+          (
+            "status" = 'connected'
+            AND (
+              "last_error_code" IS NULL
+              OR "last_error_code" NOT IN (
+                ${DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE},
+                ${DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE},
+                ${DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE}
+              )
+            )
+          ) DESC,
+          "last_seen_at" DESC,
+          "source_instance_key" ASC,
+          "id" ASC
+        LIMIT 1
+      `,
+    );
 
-    return prisma.deviceConnectionSource.findMany({
-      where: {
-        connectionId,
-        sourceProviderSlug,
-      },
-      orderBy: [
-        { lastSeenAt: "desc" },
-        { sourceInstanceKey: "asc" },
-        { id: "asc" },
-      ],
-      take: 1,
-      ...hostedConnectionSourceAdmissionArgs,
-    });
+    return candidate
+      ? {
+          ...candidate,
+          status: normalizeSourceStatus(candidate.status),
+        }
+      : null;
   }
 
   async listConnectionSourcesForConnections(

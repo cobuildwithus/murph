@@ -692,6 +692,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             telegramMessage: expect.objectContaining({
               messageId: "1",
               replyContextPreview: "Replying to: Earlier message\nQuoted text: quoted",
+              replyToMessageId: "0",
               schema: "murph.hosted-telegram-message.v1",
               text: "hello",
               threadId: "123",

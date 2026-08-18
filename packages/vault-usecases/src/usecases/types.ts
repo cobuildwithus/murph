@@ -411,6 +411,7 @@ export interface ExperimentSessionLogResult {
   ledgerFile: string
   created: boolean
   kind: "intervention_session"
+  progress?: QueryExperimentProgressSummary
 }
 
 export interface ExperimentSessionAttachResult {
@@ -1022,6 +1023,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   logExperimentSession(
     input: CommandContext & {
       lookup: string
+      reminderIntentId?: string
       date?: string
       occurredAt?: string
       source?: EventSource

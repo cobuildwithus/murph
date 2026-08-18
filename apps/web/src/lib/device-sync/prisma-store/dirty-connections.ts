@@ -700,7 +700,7 @@ export class PrismaHostedDirtyConnectionStore {
 
     if (!existing) {
       const counters = buildDirtyCounters(resourceBatch.allResources);
-      const created = await prisma.deviceSyncDirtyConnection.createMany({
+      const [record] = await prisma.deviceSyncDirtyConnection.createManyAndReturn({
         data: {
           connectionId: input.connectionId,
           userId: input.userId,
@@ -722,7 +722,7 @@ export class PrismaHostedDirtyConnectionStore {
         skipDuplicates: true,
       });
 
-      if (created.count === 0) {
+      if (!record) {
         throw createDirtyStateContentionError("update");
       }
 
@@ -736,15 +736,6 @@ export class PrismaHostedDirtyConnectionStore {
         tx: prisma,
         userId: input.userId,
       });
-
-      const record = await prisma.deviceSyncDirtyConnection.findUnique({
-        where: {
-          connectionId: input.connectionId,
-        },
-      });
-      if (!record) {
-        throw createDirtyStateContentionError("update");
-      }
 
       return {
         dirty: withDirtyPayloadResources(
@@ -819,7 +810,7 @@ export class PrismaHostedDirtyConnectionStore {
     ) {
       throw createDirtyStateContentionError("update");
     }
-    const updated = await prisma.deviceSyncDirtyConnection.updateMany({
+    const [record] = await prisma.deviceSyncDirtyConnection.updateManyAndReturn({
       where: {
         connectionId: input.connectionId,
         dirtyRevision: existing.dirtyRevision,
@@ -843,7 +834,7 @@ export class PrismaHostedDirtyConnectionStore {
       },
     });
 
-    if (updated.count === 0) {
+    if (!record) {
       throw createDirtyStateContentionError("update");
     }
 
@@ -857,15 +848,6 @@ export class PrismaHostedDirtyConnectionStore {
       tx: prisma,
       userId: input.userId,
     });
-
-    const record = await prisma.deviceSyncDirtyConnection.findUnique({
-      where: {
-        connectionId: input.connectionId,
-      },
-    });
-    if (!record) {
-      throw createDirtyStateContentionError("update");
-    }
 
     return {
       dirty: withDirtyPayloadResources(
@@ -921,6 +903,29 @@ export class PrismaHostedDirtyConnectionStore {
     `);
 
     return rows.some((row) => row.pending === true);
+  }
+
+  async readPendingDirtyConnectionSnapshot(input: {
+    connectionId: string;
+    provider: string;
+    userId: string;
+  }): Promise<{ dirtyRevision: bigint; processedRevision: bigint } | null> {
+    const [snapshot] = await this.prisma.$queryRaw<Array<{
+      dirtyRevision: bigint;
+      processedRevision: bigint;
+    }>>(Prisma.sql`
+      SELECT
+        "dirty_revision" AS "dirtyRevision",
+        "processed_revision" AS "processedRevision"
+      FROM "device_sync_dirty_connection"
+      WHERE "connection_id" = ${input.connectionId}
+        AND "user_id" = ${input.userId}
+        AND "provider" = ${input.provider}
+        AND "dirty_revision" > "processed_revision"
+      LIMIT 1
+    `);
+
+    return snapshot ?? null;
   }
 
   async shouldRequestWakeForDirtyConnectionUpsert(input: {

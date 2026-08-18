@@ -242,8 +242,10 @@ describe("MemberUsageClient", () => {
       periodStart: "2026-07-01T00:00:00.000Z",
       previousSpentUsdMicros: "4522964",
       resetAt: "2026-07-22T18:00:00.000Z",
+      resetMode: "included_usage",
       runtimeRecheckStatus: "accepted",
       updatedAt: "2026-07-22T18:00:00.000Z",
+      usageCreditGrantedUsdMicros: "0",
     }));
     const rendered = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),
@@ -278,6 +280,240 @@ describe("MemberUsageClient", () => {
     expect(routerRefresh).toHaveBeenCalledTimes(1);
   });
 
+  test("confirms and reports one fresh Starter allowance", async () => {
+    const dashboard = makeDashboard();
+    const row = dashboard.rows[0];
+    if (!row?.currentPeriod) {
+      throw new Error("Expected a usage fixture row.");
+    }
+    row.containerOwnerMemberId = null;
+    row.memberKind = "member";
+    row.participantCount = null;
+    row.resetMode = "starter_allowance";
+    row.currentPeriod.limitUsdMicros = "0";
+    row.currentPeriod.spentUsdMicros = "0";
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      memberId: "hbm_container",
+      noticeClaimReleased: true,
+      outcome: "reset",
+      periodStart: "2026-07-01T00:00:00.000Z",
+      previousSpentUsdMicros: "0",
+      resetAt: "2026-07-22T18:00:00.000Z",
+      resetMode: "starter_allowance",
+      runtimeRecheckStatus: "accepted",
+      updatedAt: "2026-07-22T18:00:00.000Z",
+      usageCreditGrantedUsdMicros: "4500000",
+    }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Reset Starter"),
+    );
+
+    expect(rendered.container.textContent).toContain("Starter exhausted");
+    expect(rendered.container.textContent).toContain("Reset Starter allowance?");
+    expect(rendered.container.textContent).toContain(
+      "one fresh $4.50 Starter allowance",
+    );
+    expect(rendered.container.textContent).toContain("Allowance added$4.50");
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Grant $4.50"),
+    );
+
+    expect(rendered.container.querySelector('[role="alert"]')?.textContent)
+      .toContain("Starter allowance was reset to $4.50");
+    expect(routerRefresh).toHaveBeenCalledTimes(1);
+    expect(rendered.container.textContent).toContain("Committed · refreshing");
+    expect(rendered.container.textContent).not.toContain("Starter exhausted");
+    expect(rendered.container.textContent).not.toContain("Notice claimed");
+    expect(rendered.container.textContent).not.toContain("Blocked");
+    expect(() => getButton(rendered.container, "Reset Starter"))
+      .toThrow("Button not found: Reset Starter");
+    expect(getButton(rendered.container, "Refreshing").disabled).toBe(true);
+
+    const refreshedDashboard = makeDashboard();
+    const refreshedRow = refreshedDashboard.rows[0];
+    if (!refreshedRow?.currentPeriod) {
+      throw new Error("Expected a refreshed usage fixture row.");
+    }
+    refreshedDashboard.capturedAt = "2026-07-22T18:00:01.000Z";
+    refreshedRow.containerOwnerMemberId = null;
+    refreshedRow.memberKind = "member";
+    refreshedRow.participantCount = null;
+    refreshedRow.resetMode = null;
+    refreshedRow.currentPeriod.blocked = false;
+    refreshedRow.currentPeriod.idempotencyClaimStatus = null;
+    refreshedRow.currentPeriod.limitUsdMicros = "0";
+    refreshedRow.currentPeriod.remainingUsdMicros = "4500000";
+    refreshedRow.currentPeriod.spentUsdMicros = "0";
+    refreshedRow.currentPeriod.usageCreditBalanceUsdMicros = "4500000";
+    refreshedRow.currentPeriod.usageCreditLedgerVersion = "5";
+
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard: refreshedDashboard }),
+    );
+
+    expect(rendered.container.textContent).not.toContain("Committed · refreshing");
+    expect(rendered.container.textContent).toContain("Available");
+    expect(rendered.container.textContent).toContain("$4.50");
+    expect(getButton(rendered.container, "Reset").disabled).toBe(true);
+  });
+
+  test("preserves a pending Starter wake until canonical captures take over", async () => {
+    const exhaustedDashboard = makeDashboard();
+    const exhaustedRow = exhaustedDashboard.rows[0];
+    if (!exhaustedRow?.currentPeriod) {
+      throw new Error("Expected a usage fixture row.");
+    }
+    exhaustedRow.containerOwnerMemberId = null;
+    exhaustedRow.memberKind = "member";
+    exhaustedRow.participantCount = null;
+    exhaustedRow.resetMode = "starter_allowance";
+    exhaustedRow.currentPeriod.limitUsdMicros = "0";
+    exhaustedRow.currentPeriod.spentUsdMicros = "0";
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        memberId: "hbm_container",
+        noticeClaimReleased: true,
+        outcome: "reset",
+        periodStart: "2026-07-01T00:00:00.000Z",
+        previousSpentUsdMicros: "0",
+        resetAt: "2026-07-22T18:00:00.000Z",
+        resetMode: "starter_allowance",
+        runtimeRecheckStatus: "pending",
+        updatedAt: "2026-07-22T18:00:00.000Z",
+        usageCreditGrantedUsdMicros: "4500000",
+      }, 202))
+      .mockResolvedValueOnce(jsonResponse({
+        memberId: "hbm_container",
+        runtimeRecheckStatus: "accepted",
+      }));
+    const firstRender = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: exhaustedDashboard }),
+    );
+
+    await clickButton(
+      firstRender.window,
+      getButton(firstRender.container, "Reset Starter"),
+    );
+    await clickButton(
+      firstRender.window,
+      getButton(firstRender.container, "Grant $4.50"),
+    );
+    expect(firstRender.container.textContent).toContain(
+      "Starter allowance was reset, but the runtime did not accept",
+    );
+    await clickButton(
+      firstRender.window,
+      getButton(firstRender.container, "Close"),
+    );
+
+    expect(firstRender.container.textContent).toContain(
+      "Committed · Wake pending",
+    );
+    expect(firstRender.container.textContent).not.toContain("Starter exhausted");
+    expect(firstRender.container.textContent).not.toContain("Notice claimed");
+    expect(firstRender.container.textContent).not.toContain("Blocked");
+    expect(() => getButton(firstRender.container, "Reset Starter"))
+      .toThrow("Button not found: Reset Starter");
+    expect(getButton(firstRender.container, "Recheck runtime").disabled)
+      .toBe(false);
+
+    // A delayed or failed refresh can rerender the old capture. The committed
+    // result must still own this row and expose only the wake-safe action.
+    await firstRender.rerender(
+      createElement(MemberUsageClient, { dashboard: exhaustedDashboard }),
+    );
+    expect(firstRender.container.textContent).toContain(
+      "Committed · Wake pending",
+    );
+    expect(getButton(firstRender.container, "Recheck runtime").disabled)
+      .toBe(false);
+
+    await firstRender.cleanup();
+
+    const recoveredDashboard = makeDashboard();
+    const recoveredRow = recoveredDashboard.rows[0];
+    if (!recoveredRow?.currentPeriod) {
+      throw new Error("Expected a recovered usage fixture row.");
+    }
+    recoveredRow.containerOwnerMemberId = null;
+    recoveredRow.memberKind = "member";
+    recoveredRow.participantCount = null;
+    recoveredRow.resetMode = null;
+    recoveredRow.runtimeRecheckAvailable = true;
+    recoveredRow.currentPeriod.blocked = false;
+    recoveredRow.currentPeriod.idempotencyClaimStatus = null;
+    recoveredRow.currentPeriod.limitUsdMicros = "0";
+    recoveredRow.currentPeriod.remainingUsdMicros = "4500000";
+    recoveredRow.currentPeriod.spentUsdMicros = "0";
+    recoveredRow.currentPeriod.usageCreditBalanceUsdMicros = "4500000";
+    recoveredRow.currentPeriod.usageCreditLedgerVersion = "5";
+    recoveredDashboard.capturedAt = "2026-07-22T18:00:01.000Z";
+    const recoveredRender = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: recoveredDashboard }),
+    );
+    cleanupRender = recoveredRender.cleanup;
+
+    expect(recoveredRender.container.textContent).toContain("Wake pending");
+    await clickButton(
+      recoveredRender.window,
+      getButton(recoveredRender.container, "Recheck runtime"),
+    );
+    expect(recoveredRender.container.textContent).toContain(
+      "The allowance reset is already committed.",
+    );
+    await clickButton(
+      recoveredRender.window,
+      getButton(recoveredRender.container, "Retry runtime wake"),
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        memberId: "hbm_container",
+        operation: "runtime_recheck",
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(recoveredRender.container.querySelector('[role="alert"]')?.textContent)
+      .toContain("runtime recheck was accepted");
+    expect(() => getButton(recoveredRender.container, "Recheck runtime"))
+      .toThrow("Button not found: Recheck runtime");
+
+    const stillPendingDashboard = structuredClone(recoveredDashboard);
+    stillPendingDashboard.capturedAt = "2026-07-22T18:00:02.000Z";
+    await recoveredRender.rerender(
+      createElement(MemberUsageClient, { dashboard: stillPendingDashboard }),
+    );
+    expect(recoveredRender.container.textContent).toContain("Wake pending");
+    expect(getButton(recoveredRender.container, "Recheck runtime").disabled)
+      .toBe(false);
+
+    const consumedDashboard = structuredClone(stillPendingDashboard);
+    consumedDashboard.capturedAt = "2026-07-22T18:00:03.000Z";
+    const consumedRow = consumedDashboard.rows[0];
+    if (!consumedRow) {
+      throw new Error("Expected a consumed recovery fixture row.");
+    }
+    consumedRow.runtimeRecheckAvailable = false;
+    await recoveredRender.rerender(
+      createElement(MemberUsageClient, { dashboard: consumedDashboard }),
+    );
+    expect(recoveredRender.container.textContent).not.toContain("Wake pending");
+    expect(() => getButton(recoveredRender.container, "Recheck runtime"))
+      .toThrow("Button not found: Recheck runtime");
+  });
+
   test("keeps a committed reset open and retries only the runtime wake", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({
@@ -287,8 +523,10 @@ describe("MemberUsageClient", () => {
         periodStart: "2026-07-01T00:00:00.000Z",
         previousSpentUsdMicros: "4522964",
         resetAt: "2026-07-22T18:00:00.000Z",
+        resetMode: "included_usage",
         runtimeRecheckStatus: "pending",
         updatedAt: "2026-07-22T18:00:00.000Z",
+        usageCreditGrantedUsdMicros: "0",
       }, 202))
       .mockResolvedValueOnce(jsonResponse({
         memberId: "hbm_container",
@@ -329,6 +567,10 @@ describe("MemberUsageClient", () => {
     });
     expect(rendered.container.querySelector('[role="alert"]')?.textContent)
       .toContain("runtime recheck was accepted");
+    expect(rendered.container.textContent).toContain("Committed · refreshing");
+    expect(rendered.container.textContent).not.toContain("Blocked");
+    expect(rendered.container.textContent).not.toContain("Notice claimed");
+    expect(getButton(rendered.container, "Refreshing").disabled).toBe(true);
   });
 
   test("surfaces a stale reset without claiming success", async () => {
@@ -389,6 +631,8 @@ function makeDashboard(): HostedOpsMemberUsageDashboard {
       messagesLast7Days: 7,
       messagesRetained: 18,
       participantCount: 2,
+      resetMode: "included_usage",
+      runtimeRecheckAvailable: false,
       suspended: false,
     }],
     summary: {

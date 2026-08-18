@@ -12,6 +12,12 @@ export const ROOT_OPTIONS_WITH_VALUES = new Set([
   '--token-limit',
   '--token-offset',
 ])
+export const ROOT_OPTIONS_WITHOUT_VALUES = new Set([
+  '--full-output',
+  '--json',
+  '--no-config',
+  '--token-count',
+])
 
 export function resolveRootOptionTokenWithValue(
   token: string,
@@ -117,6 +123,44 @@ export function resolveEffectiveTopLevelToken(
   }
 
   return null
+}
+
+export function resolveVaultCliCommandPath(
+  args: readonly string[],
+): string[] {
+  const commandPath: string[] = []
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]
+    if (!token) {
+      continue
+    }
+    if (token === '--') {
+      return args
+        .slice(index + 1, index + 3)
+        .filter((entry): entry is string =>
+          typeof entry === 'string' && entry.length > 0,
+        )
+    }
+
+    const rootOptionWithValue = resolveRootOptionTokenWithValue(token)
+    if (rootOptionWithValue !== null) {
+      if (!token.includes('=')) {
+        index += 1
+      }
+      continue
+    }
+    if (ROOT_OPTIONS_WITHOUT_VALUES.has(token) || token.startsWith('-')) {
+      continue
+    }
+
+    commandPath.push(token)
+    if (commandPath.length >= 2) {
+      break
+    }
+  }
+
+  return commandPath
 }
 
 export function firstString(

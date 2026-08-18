@@ -49,6 +49,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   kind: 'automation'
   activeUntil: string | null
   automationId: string
+  relativePath: string
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
   scheduleAnchorAt?: string
@@ -60,6 +61,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   status: 'active' | 'paused'
   summary: string | null
   supportKind: AutomationSupportKind | null
+  plannedOccurrenceOffsetMs: number | null
   tags: string[]
   timeZone: string | null
   title: string
@@ -581,6 +583,7 @@ function normalizeCanonicalAssistantCronRecord(
     kind: 'automation',
     activeUntil: record.activeUntil ?? null,
     automationId: record.automationId,
+    relativePath: record.relativePath,
     continuityPolicy: record.continuityPolicy,
     createdAt: record.createdAt,
     scheduleAnchorAt: record.scheduleAnchorAt ?? record.createdAt,
@@ -592,6 +595,7 @@ function normalizeCanonicalAssistantCronRecord(
     status: record.status,
     summary: record.summary,
     supportKind: record.supportKind ?? null,
+    plannedOccurrenceOffsetMs: record.plannedOccurrenceOffsetMs ?? null,
     tags: [...record.tags],
     timeZone:
       record.schedule.kind === 'cron' || record.schedule.kind === 'dailyLocal'

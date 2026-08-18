@@ -824,6 +824,10 @@ describe("hosted web production migration guard", () => {
       parsed.searchParams.get("options"),
       `-c statement_timeout=5000 -c role=${hostedWebMigrationOwnerRole}`,
     );
+    assert.equal(
+      parsed.search,
+      "?sslmode=require&options=-c%20statement_timeout%3D5000%20-c%20role%3Dpostgres",
+    );
   });
 
   test("fails closed on ownership drift while allowing canonical bootstrap", async () => {
@@ -924,7 +928,7 @@ describe("hosted web production migration guard", () => {
     );
 
     const expectedOwnerUrl =
-      "postgresql://direct.example.com:5432/app?sslmode=require&options=-c+role%3Dpostgres";
+      "postgresql://direct.example.com:5432/app?sslmode=require&options=-c%20role%3Dpostgres";
     assert.deepEqual(events, ["verify:start", "verify:complete", "run"]);
     assert.deepEqual(verifiedUrls, [expectedOwnerUrl]);
     assert.deepEqual(calls, [
@@ -1433,17 +1437,15 @@ describe("hosted web production migration guard", () => {
       buildScript,
       /pnpm typecheck:prepared && bash scripts\/run-production-next-build\.sh/u,
     );
-    assert.match(
-      buildScript,
-      /^node \.\.\/\.\.\/scripts\/run-with-host-verification-slot\.mjs 'apps\/web build' -- bash -c /u,
-    );
+    assert.match(buildScript, /^pnpm public-routes:waf-check/u);
+    assert.doesNotMatch(buildScript, /run-with-host-verification-slot/u);
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
-    assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
-    assert.match(productionNextBuildScript, /build_worker_old_space_mb=3072/u);
+    assert.match(productionNextBuildScript, /build_old_space_mb=3072/u);
+    assert.doesNotMatch(productionNextBuildScript, /build_worker_old_space_mb/u);
     assert.match(productionNextBuildScript, /typecheck_old_space_mb=3584/u);
     assert.match(
       productionNextBuildScript,
-      /build_cache_epoch=webpack-next-16\.3-v3-prepared-typecheck-cold-webpack/u,
+      /build_cache_epoch=webpack-next-16\.3-v4-in-process-cold-webpack/u,
     );
     assert.match(productionNextBuildScript, /webpack_cache_dir=\.next\/cache\/webpack/u);
     assert.match(
@@ -1461,42 +1463,28 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
+      /node "--max-old-space-size=\$build_old_space_mb" "\$next_bin" build --webpack/u,
     );
     assert.match(
       productionNextBuildScript,
       /node \.\.\/\.\.\/scripts\/rm-paths\.mjs "\$webpack_cache_dir"/u,
     );
 
-    // The hosted build deadline lives in the package-build process owner, not
-    // in the runner: vercel-build.sh arms it for production and the dedicated
-    // native iOS E2E target, and the supervisor owns whole-group termination
-    // and reaping.
+    // Vercel owns the production build lifecycle. The application does not
+    // add a second deadline or route production through the local host slot.
     const vercelBuildScript = await readFile(
       path.join(appRoot, "scripts", "vercel-build.sh"),
       "utf8",
     );
-    assert.match(
-      vercelBuildScript,
-      /\[ "\$\{VERCEL_ENV:-\}" = "production" \] \|\|\s+\[ "\$\{VERCEL_TARGET_ENV:-\}" = "native-ios-e2e" \]/u,
-    );
-    assert.match(
-      vercelBuildScript,
-      /MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS="\$\{MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS:-900000\}"/u,
-    );
-    assert.match(vercelBuildScript, /export MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS/u);
+    assert.doesNotMatch(vercelBuildScript, /MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS/u);
     assert.doesNotMatch(productionNextBuildScript, /timeout /u);
     assert.doesNotMatch(productionNextBuildScript, /VERCEL/u);
     const verificationSlotScript = await readFile(
       path.join(appRoot, "..", "..", "scripts", "run-with-host-verification-slot.mjs"),
       "utf8",
     );
-    assert.match(
-      verificationSlotScript,
-      /COMMAND_TIMEOUT_ENV = "MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS"/u,
-    );
-    assert.match(verificationSlotScript, /COMMAND_TIMEOUT_EXIT_CODE = 124/u);
-    assert.match(verificationSlotScript, /reapCommandProcessGroup/u);
+    assert.doesNotMatch(verificationSlotScript, /MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS/u);
+    assert.doesNotMatch(verificationSlotScript, /reapCommandProcessGroup/u);
 
     // apps/web/README.md § "Production build memory guard" is the single prose
     // owner of the mutable runner contract (cache policy, epoch stamping, and
@@ -1514,7 +1502,7 @@ describe("hosted web production migration guard", () => {
       "utf8",
     );
     assert.match(readmeDoc, /## Production build memory guard/u);
-    assert.match(readmeDoc, /`VERCEL=1` with\s+`VERCEL_ENV=production`/u);
+    assert.match(readmeDoc, /Vercel owns cancellation and build deadlines/u);
     assert.match(readmeDoc, /`\.next\/cache\/webpack` before every compile/u);
     for (const [docName, doc] of [
       ["verification-and-runtime.md", verificationDoc],

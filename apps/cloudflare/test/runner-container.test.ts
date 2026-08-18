@@ -6962,7 +6962,7 @@ describe("RunnerContainer", () => {
     );
   });
 
-  it("restarts a warm shell with stale fingerprints before invoking user work", async () => {
+  it("replaces a below-floor warm runner before restored workspace state can be invoked", async () => {
     let healthChecks = 0;
     const events: string[] = [];
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({

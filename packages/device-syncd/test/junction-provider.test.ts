@@ -675,7 +675,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
         return createJsonResponse({ groups: {} });
@@ -767,7 +767,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
   const correctionSweepRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
   assert.equal(
     correctionSweepRequests.length,
-    (JUNCTION_KNOWN_TIMESERIES_RESOURCES.length - 1) * 7,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 7,
   );
   assert.deepEqual(
     new Set(correctionSweepRequests.map((url) =>
@@ -775,13 +775,11 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
         /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
       )?.[1])
     )),
-    new Set(JUNCTION_KNOWN_TIMESERIES_RESOURCES.filter(
-      (resource) => resource !== "workout_stream",
-    )),
+    new Set(JUNCTION_DEFAULT_TIMESERIES_RESOURCES),
   );
   assert.equal(
     requests.filter((url) => url.includes("/v2/summary/workouts/")).length,
-    8,
+    1,
   );
 });
 
@@ -833,7 +831,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
         return createJsonResponse({ groups: {} });
@@ -883,7 +881,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_KNOWN_TIMESERIES_RESOURCES].sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
   );
   assert.equal(importedSnapshots.length, 0);
 });
@@ -18656,6 +18654,61 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
   );
   assert.equal(continuation.payload?.windowStart, "2026-04-02T00:00:00.000Z");
   assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+});
+
+test("Junction known opt-in continuation restarts a narrowed default-only window", async () => {
+  const requests: URL[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    requests.push(url);
+    if (url.pathname.startsWith("/v2/timeseries/junction-user-1/")) {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES],
+  });
+  const context = createJunctionJobContext({ now: "2026-04-05T00:00:00.000Z" });
+  let result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-03T00:00:00.000Z",
+      timeseriesResourceCursor: "fat",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+  let continuationCount = 0;
+  while (result.scheduledJobs?.[0]) {
+    continuationCount += 1;
+    assert.ok(continuationCount < 100, "Narrowed continuation should terminate.");
+    result = await executeJunctionJob(
+      provider,
+      context,
+      createJobFromInput(result.scheduledJobs[0]),
+    );
+  }
+
+  const groupedRequests = requests.filter((url) => url.pathname.includes("/v2/timeseries/"));
+  assert.equal(
+    groupedRequests[0]?.searchParams.get("start_date"),
+    "2026-04-02",
+  );
+  assert.deepEqual(
+    new Set(groupedRequests.map((url) =>
+      normalizeJunctionResourceName(
+        url.pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1],
+      )
+    )),
+    new Set(JUNCTION_DEFAULT_TIMESERIES_RESOURCES),
+  );
+  assert.equal(
+    groupedRequests.length,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 2,
+  );
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
 });
 
 test("Junction scalar timeseries resource continuation fails closed before provider egress", async () => {

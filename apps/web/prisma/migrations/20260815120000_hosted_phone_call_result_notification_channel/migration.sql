@@ -4,7 +4,7 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 CREATE TYPE "HostedPhoneCallResultNotificationChannel"
-  AS ENUM ('telegram');
+  AS ENUM ('linq', 'telegram');
 
 CREATE TYPE "HostedPhoneCallResultDeliveryStatus"
   AS ENUM ('pending', 'queued', 'sending', 'delivered', 'ambiguous');

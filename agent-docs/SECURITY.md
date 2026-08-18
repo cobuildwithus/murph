@@ -561,29 +561,30 @@ Last verified: 2026-08-16
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - The public footer status read is a browser-to-incident.io technical-data boundary. Keep it on the fixed HTTPS status origin and fixed public summary path with no request body or query; retain the global `strict-origin` referrer policy and the exact-origin `connect-src` entry. Do not add account, page-path, query, fragment, prompt, health, message, cookie, or credential data to the request, and do not treat an empty public incident list as direct uptime proof. Keep incident.io and the technical metadata it receives disclosed in the public subprocessor register.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
-- External provider request params, nested params, and per-request options must
-  use installed official SDK types and must not contain object spread syntax or
-  `Object.assign`. Build the SDK-typed object first, then assign each optional
-  field explicitly; this preserves excess-property checking that TypeScript
-  otherwise loses across composed objects. `pnpm provider-requests:guard`
-  enforces the registered Composio, Stripe, Kernel, Linq, Retell, Temporal,
-  OpenAI, Resend, Junction, ElevenLabs, Exa, Lob, and Google Cloud client
-  boundaries across production apps, packages, and JavaScript/TypeScript
-  scripts. It also rejects direct `fetch`/`Request` construction when a known
-  provider origin is statically visible through local literals, templates,
-  URL objects, or variables. A detected official-SDK transport adapter may use
-  `provider-request-boundary-allow-next-line: sdk-transport-adapter` only when
-  the matching SDK is imported; a Linq SDK owner may use the
-  `linq-presigned-bytes` reason only for an `uploadUrl` or `downloadUrl` byte
-  transfer. The guard cannot prove the destination of imported or otherwise
-  runtime-computed URLs, and it does not inspect every possible HTTP library,
-  so it remains a focused boundary check rather than blanket proof that raw
-  provider HTTP is absent. Register each new official SDK and provider origin
-  when it is introduced. The opt-in
+- External provider calls should use the installed official SDK whenever one
+  is registered. `pnpm provider-requests:guard` scans authored production
+  JavaScript and TypeScript under `apps`, `packages`, and `scripts` for direct
+  `fetch`, Node HTTP/HTTPS, Undici, and common fetch aliases at registered
+  provider boundaries. It uses Babel's parser and scope bindings; it does not
+  reimplement TypeScript, validate provider payloads, or duplicate runtime
+  request/response contracts.
+
+  Raw transport is allowed only in an exact path-and-function owner registered
+  by the guard: an official SDK fetch hook or override, an opaque presigned byte
+  transfer, the runtime-validated xAI `x_search` call, or an explicitly named
+  pre-existing provider boundary retained as migration debt. Every owner is limited
+  to one raw call, and SDK owners must retain their registered runtime import.
+  Static same-origin calls and providers with no verified TypeScript SDK remain
+  outside the ban. Comments never suppress findings.
+
+  This is an ownership/convention check, not a security sandbox. Register each
+  provider and host explicitly. It does not claim coverage for an unregistered
+  provider, deliberately obscured transport, or code with no registered host,
+  SDK import, provider-named owner, or provider-named path. Production runtime
+  validators remain authoritative for URL, headers, body, response, timeout,
+  retry, and credential rules. The opt-in
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
-  test-mode secret key and calls the real resume endpoint with a synthetic
-  missing Subscription, so parameter drift fails without creating, charging,
-  or mutating a Stripe resource.
+  test-mode key and a synthetic missing Subscription.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no
@@ -1268,15 +1269,18 @@ Last verified: 2026-08-16
   room runtime and must never resolve the visible sender to a private member.
 - The hosted `murph.create_phone_call` dynamic tool is a model-controlled side-effect surface for user-approved outbound phone calls only. Expose it only when the hosted runtime has the web-owned phone-call port, require a bounded E.164 destination plus compact call brief, and put only user-approved disclosable facts in `shareableFacts`. Cloudflare may reach only the signed web-control callback allowlist entries for `POST /api/internal/phone-calls` and the exact generation-scoped phone-call result delivery callback, both with runtime write-fence authority; `apps/web` owns the Retell API key, from number, agent id/version, verified member transfer-number resolution, member-bound `HostedPhoneCall` rows, and request-key idempotency. Retell may receive the bounded call brief as dynamic variables and may call only signed raw-body `ask_murph`, `call_ended`, and `call_analyzed` routes; Murph must not persist raw Retell transcripts, Retell request/response bodies, provider secrets, or call audio in logs, docs, fixtures, workspace state, or user-facing output. Store only the bounded call brief, exact initiating resident-session id, provider call id, status, final analysis result, trusted result channel, and delivery generation/disposition needed for member-bound retry/audit. Encrypt every newly written brief and result before persistence through the control-domain `hosted-member-private-field` secure-box lane with member/table/row/field/scope-bound AAD, never dual-write plaintext, prefer ciphertext on reads, and fail closed when a present ciphertext is empty or invalid. A completed tracked direct analysis persists the encrypted result and advances the Web-owned call row and mailbox append under one compare-and-set; each notification uses the deterministic `phone-call-result:${callId}:generation:${generation}` identity and requires a delivered message. The output-only notification turn treats provider and callee text as bounded untrusted data, never authority, exposes no tools, and includes no conversation history or private context. The persisted initiating-session id is used only for phone-call request-key idempotency, never as a delivery route. For a group call, Web reloads the exact selected accepted message, binds it to the callback channel, account, thread, and synthetic container, derives the participant from that server-owned evidence, requires one current joined unsuspended membership, and repeats the same authority check immediately before provider start; the existing request-key calculation does not change. Account deletion must process every retained Retell provider call id, stop active calls, delete each provider object, and clear the local id only after confirmed deletion or confirmed absence. Any ambiguous provider or local-write failure must keep the `HostedPhoneCall` row and provider id as retry ownership and block the destructive local account transaction; terminal call status must not exempt provider cleanup. Retell API-key rotation must remain within the same Retell workspace while durable call ids exist, because the provider's missing-asset response proves absence only within the workspace authorized by the current key. Nullable `brief_json` and `result_json` are migration debt only: the bounded operator backfill must prove replacement equality, update under full compare-and-set authority, scrub plaintext in the same write, and emit metadata counts only.
 - A direct phone call may additionally persist only the bounded trusted
-  initiating `telegram` channel enum and fixed-vocabulary delivery state needed
-  for asynchronous result routing. Only an exact canonical scheduled occurrence
-  may set that enum; manual direct calls retain the prior null behavior.
+  initiating `linq` or `telegram` channel enum and fixed-vocabulary delivery
+  state needed for asynchronous result routing. The authenticated runtime,
+  never the model, derives that channel; group calls leave it null.
   Never persist a result-routing phone number, account identifier, or thread id
   on the call row. Web requires the matching current direct-member route before
   reservation and revalidates it immediately before provider entry; exact
   request-key replay consults the durable call before mutable route admission.
-  At completion, Web resolves the persisted channel, binds a direct thread
-  authority into the generation-scoped queued notification. At the first
+  At completion, Web resolves the persisted channel. Linq uses the ordinary
+  durable notification outbox; Telegram binds direct thread authority into a
+  generation-scoped queued notification. Both remain background work: newer
+  conversation input is admitted before result delivery and no result-specific
+  checkpoint may block a foreground reply. At the first Telegram
   message-provider fetch, the runtime supplies that exact authority to the
   signed outcome callback; Web revalidates it and compare-and-sets the exact
   generation to `sending` in the same callback operation. The runtime may report only the exact call
@@ -1288,7 +1292,12 @@ Last verified: 2026-08-16
   disposition. Route restoration and terminal callbacks may re-arm only one
   oldest nonterminal call for that member, and restoration does not acknowledge
   success if that required re-arm fails. Group calls omit the enum and keep
-  their existing thread-container authority.
+  their existing thread-container authority. `murph.get_phone_call_status`
+  exposes only the bounded three-row member-owned projection and never provider
+  ids, briefs, ciphertext, recordings, or cross-member existence.
+  `murph.stop_phone_call` may persist only the exact member-owned stop intent
+  and wake reconciliation; the sole reconciliation owner stops Retell, records
+  terminal state, and appends the deduped settlement notification.
 - The mechanical private-storage field-classification guard currently covers `HostedPhoneCall` only. It is not evidence that every other Prisma model has completed the same field-by-field audit; extend or add an owner guard when another private-content model is materially changed.
 - Kernel browser automation is an `apps/web`-owned hosted control surface. `KERNEL_API_KEY` must stay in web environment configuration only and must not be forwarded into Cloudflare runner env, Codex prompts, dynamic tool payloads, logs, fixtures, or user-facing output. Cloudflare may proxy only the narrow signed `/api/internal/computer/**` routes through `web-control.worker`; it must not receive raw Kernel API credentials or raw live-view URLs.
 - The persistent Kernel profile requires `HOSTED_COMPUTER_PROFILE_NAMESPACE` in `apps/web`; set it to a stable value per trust boundary so production, previews, and other deployments do not share saved cookies or authenticated browser state. Keep production's namespace stable, and use branch/deployment-specific preview namespaces or disable the persistent computer-use profile outside production.

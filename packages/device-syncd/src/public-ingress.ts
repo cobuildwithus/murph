@@ -1566,9 +1566,9 @@ export class DeviceSyncPublicIngress {
       };
     }
 
-    let account;
+    let webhookConnection;
     try {
-      account = await this.store.getConnectionByExternalAccount(
+      webhookConnection = await this.store.getWebhookConnectionByExternalAccount(
         provider.provider,
         prepared.externalAccountId,
       );
@@ -1577,7 +1577,7 @@ export class DeviceSyncPublicIngress {
       throw error;
     }
 
-    if (!account) {
+    if (!webhookConnection) {
       const unknownWebhookLogContext: Record<string, unknown> = {
         provider: provider.provider,
         externalAccountIdHash: hashExternalAccountIdForLogs(prepared.externalAccountId),
@@ -1643,6 +1643,7 @@ export class DeviceSyncPublicIngress {
         httpStatus: 503,
       });
     }
+    const { account, connectionOwnerId } = webhookConnection;
 
     if (
       account.status === "active"
@@ -1670,13 +1671,20 @@ export class DeviceSyncPublicIngress {
       // A dirty row proves only that import invalidation is queued. Await exact-
       // source lifecycle work before dirty coalescing can complete this trace.
       if (webhookSourceProviderSlug) {
-        const matchingSources = await this.store.listConnectionSources({
+        const sourceInstanceKey = provider.provider === "junction"
+          ? buildJunctionProviderSourceInstanceKey({
+              connectionId: account.id,
+              sourceProviderSlug: webhookSourceProviderSlug,
+            })
+          : null;
+        const source = await this.store.resolveConnectionSourceAdmissionCandidate({
           connectionId: account.id,
+          ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
           sourceProviderSlug: webhookSourceProviderSlug,
         });
         if (
-          matchingSources.length > 0
-          && !isDeviceSyncSourceAdmitted(matchingSources, webhookSourceProviderSlug)
+          source
+          && !isDeviceSyncSourceAdmitted([source], webhookSourceProviderSlug)
         ) {
           const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
             account,
@@ -1821,6 +1829,7 @@ export class DeviceSyncPublicIngress {
       const acceptedResult = await onWebhookAccepted?.({
         account,
         claimToken,
+        connectionOwnerId,
         processingAttemptedAt: claimedAt,
         sourceAdmissionDeferred,
         traceId,
