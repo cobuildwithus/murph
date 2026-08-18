@@ -48,7 +48,8 @@ continuation instead of the workspace repeating no-work checkpoints.
 ## Verification
 
 - `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-assistant-phase.test.ts`
-  passes all 299 focused assistant-phase tests, including no-work recovery,
+  passes all 300 focused assistant-phase tests, including no-work recovery with
+  a preserved future assistant continuation, no-match owner isolation,
   fresh-input priority, real assistant-progress priority, and foreground yield.
 - `pnpm --dir packages/assistant-runtime typecheck` passes.
 - Product UX journeys: an idle member with a shadowed durable sync item resumes
@@ -59,8 +60,14 @@ continuation instead of the workspace repeating no-work checkpoints.
   assistant-progress regression and rendered proof for changed changelog copy.
   The regression is added. The published copy is restored unchanged and this
   PR now only appends its source reference, so there is no rendered UI claim.
-- Exact corrected-head ReviewGPT, required CI, protected deployment, and
-  production convergence proof remain pending.
+- The substantive preliminary ReviewGPT pass found that a future assistant
+  continuation still blocked recovery and that the selected fallback could run
+  unrelated maintenance when no device item matched. The follow-up removes the
+  overly broad future-wake blocker, preserves that continuation through the
+  existing wake merge, and makes background selection owner-only.
+- Pull request #1984 merged before those findings returned. Follow-up pull
+  request #1985, its exact-head ReviewGPT and CI gates, protected deployment,
+  and production convergence proof remain pending.
 
 ## State
 
