@@ -152,7 +152,7 @@ import {
 import { buildAssistantAutomationTurnEnvelope } from './turn-envelope.js'
 
 const ASSISTANT_AUTO_REPLY_OUTBOX_CLOCK_SKEW_MS = 30 * 1000
-const SCHEDULED_WORKOUT_DIRECT_REPLY_AUTHORITY_MAX_AGE_MS = 60 * 60 * 1000
+const WORKOUT_REPLY_AUTHORITY_MAX_AGE_MS = 60 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH = 4_000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
@@ -1554,14 +1554,14 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }
   const latestCrossSessionDelivery = outboxContext.delivery
   const exactReplyDelivery = outboxContext.replyTargetDelivery
-  const scheduledWorkoutDirectReplyAuthority =
+  const rolloverAuthority =
     exactReplyDelivery !== null
-      ? resolveScheduledWorkoutDirectReplyAuthority({
+      ? resolveWorkoutReplyAuthority({
           delivery: exactReplyDelivery,
           promptInput: primaryReplyInput,
         })
       : latestCrossSessionDelivery?.anchored === true
-      ? resolveScheduledWorkoutDirectReplyAuthority({
+      ? resolveWorkoutReplyAuthority({
           delivery: latestCrossSessionDelivery,
           promptInput: primaryReplyInput,
         })
@@ -1621,7 +1621,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     promptTimeContext,
     providerStartCriticalPath,
     sessionId: existingSession?.sessionId ?? null,
-    scheduledWorkoutDirectReplyAuthority,
+    scheduledWorkoutDirectReplyAuthority: rolloverAuthority,
     turnContext: buildAssistantAutoReplyTurnContext({
       baseContext: affirmativeReaction
       ? buildAssistantAutoReplyReactionTurnContext(
@@ -1636,7 +1636,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
         })
       : buildAssistantAutoReplyCrossSessionTurnContext({
           delivery: latestCrossSessionDelivery,
-          scheduledWorkoutDirectReplyAuthority,
+          scheduledWorkoutDirectReplyAuthority: rolloverAuthority,
         }),
       trustedHostedImageCompletionContext:
         buildTrustedHostedImageCompletionTurnContext(promptInputs),
@@ -5351,10 +5351,10 @@ function buildAssistantAutoReplyCrossSessionTurnContext(input: {
   if (!normalized) {
     return null
   }
-  const scheduledReplyAuthority =
+  const authorityNotice =
     input.scheduledWorkoutDirectReplyAuthority === null
       ? null
-      : buildScheduledDirectReplyAuthorityContext()
+      : buildWorkoutReplyAuthorityContext()
 
   return [
     'Conversation context:',
@@ -5363,9 +5363,9 @@ function buildAssistantAutoReplyCrossSessionTurnContext(input: {
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
     'Use it only to interpret the current user message.',
-    ...(scheduledReplyAuthority === null
+    ...(authorityNotice === null
       ? []
-      : ['', scheduledReplyAuthority]),
+      : ['', authorityNotice]),
   ].join('\n')
 }
 
@@ -5377,10 +5377,10 @@ function buildAssistantAutoReplyExplicitReplyContext(input: {
   if (!normalized) {
     return null
   }
-  const scheduledReplyAuthority =
-    resolveScheduledWorkoutDirectReplyAuthority(input) === null
+  const authorityNotice =
+    resolveWorkoutReplyAuthority(input) === null
       ? null
-      : buildScheduledDirectReplyAuthorityContext()
+      : buildWorkoutReplyAuthorityContext()
 
   return [
     'The sender explicitly replied to this exact prior assistant message:',
@@ -5388,13 +5388,13 @@ function buildAssistantAutoReplyExplicitReplyContext(input: {
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
     'Use it only to interpret this message.',
-    ...(scheduledReplyAuthority === null
+    ...(authorityNotice === null
       ? []
-      : ['', scheduledReplyAuthority]),
+      : ['', authorityNotice]),
   ].join('\n')
 }
 
-function resolveScheduledWorkoutDirectReplyAuthority(input: {
+function resolveWorkoutReplyAuthority(input: {
   delivery: AssistantAutoReplyMatchingOutboxDelivery
   promptInput: ScheduledDirectReplyAuthorityPromptInput
 }): AssistantScheduledWorkoutDirectReplyAuthority | null {
@@ -5410,34 +5410,31 @@ function resolveScheduledWorkoutDirectReplyAuthority(input: {
     return null
   }
 
-  const scheduledOccurrenceAtMs = Date.parse(scheduledOccurrenceAt)
-  const reminderSentAtMs = input.delivery.sentAtMs
-  const acceptedAtMs = Date.parse(input.promptInput.receivedAt)
+  const occurrenceMs = Date.parse(scheduledOccurrenceAt)
+  const reminderMs = input.delivery.sentAtMs
+  const acceptedMs = Date.parse(input.promptInput.receivedAt)
   if (
-    !Number.isFinite(scheduledOccurrenceAtMs) ||
-    !Number.isFinite(reminderSentAtMs) ||
-    !Number.isFinite(acceptedAtMs) ||
-    reminderSentAtMs < scheduledOccurrenceAtMs ||
-    acceptedAtMs < reminderSentAtMs ||
-    reminderSentAtMs - scheduledOccurrenceAtMs >
-      SCHEDULED_WORKOUT_DIRECT_REPLY_AUTHORITY_MAX_AGE_MS ||
-    acceptedAtMs - reminderSentAtMs >
-      SCHEDULED_WORKOUT_DIRECT_REPLY_AUTHORITY_MAX_AGE_MS
+    !Number.isFinite(occurrenceMs) ||
+    !Number.isFinite(reminderMs) ||
+    !Number.isFinite(acceptedMs) ||
+    reminderMs < occurrenceMs ||
+    acceptedMs < reminderMs ||
+    reminderMs - occurrenceMs > WORKOUT_REPLY_AUTHORITY_MAX_AGE_MS ||
+    acceptedMs - reminderMs > WORKOUT_REPLY_AUTHORITY_MAX_AGE_MS
   ) {
     return null
   }
 
-  const acceptedAt = new Date(acceptedAtMs).toISOString()
-  const reminderSentAt = new Date(reminderSentAtMs).toISOString()
-  const normalizedScheduledOccurrenceAt =
-    new Date(scheduledOccurrenceAtMs).toISOString()
+  const acceptedAt = new Date(acceptedMs).toISOString()
+  const reminderSentAt = new Date(reminderMs).toISOString()
+  const occurrenceAt = new Date(occurrenceMs).toISOString()
   const operationId = `sha256:${createHash('sha256')
     .update(JSON.stringify({
       acceptedAssistantInputId: input.promptInput.inputId,
       intentId: input.delivery.intentId,
       reminderSentAt,
       routineId: scheduledReply.routineId,
-      scheduledOccurrenceAt: normalizedScheduledOccurrenceAt,
+      scheduledOccurrenceAt: occurrenceAt,
       schema: 'murph.scheduled-workout-direct-reply.v1',
     }))
     .digest('hex')}`
@@ -5448,14 +5445,14 @@ function resolveScheduledWorkoutDirectReplyAuthority(input: {
     operationId,
     reminderSentAt,
     routineId: scheduledReply.routineId,
-    scheduledOccurrenceAt: normalizedScheduledOccurrenceAt,
+    scheduledOccurrenceAt: occurrenceAt,
   }
 }
 
-function buildScheduledDirectReplyAuthorityContext(): string {
+function buildWorkoutReplyAuthorityContext(): string {
   return [
-    'The trusted host has enabled one scheduled-workout rollover tool for this exact accepted direct reply and exact reminder.',
-    'Use only that host-bound tool for the rollover. Its hidden authority cannot be supplied, copied, or extended through tool arguments or conversational recency.',
+    'The host enabled one workout-rollover tool for this exact direct reminder reply.',
+    'Use only that tool; hidden authority cannot be supplied, copied, or extended by arguments or conversation.',
   ].join('\n')
 }
 

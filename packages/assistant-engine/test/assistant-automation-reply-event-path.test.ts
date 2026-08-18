@@ -466,7 +466,7 @@ describe('assistant auto-reply event-first path', () => {
     const sentInput = readSentInput()
     const turnContext = sentInput.turnContext ?? ''
     expect(turnContext).toContain(
-      'The trusted host has enabled one scheduled-workout rollover tool',
+      'The host enabled one workout-rollover tool',
     )
     expect(sentInput.scheduledWorkoutDirectReplyAuthority).toEqual({
       acceptedAt: '2026-08-07T21:10:01.000Z',
@@ -525,7 +525,7 @@ describe('assistant auto-reply event-first path', () => {
 
     expect(readSentInput().scheduledWorkoutDirectReplyAuthority).toBeUndefined()
     expect(readSentInput().turnContext).not.toContain(
-      'scheduled-workout rollover tool',
+      'workout-rollover tool',
     )
   })
 
@@ -576,7 +576,7 @@ describe('assistant auto-reply event-first path', () => {
       'The assistant previously sent this message in the same conversation from another assistant run:',
     )
     expect(turnContext).toContain('Scheduled workout reminder.')
-    expect(turnContext).not.toContain('scheduled-workout rollover tool')
+    expect(turnContext).not.toContain('workout-rollover tool')
     expect(turnContext).not.toContain('automation-unanchored-workout')
     expect(
       readSentInput().scheduledWorkoutDirectReplyAuthority,
@@ -630,7 +630,7 @@ describe('assistant auto-reply event-first path', () => {
       'The sender explicitly replied to this exact prior assistant message:',
     )
     expect(turnContext).toContain('Scheduled workout reminder.')
-    expect(turnContext).not.toContain('scheduled-workout rollover tool')
+    expect(turnContext).not.toContain('workout-rollover tool')
     expect(turnContext).not.toContain('automation-stale-workout')
     expect(
       readSentInput().scheduledWorkoutDirectReplyAuthority,

@@ -27,7 +27,7 @@ For ordinary live logging, use the targeted workout commands below. Do not recon
 - Resolve: `vault-cli workout active` or `vault-cli workout active --workout-id <evt_id>`.
 - Add an exercise: `vault-cli workout exercise add <name> --order <n> [--sets <n>]`.
 - Log or correct a set: `vault-cli workout set log [exercise]`.
-- Scheduled direct-reply rollover: `murph.log_scheduled_workout_set` with the exact prior workout id, exercise name and order, set order, and member-stated actuals. The host binds the saved routine, reply authority, and timestamps outside model arguments.
+- Scheduled direct-reply rollover: `murph.log_scheduled_workout_set` with the exact prior workout id, exercise name and order, set order, and member-stated actuals; host binds reply authority, the saved routine, and timestamps outside model arguments.
 - Undo one set without shifting later set numbers: `vault-cli workout set clear [exercise] --set-order <n>`.
 - Finish: `vault-cli workout finish`.
 

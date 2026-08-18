@@ -14,7 +14,7 @@ import type {
 } from '../../assistant/tool-validation-digest.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
-const scheduledWorkoutRolloverArgumentsSchema = z.object({
+const rolloverArgumentsSchema = z.object({
   previousWorkoutId: z.string().regex(/^evt_[0-9A-Za-z]+$/u),
   exerciseName: z.string().trim().min(1).max(160),
   exerciseOrder: z.number().int().positive(),
@@ -36,8 +36,8 @@ export const MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL = {
   namespace: 'murph',
   name: 'log_scheduled_workout_set',
   description:
-    'Close one fully logged prior live workout, start the exact saved routine occurrence bound to the current direct reminder reply, and log one member-stated set result. This tool is offered only for the exact host-authorized root reply. Provide the prior workout, semantic set coordinates, and actuals only; the scheduled routine, timestamps, reply identity, and retry identity are bound by the host.',
-  inputSchema: z.toJSONSchema(scheduledWorkoutRolloverArgumentsSchema, {
+    'Close the fully logged prior workout, start the saved routine occurrence bound to this direct reminder reply, and log one member-stated set. Pass only the prior workout, set coordinates, and actuals; the host binds routine, timestamps, reply, and retry identity.',
+  inputSchema: z.toJSONSchema(rolloverArgumentsSchema, {
     io: 'input',
   }),
 } as const
@@ -45,7 +45,7 @@ export const MURPH_SCHEDULED_WORKOUT_ROLLOVER_TOOL = {
 export type ScheduledWorkoutRolloverDynamicToolRequest =
   | {
       kind: 'scheduled-workout-rollover'
-      request: z.infer<typeof scheduledWorkoutRolloverArgumentsSchema>
+      request: z.infer<typeof rolloverArgumentsSchema>
     }
   | {
       kind: 'invalid-scheduled-workout-rollover-arguments'
@@ -61,7 +61,7 @@ export function readScheduledWorkoutRolloverDynamicToolRequest(input: {
   }
 
   const parsed = parseDynamicToolArguments({
-    schema: scheduledWorkoutRolloverArgumentsSchema,
+    schema: rolloverArgumentsSchema,
     schemaRootKeys: [
       'previousWorkoutId',
       'exerciseName',
@@ -106,7 +106,7 @@ export async function executeScheduledWorkoutRolloverDynamicTool(input: {
   }
 }> {
   if (!input.vaultRoot) {
-    return scheduledWorkoutRolloverTextResult(
+    return textResult(
       false,
       'scheduled workout rollover is unavailable without a vault',
     )
@@ -118,7 +118,7 @@ export async function executeScheduledWorkoutRolloverDynamicTool(input: {
     input.invocationScope.origin.assistantInputId !==
       input.authority.authorizedAssistantInputId
   ) {
-    return scheduledWorkoutRolloverTextResult(
+    return textResult(
       false,
       'scheduled workout rollover requires the exact current direct reminder reply',
     )
@@ -134,29 +134,20 @@ export async function executeScheduledWorkoutRolloverDynamicTool(input: {
       routineId: input.authority.routineId,
       scheduledOccurrenceAt: input.authority.scheduledOccurrenceAt,
     })
-    const verifiedWorkout = workoutSessionSchema.parse(
+    const providerWorkout = workoutSessionSchema.parse(
       shown.entity.data.workout,
     )
-    const {
-      scheduledRolloverReceiptId: _scheduledRolloverReceiptId,
-      ...providerWorkout
-    } = verifiedWorkout
-    void _scheduledRolloverReceiptId
-    return scheduledWorkoutRolloverTextResult(
+    delete providerWorkout.scheduledRolloverReceiptId
+    shown.entity.data.workout = providerWorkout
+    return textResult(
       true,
       JSON.stringify({
         status: 'logged',
-        workout: {
-          ...shown.entity,
-          data: {
-            ...shown.entity.data,
-            workout: providerWorkout,
-          },
-        },
+        workout: shown.entity,
       }),
     )
   } catch (error) {
-    return scheduledWorkoutRolloverTextResult(
+    return textResult(
       false,
       error instanceof VaultCliError
         ? error.message
@@ -165,7 +156,7 @@ export async function executeScheduledWorkoutRolloverDynamicTool(input: {
   }
 }
 
-function scheduledWorkoutRolloverTextResult(
+function textResult(
   success: boolean,
   text: string,
 ): {

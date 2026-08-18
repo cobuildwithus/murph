@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-17
-Updated: 2026-08-17
+Updated: 2026-08-18
 
 ## Goal
 
@@ -118,15 +118,21 @@ Updated: 2026-08-17
   same-session exact-reply authority path, and two PR-description discrepancies.
   The required anomaly retrospective was recorded before remediation. The
   redesign stays within existing automation, reply, tool, and vault owners.
-- Current focused proof passes 4 Assistant Engine files / 388 tests, 3 real
-  Codex App Server scripted scenarios, and focused Contracts (16), Core (25),
-  Query (3), and Vault Usecases (3) tests. Typecheck passes for Contracts, Core,
-  Query, Vault Usecases, Operator Config, Assistant Engine, and Assistant
-  Runtime; contract schema regeneration and `git diff --check` pass. The local
-  product-experience recheck found no remaining product finding: an exact
-  direct reminder reply now rolls over and returns the canonical active card in
-  one provider turn, while stale, generic, ambiguous, and incomplete paths stay
-  fail-closed.
+- Final ReviewGPT round 3 found one remaining semantic-replay edge: an omitted
+  set unit inherited from the exercise and the same explicitly supplied unit
+  rendered the same workout but produced different receipts and equality
+  checks. The finding was accepted. One canonical effective-set projection now
+  drives both receipt derivation and retry comparison; focused proof covers
+  inherited-to-explicit and explicit-to-inherited retries after close, start,
+  and set-log persistence, while a genuinely different unit still fails closed.
+- Current focused proof passes 5 Assistant Engine files / 187 tests and the 10-
+  case real Vault Usecases rollover suite. Typecheck passes for Vault Usecases
+  and Assistant Engine, CLI package-shape verification passes, and
+  `git diff --check` passes. The runner's vault CLI bundle is 9,180,489 bytes
+  against its 9,192,000-byte budget. The complete local runner build then hits
+  the pre-existing macOS static-closure variance (8,331,486 bytes against the
+  8,259,368-byte local budget); exact-head Linux CI remains the authoritative
+  runner check.
 - Complete first-provider request capture compares frozen base
   `17fa4a43091db5aa0d354bc26e4dacf908c26d80` with the remediated candidate using
   the pinned real Codex App Server, repository scripted Responses endpoint,
@@ -135,8 +141,10 @@ Updated: 2026-08-17
   normalized serialization of present `include`, `input`, `instructions`,
   `parallel_tool_calls`, `text`, `tool_choice`, and `tools` fields; model,
   reasoning, storage, streaming, service-tier, cache/client/account, and
-  transport metadata were excluded identically. Direct changed from 27,683
-  tokens / 128,658 UTF-8 bytes to 27,909 / 129,589 (+226, +0.8164%; +931 bytes,
-  +0.7236%), entirely from the generated code-mode catalog entry for the
-  availability-scoped rollover tool. Group stayed byte-for-byte identical at
-  24,256 tokens / 113,505 bytes. Temporary capture code was removed.
+  transport metadata were excluded identically. The final tool-description
+  substitution was replayed against that captured serialization after its
+  runtime-only simplification. Direct changed from 27,683 tokens / 128,658
+  UTF-8 bytes to 27,885 / 129,454 (+202, +0.7297%; +796 bytes, +0.6187%),
+  entirely from the generated code-mode catalog entry for the availability-
+  scoped rollover tool. Group stayed byte-for-byte identical at 24,256 tokens /
+  113,505 bytes. Temporary capture code was removed.

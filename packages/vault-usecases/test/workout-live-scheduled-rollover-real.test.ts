@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import {
+  type WorkoutSessionDetailV1,
   type WorkoutLiveApplyMemberActionV1,
   workoutSessionSchema,
 } from '@murphai/contracts'
@@ -65,6 +66,8 @@ vi.mock('../src/usecases/workout.js', async (importOriginal) => {
 import {
   addStructuredWorkoutRecord,
   applyLiveWorkoutMemberAction,
+  buildLiveWorkoutCardEditor,
+  hasLoggedWorkoutSet,
   logLiveWorkoutSet,
   logScheduledLiveWorkoutSet,
   saveWorkoutFormat,
@@ -73,7 +76,10 @@ import {
   showWorkoutRecord,
   startLiveWorkout,
 } from '../src/workouts.js'
-import { parseShownWorkout } from '../src/usecases/workout-live-state.js'
+import {
+  type WorkoutShowResult,
+  parseShownWorkout,
+} from '../src/usecases/workout-live-state.js'
 
 const PRIOR_STARTED_AT = '2026-08-16T18:00:00.000Z'
 const PRIOR_FINAL_ACTIVITY_AT = '2026-08-16T18:42:00.000Z'
@@ -254,6 +260,37 @@ function scheduledInput(input: PreparedRolloverVault) {
     weightUnit: 'lb' as const,
   }
 }
+
+function expectCanonicalWeightedCard(shown: WorkoutShowResult): void {
+  const workout = parseShownWorkout(shown)
+  const presentation: WorkoutSessionDetailV1 = {
+    exercises: workout.exercises.map((exercise) => ({
+      name: exercise.name,
+      sets: exercise.sets.map((set) => {
+        const logged = hasLoggedWorkoutSet(set)
+        return {
+          actual: logged ? 'Logged' : null,
+          status: logged ? 'completed' : 'pending',
+          target: null,
+        }
+      }),
+    })),
+    state: 'active',
+    version: 1,
+  }
+  const card = buildLiveWorkoutCardEditor({
+    presentation,
+    workout,
+    workoutId: shown.entity.id,
+  })
+
+  expect(card?.workout.exercises[0]?.sets[1]?.actual).toBe('70 lb × 9')
+}
+
+const equivalentWeightUnitCases = [
+  ['explicit to inherited', 'lb', undefined],
+  ['inherited to explicit', undefined, 'lb'],
+] as const
 
 describe('scheduled live-workout rollover', () => {
   it('preserves and truthfully closes the prior session, starts the exact plan, and converges across persisted failures', async () => {
@@ -454,6 +491,114 @@ describe('scheduled live-workout rollover', () => {
     })
     expect(parseShownWorkout(scheduledAfterNativeReplay).exercises).toEqual(
       parseShownWorkout(replayed).exercises,
+    )
+  })
+
+  it.each(equivalentWeightUnitCases)(
+    'converges %s weight units after the prior close',
+    async (_label, firstUnit, retryUnit) => {
+      const prepared = await createRolloverVault()
+      faults.failAfterPreviousClose = true
+      await expect(logScheduledLiveWorkoutSet({
+        ...scheduledInput(prepared),
+        weightUnit: firstUnit,
+      })).rejects.toThrow('injected failure after prior workout close')
+      const prior = parseShownWorkout(
+        await showWorkoutRecord(prepared.vault, prepared.previousWorkoutId),
+      )
+
+      const rolled = await logScheduledLiveWorkoutSet({
+        ...scheduledInput(prepared),
+        weightUnit: retryUnit,
+      })
+      const workout = parseShownWorkout(rolled)
+
+      expect(workout.scheduledRolloverReceiptId).toBe(
+        prior.scheduledRolloverReceiptId,
+      )
+      expect(workout.exercises[0]?.sets[1]).toMatchObject({
+        order: 2,
+        reps: 9,
+        weight: 70,
+      })
+      expect(workout.exercises[0]?.sets[1]?.weightUnit).toBe(retryUnit)
+      expectCanonicalWeightedCard(rolled)
+    },
+  )
+
+  it.each(equivalentWeightUnitCases)(
+    'converges %s weight units after the scheduled start',
+    async (_label, firstUnit, retryUnit) => {
+      const prepared = await createRolloverVault()
+      faults.failAfterScheduledStart = true
+      await expect(logScheduledLiveWorkoutSet({
+        ...scheduledInput(prepared),
+        weightUnit: firstUnit,
+      })).rejects.toThrow('injected failure after scheduled workout start')
+      const started = await showActiveLiveWorkout({ vault: prepared.vault })
+      const startedWorkout = parseShownWorkout(started)
+
+      const rolled = await logScheduledLiveWorkoutSet({
+        ...scheduledInput(prepared),
+        weightUnit: retryUnit,
+      })
+      const workout = parseShownWorkout(rolled)
+
+      expect(rolled.entity.id).toBe(started.entity.id)
+      expect(workout.scheduledRolloverReceiptId).toBe(
+        startedWorkout.scheduledRolloverReceiptId,
+      )
+      expect(workout.exercises[0]?.sets[1]?.weightUnit).toBe(retryUnit)
+      expectCanonicalWeightedCard(rolled)
+    },
+  )
+
+  it.each(equivalentWeightUnitCases)(
+    'converges %s weight units after the scheduled set write',
+    async (_label, firstUnit, retryUnit) => {
+      const prepared = await createRolloverVault()
+      faults.failAfterScheduledLog = true
+      await expect(logScheduledLiveWorkoutSet({
+        ...scheduledInput(prepared),
+        weightUnit: firstUnit,
+      })).rejects.toThrow('injected failure after scheduled set log')
+      const logged = await showActiveLiveWorkout({ vault: prepared.vault })
+      const loggedWorkout = parseShownWorkout(logged)
+
+      const rolled = await logScheduledLiveWorkoutSet({
+        ...scheduledInput(prepared),
+        weightUnit: retryUnit,
+      })
+      const workout = parseShownWorkout(rolled)
+
+      expect(rolled.entity.id).toBe(logged.entity.id)
+      expect(workout.scheduledRolloverReceiptId).toBe(
+        loggedWorkout.scheduledRolloverReceiptId,
+      )
+      expect(workout.exercises[0]?.sets[1]?.weightUnit).toBe(firstUnit)
+      expectCanonicalWeightedCard(rolled)
+    },
+  )
+
+  it('still rejects a genuinely different effective weight unit after the prior close', async () => {
+    const prepared = await createRolloverVault()
+    faults.failAfterPreviousClose = true
+    await expect(logScheduledLiveWorkoutSet(scheduledInput(prepared))).rejects.toThrow(
+      'injected failure after prior workout close',
+    )
+    const prior = parseShownWorkout(
+      await showWorkoutRecord(prepared.vault, prepared.previousWorkoutId),
+    )
+
+    await expect(logScheduledLiveWorkoutSet({
+      ...scheduledInput(prepared),
+      weightUnit: 'kg',
+    })).rejects.toThrow('exact scheduled rollover effect')
+    expect(parseShownWorkout(
+      await showWorkoutRecord(prepared.vault, prepared.previousWorkoutId),
+    ).scheduledRolloverReceiptId).toBe(prior.scheduledRolloverReceiptId)
+    await expect(showActiveLiveWorkout({ vault: prepared.vault })).rejects.toThrow(
+      'No active live workout',
     )
   })
 

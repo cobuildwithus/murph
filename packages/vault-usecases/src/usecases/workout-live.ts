@@ -962,16 +962,23 @@ async function logScheduledLiveWorkoutSetWithLockHeld(
   })
   const targetMatches =
     target.currentSet !== undefined &&
-    JSON.stringify(target.currentSet) === JSON.stringify(target.parsedSet)
+    JSON.stringify(projectScheduledLiveWorkoutSet(
+      target.exercise,
+      target.currentSet,
+    )) === JSON.stringify(projectScheduledLiveWorkoutSet(
+      target.exercise,
+      target.parsedSet,
+    ))
+
+  if (targetMatches) {
+    return targetShown
+  }
 
   if (targetWorkout.endedAt !== undefined) {
-    if (!targetMatches) {
-      throw new VaultCliError(
-        'command_failed',
-        'The completed scheduled workout does not contain the authorized set result.',
-      )
-    }
-    return targetShown
+    throw new VaultCliError(
+      'command_failed',
+      'The completed scheduled workout does not contain the authorized set result.',
+    )
   }
 
   return logLiveWorkoutSetWithLockHeld(
@@ -1133,26 +1140,36 @@ function deriveScheduledLiveWorkoutReceiptId(input: {
         previousWorkoutId: input.input.previousWorkoutId,
         routineId: input.input.routineId,
         scheduledOccurrenceAt: input.input.scheduledOccurrenceAt,
-        set: {
-          addedWeightKg: input.set.addedWeightKg ?? null,
-          assistanceKg: input.set.assistanceKg ?? null,
-          bodyweightKg: input.set.bodyweightKg ?? null,
-          distanceMeters: input.set.distanceMeters ?? null,
-          durationSeconds: input.set.durationSeconds ?? null,
-          note: input.set.note ?? null,
-          order: input.set.order,
-          reps: input.set.reps ?? null,
-          rpe: input.set.rpe ?? null,
-          type: input.set.type ?? null,
-          weight: input.set.weight ?? null,
-          weightUnit: input.set.weightUnit ?? null,
-        },
+        set: projectScheduledLiveWorkoutSet(input.exercise, input.set),
       },
       operationId: input.input.operationId,
       schema: 'murph.scheduled-workout-rollover-receipt.v1',
     }))
     .digest('hex')
   return `sha256:${digest}`
+}
+
+function projectScheduledLiveWorkoutSet(
+  exercise: WorkoutExercise,
+  set: WorkoutSet,
+) {
+  return {
+    addedWeightKg: set.addedWeightKg ?? null,
+    assistanceKg: set.assistanceKg ?? null,
+    bodyweightKg: set.bodyweightKg ?? null,
+    distanceMeters: set.distanceMeters ?? null,
+    durationSeconds: set.durationSeconds ?? null,
+    note: set.note ?? null,
+    order: set.order,
+    reps: set.reps ?? null,
+    rpe: set.rpe ?? null,
+    type: set.type ?? null,
+    weight: set.weight ?? null,
+    weightUnit:
+      set.weight === undefined
+        ? null
+        : set.weightUnit ?? exercise.unitOverride ?? null,
+  }
 }
 
 function assertScheduledLiveWorkoutIdentity(

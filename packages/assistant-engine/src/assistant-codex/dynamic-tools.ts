@@ -1550,13 +1550,13 @@ export function readMurphDynamicToolRequest(
     return assistantStyleRequest
   }
 
-  const scheduledWorkoutRolloverRequest =
+  const rolloverRequest =
     readScheduledWorkoutRolloverDynamicToolRequest({
       arguments: request.arguments,
       tool: request.tool,
     })
-  if (scheduledWorkoutRolloverRequest) {
-    return scheduledWorkoutRolloverRequest
+  if (rolloverRequest) {
+    return rolloverRequest
   }
 
   const phoneCallRequest = readPhoneCallDynamicToolRequest({
