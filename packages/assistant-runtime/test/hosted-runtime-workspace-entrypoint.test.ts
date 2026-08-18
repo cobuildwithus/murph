@@ -36817,6 +36817,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: false,
+      checkpointSystemControl: false,
       generatedImageRetention: false,
       handoff: "no-signal reconciliation",
     },
@@ -36824,6 +36825,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: true,
       checkpointConversationInputAhead: true,
       checkpointRuntimeWake: false,
+      checkpointSystemControl: false,
       generatedImageRetention: false,
       handoff: "conversation input hint",
     },
@@ -36831,6 +36833,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: true,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: true,
+      checkpointSystemControl: false,
       generatedImageRetention: false,
       handoff: "retained checkpoint wake",
     },
@@ -36838,14 +36841,24 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
       checkpointRuntimeWake: false,
+      checkpointSystemControl: false,
       generatedImageRetention: true,
       handoff: "no-signal reconciliation after a status commit",
+    },
+    {
+      checkpointConversation: false,
+      checkpointConversationInputAhead: false,
+      checkpointRuntimeWake: true,
+      checkpointSystemControl: true,
+      generatedImageRetention: false,
+      handoff: "system-only runtime control",
     },
   ])("older due assistant carry honors $handoff before persisting a later reminder", async (
     {
       checkpointConversation,
       checkpointConversationInputAhead,
       checkpointRuntimeWake,
+      checkpointSystemControl,
       generatedImageRetention,
     },
   ) => {
@@ -36967,8 +36980,21 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane === "system") {
+              return await importRuntimeControlSystemMailboxItemForTest({
+                item: item.item,
+                vaultRoot,
+              });
+            }
+            if (
+              item.item.id === "mailbox_item_entrypoint_assistant_carry_mask_003"
+              || item.item.id === "mailbox_item_entrypoint_assistant_carry_mask_004"
+            ) {
+              assert.ok(context?.onConversationInputStaged);
+              context.onConversationInputStaged("linq");
+            }
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -37002,6 +37028,14 @@ describe("hosted workspace runtime entrypoint", () => {
                     mailboxItems.push(createMailboxItem({
                       id: "mailbox_item_entrypoint_assistant_carry_mask_003",
                       laneSeq: "3",
+                    }));
+                  }
+                  if (checkpointSystemControl) {
+                    mailboxItems.push(createMailboxItem({
+                      id: "mailbox_item_entrypoint_assistant_carry_mask_system_001",
+                      kind: "runtime.manual-requested",
+                      lane: "system",
+                      laneSeq: "1",
                     }));
                   }
                   olderWakePersisted.resolve();
@@ -37249,13 +37283,6 @@ describe("hosted workspace runtime entrypoint", () => {
           events[secondSnapshotIndex],
           `snapshot:2:idle_shutdown:${Date.parse(TEST_NOW) + idleCheckpointDelayMs}`,
         );
-        assert.equal(
-          events.slice(persistedDispatchIndex + 1).some((event) =>
-            event.startsWith("mailbox.importItem:")
-          ),
-          false,
-          events.join(","),
-        );
         const reconciliationAssistantIndex = events.findIndex((event) =>
           event.includes(`:${reconciliationWakeAt}:`)
         );
@@ -37264,6 +37291,22 @@ describe("hosted workspace runtime entrypoint", () => {
           events.join(","),
         );
         assert.ok(reconciliationAssistantIndex < secondSnapshotIndex, events.join(","));
+        const systemControlImportIndex = events.indexOf(
+          "mailbox.importItem:mailbox_item_entrypoint_assistant_carry_mask_system_001",
+        );
+        if (checkpointSystemControl) {
+          assert.ok(systemControlImportIndex > persistedDispatchIndex, events.join(","));
+          assert.ok(systemControlImportIndex < reconciliationAssistantIndex, events.join(","));
+        } else {
+          assert.equal(systemControlImportIndex, -1, events.join(","));
+          assert.equal(
+            events.slice(persistedDispatchIndex + 1).some((event) =>
+              event.startsWith("mailbox.importItem:")
+            ),
+            false,
+            events.join(","),
+          );
+        }
         return;
       }
       const firstForegroundAssistantIndex = events.findIndex((event) =>

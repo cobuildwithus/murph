@@ -1431,6 +1431,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     const mailboxBudgetExhausted = () => mailboxBudget.exhausted;
     let preCheckpointExternalCompletionImported = false;
+    let conversationInputStagedOrdinal = 0;
     let deviceSyncMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
     const createMailboxImportContext = (
@@ -1449,9 +1450,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       onConversationActivityObserved: () => {
         options.onConversationActivityObserved?.("observed");
       },
-      onConversationInputStaged:
-        context?.onConversationInputStaged
-        ?? startCodexProcessPreparationForConversation,
+      onConversationInputStaged: (channel) => {
+        conversationInputStagedOrdinal += 1;
+        const notifyConversationInputStaged =
+          context?.onConversationInputStaged
+          ?? startCodexProcessPreparationForConversation;
+        notifyConversationInputStaged?.(channel);
+      },
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
     });
@@ -5641,6 +5646,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           return buildHostedRuntimeWakeKey(pendingWake);
         };
+        const checkpointStartByAtBarrierRelease =
+          checkpointCompletedDueAssistantServiceBarrier
+            ? idleCheckpointStartByMs
+            : null;
+        const conversationInputStagedOrdinalAtBarrierRelease =
+          conversationInputStagedOrdinal;
         if (conversationInputAhead && mayRunPostCheckpointWork()) {
           await runOptionalPostCheckpointWork(
             async () =>
@@ -5729,7 +5740,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const dueAssistantServiceBarrierSuccessorKey =
           resolveDueAssistantServiceBarrierSuccessorKey();
         if (dueAssistantServiceBarrierSuccessorKey !== null) {
-          const checkpointStartByBeforeService = idleCheckpointStartByMs;
           const dueAssistantWakeResult = await runOptionalPostCheckpointWork(
             async () =>
               await runForegroundPass({
@@ -5743,12 +5753,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           );
           if (
             dueAssistantWakeResult !== null
-            && checkpointStartByBeforeService !== null
-            && !hostedMailboxImportStagedConversationInput(
-              dueAssistantWakeResult.latestMailboxImport,
-            )
+            && checkpointStartByAtBarrierRelease !== null
+            && conversationInputStagedOrdinal
+              === conversationInputStagedOrdinalAtBarrierRelease
           ) {
-            setIdleCheckpointStartBy(checkpointStartByBeforeService);
+            setIdleCheckpointStartBy(checkpointStartByAtBarrierRelease);
           }
         }
         if (runtimeStateDirty) {
