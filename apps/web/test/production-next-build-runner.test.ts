@@ -11,7 +11,7 @@ const productionBuildScript = path.join(
   "scripts",
   "run-production-next-build.sh",
 );
-const buildCacheEpoch = "webpack-next-16.3-v3-prepared-typecheck-cold-webpack";
+const buildCacheEpoch = "webpack-next-16.3-v4-in-process-cold-webpack";
 
 async function createRunnerFixture(): Promise<{
   appDir: string;
@@ -141,7 +141,7 @@ test("production Next runner owns the cold Webpack cache and fail-closed epoch",
       `Resetting incompatible Next build cache for epoch=${buildCacheEpoch}`,
     );
     expect(coldBuild.stdout).toContain(
-      "compiler=webpack parent_old_space_mb=1024 build_worker_old_space_mb=3072 typecheck_old_space_mb=3584 webpack_cache=cold",
+      "compiler=webpack build_old_space_mb=3072 typecheck_old_space_mb=3584 webpack_cache=cold webpack_build_worker=off",
     );
     await expect(readFile(staleCacheEntry, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
@@ -149,12 +149,12 @@ test("production Next runner owns the cold Webpack cache and fail-closed epoch",
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
       "TYPECHECK_GATE=",
-      "--max-old-space-size=1024",
+      "--max-old-space-size=3072",
       "/fixture/next",
       "typegen",
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
       "TYPECHECK_GATE=complete",
-      "--max-old-space-size=1024",
+      "--max-old-space-size=3072",
       "/fixture/next",
       "build",
       "--webpack",
@@ -232,7 +232,7 @@ test("production Next runner fails closed before compilation when the prepared t
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
       "TYPECHECK_GATE=",
-      "--max-old-space-size=1024",
+      "--max-old-space-size=3072",
       "/fixture/next",
       "typegen",
       "",

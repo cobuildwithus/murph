@@ -74,13 +74,10 @@ not `true`. A delta round also requires
 uses `INVALID` for the mandatory prior-finding summary gap defined below. State
 the exact evidence gap and stop.
 
-Do not stop for a discrepancy confined to the descriptive content of
-`review-gpt-pr-context/pr-body.md` — validation claims or prose that has drifted
-behind the current head. Those degrade the author's
-account of the change, not your ability to read the code. Record them as notes
-(see Output) and complete the substantive review. A stale table is never a
-reason to leave real defects unreviewed; say what is wrong with it and review
-anyway.
+Do not audit or report discrepancies confined to descriptive PR-body content,
+such as stale validation claims or prose from an earlier head. They are neither
+findings nor invalid evidence. Continue the substantive code review; report an
+issue only when the current patch independently meets the finding bar below.
 
 For round 2 or later the invocation must state the same first-reviewed head as
 the artifact and summarize every prior finding, its local disposition, any
@@ -395,15 +392,6 @@ For an Experience Collapse, also state the removed words, actions, screens,
 choices, concepts, or waits and the clarity, accessibility, consent, trust, and
 control that the smaller experience preserves.
 
-When `pr-body.md` describes the change inaccurately — a validation claim
-contradicted by the snapshot or prose describing an earlier head — add
-`Body discrepancy: <claim and contradiction>` after the findings and before the
-outcome, one line per discrepancy. Report every one you find. These are
-notes, not qualifying findings, and they do not prevent `PASS`: they tell the
-author what to correct in the document without withholding the review of the
-code. Apply the same treatment when the invocation omits its prior-round
-summary.
-
 When a user-facing frontend change has no readable rendered artifacts inside
 `codebase.zip`, add `Rendered evidence gap: <exact gap>` after the findings and
 before the outcome. The gap is not independently a qualifying finding and does
@@ -424,12 +412,11 @@ End with exactly one of these lines:
 `ROUND_OUTCOME: INVALID`
 
 Use `PASS` only when there are no qualifying findings and every claimed prior
-correction is proven effective; body discrepancies and rendered evidence gaps
-are notes and do not withhold it. Use `INVALID` only when the code evidence will
+correction is proven effective; rendered evidence gaps are notes and do not
+withhold it. Use `INVALID` only when the code evidence will
 not support a review or a later full audit lacks its mandatory prior-finding
 summary, as defined in Evidence and round scope; it does not count as a
-substantive round. An inaccurate PR body is never grounds for `INVALID`. Put
-the selected outcome immediately before this exact final line, and do not use
-the token elsewhere:
+substantive round. Put the selected outcome immediately before this exact final
+line, and do not use the token elsewhere:
 
 REVIEW_COMPLETE

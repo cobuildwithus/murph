@@ -498,6 +498,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   stores the scheduled occurrence and structured provider send-or-skip decision;
   surrounding job and session ids are the bounded record references, while
   private tool output and reasoning remain excluded.
+- A provider-accepted reminder remains immutable historical conversation
+  evidence after its automation is edited, archived, or deleted. Reply planning
+  supplies a bounded ordered projection of those deliveries and marks an exact
+  native reply or reaction edge when available; the model owns natural-language
+  interpretation. A canonical reminder-backed write accepts only the typed
+  outbox intent id from that trusted context, validates the persisted private
+  delivery, plan owner, and scheduled occurrence, derives one deterministic effect id,
+  no-ops retries under the canonical write lock, and returns canonical readback.
+  It never re-reads mutable automation content to redefine a message already
+  delivered. Current revision and plan-consent checks still run immediately
+  before provider delivery and govern future occurrences only.
 - A detached system notification without a valid scheduled occurrence is not a
   user or automation turn. It runs as isolated output-only formatting with no
   conversation history, private context, resume mutation, tools, network, or
@@ -568,6 +579,14 @@ it has been explicitly elevated to a cross-cutting invariant.
   of purchased, referral, carryover, and refill credit; it never reveals or
   implies payer identity, sponsorship setup, money, credit remaining, period
   dates, message counts, or whether effective room capacity is exhausted.
+- Starter usage capacity is an append-only ledger grant, not a mutable trial
+  counter. Operator recovery of an exhausted canonical Starter member may append
+exactly one policy-sized reset grant under the beneficiary lock for the
+displayed ledger version. It never replenishes an exhausted grant projection,
+changes purchased or referral credit, or counts as a new Starter enrollment.
+A stale retry cannot append another grant, and a later operator reset is
+eligible only after the prior credit is consumed and the locked canonical
+direct-Starter gate is fully exhausted again.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal

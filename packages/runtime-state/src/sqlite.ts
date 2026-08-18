@@ -50,19 +50,27 @@ export function openSqliteRuntimeDatabase(
     timeout: options.timeoutMs ?? DEFAULT_SQLITE_TIMEOUT_MS,
   });
 
-  if (options.foreignKeys ?? true) {
-    database.exec("PRAGMA foreign_keys = ON;");
-  }
+  try {
+    if (options.foreignKeys ?? true) {
+      database.exec("PRAGMA foreign_keys = ON;");
+    }
 
-  if (!readOnly) {
-    database.exec(
-      `PRAGMA journal_mode = ${options.journalMode ?? "WAL"}; PRAGMA synchronous = ${
-        options.synchronous ?? "NORMAL"
-      };`,
-    );
+    if (!readOnly) {
+      database.exec(
+        `PRAGMA journal_mode = ${options.journalMode ?? "WAL"}; PRAGMA synchronous = ${
+          options.synchronous ?? "NORMAL"
+        };`,
+      );
+    }
+    return database;
+  } catch (error) {
+    try {
+      database.close();
+    } catch {
+      // Preserve the configuration error that prevented a usable handle.
+    }
+    throw error;
   }
-
-  return database;
 }
 
 export function tableExists(database: DatabaseSync, name: string): boolean {
@@ -85,7 +93,11 @@ export function withImmediateTransaction<T>(database: DatabaseSync, operation: (
     database.exec("COMMIT");
     return result;
   } catch (error) {
-    database.exec("ROLLBACK");
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+      // Preserve the operation or commit error that determines recovery.
+    }
     throw error;
   }
 }

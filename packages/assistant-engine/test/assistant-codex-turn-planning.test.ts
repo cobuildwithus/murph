@@ -4237,7 +4237,11 @@ describe('assistant Codex turn planning', () => {
       },
       hostedToolContext: {
         ...createHostedToolContext(),
-        phoneCalls: { start: vi.fn() },
+        phoneCalls: {
+          start: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+        },
       },
       messageTargetAuthorizerAvailable: true,
       input: {
@@ -4264,8 +4268,12 @@ describe('assistant Codex turn planning', () => {
       }),
     })
 
-    expect(plan.dynamicTools.map((tool) => tool.name)).toContain(
-      'create_phone_call',
+    expect(plan.dynamicTools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        'create_phone_call',
+        'get_phone_call_status',
+        'stop_phone_call',
+      ]),
     )
   })
 
@@ -4383,7 +4391,11 @@ describe('assistant Codex turn planning', () => {
       },
       hostedToolContext: {
         ...createHostedToolContext(),
-        phoneCalls: { start: vi.fn() },
+        phoneCalls: {
+          start: vi.fn(),
+          status: vi.fn(),
+          stop: vi.fn(),
+        },
       },
       input: {
         ...createMessageInput(),
@@ -4411,6 +4423,12 @@ describe('assistant Codex turn planning', () => {
 
     expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
       'create_phone_call',
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'get_phone_call_status',
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'stop_phone_call',
     )
   })
 

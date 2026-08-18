@@ -13,6 +13,7 @@ import {
 const APPLE_HEALTH_PROVIDER = "apple_health_kit";
 const CLOCK_SKEW_MS = 2 * 60_000;
 const DB_CONNECTION_TIMEOUT_MS = 5_000;
+const DB_OWNER_CONNECTION_OPTION = "-c role=postgres";
 const DB_QUERY_TIMEOUT_MS = 10_000;
 const DB_STATEMENT_TIMEOUT_MS = 10_000;
 const JUNCTION_USER_PAGE_LIMIT = 500;
@@ -56,6 +57,19 @@ export function buildDedicatedDatabasePoolOptions(connectionString) {
     query_timeout: DB_QUERY_TIMEOUT_MS,
     statement_timeout: DB_STATEMENT_TIMEOUT_MS,
   };
+}
+
+export function withDedicatedDatabaseOwner(connectionString) {
+  const parsed = new URL(connectionString);
+  const existingOptions = parsed.searchParams.get("options")?.trim();
+  parsed.searchParams.set(
+    "options",
+    existingOptions
+      ? `${existingOptions} ${DB_OWNER_CONNECTION_OPTION}`
+      : DB_OWNER_CONNECTION_OPTION,
+  );
+  parsed.search = parsed.searchParams.toString().replaceAll("+", "%20");
+  return parsed.toString();
 }
 
 export function buildJunctionClientUserId(secret, memberId, namespace = "") {
@@ -187,7 +201,15 @@ export async function cleanupE2e(junctionClientUserIdNamespace) {
   }
   console.log(`::notice::native-ios-e2e stage=junction_cleanup result=${junction ? "success" : "absent"}`);
 
-  await resetDedicatedDatabase(config.directDatabaseUrl);
+  console.log("::notice::native-ios-e2e stage=database_reset result=started");
+  try {
+    await resetDedicatedDatabase(config.directDatabaseUrl);
+  } catch (error) {
+    console.log(`::error::native-ios-e2e stage=database_reset result=failure reason=${boundedCommandFailureReason(error)}`);
+    throw error;
+  }
+  console.log("::notice::native-ios-e2e stage=database_reset result=success");
+  console.log("::notice::native-ios-e2e stage=database_validation result=started");
   if (await readDedicatedMemberRecord(config)) {
     throw new Error("Dedicated E2E database still contains a member after reset.");
   }
@@ -328,8 +350,9 @@ async function resetDedicatedDatabase(directDatabaseUrl) {
   for (const name of Object.keys(childEnv)) {
     if (name.startsWith("NATIVE_IOS_E2E_")) delete childEnv[name];
   }
-  childEnv.DATABASE_URL = directDatabaseUrl;
-  childEnv.DIRECT_DATABASE_URL = directDatabaseUrl;
+  const ownerDatabaseUrl = withDedicatedDatabaseOwner(directDatabaseUrl);
+  childEnv.DATABASE_URL = ownerDatabaseUrl;
+  childEnv.DIRECT_DATABASE_URL = ownerDatabaseUrl;
   await runBoundedCommand({
     argv: ["--dir", "apps/web", "exec", "prisma", "migrate", "reset", "--force"],
     command: "pnpm",
@@ -401,6 +424,15 @@ function privyHeaders() {
 function requireE164(value) {
   if (!/^\+[1-9][0-9]{7,14}$/u.test(value)) throw new Error("NATIVE_IOS_E2E_PRIVY_TEST_PHONE must be an E.164 phone number.");
   return value;
+}
+
+function boundedCommandFailureReason(error) {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "E2E database reset timed out.") return "timeout";
+  if (message === "E2E database reset could not start.") return "spawn";
+  if (message === "E2E database reset process supervision failed.") return "supervision";
+  if (message === "E2E database reset failed.") return "command_exit";
+  return "unknown";
 }
 
 function assertUuid(value, label) {
