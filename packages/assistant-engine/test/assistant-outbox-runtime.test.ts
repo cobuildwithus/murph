@@ -2810,12 +2810,89 @@ describe('assistant outbox runtime', () => {
     expect(unmatched.intentId).not.toBe(first.intentId)
   }, 120_000)
 
+  it('dedupes a genuine retry at the 100-identity legacy media bound', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-media-maximum-',
+    )
+    const template = await createIntent(vaultRoot, {
+      dedupeToken: 'legacy-media-maximum-template',
+      message: 'legacy media template',
+      sessionId: 'session-legacy-media-maximum',
+      turnId: 'turn-legacy-media-maximum-template',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    let expectedIntentId = ''
+    let expectedDedupeToken = ''
+    await Promise.all(Array.from({ length: 100 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const dedupeToken = `legacy-media-maximum-token-${suffix}`
+      const media = [{
+        kind: 'image' as const,
+        url: `https://cdn.example.test/legacy-maximum/${suffix}.png`,
+        alt: `Legacy maximum candidate ${suffix}`,
+        source: `legacy-media-maximum-${suffix}`,
+      }]
+      const intentId = `outbox_legacy_media_maximum_${suffix}`
+      const timestamp = new Date(
+        Date.parse(template.createdAt) + index * 1_000,
+      ).toISOString()
+      if (index === 100) {
+        expectedIntentId = intentId
+        expectedDedupeToken = dedupeToken
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intentId}.json`),
+        JSON.stringify({
+          ...template,
+          createdAt: timestamp,
+          dedupeKey: hashAssistantOutboxLegacyMediaDedupeIdentity({
+            dedupeToken,
+            media,
+          })!,
+          deliveryIdempotencyKey: null,
+          intentId,
+          media,
+          updatedAt: timestamp,
+        }),
+        'utf8',
+      )
+    }))
+    await rm(
+      resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        template.intentId,
+      ),
+      { force: true },
+    )
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+
+    const retry = await createIntent(vaultRoot, {
+      dedupeToken: expectedDedupeToken,
+      media: [{
+        kind: 'image',
+        url: 'https://cdn.example.test/legacy-maximum/regenerated.png',
+        alt: 'Regenerated retry media',
+        source: 'legacy-media-maximum-regenerated',
+      }],
+      message: 'legacy retry with regenerated media',
+      sessionId: 'session-legacy-media-maximum',
+      turnId: 'turn-legacy-media-maximum-retry',
+    })
+
+    expect(retry.intentId).toBe(expectedIntentId)
+  }, 120_000)
+
   it('fails closed when legacy media-key recovery exceeds its distinct identity bound', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-legacy-media-distinct-bound-',
     )
     const first = await createIntent(vaultRoot, {
       dedupeToken: 'current-intent-before-distinct-legacy-candidates',
+      deliveryIdempotencyKey:
+        'current-intent-before-distinct-legacy-candidates',
       message: 'current intent',
       sessionId: 'session-legacy-dedupe-distinct-bound',
       turnId: 'turn-legacy-dedupe-distinct-bound',
@@ -2824,19 +2901,25 @@ describe('assistant outbox runtime', () => {
     await Promise.all(Array.from({ length: 101 }, async (_, offset) => {
       const index = offset + 1
       const suffix = index.toString().padStart(3, '0')
+      const legacyDedupeToken = `legacy-distinct-bound-token-${suffix}`
+      const media = [{
+        kind: 'image' as const,
+        url: `https://cdn.example.test/legacy-bound/${suffix}.png`,
+        alt: `Legacy candidate ${suffix}`,
+        source: `legacy-distinct-bound-${suffix}`,
+      }]
       const intent = {
         ...first,
         createdAt: new Date(
           Date.parse(first.createdAt) + index * 1_000,
         ).toISOString(),
-        dedupeKey: index.toString(16).padStart(40, '0'),
+        dedupeKey: hashAssistantOutboxLegacyMediaDedupeIdentity({
+          dedupeToken: legacyDedupeToken,
+          media,
+        })!,
+        deliveryIdempotencyKey: null,
         intentId: `outbox_legacy_distinct_bound_${suffix}`,
-        media: [{
-          alt: `Legacy candidate ${suffix}`,
-          kind: 'image',
-          source: `legacy-distinct-bound-${suffix}`,
-          url: `https://cdn.example.test/legacy-bound/${suffix}.png`,
-        }],
+        media,
         updatedAt: new Date(
           Date.parse(first.updatedAt) + index * 1_000,
         ).toISOString(),

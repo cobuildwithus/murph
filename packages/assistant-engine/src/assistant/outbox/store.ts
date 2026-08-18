@@ -298,6 +298,10 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
 }): Promise<AssistantOutboxIntent | null> {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
+  const dedupeToken = normalizeNullableString(input.dedupeToken)
+  const deliveryIdempotencyKey = normalizeNullableString(
+    input.deliveryIdempotencyKey,
+  )
   const routes = [
     {
       kind: 'dedupe-key' as const,
@@ -305,13 +309,13 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
       matches: (intent: AssistantOutboxIntent) =>
         intent.dedupeKey === input.dedupeKey,
     },
-    ...(normalizeNullableString(input.deliveryIdempotencyKey)
+    ...(deliveryIdempotencyKey
       ? [{
           kind: 'delivery-idempotency-key' as const,
-          key: normalizeNullableString(input.deliveryIdempotencyKey)!,
+          key: deliveryIdempotencyKey,
           matches: (intent: AssistantOutboxIntent) =>
             normalizeNullableString(intent.deliveryIdempotencyKey) ===
-            normalizeNullableString(input.deliveryIdempotencyKey),
+            deliveryIdempotencyKey,
         }]
       : []),
     ...(normalizeNullableString(input.legacyDedupeKey)
@@ -332,9 +336,15 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
   if (projectedMatch) {
     return projectedMatch
   }
+  if (dedupeToken && dedupeToken === deliveryIdempotencyKey) {
+    // A rebuilt exact transport route owns hosted retry identity. Once that
+    // route misses, media-sensitive pre-migration recovery cannot legitimately
+    // match and must not turn unrelated retained media into an admission cap.
+    return null
+  }
 
   return await findAssistantOutboxIntentByLegacyMediaIdentity({
-    dedupeToken: input.dedupeToken,
+    dedupeToken,
     paths,
     vault: input.vault,
   })

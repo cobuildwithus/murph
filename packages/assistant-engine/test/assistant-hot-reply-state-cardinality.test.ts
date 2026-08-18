@@ -1,4 +1,5 @@
 import { rm } from 'node:fs/promises'
+import path from 'node:path'
 
 import type { InboxServices } from '@murphai/inbox-services'
 import {
@@ -33,10 +34,14 @@ import {
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import {
+  hashAssistantOutboxIdentity,
+} from '../src/assistant/outbox/intents.ts'
+import {
   readAssistantAutomationState,
   resolveAssistantSession as seedAssistantSession,
   saveAssistantAutomationState,
 } from '../src/assistant/store.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   runAssistantAutomationPass,
 } from '../src/assistant/automation/run-loop.ts'
@@ -135,12 +140,16 @@ describeStateCardinality('assistant foreground state-cardinality invariant', () 
   }, 180_000)
 })
 
-it('keeps a fresh reply moving past a full route window plus protected image history', async () => {
+it('keeps a fresh reply moving after rebuilding 101 distinct current image identities', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'assistant-hot-reply-full-route-',
   )
   cleanupPaths.push(parentRoot)
   await seedRetainedRouteHistory(vaultRoot)
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+    force: true,
+  })
 
   const target = createAssistantModelTarget({
     approvalPolicy: 'never',
@@ -500,14 +509,10 @@ async function seedUnrelatedOutbox(
 }
 
 async function seedRetainedRouteHistory(vaultRoot: string): Promise<void> {
-  await saveAssistantOutboxIntent(
-    vaultRoot,
-    createRetainedRouteIntent(0, true),
-  )
-  for (let index = 1; index <= 100; index += 1) {
+  for (let index = 0; index <= 100; index += 1) {
     await saveAssistantOutboxIntent(
       vaultRoot,
-      createRetainedRouteIntent(index, false),
+      createRetainedRouteIntent(index, true),
     )
   }
 }
@@ -560,12 +565,27 @@ function createRetainedRouteIntent(
   const message = generatedImage
     ? 'Generated image delivery'
     : `Recent route delivery ${suffix}`
+  const sessionId = `session_route_history_${suffix}`
+  const turnId = `turn_route_history_${suffix}`
+  const deliveryIdempotencyKey = `delivery-route-history-${suffix}`
+  const media = generatedImage
+    ? [{
+        alt: `Generated image ${suffix}`,
+        contentType: 'image/png' as const,
+        filename: `generated-${suffix}.png`,
+        kind: 'vault_image' as const,
+        ref: `raw/captures/generated-${suffix}.png`,
+        sha256: index.toString(16).padStart(64, '0'),
+        sizeBytes: index + 1,
+        source: 'gpt-image-2',
+      }]
+    : []
 
   return assistantOutboxIntentSchema.parse({
     schema: 'murph.assistant-outbox-intent.v1',
     intentId: `outbox_route_history_${suffix}`,
-    sessionId: `session_route_history_${suffix}`,
-    turnId: `turn_route_history_${suffix}`,
+    sessionId,
+    turnId,
     createdAt,
     updatedAt: createdAt,
     lastAttemptAt: createdAt,
@@ -574,22 +594,18 @@ function createRetainedRouteIntent(
     attemptCount: 1,
     status: 'sent',
     message,
-    media: generatedImage
-      ? [{
-          alt: 'Generated image',
-          contentType: 'image/png',
-          filename: 'generated.png',
-          kind: 'vault_image',
-          ref: 'raw/captures/generated.png',
-          sha256: 'a'.repeat(64),
-          sizeBytes: 4,
-          source: 'gpt-image-2',
-        }]
-      : [],
+    media,
     card: null,
     subject: null,
     operation: null,
-    dedupeKey: `dedupe-route-history-${suffix}`,
+    dedupeKey: hashAssistantOutboxIdentity({
+      dedupeToken: deliveryIdempotencyKey,
+      media,
+      message,
+      subject: null,
+      sessionId,
+      turnId,
+    }),
     targetFingerprint: `target-route-history-${suffix}`,
     channel: 'email',
     identityId: 'identity-current',
@@ -611,7 +627,7 @@ function createRetainedRouteIntent(
       targetKind: 'thread',
     },
     deliveryConfirmationPending: false,
-    deliveryIdempotencyKey: `delivery-route-history-${suffix}`,
+    deliveryIdempotencyKey,
     deliveryTransportIdempotent: true,
     answeredMailboxItemIds: [],
     preparedDispatchToken: null,
