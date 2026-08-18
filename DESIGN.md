@@ -572,6 +572,20 @@ active-management, near-cap/recovery, paused, and one-time states at desktop and
 mobile sizes on `/design` with controls inert, including content rendered
 through a dialog or drawer portal.
 
+In active sponsorship management, reveal the apply action only after the payer
+selects a different maximum. Use the large primary button at full width on
+phones and label an increase as a review step, not as completed confirmation.
+The review opens a focus-safe responsive alert dialog with the current and new
+monthly maximums, the rule that $5 usage purchases happen only while automatic
+refills are active, and explicit `Keep current setup` and `Increase to $N`
+actions. Keep the dialog visible when the result cannot be confirmed. For limit
+changes, replace the secondary action with `Check current setup` and make
+dismissal reload authoritative state while retaining the primary retry. For
+cancellation, keep the dialog open and use the exact authorized cancellation
+request as an idempotent status check so a lost response still reaches the
+terminal receipt. Never use a browser alert or confirm prompt for sponsorship
+changes.
+
 When group funding is fulfilled, switch from the payment-status composition to
 one confident success hierarchy: a compact sage confirmation mark and mono
 `NICE ONE` label, the Fraunces headline `This group has more Murph`, one

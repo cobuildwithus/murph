@@ -37,7 +37,7 @@
     "typecheck:watch": "pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
     "test": "pnpm health-commons:generate && pnpm test:prepared",
     "test:prepared": "pnpm changelog:generate && pnpm --dir ../.. exec tsx apps/web/scripts/run-hosted-web-vitest.mts",
-    "test:viewport-overflow": "playwright test e2e/viewport-overflow.spec.ts",
+    "test:viewport-overflow": "playwright test e2e/viewport-overflow.spec.ts e2e/group-sponsorship-management-alert-dialog.spec.ts",
     "prisma:generate": "prisma generate && pnpm --dir ../.. exec tsx apps/web/scripts/ensure-prisma-client-link.ts",
     "prisma:generate:build": "pnpm --dir ../.. exec tsx apps/web/scripts/prepare-prisma-client-for-build.ts",
     "prisma:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
