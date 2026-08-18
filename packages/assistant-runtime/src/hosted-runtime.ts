@@ -996,19 +996,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     vaultRoot: input.vaultRoot,
   });
 
-  const selectedWake = input.assistantExecutionBlocked
-    ? selectEarliestHostedRuntimeWake([
-        ...(input.extraCandidates ?? []),
-        {
-          at: systemMailboxWake.at,
-          reason: systemMailboxWake.reason,
-        },
-        {
-          at: input.mailboxImportRetryAt ?? null,
-          reason: input.mailboxImportRetryAt ? "mailbox" : null,
-        },
-      ])
-    : assistantCronWake.dueNow
+  const selectedWake = !input.assistantExecutionBlocked && assistantCronWake.dueNow
     ? {
         nextWakeAt: assistantCronWake.at,
         nextWakeReason: assistantCronWake.reason,

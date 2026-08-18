@@ -106,6 +106,21 @@ frontiers advance after deployment.
 - Corrective pull request #1992 is open. Exact-head PR review of the corrected
   head, required CI, protected deployment, and production convergence proof
   remain pending.
+- Final ReviewGPT round one found two accepted cross-runtime gaps. A blocked
+  assistant source was retained in the vault but omitted from the owner-visible
+  checkpoint wake, so policy restoration had no guaranteed trigger. The
+  Junction manifest's new summary continuation fields were also absent from the
+  generic retained-wake parser, so recovery could reject an otherwise
+  successful tranche at persistence time.
+- The remediation keeps assistant execution, preemption, and immediate-recheck
+  suppressed while policy is blocked, but projects all existing assistant wake
+  sources into the checkpoint. Its focused journey drains device work without
+  entering the model, retains an assistant wake, then sends exactly once after
+  policy restoration. The retained-wake allowlist now accepts the two
+  manifest-owned summary fields while continuing to reject unknown fields. A
+  focused recovery test carries a Junction summary cursor through durable
+  mailbox serialization, reload, and cold service reconstruction with the same
+  dedupe and retry authority.
 
 ## State
 

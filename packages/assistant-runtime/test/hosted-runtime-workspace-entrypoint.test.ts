@@ -13974,11 +13974,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
       assert.equal(result.immediateRecheckRequested, undefined);
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(result.nextWakeReason, undefined);
-      assert.equal(result.status, "idle");
-      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, null);
-      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, null);
+      assert.equal(result.nextWakeAt, now);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, now);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "assistant");
       const cronStatus = await getAssistantCronStatus(vaultRoot, {
         turnEnvironment: {
           currentWorkingDirectory: null,
@@ -14027,8 +14027,8 @@ describe("hosted workspace runtime entrypoint", () => {
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
-                nextWakeAt: null,
-                nextWakeReason: null,
+                nextWakeAt: result.nextWakeAt,
+                nextWakeReason: result.nextWakeReason ?? null,
                 snapshotRef: restoredPolicyWorkspace.snapshotRef,
                 version: "1",
               }),
