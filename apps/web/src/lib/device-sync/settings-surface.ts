@@ -3,7 +3,7 @@ import type { ConfiguredDeviceSyncProviderKey } from "@murphai/device-syncd/conn
 import {
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
-} from "@murphai/device-syncd/connect-config";
+} from "@murphai/device-syncd/fitbit-migration";
 
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
 import {

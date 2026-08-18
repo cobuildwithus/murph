@@ -73,12 +73,6 @@ type VitalConnectionRequest = {
 
 const FITBIT_MIGRATION_REFRESH_INTERVAL_MS = 15_000;
 
-function isFitbitMigrationNotice(
-  value: ConnectCallbackNotice,
-): value is NonNullable<ConnectCallbackNotice> {
-  return value?.title === FITBIT_MIGRATION_AUTHORIZED_NOTICE.title;
-}
-
 export type {
   ConnectCallbackInput,
   InitialDeviceConnectIntent,
@@ -193,26 +187,12 @@ export function ConnectSourcesGrid({
     () => filterConnectSourcesForSearch(displaySources, search),
     [displaySources, search],
   );
-  const hasVerifyingFitbitMigration = useMemo(
-    () =>
-      displaySources.some(
-        (source) =>
-          source.id === "fitbit" &&
-          source.migrationState === "verifying_successor",
-      ),
-    [displaySources],
-  );
-  const hasAutomaticallyProgressingFitbitMigration = useMemo(
-    () =>
-      displaySources.some(
-        (source) =>
-          source.id === "fitbit" &&
-          (source.migrationState === "verifying_successor" ||
-            (source.migrationState === "cutover_ready" &&
-              source.migrationRetryRequired !== true)),
-      ),
-    [displaySources],
-  );
+  const fitbitMigrationState = displaySources.find(
+    (source) => source.id === "fitbit" && source.migrationState,
+  )?.migrationState ?? null;
+  const hasActiveFitbitMigration =
+    fitbitMigrationState === "verifying_successor"
+    || fitbitMigrationState === "cutover_ready";
   const disconnectUnavailableSourceNames = useMemo(() => {
     if (
       disconnectSource?.disconnectScope !== "junction_account"
@@ -248,7 +228,8 @@ export function ConnectSourcesGrid({
   const noticeCandidate =
     notice ?? initialConnectIntentPresentation?.notice ?? null;
   const visibleNotice =
-    !hasVerifyingFitbitMigration && isFitbitMigrationNotice(noticeCandidate)
+    fitbitMigrationState !== "verifying_successor"
+      && noticeCandidate?.title === FITBIT_MIGRATION_AUTHORIZED_NOTICE.title
       ? null
       : noticeCandidate;
   const visibleActionError =
@@ -288,7 +269,7 @@ export function ConnectSourcesGrid({
   }, [hasInitialCallback]);
 
   useEffect(() => {
-    if (!hasAutomaticallyProgressingFitbitMigration) {
+    if (!hasActiveFitbitMigration) {
       return;
     }
 
@@ -302,7 +283,7 @@ export function ConnectSourcesGrid({
     }, FITBIT_MIGRATION_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
-  }, [hasAutomaticallyProgressingFitbitMigration, router]);
+  }, [hasActiveFitbitMigration, router]);
 
   useEffect(() => {
     if (
@@ -525,8 +506,9 @@ export function ConnectSourcesGrid({
       if (migrationCutover && result.status === "pending") {
         setNotice({
           kind: "warning",
-          title: "Fitbit is still switching",
-          message: "The legacy Fitbit connection is still syncing. Murph will retry the switch automatically.",
+          title: "Retry requested",
+          message:
+            "Fitbit remains active while the automatic switch continues. Murph will keep retrying, and you can leave this page.",
         });
         router.refresh();
         return;
@@ -650,9 +632,7 @@ export function ConnectSourcesGrid({
               errorMessage={
                 visibleActionError?.sourceId === source.id
                   ? visibleActionError.message
-                  : source.migrationRetryRequired
-                    ? "Murph could not stop the legacy Fitbit connection. It is still syncing; retry when you are ready."
-                    : null
+                  : null
               }
               pending={pendingSourceId === source.id}
               pendingDisconnect={pendingDisconnectSourceId === source.id}

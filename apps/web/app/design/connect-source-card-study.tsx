@@ -1,6 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitbit-migration";
 
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
@@ -166,22 +167,21 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     source: FITBIT_CONNECT_SOURCE,
   },
   ...([
-    ["fitbit-authorization", "authorization_required", null],
-    ["fitbit-verifying", "verifying_successor", null],
-    ["fitbit-switching", "cutover_ready", null],
-    [
-      "fitbit-retry",
-      "cutover_ready",
-      "Murph could not stop the legacy Fitbit connection. It is still syncing; retry when you are ready.",
-    ],
-  ] as const).map(([id, migrationState, errorMessage]) => ({
+    ["fitbit-authorization", "authorization_required", false],
+    ["fitbit-verifying", "verifying_successor", false],
+    ["fitbit-switching", "cutover_ready", false],
+    ["fitbit-retry", "cutover_ready", true],
+  ] as const).map(([id, migrationState, migrationRetryRequired]) => ({
     authenticated: true,
-    errorMessage,
+    errorMessage: null,
     source: {
       ...FITBIT_CONNECT_SOURCE,
       disconnectConnectionId: "design-fitbit-migration",
-      disconnectSourceProviderSlug: "fitbit",
+      ...(migrationState === "cutover_ready"
+        ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG }
+        : {}),
       id,
+      ...(migrationRetryRequired ? { migrationRetryRequired: true } : {}),
       migrationState,
     },
   })),

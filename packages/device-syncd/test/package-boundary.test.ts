@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 
 import * as rootExports from "../src/index.ts";
-import { JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG } from "../src/fitbit-migration.ts";
+import {
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+} from "../src/fitbit-migration.ts";
 import { createSecretCodec } from "../src/local-secret-codec.ts";
 
 test("@murphai/device-syncd package manifest exposes narrow public subpaths", async () => {
@@ -121,14 +124,29 @@ test("@murphai/device-syncd root barrel exposes the local secret codec API", () 
   assert.equal("buildDeviceSyncTokenCipherOptions" in rootExports, false);
 });
 
-test("Fitbit migration public entrypoint stays browser-safe", async () => {
+test("Fitbit migration public entrypoint and browser consumers stay browser-safe", async () => {
   const source = await readFile(
     new URL("../src/fitbit-migration.ts", import.meta.url),
     "utf8",
   );
+  const browserSources = await Promise.all(
+    [
+      "apps/web/app/(dashboard)/connect/connect-page-helpers.ts",
+      "apps/web/src/lib/device-sync/settings-surface.ts",
+    ].map((path) => readFile(resolve(repoRoot, path), "utf8")),
+  );
 
+  assert.equal(JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG, "fitbit");
   assert.equal(JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG, "google_health");
   assert.doesNotMatch(source, /["']\.\/connect-config\.ts["']/u);
+  for (const browserSource of browserSources) {
+    assert.equal(
+      readModuleSpecifiers(browserSource).includes(
+        "@murphai/device-syncd/connect-config",
+      ),
+      false,
+    );
+  }
 });
 
 test("Junction provider imports SDK resource subpaths without the aggregate root", async () => {

@@ -7,6 +7,8 @@ import { act, Children, createElement, isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
+import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitbit-migration";
+
 import { renderClientComponent } from "./render-client-component";
 
 vi.mock("next/image", () => ({
@@ -2962,7 +2964,11 @@ test("connect source card design study renders the production action states", as
   assert.match(markup, /aria-label="Disconnect Garmin"/u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.match(markup, /aria-label="Connect Fitbit"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Fitbit"/u);
   assert.equal(markup.match(/aria-label="Sign in to Murph"/gu)?.length, 4);
+  assert.equal(markup.match(/role="status"/gu)?.length, 4);
+  assert.match(markup, /aria-label="Retry Fitbit migration now"/u);
+  assert.match(markup, />Retry now<\/button>/u);
   assert.match(markup, /Dexcom connections are coming soon\./u);
   assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);
@@ -6249,7 +6255,7 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
       expected: {
         connectProvider: null,
         connectTarget: null,
-        disconnectSourceProviderSlug: "fitbit",
+        disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
         migrationState: "cutover_ready",
       },
       name: "targeted automatic cutover",
@@ -6259,7 +6265,7 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
       expected: {
         connectProvider: null,
         connectTarget: null,
-        disconnectSourceProviderSlug: "fitbit",
+        disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
         migrationRetryRequired: true,
         migrationState: "cutover_ready",
       },
@@ -6291,3 +6297,173 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
     }, value.name);
   }
 });
+
+test("ConnectSourcesGrid keeps automatic Fitbit continuation live and accelerable", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const expectedCutoverUrl =
+    "/api/settings/device-sync/connections/dsc_junction_fitbit/fitbit-migration/cutover";
+  const expectedRequestInit = {
+    body: undefined,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {},
+    keepalive: false,
+    method: "POST",
+  };
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(Response.json({
+      connectionId: "dsc_junction_fitbit",
+      status: "pending",
+    }))
+    .mockResolvedValueOnce(Response.json({
+      connectionId: "dsc_junction_fitbit",
+      status: "complete",
+    }));
+  vi.stubGlobal("fetch", fetch);
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const renderMigration = (input: {
+    migrationRetryRequired?: true;
+    migrationState: "verifying_successor" | "cutover_ready";
+  }) => createElement(ConnectSourcesGrid, {
+    sources: [createFitbitMigrationSource(input)],
+  });
+  const rendered = await renderClientComponent(
+    renderMigration({ migrationState: "verifying_successor" }),
+    { requireButton: false },
+  );
+
+  try {
+    const status = rendered.container.querySelector('[role="status"]');
+    assert.ok(status);
+    assert.equal(
+      rendered.container.querySelectorAll('[role="status"]').length,
+      1,
+    );
+    assert.equal(status.getAttribute("aria-live"), "polite");
+    assert.equal(status.getAttribute("aria-atomic"), "true");
+    assert.match(
+      status.textContent ?? "",
+      /Daily data may need the next provider pull after that day closes\./u,
+    );
+    assert.match(status.textContent ?? "", /You can leave this page/u);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+
+    await rendered.rerender(renderMigration({
+      migrationRetryRequired: true,
+      migrationState: "cutover_ready",
+    }));
+    assert.equal(rendered.container.querySelector('[role="status"]'), status);
+    assert.match(
+      status.textContent ?? "",
+      /Murph will keep retrying the automatic switch/u,
+    );
+    assert.match(status.textContent ?? "", /You can leave this page/u);
+    assert.equal(rendered.container.querySelector('[role="alert"]'), null);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 2);
+
+    const retryButton = rendered.container.querySelector(
+      'button[aria-label="Retry Fitbit migration now"]',
+    );
+    assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
+    await act(async () => {
+      retryButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    await vi.waitFor(() => {
+      assert.match(rendered.container.textContent ?? "", /Retry requested/u);
+    });
+    assert.deepEqual(fetch.mock.calls[0], [
+      expectedCutoverUrl,
+      expectedRequestInit,
+    ]);
+    assert.equal(rendered.container.querySelector('[role="status"]'), status);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Murph will keep retrying, and you can leave this page\./u,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Murph could not stop the legacy Fitbit connection/u,
+    );
+    assert.equal(mocks.routerRefresh.mock.calls.length, 3);
+
+    const retryAgainButton = rendered.container.querySelector(
+      'button[aria-label="Retry Fitbit migration now"]',
+    );
+    assert.ok(retryAgainButton instanceof rendered.window.HTMLButtonElement);
+    await act(async () => {
+      retryAgainButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    await vi.waitFor(() => {
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Fitbit migration complete/u,
+      );
+    });
+    assert.deepEqual(fetch.mock.calls, [
+      [expectedCutoverUrl, expectedRequestInit],
+      [expectedCutoverUrl, expectedRequestInit],
+    ]);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Fitbit now uses Google Health\. Your history is still saved\./u,
+    );
+    assert.equal(rendered.container.querySelector('[role="status"]'), null);
+    assert.equal(
+      rendered.container.querySelector(
+        'button[aria-label="Retry Fitbit migration now"]',
+      ),
+      null,
+    );
+    assert.ok(
+      rendered.container.querySelector('button[aria-label="Disconnect Fitbit"]'),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 3);
+  } finally {
+    await rendered.cleanup();
+    vi.useRealTimers();
+  }
+});
+
+function createFitbitMigrationSource(input: {
+  migrationRetryRequired?: true;
+  migrationState: "verifying_successor" | "cutover_ready";
+}) {
+  return {
+    connected: true,
+    description:
+      "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+    disconnectConnectionId: "dsc_junction_fitbit",
+    ...(input.migrationState === "cutover_ready"
+      ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG }
+      : {}),
+    id: "fitbit",
+    logo: {
+      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+      height: 36,
+      src: "/brand-logos/connect/fitbit.svg",
+      width: 128,
+    },
+    ...input,
+    name: "Fitbit",
+  };
+}

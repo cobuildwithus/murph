@@ -56,6 +56,16 @@ export function SourceCard({
     : requiresReconnect
       ? "Reconnect"
       : "Connect";
+  const migrationRetryRequired = source.migrationRetryRequired === true;
+  const migrationStatusText = migrationState === "authorization_required"
+    ? "Authorize Google Health to keep Fitbit and Pixel Watch syncing. Murph will keep the legacy Fitbit connection active until Google Health is verified, then switch automatically."
+    : migrationState === "verifying_successor"
+      ? "Google Health is authorized. You can leave this page while Murph imports historical data and waits for a fresh supported update. Daily data may need the next provider pull after that day closes. Fitbit stays active until verification finishes."
+      : migrationState === "cutover_ready"
+        ? migrationRetryRequired
+          ? "Google Health is verified. Murph will keep retrying the automatic switch in the background while Fitbit stays active. You can leave this page, or choose Retry now to accelerate the next attempt."
+          : "Google Health is verified. Murph is switching automatically; you can leave this page, and your existing history stays in place."
+        : null;
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
   const reconnectUnavailable = requiresReconnect && !isAvailable;
   const connectionOfferEnabled = source.connectionAvailable !== false;
@@ -143,15 +153,14 @@ export function SourceCard({
                 : "ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"
             }
           >
-            {migrationState ? (
-              <p className="max-w-[24rem] text-sm leading-relaxed text-pretty text-muted-foreground">
-                {migrationState === "authorization_required"
-                  ? "Authorize Google Health to keep Fitbit and Pixel Watch syncing. Murph will keep the legacy Fitbit connection active until Google Health is verified, then switch automatically."
-                  : migrationState === "verifying_successor"
-                    ? "Google Health is authorized, but Murph cannot verify representative history yet. The legacy Fitbit connection stays active while Murph waits for the historical import, supported resources, and a fresh update."
-                    : errorMessage
-                      ? "Google Health is verified, but Murph could not stop the legacy Fitbit connection. Fitbit keeps syncing until you retry."
-                      : "Google Health is verified. Murph is switching from the legacy Fitbit connection automatically; your existing history is kept."}
+            {migrationStatusText ? (
+              <p
+                aria-atomic="true"
+                aria-live="polite"
+                className="max-w-[24rem] text-sm leading-relaxed text-pretty text-muted-foreground"
+                role="status"
+              >
+                {migrationStatusText}
               </p>
             ) : requiresConnectionReset ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
@@ -242,17 +251,20 @@ export function SourceCard({
               >
                 {source.unavailableActionLabel}
               </Button>
-            ) : migrationState === "cutover_ready" ? (
+            ) : migrationState === "cutover_ready" && migrationRetryRequired ? (
               <Button
                 type="button"
-                disabled={!errorMessage || !canDisconnect || pendingDisconnect}
-                aria-label={errorMessage ? "Retry Fitbit migration" : "Switching Fitbit to Google Health"}
+                disabled={
+                  !canDisconnect || !onMigrationRetry || pendingDisconnect
+                }
+                aria-label="Retry Fitbit migration now"
                 onClick={() => onMigrationRetry?.(source)}
                 className="self-end"
               >
-                {errorMessage ? "Retry migration" : "Switching..."}
+                {pendingDisconnect ? "Retrying..." : "Retry now"}
               </Button>
-            ) : migrationState === "verifying_successor" ? null
+            ) : migrationState === "verifying_successor"
+              || migrationState === "cutover_ready" ? null
               : reconnectUnavailable
               || requiresConnectionReset
               || historicalReconnectUnavailable
