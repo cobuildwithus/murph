@@ -77,11 +77,16 @@ of the tactical fix on the old implementation.
 | 23 | Root and property defaults used inconsistent provenance. | Accepted one default transition. | Added another position dimension. |
 | 24 | Call-produced aggregates were projected before helper-return expansion. | Accepted by moving expansion into the resolver. | More resolver responsibility. |
 | 25 | Return-local aggregate aliases could still lose provenance. Model confirmation was unknown, so the run was diagnostic and requested another retrospective. | Accepted as evidence that the custom engine should be removed; rejected another tactical patch. | Triggered the complexity collapse. |
+| 26 | The production source census, file-level provider gate, and AST owner analysis disagreed, skipping current `.call`, generic-path, nullish, and conditional owners; the third exception registry and configurable one-call fields were unused. | Accepted the coverage and deletion findings; rejected expanding this tooling PR to delete inert baseline comments from production files. | Deleted the duplicate gates, third registry, and repeated fields; added only two direct expression cases and four existing-owner records, for a net ten-line guard/test deletion. |
 
 Two later simplification-design attempts on Phlebas failed before review because
 GitHub GraphQL returned HTTP 503; they produced no ReviewGPT findings and are not
-counted as rounds. A fresh exact-head review is required for the smaller
-candidate.
+counted as rounds. Two exact-head round-26 staging attempts on Mountain and
+Hercules likewise failed before submission on browser socket timeouts and are
+not counted. The substantive Phlebas round completed with a captured
+`gpt-5-6-pro` model slug while its response text reported model confirmation as
+unknown; its concrete findings were reproduced and corrected without restoring
+the old provenance engine.
 
 ## Tasks
 
@@ -90,9 +95,9 @@ candidate.
 3. [x] Delete guard-driven production workarounds and collapse durable docs.
 4. [x] Run focused tests, the production scan, typecheck, diff checks, and
    relevant repository verification.
-5. [ ] Commit and push the exact candidate.
-6. [ ] Run a fresh non-Eragon ReviewGPT full audit with exact-head CI, resolve
-   accepted findings, and close the plan.
+5. [ ] Commit and push the round-26 correction candidate.
+6. [ ] Run a non-Eragon ReviewGPT correction audit with exact-head CI and close
+   the plan.
 
 ## Verification
 
@@ -105,8 +110,8 @@ candidate.
 
 ## Current evidence
 
-- Compact suite: 21 focused tests pass in about one second.
-- Guard plus tests: 1,589 lines, down from approximately 11,400 on the prior
+- Compact suite: 22 focused tests pass, including the production source census.
+- Guard plus tests: 1,579 lines, down from approximately 11,400 on the prior
   PR head.
 - Production workarounds from the old analyzer are removed from the PR.
 - The production scan, repo-tools TypeScript compilation, frozen lockfile,

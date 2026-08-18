@@ -253,7 +253,6 @@ type ApprovedRawHttpOwnerReason =
   | "xai-x-search";
 
 interface ApprovedRawHttpOwner {
-  readonly maxCalls: number;
   readonly ownerName: string;
   readonly providerIds: readonly string[];
   readonly reason: ApprovedRawHttpOwnerReason;
@@ -265,28 +264,24 @@ interface ApprovedRawHttpOwner {
 // guard owns only where a raw transport capability may exist.
 export const approvedProviderRawHttpOwners = Object.freeze([
   {
-    maxCalls: 1,
     ownerName: "fetchHostedLinqAttachmentDownloadUrl",
     providerIds: ["linq"],
     reason: "existing-provider-boundary",
     relativePath: "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "hostedLocalFetch",
     providerIds: ["linq"],
     reason: "existing-provider-boundary",
     relativePath: "packages/hosted-local-harness/src/dev-hosted-local/linq-webhook-tunnel.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "fetchLinqWebhookSubscriptions",
     providerIds: ["linq"],
     reason: "existing-provider-boundary",
     relativePath: "packages/hosted-local-harness/src/dev-hosted-local/linq-webhook-tunnel.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "resolveDefaultLinqFetch",
     providerIds: ["linq"],
     reason: "official-sdk-fetch-hook",
@@ -294,49 +289,42 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@linqapp/sdk",
   },
   {
-    maxCalls: 1,
     ownerName: "putHostedContainerDirectR2SmokePayload",
     providerIds: [],
     reason: "presigned-byte-transfer",
     relativePath: "apps/cloudflare/src/container-entrypoint.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "fetchMurphHostedLinqContactCardVcfPhoto",
     providerIds: ["linq"],
     reason: "presigned-byte-transfer",
     relativePath: "apps/web/src/lib/hosted-onboarding/linq-contact-card.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "sendHostedLinqAttachmentMessage",
     providerIds: ["linq"],
     reason: "presigned-byte-transfer",
     relativePath: "apps/web/src/lib/hosted-onboarding/linq-client.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "uploadLinqAttachmentBytes",
     providerIds: ["linq"],
     reason: "presigned-byte-transfer",
     relativePath: "packages/operator-config/src/linq-runtime.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "downloadHostedLinqAttachmentBytes",
     providerIds: ["linq"],
     reason: "presigned-byte-transfer",
     relativePath: "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "executeAskGrokTool",
     providerIds: ["xai"],
     reason: "xai-x-search",
     relativePath: "packages/assistant-engine/src/assistant-codex/ask-grok-tool.ts",
   },
   {
-    maxCalls: 1,
     ownerName: "createOperatorLinqFetch",
     providerIds: ["linq"],
     reason: "official-sdk-fetch-hook",
@@ -344,7 +332,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@linqapp/sdk",
   },
   {
-    maxCalls: 1,
     ownerName: "createBoundedComposioFetch",
     providerIds: ["composio"],
     reason: "official-sdk-fetch-hook",
@@ -352,7 +339,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@composio/client",
   },
   {
-    maxCalls: 1,
     ownerName: "createHostedLinqFirstContactAdmissionOpenAiFetch",
     providerIds: ["openai"],
     reason: "official-sdk-fetch-hook",
@@ -360,7 +346,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "openai",
   },
   {
-    maxCalls: 1,
     ownerName: "requestJunctionResource",
     providerIds: ["junction"],
     reason: "official-sdk-fetch-hook",
@@ -368,7 +353,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@junction-api/sdk",
   },
   {
-    maxCalls: 1,
     ownerName: "createBoundedLinqApiFetch",
     providerIds: ["linq"],
     reason: "official-sdk-fetch-hook",
@@ -376,7 +360,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@linqapp/sdk",
   },
   {
-    maxCalls: 1,
     ownerName: "createLobFetchAdapter",
     providerIds: ["lob"],
     reason: "official-sdk-fetch-hook",
@@ -384,7 +367,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@lob/lob-typescript-sdk",
   },
   {
-    maxCalls: 1,
     ownerName: "createTelegramElevenLabsFetchAdapter",
     providerIds: ["elevenlabs"],
     reason: "official-sdk-fetch-hook",
@@ -392,7 +374,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@murphai/operator-config/elevenlabs-runtime",
   },
   {
-    maxCalls: 1,
     ownerName: "createOpenAiImageSdkFetch",
     providerIds: ["openai"],
     reason: "official-sdk-fetch-hook",
@@ -400,7 +381,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "openai",
   },
   {
-    maxCalls: 1,
     ownerName: "requestSdkResource",
     providerIds: ["junction"],
     reason: "official-sdk-fetch-hook",
@@ -408,7 +388,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@junction-api/sdk/activity",
   },
   {
-    maxCalls: 1,
     ownerName: "createElevenLabsSdkFetch",
     providerIds: ["elevenlabs"],
     reason: "official-sdk-fetch-hook",
@@ -416,7 +395,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@elevenlabs/elevenlabs-js",
   },
   {
-    maxCalls: 1,
     ownerName: "createLinqSdkFetch",
     providerIds: ["linq"],
     reason: "official-sdk-fetch-hook",
@@ -424,7 +402,6 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "@linqapp/sdk",
   },
   {
-    maxCalls: 1,
     ownerName: "fetchRequest",
     providerIds: ["resend"],
     reason: "provider-sdk-override",
@@ -432,37 +409,37 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "resend",
   },
   {
-    maxCalls: 1,
     ownerName: "request",
     providerIds: ["exa"],
     reason: "provider-sdk-override",
     relativePath: "packages/cli/src/research-scout-client.ts",
     requiredRuntimeModule: "exa-js",
   },
+  {
+    ownerName: "fetchAuthorizedProviderUpstream",
+    providerIds: ["elevenlabs", "exa", "linq", "openai", "xai"],
+    reason: "existing-provider-boundary",
+    relativePath: "apps/cloudflare/src/runner-egress-intercept.ts",
+  },
+  {
+    ownerName: "requestLinqApi",
+    providerIds: ["linq"],
+    reason: "existing-provider-boundary",
+    relativePath: "scripts/linq-typing-repro.ts",
+  },
+  {
+    ownerName: "resolveJunctionUser",
+    providerIds: ["junction"],
+    reason: "existing-provider-boundary",
+    relativePath: "scripts/native-ios-hosted-e2e-identity.mjs",
+  },
+  {
+    ownerName: "deleteJunctionUser",
+    providerIds: ["junction"],
+    reason: "existing-provider-boundary",
+    relativePath: "scripts/native-ios-hosted-e2e-identity.mjs",
+  },
 ] satisfies readonly ApprovedRawHttpOwner[]);
-
-export const providerHttpExceptionRegistry = Object.freeze([
-  {
-    description: "One exact pre-existing provider boundary remains visible as migration debt.",
-    id: "existing-provider-boundary",
-  },
-  {
-    description: "One exact production owner may transfer opaque presigned bytes.",
-    id: "presigned-byte-transfer",
-  },
-  {
-    description: "One exact production owner may adapt an official SDK transport.",
-    id: "official-sdk-fetch-hook",
-  },
-  {
-    description: "One exact SDK subclass method may provide a bounded request override.",
-    id: "provider-sdk-override",
-  },
-  {
-    description: "The exact Ask Grok owner may issue the runtime-validated x_search request.",
-    id: "xai-x-search",
-  },
-] as const);
 
 type ProviderRequestBoundaryViolationKind =
   | "approved-owner-overflow"
@@ -478,7 +455,6 @@ export interface ProviderRequestBoundaryViolation {
 }
 
 interface RawTransportCall {
-  readonly callPath: NodePath<CallExpression | OptionalCallExpression>;
   readonly urlPath: NodePath<Node> | null;
 }
 
@@ -500,6 +476,8 @@ const transparentExpressionTypes = new Set([
   "TSSatisfiesExpression",
   "TypeCastExpression",
 ]);
+const potentialRawTransportPattern = String.raw`\bfetch(?:Impl|Implementation)?\b|["'](?:node:)?https?["']|["'](?:cross-fetch|node-fetch|undici)["']`;
+const potentialRawTransportRegex = new RegExp(potentialRawTransportPattern, "u");
 
 export async function collectProviderRequestBoundaryViolations(): Promise<
   ProviderRequestBoundaryViolation[]
@@ -530,9 +508,6 @@ export function findProviderRequestBoundaryViolations(
   }
 
   const normalizedPath = normalizeRepoPath(relativePath);
-  if (!containsRequiredProviderEvidence(normalizedPath, contents)) {
-    return [];
-  }
   const sourceFile = parse(contents, {
     allowAwaitOutsideFunction: true,
     allowReturnOutsideFunction: true,
@@ -562,7 +537,7 @@ export function findProviderRequestBoundaryViolations(
     callPath: NodePath<CallExpression | OptionalCallExpression>,
   ): void {
     const rawCall = readRawTransportCall(callPath, contents);
-    if (!rawCall || isStaticSameOrigin(rawCall.urlPath, contents, new Set())) {
+    if (!rawCall || isStaticSameOrigin(rawCall.urlPath, new Set())) {
       return;
     }
 
@@ -588,7 +563,7 @@ export function findProviderRequestBoundaryViolations(
     if (approval) {
       const count = (approvalCounts.get(approval) ?? 0) + 1;
       approvalCounts.set(approval, count);
-      if (count > approval.maxCalls) {
+      if (count > 1) {
         recordViolation({
           boundary: `${approval.reason} owner ${ownerName}`,
           kind: "approved-owner-overflow",
@@ -692,7 +667,6 @@ function readRawTransportCall(
   }
   const urlIndex = calleeName === "call" ? 1 : calleeName === "apply" ? -1 : 0;
   return {
-    callPath,
     urlPath: urlIndex >= 0 ? argumentsPaths[urlIndex] ?? null : null,
   };
 }
@@ -704,6 +678,30 @@ function isLowLevelTransportExpression(
 ): boolean {
   const expressionPath = unwrapExpressionPath(originalPath);
   const node = expressionPath.node;
+
+  if (expressionPath.isLogicalExpression()) {
+    return isLowLevelTransportExpression(
+      expressionPath.get("left") as NodePath<Node>,
+      contents,
+      resolvingBindings,
+    ) || isLowLevelTransportExpression(
+      expressionPath.get("right") as NodePath<Node>,
+      contents,
+      resolvingBindings,
+    );
+  }
+
+  if (expressionPath.isConditionalExpression()) {
+    return isLowLevelTransportExpression(
+      expressionPath.get("consequent") as NodePath<Node>,
+      contents,
+      resolvingBindings,
+    ) || isLowLevelTransportExpression(
+      expressionPath.get("alternate") as NodePath<Node>,
+      contents,
+      resolvingBindings,
+    );
+  }
 
   if (expressionPath.isIdentifier()) {
     const name = expressionPath.node.name;
@@ -946,7 +944,6 @@ function collectCallProviderIds(input: {
 
 function isStaticSameOrigin(
   originalPath: NodePath<Node> | null,
-  contents: string,
   resolvingBindings: Set<string>,
 ): boolean {
   if (!originalPath?.node) {
@@ -979,7 +976,6 @@ function isStaticSameOrigin(
       initPath?.node &&
       isStaticSameOrigin(
         initPath,
-        contents,
         new Set(resolvingBindings).add(bindingKey),
       ),
     );
@@ -990,7 +986,7 @@ function isStaticSameOrigin(
   const calleePath = readMemberPath(expressionPath.node.callee);
   const argumentPaths = expressionPath.get("arguments") as NodePath<Node>[];
   return calleePath?.join(".") === "URL" &&
-    isStaticSameOrigin(argumentPaths[0] ?? null, contents, resolvingBindings) &&
+    isStaticSameOrigin(argumentPaths[0] ?? null, resolvingBindings) &&
     readMemberPath(argumentPaths[1]?.node)?.join(".") === "location.origin";
 }
 
@@ -1134,25 +1130,7 @@ function hasRuntimeModule(modules: ReadonlySet<string>, expected: string): boole
 }
 
 function containsPotentialRawTransport(contents: string): boolean {
-  return /\bfetch(?:Impl|Implementation)?\b|["'](?:node:)?https?["']|["'](?:cross-fetch|node-fetch|undici)["']/u.test(contents);
-}
-
-function containsRequiredProviderEvidence(
-  relativePath: string,
-  contents: string,
-): boolean {
-  const lowerContents = contents.toLowerCase();
-  const normalizedPath = normalizeIdentifierText(relativePath);
-  return providerBoundaryRegistry.some((provider) =>
-    provider.rawHttpPolicy === "require-official-sdk" &&
-    (
-      provider.hosts.some((host) => lowerContents.includes(host)) ||
-      provider.sdkModules.some((moduleName) => contents.includes(moduleName)) ||
-      provider.identifiers.some((identifier) =>
-        containsNormalizedIdentifierInNormalizedText(normalizedPath, identifier)
-      )
-    )
-  );
+  return potentialRawTransportRegex.test(contents);
 }
 
 function containsNormalizedIdentifier(text: string, identifier: string): boolean {
@@ -1194,7 +1172,6 @@ export async function listProviderRequestSourceFiles(): Promise<string[]> {
 }
 
 async function listPotentialRawTransportFiles(): Promise<string[]> {
-  const pattern = "\\bfetch(?:Impl|Implementation)?\\s*(?:\\?\\.)?\\s*\\(|(?:=|:)\\s*(?:globalThis\\.)?fetch\\b|[\"'](?:node:)?https?[\"']|[\"'](?:cross-fetch|node-fetch|undici)[\"']";
   try {
     const { stdout } = await execFileAsync(
       "rg",
@@ -1203,7 +1180,7 @@ async function listPotentialRawTransportFiles(): Promise<string[]> {
         "--no-messages",
         "--glob",
         "*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-        pattern,
+        potentialRawTransportPattern,
         "--",
         ...providerRequestScanRoots,
       ],
@@ -1220,7 +1197,7 @@ async function listPotentialRawTransportFiles(): Promise<string[]> {
   }
   const { stdout } = await execFileAsync(
     "git",
-    ["grep", "-I", "-l", "-E", pattern, "--", ...providerRequestScanRoots],
+    ["grep", "-I", "-l", "-P", potentialRawTransportPattern, "--", ...providerRequestScanRoots],
     { cwd: repoRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
   );
   return stdout.split("\n").filter(Boolean);

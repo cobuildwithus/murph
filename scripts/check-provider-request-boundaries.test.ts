@@ -4,8 +4,8 @@ import {
   approvedProviderRawHttpOwners,
   findProviderRequestBoundaryViolations,
   isProviderRequestGuardEntrypoint,
+  listProviderRequestSourceFiles,
   providerBoundaryRegistry,
-  providerHttpExceptionRegistry,
   providerRequestSourceExtensions,
   shouldScanProviderRequestSourceFile,
   shouldSkipProviderRequestDirectory,
@@ -162,12 +162,13 @@ describe("check-provider-request-boundaries", () => {
     `, "apps/web/src/lib/connected-apps/composio.ts")).toEqual([]);
   });
 
-  it("invalidates an SDK transport owner that loses its runtime import", () => {
+  it("checks a provider-named owner's runtime import on a generic path", () => {
     expect(violations(`
-      function createBoundedComposioFetch(fetchImpl: typeof fetch) {
-        return (request: Request) => fetchImpl(request);
+      function createTelegramElevenLabsFetchAdapter(fetchImpl: typeof fetch) {
+        const sdkFetch = fetchImpl ?? fetch;
+        return sdkFetch("https://api.elevenlabs.io/v1/text-to-speech");
       }
-    `, "apps/web/src/lib/connected-apps/composio.ts")).toEqual([
+    `, "packages/assistant-engine/src/assistant/channels/runtime.ts")).toEqual([
       "invalid-approved-owner",
     ]);
   });
@@ -175,9 +176,10 @@ describe("check-provider-request-boundaries", () => {
   it("caps every exact owner at its registered raw-call count", () => {
     expect(violations(`
       import Composio from "@composio/client";
-      function createBoundedComposioFetch(fetchImpl: typeof fetch) {
-        fetchImpl("https://backend.composio.dev/api/v3/one");
-        return fetchImpl("https://backend.composio.dev/api/v3/two");
+      function createBoundedComposioFetch(fetchImpl: typeof fetch, useGlobal: boolean) {
+        const sdkFetch = useGlobal ? fetch : (fetchImpl ?? fetch);
+        sdkFetch("https://backend.composio.dev/api/v3/one");
+        return sdkFetch("https://backend.composio.dev/api/v3/two");
       }
       void Composio;
     `, "apps/web/src/lib/connected-apps/composio.ts")).toEqual([
@@ -251,18 +253,29 @@ describe("check-provider-request-boundaries", () => {
     });
   });
 
+  it("uses the production source census for registered owner shapes", async () => {
+    const sourceFiles = await listProviderRequestSourceFiles();
+    expect(sourceFiles).toEqual(expect.arrayContaining([
+      "apps/cloudflare/src/container-entrypoint.ts",
+      "apps/cloudflare/src/runner-egress-intercept.ts",
+      "apps/web/src/lib/hosted-onboarding/linq-contact-card.ts",
+      "apps/web/src/lib/linq/api.ts",
+      "packages/assistant-engine/src/assistant/channels/runtime.ts",
+      "packages/operator-config/src/linq-runtime.ts",
+      "scripts/linq-typing-repro.ts",
+      "scripts/native-ios-hosted-e2e-identity.mjs",
+    ]));
+  });
+
   it("keeps the provider and owner registries explicit and duplicate-free", () => {
     expect(new Set(providerBoundaryRegistry.map((provider) => provider.id)).size)
       .toBe(providerBoundaryRegistry.length);
     const hosts = providerBoundaryRegistry.flatMap((provider) => provider.hosts);
     expect(new Set(hosts).size).toBe(hosts.length);
-    expect(new Set(providerHttpExceptionRegistry.map((exception) => exception.id)).size)
-      .toBe(providerHttpExceptionRegistry.length);
     const ownerKeys = approvedProviderRawHttpOwners.map(
       (owner) => `${owner.relativePath}:${owner.ownerName}`,
     );
     expect(new Set(ownerKeys).size).toBe(ownerKeys.length);
-    expect(approvedProviderRawHttpOwners.every((owner) => owner.maxCalls === 1)).toBe(true);
   });
 
 });
