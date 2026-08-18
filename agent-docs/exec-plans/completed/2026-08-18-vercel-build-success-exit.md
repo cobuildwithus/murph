@@ -86,9 +86,9 @@ Updated: 2026-08-18
   - The focused hosted Web suites passed 101 tests.
   - The full local build passed; Webpack compiled in 71 seconds without a build
     worker.
-  - The merged production commit reached `Ready` on a Standard 4-core, 8 GB
-    builder. Webpack compiled in 3.8 minutes, all 261 pages generated, and the
-    public smoke check returned HTTP 200.
+  - PR #1988 landed as production commit `d00fedae93`. It reached `Ready` on a
+    Standard 4-core, 8 GB builder; Webpack compiled in 3.8 minutes, all 261 pages
+    generated, and the public smoke check returned HTTP 200.
   - The PR was merged externally while the final review and direct-main
     acceptance gates were being reconciled, so those runs are not claimed as
     completion evidence.
