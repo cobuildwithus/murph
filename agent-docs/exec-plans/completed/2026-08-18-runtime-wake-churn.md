@@ -1,6 +1,6 @@
 # Stop production runtime wake churn
 
-Status: active
+Status: completed
 Updated: 2026-08-18
 
 ## Goal
@@ -59,10 +59,20 @@ assistant schedules, conversation work, and connected-health maintenance.
 
 ## Verification
 
-- Focused assistant-runtime and/or Cloudflare mode-transition regression.
-- A genuine system-mailbox recheck still coalesces without restarting work.
-- A genuine future assistant wake remains armed.
-- Relevant package typechecks and diff hygiene pass locally.
-- Required GitHub checks and ReviewGPT gates pass on the exact PR head.
-- Post-deploy aggregates show the empty-import/checkpoint loop collapsing and
-  due workspaces no longer advancing versions without useful work.
+- The Cloudflare controller suite passed all 152 tests, including the new
+  cross-mode handoff regression and its post-release default retry.
+- Cloudflare and Web typechecks passed, as did changelog registry coverage and
+  focused Web preflight coverage.
+- Hosted-local foreground-priority coverage passed six cases on the integrated
+  head, and the Linq scheduled-reminder journey passed all three cases through
+  the private Temporal consumer, exact alarm wake, delivery, attachment, and
+  usage settlement.
+- The preliminary specialist finding requested this end-to-end proof; the
+  added journey evidence resolved it without expanding the patch.
+- Final ReviewGPT passed with no findings, and the broad candidate-head build,
+  typecheck, package coverage, app verification, billing, and hygiene checks
+  passed.
+- Production deployment and aggregate convergence measurement follow the
+  merged PR through the protected deployment workflow; they do not require a
+  second repository change.
+Completed: 2026-08-18
