@@ -1,6 +1,6 @@
 # Halve Cloudflare container resources
 
-Status: active
+Status: completed
 
 ## Outcome
 
@@ -102,3 +102,4 @@ incomplete until the exact managed smoke passes.
   smoke step proves the deployed Worker and managed runner bundle.
 
 Updated: 2026-08-18
+Completed: 2026-08-18
