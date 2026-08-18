@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { CheckIcon } from "lucide-react";
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
@@ -6,7 +7,7 @@ import {
 } from "@murphai/hosted-execution/plan-usage";
 
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
-import { Button } from "@/src/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import { Progress } from "@/src/components/ui/progress";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
@@ -14,6 +15,7 @@ import {
   getHostedBillingPlanDefinition,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
+  type HostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   SETTINGS_CORE_FEATURES,
@@ -35,6 +37,7 @@ import { HostedPlanCheckoutButton } from "./hosted-plan-checkout-button";
 import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
 import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
+import { HostedSponsoredFamilyRecoveryDialog } from "./hosted-sponsored-family-recovery-dialog";
 import {
   HostedUsageTopUpDialog,
   type HostedUsageTopUpActivePurchase,
@@ -71,6 +74,7 @@ export function HostedBillingSettings(props: {
   familyBillingOwner?: boolean;
   familyDraftRecovery?: HostedFamilyDraftRecoveryProjection | null;
   familyInviteReturnPath?: string | null;
+  familyRecurringUpgradeAvailable?: boolean;
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
   payerMemberId?: string | null;
@@ -80,6 +84,7 @@ export function HostedBillingSettings(props: {
   showGroupPlan?: boolean;
   showMaxPlan?: boolean;
   usageActivityDetail?: ReactNode;
+  usageRecoveryInitialOpen?: boolean;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpCheckoutUrl?: string;
@@ -133,6 +138,47 @@ export function HostedBillingSettings(props: {
   const usageTopUpOffers = props.usageTopUpOffers ?? [];
   const canStartDirectPlan =
     props.canStartDirectPlan === true && !familyCurrent && !ownPaidBillingActive;
+  const usageRecoveryPlanCode = resolveDirectUsageRecoveryPlanCode({
+    canStartDirectPlan,
+    canUpgradeToEdge: props.canUpgradeToEdge === true,
+    canUpgradeToMax: props.canUpgradeToMax === true,
+    canUpgradeToPulse: props.canUpgradeToPulse === true,
+    currentPlanCode,
+    familyCurrent,
+    planChangePending: props.planChangePending === true,
+    status: props.usageStatus,
+  });
+  const usageRecoveryPlanName = usageRecoveryPlanCode
+    ? getHostedBillingPlanDefinition(usageRecoveryPlanCode).displayName
+    : null;
+  const usageRecoveryRecurringAction = usageRecoveryPlanCode && usageRecoveryPlanName
+    ? renderDirectUsageRecoveryAction({
+        currentPlanCode,
+        starterAccessActive,
+        targetPlanCode: usageRecoveryPlanCode,
+        targetPlanName: usageRecoveryPlanName,
+      })
+    : activeFamilyOwner && props.familyRecurringUpgradeAvailable === true
+      ? (
+          <Link
+            className={cn(
+              buttonVariants({ size: "lg" }),
+              "min-h-11 w-full sm:w-auto",
+            )}
+            href="#family"
+          >
+            Upgrade Family access
+          </Link>
+        )
+      : null;
+  const usageRecoveryRecurringPlanName = usageRecoveryPlanName
+    ?? (activeFamilyOwner && props.familyRecurringUpgradeAvailable === true
+      ? "a higher Family tier"
+      : null);
+  const showSponsoredRecovery = sponsoredMember && (
+    props.usageRecoveryInitialOpen === true
+    || props.usageStatus?.status === "exhausted"
+  );
 
   const hasPendingGroupSwitch =
     scheduledPlanCode === "launch_group_monthly" &&
@@ -586,18 +632,38 @@ export function HostedBillingSettings(props: {
         && noPlanText ? (
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
-      <PlanUsageBand
-        planChangePending={props.planChangePending === true}
-        status={props.usageStatus}
-        usageTopUpActivePurchase={props.usageTopUpActivePurchase}
-        usageTopUpCheckoutUrl={props.usageTopUpCheckoutUrl}
-        usageTopUpInitialOpen={props.usageTopUpInitialOpen}
-        usageTopUpOffers={usageTopUpOffers}
-        payerMemberId={props.payerMemberId}
-        usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
-        usageTopUpScope={props.usageTopUpScope}
-        usageTopUpTargetLabel={props.usageTopUpTargetLabel}
-      />
+      {showSponsoredRecovery ? (
+        <div className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:p-5">
+          <div>
+            <p className="font-serif text-xl font-semibold tracking-tight text-foreground">
+              Keep Murph going
+            </p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Your Family owner controls recurring access. Send them a generic
+              Family Settings link so they can choose your account after signing in.
+            </p>
+          </div>
+          <HostedSponsoredFamilyRecoveryDialog
+            initialOpen={props.usageRecoveryInitialOpen}
+          />
+        </div>
+      ) : null}
+      {showSponsoredRecovery ? null : (
+        <PlanUsageBand
+          planChangePending={props.planChangePending === true}
+          recommendedRecurringAction={usageRecoveryRecurringAction}
+          recommendedRecurringPlanName={usageRecoveryRecurringPlanName}
+          status={props.usageStatus}
+          usageTopUpActivePurchase={props.usageTopUpActivePurchase}
+          usageTopUpCheckoutUrl={props.usageTopUpCheckoutUrl}
+          usageTopUpInitialOpen={props.usageTopUpInitialOpen}
+          usageTopUpOffers={usageTopUpOffers}
+          payerMemberId={props.payerMemberId}
+          usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
+          usageTopUpScope={props.usageTopUpScope}
+          usageTopUpTargetLabel={props.usageTopUpTargetLabel}
+        />
+      )}
       {props.usageActivityDetail}
       <div
         className={cn(
@@ -633,8 +699,151 @@ export function HostedBillingSettings(props: {
   );
 }
 
+function resolveDirectUsageRecoveryPlanCode(input: {
+  canStartDirectPlan: boolean;
+  canUpgradeToEdge: boolean;
+  canUpgradeToMax: boolean;
+  canUpgradeToPulse: boolean;
+  currentPlanCode: HostedBillingPlanCode | null;
+  familyCurrent: boolean;
+  planChangePending: boolean;
+  status?: HostedPlanUsageStatus | null;
+}): HostedBillingPlanCode | null {
+  if (
+    input.familyCurrent
+    || input.planChangePending
+    || !input.status
+    || input.status.status !== "exhausted"
+  ) {
+    return null;
+  }
+
+  const status = input.status;
+  const recommendedActionPlanCode =
+    status.recommendedAction?.kind === "change_plan"
+      ? status.recommendedAction.targetPlanCode
+      : status.recommendedAction?.kind === "start_pulse"
+        ? "launch_monthly"
+        : status.recommendedAction?.kind === "upgrade_edge"
+          ? "launch_edge_monthly"
+          : null;
+  const candidates = [
+    status.subscriptionActionQuote?.targetPlanCode ?? null,
+    recommendedActionPlanCode,
+    status.recommendedPlanCode ?? null,
+  ];
+
+  for (const candidate of candidates) {
+    if (
+      candidate
+      && isDirectUsageRecoveryPlanEligible({
+        canStartDirectPlan: input.canStartDirectPlan,
+        canUpgradeToEdge: input.canUpgradeToEdge,
+        canUpgradeToMax: input.canUpgradeToMax,
+        canUpgradeToPulse: input.canUpgradeToPulse,
+        candidate,
+        currentPlanCode: input.currentPlanCode,
+        status,
+      })
+    ) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function isDirectUsageRecoveryPlanEligible(input: {
+  canStartDirectPlan: boolean;
+  canUpgradeToEdge: boolean;
+  canUpgradeToMax: boolean;
+  canUpgradeToPulse: boolean;
+  candidate: HostedBillingPlanCode;
+  currentPlanCode: HostedBillingPlanCode | null;
+  status: Exclude<HostedPlanUsageStatus, { status: "unavailable" }>;
+}): boolean {
+  if (input.candidate === input.currentPlanCode) {
+    return false;
+  }
+  if (input.status.accessKind === "starter") {
+    const serverPlanCodes = input.status.availablePlans?.map((plan) => plan.code);
+    return input.canStartDirectPlan
+      && (serverPlanCodes === undefined || serverPlanCodes.includes(input.candidate));
+  }
+  if (input.status.accessKind !== "paid") {
+    return false;
+  }
+  if (input.candidate === "launch_monthly") {
+    return input.currentPlanCode === "launch_group_monthly"
+      && input.canUpgradeToPulse;
+  }
+  if (input.candidate === "launch_edge_monthly") {
+    return (
+      input.currentPlanCode === "launch_group_monthly"
+      || input.currentPlanCode === "launch_monthly"
+    ) && input.canUpgradeToEdge;
+  }
+  if (input.candidate === "launch_max_monthly") {
+    return (
+      input.currentPlanCode === "launch_group_monthly"
+      || input.currentPlanCode === "launch_monthly"
+      || input.currentPlanCode === "launch_edge_monthly"
+    ) && input.canUpgradeToMax;
+  }
+  return false;
+}
+
+function renderDirectUsageRecoveryAction(input: {
+  currentPlanCode: HostedBillingPlanCode | null;
+  starterAccessActive: boolean;
+  targetPlanCode: HostedBillingPlanCode;
+  targetPlanName: string;
+}): ReactNode {
+  const label = `Upgrade to ${input.targetPlanName}`;
+  if (input.starterAccessActive) {
+    return (
+      <HostedPlanCheckoutButton block targetPlanCode={input.targetPlanCode}>
+        {label}
+      </HostedPlanCheckoutButton>
+    );
+  }
+  if (
+    input.targetPlanCode === "launch_edge_monthly"
+    && (
+      input.currentPlanCode === "launch_group_monthly"
+      || input.currentPlanCode === "launch_monthly"
+    )
+  ) {
+    return (
+      <UpgradeToEdgeButton
+        block
+        expectedCurrentPlanCode={input.currentPlanCode}
+        primary
+      >
+        {label}
+      </UpgradeToEdgeButton>
+    );
+  }
+  if (!input.currentPlanCode) {
+    return null;
+  }
+  return (
+    <HostedPlanChangeButton
+      block
+      expectedCurrentPlanCode={input.currentPlanCode}
+      mode="upgrade"
+      primary
+      targetPlanCode={input.targetPlanCode}
+    >
+      {label}
+    </HostedPlanChangeButton>
+  );
+}
+
 function PlanUsageBand(props: {
   planChangePending: boolean;
+  recommendedRecurringAction?: ReactNode;
+  recommendedRecurringPlanName?: string | null;
   status?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpCheckoutUrl?: string;
@@ -647,18 +856,20 @@ function PlanUsageBand(props: {
 }) {
   const payerMemberId = props.payerMemberId?.trim() || null;
   const inactiveTopUpDialog =
-    payerMemberId &&
-    (props.usageTopUpActivePurchase ||
-      props.usageTopUpInitialOpen ||
-      props.usageTopUpPurchaseReturn) ? (
+    payerMemberId
+    && (
+      props.usageTopUpActivePurchase
+      || props.usageTopUpInitialOpen
+      || props.usageTopUpPurchaseReturn
+    ) ? (
       <HostedUsageTopUpDialog
         activePurchase={props.usageTopUpActivePurchase}
         checkoutUrl={props.usageTopUpCheckoutUrl}
+        deferTerminalRefreshUntilClose
         initialOpen={props.usageTopUpInitialOpen}
         offers={[]}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
-        deferTerminalRefreshUntilClose
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
       />
@@ -669,18 +880,105 @@ function PlanUsageBand(props: {
   }
 
   const { status } = props;
-  const displayPlanName =
-    status.planCode === "launch_group_monthly"
-      ? HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME
-      : status.planName;
+  const displayPlanName = status.planCode === "launch_group_monthly"
+    ? HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME
+    : status.planName;
   const periodLabel = status.periodKind === "lifetime"
     ? null
     : `Resets ${formatHostedBillingDate(new Date(status.periodEnd))}`;
   const action = status.recommendedAction;
   const eligibleUsageTopUpOffers =
     status.accessKind === "paid" || status.accessKind === "family_sponsored"
-    ? props.usageTopUpOffers
-    : [];
+      ? props.usageTopUpOffers
+      : [];
+  const hasAuthorizedTopUp = Boolean(payerMemberId)
+    && (
+      eligibleUsageTopUpOffers.length > 0
+      || Boolean(props.usageTopUpActivePurchase)
+    );
+  const hasRecurringRecovery = Boolean(
+    !props.planChangePending && props.recommendedRecurringAction,
+  );
+
+  if (status.status === "exhausted") {
+    const topUpIsPrimary = hasAuthorizedTopUp && !hasRecurringRecovery;
+    const exhaustedTopUpDialog = payerMemberId && hasAuthorizedTopUp ? (
+      <HostedUsageTopUpDialog
+        activePurchase={props.usageTopUpActivePurchase}
+        checkoutUrl={props.usageTopUpCheckoutUrl}
+        initialOpen={props.usageTopUpInitialOpen}
+        offers={eligibleUsageTopUpOffers}
+        payerMemberId={payerMemberId}
+        purchaseReturn={props.usageTopUpPurchaseReturn}
+        quietSuccessfulReturn
+        scope={props.usageTopUpScope}
+        targetLabel={props.usageTopUpTargetLabel}
+        triggerClassName="min-h-11 w-full sm:w-auto"
+        triggerLabel="Add one-time usage"
+        triggerSize={topUpIsPrimary ? "xl" : "lg"}
+        triggerVariant={topUpIsPrimary ? "default" : "outline"}
+      />
+    ) : null;
+    const recoveryExplanation = hasRecurringRecovery
+      ? props.recommendedRecurringPlanName === "a higher Family tier"
+        ? "A higher recurring Family tier is available. Upgrade it for more included usage each period."
+        : `${props.recommendedRecurringPlanName ?? "A recurring plan"} is the recommended recurring way to continue.`
+      : props.planChangePending
+        ? hasAuthorizedTopUp
+          ? "A recurring plan change is already in progress. Add one-time usage to continue while it finishes."
+          : status.periodKind === "monthly"
+            ? "A recurring plan change is already in progress. Murph will resume when new usage is available or this allowance resets."
+            : "A recurring plan change is already in progress. Murph will resume when new usage is available."
+        : hasAuthorizedTopUp
+          ? "No higher recurring plan is available. Add one-time usage to continue."
+          : status.periodKind === "monthly"
+            ? "No higher recurring plan or one-time usage is available. Murph will resume when this allowance resets."
+            : "No authorized recurring plan or one-time usage is available right now.";
+
+    return (
+      <div
+        aria-label={`${displayPlanName} AI usage`}
+        className="rounded-2xl border border-border bg-card p-4 sm:p-5"
+      >
+        <div className="flex flex-col gap-1">
+          <p className="font-serif text-xl font-semibold tracking-tight text-foreground">
+            Keep Murph going
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {displayPlanName}{periodLabel ? ` · ${periodLabel}` : null}
+          </p>
+        </div>
+        <div className="mt-4 flex items-center gap-3">
+          <Progress
+            aria-label={`${status.usedPercent}% used, ${status.remainingPercent}% remaining`}
+            className="min-w-0 flex-1"
+            value={status.usedPercent}
+          />
+          <span className="shrink-0 text-xs font-medium tabular-nums text-foreground">
+            {status.remainingPercent}% remaining
+          </span>
+        </div>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+          {recoveryExplanation}
+        </p>
+        {hasRecurringRecovery || exhaustedTopUpDialog ? (
+          <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+            {hasRecurringRecovery ? (
+              <div className="w-full sm:w-auto [&_button]:min-h-11">
+                {props.recommendedRecurringAction}
+              </div>
+            ) : null}
+            {exhaustedTopUpDialog}
+          </div>
+        ) : null}
+        {!hasAuthorizedTopUp
+        && (props.usageTopUpInitialOpen || props.usageTopUpPurchaseReturn)
+          ? inactiveTopUpDialog
+          : null}
+      </div>
+    );
+  }
+
   const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
@@ -743,20 +1041,9 @@ function PlanUsageBand(props: {
           {status.remainingPercent}% remaining
         </span>
       </div>
-      {status.status === "exhausted" ? (
-        <p className="mt-3 text-sm text-pretty text-muted-foreground">
-          {status.accessKind === "starter"
-            ? "You've used your starter usage. Choose a monthly plan to continue."
-            : status.planCode === "launch_group_monthly"
-              ? "You've used this period's included AI usage. Your wearable keeps syncing and your group activity stays current."
-              : eligibleUsageTopUpOffers.length > 0
-                ? "You've used all available usage. Add usage to continue."
-                : "You've used all available usage. Murph pauses new usage until more capacity is available."}
-        </p>
-      ) : null}
-      {eligibleUsageTopUpOffers.length === 0 &&
-      !props.usageTopUpActivePurchase &&
-      (props.usageTopUpInitialOpen || props.usageTopUpPurchaseReturn)
+      {eligibleUsageTopUpOffers.length === 0
+      && !props.usageTopUpActivePurchase
+      && (props.usageTopUpInitialOpen || props.usageTopUpPurchaseReturn)
         ? usageTopUpDialog
         : null}
     </div>

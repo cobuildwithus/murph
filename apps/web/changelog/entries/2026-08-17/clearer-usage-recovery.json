@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-17",
+  "order": 100,
+  "item": {
+    "id": "clearer-usage-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Usage recovery is clearer",
+    "summary": "When AI usage runs out, Murph now sends one Settings link and highlights the best available way to continue.",
+    "details": "Eligible recurring upgrades appear first, one-time usage stays secondary, and Family members can send a generic Settings link to their plan owner.",
+    "relevanceTags": ["settings", "billing", "ai-usage", "family", "accessibility"],
+    "sourcePullRequests": []
+  }
+}

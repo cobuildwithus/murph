@@ -54,25 +54,68 @@ export interface UserFacingMessageContextByKey {
     homeUrl: string
   }
   "linq.ai_usage.starter_limit_reached": {
-    homeUrl: string
+    settingsUrl: string
   }
   "linq.ai_usage.edge_limit_reached": {
-    homeUrl: string
+    settingsUrl: string
   }
   "linq.ai_usage.family_limit_reached": {
-    homeUrl: string
+    settingsUrl: string
   }
   "linq.ai_usage.group_upgrade_pulse": {
-    homeUrl: string
+    settingsUrl: string
   }
   "linq.ai_usage.max_limit_reached": {
-    homeUrl: string
+    settingsUrl: string
   }
   "linq.ai_usage.pulse_upgrade_edge": {
-    homeUrl: string
+    settingsUrl: string
   }
   "linq.ai_usage.thread_limit_reached": Record<string, never>
 }
+
+const USAGE_RECOVERY_MESSAGE_TEMPLATES = [
+  `Murph is paused because the available AI usage has been used. Review your options in Settings:
+{settingsUrl}`,
+  `Murph is paused after reaching the current AI usage limit. Review your options in Settings:
+{settingsUrl}`,
+  `The current AI usage limit has been reached, so Murph is paused. See your options in Settings:
+{settingsUrl}`,
+  `All available AI usage has been used, so Murph is paused. Continue from Settings:
+{settingsUrl}`,
+  `Murph has paused because no AI usage remains right now. Open Settings to continue:
+{settingsUrl}`,
+  `The available AI usage is fully used, and Murph is paused. Review Settings for next steps:
+{settingsUrl}`,
+  `Murph has reached the current AI usage limit and is paused. See the available options in Settings:
+{settingsUrl}`,
+  `No AI usage is available right now, so Murph is paused. Continue in Settings:
+{settingsUrl}`,
+  `Murph is paused now that the available AI usage has run out. Review your options in Settings:
+{settingsUrl}`,
+  `The available AI usage has run out, so Murph is paused. See what is available in Settings:
+{settingsUrl}`,
+  `Murph has paused after all available AI usage was used. Review the next steps in Settings:
+{settingsUrl}`,
+  `The current AI usage is fully used, so Murph is paused. Open Settings for your options:
+{settingsUrl}`,
+  `Murph is paused because the current AI usage limit was reached. Continue from Settings:
+{settingsUrl}`,
+  `Available AI usage is at its limit, and Murph is paused. Review the available paths in Settings:
+{settingsUrl}`,
+  `Murph has no AI usage available right now and is paused. See your options in Settings:
+{settingsUrl}`,
+  `The current AI usage limit is reached, so Murph is paused. Open Settings to review next steps:
+{settingsUrl}`,
+  `Murph is paused with no AI usage remaining right now. Continue in Settings:
+{settingsUrl}`,
+  `The available AI usage is at its limit, so Murph is paused. Review your options in Settings:
+{settingsUrl}`,
+  `Murph has paused because the available AI usage ran out. See the available next steps in Settings:
+{settingsUrl}`,
+  `All current AI usage has been used, so Murph is paused. Open Settings to continue:
+{settingsUrl}`,
+] as const
 
 export interface RenderUserFacingMessageInput<K extends UserFacingMessageTemplateKey> {
   context: UserFacingMessageContextByKey[K]
@@ -561,138 +604,12 @@ Sound good?`,
     `Your plan went inactive. You can pick it back up here:
 {homeUrl}`,
   ],
-  "linq.ai_usage.starter_limit_reached": [
-    `You've used your free starter usage. Murph is paused until you start a plan: {homeUrl}`,
-    `Your free starter usage is used. Choose a plan to keep going: {homeUrl}`,
-    `You've reached the end of your free starter usage. Start a plan here: {homeUrl}`,
-    `Your starter usage has run out. Murph can continue after you pick a plan: {homeUrl}`,
-    `The free usage included with your account is used. Start a plan here: {homeUrl}`,
-    `You've used the starter usage on your account. Choose a plan to continue: {homeUrl}`,
-    `Your free starter balance is empty. Murph is paused until you start a plan: {homeUrl}`,
-    `Starter usage is used up. Choose a monthly plan here: {homeUrl}`,
-    `You've reached your free starter allowance. Start a plan to keep Murph active: {homeUrl}`,
-    `The starter usage on your account has been used. Choose a plan here: {homeUrl}`,
-    `Your included starter usage is spent. Choose a plan to resume: {homeUrl}`,
-    `You've finished the free usage included with your account. Start a plan here: {homeUrl}`,
-    `Murph is paused because your starter usage is used. Select a plan here: {homeUrl}`,
-    `Your starter allowance is used up. You can start a plan here: {homeUrl}`,
-    `The free starter balance has reached zero. Continue by choosing a plan: {homeUrl}`,
-    `You've used the free starter allowance. Start a plan when you're ready: {homeUrl}`,
-    `Your account's starter usage is gone. Choose a plan to keep going: {homeUrl}`,
-    `Starter usage has been used. Murph can resume after you start a plan: {homeUrl}`,
-    `You've reached the starter usage limit. Pick a plan here: {homeUrl}`,
-    `Your free starter usage is complete. Choose a plan to continue: {homeUrl}`,
-  ],
-  "linq.ai_usage.edge_limit_reached": [
-    `You've used this month's included Edge allowance. Murph is paused for this usage period. The allowance resets next period.`,
-    `Your included Edge usage is at its monthly amount. Murph is paused right now. The allowance resets next period.`,
-    `This month's Edge allowance is used. Murph is paused for the current period. A new allowance begins next period.`,
-    `You've reached the included Edge allowance. Murph is paused for this usage period. The monthly allowance will reset.`,
-    `Edge usage is at the included monthly limit. Murph is paused right now. The allowance resets next period.`,
-    `The included Edge allowance is spent for this period. Murph is paused for the current usage period.`,
-    `You've used the monthly Edge allowance. Murph is paused right now. The included allowance resets next period.`,
-    `Your Edge allowance has reached its included amount. Murph is paused for this usage period.`,
-    `This month's included Edge usage is used. Murph is paused right now. A new allowance begins next period.`,
-    `You've reached the Edge usage amount for this month. Murph is paused for the current period.`,
-    `This month's Edge allowance is fully used. Murph is paused right now. The allowance resets next period.`,
-    `Edge's included usage is at its monthly limit. Murph is paused for this usage period.`,
-    `You've used this period's Edge allowance. Murph is paused right now. The monthly allowance will reset.`,
-    `The included Edge usage has been reached. Murph is paused for the current usage period.`,
-    `Your monthly Edge allowance is spent. Murph is paused right now. The next allowance begins next period.`,
-    `This period's Edge usage is at the included amount. Murph is paused for this usage period.`,
-    `You've reached the included monthly Edge usage. Murph is paused right now. The allowance resets next period.`,
-    `Edge usage is at its monthly allowance. Murph is paused for the current period.`,
-    `The monthly Edge allowance is used. Murph is paused right now. The included allowance will reset.`,
-    `You've used Edge's included allowance for this month. Murph is paused for this usage period.`,
-  ],
-  "linq.ai_usage.family_limit_reached": [
-    `You've used your individual Family allowance for this month. Other Family members have separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your included usage through Family is at its monthly amount. Everyone else on the plan has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your individual monthly allowance through Family is used. Other members' allowances are separate. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `You've reached your own included usage for the month. This does not use another Family member's allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your monthly usage is at the limit included with your Family seat. Each Family member has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your individual allowance is spent for this period. Other Family members keep their own separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `You've used your Family-sponsored monthly allowance. Other members have separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your own Family allowance has reached its included amount. Every other member has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `You've reached the included usage for your Family seat this month. Other Family seats have separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `You've reached your individual usage amount for this month. This does not affect another Family member's allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your monthly allowance through Family is used. Each member's allowance is separate. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your Family seat's included usage is at its monthly limit. Other members have their own separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `You've used your own allowance for this period. Other Family members' allowances are separate. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your individual included usage has been reached. It does not draw from anyone else's Family allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your monthly included usage through Family is spent. Everyone else on the plan has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your own usage is at the included amount for this period. Other Family members keep their separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `You've reached your included monthly usage. Each Family member has a separate allowance. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your individual Family usage is at its monthly allowance. Other members have separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `Your own monthly allowance is used. Other Family members have separate usage limits. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-    `You've used the allowance included with your Family seat for this month. Other members keep their own separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
-  ],
-  "linq.ai_usage.group_upgrade_pulse": [
-    `You've used this month's included Core AI usage. New Murph replies are paused, but your wearable keeps syncing and your group activity stays current. Pulse includes more private usage: {homeUrl}`,
-    `Your Core AI allowance is used for this month. Wearable syncing and group activity keep running. Pulse has more replies, or you can wait for the reset: {homeUrl}`,
-    `Core's included AI usage is at its monthly limit. I pause new replies until reset, while your wearable and group data keep updating. Pulse has more included usage: {homeUrl}`,
-    `You've reached the Core plan's monthly AI allowance. Syncing stays on and your group activity remains current. Pulse is available, or wait for next period: {homeUrl}`,
-    `This month's Core AI usage is used. New AI work pauses, not your wearable connection or group updates. Pulse includes more usage: {homeUrl}`,
-    `Your included Core replies are used for this period. Health data keeps syncing and group activity keeps updating. Pulse is available, or wait for the reset: {homeUrl}`,
-    `You've hit the Core plan's AI limit for the month. New replies pause, while wearable syncing continues and your group stays current. Pulse fits more regular private Murph usage: {homeUrl}`,
-    `Core AI usage is at its included monthly amount. I pause new replies until reset, but syncing and group data continue. Pulse details: {homeUrl}`,
-    `The Core allowance for new AI work is used. Your wearable remains connected and group activity stays current. Choose Pulse for more usage or wait: {homeUrl}`,
-    `You've used the AI included with Core this month. Only new Murph work pauses; wearable and group updates continue. Pulse offers more included usage: {homeUrl}`,
-    `Your Core plan has reached this month's AI allowance. Syncing keeps running in the background and your group data stays current. Pulse is available, or wait: {homeUrl}`,
-    `That's the included Core AI usage for this period. I pause replies until reset, while your wearable and group activity continue updating. Pulse details: {homeUrl}`,
-    `You've reached Core's monthly AI amount. New replies pause, while your health data still syncs and your group participation remains current. Pulse has more private replies: {homeUrl}`,
-    `The Core plan's included AI is used for now. Wearable syncing does not stop, and group activity keeps updating. Pulse or the next reset will reopen replies: {homeUrl}`,
-    `Your monthly Core AI allowance is spent. New replies pause, but your wearable connection and group updates stay active. Pulse details: {homeUrl}`,
-    `You've used this period's Core AI allowance. New replies pause, while syncing and group activity continue normally. Pulse includes more private Murph usage: {homeUrl}`,
-    `Core's monthly AI capacity is used. I pause new AI work until reset, not wearable syncing or group updates. Pulse is available if you want to keep chatting: {homeUrl}`,
-    `You've reached the included usage on Core. Your wearable keeps syncing and your group data keeps moving. More Murph replies come with Pulse or the next reset: {homeUrl}`,
-    `This month's Core AI allowance is complete. New replies pause, while background health syncing and group activity continue. Pulse has more included replies: {homeUrl}`,
-    `Your included Core AI usage has run out for this period. New Murph replies pause, while wearables and group data stay current. Pulse is available here: {homeUrl}`,
-  ],
-  "linq.ai_usage.max_limit_reached": [
-    `You've used this month's included Max allowance. Murph is paused for this usage period. The allowance resets next period.`,
-    `Your included Max usage is at its monthly amount. Murph is paused right now. The allowance resets next period.`,
-    `This month's Max allowance is used. Murph is paused for the current period. A new allowance begins next period.`,
-    `You've reached the included Max allowance. Murph is paused for this usage period. The monthly allowance will reset.`,
-    `Max usage is at the included monthly limit. Murph is paused right now. The allowance resets next period.`,
-    `The included Max allowance is spent for this period. Murph is paused for the current usage period.`,
-    `You've used the monthly Max allowance. Murph is paused right now. The included allowance resets next period.`,
-    `Your Max allowance has reached its included amount. Murph is paused for this usage period.`,
-    `This month's included Max usage is used. Murph is paused right now. A new allowance begins next period.`,
-    `You've reached the Max usage amount for this month. Murph is paused for the current period.`,
-    `This month's Max allowance is fully used. Murph is paused right now. The allowance resets next period.`,
-    `Max's included usage is at its monthly limit. Murph is paused for this usage period.`,
-    `You've used this period's Max allowance. Murph is paused right now. The monthly allowance will reset.`,
-    `The included Max usage has been reached. Murph is paused for the current usage period.`,
-    `Your monthly Max allowance is spent. Murph is paused right now. The next allowance begins next period.`,
-    `This period's Max usage is at the included amount. Murph is paused for this usage period.`,
-    `You've reached the included monthly Max usage. Murph is paused right now. The allowance resets next period.`,
-    `Max usage is at its monthly allowance. Murph is paused for the current period.`,
-    `The monthly Max allowance is used. Murph is paused right now. The included allowance will reset.`,
-    `You've used Max's included allowance for this month. Murph is paused for this usage period.`,
-  ],
-  "linq.ai_usage.pulse_upgrade_edge": [
-    `You've used this month's included Pulse allowance. Murph is paused for this usage period. The allowance resets next period.`,
-    `Your included Pulse usage is at its monthly amount. Murph is paused right now. The allowance resets next period.`,
-    `This month's Pulse allowance is used. Murph is paused for the current period. A new allowance begins next period.`,
-    `You've reached the included Pulse allowance. Murph is paused for this usage period. The monthly allowance will reset.`,
-    `Pulse usage is at the included monthly limit. Murph is paused right now. The allowance resets next period.`,
-    `The included Pulse allowance is spent for this period. Murph is paused for the current usage period.`,
-    `You've used the monthly Pulse allowance. Murph is paused right now. The included allowance resets next period.`,
-    `Your Pulse allowance has reached its included amount. Murph is paused for this usage period.`,
-    `This month's included Pulse usage is used. Murph is paused right now. A new allowance begins next period.`,
-    `You've reached the Pulse usage amount for this month. Murph is paused for the current period.`,
-    `This month's Pulse allowance is fully used. Murph is paused right now. The allowance resets next period.`,
-    `Pulse's included usage is at its monthly limit. Murph is paused for this usage period.`,
-    `You've used this period's Pulse allowance. Murph is paused right now. The monthly allowance will reset.`,
-    `The included Pulse usage has been reached. Murph is paused for the current usage period.`,
-    `Your monthly Pulse allowance is spent. Murph is paused right now. The next allowance begins next period.`,
-    `This period's Pulse usage is at the included amount. Murph is paused for this usage period.`,
-    `You've reached the included monthly Pulse usage. Murph is paused right now. The allowance resets next period.`,
-    `Pulse usage is at its monthly allowance. Murph is paused for the current period.`,
-    `The monthly Pulse allowance is used. Murph is paused right now. The included allowance will reset.`,
-    `You've used Pulse's included allowance for this month. Murph is paused for this usage period.`,
-  ],
+  "linq.ai_usage.starter_limit_reached": USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "linq.ai_usage.edge_limit_reached": USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "linq.ai_usage.family_limit_reached": USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "linq.ai_usage.group_upgrade_pulse": USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "linq.ai_usage.max_limit_reached": USAGE_RECOVERY_MESSAGE_TEMPLATES,
+  "linq.ai_usage.pulse_upgrade_edge": USAGE_RECOVERY_MESSAGE_TEMPLATES,
   "linq.ai_usage.thread_limit_reached": [
     `Well. I'm out of time for the month, which means all of you are stuck with each other's opinions until it resets.`,
     `That's me done for the month. Enjoy the silence, everybody, I'll be back when my time resets.`,

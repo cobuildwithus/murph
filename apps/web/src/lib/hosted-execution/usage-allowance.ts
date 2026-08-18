@@ -448,7 +448,8 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
   "https://developers.openai.com/api/docs/pricing";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_SOURCE =
   "https://docs.venice.ai/overview/pricing";
-const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
+const HOSTED_AI_USAGE_RECOVERY_URL =
+  "https://withmurph.ai/settings?usageRecovery=true#subscription";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
 // GPT Image API pricing has separate text/image token buckets and is not part
@@ -3461,7 +3462,7 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
 }): string {
   return renderUserFacingMessage({
     context: {
-      homeUrl: HOSTED_AI_USAGE_HOME_URL,
+      settingsUrl: HOSTED_AI_USAGE_RECOVERY_URL,
     },
     key: input.key,
     seed: buildHostedAiUsageNoticeSeed(input),

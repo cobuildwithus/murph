@@ -41,6 +41,44 @@ const MAX_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   usedPercent: 16,
 };
 
+const EXHAUSTED_PULSE_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  accessKind: "paid",
+  forecast: null,
+  generatedAt: "2026-08-21T12:00:00.000Z",
+  periodEnd: "2026-08-27T04:00:00.000Z",
+  periodKind: "monthly",
+  periodStart: "2026-07-27T04:00:00.000Z",
+  planCode: "launch_monthly",
+  planName: "Pulse",
+  recommendedAction: {
+    kind: "change_plan",
+    label: "Upgrade to Edge ($20/month)",
+    targetPlanCode: "launch_edge_monthly",
+    url: "/settings#subscription",
+  },
+  remainingPercent: 0,
+  status: "exhausted",
+  subscriptionActionQuote: {
+    action: "change_plan",
+    expiresAt: "2026-08-21T12:10:00.000Z",
+    label: "Upgrade to Edge ($20/month)",
+    monthlyPriceUsdCents: 2_000,
+    quoteId: "quote_design_usage_recovery_edge",
+    targetPlanCode: "launch_edge_monthly",
+    timing: "immediate",
+  },
+  usedPercent: 100,
+};
+
+const EXHAUSTED_MAX_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  ...MAX_USAGE_STATUS,
+  generatedAt: "2026-08-21T12:00:00.000Z",
+  recommendedAction: null,
+  remainingPercent: 0,
+  status: "exhausted",
+  usedPercent: 100,
+};
+
 export function GroupMemberPlanStudy() {
   return (
     <div
@@ -386,6 +424,73 @@ export function GroupMemberPlanStudy() {
               url: "/settings?addUsage=true#subscription",
             }}
             resetAt={new Date("2026-08-27T04:00:00.000Z")}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Exhausted Pulse usage with recurring upgrade first"
+        state="usage-recovery-direct-upgrade-first"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canUpgradeToEdge
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_monthly"
+            currentPeriodEnd={new Date("2026-08-27T04:00:00.000Z")}
+            payerMemberId="design_usage_recovery_direct"
+            usageRecoveryInitialOpen
+            usageStatus={EXHAUSTED_PULSE_USAGE_STATUS}
+            usageTopUpOffers={[{
+              amountLabel: "$10",
+              offerCode: "usage_10_usd",
+            }]}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Exhausted Max usage with one-time usage as the best available path"
+        state="usage-recovery-no-higher-tier"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_max_monthly"
+            currentPeriodEnd={new Date("2026-09-07T20:00:00.000Z")}
+            payerMemberId="design_usage_recovery_max"
+            showMaxPlan
+            usageRecoveryInitialOpen
+            usageStatus={EXHAUSTED_MAX_USAGE_STATUS}
+            usageTopUpOffers={[{
+              amountLabel: "$10",
+              offerCode: "usage_10_usd",
+            }]}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Sponsored Family member recovery handoff"
+        state="usage-recovery-family-sponsored"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            familyState="sponsored"
+            usageRecoveryInitialOpen
+            usageStatus={{
+              ...EXHAUSTED_PULSE_USAGE_STATUS,
+              accessKind: "family_sponsored",
+              planName: "Family",
+              recommendedAction: null,
+              subscriptionActionQuote: null,
+            }}
           />
         </div>
       </StudyState>

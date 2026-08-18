@@ -35,6 +35,7 @@ import {
   isHostedBillingPlanChangePortalConfigured,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
+  HOSTED_FAMILY_PLAN_DISPLAY,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   hasConfirmedHostedGroupMembership,
@@ -117,6 +118,7 @@ type SettingsSearchParams = {
   usageFamily?: string | string[] | undefined;
   usageMember?: string | string[] | undefined;
   usagePurchase?: string | string[] | undefined;
+  usageRecovery?: string | string[] | undefined;
   voice?: string | string[] | undefined;
 };
 
@@ -138,6 +140,8 @@ export default async function SettingsPage({
   const addUsageTarget = readOnlySearchParamValue(resolvedSearchParams.addUsage);
   const openPersonalUsageTopUp = addUsageTarget === "true";
   const requestedFamilyOwnerUsageTopUp = addUsageTarget === "family";
+  const usageRecoveryInitialOpen =
+    readOnlySearchParamValue(resolvedSearchParams.usageRecovery) === "true";
   const openVoiceLink =
     readFirstSearchParamValue(resolvedSearchParams.voice) === "true";
   const usageTopUpPurchaseReturn = readUsageTopUpPurchaseReturn(
@@ -158,10 +162,11 @@ export default async function SettingsPage({
       && !groupPaymentMethodSaved
       && planChangeReturn === null
       && usageTopUpPurchaseReturn === null
+      && !usageRecoveryInitialOpen
     ) {
       redirect("/");
     }
-    return <SettingsAuthRequired />;
+    return <SettingsAuthRequired usageRecovery={usageRecoveryInitialOpen} />;
   }
 
   if (planChangeReturn === HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE) {
@@ -202,6 +207,8 @@ export default async function SettingsPage({
   const familyOwnerUsageTopUpMember =
     resolveActiveFamilyOwnerUsageTopUpMember(familyOwner);
   const sponsoredMember = familyAccess !== null && familyOwner === null;
+  const familyRecurringUpgradeAvailable =
+    activeFamilyOwner && hasHigherHostedFamilyOwnerTier(familyOwner);
   const usageTopUpOffers = usageTopUpActivePurchase
     ? []
     : projectHostedUsageTopUpOffers(usageTopUpOfferCodes);
@@ -518,6 +525,7 @@ export default async function SettingsPage({
           familyBillingOwner={familyBillingOwner}
           familyDraftRecovery={familyDraftRecovery}
           familyInviteReturnPath={familyInviteReturnPath}
+          familyRecurringUpgradeAvailable={familyRecurringUpgradeAvailable}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
           planChangePending={planChangePending}
@@ -545,6 +553,7 @@ export default async function SettingsPage({
           payerMemberId={authenticatedMember?.id}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
+          usageRecoveryInitialOpen={usageRecoveryInitialOpen}
           usageStatus={usageStatus}
           usageTopUpActivePurchase={billingUsageTopUpActivePurchase}
           usageTopUpCheckoutUrl={
@@ -624,6 +633,9 @@ export default async function SettingsPage({
             usageTopUpOffers={familyUsageTopUpOffers}
             usageTopUpPurchaseReturn={familySettingsUsageTopUpPurchaseReturn}
             usageTopUpReturnMemberId={familySettingsUsageTopUpReturnMemberId}
+            {...(usageRecoveryInitialOpen
+              ? { usageRecoveryInitialOpen: true }
+              : {})}
           />
         </section>
       ) : null}
@@ -782,10 +794,21 @@ async function readSettingsPageData(input: {
     && await isHostedBillingPlanSelectionAvailable({
       billingPlanCode: "launch_max_monthly",
     });
+  const currentPlanCode = parseHostedBillingPlanCode(
+    settingsSnapshot.billingRef?.currentBillingPlanCode,
+  );
+  const subscriptionActionTargetPlanCode =
+    currentPlanCode === "launch_edge_monthly" && maxPlanAvailable
+      ? "launch_max_monthly" as const
+      : undefined;
   const usageStatus = await readHostedPersonalAiUsageStatus({
+    includeSubscriptionActionQuote: true,
     memberId,
     prisma,
     publicBaseUrl: null,
+    ...(subscriptionActionTargetPlanCode
+      ? { subscriptionActionTargetPlanCode }
+      : {}),
   });
   const usageActivity = await readHostedAiUsageActivity({
     memberId,
@@ -873,6 +896,27 @@ function readFirstSearchParamValue(
   value: string | string[] | undefined,
 ): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function hasHigherHostedFamilyOwnerTier(
+  snapshot: HostedFamilyOwnerSnapshot | null,
+): boolean {
+  if (!snapshot?.billingActive) {
+    return false;
+  }
+  const owner = snapshot.members.find((member) => member.isOwner);
+  if (!owner || owner.pendingPlanCode !== null) {
+    return false;
+  }
+  const currentPlan = HOSTED_FAMILY_PLAN_DISPLAY.plans.find(
+    (plan) => plan.code === owner.planCode,
+  );
+  return Boolean(
+    currentPlan
+    && HOSTED_FAMILY_PLAN_DISPLAY.plans.some(
+      (plan) => plan.recurringAmountUsdCents > currentPlan.recurringAmountUsdCents,
+    ),
+  );
 }
 
 function readOnlySearchParamValue(

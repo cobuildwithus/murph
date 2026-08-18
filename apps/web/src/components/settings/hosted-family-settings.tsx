@@ -20,6 +20,7 @@ export function HostedFamilySettings(props: {
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
+  usageRecoveryInitialOpen?: boolean;
 }) {
   const snapshot = props.ownerSnapshot;
 
@@ -64,6 +65,7 @@ export function HostedFamilySettings(props: {
         usageTopUpOffers={props.usageTopUpOffers ?? []}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
         usageTopUpReturnMemberId={props.usageTopUpReturnMemberId}
+        usageRecoveryInitialOpen={props.usageRecoveryInitialOpen}
       />
     </div>
   );

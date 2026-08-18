@@ -687,6 +687,81 @@ test("AuthProvider preserves a Group payment return through sign-in", async () =
 
 test.each([
   {
+    label: "exact recovery handoff",
+    resumes: true,
+    search: "?usageRecovery=true",
+  },
+  {
+    label: "recovery handoff with extra state",
+    resumes: false,
+    search: "?usageRecovery=true&context=extra",
+  },
+  {
+    label: "repeated recovery handoff",
+    resumes: false,
+    search: "?usageRecovery=true&usageRecovery=true",
+  },
+])("AuthProvider scopes the Settings usage recovery return: $label", async ({ resumes, search }) => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+  const reload = vi.fn();
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const href = `https://join.example.test/settings${search}#subscription`;
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+  );
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash: "#subscription",
+      href,
+      origin: "https://join.example.test",
+      pathname: "/settings",
+      reload,
+      search,
+    },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  if (resumes) {
+    expect(rendered.window.location.href).toBe(href);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+  } else {
+    expect(assign).toHaveBeenCalledWith("/home");
+    expect(reload).not.toHaveBeenCalled();
+  }
+
+  await rendered.cleanup();
+});
+
+test.each([
+  {
     label: "exact Family invite",
     resumes: true,
     search:
