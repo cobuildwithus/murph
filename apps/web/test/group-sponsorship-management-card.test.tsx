@@ -478,50 +478,62 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
   }
 });
 
-test("reloads authoritative state after an uncertain cancellation", async () => {
-  const fetchMock = vi.fn(async () => {
-    throw new Error("Connection lost after request");
-  });
-  vi.stubGlobal("fetch", fetchMock);
-
-  const { GroupSponsorshipManagementCard } = await import(
-    "@/src/components/hosted-groups/group-sponsorship-management-card"
-  );
-  const rendered = await renderClientComponent(createElement(
-    GroupSponsorshipManagementCard,
-    {
-      endpoint: "/api/groups/fund/example/sponsorship",
-      management: baseManagement,
-    },
-  ));
-  try {
-    const cancelButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Cancel sponsorship");
-    assert.ok(cancelButton);
-    await act(async () => {
-      cancelButton.click();
+test.each([false, true])(
+  "reaches the canceled receipt after an uncertain cancellation with cancelOnly=%s",
+  async (cancelOnly) => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw new Error("Connection lost after request");
+      }
+      return {
+        json: async () => ({ management: null }),
+        ok: true,
+      };
     });
+    vi.stubGlobal("fetch", fetchMock);
 
-    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
-      "[data-slot='alert-dialog-action']",
+    const { GroupSponsorshipManagementCard } = await import(
+      "@/src/components/hosted-groups/group-sponsorship-management-card"
     );
-    assert.ok(confirmButton);
-    await act(async () => {
-      confirmButton.click();
-    });
+    const rendered = await renderClientComponent(createElement(
+      GroupSponsorshipManagementCard,
+      {
+        cancelOnly,
+        endpoint: "/api/groups/fund/example/sponsorship",
+        management: baseManagement,
+      },
+    ));
+    try {
+      const cancelButton = [...rendered.container.querySelectorAll("button")]
+        .find((candidate) => candidate.textContent === "Cancel sponsorship");
+      assert.ok(cancelButton);
+      await act(async () => {
+        cancelButton.click();
+      });
 
-    expect(rendered.container.textContent).toContain(
-      "We couldn’t confirm whether that change went through",
-    );
-    expect(confirmButton.textContent).toBe("Cancel sponsorship");
-    const checkButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Check current setup");
-    assert.ok(checkButton);
-    await act(async () => {
-      checkButton.click();
-    });
-    expect(rendered.reload).toHaveBeenCalledTimes(1);
-  } finally {
-    await rendered.cleanup();
+      const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+        "[data-slot='alert-dialog-action']",
+      );
+      assert.ok(confirmButton);
+      await act(async () => {
+        confirmButton.click();
+      });
+
+      expect(rendered.container.textContent).toContain(
+        "We couldn’t confirm whether cancellation went through",
+      );
+      expect(confirmButton.textContent).toBe("Check cancellation status");
+      expect(rendered.container.textContent).not.toContain("Check current setup");
+      await act(async () => {
+        confirmButton.click();
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(rendered.reload).not.toHaveBeenCalled();
+      expect(rendered.container.textContent).toContain(
+        "Monthly sponsorship canceled",
+      );
+    } finally {
+      await rendered.cleanup();
+    }
   }
-});
+);

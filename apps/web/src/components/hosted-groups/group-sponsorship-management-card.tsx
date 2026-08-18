@@ -350,6 +350,9 @@ export function GroupSponsorshipManagementCard({
         onOpenChange={(open) => {
           if (!open && !busy) {
             if (error) {
+              if (confirmation?.kind === "cancel") {
+                return;
+              }
               window.location.reload();
               return;
             }
@@ -415,17 +418,21 @@ export function GroupSponsorshipManagementConfirmationDialog({
 
           {error ? (
             <p role="alert" className="text-sm/6 text-destructive">
-              We couldn’t confirm whether that change went through. Check your current setup or try again.
+              {isIncrease
+                ? "We couldn’t confirm whether that change went through. Check your current setup or try again."
+                : "We couldn’t confirm whether cancellation went through. Check its status to see whether automatic refills stopped."}
             </p>
           ) : null}
 
           <footer className="-mx-5 -mb-5 flex flex-col-reverse gap-2 rounded-b-2xl border-t border-border bg-muted/50 p-5 sm:flex-row sm:justify-end">
-            <AlertDialogPrimitive.Close
-              disabled={busy}
-              render={<Button size="lg" variant="outline" />}
-            >
-              {error ? "Check current setup" : "Keep current setup"}
-            </AlertDialogPrimitive.Close>
+            {error && !isIncrease ? null : (
+              <AlertDialogPrimitive.Close
+                disabled={busy}
+                render={<Button size="lg" variant="outline" />}
+              >
+                {error ? "Check current setup" : "Keep current setup"}
+              </AlertDialogPrimitive.Close>
+            )}
             <Button
               data-slot="alert-dialog-action"
               disabled={busy}
@@ -436,7 +443,11 @@ export function GroupSponsorshipManagementConfirmationDialog({
               {busy ? <Spinner data-icon="inline-start" /> : null}
               {busy
                 ? isIncrease ? "Updating limit" : "Canceling sponsorship"
-                : isIncrease ? `Increase to ${nextLimit}` : "Cancel sponsorship"}
+                : isIncrease
+                  ? `Increase to ${nextLimit}`
+                  : error
+                    ? "Check cancellation status"
+                    : "Cancel sponsorship"}
             </Button>
           </footer>
         </AlertDialogPrimitive.Popup>

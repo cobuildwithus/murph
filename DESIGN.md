@@ -578,11 +578,13 @@ phones and label an increase as a review step, not as completed confirmation.
 The review opens a focus-safe responsive alert dialog with the current and new
 monthly maximums, the rule that $5 usage purchases happen only while automatic
 refills are active, and explicit `Keep current setup` and `Increase to $N`
-actions. Keep the dialog visible when the result cannot be confirmed, replace
-the secondary action with `Check current setup`, and make dismissal reload the
-authoritative state while retaining the primary retry. Use the same confirmation
-pattern for cancellation; never use a browser alert or confirm prompt for
-sponsorship changes.
+actions. Keep the dialog visible when the result cannot be confirmed. For limit
+changes, replace the secondary action with `Check current setup` and make
+dismissal reload authoritative state while retaining the primary retry. For
+cancellation, keep the dialog open and use the exact authorized cancellation
+request as an idempotent status check so a lost response still reaches the
+terminal receipt. Never use a browser alert or confirm prompt for sponsorship
+changes.
 
 When group funding is fulfilled, switch from the payment-status composition to
 one confident success hierarchy: a compact sage confirmation mark and mono
