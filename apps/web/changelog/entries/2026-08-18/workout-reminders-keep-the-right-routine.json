@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Workout reminders keep the right routine",
-    "summary": "Murph now closes a tracked workout when you log its final planned set, so the next reminder can use the right saved routine without a separate finish message.",
-    "details": "This works in an ordinary private-chat reply without requiring the iMessage Reply feature. If an older workout is already still open, Murph asks for its end time or total duration instead of guessing, and explicit corrections stay attached to that workout.",
+    "summary": "Workout reminders now keep their saved routine attached, so an ordinary reply can target the right workout without using the iMessage Reply feature.",
+    "details": "You can report a set and say you’re done in the same message; Murph logs it, finishes the workout, and returns the completed card. If an older workout is already still open, Murph asks for its end time or total duration instead of guessing.",
     "relevanceTags": ["assistant", "workouts", "automations", "reliability"],
     "sourcePullRequests": [1981]
   }

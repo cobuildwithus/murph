@@ -177,11 +177,13 @@ response includes both the truthful no-save result and that exact recovery
 question. It does not stop after the failure statement or give generic retry
 advice.
 
-When a member's current completion fills the final unlogged placeholder across
-the active workout, Murph finishes that workout in the same turn and returns the
+An active workout may have zero pending planned sets and remain active so the
+member can add targetless extra sets. Plan exhaustion is not session closure.
+When one message contains both a set result and unmistakable closure language,
+Murph logs the set, finishes that same workout in the same turn, and returns the
 completed card. The member does not need to send a separate finish command.
-A correction to an already logged set, a reminder by itself, plan targets,
-elapsed time, or an earlier-day active record does not prove completion.
+A reminder by itself, plan targets, elapsed time, or an earlier-day active record
+does not prove completion.
 
 ## Generic scheduled-reminder relationship context
 
