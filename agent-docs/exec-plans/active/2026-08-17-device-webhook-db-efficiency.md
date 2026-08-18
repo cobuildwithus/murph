@@ -105,3 +105,25 @@ unwrap for that illustrative burst.
   the final runtime query-budget proof.
 - The implementation is ready for the repository completion review and PR
   workflow; the plan remains active until those gates complete.
+
+### ReviewGPT round 3 remediation
+
+- Round 3 returned one review-induced Material UX finding: the production
+  SQLite service adapter still exact-filtered canonical Junction source keys,
+  unlike the hosted resolver and public-ingress test double. A disconnected
+  legacy-only source could therefore be acknowledged and queued even though
+  the worker would later skip it.
+- A production-composition regression reproduced the failure through
+  `createDeviceSyncService`, `SqliteDeviceSyncStore`, signed Junction ingress,
+  the durable job queue, the real Junction executor, trace release/completion,
+  and importer calls.
+- The correction deletes the exact-key filter and applies the existing
+  canonical-first, admitted-fallback ordering to the same bounded source list.
+  No state, owner, query, queue, migration, or compatibility subsystem was
+  added.
+- Focused proof and the complete device-sync package suite are green: 1,121
+  tests passed, including no-source, connected/disconnected legacy-only,
+  canonical-blocked-with-legacy-sibling, and canonical-connected cases. The
+  package typecheck and `git diff --check` also pass.
+- The plan remains active pending a passing later ReviewGPT round, exact-head
+  CI, parent final review, merge-tree proof, and final plan closure.

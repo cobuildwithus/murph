@@ -404,16 +404,17 @@ class DeviceSyncServiceController {
         listConnectionSources: (input) => this.store.listConnectionSources(input),
         resolveConnectionSourceAdmissionCandidate: (input) =>
           this.store.listConnectionSources(input)
-            .filter((source) =>
-              input.sourceInstanceKey === undefined
-              || source.sourceInstanceKey === input.sourceInstanceKey
-            )
             .sort((left, right) => {
+              const leftExact = input.sourceInstanceKey !== undefined
+                && left.sourceInstanceKey === input.sourceInstanceKey;
+              const rightExact = input.sourceInstanceKey !== undefined
+                && right.sourceInstanceKey === input.sourceInstanceKey;
               const leftAdmitted = left.status === "connected"
                 && !isDeviceSyncSourceDisconnectFenced(left);
               const rightAdmitted = right.status === "connected"
                 && !isDeviceSyncSourceDisconnectFenced(right);
-              return Number(rightAdmitted) - Number(leftAdmitted)
+              return Number(rightExact) - Number(leftExact)
+                || Number(rightAdmitted) - Number(leftAdmitted)
                 || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
                 || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
                 || left.id.localeCompare(right.id);
