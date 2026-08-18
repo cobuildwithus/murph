@@ -28,8 +28,9 @@ queue, database schema, or per-member alert owner.
   runtime, mailbox item, connection, provider, message, or health-data values.
 - Reuse the singleton incident row and five-minute cron. Add no scheduler,
   queue, migration, table, or per-runtime state.
-- Keep initial and retried Resend effects idempotent, and give each reminder a
-  stable generation key that survives ambiguous provider outcomes.
+- Keep initial and retried Resend effects idempotent. Persist one fresh
+  generation identity for each new reminder and reuse it across ambiguous
+  provider outcomes.
 - Leave latency alerts at one email per continuous incident.
 
 ## Product UX Plan
@@ -99,14 +100,23 @@ body and persisted detail remains aggregate-only.
 - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
   apps/web/test/hosted-runtime-progress-alert-monitor.test.ts
   apps/web/test/hosted-runtime-latency-alert-monitor.test.ts
-  apps/web/test/hosted-runtime-latency-alert-cron.test.ts` passes 60 tests.
+  apps/web/test/hosted-runtime-latency-alert-cron.test.ts` passes 62 tests.
 - `pnpm --dir apps/web typecheck` passes after generating the local Prisma
   client in the isolated worktree.
 - Focused ESLint passes for the shared incident owner, progress monitor, and
   progress-monitor test; `git diff --check` passes.
-- ReviewGPT recommended the existing aggregate owner plus six-hour reminders,
-  no separate device-sync monitor, no recovery email, and no manual reset of an
-  already-active production row.
+- The planning ReviewGPT pass recommended the existing aggregate owner plus
+  six-hour reminders, no separate device-sync monitor, no recovery email, and
+  no manual reset of an already-active production row.
+- Final ReviewGPT round 1 found that a separate persisted reminder kind and key
+  suffix duplicated the existing persisted generation identity. The accepted
+  simplification gives every fresh reminder a new incident-generation id and
+  reuses that id plus the exact body for retries, deleting the parser, schema
+  bump, and correlated JSON sub-state.
+- The accepted specialist coverage finding is resolved by proving the latency
+  monitor still sends only one email after the progress monitor's six-hour
+  reminder horizon. Focused progress coverage also proves overlapping reminder
+  scans admit one provider effect.
 - ReviewGPT's declared patch artifact was not downloadable after two canonical
   recovery attempts. Existing Frog entries already cover the exact missing-tab
   and declared-without-downloadable-artifact failures; the implementation was

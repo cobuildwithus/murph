@@ -22,6 +22,17 @@ const alertEnv = {
   RESEND_API_KEY: "re_test",
 };
 
+function createVoidDeferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve = () => {};
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("hosted runtime progress health", () => {
   it("detects the exact 15-minute durable progress boundary across both lanes", () => {
     const health = summarizeHostedRuntimeProgressRows({
@@ -298,16 +309,33 @@ describe("hosted runtime progress alert monitor", () => {
       prisma: fixture.prisma,
       sendAlert,
     });
+    const remindedAgain = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-11T04:30:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
 
     expect(HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS).toBe(6 * 60 * 60_000);
     expect(opened.outcome).toBe("alert_sent");
     expect(exactBoundary.outcome).toBe("incident_active");
     expect(reminded.outcome).toBe("alert_sent");
-    expect(fixture.queryRaw).toHaveBeenCalledTimes(5);
-    expect(sendAlert).toHaveBeenCalledTimes(2);
+    expect(remindedAgain.outcome).toBe("alert_sent");
+    expect(fixture.queryRaw).toHaveBeenCalledTimes(7);
+    expect(sendAlert).toHaveBeenCalledTimes(3);
+    const initialKey = sendAlert.mock.calls[0]?.[0].idempotencyKey ?? "";
+    const firstReminderKey = sendAlert.mock.calls[1]?.[0].idempotencyKey ?? "";
+    const secondReminderKey = sendAlert.mock.calls[2]?.[0].idempotencyKey ?? "";
+    expect(initialKey).toMatch(/^murph\/runtime-progress\/[0-9a-f-]+\/alert$/u);
+    expect(firstReminderKey).toMatch(
+      /^murph\/runtime-progress\/[0-9a-f-]+\/alert$/u,
+    );
+    expect(secondReminderKey).toMatch(
+      /^murph\/runtime-progress\/[0-9a-f-]+\/alert$/u,
+    );
+    expect(firstReminderKey).not.toBe(initialKey);
+    expect(secondReminderKey).not.toBe(firstReminderKey);
     expect(sendAlert.mock.calls[1]?.[0]).toMatchObject({
-      idempotencyKey:
-        `murph/runtime-progress/${readIncidentId(fixture.readState())}/reminder/${now.getTime()}`,
       subject: "Hosted runtime progress stalled",
       to: ["operator@example.test"],
     });
@@ -324,11 +352,7 @@ describe("hosted runtime progress alert monitor", () => {
     expect(persisted).not.toContain("runtime_private_reminder_a");
     expect(persisted).not.toContain("runtime_private_reminder_b");
     expect(fixture.readState()?.detailsJson).toMatchObject({
-      notification: {
-        idempotencyKeySuffix: `reminder/${now.getTime()}`,
-        kind: "reminder",
-      },
-      schema: "murph.hosted-runtime-progress-monitor.v2",
+      schema: "murph.hosted-runtime-progress-monitor.v1",
     });
   });
 
@@ -391,6 +415,53 @@ describe("hosted runtime progress alert monitor", () => {
     });
   });
 
+  it("admits one provider effect when due reminder scans overlap", async () => {
+    const fixture = createProgressMonitorFixture([
+      progressRow({
+        progressOriginAt: "2026-08-10T15:00:00.000Z",
+        lane: "system",
+        runtimeKey: "runtime_private",
+      }),
+    ]);
+    let sendOrdinal = 0;
+    const reminderStarted = createVoidDeferred();
+    const reminderRelease = createVoidDeferred();
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      sendOrdinal += 1;
+      if (sendOrdinal === 2) {
+        reminderStarted.resolve();
+        await reminderRelease.promise;
+      }
+      return { providerMessageId: `provider-message-${sendOrdinal}` };
+    });
+
+    await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    const firstReminder = runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:15:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    await reminderStarted.promise;
+    const overlapping = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:15:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    reminderRelease.resolve();
+
+    expect((await firstReminder).outcome).toBe("alert_sent");
+    expect(overlapping.outcome).toBe("coalesced");
+    expect(sendAlert).toHaveBeenCalledTimes(2);
+  });
+
   it("defers an overdue reminder through quiet hours and resumes in the morning", async () => {
     const initialNow = instant("2026-08-11T00:00:00.000Z");
     const fixture = createProgressMonitorFixture([
@@ -432,7 +503,7 @@ describe("hosted runtime progress alert monitor", () => {
     );
   });
 
-  it("upgrades an already-active v1 incident in place", async () => {
+  it("reminds from an already-active v1 incident without a migration", async () => {
     const fixture = createProgressMonitorFixture([
       progressRow({
         progressOriginAt: "2026-08-10T15:00:00.000Z",
@@ -455,6 +526,7 @@ describe("hosted runtime progress alert monitor", () => {
     if (!activeState) {
       throw new Error("Expected an active progress incident.");
     }
+    const legacyIncidentId = readIncidentId(activeState);
     fixture.setState({
       ...activeState,
       detailsJson: {
@@ -480,12 +552,9 @@ describe("hosted runtime progress alert monitor", () => {
 
     expect(reminded.outcome).toBe("alert_sent");
     expect(sendAlert).toHaveBeenCalledTimes(2);
+    expect(readIncidentId(fixture.readState())).not.toBe(legacyIncidentId);
     expect(fixture.readState()?.detailsJson).toMatchObject({
-      notification: {
-        idempotencyKeySuffix: `reminder/${now.getTime()}`,
-        kind: "reminder",
-      },
-      schema: "murph.hosted-runtime-progress-monitor.v2",
+      schema: "murph.hosted-runtime-progress-monitor.v1",
     });
   });
 
