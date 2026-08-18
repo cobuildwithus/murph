@@ -336,7 +336,7 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
   if (projectedMatch) {
     return projectedMatch
   }
-  if (dedupeToken && dedupeToken === deliveryIdempotencyKey) {
+  if (deliveryIdempotencyKey) {
     // A rebuilt exact transport route owns hosted retry identity. Once that
     // route misses, media-sensitive pre-migration recovery cannot legitimately
     // match and must not turn unrelated retained media into an admission cap.

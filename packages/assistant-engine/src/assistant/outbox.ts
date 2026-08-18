@@ -421,10 +421,7 @@ export async function createAssistantOutboxIntent(
     const existing = await findAssistantOutboxIntentByDedupeIdentity({
       dedupeKey,
       dedupeToken: input.dedupeToken,
-      deliveryIdempotencyKey:
-        normalizeNullableString(input.dedupeToken) === deliveryIdempotencyKey
-          ? deliveryIdempotencyKey
-          : null,
+      deliveryIdempotencyKey,
       legacyDedupeKey: hashAssistantOutboxLegacyMediaDedupeIdentity({
         dedupeToken: input.dedupeToken,
         media,

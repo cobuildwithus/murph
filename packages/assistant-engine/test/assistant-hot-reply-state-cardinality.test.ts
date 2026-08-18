@@ -29,6 +29,9 @@ import {
   assistantAutomationInputSummaryFromCandidate,
 } from '../src/assistant/automation/input-summary.ts'
 import {
+  sendAssistantNotificationLocal,
+} from '../src/assistant/notification-turn.ts'
+import {
   listAssistantOutboxIntentsForAutoReplyRoute,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
@@ -225,6 +228,140 @@ it('keeps a fresh reply moving after rebuilding 101 distinct current image ident
     channel: 'email',
     eligibleAfter: candidate.event.cursor,
   }))
+}, 180_000)
+
+it('dedupes a distinct-key notification retry after rebuilding 101 current image identities', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-notification-full-route-',
+  )
+  cleanupPaths.push(parentRoot)
+  await seedRetainedRouteHistory(vaultRoot)
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+    force: true,
+  })
+
+  const target = createAssistantModelTarget({
+    approvalPolicy: 'never',
+    model: 'gpt-5.6-test',
+    provider: 'codex-cli',
+    sandbox: 'danger-full-access',
+  })
+  if (!target) {
+    throw new Error('Expected a test assistant target.')
+  }
+  await seedAssistantSession({
+    actorId: 'actor-notification',
+    channel: 'email',
+    identityId: 'identity-notification',
+    target,
+    threadId: 'thread-notification',
+    threadIsDirect: true,
+    vault: vaultRoot,
+  })
+  boundaries.executeProvider.mockImplementation(async (input) => {
+    const codexContinuation = {
+      kind: 'explicit-structured-history' as const,
+    }
+    const releaseAcceptedInputs = await input.onProviderRequestPlanned?.({
+      codexContinuation,
+      providerAttemptId: null,
+    })
+    try {
+      await input.onProviderRequestStarted?.({
+        providerRequestOrdinal: 0,
+        startedAt: '2026-08-15T12:00:01.000Z',
+      })
+      const response = JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Scheduled update prepared.',
+        text: 'Bounded scheduled update.',
+      })
+      return {
+        kind: 'succeeded' as const,
+        providerTurn: {
+          assistantContractFingerprint: 'a'.repeat(64),
+          attemptCount: 1,
+          codexContinuation,
+          codexThreadId: null,
+          provider: input.route.provider,
+          providerOptions: input.route.providerOptions,
+          rawEvents: [],
+          response,
+          responseDeliveryContextOrdinal: 0,
+          responseMedia: [],
+          route: input.route,
+          session: input.resolvedSession,
+          stderr: '',
+          stdout: '',
+          transcriptResponse: response,
+          usage: null,
+          workingDirectory: input.plan.requestedWorkingDirectory,
+        },
+      }
+    } finally {
+      await releaseAcceptedInputs?.()
+    }
+  })
+  const deliveryDedupeToken = 'cron-activation:distinct-product-token'
+  const deliveryIdempotencyKey = 'hosted-delivery:distinct-transport-key'
+  const notificationInput = {
+    actorId: 'actor-notification',
+    channel: 'email' as const,
+    deferCommitUntilDeliveryAccepted: true,
+    deliveryDedupeToken,
+    deliveryDispatchMode: 'queue-only' as const,
+    deliveryIdempotencyKey,
+    deliveryTarget: 'thread-notification',
+    executionContext: {
+      hosted: {
+        defaultTarget: target,
+        memberId: 'member-test',
+        userEnvKeys: [],
+      },
+    },
+    identityId: 'identity-notification',
+    instructions: 'Prepare the scheduled update.',
+    sessionId: null,
+    threadId: 'thread-notification',
+    threadIsDirect: true,
+    turnTrigger: 'automation-cron' as const,
+    vault: vaultRoot,
+    workingDirectory: vaultRoot,
+  }
+
+  const first = await sendAssistantNotificationLocal(notificationInput)
+  expect(first.deliveryOutcome).toMatchObject({
+    intentId: expect.any(String),
+    kind: 'queued',
+  })
+  if (first.deliveryOutcome?.kind !== 'queued') {
+    throw new Error('Expected the first notification delivery to be queued.')
+  }
+  const firstIntentId = first.deliveryOutcome.intentId
+  expect(firstIntentId).toEqual(expect.any(String))
+  await expect(readAssistantOutboxIntent(vaultRoot, firstIntentId!)).resolves
+    .toMatchObject({
+      deliveryIdempotencyKey,
+      intentId: firstIntentId,
+      status: 'pending',
+    })
+
+  await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+    force: true,
+  })
+  const retry = await sendAssistantNotificationLocal(notificationInput)
+  expect(retry.deliveryOutcome).toMatchObject({
+    intentId: firstIntentId,
+    kind: 'queued',
+  })
+  expect(boundaries.executeProvider).toHaveBeenCalledTimes(2)
+  await expect(readAssistantOutboxIntent(vaultRoot, firstIntentId!)).resolves
+    .toMatchObject({
+      deliveryIdempotencyKey,
+      intentId: firstIntentId,
+      status: 'pending',
+    })
 }, 180_000)
 
 it('preserves an older exact native-reply anchor beyond the route window', async () => {
