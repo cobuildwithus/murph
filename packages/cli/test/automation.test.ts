@@ -121,6 +121,7 @@ test("automation scaffold payload uses the canonical default shape", () => {
       threadId: null,
     },
     assistantTargetOverride: null,
+    scheduledReply: null,
     supportKind: null,
     instructions: "Write the scheduled assistant instructions here.",
     summary: "Weekly scheduled assistant notification instructions.",

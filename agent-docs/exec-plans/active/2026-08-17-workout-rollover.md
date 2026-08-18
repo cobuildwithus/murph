@@ -151,6 +151,9 @@ Updated: 2026-08-18
   with their existing narrow cross-platform tolerances; full assemble-only
   production bundle and parity proof passes. The built CLI package-shape check
   also passes on this post-merge candidate.
+- Exact-head CLI coverage exposed one stale scaffold assertion that omitted the
+  new optional `scheduledReply: null` field. The assertion-only correction adds
+  no runtime behavior; its focused CLI automation suite passes 17 cases.
 - Complete first-provider request capture compares frozen base
   `17fa4a43091db5aa0d354bc26e4dacf908c26d80` with the remediated candidate using
   the pinned real Codex App Server, repository scripted Responses endpoint,
