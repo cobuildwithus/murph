@@ -2262,6 +2262,12 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     directEnsureRequestStartedAtEpochMs?: number;
     directEnsureResponseReceivedAtEpochMs?: number;
     directEnsureOrchestrationAttemptId?: string;
+    directEnsureResultKind?:
+      | "legacy_accepted"
+      | "runtime_processing_accepted"
+      | "retry_later";
+    directEnsureAction?: "started" | "replaced" | "woken" | "already_running";
+    directEnsureRuntimeAttemptId?: string;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
@@ -2564,6 +2570,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "directEnsureRequestStartedAtEpochMs",
     "directEnsureResponseReceivedAtEpochMs",
     "directEnsureOrchestrationAttemptId",
+    "directEnsureResultKind",
+    "directEnsureAction",
+    "directEnsureRuntimeAttemptId",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
@@ -2725,6 +2734,17 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
       "linq-typing-started",
       "unknown",
     ],
+    "orchestration.directEnsureResultKind": [
+      "legacy_accepted",
+      "runtime_processing_accepted",
+      "retry_later",
+    ],
+    "orchestration.directEnsureAction": [
+      "started",
+      "replaced",
+      "woken",
+      "already_running",
+    ],
   };
 
 export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
@@ -2732,6 +2752,7 @@ export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
   | { kind: "enum_string"; values: readonly string[] }
   | { kind: "lease_generation" }
   | { kind: "orchestration_attempt_id" }
+  | { kind: "opaque_identifier" }
   | { kind: "safe_integer" };
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES: Readonly<
@@ -2776,6 +2797,12 @@ function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
     )
   ) {
     return { kind: "orchestration_attempt_id" };
+  }
+  if (
+    phase === "orchestration"
+    && leafKey === "directEnsureRuntimeAttemptId"
+  ) {
+    return { kind: "opaque_identifier" };
   }
   const allowedStringValues =
     HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES[`${phase}.${leafKey}`];
@@ -2849,6 +2876,7 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
       diagnostics[leafKey] = leaf;
     }
   }
+  sanitizeHostedRuntimeDirectEnsureOutcome(diagnostics);
 
   return Object.keys(diagnostics).length > 0
     ? diagnostics as HostedRuntimeOrchestrationLatencyDiagnostics
@@ -2978,6 +3006,9 @@ function sanitizeHostedRuntimeLatencyPhaseBreakdownJson(value: unknown): {
         changed = true;
       }
     }
+    if (phase === "orchestration") {
+      changed = sanitizeHostedRuntimeDirectEnsureOutcome(sanitizedPhase) || changed;
+    }
     if (Object.keys(sanitizedPhase).length > 0) {
       sanitized[phase] = sanitizedPhase;
     } else if (Object.keys(entry).length > 0) {
@@ -3019,7 +3050,42 @@ function assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(
         );
       }
     }
+    if (
+      key === "orchestration"
+      && !isHostedRuntimeDirectEnsureOutcomeConsistent(entry)
+    ) {
+      throw new TypeError(
+        "Hosted runtime latency phaseBreakdown orchestration direct ensure outcome is inconsistent.",
+      );
+    }
   }
+}
+
+function sanitizeHostedRuntimeDirectEnsureOutcome(
+  orchestration: Record<string, HostedRuntimeLatencyPhaseBreakdownJsonLeaf>,
+): boolean {
+  if (isHostedRuntimeDirectEnsureOutcomeConsistent(orchestration)) {
+    return false;
+  }
+  delete orchestration.directEnsureResultKind;
+  delete orchestration.directEnsureAction;
+  delete orchestration.directEnsureRuntimeAttemptId;
+  return true;
+}
+
+function isHostedRuntimeDirectEnsureOutcomeConsistent(
+  orchestration: Record<string, unknown>,
+): boolean {
+  const resultKind = orchestration.directEnsureResultKind;
+  const action = orchestration.directEnsureAction;
+  const runtimeAttemptId = orchestration.directEnsureRuntimeAttemptId;
+  if (resultKind === undefined) {
+    return action === undefined && runtimeAttemptId === undefined;
+  }
+  if (resultKind === "runtime_processing_accepted") {
+    return action !== undefined && runtimeAttemptId !== undefined;
+  }
+  return action === undefined && runtimeAttemptId === undefined;
 }
 
 function isHostedRuntimeLatencyPhaseBreakdownRecord(
@@ -3045,6 +3111,8 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
         && /^(?:0|[1-9]\d*)$/u.test(value);
     case "orchestration_attempt_id":
       return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+    case "opaque_identifier":
+      return isHostedRuntimeLatencyOpaqueIdentifier(value);
     case "safe_integer":
       return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
     default:
@@ -3057,6 +3125,12 @@ export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(
 ): value is string {
   return typeof value === "string"
     && /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
+}
+
+function isHostedRuntimeLatencyOpaqueIdentifier(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length <= 192
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value);
 }
 
 function isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value: unknown): value is number {

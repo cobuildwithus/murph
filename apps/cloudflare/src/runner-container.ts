@@ -78,6 +78,7 @@ const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS = 1_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
+const RUNNER_READINESS_ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
 const RUNNER_TRANSPORT_FAILURE_DETAIL_MAX_CHARS = 1_024;
@@ -193,6 +194,13 @@ class RunnerContainerShellPrewarmSupersededError extends Error {
   }
 }
 
+class RunnerContainerCleanupUnsettledError extends Error {
+  constructor(cause: unknown) {
+    super("Hosted runner container cleanup did not settle before its deadline.", { cause });
+    this.name = "RunnerContainerCleanupUnsettledError";
+  }
+}
+
 interface HostedExecutionContainerInvokeRequest {
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -207,11 +215,17 @@ export interface RunnerContainerEnsureReadyForProcessingInput {
   userId: string;
 }
 
-export interface RunnerContainerEnsureReadyForProcessingResult {
-  action?: "already_warm" | "started";
-  kind: "ready";
-  shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
-}
+export type RunnerContainerEnsureReadyForProcessingResult =
+  | {
+      action?: "already_warm" | "started";
+      kind: "ready";
+      shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
+    }
+  | {
+      action?: never;
+      kind: "cleanup_unsettled";
+      shellPrewarmObservation?: never;
+    };
 
 export interface RunnerContainerShellPrewarmObservation {
   firstHintAtEpochMs: number;
@@ -792,20 +806,39 @@ export class RunnerContainer extends Container {
     const shellPrewarmObservation = this.shellPrewarmObservation;
     this.shellPrewarmObservation = null;
     const supersededShellPrewarm = this.supersedeShellPrewarm();
-    return await this.withLifecycleLock(async () => {
+    // Start the wall-clock deadline before lifecycle-lock admission. A queued
+    // readiness request must not receive a fresh timeout after its caller-side
+    // guard has already elapsed.
+    const readinessSignal = AbortSignal.timeout(input.timeoutMs);
+    let lifecycleLockAcquired = false;
+    let cleanupSettlementTimedOut = false;
+    const readiness = this.withLifecycleLock(async () => {
+      lifecycleLockAcquired = true;
+      throwIfRunnerContainerOperationAborted(readinessSignal);
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
       };
       this.currentLogContext = logContext;
       try {
-        const action = await this.ensureContainerReady(
-          input,
-          AbortSignal.timeout(input.timeoutMs),
-          { completeSupersededShellPrewarm: supersededShellPrewarm },
-        );
+        let action: "already_warm" | "started";
+        try {
+          action = await this.ensureContainerReady(
+            input,
+            readinessSignal,
+            {
+              completeSupersededShellPrewarm: supersededShellPrewarm,
+              surfaceCleanupUnsettled: true,
+            },
+          );
+        } catch (error) {
+          if (error instanceof RunnerContainerCleanupUnsettledError) {
+            return { kind: "cleanup_unsettled" as const };
+          }
+          throw error;
+        }
         return {
           action,
-          kind: "ready",
+          kind: "ready" as const,
           ...(shellPrewarmObservation === null
             ? {}
             : { shellPrewarmObservation: { ...shellPrewarmObservation } }),
@@ -816,6 +849,32 @@ export class RunnerContainer extends Container {
         }
       }
     });
+    try {
+      return await raceRunnerContainerOperationAbort(
+        readiness,
+        readinessSignal,
+        async () => {
+          if (!lifecycleLockAcquired) {
+            return;
+          }
+          // Once lifecycle work starts, ensureContainerReady owns any
+          // fail-closed stop it initiated. Give that bounded stop time to
+          // settle before the caller decides whether the write fence can be
+          // cleared or preserved.
+          const settled = await waitForRunnerContainerOperationSettlement(
+            readiness,
+            RUNNER_READINESS_ABORT_SETTLEMENT_TIMEOUT_MS,
+          );
+          cleanupSettlementTimedOut = !settled;
+          return settled ? "use_operation_outcome" : undefined;
+        },
+      );
+    } catch (error) {
+      if (cleanupSettlementTimedOut) {
+        return { kind: "cleanup_unsettled" };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -2141,6 +2200,7 @@ export class RunnerContainer extends Container {
     operationAbortSignal: AbortSignal,
     options: {
       completeSupersededShellPrewarm?: boolean;
+      surfaceCleanupUnsettled?: boolean;
     } = {},
   ): Promise<"already_warm" | "started"> {
     const readinessStartedAt = Date.now();
@@ -2166,10 +2226,18 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: input.userId,
       });
-      await this.stopWarmContainer({
-        failClosed: true,
-        reason: "warm-invalidated",
-      });
+      if (options.surfaceCleanupUnsettled) {
+        await this.stopWarmContainerForReadiness({
+          cause: new Error("Hosted runner warm shell was invalidated by unsettled cleanup."),
+          failClosed: true,
+          reason: "warm-invalidated",
+        });
+      } else {
+        await this.stopWarmContainer({
+          failClosed: true,
+          reason: "warm-invalidated",
+        });
+      }
     } else if (
       !isRunnerContainerStopped(status)
       && !options.completeSupersededShellPrewarm
@@ -2236,9 +2304,17 @@ export class RunnerContainer extends Container {
           phase: "container.starting",
           userId: input.userId,
         });
-        await this.stopWarmContainer({
-          reason: "warm-health-failed",
-        });
+        if (options.surfaceCleanupUnsettled) {
+          await this.stopWarmContainerForReadiness({
+            cause: error,
+            failClosed: true,
+            reason: "warm-health-failed",
+          });
+        } else {
+          await this.stopWarmContainer({
+            reason: "warm-health-failed",
+          });
+        }
       }
     }
     throwIfRunnerContainerOperationAborted(operationAbortSignal);
@@ -2300,10 +2376,18 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: input.userId,
       });
-      await this.stopWarmContainer({
-        failClosed: false,
-        reason: "cold-start-failure",
-      }).catch(() => undefined);
+      if (options.surfaceCleanupUnsettled) {
+        await this.stopWarmContainerForReadiness({
+          cause: error,
+          failClosed: false,
+          reason: "cold-start-failure",
+        });
+      } else {
+        await this.stopWarmContainer({
+          failClosed: false,
+          reason: "cold-start-failure",
+        }).catch(() => undefined);
+      }
       throw error;
     }
 
@@ -2351,18 +2435,21 @@ export class RunnerContainer extends Container {
   }
 
   private async destroyIfRunning(input: {
+    cleanupDeadlineAtMs?: number;
     expectedInteractionGeneration?: number;
     failClosed?: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<boolean> {
     const failClosed = Boolean(input.failClosed);
     const context = this.currentLogContext;
+    const statusDeadlineAtMs = input.cleanupDeadlineAtMs
+      ?? Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
     let statusBeforeDestroy: string | null = null;
 
     try {
       statusBeforeDestroy = await readRunnerContainerStatusWithTimeout(
         this,
-        RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
+        Math.max(1, statusDeadlineAtMs - Date.now()),
       );
       if (
         isRunnerContainerStopped(statusBeforeDestroy)
@@ -2427,6 +2514,9 @@ export class RunnerContainer extends Container {
         (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
       );
       const destroySettle = this.waitForDestroyedContainerStopped({
+        ...(input.cleanupDeadlineAtMs === undefined
+          ? {}
+          : { cleanupDeadlineAtMs: input.cleanupDeadlineAtMs }),
         destroyStartedAt,
         failClosed,
         statusBeforeDestroy,
@@ -2499,6 +2589,7 @@ export class RunnerContainer extends Container {
   }
 
   private async waitForDestroyedContainerStopped(input: {
+    cleanupDeadlineAtMs?: number;
     destroyStartedAt: number;
     failClosed: boolean;
     statusBeforeDestroy: string | null;
@@ -2517,7 +2608,8 @@ export class RunnerContainer extends Container {
       }
   > {
     const context = this.currentLogContext;
-    const deadlineMs = Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
+    const cleanupDeadlineAtMs = input.cleanupDeadlineAtMs
+      ?? Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
     const observedStatuses: string[] = [];
     let lastError: unknown = null;
     let statusAfterDestroy: string | null = null;
@@ -2534,7 +2626,7 @@ export class RunnerContainer extends Container {
         };
       }
 
-      let remainingMs = deadlineMs - Date.now();
+      let remainingMs = cleanupDeadlineAtMs - Date.now();
       if (remainingMs <= 0) {
         const error = lastError
           ? new Error("Hosted runner container did not report stopped after destroy.", {
@@ -2588,7 +2680,7 @@ export class RunnerContainer extends Container {
         appendObservedRunnerContainerStatus(observedStatuses, "status_error");
       }
 
-      remainingMs = deadlineMs - Date.now();
+      remainingMs = cleanupDeadlineAtMs - Date.now();
       if (remainingMs <= 0) {
         continue;
       }
@@ -2600,6 +2692,7 @@ export class RunnerContainer extends Container {
   }
 
   private async stopWarmContainer(input?: {
+    cleanupDeadlineAtMs?: number;
     expectedInteractionGeneration?: number;
     failClosed?: boolean;
     reason?: RunnerContainerDestroyReason;
@@ -2610,6 +2703,9 @@ export class RunnerContainer extends Container {
     let destroyed: boolean;
     try {
       destroyed = await this.destroyIfRunning({
+        ...(input?.cleanupDeadlineAtMs === undefined
+          ? {}
+          : { cleanupDeadlineAtMs: input.cleanupDeadlineAtMs }),
         ...(input?.expectedInteractionGeneration === undefined
           ? {}
           : { expectedInteractionGeneration: input.expectedInteractionGeneration }),
@@ -2626,6 +2722,30 @@ export class RunnerContainer extends Container {
       this.warmShellInvalidatedByUnsettledDestroy = true;
     }
     return destroyed;
+  }
+
+  private async stopWarmContainerForReadiness(input: {
+    cause: unknown;
+    failClosed: boolean;
+    reason: RunnerContainerDestroyReason;
+  }): Promise<void> {
+    const cleanupDeadlineAtMs = Date.now() + RUNNER_DESTROY_SETTLE_TIMEOUT_MS;
+    try {
+      const settled = await this.stopWarmContainer({
+        cleanupDeadlineAtMs,
+        failClosed: input.failClosed,
+        reason: input.reason,
+      });
+      if (settled) {
+        return;
+      }
+    } catch (error) {
+      if (error instanceof RunnerContainerCleanupUnsettledError) {
+        throw error;
+      }
+      throw new RunnerContainerCleanupUnsettledError(error);
+    }
+    throw new RunnerContainerCleanupUnsettledError(input.cause);
   }
 
   private async waitForStopOrDelay(
@@ -3157,16 +3277,19 @@ export async function refreshHostedExecutionContainerBrowserVaultReplica(_input?
 async function raceRunnerContainerOperationAbort<T>(
   operation: Promise<T>,
   signal: AbortSignal,
-  onOperationAbort?: () => Promise<void>,
+  onOperationAbort?: () => Promise<"use_operation_outcome" | undefined | void>,
 ): Promise<T> {
   if (signal.aborted) {
-    await onOperationAbort?.().catch(() => undefined);
+    const abortDisposition = await onOperationAbort?.().catch(() => undefined);
+    if (abortDisposition === "use_operation_outcome") {
+      return await operation;
+    }
     throwIfRunnerContainerOperationAborted(signal);
   }
 
   let removeAbortListener: () => void = () => undefined;
   const abortCleanup: {
-    promise: Promise<void> | null;
+    promise: Promise<"use_operation_outcome" | undefined | void> | null;
   } = {
     promise: null,
   };
@@ -3185,12 +3308,38 @@ async function raceRunnerContainerOperationAbort<T>(
     return await Promise.race([operation, abort]);
   } catch (error) {
     if (signal.aborted) {
-      await abortCleanup.promise?.catch(() => undefined);
+      const abortDisposition = await abortCleanup.promise?.catch(() => undefined);
+      if (abortDisposition === "use_operation_outcome") {
+        return await operation;
+      }
       void operation.catch(() => undefined);
     }
     throw error;
   } finally {
     removeAbortListener();
+  }
+}
+
+async function waitForRunnerContainerOperationSettlement(
+  operation: Promise<unknown>,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<false>((resolve) => {
+    timeoutId = setTimeout(() => resolve(false), timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      operation.then(
+        () => true as const,
+        () => true as const,
+      ),
+      timeout,
+    ]);
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 

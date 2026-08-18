@@ -7855,8 +7855,14 @@ describe("hosted workspace runtime entrypoint", () => {
   const externalCompletionDeliveryScenarios = [
     {
       dedupeKey:
-        "assistant.notification.requested:phone-call-result:phone_call_real_path",
-      label: "phone-call result",
+        "assistant.notification.requested:phone-call-result:phone_call_real_path:generation:1",
+      label: "generation-scoped phone-call result",
+      privateCompletion: false,
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_manual_real_path",
+      label: "generationless manual phone-call result",
       privateCompletion: false,
     },
     {
@@ -7903,6 +7909,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const events: string[] = [];
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const logRequests: HostedRuntimeLogRequest[] = [];
       const mailboxItems: HostedMailboxItem[] = [];
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
       const privateAskExecutionRelease = createDeferred<void>();
@@ -7913,6 +7920,9 @@ describe("hosted workspace runtime entrypoint", () => {
             "assistant.notification.requested:",
             "",
           );
+      const phoneCallResultUsesForegroundDurabilityBarrier =
+        transport.channel === "telegram"
+        && completion.label === "generation-scoped phone-call result";
       const requestId = `aask_req_${"a".repeat(64)}`;
       let activeVaultRoot = vaultRoot;
       let assistantPhaseCalls = 0;
@@ -7933,6 +7943,26 @@ describe("hosted workspace runtime entrypoint", () => {
             || (transport.channel === "telegram" && url.endsWith("/sendMessage"))
           )
         ) {
+          if (
+            transport.channel === "telegram"
+            && phoneCallResultUsesForegroundDurabilityBarrier
+          ) {
+            assert.ok(
+              checkpointRequests.some((request) =>
+                request.reason === "canonical_runtime_commit"
+              ),
+              events.join(","),
+            );
+            assert.ok(
+              logRequests.flatMap((request) => request.entries).some((entry) =>
+                entry.eventCode === "checkpoint.runtime_residue_deferred"
+                && entry.redactedJson?.checkpointPhase === "assistant"
+                && entry.redactedJson.checkpointReason === "outbox_sending"
+              ),
+              events.join(","),
+            );
+            assert.equal(events.includes("snapshot:idle_shutdown"), false);
+          }
           providerDispatchWasForegroundCausal =
             currentPhaseIsForegroundCausal;
           events.push(`provider.send:${deliveryKey}`);
@@ -8020,12 +8050,13 @@ describe("hosted workspace runtime entrypoint", () => {
                 `attempt_synthetic_external_completion_real_${
                   completion.privateCompletion
                     ? "private"
-                    : completion.label === "phone-call result"
+                    : completion.label === "generation-scoped phone-call result"
                       ? "phone"
                       : "referral"
                 }_${transport.channel}`,
               idleCheckpointDelayMs:
-                completion.privateCompletion && transport.channel === "linq"
+                (completion.privateCompletion && transport.channel === "linq")
+                || phoneCallResultUsesForegroundDurabilityBarrier
                   ? 180_000
                   : 200,
               leaseGeneration: "7",
@@ -8051,6 +8082,17 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             async importItem(item) {
               events.push(`mailbox.importItem:${item.item.id}`);
+              if (item.item.kind === "conversation.message") {
+                return {
+                  assistantInputId: await stageAssistantInputEventForMailboxItem({
+                    channel: "telegram",
+                    item: item.item,
+                    threadId: transport.target,
+                    vaultRoot: activeVaultRoot,
+                  }),
+                  status: "imported",
+                };
+              }
               if (item.item.kind === "assistant.ask.requested") {
                 return await enqueueHostedSystemMailboxItem({
                   item,
@@ -8070,12 +8112,16 @@ describe("hosted workspace runtime entrypoint", () => {
                     deliveryDispatchMode: "queue-only",
                     deliveryDedupeToken: deliveryKey,
                     deliveryIdempotencyKey: deliveryKey,
-                    ...(transport.channel === "linq"
+                    ...((
+                      transport.channel === "linq"
                       && !completion.privateCompletion
+                    ) || phoneCallResultUsesForegroundDurabilityBarrier
                       ? {
                           externalThreadRouteAuthority: {
-                            accountLookupKey: "linq-account-key",
-                            channel: "linq" as const,
+                            ...(transport.channel === "linq"
+                              ? { accountLookupKey: "linq-account-key" }
+                              : {}),
+                            channel: transport.channel,
                             containerMemberId: TEST_USER_ID,
                             threadId: transport.target,
                           },
@@ -8157,6 +8203,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   events,
                   items: mailboxItems,
                 }),
+                logRequests,
                 workspacePort: createWorkspacePort({
                   checkpointRequests,
                   events,
@@ -8198,12 +8245,23 @@ describe("hosted workspace runtime entrypoint", () => {
                     `provider.record:${request.providerThreadId ?? request.target}`,
                   );
                 },
+                async recordPhoneCallResultDeliveryOutcome(request) {
+                  assert.equal(
+                    completion.label,
+                    "generation-scoped phone-call result",
+                  );
+                  assert.equal(request.generation, 1);
+                  assert.equal(request.phoneCallId, "phone_call_real_path");
+                  events.push(`phone-result.outcome:${request.status}`);
+                },
                 async sendEmail() {},
               },
               providerFetch,
             },
             runtimeWakeSignal,
-            ...(completion.privateCompletion && transport.channel === "linq"
+            ...(
+              (completion.privateCompletion && transport.channel === "linq")
+              || phoneCallResultUsesForegroundDurabilityBarrier
               ? { shutdownSignal: privateProductionDelayShutdown.signal }
               : {}),
             async runAssistantPhase(input) {
@@ -8246,6 +8304,15 @@ describe("hosted workspace runtime entrypoint", () => {
                       lane: "system",
                       laneSeq: "1",
                     }));
+                    if (phoneCallResultUsesForegroundDurabilityBarrier) {
+                      mailboxItems.push(createMailboxItem({
+                        dedupeKey: "conversation:phone-result-priority:1",
+                        id: "mailbox_item_phone_result_priority_1",
+                        kind: "conversation.message",
+                        lane: "conversation",
+                        laneSeq: "1",
+                      }));
+                    }
                     runtimeWakeSignal.notify();
                   }, 0);
                 }
@@ -8254,10 +8321,35 @@ describe("hosted workspace runtime entrypoint", () => {
                   progressed: true,
                 };
               }
-              if (assistantPhaseCalls === 2) {
+              if (
+                phoneCallResultUsesForegroundDurabilityBarrier
+                && assistantPhaseCalls >= 2
+                && assistantPhaseCalls <= 4
+              ) {
+                assert.equal(input.foregroundCausalOnly, false);
+                if (assistantPhaseCalls < 4) {
+                  const conversationOrdinal = assistantPhaseCalls;
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey:
+                      `conversation:phone-result-priority:${conversationOrdinal}`,
+                    id: `mailbox_item_phone_result_priority_${conversationOrdinal}`,
+                    kind: "conversation.message",
+                    lane: "conversation",
+                    laneSeq: String(conversationOrdinal),
+                  }));
+                  runtimeWakeSignal.notify();
+                }
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              const externalCompletionPhase =
+                phoneCallResultUsesForegroundDurabilityBarrier ? 5 : 2;
+              if (assistantPhaseCalls === externalCompletionPhase) {
                 assert.equal(input.foregroundCausalOnly, true);
               }
-              if (assistantPhaseCalls === 2) {
+              if (assistantPhaseCalls === externalCompletionPhase) {
                 const pendingSystemMailbox =
                   (await readHostedSystemMailboxState(activeVaultRoot)).pending;
                 assert.deepEqual(
@@ -8288,8 +8380,13 @@ describe("hosted workspace runtime entrypoint", () => {
                 `outbox.after-phase:${outboxStatuses.join("|")}`,
               );
               if (
-                completion.privateCompletion
-                && transport.channel === "linq"
+                (
+                  (
+                    completion.privateCompletion
+                    && transport.channel === "linq"
+                  )
+                  || phoneCallResultUsesForegroundDurabilityBarrier
+                )
                 && outboxStatuses.includes("sent")
               ) {
                 privateProductionDelayShutdown.abort(
@@ -8307,6 +8404,72 @@ describe("hosted workspace runtime entrypoint", () => {
           5_000,
           () => events.join(","),
         );
+        if (phoneCallResultUsesForegroundDurabilityBarrier) {
+          await withRealTimeout(
+            runHostedWorkspaceRuntimeJobInProcess(
+              createWorkspaceRuntimeJobInput({
+                platformEnv: {
+                  TELEGRAM_BOT_TOKEN: "synthetic-telegram-token",
+                },
+                resolvedConfig: {
+                  channelCapabilities: {
+                    emailSendReady: false,
+                    telegramBotConfigured: true,
+                  },
+                  deviceSync: null,
+                  managedAutoReplyChannels: [{
+                    capabilityReady: true,
+                    channel: "telegram",
+                    memberChannel: "telegram",
+                  }],
+                },
+                request: {
+                  attemptId:
+                    "attempt_synthetic_phone_result_terminal_restart",
+                  idleCheckpointDelayMs: 1,
+                  leaseGeneration: "8",
+                  userId: TEST_USER_ID,
+                  workspaceVersion: "0",
+                },
+              }),
+              {
+                async createCheckpointSnapshot() {
+                  return {
+                    snapshotRef: createBundleRef({
+                      hash: "9".repeat(64),
+                      key:
+                        "users/bundles/member-synthetic/"
+                        + "phone-result-terminal-restart.bundle.json",
+                      size: 512,
+                    }),
+                  };
+                },
+                async importItem() {
+                  throw new Error(
+                    "Terminal phone-result restart should not import mailbox work.",
+                  );
+                },
+                platform: {
+                  ...createPlatform({
+                    mailboxPort: createMailboxPort({ events: [], items: [] }),
+                    workspacePort: createWorkspacePort({
+                      checkpointRequests: [],
+                      events: [],
+                      workspace: createWorkspaceState({ version: "0" }),
+                    }),
+                  }),
+                  providerFetch,
+                },
+                async runAssistantPhase(input) {
+                  return await runHostedWorkspaceAssistantPhase(input);
+                },
+                vaultRoot: activeVaultRoot,
+              },
+            ),
+            5_000,
+            () => events.join(","),
+          );
+        }
         const providerEvent = `provider.send:${deliveryKey}`;
         if (completion.privateCompletion) {
           const consentedAskInput =
@@ -8336,7 +8499,10 @@ describe("hosted workspace runtime entrypoint", () => {
           );
         }
 
-        if (transport.channel === "telegram") {
+        if (
+          transport.channel === "telegram"
+          && !phoneCallResultUsesForegroundDurabilityBarrier
+        ) {
           const finalIntents = await listAssistantOutboxIntents(activeVaultRoot);
           const telegramDiagnostics = JSON.stringify(
             finalIntents.map((intent) => ({
@@ -8372,6 +8538,44 @@ describe("hosted workspace runtime entrypoint", () => {
           1,
           events.join(","),
         );
+        if (phoneCallResultUsesForegroundDurabilityBarrier) {
+          assert.ok(
+            requireEventIndex(events, "phone-result.outcome:sending")
+              < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, providerEvent)
+              < requireEventIndex(events, "phone-result.outcome:sent"),
+            events.join(","),
+          );
+          for (const ordinal of [1, 2, 3]) {
+            assert.ok(
+              requireEventIndex(
+                events,
+                `mailbox.importItem:mailbox_item_phone_result_priority_${ordinal}`,
+              ) < requireEventIndex(events, "outbox.after-phase:pending"),
+              events.join(","),
+            );
+          }
+          assert.ok(
+            requireEventIndex(events, "outbox.after-phase:pending")
+              < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, providerEvent)
+              < requireEventIndex(events, "outbox.after-phase:sent"),
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(events, providerEvent)
+              < requireEventIndex(events, "snapshot:idle_shutdown"),
+            events.join(","),
+          );
+          assert.ok(assistantPhaseCalls >= 3);
+          return;
+        }
         assert.ok(
           requireEventIndex(events, "outbox.after-phase:sending")
             < requireEventIndex(events, providerEvent),
@@ -37779,6 +37983,7 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 
 async function stageAssistantInputEventForMailboxItem(input: {
   causalSeq?: string;
+  channel?: "linq" | "telegram";
   item: HostedMailboxItem;
   lane?: "conversation" | "system";
   sessionId?: string;
@@ -37786,6 +37991,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
   threadIsDirect?: boolean;
   vaultRoot: string;
 }): Promise<string> {
+  const channel = input.channel ?? "linq";
   const text = "entrypoint hosted mailbox input";
   const threadId = input.threadId ?? "thread_1";
   const staged = await upsertAssistantInputEvent({
@@ -37805,18 +38011,18 @@ async function stageAssistantInputEventForMailboxItem(input: {
         actorId: "actor_1",
         actorIsSelf: false,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-        source: "linq",
+        source: channel,
         threadId,
         threadIsDirect: input.threadIsDirect ?? true,
       },
       occurredAt: input.item.occurredAt,
       receivedAt: input.item.createdAt,
       replyTarget: {
-        channel: "linq",
+        channel,
         messageId: `msg_${input.item.id}`,
         threadId,
       },
-      ...(input.threadIsDirect === false
+      ...(channel === "linq" && input.threadIsDirect === false
         ? {
             sourceMetadata: {
               externalThreadRouteAuthorityPresent: true,

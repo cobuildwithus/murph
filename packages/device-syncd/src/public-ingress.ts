@@ -1,6 +1,7 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
+  isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
   isDeviceSyncSourceAdmitted,
   isEstablishedDeviceSyncConnection,
@@ -1508,6 +1509,8 @@ export class DeviceSyncPublicIngress {
     const now = prepared.receivedAt;
     const traceId = prepared.traceId;
     const claimToken = generateStateCode();
+    // One delivery-attempt instant owns trace leasing and pending-setup lifetime
+    // checks. The frozen receipt below remains provider event semantics.
     const claimedAt = toIsoTimestamp(new Date());
     const webhook = toIngressWebhook({
       ...prepared,
@@ -1641,6 +1644,27 @@ export class DeviceSyncPublicIngress {
       });
     }
     const { account, connectionOwnerId } = webhookConnection;
+
+    if (
+      account.status === "active"
+      && isDeviceSyncConnectionSetupPending(account)
+      && isDeviceSyncConnectionSetupExpiredAt(account, claimedAt)
+    ) {
+      this.logger.warn?.("Ignoring webhook side effects for expired incomplete device sync setup.", {
+        provider: provider.provider,
+        accountId: account.id,
+        eventType: webhook.eventType,
+        traceId,
+      });
+      await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: provider.provider,
+        eventType: webhook.eventType,
+        traceId,
+      };
+    }
 
     let sourceAdmissionDeferred = false;
     try {
@@ -1806,6 +1830,7 @@ export class DeviceSyncPublicIngress {
         account,
         claimToken,
         connectionOwnerId,
+        processingAttemptedAt: claimedAt,
         sourceAdmissionDeferred,
         traceId,
         webhook,

@@ -9,6 +9,7 @@ import type {
 import type {
   HostedPhoneCallBrief,
   HostedPhoneCallGroupRequester,
+  HostedPhoneCallResultNotificationChannel,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import {
@@ -70,6 +71,7 @@ interface HostedPhoneCallReservationData {
   originSessionId: string;
   provider: "retell";
   requestKey: string;
+  resultNotificationChannel: HostedPhoneCallResultNotificationChannel | null;
   status: "starting";
 }
 
@@ -108,6 +110,7 @@ type HostedPhoneCallReconciliationWorkflowStarter = (
 ) => Promise<unknown>;
 
 type HostedPhoneCallNotificationDestinationResolver = (input: {
+  directChannel?: HostedPhoneCallResultNotificationChannel;
   memberId: string;
   signal?: AbortSignal;
 }) => Promise<HostedAssistantNotificationDestination>;
@@ -131,6 +134,7 @@ export async function createHostedPhoneCall(input: {
   prisma?: HostedPhoneCallStore;
   reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
   requestKey: string;
+  resultNotificationChannel?: HostedPhoneCallResultNotificationChannel;
   runtime?: PhoneCallRuntime;
   signal?: AbortSignal;
   transferNumberResolver?: (resolverInput: {
@@ -161,13 +165,66 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
   const resolveNotificationDestination = input.notificationDestinationResolver
     ?? requireHostedAssistantNotificationDestination;
-  const notificationDestination = await resolveNotificationDestination({
-    memberId: input.memberId,
-    signal: input.signal,
-  });
+  const resolveReplay = (call: HostedPhoneCall) =>
+    resolveExistingHostedPhoneCall({
+      brief: input.brief,
+      call,
+      crypto,
+      memberId: input.memberId,
+      originSessionId: input.originSessionId,
+      resultNotificationChannel: input.resultNotificationChannel ?? null,
+      runtime,
+      signal: input.signal,
+      startReconciliationWorkflow,
+      store,
+    });
+  if (input.resultNotificationChannel) {
+    const existing = await findHostedPhoneCallByRequestKey({
+      memberId: input.memberId,
+      requestKey: input.requestKey,
+      store,
+    });
+    if (existing) {
+      return await resolveReplay(existing);
+    }
+  }
+
+  let notificationDestination: HostedAssistantNotificationDestination;
+  try {
+    notificationDestination = await resolveNotificationDestination({
+      ...(input.resultNotificationChannel
+        ? { directChannel: input.resultNotificationChannel }
+        : {}),
+      memberId: input.memberId,
+      signal: input.signal,
+    });
+  } catch (error) {
+    // An exact replay remains authoritative even if its mutable delivery route
+    // was removed after the provider effect began. Re-read after route failure
+    // to close the concurrent-reservation race without admitting a new call.
+    if (input.resultNotificationChannel) {
+      const existing = await findHostedPhoneCallByRequestKey({
+        memberId: input.memberId,
+        requestKey: input.requestKey,
+        store,
+      });
+      if (existing) {
+        return await resolveReplay(existing);
+      }
+    }
+    throw error;
+  }
   input.signal.throwIfAborted();
+  const threadContainerDestination =
+    isHostedThreadContainerNotificationDestination(notificationDestination);
+  if (input.resultNotificationChannel) {
+    assertHostedPhoneCallDirectNotificationDestination({
+      channel: input.resultNotificationChannel,
+      destination: notificationDestination,
+    });
+  }
   let reassertGroupRequesterAuthority: (() => Promise<void>) | null = null;
-  if (isHostedThreadContainerNotificationDestination(notificationDestination)) {
+  if (threadContainerDestination) {
     const routeAuthority = notificationDestination.externalThreadRouteAuthority;
     if (!routeAuthority) {
       throw new Error(
@@ -208,6 +265,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       crypto,
       memberId: input.memberId,
       originSessionId: input.originSessionId,
+      resultNotificationChannel: input.resultNotificationChannel ?? null,
       runtime,
       signal: input.signal,
       startReconciliationWorkflow,
@@ -252,6 +310,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       originSessionId: input.originSessionId,
       provider: "retell",
       requestKey: input.requestKey,
+      resultNotificationChannel: input.resultNotificationChannel ?? null,
       status: "starting",
     },
   });
@@ -263,6 +322,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       crypto,
       memberId: input.memberId,
       originSessionId: input.originSessionId,
+      resultNotificationChannel: input.resultNotificationChannel ?? null,
       runtime,
       signal: input.signal,
       startReconciliationWorkflow,
@@ -321,6 +381,17 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     try {
       input.signal.throwIfAborted();
       await reassertGroupRequesterAuthority?.();
+      if (input.resultNotificationChannel) {
+        const currentDestination = await resolveNotificationDestination({
+          directChannel: input.resultNotificationChannel,
+          memberId: input.memberId,
+          signal: input.signal,
+        });
+        assertHostedPhoneCallDirectNotificationDestination({
+          channel: input.resultNotificationChannel,
+          destination: currentDestination,
+        });
+      }
       input.signal.throwIfAborted();
     } catch (error) {
       throw markPhoneCallRuntimeNoActiveEffect(error);
@@ -508,6 +579,36 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   };
 }
 
+async function findHostedPhoneCallByRequestKey(input: {
+  memberId: string;
+  requestKey: string;
+  store: HostedPhoneCallStore;
+}): Promise<HostedPhoneCall | null> {
+  return input.store.hostedPhoneCall.findUnique({
+    where: {
+      memberId_requestKey: {
+        memberId: input.memberId,
+        requestKey: input.requestKey,
+      },
+    },
+  });
+}
+
+function assertHostedPhoneCallDirectNotificationDestination(input: {
+  channel: HostedPhoneCallResultNotificationChannel;
+  destination: HostedAssistantNotificationDestination;
+}): void {
+  if (
+    isHostedThreadContainerNotificationDestination(input.destination)
+    || input.destination.route.threadIsDirect !== true
+    || input.destination.route.channel !== input.channel
+  ) {
+    throw new Error(
+      "Hosted phone call result notification channel does not match the direct route.",
+    );
+  }
+}
+
 function normalizeHostedPhoneCallBriefForConversation(input: {
   brief: HostedPhoneCallBrief;
   notificationDestination: HostedAssistantNotificationDestination;
@@ -604,6 +705,7 @@ async function resolveExistingHostedPhoneCall(input: {
   crypto: HostedPhoneCallCrypto;
   memberId: string;
   originSessionId: string;
+  resultNotificationChannel: HostedPhoneCallResultNotificationChannel | null;
   runtime: PhoneCallRuntime;
   signal: AbortSignal;
   startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
@@ -615,6 +717,11 @@ async function resolveExistingHostedPhoneCall(input: {
   if (
     input.call.originSessionId !== input.originSessionId
     && !isHostedScheduledPhoneCallRequestKey(input.call.requestKey)
+  ) {
+    throw new Error("Hosted phone call request key collision.");
+  }
+  if (
+    input.call.resultNotificationChannel !== input.resultNotificationChannel
   ) {
     throw new Error("Hosted phone call request key collision.");
   }

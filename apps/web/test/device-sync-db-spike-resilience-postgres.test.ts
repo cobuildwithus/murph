@@ -212,6 +212,7 @@ describe.skipIf(!runPostgresProof)(
                   claimToken,
                   now: receipt.receivedAt.toISOString(),
                   ownerId: memberId,
+                  processingAttemptedAt: receipt.receivedAt.toISOString(),
                   store,
                   traceId: receipt.traceId,
                   webhook: {
@@ -523,6 +524,7 @@ describe.skipIf(!runPostgresProof)(
               claimToken,
               now: trace.acceptedAt.toISOString(),
               ownerId: memberId,
+              processingAttemptedAt: trace.acceptedAt.toISOString(),
               store,
               traceId: trace.traceId,
               webhook: {
@@ -737,6 +739,7 @@ describe.skipIf(!runPostgresProof)(
             claimToken,
             now: acceptedAt.toISOString(),
             ownerId: memberId,
+            processingAttemptedAt: acceptedAt.toISOString(),
             sourceAdmissionDeferred: true,
             store,
             traceId,

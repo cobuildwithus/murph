@@ -27,6 +27,15 @@ const privyManagementMocks = vi.hoisted(() => ({
   setCustomMetadata: vi.fn(),
 }));
 
+const phoneCallResultRecoveryMocks = vi.hoisted(() => ({
+  rearmRequired: vi.fn(),
+}));
+
+vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
+  signalHostedPhoneCallResultNotificationRecovery:
+    phoneCallResultRecoveryMocks.rearmRequired,
+}));
+
 vi.mock("@privy-io/node", () => ({
   APIError: class APIError extends Error {},
   NotFoundError: class NotFoundError extends Error {},
@@ -310,6 +319,7 @@ describe("completeHostedPrivyVerification", () => {
     privyManagementMocks.getUser.mockImplementation(async (userId: string) =>
       livePrivyUsersById.get(userId) ?? { id: userId }
     );
+    phoneCallResultRecoveryMocks.rearmRequired.mockResolvedValue(false);
     vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
@@ -1771,22 +1781,23 @@ describe("completeHostedPrivyVerification", () => {
       },
     });
 
-    await expect(
-      completeHostedPrivyVerification({
-        identity: makeIdentity({
-          phone: null,
-          telegram: {
-            firstName: "Alice",
-            lastName: null,
-            photoUrl: null,
-            telegramUserId: "456",
-            username: "alice",
-          },
-          wallet: null,
-        }),
-        now: NOW,
-        prisma,
+    const verificationInput = {
+      identity: makeIdentity({
+        phone: null,
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+        wallet: null,
       }),
+      now: NOW,
+      prisma,
+    };
+    await expect(
+      completeHostedPrivyVerification(verificationInput),
     ).resolves.toMatchObject({
       inviteCode: expect.any(String),
       joinUrl: expect.stringContaining("/join/"),
@@ -1802,6 +1813,22 @@ describe("completeHostedPrivyVerification", () => {
       }),
     }));
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(phoneCallResultRecoveryMocks.rearmRequired).toHaveBeenCalledWith({
+      memberId: existingMember.id,
+      prisma,
+    });
+
+    const recoveryError = new Error("phone-call recovery unavailable");
+    phoneCallResultRecoveryMocks.rearmRequired.mockRejectedValueOnce(
+      recoveryError,
+    );
+    await expect(
+      completeHostedPrivyVerification(verificationInput),
+    ).resolves.toMatchObject({
+      memberId: existingMember.id,
+      stage: "checkout",
+    });
+    expect(phoneCallResultRecoveryMocks.rearmRequired).toHaveBeenCalledTimes(2);
   });
 
   it("fails closed when Telegram auth resolves to multiple members across blind-index read candidates", async () => {

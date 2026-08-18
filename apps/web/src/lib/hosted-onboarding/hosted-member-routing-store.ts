@@ -39,7 +39,6 @@ export {
   tryCreateHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-linq";
 export {
-  syncHostedMemberTelegramRoutingBinding,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-telegram";
 export {

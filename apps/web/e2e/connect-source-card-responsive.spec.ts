@@ -44,12 +44,12 @@ test.describe("Mobvoi Health Connect design proof", () => {
       for (const viewport of PROOF_VIEWPORTS) {
         await page.setViewportSize({ width: viewport.width, height: 1000 });
         const response = await page.goto(
-          `/design?tab=sections&proofViewport=${viewport.name}#connect-source-card-actions`,
+          `/screenshots/health?proofViewport=${viewport.name}#connect-source-card-actions`,
           { waitUntil: "load" },
         );
         expect(
           response?.status(),
-          `/design should respond 200 at ${viewport.width}px`,
+          `/screenshots/health should respond 200 at ${viewport.width}px`,
         ).toBe(200);
         await page.evaluate(async () => {
           await document.fonts?.ready;

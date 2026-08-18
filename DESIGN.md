@@ -303,7 +303,14 @@ legacy unknown counts as chart gaps rather than zeros. Once message tracking has
 unavailable day also ends the exact cumulative line until the missing evidence
 is reconciled; later known daily bars may still render. State that the daily
 message total combines inbound messages across supported channels with tracked
-Linq replies. Give each keyboard-enabled chart one visible focus surface named
+successful Linq, Telegram, and email outbound messages. Telegram and email
+begin at their explicit post-cutover receipt date; do not imply reconstructed
+older history. For group email, count each successfully sent recipient
+child once and the recipient-planning parent zero times. For the new
+Telegram/email contribution, exclude reactions and ephemeral progress updates;
+the total must follow durable outbox-backed conversational delivery ownership
+rather than infer provider success. Keep the existing Linq ledger contribution
+unchanged. Give each keyboard-enabled chart one visible focus surface named
 by its heading. Keep acquisition and revenue snapshots after the message charts.
 End the grid with **Monthly revenue**: restrained sage bars where each bar
 estimates one UTC month from the month's latest snapshot MRR plus fulfilled
@@ -585,6 +592,24 @@ and added amount, plus one short clarification that the amounts are not the
 current balance. Keep the existing Murph conversation handoff beside the
 Missions heading, and hide it when the member has no supported conversation
 route or new missions are disabled.
+
+Personal and owner-seat Family usage-credit checkout returns reconcile against
+the authenticated beneficiary's existing aggregate meter without opening a
+success confirmation when that meter is present. Expose the fulfilled transition
+through one visually hidden polite status region that is mounted before
+reconciliation and receives the verified result once, but do not add a
+post-purchase messaging handoff.
+Keep those returns visually quiet while payment is confirming and
+after fulfillment; if the bounded status check fails, remains unresolved, or
+reports a terminal failure, open only the compact payment-recovery dialog with
+its safe check/retry and close actions. Another active Family member and
+former-member recovery keep one compact target-specific result because their
+meter is not present. The Family roster owns an exact returned member's status
+without requiring Manage to be opened, and those off-meter results remain
+visible until Close owns their terminal refresh. A personal return whose usage
+status is unavailable follows that same close-owned compact pattern and confirms
+only that the durable credit reached the account. Group funding keeps its
+separately owned fulfillment receipt and Messages handoff.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a

@@ -1551,6 +1551,305 @@ describe("RunnerContainer", () => {
     expect(executeCalls).toHaveLength(0);
   });
 
+  it("starts the readiness deadline before lifecycle-lock admission", async () => {
+    const firstDeadline = new AbortController();
+    const queuedDeadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementation((timeoutMs) =>
+        timeoutMs === 1_000 ? queuedDeadline.signal : firstDeadline.signal
+      );
+    const firstHealthStarted = createDeferred<void>();
+    const releaseFirstHealth = createDeferred<void>();
+    let healthCalls = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (!url.endsWith("/health")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+      healthCalls += 1;
+      firstHealthStarted.resolve(undefined);
+      await releaseFirstHealth.promise;
+      return new Response(JSON.stringify(createRunnerHealthResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const first = container.ensureReadyForProcessing({
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await firstHealthStarted.promise;
+    const queued = container.ensureReadyForProcessing({
+      timeoutMs: 1_000,
+      userId: "member_123",
+    });
+    queuedDeadline.abort(new DOMException("Timed out", "TimeoutError"));
+
+    await expect(queued).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(healthCalls).toBe(1);
+    releaseFirstHealth.resolve(undefined);
+    await expect(first).resolves.toMatchObject({ kind: "ready" });
+    await Promise.resolve();
+    expect(healthCalls).toBe(1);
+    expect(timeout).toHaveBeenCalledWith(30_000);
+    expect(timeout).toHaveBeenCalledWith(1_000);
+    timeout.mockRestore();
+  });
+
+  it("waits for in-lock fail-closed cleanup after readiness aborts", async () => {
+    const readinessDeadline = new AbortController();
+    const originalAbortSignalTimeout = AbortSignal.timeout;
+    const timeout = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementationOnce(() => readinessDeadline.signal)
+      .mockImplementation((timeoutMs) => originalAbortSignalTimeout(timeoutMs));
+    const startObserved = createDeferred<void>();
+    const destroySettlement = createDeferred<void>();
+    let status: "running" | "stopped" = "stopped";
+    const startAndWaitForPorts = vi.fn(async (input: {
+      cancellationOptions: { abort: AbortSignal };
+    }) => {
+      status = "running";
+      startObserved.resolve(undefined);
+      await new Promise<never>((_, reject) => {
+        input.cancellationOptions.abort.addEventListener("abort", () => {
+          reject(input.cancellationOptions.abort.reason);
+        }, { once: true });
+      });
+    });
+    const destroy = vi.fn(async () => {
+      await destroySettlement.promise;
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const { container } = createContainerDouble({
+      destroy,
+      getState,
+      initialStatus: "stopped",
+      startAndWaitForPorts,
+    });
+
+    const readiness = container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    });
+    let settled = false;
+    void readiness.finally(() => {
+      settled = true;
+    }).catch(() => undefined);
+    await startObserved.promise;
+    readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
+    await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+
+    destroySettlement.resolve(undefined);
+    await expect(readiness).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(settled).toBe(true);
+    timeout.mockRestore();
+  });
+
+  it("reports unsettled warm-invalidated cleanup to readiness callers", async () => {
+    const destroy = vi.fn(async () => {
+      throw new Error("destroy failed");
+    });
+    const { container } = createContainerDouble({
+      destroy,
+      initialStatus: "running",
+    });
+    Object.assign(container, {
+      warmShellInvalidatedByUnsettledDestroy: true,
+    });
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 15_000,
+      userId: "member_123",
+    })).resolves.toEqual({ kind: "cleanup_unsettled" });
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("reports unsettled warm-health-failure cleanup to readiness callers", async () => {
+    const readinessDeadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => readinessDeadline.signal);
+    const healthObserved = createDeferred<void>();
+    const destroy = vi.fn(async () => {
+      throw new Error("destroy failed");
+    });
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthObserved.resolve(undefined);
+        return new Response(JSON.stringify({ error: "stale shell" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }),
+      destroy,
+      initialStatus: "running",
+    });
+
+    try {
+      const readiness = container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: "member_123",
+      });
+      await healthObserved.promise;
+      readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
+
+      await expect(readiness).resolves.toEqual({ kind: "cleanup_unsettled" });
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("shares one cleanup deadline across a slow status read and destroy settlement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const readinessDeadline = new AbortController();
+    const queuedReadinessDeadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementationOnce(() => readinessDeadline.signal)
+      .mockImplementation(() => queuedReadinessDeadline.signal);
+    const startObserved = createDeferred<void>();
+    const queuedHealthStarted = createDeferred<number>();
+    let queuedHealthStartedAt: number | null = null;
+    const cleanupStatus = createDeferred<{
+      lastChange: number;
+      status: "running";
+    }>();
+    let secondDestroyRequested = false;
+    let stateReads = 0;
+    const getState = vi.fn(() => {
+      stateReads += 1;
+      if (secondDestroyRequested) {
+        return Promise.resolve({
+          lastChange: Date.now(),
+          status: "stopped" as const,
+        });
+      }
+      if (stateReads === 1) {
+        return Promise.resolve({
+          lastChange: Date.now(),
+          status: "stopped" as const,
+        });
+      }
+      if (stateReads === 2) {
+        return cleanupStatus.promise;
+      }
+      return Promise.resolve({
+        lastChange: Date.now(),
+        status: "running" as const,
+      });
+    });
+    let startCalls = 0;
+    const startAndWaitForPorts = vi.fn(async (input: {
+      cancellationOptions: { abort: AbortSignal };
+    }) => {
+      startCalls += 1;
+      if (startCalls > 1) {
+        return;
+      }
+      startObserved.resolve(undefined);
+      await new Promise<never>((_, reject) => {
+        input.cancellationOptions.abort.addEventListener("abort", () => {
+          reject(input.cancellationOptions.abort.reason);
+        }, { once: true });
+      });
+    });
+    let destroyCalls = 0;
+    const destroy = vi.fn(() => {
+      destroyCalls += 1;
+      if (destroyCalls === 1) {
+        return new Promise<void>(() => undefined);
+      }
+      secondDestroyRequested = true;
+      return Promise.resolve();
+    });
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        queuedHealthStartedAt = Date.now();
+        queuedHealthStarted.resolve(queuedHealthStartedAt);
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+      destroy,
+      getState,
+      initialStatus: "stopped",
+      startAndWaitForPorts,
+    });
+
+    try {
+      const readiness = container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: "member_123",
+      });
+      await startObserved.promise;
+      readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(getState).toHaveBeenCalledTimes(2);
+      const queuedReadiness = container.ensureReadyForProcessing({
+        timeoutMs: 30_000,
+        userId: "member_123",
+      });
+      let queuedReadinessSettled = false;
+      void queuedReadiness.then(
+        () => {
+          queuedReadinessSettled = true;
+        },
+        () => {
+          queuedReadinessSettled = true;
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      cleanupStatus.resolve({
+        lastChange: Date.now(),
+        status: "running",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(queuedHealthStartedAt).toBeNull();
+      expect(queuedReadinessSettled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(readiness).resolves.toEqual({ kind: "cleanup_unsettled" });
+      expect(Date.now()).toBe(Date.parse("2026-04-27T00:00:05.000Z"));
+      await expect(queuedHealthStarted.promise).resolves.toBe(
+        Date.parse("2026-04-27T00:00:05.000Z"),
+      );
+      await expect(queuedReadiness).resolves.toEqual({
+        action: "started",
+        kind: "ready",
+      });
+      expect(destroy).toHaveBeenCalledTimes(2);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    } finally {
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("prewarmShell issues startup without waiting for ports or invoking workspace work", async () => {
     const neverSettlingStateRead = new Promise<never>(() => undefined);
     const getState = vi.fn(() => neverSettlingStateRead);
@@ -7410,6 +7709,59 @@ describe("RunnerContainer", () => {
           phase: "container.ready",
         }),
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives an ordinary destroy a fresh settlement window after a slow status read", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+
+    try {
+      let status: "running" | "destroying" | "stopped" = "running";
+      let stateReads = 0;
+      const getState = vi.fn(async () => {
+        stateReads += 1;
+        if (stateReads === 1) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 4_000));
+        }
+        return {
+          lastChange: Date.now(),
+          status,
+        };
+      });
+      const destroy = vi.fn(async () => {
+        status = "destroying";
+        await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+        status = "stopped";
+      });
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const destroyPromise = container.destroyInstance();
+      let settled = false;
+      void destroyPromise.finally(() => {
+        settled = true;
+      }).catch(() => undefined);
+
+      await vi.advanceTimersByTimeAsync(3_999);
+      expect(destroy).not.toHaveBeenCalled();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(destroyPromise).resolves.toBeUndefined();
+      expect(Date.now()).toBe(Date.parse("2026-04-27T00:00:06.000Z"));
     } finally {
       vi.useRealTimers();
     }

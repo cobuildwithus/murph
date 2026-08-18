@@ -159,10 +159,10 @@ export class HostedDeviceSyncPublicIngressService {
           account,
           claimToken,
           connectionOwnerId,
+          processingAttemptedAt,
           sourceAdmissionDeferred,
           traceId,
           webhook,
-          provider,
           now,
         }) => {
           await handleHostedDeviceSyncWebhookAccepted({
@@ -170,6 +170,7 @@ export class HostedDeviceSyncPublicIngressService {
             claimToken,
             now,
             ownerId: connectionOwnerId,
+            processingAttemptedAt,
             registry: input.registry,
             sourceAdmissionDeferred,
             store: this.context.store,
