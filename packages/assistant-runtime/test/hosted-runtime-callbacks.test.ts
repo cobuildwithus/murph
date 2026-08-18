@@ -18425,6 +18425,11 @@ describe("hosted runtime callbacks", () => {
       automationId: "automation_123",
       expectedUpdatedAt: "2026-07-12T11:00:00.000Z",
     };
+    const automationContextReferences: NonNullable<
+      AssistantOutboxIntent["automationContextReferences"]
+    > = [
+      { entityId: "exp_123", entityKind: "experiment" },
+    ];
     const fanoutTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Group subject",
@@ -18455,6 +18460,7 @@ describe("hosted runtime callbacks", () => {
     }));
     mocks.readAssistantOutboxIntent.mockResolvedValue({
       automationAuthority,
+      automationContextReferences,
       intentId: "intent_123",
     } as AssistantOutboxIntent);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
@@ -18498,6 +18504,7 @@ describe("hosted runtime callbacks", () => {
       actorId: "actor_123",
       answeredMailboxItemIds: ["mailbox_123"],
       automationAuthority,
+      automationContextReferences,
       channel: "email",
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       deliveryTransportIdempotent: false,

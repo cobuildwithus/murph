@@ -242,8 +242,19 @@ describe('assistant outbox runtime', () => {
     )
     const scheduledOccurrenceAt = '2026-04-08T00:03:00.000Z'
     const plannedOccurrenceAt = '2026-04-08T00:18:00.000Z'
+    const automationContextReferences = [
+      {
+        entityKind: 'workout_format',
+        entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+      },
+      {
+        entityKind: 'experiment',
+        entityId: 'exp_01JQ8PWXP5A68SQM1W0GYM41WB',
+      },
+    ]
 
     const intent = await createIntent(vaultRoot, {
+      automationContextReferences,
       plannedOccurrenceAt,
       scheduledOccurrenceAt,
     })
@@ -253,6 +264,33 @@ describe('assistant outbox runtime', () => {
     expect(persisted.scheduledOccurrenceAt).toBe(scheduledOccurrenceAt)
     expect(intent.plannedOccurrenceAt).toBe(plannedOccurrenceAt)
     expect(persisted.plannedOccurrenceAt).toBe(plannedOccurrenceAt)
+    expect(intent.automationContextReferences).toEqual(
+      automationContextReferences,
+    )
+    expect(persisted.automationContextReferences).toEqual(
+      automationContextReferences,
+    )
+  })
+
+  it('omits absent or empty context references from persisted outbox intents', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-empty-context-references-',
+    )
+
+    const absent = await createIntent(vaultRoot)
+    const empty = await createIntent(vaultRoot, {
+      automationContextReferences: [],
+    })
+    const persistedAbsent = await readRawOutboxIntent(
+      vaultRoot,
+      absent.intentId,
+    )
+    const persistedEmpty = await readRawOutboxIntent(vaultRoot, empty.intentId)
+
+    expect(absent).not.toHaveProperty('automationContextReferences')
+    expect(empty).not.toHaveProperty('automationContextReferences')
+    expect(persistedAbsent).not.toHaveProperty('automationContextReferences')
+    expect(persistedEmpty).not.toHaveProperty('automationContextReferences')
   })
 
   it('retires claimed export packs only after confirmed delivery', async () => {
@@ -7814,6 +7852,7 @@ async function createIntent(
     actorId: string | null
     answeredMailboxItemIds: string[]
     automationAuthority: AssistantOutboxIntent['automationAuthority']
+    automationContextReferences: AssistantOutboxIntent['automationContextReferences']
     card: AssistantResponseCard | null
     channel: string | null
     createdAt: string
@@ -7844,6 +7883,7 @@ async function createIntent(
     actorId: overrides.actorId ?? null,
     answeredMailboxItemIds: overrides.answeredMailboxItemIds,
     automationAuthority: overrides.automationAuthority,
+    automationContextReferences: overrides.automationContextReferences,
     card: overrides.card ?? null,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
