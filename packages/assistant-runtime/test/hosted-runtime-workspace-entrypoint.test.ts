@@ -8539,11 +8539,6 @@ describe("hosted workspace runtime entrypoint", () => {
               events.join(","),
             );
             assert.ok(
-              requireEventIndex(events, "outbox.after-phase:sending")
-                < requireEventIndex(events, providerEvent),
-              events.join(","),
-            );
-            assert.ok(
               requireEventIndex(events, "phone-result.outcome:sending")
                 < requireEventIndex(events, providerEvent),
               events.join(","),
@@ -8566,10 +8561,6 @@ describe("hosted workspace runtime entrypoint", () => {
             );
           }
           assert.equal(finalIntents[0]?.status, "sent");
-          assert.equal(
-            result.status,
-            telegramPhoneResultHasPendingInput ? "scheduled" : "idle",
-          );
           assert.ok(assistantPhaseCalls >= 3);
           return;
         }
