@@ -2854,9 +2854,9 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-restored-foreground-attempt",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.050Z",
     });
 
     const firstRequest = invoke.mock.calls[0]?.[0].job.request;
@@ -2877,6 +2877,16 @@ describe("HostedUserRunner execution coordination", () => {
 
     firstInvocationResult.resolve({ nextWakeAt: null, status: "idle" });
     await flushWaitUntil();
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-restored-foreground-retry",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[1]?.[0].job.request.processingMode).toBeUndefined();
   });
 
   it("returns timeout retry cadence and clears the fresh fence when startup readiness times out", async () => {
@@ -3702,10 +3712,9 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-foreground-behind-system-mailbox",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      runtimeAttemptId: token.attemptId,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledWith({
