@@ -903,7 +903,12 @@ Hosted onboarding extras:
   The monitor reports aggregate runtime,
   lane, age, and pending-item counts only. It has its own singleton incident
   row, so an active reply-latency incident cannot suppress a newly discovered
-  progress stall; recovery silently rearms each monitor independently.
+  progress stall. While one progress incident remains anomalous, the same row
+  sends a fresh aggregate reminder every six hours plus stable jitter, outside
+  quiet hours. Each fresh reminder claim persists a new generation identity
+  before Resend, while an ambiguous retry reuses that identity and the exact
+  body. The latency monitor remains one email per continuous incident. Recovery
+  silently rearms each monitor independently and sends no recovery email.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` is an optional comma-separated
   provider rollout gate for the encrypted Cloudflare Queue transport. Leave it

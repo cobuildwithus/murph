@@ -1,8 +1,12 @@
 import type { HostedLinqAlert } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
-import type { sendHostedResendPlainTextEmail } from "@/src/lib/hosted-onboarding/resend-plain-text-email";
 import {
+  HostedResendPlainTextEmailError,
+  type sendHostedResendPlainTextEmail,
+} from "@/src/lib/hosted-onboarding/resend-plain-text-email";
+import {
+  HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS,
   HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   readHostedRuntimeProgressHealth,
   runHostedRuntimeProgressAlertMonitor,
@@ -17,6 +21,17 @@ const alertEnv = {
   HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: "America/Los_Angeles",
   RESEND_API_KEY: "re_test",
 };
+
+function createVoidDeferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve = () => {};
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 describe("hosted runtime progress health", () => {
   it("detects the exact 15-minute durable progress boundary across both lanes", () => {
@@ -248,6 +263,301 @@ describe("hosted runtime progress alert monitor", () => {
     });
   });
 
+  it("refreshes aggregate evidence in a six-hour reminder", async () => {
+    const fixture = createProgressMonitorFixture([
+      progressRow({
+        progressOriginAt: "2026-08-10T15:30:00.000Z",
+        lane: "system",
+        pendingCount: 2n,
+        runtimeKey: "runtime_private_initial",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (input: AlertSendInput) => {
+      void input;
+      return { providerMessageId: "provider-message" };
+    });
+
+    const opened = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    fixture.setRows([
+      progressRow({
+        progressOriginAt: "2026-08-10T14:00:00.000Z",
+        lane: "system",
+        pendingCount: 4n,
+        runtimeKey: "runtime_private_reminder_a",
+      }),
+      progressRow({
+        progressOriginAt: "2026-08-10T15:00:00.000Z",
+        lane: "conversation",
+        pendingCount: 3n,
+        runtimeKey: "runtime_private_reminder_b",
+      }),
+    ]);
+    const exactBoundary = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:00:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    const reminded = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:15:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    const remindedAgain = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-11T04:30:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS).toBe(6 * 60 * 60_000);
+    expect(opened.outcome).toBe("alert_sent");
+    expect(exactBoundary.outcome).toBe("incident_active");
+    expect(reminded.outcome).toBe("alert_sent");
+    expect(remindedAgain.outcome).toBe("alert_sent");
+    expect(fixture.queryRaw).toHaveBeenCalledTimes(7);
+    expect(sendAlert).toHaveBeenCalledTimes(3);
+    const initialKey = sendAlert.mock.calls[0]?.[0].idempotencyKey ?? "";
+    const firstReminderKey = sendAlert.mock.calls[1]?.[0].idempotencyKey ?? "";
+    const secondReminderKey = sendAlert.mock.calls[2]?.[0].idempotencyKey ?? "";
+    expect(initialKey).toMatch(/^murph\/runtime-progress\/[0-9a-f-]+\/alert$/u);
+    expect(firstReminderKey).toMatch(
+      /^murph\/runtime-progress\/[0-9a-f-]+\/alert$/u,
+    );
+    expect(secondReminderKey).toMatch(
+      /^murph\/runtime-progress\/[0-9a-f-]+\/alert$/u,
+    );
+    expect(firstReminderKey).not.toBe(initialKey);
+    expect(secondReminderKey).not.toBe(firstReminderKey);
+    expect(sendAlert.mock.calls[1]?.[0]).toMatchObject({
+      subject: "Hosted runtime progress stalled",
+      to: ["operator@example.test"],
+    });
+    const reminderMessage = sendAlert.mock.calls[1]?.[0].text ?? "";
+    const persisted = JSON.stringify(fixture.readState()?.detailsJson);
+    expect(reminderMessage).toContain("Murph runtime progress reminder.");
+    expect(reminderMessage).toContain("2 active runtimes");
+    expect(reminderMessage).toContain("Affected lanes: 1 system, 1 conversation");
+    expect(reminderMessage).toContain("Pending live items: 7");
+    expect(reminderMessage).not.toContain("runtime_private_initial");
+    expect(reminderMessage).not.toContain("runtime_private_reminder_a");
+    expect(reminderMessage).not.toContain("runtime_private_reminder_b");
+    expect(persisted).not.toContain("runtime_private_initial");
+    expect(persisted).not.toContain("runtime_private_reminder_a");
+    expect(persisted).not.toContain("runtime_private_reminder_b");
+    expect(fixture.readState()?.detailsJson).toMatchObject({
+      schema: "murph.hosted-runtime-progress-monitor.v1",
+    });
+  });
+
+  it("retries one reminder with its exact persisted body and Resend key", async () => {
+    const fixture = createProgressMonitorFixture([
+      progressRow({
+        progressOriginAt: "2026-08-10T15:00:00.000Z",
+        lane: "system",
+        runtimeKey: "runtime_private",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "provider-message" };
+    })
+      .mockResolvedValueOnce({ providerMessageId: "initial-message" })
+      .mockRejectedValueOnce(new HostedResendPlainTextEmailError(
+        "Hosted Resend email send failed.",
+        {
+          code: "RESEND_SEND_FAILED",
+          providerStatus: 503,
+        },
+      ))
+      .mockResolvedValueOnce({ providerMessageId: "reminder-message" });
+
+    await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    await expect(runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:15:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_PROGRESS_ALERT_SEND_FAILED",
+    });
+    const retried = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:35:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(retried.outcome).toBe("alert_sent");
+    expect(sendAlert).toHaveBeenCalledTimes(3);
+    expect(sendAlert.mock.calls[2]?.[0].idempotencyKey).toBe(
+      sendAlert.mock.calls[1]?.[0].idempotencyKey,
+    );
+    expect(sendAlert.mock.calls[2]?.[0].text).toBe(
+      sendAlert.mock.calls[1]?.[0].text,
+    );
+    expect(fixture.readState()).toMatchObject({
+      attemptCount: 3,
+      lastErrorCode: null,
+      lastProviderStatus: null,
+      status: "progress_alerting",
+    });
+  });
+
+  it("admits one provider effect when due reminder scans overlap", async () => {
+    const fixture = createProgressMonitorFixture([
+      progressRow({
+        progressOriginAt: "2026-08-10T15:00:00.000Z",
+        lane: "system",
+        runtimeKey: "runtime_private",
+      }),
+    ]);
+    let sendOrdinal = 0;
+    const reminderStarted = createVoidDeferred();
+    const reminderRelease = createVoidDeferred();
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      sendOrdinal += 1;
+      if (sendOrdinal === 2) {
+        reminderStarted.resolve();
+        await reminderRelease.promise;
+      }
+      return { providerMessageId: `provider-message-${sendOrdinal}` };
+    });
+
+    await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    const firstReminder = runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:15:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    await reminderStarted.promise;
+    const overlapping = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:15:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    reminderRelease.resolve();
+
+    expect((await firstReminder).outcome).toBe("alert_sent");
+    expect(overlapping.outcome).toBe("coalesced");
+    expect(sendAlert).toHaveBeenCalledTimes(2);
+  });
+
+  it("defers an overdue reminder through quiet hours and resumes in the morning", async () => {
+    const initialNow = instant("2026-08-11T00:00:00.000Z");
+    const fixture = createProgressMonitorFixture([
+      progressRow({
+        progressOriginAt: "2026-08-10T23:00:00.000Z",
+        lane: "system",
+        runtimeKey: "runtime_private",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "provider-message" };
+    });
+
+    await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: initialNow,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    const overnight = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-11T06:20:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    const morning = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-11T14:20:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(overnight.outcome).toBe("deferred_quiet_hours");
+    expect(morning.outcome).toBe("alert_sent");
+    expect(sendAlert).toHaveBeenCalledTimes(2);
+    expect(sendAlert.mock.calls[1]?.[0].text).toContain(
+      "Murph runtime progress reminder.",
+    );
+  });
+
+  it("reminds from an already-active v1 incident without a migration", async () => {
+    const fixture = createProgressMonitorFixture([
+      progressRow({
+        progressOriginAt: "2026-08-10T15:00:00.000Z",
+        lane: "system",
+        runtimeKey: "runtime_private",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "provider-message" };
+    });
+
+    await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    const activeState = fixture.readState();
+    if (!activeState) {
+      throw new Error("Expected an active progress incident.");
+    }
+    const legacyIncidentId = readIncidentId(activeState);
+    fixture.setState({
+      ...activeState,
+      detailsJson: {
+        health: {
+          pendingItemCount: 1,
+          stalledRuntimeCount: 1,
+        },
+        incidentId: readIncidentId(activeState),
+        lastEvaluatedAt: now.toISOString(),
+        message: sendAlert.mock.calls[0]?.[0].text ?? null,
+        phase: "alert",
+        schema: "murph.hosted-runtime-progress-monitor.v1",
+        thresholdMs: HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
+      },
+    });
+
+    const reminded = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-08-10T22:15:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(reminded.outcome).toBe("alert_sent");
+    expect(sendAlert).toHaveBeenCalledTimes(2);
+    expect(readIncidentId(fixture.readState())).not.toBe(legacyIncidentId);
+    expect(fixture.readState()?.detailsJson).toMatchObject({
+      schema: "murph.hosted-runtime-progress-monitor.v1",
+    });
+  });
+
   it("silently rearms after recovery and gives a later stall a new identity", async () => {
     const fixture = createProgressMonitorFixture([
       progressRow({
@@ -411,7 +721,23 @@ function createProgressMonitorFixture(
     setRows(nextRows: readonly HostedRuntimeProgressHealthRow[]) {
       rows = [...nextRows];
     },
+    setState(nextState: HostedLinqAlert) {
+      state = nextState;
+    },
   };
+}
+
+function readIncidentId(state: HostedLinqAlert | null): string {
+  const details = state?.detailsJson;
+  if (
+    !details
+    || typeof details !== "object"
+    || Array.isArray(details)
+    || typeof details.incidentId !== "string"
+  ) {
+    throw new TypeError("Expected an incident identity.");
+  }
+  return details.incidentId;
 }
 
 type AlertSendInput = Parameters<typeof sendHostedResendPlainTextEmail>[0];

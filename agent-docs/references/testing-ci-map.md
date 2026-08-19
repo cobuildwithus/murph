@@ -605,8 +605,10 @@ supported provider credential.
   the 20,000 eligible-row cap after exclusions. The hosted-local
   foreground-priority leg drives this monitor through authenticated cron HTTP
   and the same isolated Resend stub, proving paced lost-ack retry,
-  identifier-free aggregation, active-incident coalescing, recovery/rearm, and
-  independence from the latency monitor.
+  identifier-free aggregation, short-window active-incident coalescing,
+  six-hour fresh-evidence reminders with stable per-generation identity,
+  quiet-hour deferral, recovery/rearm, and independence from the latency
+  monitor.
 - `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
   opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
   latency monitor. It runs the production query against 50,000 stale rows per
