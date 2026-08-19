@@ -29,6 +29,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  type DeviceConnectionSourceResourceAvailabilitySummary,
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
   type DeviceSyncProvider,
@@ -1123,6 +1124,129 @@ describe("hosted device-sync runtime", () => {
       await cleanup();
     }
   });
+
+  test.each(["warm", "cold"] as const)(
+    "sync replaces a stale local Google source when Web advances its epoch on a %s runtime",
+    async (runtimeState) => {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-",
+      );
+      await mkdir(vaultRoot, { recursive: true });
+
+      const baseProvider = createFakeProvider();
+      const junctionProvider: DeviceSyncProvider = {
+        ...baseProvider,
+        provider: "junction",
+        descriptor: {
+          ...baseProvider.descriptor,
+          displayName: "Junction",
+          provider: "junction",
+        },
+      };
+      let service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+      const hostedConnectionId = "hosted_conn_google_source_epoch";
+      const buildGoogleSnapshot = (input: {
+        firstSeenAt: string;
+        lastDataAt: string | null;
+        lastSeenAt: string;
+        resourceAvailabilitySummary: DeviceConnectionSourceResourceAvailabilitySummary;
+      }) => buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: "junction-google-source-epoch",
+        provider: "junction",
+        sources: [{
+          displayName: "Google Health",
+          firstSeenAt: input.firstSeenAt,
+          lastDataAt: input.lastDataAt,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: input.lastSeenAt,
+          resourceCount: Object.keys(input.resourceAvailabilitySummary).length,
+          resourceAvailabilitySummary: input.resourceAvailabilitySummary,
+          sourceInstanceKey: "hosted_google_health_source",
+          sourceProviderSlug: "google_health",
+          status: "connected",
+        }],
+      });
+      let snapshot = buildGoogleSnapshot({
+        firstSeenAt: "2026-08-10T01:00:00.000Z",
+        lastDataAt: "2026-08-10T02:00:00.000Z",
+        lastSeenAt: "2026-08-10T02:00:00.000Z",
+        resourceAvailabilitySummary: {
+          activity: true,
+          historicalBackfillCompletedAt: "2026-08-10T02:00:00.000Z",
+        },
+      });
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates() {
+          throw new Error("applyUpdates should not be called during hydration");
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during hydration");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      try {
+        await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          wake: buildCronWake("2026-08-10T02:05:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+
+        snapshot = buildGoogleSnapshot({
+          firstSeenAt: "2026-08-11T01:00:00.000Z",
+          lastDataAt: null,
+          lastSeenAt: "2026-08-11T01:00:00.000Z",
+          resourceAvailabilitySummary: {},
+        });
+        if (runtimeState === "cold") {
+          closeHostedRuntimeDeviceSyncService(service);
+          service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+        }
+
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          wake: buildCronWake("2026-08-11T01:05:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+        const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+        assert.ok(localAccountId);
+        const [source] = getStore(service).listConnectionSources({
+          connectionId: localAccountId,
+        });
+
+        assert.deepEqual(source && {
+          firstSeenAt: source.firstSeenAt,
+          lastDataAt: source.lastDataAt,
+          lastErrorCode: source.lastErrorCode,
+          lastSeenAt: source.lastSeenAt,
+          resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+          status: source.status,
+        }, {
+          firstSeenAt: "2026-08-11T01:00:00.000Z",
+          lastDataAt: null,
+          lastErrorCode: null,
+          lastSeenAt: "2026-08-11T01:00:00.000Z",
+          resourceAvailabilitySummary: {},
+          status: "connected",
+        });
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    },
+  );
 
   test("sync seeds hosted connection sources without overwriting unpublished local state", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(

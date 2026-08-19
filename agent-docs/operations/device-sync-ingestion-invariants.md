@@ -347,10 +347,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    key and spelling, and use one source-state consolidation rule: the newest
    valid `lastSeenAt` owns status, errors, and availability, equal-timestamp
    lifecycle conflicts fail retryably, and `lastDataAt` merges independently as
-   monotonic arrival evidence. An accepted reconnect therefore replaces an
-   older fence before its first new payload without discarding historical
-   arrival evidence, so hosted/local keys or timestamps cannot create competing
-   source owners. Future aggregate-progress ownership comes
+   monotonic arrival evidence. The persisted Web row is the sole owner of an
+   exact source's `firstSeenAt` authorization epoch. When that exact row advances,
+   hosted hydration replaces the prior local lifecycle, coverage, and arrival
+   fields instead of consolidating them; runtime callbacks must match the current
+   epoch and cannot rewrite it. An accepted same-epoch alias reconnect therefore
+   replaces an older fence before its first new payload without discarding
+   historical arrival evidence, so hosted/local keys or timestamps cannot create
+   competing source owners. Future aggregate-progress ownership comes
    from the versioned status scalar rather than today's window fields; opaque
    future progress and evidence remain unchanged while canonical webhook import
    continues.
@@ -529,5 +533,6 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 - Legacy Fitbit stays active until Google Health has explicit authorization, both exact-source historical pulls are terminal, Google Health has a fresh supported fact, and its normalized capabilities cover every canonical resource actually produced by Fitbit. An advertised sparse resource whose exact Fitbit pull finishes empty creates no transfer obligation.
 - Accepted Fitbit daily facts remain canonically visible during verification but are provisional cutover evidence until a provider pull begins after that provider-local day closes. Interval resources fence on their accepted canonical end. Successor admission is strictly after each per-resource boundary.
 - Every source-bearing Fitbit or Google Health summary, daily aggregate, precise timeseries, and workout import uses the same provider-local canonical commit boundary. That boundary forwards the durable Fitbit fence, distinguishes provider pulls from inline deliveries, and records accepted Fitbit coverage from the committed import receipt; companion-only imports remain outside it.
+- Reauthorizing the same Google Health source advances its Web-owned source epoch and clears prior arrival, coverage, error, and lifecycle evidence in hosted state. Delayed runtime output from the prior epoch cannot restore those fields or satisfy migration freshness.
 - Mixed or source-unknown migration data is retryable: ingress must not acknowledge the trace or create canonical dirty work by guessing.
 - Cutover reuses the connection lock and source row. Pending dirty work must be drained and acknowledged before the exact Fitbit revoke claim or finalization; provider failure restores active legacy state and a bounded retry marker.

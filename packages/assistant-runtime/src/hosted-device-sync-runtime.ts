@@ -253,20 +253,29 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         continue;
       }
 
-      const sourceInstanceKey = resolveHostedHydrationSourceInstanceKey({
-        entry,
-        localSources,
-        source,
-        sourceInstanceKey: source.sourceInstanceKey,
-      });
+      const isJunctionSource = entry.connection.provider.trim().toLowerCase()
+        === "junction";
+      const exactLocalSource = localSourcesByKey.get(source.sourceInstanceKey);
+      const hostedSourceEpochAdvanced = Boolean(
+        isJunctionSource
+        && exactLocalSource
+        && Date.parse(source.firstSeenAt)
+          > Date.parse(exactLocalSource.firstSeenAt),
+      );
+      const sourceInstanceKey = hostedSourceEpochAdvanced
+        ? source.sourceInstanceKey
+        : resolveHostedHydrationSourceInstanceKey({
+            entry,
+            localSources,
+            source,
+            sourceInstanceKey: source.sourceInstanceKey,
+          });
       const localSource = localSourcesByKey.get(sourceInstanceKey);
       const establishedLocalSource = localSource ?? (
-        entry.connection.provider.trim().toLowerCase() === "junction"
+        isJunctionSource
           ? selectHostedJunctionSource(localSources, source.sourceProviderSlug)
           : undefined
       );
-      const isJunctionSource = entry.connection.provider.trim().toLowerCase()
-        === "junction";
       if (
         !isJunctionSource
         && !terminalStatus
@@ -292,12 +301,16 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
             status: establishedLocalSource.status,
           }
         : null;
-      const consolidatedState = (
-        isJunctionSource
+      const shouldConsolidateHostedSource = isJunctionSource
         && localLifecycleSource
         && !terminalStatus
-        && !hostedConnectionEpochChanged
-      )
+        && !hostedConnectionEpochChanged;
+      const consolidatedState = hostedSourceEpochAdvanced
+        ? {
+            lastDataAt: source.lastDataAt,
+            lifecycleSource: source,
+          }
+        : shouldConsolidateHostedSource
         ? resolveDeviceSyncSourceState(
             [localLifecycleSource, source],
             hostedSourceStateUnavailable,
@@ -335,6 +348,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         lastErrorCode: lifecycleSource.lastErrorCode,
         lastErrorMessage: lifecycleSource.lastErrorMessage,
         firstSeenAt: source.firstSeenAt,
+        ...(hostedSourceEpochAdvanced ? { replaceFirstSeenAt: true } : {}),
         lastSeenAt: lifecycleSource.lastSeenAt,
         lastDataAt: consolidatedState.lastDataAt,
       });

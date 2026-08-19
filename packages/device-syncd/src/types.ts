@@ -927,7 +927,10 @@ export interface ProviderJobContext {
   // reaching into service/store internals directly.
   importSnapshot(snapshot: unknown): Promise<unknown>;
   upsertConnectionSource?(
-    input: Omit<UpsertDeviceConnectionSourceInput, "connectionId">,
+    input: Omit<
+      UpsertDeviceConnectionSourceInput,
+      "connectionId" | "replaceFirstSeenAt"
+    >,
   ): DeviceConnectionSourceRecord | Promise<DeviceConnectionSourceRecord>;
   listConnectionSources?(
     input?: Omit<ListDeviceConnectionSourcesInput, "connectionId">,

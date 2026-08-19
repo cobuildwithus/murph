@@ -1386,6 +1386,61 @@ test("device sync store migrates an existing v8 source row to the arrival column
   }
 });
 
+test("device sync store replaces an explicitly advanced source epoch", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-source-epoch");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const connection = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-source-epoch",
+      displayName: "Junction",
+      scopes: [],
+      credential: { kind: "none" },
+      metadata: {},
+      connectedAt: "2026-08-10T00:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_google_health",
+      sourceProviderSlug: "google_health",
+      status: "connected",
+      firstSeenAt: "2026-08-10T01:00:00.000Z",
+      lastSeenAt: "2026-08-10T02:00:00.000Z",
+      lastDataAt: "2026-08-10T01:30:00.000Z",
+    });
+
+    const replaced = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_google_health",
+      sourceProviderSlug: "google_health",
+      status: "connected",
+      firstSeenAt: "2026-08-11T01:00:00.000Z",
+      replaceFirstSeenAt: true,
+      lastSeenAt: "2026-08-11T01:00:00.000Z",
+      lastDataAt: null,
+    });
+
+    assert.equal(replaced.firstSeenAt, "2026-08-11T01:00:00.000Z");
+    assert.equal(replaced.lastDataAt, null);
+
+    const observed = store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_google_health",
+      sourceProviderSlug: "google_health",
+      status: "connected",
+      lastSeenAt: "2026-08-11T02:00:00.000Z",
+    });
+    assert.equal(observed.firstSeenAt, "2026-08-11T01:00:00.000Z");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store keeps source instances distinct and lists them deterministically", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-sources");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

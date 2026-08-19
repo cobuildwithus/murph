@@ -1810,6 +1810,7 @@ describe("runHostedDeviceSyncPass", () => {
             activity: true,
             canonicalCoverageBoundary_activity: "2026-08-11",
             canonicalCoverageFinalizedAt_activity: "2026-08-12T04:00:01.000Z",
+            historicalBackfillCompletedAt: "2026-08-12T03:59:00.000Z",
           },
           sourceProviderSlug: "fitbit",
           status: "connected",
@@ -1908,6 +1909,7 @@ describe("runHostedDeviceSyncPass", () => {
         {
           resourceAvailabilitySummary: {
             canonicalCoverageBoundary_sleep: "2026-08-11T10:05:00.000Z",
+            historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
             sleep: true,
           },
           sourceProviderSlug: "fitbit",

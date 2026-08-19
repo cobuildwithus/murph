@@ -35,9 +35,12 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
 4. [x] Run focused importer, Device Sync, Web, lint, and typecheck proof.
 5. [x] Commit and push the round-4 remediation, then run ReviewGPT round 5 with
    exact-head CI.
-6. [ ] Resolve the accepted round-5 canonical-import ownership finding and run
+6. [x] Resolve the accepted round-5 canonical-import ownership finding and run
    ReviewGPT round 6 on the remediated head.
-7. [ ] Prove a clean current-base merge, mark the
+7. [x] Reproduce and correct round 6's same-source reauthorization epoch rewind
+   without adding a persisted owner or retry path.
+8. [ ] Push the exact correction and run the final allowed ReviewGPT round 7.
+9. [ ] Prove a clean current-base merge, mark the
    PR ready, and archive this plan without merging.
 
 ## ReviewGPT ledger
@@ -60,18 +63,27 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
   correction routes every source-bearing import through one provider-local
   commit boundary; companion-only imports remain separate and no state owner,
   marker, job, retry loop, or database fanout was added.
+- Final round 6: accepted that a same-source Google reauthorization could reset
+  Web's authorization epoch and then have stale local arrival and history state
+  merged back into it. The correction makes the existing Web source row the
+  epoch owner: exact later epochs replace local lifecycle evidence, old-epoch
+  callbacks fail their source fence, and runtime updates cannot rewrite an
+  existing Web `firstSeenAt`. Same-epoch provider aliases retain their existing
+  consolidation behavior.
 
 ## Evidence so far
 
 - Importers: 19 files, 475 tests passed.
-- Device Sync: 49 files, 1,177 tests passed after the round-5 correction.
+- Device Sync: 49 files, 1,178 tests passed after the round-6 correction.
 - Focused Web migration/connect proof: 3 files, 290 tests passed.
-- Device Sync, Importers, and Web prepared typechecks passed.
+- Round-6 Web authority proof: 1 file, 76 tests passed.
+- Assistant Runtime: 89 files passed, 1 skipped; 2,404 tests passed, 5 skipped.
+- Device Sync, Assistant Runtime, Importers, and Web prepared typechecks passed.
 - Package-local scoped Web lint passed.
-- Round-5 focused provider composition, Device Sync typecheck, and full Device
-  Sync tests pass. Documentation guards and the final ReviewGPT/CI gate remain
-  pending; GitHub Actions currently cannot start because of an account billing
-  lock.
+- Round-6 warm/cold hydration, local-store epoch replacement, delayed callback
+  rejection, current-epoch arrival, same-epoch alias, and maintenance retry
+  proofs pass. The final ReviewGPT/CI gate remains pending; GitHub Actions
+  currently cannot start because of an account billing lock.
 
 ## Deployment concern
 

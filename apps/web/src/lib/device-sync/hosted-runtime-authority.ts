@@ -10,7 +10,6 @@ import {
   isGoogleHealthFitbitMigrationLegacyTerminal,
 } from "@murphai/device-syncd/fitbit-migration";
 import type {
-  DeviceSyncJobFailureEventOrigin,
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import type {
@@ -1468,6 +1467,17 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       continue;
     }
 
+    if (
+      current
+      && input.provider.trim().toLowerCase() === "junction"
+      && normalizeJunctionProviderSlug(update.sourceProviderSlug)
+        === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+      && update.firstSeenAt !== current.firstSeenAt
+    ) {
+      staleCount += 1;
+      continue;
+    }
+
     // The runner's snapshot can predate an arrival Web already recorded, so an
     // otherwise valid update must not carry the older value back. Forward-only
     // is the whole basis of the stall signal: a rewind reopens a silence window
@@ -1511,10 +1521,20 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       continue;
     }
 
-    toApply.push(update);
+    toApply.push(current
+      ? omitHostedRuntimeSourceFirstSeenAt(update)
+      : update);
   }
 
   return { staleCount, toApply };
+}
+
+function omitHostedRuntimeSourceFirstSeenAt(
+  update: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate,
+): HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
+  const next = { ...update };
+  delete next.firstSeenAt;
+  return next;
 }
 
 function isHostedRuntimeFitbitMigrationTerminalSourceUpdate(input: {
