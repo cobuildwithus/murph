@@ -12,7 +12,7 @@ if [[ -r "$review_gpt_local_config" ]]; then
 fi
 
 review_gpt_invalid_browser_lane() {
-  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, phlebas, hercules, mountain, or vonneumann." >&2
+  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, phlebas, hercules, mountain, vonneumann, or apollo." >&2
 }
 
 review_gpt_browser_lane_display_name() {
@@ -23,6 +23,7 @@ review_gpt_browser_lane_display_name() {
     hercules) printf '%s\n' "Hercules" ;;
     mountain) printf '%s\n' "Mountain" ;;
     vonneumann) printf '%s\n' "Vonneumann" ;;
+    apollo) printf '%s\n' "Apollo" ;;
     *)
       review_gpt_invalid_browser_lane "$1"
       return 1
@@ -38,6 +39,7 @@ review_gpt_browser_lane_port() {
     hercules) printf '%s\n' "9444" ;;
     mountain) printf '%s\n' "9450" ;;
     vonneumann) printf '%s\n' "9446" ;;
+    apollo) printf '%s\n' "9454" ;;
     *)
       review_gpt_invalid_browser_lane "$1"
       return 1
@@ -136,8 +138,8 @@ if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
   esac
 fi
 
-if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-5]$ ]]; then
-  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 5." >&2
+if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-6]$ ]]; then
+  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 6." >&2
   return 1 2>/dev/null || exit 1
 fi
 
@@ -146,7 +148,7 @@ case "$review_gpt_requested_browser_lane" in
     review_gpt_selected_browser_lane="main"
     ;;
   "" | auto | random)
-    review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann)
+    review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann apollo)
     review_gpt_browser_lanes=("${review_gpt_all_browser_lanes[@]:0:review_gpt_browser_lane_count}")
     review_gpt_usable_browser_lanes=()
 
@@ -166,7 +168,7 @@ case "$review_gpt_requested_browser_lane" in
   aragon | eragon)
     review_gpt_selected_browser_lane="eragon"
     ;;
-  phlebas | hercules | mountain | vonneumann)
+  phlebas | hercules | mountain | vonneumann | apollo)
     review_gpt_selected_browser_lane="$review_gpt_requested_browser_lane"
     ;;
   *)
@@ -188,7 +190,8 @@ else
   review_gpt_selected_browser_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/$review_gpt_selected_browser_lane/$review_gpt_selected_browser_display.app"
 fi
 
-if [[ ! -d "$review_gpt_selected_browser_app" ]] && command -v mdfind >/dev/null 2>&1; then
+if [[ ! -x "$review_gpt_installed_browser_binary" && ! -d "$review_gpt_selected_browser_app" ]] &&
+  command -v mdfind >/dev/null 2>&1; then
   review_gpt_found_browser_app="$(
     mdfind "kMDItemDisplayName == '$review_gpt_selected_browser_display.app' || kMDItemFSName == '$review_gpt_selected_browser_display.app'" | head -n 1
   )"
