@@ -153,6 +153,53 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     return limited.map(cloneSourceRecord);
   });
 
+  const queryRaw = vi.fn(async (query: {
+    strings: readonly string[];
+    values: readonly unknown[];
+  }) => {
+    const sql = query.strings.join("?");
+    const connectionId = requireString(query.values[0]);
+    const sourceProviderSlug = requireString(query.values[1]);
+    const sourceInstanceKey = sql.includes('"source_instance_key" =')
+      ? requireString(query.values[2])
+      : null;
+    const disconnectFences = new Set(
+      query.values
+        .slice(sourceInstanceKey === null ? 2 : 3)
+        .filter((value): value is string => typeof value === "string"),
+    );
+    const candidate = [...records.values()]
+      .filter((record) => record.connectionId === connectionId)
+      .filter((record) => record.sourceProviderSlug === sourceProviderSlug)
+      .sort((left, right) => {
+        const leftExact = sourceInstanceKey !== null
+          && left.sourceInstanceKey === sourceInstanceKey;
+        const rightExact = sourceInstanceKey !== null
+          && right.sourceInstanceKey === sourceInstanceKey;
+        const leftAdmitted = left.status === "connected"
+          && (left.lastErrorCode === null || !disconnectFences.has(left.lastErrorCode));
+        const rightAdmitted = right.status === "connected"
+          && (right.lastErrorCode === null || !disconnectFences.has(right.lastErrorCode));
+        return Number(rightExact) - Number(leftExact)
+          || Number(rightAdmitted) - Number(leftAdmitted)
+          || right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
+          || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
+          || left.id.localeCompare(right.id);
+      })[0];
+
+    return candidate
+      ? [{
+          id: candidate.id,
+          lastErrorCode: candidate.lastErrorCode,
+          lastErrorMessage: candidate.lastErrorMessage,
+          lastSeenAt: new Date(candidate.lastSeenAt),
+          sourceInstanceKey: candidate.sourceInstanceKey,
+          sourceProviderSlug: candidate.sourceProviderSlug,
+          status: candidate.status,
+        }]
+      : [];
+  });
+
   const updateMany = vi.fn(async (input: {
     where: {
       connectionId: string;
@@ -237,6 +284,7 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
 
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma: {
+      $queryRaw: queryRaw,
       deviceConnection: {
         update: deviceConnectionUpdate,
       },
@@ -255,6 +303,7 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
   return {
     deviceConnectionUpdate,
     findMany,
+    queryRaw,
     records,
     signals,
     store,
@@ -420,90 +469,91 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     }));
   });
 
-  it("bounds source admission to one exact, minimally projected connected candidate", async () => {
-    const { findMany, store } = createSourceStore([
+  it("resolves one exact, minimally projected admitted source in one store query", async () => {
+    const { queryRaw, store } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_newer_blocked",
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        lastSeenAt: new Date("2026-03-25T03:00:00.000Z"),
+        sourceInstanceKey: "src_blocked",
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+      createSourceRecord({
+        id: "dcs_admitted",
+        lastSeenAt: new Date("2026-03-25T02:00:00.000Z"),
+        sourceInstanceKey: "src_admitted",
+        sourceProviderSlug: "oura",
+      }),
       createSourceRecord({
         id: "dcs_other",
         sourceInstanceKey: "src_other",
         sourceProviderSlug: "garmin",
       }),
-      createSourceRecord({
-        id: "dcs_target",
-        sourceInstanceKey: "src_target",
-        sourceProviderSlug: "oura",
-      }),
     ]);
 
-    await expect(store.listConnectionSourceAdmissionCandidates({
+    await expect(store.resolveConnectionSourceAdmissionCandidate({
       connectionId: "dsc_parent",
       sourceProviderSlug: "oura",
-    })).resolves.toEqual([
-      expect.objectContaining({
-        sourceProviderSlug: "oura",
-        status: "connected",
-      }),
-    ]);
-    expect(findMany).toHaveBeenCalledOnce();
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      select: {
-        id: true,
-        lastErrorCode: true,
-        lastErrorMessage: true,
-        lastSeenAt: true,
-        sourceInstanceKey: true,
-        sourceProviderSlug: true,
-        status: true,
-      },
-      take: 1,
-      where: expect.objectContaining({
-        connectionId: "dsc_parent",
-        sourceProviderSlug: "oura",
-        status: "connected",
-      }),
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dcs_admitted",
+      sourceProviderSlug: "oura",
+      status: "connected",
     }));
+    expect(queryRaw).toHaveBeenCalledOnce();
+    const sql = queryRaw.mock.calls[0]?.[0]?.strings.join("?") ?? "";
+    expect(sql).toContain('SELECT\n          "id"');
+    expect(sql).toContain('"last_error_code" AS "lastErrorCode"');
+    expect(sql).toContain('ORDER BY');
+    expect(sql).toContain("LIMIT 1");
+    expect(sql).not.toContain("SELECT *");
   });
 
-  it("returns one exact blocked source when no admitted candidate exists", async () => {
-    const { findMany, store } = createSourceStore([
+  it("prefers the canonical source row but falls back to the ranked same-slug row", async () => {
+    const { queryRaw, store } = createSourceStore([
       createSourceRecord({
-        id: "dcs_target",
+        id: "dcs_older",
         lastErrorCode: "SOURCE_USER_DISCONNECTED",
-        sourceInstanceKey: "src_target",
+        lastSeenAt: new Date("2026-03-25T01:00:00.000Z"),
+        sourceInstanceKey: "src_older",
         sourceProviderSlug: "oura",
+        status: "disconnected",
       }),
       createSourceRecord({
-        id: "dcs_unrelated",
-        sourceInstanceKey: "src_unrelated",
-        sourceProviderSlug: "garmin",
+        id: "dcs_admitted_legacy",
+        lastSeenAt: new Date("2026-03-25T02:00:00.000Z"),
+        sourceInstanceKey: "src_admitted_legacy",
+        sourceProviderSlug: "oura",
       }),
     ]);
 
-    await expect(store.listConnectionSourceAdmissionCandidates({
+    await expect(store.resolveConnectionSourceAdmissionCandidate({
       connectionId: "dsc_parent",
       sourceProviderSlug: "oura",
-    })).resolves.toEqual([
-      expect.objectContaining({
-        lastErrorCode: "SOURCE_USER_DISCONNECTED",
-        sourceProviderSlug: "oura",
-      }),
-    ]);
-    expect(findMany).toHaveBeenCalledTimes(2);
-    expect(findMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      select: {
-        id: true,
-        lastErrorCode: true,
-        lastErrorMessage: true,
-        lastSeenAt: true,
-        sourceInstanceKey: true,
-        sourceProviderSlug: true,
-        status: true,
-      },
-      take: 1,
-      where: {
-        connectionId: "dsc_parent",
-        sourceProviderSlug: "oura",
-      },
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dcs_admitted_legacy",
+      sourceInstanceKey: "src_admitted_legacy",
     }));
+    await expect(store.resolveConnectionSourceAdmissionCandidate({
+      connectionId: "dsc_parent",
+      sourceInstanceKey: "src_older",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dcs_older",
+      sourceInstanceKey: "src_older",
+    }));
+    await expect(store.resolveConnectionSourceAdmissionCandidate({
+      connectionId: "dsc_parent",
+      sourceInstanceKey: "src_missing_canonical",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dcs_admitted_legacy",
+      sourceInstanceKey: "src_admitted_legacy",
+    }));
+    expect(queryRaw).toHaveBeenCalledTimes(3);
+    const exactSql = queryRaw.mock.calls[1]?.[0]?.strings.join("?") ?? "";
+    expect(exactSql).toContain('("source_instance_key" =');
+    expect(exactSql).not.toContain('AND "source_instance_key" =');
   });
 
   it("marks all non-disconnected sources for one parent connection disconnected", async () => {

@@ -733,6 +733,128 @@ test("assistant usage parsing validates the turn profile allowlist", () => {
   assert.equal(dropped.inputTokens, 10);
 });
 
+test("assistant usage parsing accepts the v2 tool profile and drops invalid v2 invariants", () => {
+  const baseRecord = {
+    attemptCount: 1,
+    credentialSource: "platform",
+    inputTokens: 10,
+    occurredAt: "2026-03-29T12:00:00.000Z",
+    outputTokens: 5,
+    provider: "codex-cli",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: "asst_123",
+    turnId: "turn_123",
+    usageId: "turn_123.attempt-1",
+  };
+  const profile = {
+    modelContextWindow: null,
+    requestCount: 0,
+    requests: [],
+    requestsTruncated: false,
+    schema: "murph.assistant-turn-profile.v2",
+    tools: [
+      {
+        calls: 2,
+        durationKnownCalls: 1,
+        durationMs: 0,
+        failedCalls: 1,
+        kind: "command",
+        label: "vault-cli memory show",
+        outputBytesMax: 8,
+        outputBytesTotal: 12,
+      },
+      {
+        calls: 1,
+        durationKnownCalls: 1,
+        durationMs: 10,
+        failedCalls: 1,
+        kind: "command",
+        label: "curl",
+        outputBytesMax: 0,
+        outputBytesTotal: 0,
+      },
+      {
+        calls: 1,
+        durationKnownCalls: 0,
+        durationMs: 0,
+        failedCalls: 0,
+        kind: "dynamic_tool",
+        label: "t_c",
+        outputBytesMax: 2,
+        outputBytesTotal: 2,
+      },
+    ],
+    toolsTruncated: false,
+  };
+
+  assert.deepEqual(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      turnProfileJson: profile,
+    }).turnProfileJson,
+    profile,
+  );
+
+  const invalidTools = [
+    { ...profile.tools[0], kind: "browser" },
+    { ...profile.tools[0], label: "member-private-command" },
+    { ...profile.tools[0], durationKnownCalls: 3 },
+    { ...profile.tools[0], calls: 0, failedCalls: 0 },
+    { ...profile.tools[0], durationKnownCalls: 0, durationMs: 1 },
+    { ...profile.tools[0], failedCalls: 3 },
+    { ...profile.tools[0], outputBytesMax: 13 },
+    { ...profile.tools[0], outputBytesMax: 5, outputBytesTotal: 11 },
+    {
+      ...profile.tools[0],
+      calls: Number.MAX_SAFE_INTEGER,
+      durationKnownCalls: 0,
+      durationMs: 0,
+      failedCalls: 0,
+      outputBytesMax: 2,
+      outputBytesTotal: 2,
+    },
+    { ...profile.tools[2], label: "a.b.c" },
+    { ...profile.tools[2], label: "t_" },
+    { ...profile.tools[2], label: "t_a.b" },
+    { ...profile.tools[2], label: "n01_at1_b" },
+    { ...profile.tools[2], label: "n2_abt1_c" },
+    { ...profile.tools[2], label: "n7_private/path_t1_c" },
+  ];
+  for (const tool of invalidTools) {
+    const parsed = parseAssistantUsageRecord({
+      ...baseRecord,
+      turnProfileJson: { ...profile, tools: [tool] },
+    });
+    assert.equal(parsed.turnProfileJson, null);
+    assert.equal(parsed.inputTokens, 10);
+  }
+
+  const duplicate = parseAssistantUsageRecord({
+    ...baseRecord,
+    turnProfileJson: {
+      ...profile,
+      tools: [profile.tools[0], { ...profile.tools[0] }],
+    },
+  });
+  assert.equal(duplicate.turnProfileJson, null);
+
+  for (const requestFields of [
+    { requestCount: 1, requests: [], requestsTruncated: false },
+    { requestCount: 1, requests: [], requestsTruncated: true },
+    {
+      requestCount: ASSISTANT_TURN_PROFILE_MAX_REQUESTS + 1,
+      requests: [{ cachedInput: 0, input: 1, output: 1 }],
+      requestsTruncated: true,
+    },
+  ]) {
+    const parsed = parseAssistantUsageRecord({
+      ...baseRecord,
+      turnProfileJson: { ...profile, ...requestFields },
+    });
+    assert.equal(parsed.turnProfileJson, null);
+  }
+});
+
 test("assistant usage parsing drops out-of-contract turn profiles without failing the record", () => {
   const validProfile = {
     // A null context window is part of the contract (older runtimes omit it).

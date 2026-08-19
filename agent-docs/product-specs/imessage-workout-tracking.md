@@ -177,7 +177,75 @@ response includes both the truthful no-save result and that exact recovery
 question. It does not stop after the failure statement or give generic retry
 advice.
 
-An active workout may have zero pending sets after the final result is logged; it remains active until the member explicitly finishes it.
+An active workout may have zero pending planned sets and remain active so the
+member can add targetless extra sets. Plan exhaustion is not session closure.
+When one message contains both a set result and unmistakable closure language,
+Murph logs the set, finishes that same workout in the same turn, and returns the
+completed card. The member does not need to send a separate finish command.
+A reminder by itself, plan targets, elapsed time, or an earlier-day active record
+does not prove completion.
+
+## Generic scheduled-reminder relationship context
+
+Every scheduled automation delivered into assistant context includes its exact
+`automationId` and occurrence timestamps. When it concerns canonical records,
+it also includes a bounded list of exact `contextReferences`; plan-owned support
+continues to include its `supportSeriesId`. Each reference names an entity kind
+and the canonical id it concerns, such as a workout format, experiment, habit,
+or regimen. The host keeps those exact ids visible to the model.
+That relationship metadata survives provider-accepted text, text-plus-media,
+and media-only reminder presentations; native reply is never required.
+
+A model-authored reference copies an id returned by a successful current
+canonical read or create result that identifies exactly one record. When that
+evidence is missing or ambiguous, the automation stores no reference. The host
+preserves stored ids with the delivery; preservation is not proof that a record
+still exists or is the right mutation target.
+
+The metadata is relationship context, not side-effect authority. It does not
+confer read permission, mutation permission, or consent, and it does not select a
+write surface. The assistant must inspect the referenced canonical record and
+use the ordinary domain tools, validation, and locks for any action. Missing or
+conflicting references fail closed rather than being guessed from reminder copy,
+titles, card state, or recency.
+
+The same prior-delivery context remains available for the next ordinary direct
+chat message after the reminder. Native iMessage Reply, a quoted reply target,
+card provenance, or provider reply attestation is neither required nor treated
+as authority.
+
+For a workout reminder, the relationship context identifies the exact saved
+workout-format id. On an ordinary set completion, Murph reads that format and
+the ordinary active-workout state. If no workout is active, the current
+completion plus that exact inspected reference authorizes starting only the
+referenced routine and logging only the stated set. If the active workout
+already references that routine, the exact active event is targeted normally.
+
+A different active workout is not assumed to be the reminder target, but the
+reminder also does not establish when that earlier workout ended. Active
+`durationMinutes` is elapsed time at the latest mutation, not an end
+observation. Murph never derives an end from that value, a last-write time, a
+plan target, the reminder time, the later reply time, or local midnight. If the
+member supplies the earlier workout's exact end time or exact total duration,
+Murph may compose the existing finish, start-from-format, and targeted set-log
+commands. Otherwise it makes no workout mutation, says the new set was not
+saved yet, and asks one narrow question for that time or duration while
+preserving the exact proposed routine, workout-format id, active-workout event
+id, exercise, set, and result in text. That exact text remains available through
+committed transcript replay even when provider-thread continuity changes. Only
+the immediate answer may continue the proposal, after Murph exact-reads the
+recorded format and event ids and separately reads the sole active workout. It
+continues only when the recorded event remains active and is still the sole
+active workout. A completed, missing, replaced, or conflicting active event, an
+ambiguous answer, or an unrelated later message fails closed without mutation.
+
+Multiple active workouts, an unidentified routine or set, missing or
+conflicting relationship context, changed state, and insufficient finish timing
+all stop without silent retargeting. The existing one-active-workout invariant
+and mutation lock remain the write owners. Explicit historical intent,
+including a correction for yesterday or an explicit older workout id, continues
+through the ordinary exact historical targeting path and is not reinterpreted
+as a new-routine completion.
 
 ## Direct action loop
 
@@ -286,6 +354,19 @@ explicit restoration of the quarantined intent after the compatible bundle is
 live, not rollback below the floor. Focused static-route, local-outbox, and
 hosted-side-effect round-trip tests pin all three strict readers with the same
 expanded fixture shape.
+
+Reminder context references follow the same persisted-outbox rollout rule.
+Intents without references omit the optional field, so ordinary replies remain
+readable by the preceding strict reader. Deploy the reference-aware Worker and
+runner together with immediate container rollout before any reminder carrying
+references can fire, then prove the exact runner-bundle fingerprint. The first
+canonical automation or outbox intent with a non-empty reference list
+establishes that bundle as the hard rollback floor. Hosted rollback below the
+floor is safe only after every such canonical reference is removed through the
+current writer and every affected intent and checkpoint has drained; otherwise
+recovery requires the compatible reader or a forward fix, never manual editing
+of canonical or assistant runtime state. A local CLI downgrade below the same
+reader floor is unsupported while canonical automations carry references.
 
 Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store

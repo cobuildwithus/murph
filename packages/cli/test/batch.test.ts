@@ -37,6 +37,31 @@ async function runCli(argv: string[]): Promise<string> {
   }
 }
 
+test('batch schema explains source output lengths before compact mode', async () => {
+  const raw = await runCli(['batch', '--schema', '--format', 'json'])
+  const schema = JSON.parse(raw) as {
+    output?: {
+      properties?: {
+        commands?: {
+          items?: {
+            properties?: Record<string, { description?: string }>
+          }
+        }
+      }
+    }
+  }
+  const outputProperties = schema.output?.properties?.commands?.items?.properties
+
+  assert.equal(
+    outputProperties?.outputBytes?.description,
+    'UTF-8 byte length of captured child stdout before compact mode may clear stdout.',
+  )
+  assert.equal(
+    outputProperties?.outputChars?.description,
+    'Legacy UTF-16 code-unit length of captured child stdout before compact mode may clear stdout.',
+  )
+})
+
 test('batch runs multiple vault-cli argv arrays in one process', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-'))
   const vault = path.join(parent, 'vault')
@@ -84,6 +109,7 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
         argv: string[]
         data?: unknown
         ok: boolean
+        outputBytes: number
         outputChars: number
         stdout: string
       }>
@@ -109,6 +135,14 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
       result.commands[1]?.outputChars,
       result.commands[1]?.stdout.length,
     )
+    assert.equal(
+      result.commands[0]?.outputBytes,
+      Buffer.byteLength(result.commands[0]?.stdout ?? '', 'utf8'),
+    )
+    assert.equal(
+      result.commands[1]?.outputBytes,
+      Buffer.byteLength(result.commands[1]?.stdout ?? '', 'utf8'),
+    )
     assert.equal(typeof result.commands[0]?.data, 'object')
     assert.equal(typeof result.commands[1]?.data, 'object')
     assert.deepEqual(JSON.parse(result.commands[0]?.stdout ?? ''), result.commands[0]?.data)
@@ -127,6 +161,41 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
 
   try {
     await runCli(['init', '--vault', vault, '--format', 'json'])
+    await runCli([
+      'memory',
+      'upsert',
+      'Préfère les réponses concises 🙂.',
+      '--section',
+      'Preferences',
+      '--vault',
+      vault,
+      '--format',
+      'json',
+    ])
+
+    const nonCompactRaw = await runCli([
+      'batch',
+      '--vault',
+      vault,
+      '--command',
+      '["memory","show"]',
+      '--format',
+      'json',
+    ])
+    const nonCompactResult = JSON.parse(nonCompactRaw) as {
+      commands: Array<{
+        outputBytes: number
+        outputChars: number
+        stdout: string
+      }>
+    }
+    const nonCompactMemory = nonCompactResult.commands[0]
+    assert.ok(nonCompactMemory)
+    assert.equal(
+      nonCompactMemory.outputBytes,
+      Buffer.byteLength(nonCompactMemory.stdout, 'utf8'),
+    )
+    assert.equal(nonCompactMemory.outputChars, nonCompactMemory.stdout.length)
 
     const raw = await runCli([
       'batch',
@@ -144,6 +213,7 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
       commands: Array<{
         data?: unknown
         ok: boolean
+        outputBytes: number
         outputChars: number
         stdout: string
       }>
@@ -155,8 +225,20 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
       result.commands.every((command) => command.outputChars > 0),
       true,
     )
+    assert.equal(
+      result.commands.every((command) => command.outputBytes > 0),
+      true,
+    )
+    assert.equal(
+      result.commands.some(
+        (command) => command.outputBytes > command.outputChars,
+      ),
+      true,
+    )
     assert.equal(typeof result.commands[0]?.data, 'object')
     assert.equal(typeof result.commands[1]?.data, 'object')
+    assert.equal(result.commands[0]?.outputBytes, nonCompactMemory.outputBytes)
+    assert.equal(result.commands[0]?.outputChars, nonCompactMemory.outputChars)
 
     const duplicatedRaw = JSON.stringify({
       ...result,
@@ -331,6 +413,8 @@ test('batch rejects setup, interactive, and assistant automation child commands'
       '["assistant","run","--once"]',
       '--command',
       '["--filter-output","--once","assistant","run"]',
+      '--command',
+      '["--","assistant","run"]',
       '--format',
       'json',
     ])
@@ -344,8 +428,9 @@ test('batch rejects setup, interactive, and assistant automation child commands'
       }>
     }
 
-    assert.equal(result.failed, 9)
+    assert.equal(result.failed, 10)
     assert.deepEqual(result.commands.map((command) => command.ok), [
+      false,
       false,
       false,
       false,
@@ -412,6 +497,60 @@ test('batch inserts inherited defaults before child argv terminator', async () =
       'json',
       '--',
       '--format',
+    ])
+  } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
+test('batch admission still runs an allowed child behind root options', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-allowed-admission-'))
+  const vault = path.join(parent, 'vault')
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+    await runCli([
+      'memory',
+      'upsert',
+      'Prefers concise answers.',
+      '--section',
+      'Preferences',
+      '--vault',
+      vault,
+      '--format',
+      'json',
+    ])
+
+    const raw = await runCli([
+      'batch',
+      '--vault',
+      vault,
+      '--command',
+      '["--filter-output","--once","memory","show"]',
+      '--format',
+      'json',
+    ])
+    const result = JSON.parse(raw) as {
+      failed: number
+      commands: Array<{
+        argv: string[]
+        error?: {
+          message: string
+        }
+        ok: boolean
+      }>
+    }
+
+    assert.equal(result.failed, 0, result.commands[0]?.error?.message)
+    assert.equal(result.commands[0]?.ok, true)
+    assert.deepEqual(result.commands[0]?.argv.slice(0, 4), [
+      '--filter-output',
+      '--once',
+      'memory',
+      'show',
     ])
   } finally {
     await rm(parent, {

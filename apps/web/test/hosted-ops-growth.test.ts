@@ -948,6 +948,9 @@ describe("hosted ops growth metrics", () => {
           lte: expect.any(Date),
         },
         kind: "starter_grant",
+        semanticSourceKey: {
+          startsWith: "hosted-starter-usage:",
+        },
       },
     });
     expect(mocks.hostedUsageCreditEntry.count.mock.calls[1]?.[0]).toMatchObject({
@@ -989,6 +992,9 @@ describe("hosted ops growth metrics", () => {
           lt: expect.any(Date),
         },
         kind: "starter_grant",
+        semanticSourceKey: {
+          startsWith: "hosted-starter-usage:",
+        },
       },
     });
   });

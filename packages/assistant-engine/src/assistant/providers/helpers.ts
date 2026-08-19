@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 
 import { getAssistantBindingContextLines } from '../bindings.js'
@@ -22,11 +23,18 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  VAULT_CLI_BATCH_MAX_COMMANDS,
   VAULT_CLI_BATCH_RESULT_SCHEMA,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  resolveCodexCommandFamily,
+} from '../../assistant-codex/command-family.js'
+import {
+  isCodexActionStructurallyFailed,
+} from '../../assistant-codex/action-outcome.js'
+import {
+  buildAssistantTurnProfileToolIdentityLabel,
   ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
-  ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH,
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_TURN_PROFILE_SCHEMA,
   type AssistantUsageTokenPricingBasis,
@@ -489,52 +497,22 @@ function sanitizeCodexUsage(
   }
 }
 
-const ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
-const ASSISTANT_TURN_PROFILE_SUBCOMMAND_TOKEN_PATTERN = /^[a-z][a-z0-9-]{0,24}$/u
-const ASSISTANT_TURN_PROFILE_SHELL_TOKEN_PATTERN = /^(?:.*\/)?(?:ba|z|da)?sh$/u
-// Codex shlex-joins shell executions into `bash -lc <script>` (multi-word
-// scripts arrive double-quoted), so strip one wrapper prefix before labeling.
-const ASSISTANT_TURN_PROFILE_SHELL_WRAPPER_PREFIX_PATTERN =
-  /^\s*(?:\S*\/)?(?:ba|z|da)?sh\s+-[a-z]*c[a-z]*\s+/u
-// Only these head binaries get subcommand tokens in persisted labels. For any
-// other command the first positional token can be member content (search
-// terms, vault paths), so the label stops at the binary name.
-const ASSISTANT_TURN_PROFILE_SUBCOMMAND_HEAD_BINARIES = new Set(['vault-cli', 'murph'])
-// Codex also emits a best-effort parsed commandActions array. Use only these
-// fixed executable names to retain an ordered compound-command chain or when
-// shell-wrapper quoting makes the raw command fail closed; never persist an
-// action argument, path, query, or arbitrary head.
-const ASSISTANT_TURN_PROFILE_STRUCTURED_COMMAND_HEAD_BINARIES = new Set([
-  'cat',
-  'grep',
-  'head',
-  'jq',
-  'murph',
-  'node',
-  'printf',
-  'rg',
-  'sed',
-  'tail',
-  'vault-cli',
-])
-const ASSISTANT_TURN_PROFILE_BATCH_COMMAND_PATHS = new Set([
-  'food search-labels',
-  'food search-labels-batch',
-  'goal list',
-  'goal show',
-  'meal add',
-  'meal edit',
-  'meal show',
-  'meal totals',
-  'meal nutrients',
-])
+type AssistantTurnProfileToolKind = 'command' | 'dynamic_tool' | 'mcp_tool'
 
 interface AssistantTurnProfileToolAggregate {
   calls: number
+  durationKnownCalls: number
   durationMs: number
   failedCalls: number
+  kind: AssistantTurnProfileToolKind
   label: string
-  outputChars: number
+  outputBytesMax: number
+  outputBytesTotal: number
+}
+
+interface AssistantTurnProfileToolAggregateRead {
+  aggregates: AssistantTurnProfileToolAggregate[]
+  attributionTruncated: boolean
 }
 
 // Compact per-turn profile derived entirely from notifications Codex already
@@ -556,7 +534,8 @@ export function buildAssistantCodexTurnProfileJson(input: {
   const modelContextWindow = tokenUsageEvents.at(-1)?.tokenUsage.modelContextWindow
     ?? null
 
-  const toolsByLabel = new Map<string, AssistantTurnProfileToolAggregate>()
+  const toolsByKindAndLabel = new Map<string, AssistantTurnProfileToolAggregate>()
+  let toolAttributionTruncated = false
   const startIndex = findAssistantCodexTurnStartedEventIndex(input) ?? 0
   for (let index = startIndex; index < input.rawEvents.length; index += 1) {
     const notification = readCodexServerNotification(input.rawEvents[index])
@@ -571,33 +550,37 @@ export function buildAssistantCodexTurnProfileJson(input: {
     }
 
     const item = readCodexRecord(notification.params.item)
-    const toolAggregates = readAssistantTurnProfileToolAggregates(item)
-    if (!toolAggregates) {
+    const toolRead = readAssistantTurnProfileToolAggregates(item)
+    if (!toolRead) {
       continue
     }
+    toolAttributionTruncated ||= toolRead.attributionTruncated
 
-    for (const aggregate of toolAggregates) {
-      const existing = toolsByLabel.get(aggregate.label)
+    for (const aggregate of toolRead.aggregates) {
+      const aggregateKey = JSON.stringify([aggregate.kind, aggregate.label])
+      const existing = toolsByKindAndLabel.get(aggregateKey)
       if (existing) {
-        existing.calls += aggregate.calls
-        existing.durationMs += aggregate.durationMs
-        existing.failedCalls += aggregate.failedCalls
-        existing.outputChars += aggregate.outputChars
+        if (!mergeAssistantTurnProfileToolAggregate(existing, aggregate)) {
+          return null
+        }
       } else {
-        toolsByLabel.set(aggregate.label, aggregate)
+        toolsByKindAndLabel.set(aggregateKey, aggregate)
       }
     }
   }
 
-  if (requests.length === 0 && toolsByLabel.size === 0) {
+  if (requests.length === 0 && toolsByKindAndLabel.size === 0) {
     return null
   }
 
-  const tools = [...toolsByLabel.values()].sort((left, right) => {
-    const durationDelta = right.durationMs - left.durationMs
-    return durationDelta !== 0
-      ? durationDelta
-      : right.outputChars - left.outputChars
+  const tools = [...toolsByKindAndLabel.values()].sort((left, right) => {
+    if (right.durationMs !== left.durationMs) {
+      return right.durationMs > left.durationMs ? 1 : -1
+    }
+    if (right.outputBytesTotal !== left.outputBytesTotal) {
+      return right.outputBytesTotal > left.outputBytesTotal ? 1 : -1
+    }
+    return 0
   })
 
   return {
@@ -608,18 +591,23 @@ export function buildAssistantCodexTurnProfileJson(input: {
     schema: ASSISTANT_TURN_PROFILE_SCHEMA,
     tools: tools.slice(0, ASSISTANT_TURN_PROFILE_MAX_TOOLS).map((tool) => ({
       calls: tool.calls,
+      durationKnownCalls: tool.durationKnownCalls,
       durationMs: tool.durationMs,
-      ...(tool.failedCalls > 0 ? { failedCalls: tool.failedCalls } : {}),
+      failedCalls: tool.failedCalls,
+      kind: tool.kind,
       label: tool.label,
-      outputChars: tool.outputChars,
+      outputBytesMax: tool.outputBytesMax,
+      outputBytesTotal: tool.outputBytesTotal,
     })),
-    toolsTruncated: tools.length > ASSISTANT_TURN_PROFILE_MAX_TOOLS,
+    toolsTruncated:
+      toolAttributionTruncated
+      || tools.length > ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   }
 }
 
 function readAssistantTurnProfileToolAggregates(
   item: Record<string, unknown> | null,
-): AssistantTurnProfileToolAggregate[] | null {
+): AssistantTurnProfileToolAggregateRead | null {
   const itemType = readAssistantProviderString(item?.type)
   if (!item || !itemType) {
     return null
@@ -627,43 +615,64 @@ function readAssistantTurnProfileToolAggregates(
 
   if (itemType === 'commandExecution') {
     const aggregatedOutput = item.aggregatedOutput
-    const batchRead = readAssistantTurnProfileBatchToolAggregates(aggregatedOutput)
-    if (batchRead !== null) {
-      return batchRead
+    const label = resolveCodexCommandFamily({
+      allowKnownShellWrapper: true,
+      commandLabel: readAssistantProviderString(item.command),
+      source: 'display',
+    })
+    if (label === 'vault-cli batch') {
+      const batchRead = readAssistantTurnProfileBatchToolAggregates(aggregatedOutput)
+      if (batchRead !== null) {
+        return {
+          aggregates: batchRead,
+          attributionTruncated: false,
+        }
+      }
     }
 
-    return [{
-      calls: 1,
-      durationMs: readAssistantProviderInteger(item, 'durationMs') ?? 0,
-      failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
-      label: buildAssistantTurnProfileCommandLabel(
-        readAssistantProviderString(item.command),
-        item.commandActions,
-      ),
-      outputChars: readAssistantTurnProfileTextLength(aggregatedOutput),
-    }]
+    const durationMs = readAssistantProviderInteger(item, 'durationMs')
+    const outputBytes = readAssistantTurnProfileUtf8Bytes(aggregatedOutput)
+
+    return {
+      aggregates: [{
+        calls: 1,
+        durationKnownCalls: durationMs === null ? 0 : 1,
+        durationMs: durationMs ?? 0,
+        failedCalls: isCodexActionStructurallyFailed({ item }) ? 1 : 0,
+        kind: 'command',
+        label,
+        outputBytesMax: outputBytes,
+        outputBytesTotal: outputBytes,
+      }],
+      attributionTruncated: label === 'vault-cli batch',
+    }
   }
 
   if (itemType === 'mcpToolCall' || itemType === 'dynamicToolCall') {
-    const server = readAssistantProviderString(
-      itemType === 'mcpToolCall' ? item.server : item.namespace,
-    )
     const tool = readAssistantProviderString(item.tool)
-    const label = [server, tool]
-      .filter((part): part is string =>
-        part !== null && ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(part),
-      )
-      .join('.')
+    const kind = itemType === 'mcpToolCall' ? 'mcp_tool' : 'dynamic_tool'
+    const label = buildAssistantTurnProfileToolIdentityLabel({
+      kind,
+      tool,
+    })
 
-    return [{
-      calls: 1,
-      durationMs: readAssistantProviderInteger(item, 'durationMs') ?? 0,
-      failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
-      label: truncateAssistantTurnProfileLabel(label.length > 0 ? label : itemType),
-      outputChars: readAssistantTurnProfileTextLength(
-        itemType === 'mcpToolCall' ? item.result : item.contentItems,
-      ),
-    }]
+    const durationMs = readAssistantProviderInteger(item, 'durationMs')
+    const outputBytes = readAssistantTurnProfileUtf8Bytes(
+      itemType === 'mcpToolCall' ? item.result : item.contentItems,
+    )
+    return {
+      aggregates: [{
+        calls: 1,
+        durationKnownCalls: durationMs === null ? 0 : 1,
+        durationMs: durationMs ?? 0,
+        failedCalls: isCodexActionStructurallyFailed({ item }) ? 1 : 0,
+        kind,
+        label,
+        outputBytesMax: outputBytes,
+        outputBytesTotal: outputBytes,
+      }],
+      attributionTruncated: false,
+    }
   }
 
   return null
@@ -684,13 +693,16 @@ function readAssistantTurnProfileBatchToolAggregates(
   }
 
   const result = readAssistantProviderRecord(parsed)
+  if (result?.schema !== VAULT_CLI_BATCH_RESULT_SCHEMA) {
+    return null
+  }
   const commands = result?.commands
   const count = result?.count
   const failed = result?.failed
   if (
-    result?.schema !== VAULT_CLI_BATCH_RESULT_SCHEMA
-    || !Array.isArray(commands)
+    !Array.isArray(commands)
     || commands.length === 0
+    || commands.length > VAULT_CLI_BATCH_MAX_COMMANDS
     || typeof count !== 'number'
     || !Number.isSafeInteger(count)
     || count !== commands.length
@@ -708,7 +720,11 @@ function readAssistantTurnProfileBatchToolAggregates(
     const argv = command?.argv
     const durationMs = command?.durationMs
     const ok = command?.ok
-    const outputChars = command?.outputChars
+    // The v1 batch envelope counts UTF-16 code units, not bytes. Validate it
+    // only as part of the envelope; byte metrics come from source-owned bytes.
+    const legacyOutputChars = command?.outputChars
+    const outputBytes = command?.outputBytes
+    const stdout = command?.stdout
     if (
       !command
       || !Array.isArray(argv)
@@ -717,30 +733,41 @@ function readAssistantTurnProfileBatchToolAggregates(
       || !Number.isSafeInteger(durationMs)
       || durationMs < 0
       || typeof ok !== 'boolean'
-      || typeof outputChars !== 'number'
-      || !Number.isSafeInteger(outputChars)
-      || outputChars < 0
+      || typeof legacyOutputChars !== 'number'
+      || !Number.isSafeInteger(legacyOutputChars)
+      || legacyOutputChars < 0
+      || typeof outputBytes !== 'number'
+      || !Number.isSafeInteger(outputBytes)
+      || outputBytes < 0
+      || typeof stdout !== 'string'
+      || (stdout.length > 0 && Buffer.byteLength(stdout, 'utf8') !== outputBytes)
     ) {
       return null
     }
 
     if (!ok) {
-      failedCommands += 1
+      const nextFailedCommands = safeAssistantTurnProfileIntegerSum(
+        failedCommands,
+        1,
+      )
+      if (nextFailedCommands === null) {
+        return null
+      }
+      failedCommands = nextFailedCommands
     }
 
-    const family = argv[0]
-    const subcommand = argv[1]
-    const path = typeof family === 'string' && typeof subcommand === 'string'
-      ? `${family} ${subcommand}`
-      : null
     aggregates.push({
       calls: 1,
+      durationKnownCalls: 1,
       durationMs,
       failedCalls: ok ? 0 : 1,
-      label: path && ASSISTANT_TURN_PROFILE_BATCH_COMMAND_PATHS.has(path)
-        ? `${family}.${subcommand}`
-        : 'other',
-      outputChars,
+      kind: 'command',
+      label: resolveCodexCommandFamily({
+        argv,
+        source: 'batch_argv',
+      }),
+      outputBytesMax: outputBytes,
+      outputBytesTotal: outputBytes,
     })
   }
 
@@ -751,164 +778,68 @@ function readAssistantTurnProfileBatchToolAggregates(
   return aggregates
 }
 
-function isAssistantTurnProfileFailedTool(item: Record<string, unknown>): boolean {
-  const exitCode = readAssistantProviderInteger(item, 'exitCode')
-  if (exitCode !== null) {
-    return exitCode !== 0
+function mergeAssistantTurnProfileToolAggregate(
+  target: AssistantTurnProfileToolAggregate,
+  source: AssistantTurnProfileToolAggregate,
+): boolean {
+  const calls = safeAssistantTurnProfileIntegerSum(target.calls, source.calls)
+  const durationKnownCalls = safeAssistantTurnProfileIntegerSum(
+    target.durationKnownCalls,
+    source.durationKnownCalls,
+  )
+  const durationMs = safeAssistantTurnProfileIntegerSum(
+    target.durationMs,
+    source.durationMs,
+  )
+  const failedCalls = safeAssistantTurnProfileIntegerSum(
+    target.failedCalls,
+    source.failedCalls,
+  )
+  const outputBytesTotal = safeAssistantTurnProfileIntegerSum(
+    target.outputBytesTotal,
+    source.outputBytesTotal,
+  )
+  if (
+    calls === null
+    || durationKnownCalls === null
+    || durationMs === null
+    || failedCalls === null
+    || outputBytesTotal === null
+  ) {
+    return false
   }
 
-  const status = readAssistantProviderString(item.status)?.toLowerCase()
-  return status === 'failed'
+  target.calls = calls
+  target.durationKnownCalls = durationKnownCalls
+  target.durationMs = durationMs
+  target.failedCalls = failedCalls
+  target.outputBytesMax = Math.max(target.outputBytesMax, source.outputBytesMax)
+  target.outputBytesTotal = outputBytesTotal
+  return true
 }
 
-// Tool labels must stay secret-safe: persist only the binary name unless the
-// head binary is a known subcommand-style CLI, because the first positional
-// argument of arbitrary commands (grep patterns, file paths) can carry member
-// health content even when it matches a benign-looking token charset.
-function buildAssistantTurnProfileCommandLabel(
-  command: string | null,
-  commandActions: unknown,
-): string {
-  const tokens = unwrapAssistantTurnProfileShellWrapper(command ?? '')
-    .split(/\s+/u)
-    .filter((token) => token.length > 0)
-  const labelTokens: string[] = []
-
-  for (const token of tokens) {
-    if (labelTokens.length === 0) {
-      // A shell or flag head surviving wrapper stripping is not a labelable
-      // binary (`bash member-script.sh` would put the script filename in the
-      // head slot): fail closed instead of skipping into positional content.
-      if (ASSISTANT_TURN_PROFILE_SHELL_TOKEN_PATTERN.test(token) || token.startsWith('-')) {
-        break
-      }
-      // Path-invoked binaries (`scripts/check-x.sh`) can carry member-named
-      // files; only bare binary names may persist.
-      if (!ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(token) || token.includes('/')) {
-        break
-      }
-      labelTokens.push(token)
-      if (!ASSISTANT_TURN_PROFILE_SUBCOMMAND_HEAD_BINARIES.has(token)) {
-        break
-      }
-      continue
-    }
-    if (!ASSISTANT_TURN_PROFILE_SUBCOMMAND_TOKEN_PATTERN.test(token)) {
-      break
-    }
-
-    labelTokens.push(token)
-    if (labelTokens.length >= 3) {
-      break
-    }
-  }
-
-  if (labelTokens.length > 0) {
-    const rawLabel = labelTokens.join(' ')
-    const structuredHeads =
-      readAssistantTurnProfileStructuredCommandHeads(commandActions)
-    if (
-      structuredHeads.length > 1
-      && structuredHeads[0] === labelTokens[0]
-    ) {
-      return truncateAssistantTurnProfileLabel(
-        [rawLabel, ...structuredHeads.slice(1)].join(' '),
-      )
-    }
-    return truncateAssistantTurnProfileLabel(rawLabel)
-  }
-
-  const structuredHeads =
-    readAssistantTurnProfileStructuredCommandHeads(commandActions)
-  return structuredHeads.length > 0
-    ? truncateAssistantTurnProfileLabel(structuredHeads.join(' '))
-    : 'command'
+function safeAssistantTurnProfileIntegerSum(
+  left: number,
+  right: number,
+): number | null {
+  const result = left + right
+  return Number.isSafeInteger(result) ? result : null
 }
 
-function readAssistantTurnProfileStructuredCommandHeads(
-  value: unknown,
-): string[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    return []
-  }
-
-  const heads: string[] = []
-  for (const action of value) {
-    const command = readAssistantProviderString(
-      readAssistantProviderRecord(action)?.command,
-    )
-    const head = command?.split(/\s/u, 1)[0] ?? null
-    if (
-      !head
-      || head.includes('/')
-      || !ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(head)
-      || !ASSISTANT_TURN_PROFILE_STRUCTURED_COMMAND_HEAD_BINARIES.has(head)
-    ) {
-      return []
-    }
-    heads.push(head)
-  }
-
-  return heads
-}
-
-// Strip one `bash -lc <script>` wrapper layer so the inner head binary can be
-// labeled. The quoted form unwraps only when the whole remainder is a single
-// quoted region with no unescaped inner quote of the same type; any other
-// shape keeps the original string, whose quote/shell head then fails closed in
-// the token sanitizer. This keeps the fail-closed guarantee independent of how
-// the provider quotes commands.
-function unwrapAssistantTurnProfileShellWrapper(command: string): string {
-  const wrapper = ASSISTANT_TURN_PROFILE_SHELL_WRAPPER_PREFIX_PATTERN.exec(command)
-  if (!wrapper) {
-    return command
-  }
-  const script = command.slice(wrapper[0].length)
-  const quote = script[0]
-  if (quote !== '"' && quote !== "'") {
-    return script
-  }
-  if (script.length < 2 || !script.endsWith(quote)) {
-    return command
-  }
-  const inner = script.slice(1, -1)
-  return hasAssistantTurnProfileUnescapedQuote(inner, quote) ? command : inner
-}
-
-function hasAssistantTurnProfileUnescapedQuote(inner: string, quote: string): boolean {
-  let backslashes = 0
-  for (const char of inner) {
-    if (char === '\\') {
-      backslashes += 1
-      continue
-    }
-    if (char === quote && backslashes % 2 === 0) {
-      return true
-    }
-    backslashes = 0
-  }
-  return false
-}
-
-function truncateAssistantTurnProfileLabel(label: string): string {
-  return label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
-    ? label.slice(0, ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH)
-    : label
-}
-
-function readAssistantTurnProfileTextLength(value: unknown): number {
+function readAssistantTurnProfileUtf8Bytes(value: unknown): number {
+  let serialized: string
   if (typeof value === 'string') {
-    return value.length
+    serialized = value
+  } else if (value === null || value === undefined) {
+    serialized = ''
+  } else {
+    try {
+      serialized = JSON.stringify(value) ?? ''
+    } catch {
+      serialized = ''
+    }
   }
-  if (value === null || value === undefined) {
-    return 0
-  }
-
-  try {
-    return JSON.stringify(value)?.length ?? 0
-  } catch {
-    return 0
-  }
+  return Buffer.byteLength(serialized, 'utf8')
 }
 
 function findAssistantCodexTurnStartedEventIndex(input: {
@@ -1323,7 +1254,7 @@ function readAssistantProviderInteger(
   for (const key of keys) {
     const value = record[key]
 
-    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
       return value
     }
   }

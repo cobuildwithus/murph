@@ -251,6 +251,7 @@ export interface AssistantNotificationInput
       | 'operatorAuthority'
       | 'reviewedAssistantAskCompletionExpiresAt'
       | 'outboxAutomationAuthority'
+      | 'outboxAutomationContextReferences'
       | 'outboxPlannedOccurrenceAt'
       | 'outboxExternalThreadRouteAuthority'
       | 'assistantTargetOverride'
@@ -1512,6 +1513,8 @@ function buildAssistantNotificationMessageInput(
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,
     outboxAutomationAuthority: input.outboxAutomationAuthority ?? null,
+    outboxAutomationContextReferences:
+      input.outboxAutomationContextReferences ?? null,
     outboxPlannedOccurrenceAt: input.outboxPlannedOccurrenceAt ?? null,
     outboxExternalThreadRouteAuthority:
       input.outboxExternalThreadRouteAuthority ?? null,
@@ -1597,6 +1600,8 @@ async function deliverAssistantNotificationMessage(input: {
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
+    automationContextReferences:
+      input.input.outboxAutomationContextReferences ?? null,
     plannedOccurrenceAt: input.input.outboxPlannedOccurrenceAt ?? null,
     scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
     externalThreadRouteAuthority:
