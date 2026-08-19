@@ -237,28 +237,42 @@ test("payment recovery stays retryable when Checkout cannot open", async ({
     });
   });
 
-  const response = await page.goto("/screenshots/groups", {
-    waitUntil: "load",
-  });
-  expect(response?.status(), "screenshot study should respond 200").toBe(200);
+  for (const viewport of [
+    { height: 720, width: 1_280 },
+    { height: 844, width: 390 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const response = await page.goto("/screenshots/groups", {
+      waitUntil: "load",
+    });
+    expect(response?.status(), "screenshot study should respond 200").toBe(200);
 
-  const recoveryStudy = page.locator('[data-design-state="monthly-recovery"]');
-  await expect(recoveryStudy).toHaveCount(1);
-  await page.locator("[inert]").evaluateAll((elements) => {
-    for (const element of elements) {
-      element.removeAttribute("inert");
-    }
-  });
+    const recoveryStudy = page.locator(
+      '[data-design-state="monthly-recovery"]',
+    );
+    await expect(recoveryStudy).toHaveCount(1);
+    await page.waitForFunction(() => {
+      const element = document.querySelector(
+        '[data-design-state="monthly-recovery"]',
+      );
+      return element
+        ? Object.keys(element).some((key) => key.startsWith("__reactFiber$"))
+        : false;
+    });
+    await page.locator('[data-screenshot-category="groups"]').evaluate(
+      (element) => element.removeAttribute("inert"),
+    );
 
-  const reviewButton = recoveryStudy.getByRole("button", {
-    name: "Review payment",
-  });
-  const originalUrl = page.url();
-  await reviewButton.click();
+    const reviewButton = recoveryStudy.getByRole("button", {
+      name: "Review payment",
+    });
+    const originalUrl = page.url();
+    await reviewButton.click();
 
-  await expect(recoveryStudy.getByRole("alert")).toContainText(
-    "Payment review couldn’t open. Try again.",
-  );
-  await expect(reviewButton).toBeEnabled();
-  expect(page.url()).toBe(originalUrl);
+    await expect(recoveryStudy.getByRole("alert")).toContainText(
+      "Payment review couldn’t open. Try again.",
+    );
+    await expect(reviewButton).toBeEnabled();
+    expect(page.url()).toBe(originalUrl);
+  }
 });
