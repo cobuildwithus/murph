@@ -181,6 +181,13 @@ charge still fits under the current cap. If the payer has since reduced the cap
 to fulfilled spend, recovery leaves the failed purchase as immutable history
 and returns the authorization to active-at-cap without starting Stripe.
 
+When recovery returns no Checkout URL because the exact payment is pending,
+the payer page keeps one focused live status region and performs a bounded,
+authenticated read of the existing management projection. The same region
+transitions to explicit confirmation when the authorization becomes active. If
+the bounded reads cannot establish completion, it offers a read-only status
+recheck; it does not submit recovery again or invite a second payment.
+
 Periods roll forward lazily from the successful activation anchor with
 calendar-month and end-of-month semantics. The cap resets, but unused credit
 remains available in the existing ledger. An increase requires explicit payer
@@ -1018,9 +1025,12 @@ The Stripe Session uses:
 - Session metadata containing only purchase ID, purpose, and policy version;
 - the same opaque purchase ID in `payment_intent_data.metadata` for later
   refund/dispute correlation;
-- `setup_future_usage=off_session` for current-policy personal, Family, and
-  group Checkout, so the collected card can be reused for a later explicit
-  top-up;
+- `setup_future_usage=off_session` for current-policy monthly sponsorship
+  activation and recovery Checkout, so the exact approved method can fund
+  later automatic refills; ordinary one-time Checkout does not force saving;
+- `payment_method_types=["card"]` for current-policy monthly sponsorship
+  activation and recovery Checkout, including wallets that materialize as card
+  methods; ordinary one-time Checkout retains Dashboard-managed dynamic methods;
 - `saved_payment_method_options.payment_method_save=enabled` for current-policy
   Checkout, so the payer can let Stripe present the method again in later
   Checkout flows;
@@ -1058,24 +1068,36 @@ without card saving so an in-flight idempotent Checkout request never changes
 shape. Version two remains reconstructible with future-use saving and direct
 saved-card payment for group purchases only. New purchases freeze
 version three with both behaviors for personal, Family, and group targets.
-New purchases freeze `hosted-usage-credit-checkout-v4`, which retains those
-targets, adds Stripe's explicit payment-method save choice to Checkout, and
+Version four remains reconstructible with forced future-use saving for every
+target, adds Stripe's explicit payment-method save choice to Checkout, and
 binds personal and Family card selection to the target's exact Murph billing
 Subscription. It uses that Subscription's explicit default or inherited
 Customer default regardless of whether Stripe may redisplay the card in
 Checkout. Group funding remains Customer-scoped because it has no required
 Murph billing Subscription. Legacy default Sources are unsupported for direct
-v4 reuse and stay in Checkout.
-Versions one through three retain their original request and selection shapes.
+v4 reuse and stay in Checkout. New purchases freeze
+`hosted-usage-credit-checkout-v5`, which retains the explicit save choice but
+forces future-use saving and card-only Checkout only for monthly sponsorship
+activation and recovery. Ordinary one-time Checkout retains Dashboard-managed
+dynamic payment methods. A legacy explicit sponsorship method outside the
+reusable-card domain is unavailable to automatic refill and returns to explicit
+recovery without substituting an attached method; an unbound legacy failed
+refill upgrades to the current request policy before opening recovery Checkout.
+Automatic sponsorship refills derive their exact reusable method from the
+latest verified explicit sponsorship payment: either the ordinal-zero direct
+activation or a Checkout-backed activation or recovery. Sessionless automatic
+refills, attached-method count, card fingerprints, and one-time contributions
+never become a new payment authority. Versions one through four retain
+their original request and selection shapes.
 Every retry and Stripe proof check uses the purchase's frozen policy version
 rather than the latest global version.
 
-After production persists its first v4 purchase, a v4-capable Web bundle is the
+After production persists its first v5 purchase, a v5-capable Web bundle is the
 minimum compatible consumer for status, cancellation, Stripe reconciliation,
-and account deletion involving retained v4 financial state. A safe rollback
-first disables new Add usage and group-funding intake, keeps v4-compatible
+and account deletion involving retained v5 financial state. A safe rollback
+first disables new Add usage and group-funding intake, keeps v5-compatible
 consumers running, and forward-fixes. Rolling Web below that floor requires
-proof that no v4 purchase or retained v4 financial state exists.
+proof that no v5 purchase or retained v5 financial state exists.
 
 ## Stripe Catalog And Payment Configuration
 
@@ -1095,10 +1117,12 @@ is the exact active one-time, per-unit, single-currency amount frozen on the
 purchase. Do not use custom unit amounts, transformed quantity, or extra
 currency options for v1.
 
-Use Dashboard-managed dynamic payment methods unless a reviewed requirement
-limits the top-up configuration to immediately confirmed methods. Delayed
-methods are safe only because the UI and fulfillment model include
-`payment_pending`; Checkout completion alone never grants credit.
+Use Dashboard-managed dynamic payment methods for ordinary one-time top-ups.
+Current-policy monthly sponsorship activation and recovery explicitly use the
+card-method domain required by automatic refills; delayed methods stay outside
+that recurring authority. Delayed methods remain safe for one-time top-ups only
+because the UI and fulfillment model include `payment_pending`; Checkout
+completion alone never grants credit.
 
 Before live launch, finance/counsel must classify the prepaid service credit
 and confirm the Product tax code and Price tax behavior. V1 does not enable
