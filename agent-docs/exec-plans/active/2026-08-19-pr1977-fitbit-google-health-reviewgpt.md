@@ -47,8 +47,13 @@ zero-finding ReviewGPT round, and merge it.
 11. [x] Commit and push the round-8 remediation with exact-head evidence.
 12. [x] Run the explicitly authorized round 9 and resolve its webhook replay
     finding through the existing trace-keyed mailbox identity and source epoch.
-13. [ ] Push the round-9 correction, obtain a zero-finding confirmation on the
-    exact head, prove a clean current-base merge, archive this plan, and merge.
+13. [x] Push the round-9 correction and run the explicitly authorized round 10.
+14. [x] Resolve round 10's cross-trace logical-fact replay finding through the
+    existing provider-job identity and mailbox item with focused direct proof.
+15. [ ] Push the exact head, obtain the user's explicit post-cap continuation
+    before another ReviewGPT round, resolve or report the consumed base-update
+    budget, archive this plan, and merge only after the required zero-finding
+    confirmation.
 
 ## ReviewGPT ledger
 
@@ -105,9 +110,22 @@ zero-finding ReviewGPT round, and merge it.
   epoch, and carries the already-read `firstSeenAt` in the minimal admission
   projection. No finding was rejected and no persisted state, query, queue,
   retry owner, or lifecycle process was added.
+- Final round 10: accepted that the round-9 trace identity did not cover the
+  same logical Junction daily fact arriving under a different Svix trace after
+  same-source reauthorization. The requirement-level retrospective keeps the
+  existing prepared provider-job dedupe identity as the logical fact owner,
+  persists it through the existing migration mailbox item, freezes first
+  acceptance, and records provider occurrence as `lastDataAt`. Both clocks must
+  be strictly after the effective current source epoch. No finding was rejected;
+  no schema, query, queue, ledger, lifecycle owner, or reconciliation process is
+  being added.
 
 The first round-8 invocation rejected a malformed PR-body hash token before
 review. Correcting the packaging metadata and retrying the same invocation was
+a tooling retry, not an additional substantive ReviewGPT round.
+
+The first round-10 invocation rejected `--thinking xhigh` before sending.
+Retrying the same exact package with the supported current-thinking setting was
 a tooling retry, not an additional substantive ReviewGPT round.
 
 ## Round-7 retrospective
@@ -172,6 +190,29 @@ a tooling retry, not an additional substantive ReviewGPT round.
   to an existing minimal projection, and adds focused proof. It introduces no
   schema, state owner, query, job, queue, manager, or reconciliation process.
 
+## Round-10 retrospective
+
+- Authority: an independent HTTP/Svix delivery is transport evidence, not a
+  fresh health fact. The existing prepared provider-job dedupe keys own the
+  logical fact; their normalized set binds the existing migration mailbox item
+  to the exact connection epoch independently of the transport trace.
+- Epoch: the first insertion may advance freshness only when both its frozen
+  acceptance and provider occurrence are strictly later than the effective
+  current exact-source `firstSeenAt`. Same-transaction source confirmation
+  raises that effective epoch to at least the request's acceptance time.
+- Data meaning: `lastDataAt` records the provider occurrence rather than the
+  later transport receipt. Pending, consumed, retained, or replayed mailbox
+  state cannot make an old fact current.
+- Rejected shape: moving freshness to the eventual import receipt would broaden
+  writes and continuation ownership while Fitbit remains intentionally
+  canonical before cutover. The correction instead reuses the ingress-owned
+  identity and source row.
+- Complexity: the first reviewed head had 3,698 authored production lines of
+  churn; round 10 reviewed 4,544, an increase of 846 (22.9%). The retained
+  concepts remain one Web source epoch, prepared provider-job identities, the
+  existing mailbox item, and the existing cutover lock. No owner or process is
+  added.
+
 ## Evidence so far
 
 - The user additionally required screenshot submission for every UI-touching
@@ -198,13 +239,24 @@ a tooling retry, not an additional substantive ReviewGPT round.
   corrected wake/source projection suite passes 191 tests; the real-PostgreSQL
   ingress replay proof covers trace release, source reauthorization, mailbox
   dedupe, and a distinct current-epoch trace.
+- Round-10 proof reproduces the same pre-reauthorization Google daily payload
+  under distinct Svix traces with equal prepared provider-job identity. The
+  corrected production-composed PostgreSQL path holds `lastDataAt` through both
+  pending and consumed mailbox replay after a fresh service instance, admits a
+  distinct post-epoch fact at its provider occurrence, and permits exactly one
+  eventual Fitbit revoke when the other readiness predicates are complete.
+- The round-10 correction passes 180 focused Web wake tests, all 8
+  production-composed prepared-webhook PostgreSQL tests, Web typecheck, scoped
+  lint with no errors, docs drift/gardening, the 7 screenshot-evidence guard
+  tests, diff whitespace, and identifier-leak scanning.
 - Round-6 warm/cold hydration, local-store epoch replacement, delayed callback
   rejection, current-epoch arrival, same-epoch alias, and maintenance retry
   proofs pass. Round-8 provider-timezone proof covers IANA and offset precedence,
   DST, invalid and absent provenance, mixed same-day provenance, mutable vault
-  timezone changes, and the UTC-12 convergence boundary. The round-9 correction
-  still requires exact-head typecheck, PostgreSQL proof, CI, and ReviewGPT
-  confirmation before merge.
+  timezone changes, and the UTC-12 convergence boundary. The round-10
+  correction still requires an exact-head push, the explicitly authorized
+  post-cap ReviewGPT confirmation, exact-head required CI, and a merge path that
+  does not reset the already-consumed base-update budget.
 
 ## Deployment concern
 

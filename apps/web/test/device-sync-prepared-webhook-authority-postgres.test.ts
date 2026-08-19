@@ -9,12 +9,14 @@ import {
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
 import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 import type { DeviceSyncRegistry } from "@murphai/device-syncd/types";
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostedDeviceSyncControlPlaneContext } from "@/src/lib/device-sync/control-plane-context";
+import { completeHostedGoogleHealthFitbitMigration } from "@/src/lib/device-sync/fitbit-migration-cutover";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { HostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { HostedDeviceSyncWebhookAdminService } from "@/src/lib/device-sync/webhook-admin-service";
@@ -871,17 +873,47 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("does not let a redelivered pre-reauthorization Google daily trace certify the new source epoch", async () => {
+    it("does not let a repeated pre-reauthorization Google daily fact certify the new source epoch", async () => {
       const sourceProviderSlug = "google_health";
       const fixture = await createFixture({
         sourceLastErrorCode: null,
         sourceProviderSlug,
       });
-      const providerFetch = vi.fn(async () => {
-        throw new Error("An admitted exact source must not require a provider read.");
+      let cutoverEnabled = false;
+      const cutoverRequests: Array<{ method: string; url: string }> = [];
+      const providerFetch = vi.fn(async (input, init) => {
+        if (!cutoverEnabled) {
+          throw new Error("An admitted exact source must not require a provider read.");
+        }
+        const request = new Request(input, init);
+        cutoverRequests.push({ method: request.method, url: request.url });
+        if (
+          request.method === "GET"
+          && request.url.endsWith(`/v2/user/providers/${fixture.externalAccountId}`)
+        ) {
+          return new Response(JSON.stringify({
+            data: [
+              { slug: "fitbit", status: "connected" },
+              { slug: sourceProviderSlug, status: "connected" },
+            ],
+          }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        if (
+          request.method === "DELETE"
+          && request.url.endsWith(`/v2/user/${fixture.externalAccountId}/fitbit`)
+        ) {
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        throw new Error(`Unexpected migration cutover request: ${request.method}`);
       });
       const registry = createJunctionRegistry(providerFetch);
-      const messageId = `msg_google_replay_${randomUUID().replaceAll("-", "")}`;
+      const firstMessageId = `msg_google_replay_${randomUUID().replaceAll("-", "")}`;
       const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
         connectionId: fixture.connectionId,
         sourceProviderSlug,
@@ -893,10 +925,13 @@ describe.skipIf(!runPostgresProof)(
       if (!sourceInstanceKey || !fitbitInstanceKey) {
         throw new Error("Expected exact Google Health and Fitbit source keys.");
       }
+      const initialSourceAt = new Date(fixture.receivedAt.getTime() - 72 * 60 * 60_000);
+      const logicalEventAt = new Date(fixture.receivedAt.getTime() - 48 * 60 * 60_000);
 
       try {
         await fixture.store.upsertConnectionSource({
           connectionId: fixture.connectionId,
+          firstSeenAt: initialSourceAt.toISOString(),
           lastSeenAt: fixture.receivedAt.toISOString(),
           sourceInstanceKey,
           sourceProviderSlug,
@@ -911,9 +946,9 @@ describe.skipIf(!runPostgresProof)(
           status: "connected",
         });
         const firstPrepared = await prepareDailyData({
-          eventAt: fixture.receivedAt,
+          eventAt: logicalEventAt,
           fixture,
-          messageId,
+          messageId: firstMessageId,
           receivedAt: fixture.receivedAt,
           registry,
           sourceProviderSlug,
@@ -939,7 +974,9 @@ describe.skipIf(!runPostgresProof)(
         await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
           select: { lastDataAt: true },
           where: { id: fixture.sourceId },
-        })).resolves.toEqual({ lastDataAt: fixture.receivedAt });
+        })).resolves.toEqual({
+          lastDataAt: logicalEventAt,
+        });
         await expect(fixture.prisma.hostedMailboxItem.count({
           where: { userId: fixture.memberId },
         })).resolves.toBe(1);
@@ -984,14 +1021,16 @@ describe.skipIf(!runPostgresProof)(
 
         const retryReceivedAt = new Date(reauthorizedSource.firstSeenAt.getTime() + 1_000);
         const retryPrepared = await prepareDailyData({
-          eventAt: fixture.receivedAt,
+          eventAt: logicalEventAt,
           fixture,
-          messageId,
           receivedAt: retryReceivedAt,
           registry,
           sourceProviderSlug,
         });
-        expect(retryPrepared.traceId).toBe(firstPrepared.traceId);
+        expect(retryPrepared.traceId).not.toBe(firstPrepared.traceId);
+        expect(retryPrepared.jobs.map((job) => job.dedupeKey)).toEqual(
+          firstPrepared.jobs.map((job) => job.dedupeKey),
+        );
         await expect(consumeService.handlePreparedWebhook(retryPrepared)).rejects.toMatchObject({
           code: "WEBHOOK_SOURCE_NOT_READY",
           retryable: true,
@@ -1004,14 +1043,71 @@ describe.skipIf(!runPostgresProof)(
           where: { userId: fixture.memberId },
         })).resolves.toBe(1);
 
-        const currentPrepared = await prepareDailyData({
-          eventAt: retryReceivedAt,
+        const migrationMailboxItem = await fixture.prisma.hostedMailboxItem.findFirstOrThrow({
+          select: { id: true },
+          where: { userId: fixture.memberId },
+        });
+        await fixture.prisma.hostedMailboxItem.update({
+          data: { consumedAt: retryReceivedAt },
+          where: { id: migrationMailboxItem.id },
+        });
+        const restartedConsumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+        const consumedRetryPrepared = await prepareDailyData({
+          eventAt: logicalEventAt,
           fixture,
           receivedAt: new Date(retryReceivedAt.getTime() + 1_000),
           registry,
           sourceProviderSlug,
         });
-        await expect(consumeService.handlePreparedWebhook(currentPrepared)).rejects.toMatchObject({
+        expect(consumedRetryPrepared.jobs.map((job) => job.dedupeKey)).toEqual(
+          firstPrepared.jobs.map((job) => job.dedupeKey),
+        );
+        await expect(
+          restartedConsumeService.handlePreparedWebhook(consumedRetryPrepared),
+        ).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(reauthorizedSource);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+        await expect(completeHostedGoogleHealthFitbitMigration({
+          connectionId: fixture.connectionId,
+          registry,
+          store: fixture.store,
+          userId: fixture.memberId,
+        })).resolves.toMatchObject({ status: "pending" });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { status: true },
+          where: {
+            connectionId_sourceInstanceKey: {
+              connectionId: fixture.connectionId,
+              sourceInstanceKey: fitbitInstanceKey,
+            },
+          },
+        })).resolves.toEqual({ status: "connected" });
+        expect(providerFetch).not.toHaveBeenCalled();
+
+        const currentEventAt = new Date(reauthorizedSource.firstSeenAt.getTime() + 120_000);
+        const currentReceivedAt = new Date(currentEventAt.getTime() + 1_000);
+        const currentPrepared = await prepareDailyData({
+          eventAt: currentEventAt,
+          fixture,
+          receivedAt: currentReceivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        await expect(
+          restartedConsumeService.handlePreparedWebhook(currentPrepared),
+        ).rejects.toMatchObject({
           code: "WEBHOOK_SOURCE_NOT_READY",
           retryable: true,
         });
@@ -1020,12 +1116,60 @@ describe.skipIf(!runPostgresProof)(
           where: { id: fixture.sourceId },
         })).resolves.toEqual({
           firstSeenAt: reauthorizedSource.firstSeenAt,
-          lastDataAt: new Date(retryReceivedAt.getTime() + 1_000),
+          lastDataAt: currentEventAt,
         });
         await expect(fixture.prisma.hostedMailboxItem.count({
           where: { userId: fixture.memberId },
         })).resolves.toBe(2);
         expect(providerFetch).not.toHaveBeenCalled();
+
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: currentReceivedAt.toISOString(),
+          resourceAvailabilitySummary: {
+            historicalBackfillCompletedAt: currentReceivedAt.toISOString(),
+          },
+          sourceInstanceKey: fitbitInstanceKey,
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        });
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: currentReceivedAt.toISOString(),
+          resourceAvailabilitySummary: {
+            historicalBackfillCompletedAt: currentReceivedAt.toISOString(),
+            steps: true,
+          },
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+        });
+        cutoverEnabled = true;
+        await expect(completeHostedGoogleHealthFitbitMigration({
+          connectionId: fixture.connectionId,
+          registry,
+          store: fixture.store,
+          userId: fixture.memberId,
+        })).resolves.toMatchObject({ status: "complete" });
+        await expect(completeHostedGoogleHealthFitbitMigration({
+          connectionId: fixture.connectionId,
+          registry,
+          store: fixture.store,
+          userId: fixture.memberId,
+        })).resolves.toMatchObject({ status: "complete" });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { lastErrorCode: true, status: true },
+          where: {
+            connectionId_sourceInstanceKey: {
+              connectionId: fixture.connectionId,
+              sourceInstanceKey: fitbitInstanceKey,
+            },
+          },
+        })).resolves.toEqual({
+          lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+          status: "disconnected",
+        });
+        expect(cutoverRequests.filter((request) => request.method === "DELETE")).toHaveLength(1);
       } finally {
         await cleanupFixture(fixture);
       }

@@ -8629,6 +8629,7 @@ describe("hosted device-sync wakes", () => {
         dataSourceProviderSlug: "google_health",
         eventType: "daily.data.activity.updated",
         jobs: [{
+          dedupeKey: "google-health-activity-fact",
           kind: "resource",
           payload: {
             resource: "activity",
@@ -8743,6 +8744,7 @@ describe("hosted device-sync wakes", () => {
         dataSourceProviderSlug: "google_health",
         eventType: "daily.data.activity.updated",
         jobs: [{
+          dedupeKey: "google-health-activity-fact",
           kind: "resource",
           payload: {
             resource: "activity",
@@ -8761,7 +8763,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
   });
 
-  it("keeps a dedicated migration trace identity when the same delivery confirms its source", async () => {
+  it("keeps a dedicated logical migration identity when the same delivery confirms its source", async () => {
     const source = buildHostedConnectionSource("dsc_123", "google_health", {
       firstSeenAt: "2026-03-26T11:59:00.000Z",
       lastSeenAt: "2026-03-26T11:59:00.000Z",
@@ -8812,6 +8814,7 @@ describe("hosted device-sync wakes", () => {
         dataSourceProviderSlug: "google_health",
         eventType: "daily.data.activity.updated",
         jobs: [{
+          dedupeKey: "google-health-activity-fact",
           kind: "resource",
           payload: {
             resource: "activity",
@@ -8847,7 +8850,7 @@ describe("hosted device-sync wakes", () => {
         tx: mocks.prismaTx,
       }),
     );
-    expect(mocks.markConnectionSourceDataReceived).toHaveBeenCalledOnce();
+    expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
   });
 
   it("accepts source lifecycle work while Fitbit still owns canonical admission", async () => {

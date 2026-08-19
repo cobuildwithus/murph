@@ -1978,6 +1978,14 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     webhookReceivedAt: input.now,
   });
+  const fitbitMigrationSuccessorEventId =
+    buildHostedFitbitMigrationSuccessorEventId({
+      connectionId: input.account.id,
+      expectedConnectedAt: input.account.connectedAt,
+      jobs: input.webhook.jobs ?? [],
+      provider: input.account.provider,
+      userId: ownerId,
+    });
   const sourceObservation = input.sourceAdmissionDeferred === true
     ? await prepareHostedWebhookSourceObservation({
         ...input,
@@ -2006,6 +2014,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     expectedConnectedAt: input.account.connectedAt,
     dirtyResources,
     eventType: input.webhook.eventType,
+    fitbitMigrationSuccessorEventId,
     occurredAt: input.webhook.occurredAt ?? input.now,
     processingAttemptedAt: input.processingAttemptedAt,
     provider: input.account.provider,
@@ -2774,6 +2783,7 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   dirtyResources: readonly HostedDeviceSyncDirtyResource[];
   eventType: string;
   expectedConnectedAt: string;
+  fitbitMigrationSuccessorEventId: string | null;
   occurredAt: string;
   processingAttemptedAt: string;
   provider: string;
@@ -2985,12 +2995,15 @@ async function persistHostedDeviceSyncWebhookAccepted(
             }
 
             if (finalAdmission.kind === "migration_pending") {
-              if (!preparedMailbox) {
-                throw createHostedDeviceSyncDirtyPreparationMismatchError();
+              if (!preparedMailbox || !input.fitbitMigrationSuccessorEventId) {
+                throw webhookSourceNotReadyError(
+                  "Google Health webhook logical identity is not available yet. Retry shortly.",
+                );
               }
               const mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
                 envelope: buildHostedDeviceSyncWake({
                   connectionId: input.connectionId,
+                  eventId: input.fitbitMigrationSuccessorEventId,
                   expectedConnectedAt: input.expectedConnectedAt,
                   hint: {
                     eventType: input.eventType,
@@ -3001,7 +3014,6 @@ async function persistHostedDeviceSyncWebhookAccepted(
                   occurredAt: input.occurredAt,
                   provider: input.provider,
                   source: "webhook-hint",
-                  traceId: input.traceId,
                   userId: input.userId,
                 }),
                 prepared: preparedMailbox,
@@ -3020,10 +3032,12 @@ async function persistHostedDeviceSyncWebhookAccepted(
                 mailboxAppend.inserted
                 && Date.parse(input.acceptedAt)
                   > finalAdmission.successorFirstSeenAt.getTime()
+                && Date.parse(input.occurredAt)
+                  > finalAdmission.successorFirstSeenAt.getTime()
               ) {
                 await input.store.markConnectionSourceDataReceived({
                   connectionId: input.connectionId,
-                  now: input.acceptedAt,
+                  now: input.occurredAt,
                   sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
                   tx,
                 });
@@ -3432,7 +3446,12 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       return {
         ...ready,
         kind: "migration_pending",
-        successorFirstSeenAt: dataSource.firstSeenAt,
+        successorFirstSeenAt: observedSourceWillBeAdmitted
+          ? new Date(Math.max(
+              dataSource.firstSeenAt.getTime(),
+              Date.parse(input.acceptedAt),
+            ))
+          : dataSource.firstSeenAt,
       };
     }
   }
@@ -3451,6 +3470,39 @@ function hasNonTerminalHostedGoogleHealthFitbitLegacySource(
 
 function isHostedJunctionDailyDataWebhookEvent(eventType: string): boolean {
   return eventType.startsWith("daily.data.");
+}
+
+function buildHostedFitbitMigrationSuccessorEventId(input: {
+  connectionId: string;
+  expectedConnectedAt: string;
+  jobs: readonly DeviceSyncJobInput[];
+  provider: string;
+  userId: string;
+}): string | null {
+  if (input.jobs.length === 0) {
+    return null;
+  }
+  const providerJobDedupeKeys: string[] = [];
+  for (const job of input.jobs) {
+    const dedupeKey = normalizeNullableString(job.dedupeKey);
+    if (!dedupeKey) {
+      return null;
+    }
+    providerJobDedupeKeys.push(dedupeKey);
+  }
+  const logicalFactId = sha256Hex(JSON.stringify(
+    [...new Set(providerJobDedupeKeys)].sort(),
+  ));
+
+  return [
+    "device-sync",
+    "fitbit-migration-successor-arrival",
+    input.userId,
+    input.provider,
+    input.connectionId,
+    input.expectedConnectedAt,
+    logicalFactId,
+  ].join(":");
 }
 
 function isHostedJunctionDataWebhookEvent(eventType: string): boolean {
