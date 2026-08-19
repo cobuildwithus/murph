@@ -8,11 +8,12 @@ import {
   parseHostedExecutionWake,
   parseHostedRuntimeReconciliationFacts,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRuntimeReconciliationBlockedReason,
-  HostedRuntimeReconciliationFacts,
-  HostedRuntimeReconciliationFactsRequest,
-  HostedRuntimeReconciliationFactsWorkspace,
+import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  type HostedRuntimeReconciliationBlockedReason,
+  type HostedRuntimeReconciliationFacts,
+  type HostedRuntimeReconciliationFactsRequest,
+  type HostedRuntimeReconciliationFactsWorkspace,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   isHostedRuntimeFutureMailboxContinuation,
@@ -684,6 +685,7 @@ function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | 
     case "alarm":
     case "assistant":
     case "assistant_due":
+    case HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON:
     case "device-sync.reconcile":
     case "mailbox":
       return reason;
@@ -695,6 +697,9 @@ function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | 
 function isHostedRuntimeModelCapableWorkspaceWakeReason(
   reason: string | null,
 ): boolean {
+  if (reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON) {
+    return false;
+  }
   return reason === "assistant" || reason === "assistant_due";
 }
 

@@ -41,6 +41,9 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
 } from "@murphai/hosted-execution/env";
 import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
@@ -29232,7 +29235,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   return {
                     checkpointReason: "outbox_receipt" as const,
                     nextWakeAt: outboxRetryWakeAt,
-                    nextWakeReason: "assistant",
+                    nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
                     redactedStatus: {
                       hostedAssistantNextWakeAt: outboxRetryWakeAt,
                     },
@@ -29270,7 +29273,10 @@ describe("hosted workspace runtime entrypoint", () => {
             if (assistantPhaseCalls === 3) {
               assert.ok(events.includes("workspace.checkpoint"), events.join(","));
               assert.equal(input.workspace?.nextWakeAt, outboxRetryWakeAt);
-              assert.equal(input.workspace?.nextWakeReason, "assistant");
+              assert.equal(
+                input.workspace?.nextWakeReason,
+                HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+              );
               return {
                 progressed: false,
               };
@@ -29301,9 +29307,16 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, outboxRetryWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(
+        checkpointRequests[0]?.nextWakeReason,
+        HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      );
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, outboxRetryWakeAt);
+      assert.equal(
+        result.nextWakeReason,
+        HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      );
     } finally {
       runtimeAbortController.abort();
       await removeTempRoot(vaultRoot);

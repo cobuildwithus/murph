@@ -24,6 +24,9 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/env";
@@ -2626,6 +2629,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(firstPass).toEqual(expect.objectContaining({
       checkpointReason: "canonical_runtime_commit",
       nextWakeAt: outboxWakeAt,
+      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
       progressed: true,
     }));
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
@@ -2638,7 +2642,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       resolvedDeviceSync,
       workspace: createDueAssistantWorkspace({
         nextWakeAt: outboxWakeAt,
-        nextWakeReason: "assistant",
+        nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
       }),
     }));
 
@@ -8229,7 +8233,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       nextWakeAt: outboxWakeAt,
-      nextWakeReason: "assistant",
+      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
       progressed: true,
     }));
   });
@@ -10221,7 +10225,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       nextWakeAt: "2026-04-27T00:00:00.000Z",
-      nextWakeReason: "assistant",
+      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
       redactedStatus: expect.objectContaining({
         hostedAssistantNextWakeAt: "2026-04-27T00:00:00.000Z",
         hostedOutboxDeliveryYielded: 1,
@@ -10369,7 +10373,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       nextWakeAt: "2026-04-27T00:00:00.000Z",
-      nextWakeReason: "assistant",
+      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
       redactedStatus: expect.objectContaining({
         hostedAssistantNextWakeAt: "2026-04-27T00:00:00.000Z",
         hostedOutboxDeliveryYielded: 1,
@@ -10492,7 +10496,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(postCheckpoint).toEqual(expect.objectContaining({
         checkpointReason: "assistant_runtime_commit",
         nextWakeAt: now,
-        nextWakeReason: "assistant",
+        nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
         redactedStatus: expect.objectContaining({
           hostedAssistantNextWakeAt: now,
           hostedOutboxDeliveryYielded: 1,
@@ -13727,7 +13731,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: outboxWakeAt,
-      nextWakeReason: "assistant",
+      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
     }));
   });
 
@@ -15631,7 +15635,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: now,
-      nextWakeReason: "assistant",
+      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
     }));
   });
 

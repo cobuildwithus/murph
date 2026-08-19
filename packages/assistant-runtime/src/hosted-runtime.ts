@@ -236,8 +236,10 @@ import {
 } from "./hosted-runtime/wake-time.ts";
 import {
   HOSTED_ASSISTANT_WAKE_REASON,
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
+  hostedRuntimeWakeReasonUsesAssistantPhase,
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
@@ -1010,7 +1012,9 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   const assistantWake = selectEarliestHostedRuntimeWake([
     {
       at: outboxWakeAt,
-      reason: outboxWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+      reason: outboxWakeAt
+        ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+        : null,
     },
     {
       at: pendingAssistantInputWakeAt,
@@ -2295,7 +2299,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const hostedVaultStartupPreparationRequiresCheckpoint =
         hostedVaultStartupPreparation.mutated;
       const activeWorkspaceAlreadyOwnsDueAssistantWake =
-        activeWorkspace?.nextWakeReason === HOSTED_ASSISTANT_WAKE_REASON
+        activeWorkspace !== null
+        && hostedRuntimeWakeReasonUsesAssistantPhase(
+          activeWorkspace?.nextWakeReason ?? null,
+        )
         && hostedRuntimeWakeIsDue(activeWorkspace.nextWakeAt ?? null);
       const dueAssistantHandoffRequiresCheckpoint =
         !assistantExecutionBlocked
@@ -7100,7 +7107,7 @@ function normalizeHostedRuntimeWakeReason(nextWakeReason: string | null): string
 }
 
 function hostedRuntimeWakeReasonIsAssistant(nextWakeReason: string | null): boolean {
-  return normalizeHostedRuntimeWakeReason(nextWakeReason) === HOSTED_ASSISTANT_WAKE_REASON;
+  return hostedRuntimeWakeReasonUsesAssistantPhase(nextWakeReason);
 }
 
 function buildHostedRuntimeIdleCheckpointPhaseLogDetails(input: {
