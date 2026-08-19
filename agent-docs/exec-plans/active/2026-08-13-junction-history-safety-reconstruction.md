@@ -979,3 +979,28 @@ bundle, and exact-head CI proof.
   were inspected; the focused Playwright evidence passes two tests. Final
   conflict-marker, diff-check, and identifier scans remain required immediately
   before the merge checkpoint.
+
+## Round 17 result and final current-main integration
+
+- Final ReviewGPT round 17 audited exact PR head
+  `f69904c957c6ec70c19665468575d339f06150e1` as the complete combined release
+  and returned `PASS` with no findings. Its same-thread render follow-up inspected
+  the exact phone and desktop changelog captures and returned
+  `RENDER_EVIDENCE: PASS`.
+- Current `main` at `fdec2cd8069ea5a60c8ccf81a5fca78459aacf8b` introduced one
+  bounded foreground-state runtime change after that review. The normal merge had
+  three textual conflicts, all in the existing runner-bundle byte ratchets and
+  their policy test; every production codepath merged without a textual conflict.
+- The resolution preserves both reviewed graphs and adds no behavior or contract:
+  it retains both sets of bundle-history evidence, measures their combined
+  artifact, and ratchets only the two existing size boundaries. Canonical
+  production assembly passes all eight parity probes at `9,364,936/9,397,704`
+  vault CLI bytes, `1,703,996` runner-entry bytes, an `8,442,444`-byte static
+  closure with the existing 96 KiB tolerance, and `11,024,658/11,393,617` total
+  runner bytes.
+- Both runner-bundle policy files pass 56 tests, the Cloudflare alarm owner passes
+  152 tests, the two directly coupled assistant-runtime files pass 372 tests, and
+  Cloudflare typecheck passes. This is a bounded current-base integration under
+  the manual-conflict exemption: the already-reviewed PR behavior and current-main
+  behavior are preserved without newly authored behavior, so round 17 remains the
+  immutable final ReviewGPT gate. Exact-head required CI remains the merge gate.

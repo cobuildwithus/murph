@@ -2856,10 +2856,9 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-restored-foreground-attempt",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: expect.any(String),
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.050Z",
     });
 
     const firstRequest = invoke.mock.calls[0]?.[0].job.request;
@@ -3720,10 +3719,9 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-foreground-behind-system-mailbox",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      runtimeAttemptId: token.attemptId,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledWith({

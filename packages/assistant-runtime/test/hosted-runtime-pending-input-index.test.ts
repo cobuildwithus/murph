@@ -43,6 +43,7 @@ import {
   inspectHostedPendingAssistantInputWakeCandidate,
   readHostedPendingAssistantImageCompletionRecoveryInputIds,
   readHostedPendingAssistantInputIds,
+  resolveHostedPendingAssistantImageCompletionHintPath,
   resolveHostedPendingAssistantInputStatePath,
   runHostedPendingAssistantInputContentRetention,
   selectHostedConversationMailboxHandledItemBatch,
@@ -190,7 +191,7 @@ describe("hosted pending assistant input index", () => {
       });
   });
 
-  it("keeps image-completion discovery in the canonical pending index", async () => {
+  it("keeps the canonical pending index authoritative over its fixed completion hint", async () => {
     const vaultRoot = await createTempVault();
     const ordinary = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -229,6 +230,14 @@ describe("hosted pending assistant input index", () => {
     await expect(
       readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
     ).resolves.toEqual([]);
+    const hintFilePath = resolveHostedPendingAssistantImageCompletionHintPath(
+      vaultRoot,
+    );
+    await expect(
+      readFile(hintFilePath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      value: { hasImageCompletionCandidate: false },
+    });
 
     await enqueueHostedPendingAssistantInputId({
       inputId: completion.inputId,
@@ -237,6 +246,11 @@ describe("hosted pending assistant input index", () => {
     await expect(
       readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
     ).resolves.toEqual([ordinary.inputId, completion.inputId]);
+    await expect(
+      readFile(hintFilePath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      value: { hasImageCompletionCandidate: true },
+    });
   });
 
   it("keeps old state conservative until existing compaction rebuilds the hint", async () => {
@@ -278,11 +292,24 @@ describe("hosted pending assistant input index", () => {
     await expect(
       readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
     ).resolves.toEqual([ordinary.inputId]);
+    const hintFilePath = resolveHostedPendingAssistantImageCompletionHintPath(
+      vaultRoot,
+    );
+    await expect(
+      readFile(hintFilePath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      value: { hasImageCompletionCandidate: true },
+    });
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([ordinary.inputId]);
     await expect(
       readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
     ).resolves.toEqual([]);
+    await expect(
+      readFile(hintFilePath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      value: { hasImageCompletionCandidate: false },
+    });
     await expect(readFile(filePath, "utf8").then((value) => JSON.parse(value)))
       .resolves.toMatchObject({
         value: {

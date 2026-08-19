@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-18",
+  "order": 200,
+  "item": {
+    "id": "scheduled-support-resumes-after-sync",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Scheduled support resumes after syncs",
+    "summary": "Reminders and other scheduled support now resume after connected-health maintenance checkpoints instead of being mistaken for work that is already running.",
+    "details": "Fresh messages keep priority, and existing engagement, account-access, usage, and delivery-health safeguards still decide whether proactive support can run and send.",
+    "relevanceTags": ["assistant", "automations", "connected-health", "reliability"],
+    "sourcePullRequests": [1993]
+  }
+}

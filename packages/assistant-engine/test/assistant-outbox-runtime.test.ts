@@ -1,4 +1,12 @@
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  access,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -25,14 +33,21 @@ import {
   updateExperiment,
   upsertAutomation,
 } from '@murphai/core'
-import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
+import {
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
+import { openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
 import { readMaterializedExportPackReceipt } from '@murphai/vault-usecases/export-packs'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
-import { resolveAssistantGeneratedImageDelivery } from '../src/assistant/response-media.ts'
+import {
+  hasAssistantOutboxDeliveryEvidence,
+  resolveAssistantGeneratedImageDelivery,
+} from '../src/assistant/response-media.ts'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   hasAssistantSeenFirstContact,
@@ -63,12 +78,15 @@ import {
   drainAssistantOutboxLocal,
   deliverAssistantOutboxReaction,
   deliverAssistantOutboxMessage,
+  listAssistantOutboxIntentsForAutoReplyRoute,
   listAssistantOutboxIntentsLocal,
   readAssistantOutboxIntentMirrorState,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
+import { createAssistantAutoReplyHistoryReader } from '../src/assistant/automation/reply.ts'
+import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import {
   buildAssistantCronNotificationDedupeToken,
 } from '../src/assistant/cron/notification-delivery.ts'
@@ -439,6 +457,543 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-blank',
       }),
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
+  })
+
+  it('promotes the next oldest duplicate claim when the projected winner becomes terminal', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-duplicate-promotion-',
+    )
+    const first = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:30:00+01:00',
+      dedupeToken: 'duplicate-promotion-token',
+      message: 'duplicate promotion',
+      sessionId: 'session-duplicate-promotion',
+      turnId: 'turn-duplicate-promotion',
+    })
+    const duplicate = await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      createdAt: '2026-04-08T00:00:00.000Z',
+      intentId: 'outbox_duplicate_promotion_second',
+      updatedAt: '2026-04-08T00:00:00.000Z',
+    })
+
+    const beforeTerminal = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T01:00:00.000Z',
+      dedupeToken: 'duplicate-promotion-token',
+      message: 'duplicate promotion',
+      sessionId: 'session-duplicate-promotion',
+      turnId: 'turn-duplicate-promotion',
+    })
+    expect(beforeTerminal.intentId).toBe(first.intentId)
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      lastError: {
+        code: 'CHANNEL_REQUIRED',
+        message: 'channel required',
+      },
+      nextAttemptAt: null,
+      status: 'failed',
+      updatedAt: '2026-04-08T01:01:00.000Z',
+    })
+
+    const afterTerminal = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T01:02:00.000Z',
+      dedupeToken: 'duplicate-promotion-token',
+      message: 'duplicate promotion',
+      sessionId: 'session-duplicate-promotion',
+      turnId: 'turn-duplicate-promotion',
+    })
+    expect(afterTerminal.intentId).toBe(duplicate.intentId)
+  })
+
+  it('rebuilds a missing, invalid, or corrupt exact-key dedupe projection without duplicating an intent', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-projection-recovery-',
+    )
+    const first = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-projection-recovery-token',
+      message: 'projection recovery',
+      sessionId: 'session-projection-recovery',
+      turnId: 'turn-projection-recovery',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const projectionPath = path.join(
+      paths.stateDirectory,
+      'outbox-dedupe.sqlite',
+    )
+    expect((await stat(projectionPath)).mode & 0o777).toBe(0o600)
+
+    await rm(projectionPath, { force: true })
+    const afterMissingProjection = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-projection-recovery-token',
+      message: 'projection recovery',
+      sessionId: 'session-projection-recovery',
+      turnId: 'turn-projection-recovery',
+    })
+    expect(afterMissingProjection.intentId).toBe(first.intentId)
+
+    const invalidProjection = openSqliteRuntimeDatabase(projectionPath, {
+      journalMode: 'DELETE',
+      synchronous: 'FULL',
+    })
+    invalidProjection.prepare(`
+      UPDATE assistant_outbox_dedupe_routes
+      SET intent_id = '../invalid'
+      WHERE kind = 'dedupe-key'
+    `).run()
+    invalidProjection.close()
+    const afterInvalidProjection = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:01:30.000Z',
+      dedupeToken: 'stable-projection-recovery-token',
+      message: 'projection recovery',
+      sessionId: 'session-projection-recovery',
+      turnId: 'turn-projection-recovery',
+    })
+    expect(afterInvalidProjection.intentId).toBe(first.intentId)
+
+    await writeFile(projectionPath, 'not a sqlite database', 'utf8')
+    const afterCorruptProjection = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:02:00.000Z',
+      dedupeToken: 'stable-projection-recovery-token',
+      message: 'projection recovery',
+      sessionId: 'session-projection-recovery',
+      turnId: 'turn-projection-recovery',
+    })
+    expect(afterCorruptProjection.intentId).toBe(first.intentId)
+    expect(
+      (await readdir(paths.outboxQuarantineDirectory)).some(
+        (entry) =>
+          entry.startsWith('outbox-dedupe.sqlite.') &&
+          entry.endsWith('.invalid.sqlite'),
+      ),
+    ).toBe(true)
+    expect(
+      (await readdir(paths.outboxDirectory)).filter((entry) =>
+        entry.endsWith('.json'),
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('reuses one excluded rebuild slot after interrupted outbox projection recovery', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-rebuild-slot-',
+    )
+    const first = await createIntent(vaultRoot, {
+      dedupeToken: 'stable-outbox-rebuild-slot-token',
+      message: 'outbox rebuild slot',
+      sessionId: 'session-outbox-rebuild-slot',
+      turnId: 'turn-outbox-rebuild-slot',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const databasePath = path.join(
+      paths.stateDirectory,
+      'outbox-dedupe.sqlite',
+    )
+    const rebuildDirectory = path.join(paths.stateDirectory, '.tmp')
+    const rebuildPath = path.join(
+      rebuildDirectory,
+      'outbox-dedupe.sqlite.rebuild',
+    )
+    const rebuildPaths = [
+      rebuildPath,
+      `${rebuildPath}-journal`,
+      `${rebuildPath}-shm`,
+      `${rebuildPath}-wal`,
+    ]
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await writeFile(databasePath, 'not-a-complete-sqlite-projection', 'utf8')
+      await mkdir(rebuildDirectory, { recursive: true })
+      await Promise.all(rebuildPaths.map((rebuildArtifactPath) =>
+        writeFile(rebuildArtifactPath, `interrupted-rebuild-${attempt}`, 'utf8')
+      ))
+
+      const recovered = await createIntent(vaultRoot, {
+        dedupeToken: 'stable-outbox-rebuild-slot-token',
+        message: 'outbox rebuild slot',
+        sessionId: 'session-outbox-rebuild-slot',
+        turnId: 'turn-outbox-rebuild-slot',
+      })
+      expect(recovered.intentId).toBe(first.intentId)
+      await Promise.all(rebuildPaths.map((rebuildArtifactPath) =>
+        expect(access(rebuildArtifactPath)).rejects.toMatchObject({
+          code: 'ENOENT',
+        })
+      ))
+      await expect(access(rebuildDirectory)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+    }
+  })
+
+  it.each(['missing', 'corrupt'] as const)(
+    'serializes %s projection recovery with a concurrent outbox writer',
+    async (projectionState) => {
+      const { vaultRoot } = await createAssistantVault(
+        `assistant-outbox-dedupe-${projectionState}-recovery-lock-`,
+      )
+      const createdAt = '2026-04-08T00:10:00.000Z'
+      const routeTarget = 'projection-recovery-route'
+      const seeded = await createIntent(vaultRoot, {
+        channel: 'telegram',
+        createdAt,
+        explicitTarget: routeTarget,
+        message: 'projection recovery route seed',
+        sessionId: 'session-projection-recovery-route',
+        threadId: 'thread-projection-recovery-route',
+        turnId: 'turn-projection-recovery-route',
+      })
+      const sent = await saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        attemptCount: 1,
+        delivery: createDelivery({
+          channel: 'telegram',
+          providerMessageId: 'provider-projection-recovery-route',
+          providerThreadId: routeTarget,
+          sentAt: createdAt,
+          target: routeTarget,
+          targetKind: 'explicit',
+        }),
+        lastAttemptAt: createdAt,
+        nextAttemptAt: null,
+        sentAt: createdAt,
+        status: 'sent',
+        updatedAt: createdAt,
+      })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const projectionPath = path.join(
+        paths.stateDirectory,
+        'outbox-dedupe.sqlite',
+      )
+      let writerEntered!: () => void
+      const writerStarted = new Promise<void>((resolve) => {
+        writerEntered = resolve
+      })
+      let releaseWriter!: () => void
+      const writerMayContinue = new Promise<void>((resolve) => {
+        releaseWriter = resolve
+      })
+      const writer = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+        if (projectionState === 'missing') {
+          await rm(projectionPath, { force: true })
+        } else {
+          await writeFile(projectionPath, 'not a sqlite database', 'utf8')
+        }
+        writerEntered()
+        await writerMayContinue
+        return await createIntent(vaultRoot, {
+          createdAt: '2026-04-08T00:11:00.000Z',
+          dedupeToken: 'concurrent-projection-recovery-token',
+          message: 'concurrent projection recovery intent',
+          sessionId: 'session-concurrent-projection-recovery',
+          turnId: 'turn-concurrent-projection-recovery',
+        })
+      })
+
+      await writerStarted
+      let routeReadSettled = false
+      const routeRead = listAssistantOutboxIntentsForAutoReplyRoute({
+        actorId: sent.actorId,
+        channel: 'telegram',
+        deliveryTarget: routeTarget,
+        identityId: sent.identityId,
+        providerMessageIds: [],
+        threadId: sent.threadId,
+        vault: vaultRoot,
+      })
+      void routeRead.then(
+        () => {
+          routeReadSettled = true
+        },
+        () => {
+          routeReadSettled = true
+        },
+      )
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      expect(routeReadSettled).toBe(false)
+
+      releaseWriter()
+      const concurrentIntent = await writer
+      await expect(routeRead).resolves.toEqual([
+        expect.objectContaining({ intentId: sent.intentId }),
+      ])
+      const retry = await createIntent(vaultRoot, {
+        createdAt: '2026-04-08T00:12:00.000Z',
+        dedupeToken: 'concurrent-projection-recovery-token',
+        message: 'concurrent projection recovery intent',
+        sessionId: 'session-concurrent-projection-recovery',
+        turnId: 'turn-concurrent-projection-recovery',
+      })
+      expect(retry.intentId).toBe(concurrentIntent.intentId)
+      expect(
+        (await readdir(paths.outboxDirectory)).filter((entry) =>
+          entry.endsWith('.json'),
+        ),
+      ).toHaveLength(2)
+    },
+    120_000,
+  )
+
+  it('bounds auto-reply route context while preserving an older exact provider anchor', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-auto-reply-route-bound-',
+    )
+    const createdAt = '2026-04-08T00:20:00.000Z'
+    const routeTarget = 'auto-reply-bound-route'
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'telegram',
+      createdAt,
+      explicitTarget: routeTarget,
+      message: 'auto-reply route bound seed',
+      sessionId: 'session-auto-reply-route-bound',
+      threadId: 'thread-auto-reply-route-bound',
+      turnId: 'turn-auto-reply-route-bound',
+    })
+    const sent = await saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 1,
+      delivery: createDelivery({
+        channel: 'telegram',
+        providerMessageId: 'provider-auto-reply-route-bound-000',
+        providerThreadId: routeTarget,
+        sentAt: createdAt,
+        target: routeTarget,
+        targetKind: 'explicit',
+      }),
+      lastAttemptAt: createdAt,
+      nextAttemptAt: null,
+      sentAt: createdAt,
+      status: 'sent',
+      updatedAt: createdAt,
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await Promise.all(Array.from({ length: 100 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const timestamp = new Date(
+        Date.parse(createdAt) + index * 1_000,
+      ).toISOString()
+      const delivery = expectMessageDelivery(sent.delivery)
+      const intent = {
+        ...sent,
+        createdAt: timestamp,
+        delivery: {
+          ...delivery,
+          providerMessageId: `provider-auto-reply-route-bound-${suffix}`,
+          sentAt: timestamp,
+        },
+        intentId: `outbox_auto_reply_route_bound_${suffix}`,
+        sentAt: timestamp,
+        updatedAt: timestamp,
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+    await Promise.all(Array.from({ length: 2 }, async (_, offset) => {
+      const suffix = (offset + 1).toString().padStart(3, '0')
+      const timestamp = new Date(
+        Date.parse(createdAt) + (101 + offset) * 1_000,
+      ).toISOString()
+      const delivery = expectMessageDelivery(sent.delivery)
+      const collisionTarget = `other-auto-reply-route-${suffix}`
+      const intent = {
+        ...sent,
+        createdAt: timestamp,
+        delivery: {
+          ...delivery,
+          providerMessageId: 'provider-auto-reply-route-bound-000',
+          providerThreadId: collisionTarget,
+          sentAt: timestamp,
+          target: collisionTarget,
+        },
+        intentId: `outbox_auto_reply_route_collision_${suffix}`,
+        sentAt: timestamp,
+        updatedAt: timestamp,
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+    const olderTimestamp = new Date(
+      Date.parse(createdAt) - 1_000,
+    ).toISOString()
+    const olderDelivery = expectMessageDelivery(sent.delivery)
+    const olderAnchor = {
+      ...sent,
+      createdAt: olderTimestamp,
+      delivery: {
+        ...olderDelivery,
+        providerMessageId: 'provider-auto-reply-route-bound-older',
+        sentAt: olderTimestamp,
+      },
+      intentId: 'outbox_auto_reply_route_bound_older',
+      sentAt: olderTimestamp,
+      updatedAt: olderTimestamp,
+    }
+    await writeFile(
+      path.join(paths.outboxDirectory, `${olderAnchor.intentId}.json`),
+      JSON.stringify(olderAnchor),
+      'utf8',
+    )
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+
+    const recentRouteHistory = await listAssistantOutboxIntentsForAutoReplyRoute({
+      actorId: sent.actorId,
+      channel: 'telegram',
+      deliveryTarget: routeTarget,
+      identityId: sent.identityId,
+      providerMessageIds: [],
+      threadId: sent.threadId,
+      vault: vaultRoot,
+    })
+    expect(recentRouteHistory).toHaveLength(100)
+    expect(recentRouteHistory.map((intent) => intent.intentId)).toEqual(
+      Array.from({ length: 100 }, (_, offset) =>
+        `outbox_auto_reply_route_bound_${(offset + 1).toString().padStart(3, '0')}`
+      ),
+    )
+
+    const nativeReplyHistory = await listAssistantOutboxIntentsForAutoReplyRoute({
+      actorId: sent.actorId,
+      channel: 'telegram',
+      deliveryTarget: routeTarget,
+      identityId: sent.identityId,
+      providerMessageIds: ['provider-auto-reply-route-bound-000'],
+      threadId: sent.threadId,
+      vault: vaultRoot,
+    })
+    expect(nativeReplyHistory).toHaveLength(100)
+    expect(nativeReplyHistory[0]?.intentId).toBe(sent.intentId)
+    expect(nativeReplyHistory.map((intent) => intent.intentId)).not.toContain(
+      'outbox_auto_reply_route_bound_001',
+    )
+    expect(nativeReplyHistory.at(-1)?.intentId).toBe(
+      'outbox_auto_reply_route_bound_100',
+    )
+
+    const groupedNativeReplyHistory =
+      await listAssistantOutboxIntentsForAutoReplyRoute({
+        actorId: sent.actorId,
+        channel: 'telegram',
+        deliveryTarget: routeTarget,
+        identityId: sent.identityId,
+        providerMessageIds: [
+          'provider-auto-reply-route-bound-000',
+          'provider-auto-reply-route-bound-older',
+        ],
+        threadId: sent.threadId,
+        vault: vaultRoot,
+      })
+    expect(groupedNativeReplyHistory).toHaveLength(100)
+    expect(groupedNativeReplyHistory.slice(0, 2).map((intent) =>
+      intent.intentId
+    )).toEqual([
+      olderAnchor.intentId,
+      sent.intentId,
+    ])
+    expect(groupedNativeReplyHistory.map((intent) => intent.intentId))
+      .not.toContain('outbox_auto_reply_route_bound_001')
+    expect(groupedNativeReplyHistory.map((intent) => intent.intentId))
+      .not.toContain('outbox_auto_reply_route_bound_002')
+  }, 120_000)
+
+  it('keeps accepted Linq media in native-reply history after a terminal rich-link failure', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-terminal-partial-linq-history-',
+    )
+    const media: AssistantOutboxIntent['media'][number] = {
+      alt: 'Generated portrait',
+      contentType: 'image/png',
+      filename: 'generated-portrait.png',
+      kind: 'vault_image',
+      ref: 'raw/captures/2026/08/generated-portrait.png',
+      sha256: '7'.repeat(64),
+      sizeBytes: 7,
+      source: 'gpt-image-2',
+    }
+    const intentInput: Parameters<typeof createIntent>[1] = {
+      actorId: null,
+      channel: 'linq',
+      createdAt: '2026-04-08T00:30:00.000Z',
+      dedupeToken: 'terminal-partial-linq-history',
+      explicitTarget: 'linq-terminal-partial-thread',
+      identityId: 'participant-terminal-partial',
+      media: [media],
+      message: 'Generated portrait',
+      sessionId: 'session-terminal-partial-linq',
+      threadId: 'linq-terminal-partial-thread',
+      threadIsDirect: false,
+      turnId: 'turn-terminal-partial-linq',
+    }
+    const seeded = await createIntent(vaultRoot, intentInput)
+    const providerMessageId = 'linq-terminal-partial-primary'
+    const failed = await saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: 3,
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageEffects: [{
+          carriesIntentMedia: true,
+          message: 'Generated portrait',
+          providerMessageId,
+        }],
+        providerMessageId,
+        providerMessageIds: [providerMessageId],
+        providerThreadId: 'linq-terminal-partial-thread',
+        sentAt: '2026-04-08T00:30:01.000Z',
+        target: 'linq-terminal-partial-thread',
+        targetKind: 'thread',
+      }),
+      deliveryConfirmationPending: false,
+      lastAttemptAt: '2026-04-08T00:31:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+        message: 'The rich-link sibling exhausted retries.',
+      },
+      nextAttemptAt: null,
+      sentAt: null,
+      status: 'failed',
+      updatedAt: '2026-04-08T00:31:00.000Z',
+    })
+    expect(hasAssistantOutboxDeliveryEvidence(failed, true)).toBe(true)
+
+    const historyReader = createAssistantAutoReplyHistoryReader({
+      vault: vaultRoot,
+    })
+    await expect(historyReader.readOutboxIntents({
+      conversation: {
+        accountId: 'participant-terminal-partial',
+        actorId: null,
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'linq-terminal-partial-thread',
+        threadIsDirect: false,
+      },
+      deliveryTarget: 'linq-terminal-partial-thread',
+      providerMessageIds: [providerMessageId],
+      source: 'linq',
+    })).resolves.toEqual([
+      expect.objectContaining({
+        intentId: failed.intentId,
+        media: [expect.objectContaining({
+          ref: media.ref,
+          sha256: media.sha256,
+        })],
+      }),
+    ])
+
+    const retry = await createIntent(vaultRoot, intentInput)
+    expect(retry.intentId).not.toBe(failed.intentId)
   })
 
   it('persists native reply intent explicitly while omitting it from legacy messages', async () => {
@@ -2252,6 +2807,184 @@ describe('assistant outbox runtime', () => {
     expect(retryWithDifferentMedia.media).toEqual(first.media)
   })
 
+  it('does not count repeated rebuilt media identities toward the legacy candidate bound', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-media-dedupe-bound-',
+    )
+    const first = await createIntent(vaultRoot, {
+      dedupeToken: 'current-intent-before-legacy-candidates',
+      message: 'current intent',
+      sessionId: 'session-legacy-dedupe-bound',
+      turnId: 'turn-legacy-dedupe-bound',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await Promise.all(Array.from({ length: 101 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const intent = {
+        ...first,
+        createdAt: new Date(
+          Date.parse(first.createdAt) + index * 1_000,
+        ).toISOString(),
+        dedupeKey: index.toString(16).padStart(40, '0'),
+        intentId: `outbox_legacy_bound_${suffix}`,
+        updatedAt: new Date(
+          Date.parse(first.updatedAt) + index * 1_000,
+        ).toISOString(),
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+    const unmatched = await createIntent(vaultRoot, {
+      dedupeToken: 'unmatched-legacy-media-token',
+      message: 'new intent after repeated legacy media identities',
+      sessionId: 'session-legacy-dedupe-bound',
+      turnId: 'turn-legacy-dedupe-bound-new',
+    })
+    expect(unmatched.intentId).not.toBe(first.intentId)
+  }, 120_000)
+
+  it('dedupes a genuine retry at the 100-identity legacy media bound', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-media-maximum-',
+    )
+    const template = await createIntent(vaultRoot, {
+      dedupeToken: 'legacy-media-maximum-template',
+      message: 'legacy media template',
+      sessionId: 'session-legacy-media-maximum',
+      turnId: 'turn-legacy-media-maximum-template',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    let expectedIntentId = ''
+    let expectedDedupeToken = ''
+    await Promise.all(Array.from({ length: 100 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const dedupeToken = `legacy-media-maximum-token-${suffix}`
+      const media = [{
+        kind: 'image' as const,
+        url: `https://cdn.example.test/legacy-maximum/${suffix}.png`,
+        alt: `Legacy maximum candidate ${suffix}`,
+        source: `legacy-media-maximum-${suffix}`,
+      }]
+      const intentId = `outbox_legacy_media_maximum_${suffix}`
+      const timestamp = new Date(
+        Date.parse(template.createdAt) + index * 1_000,
+      ).toISOString()
+      if (index === 100) {
+        expectedIntentId = intentId
+        expectedDedupeToken = dedupeToken
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intentId}.json`),
+        JSON.stringify({
+          ...template,
+          createdAt: timestamp,
+          dedupeKey: hashAssistantOutboxLegacyMediaDedupeIdentity({
+            dedupeToken,
+            media,
+          })!,
+          deliveryIdempotencyKey: null,
+          intentId,
+          media,
+          updatedAt: timestamp,
+        }),
+        'utf8',
+      )
+    }))
+    await rm(
+      resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        template.intentId,
+      ),
+      { force: true },
+    )
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+
+    const retry = await createIntent(vaultRoot, {
+      dedupeToken: expectedDedupeToken,
+      media: [{
+        kind: 'image',
+        url: 'https://cdn.example.test/legacy-maximum/regenerated.png',
+        alt: 'Regenerated retry media',
+        source: 'legacy-media-maximum-regenerated',
+      }],
+      message: 'legacy retry with regenerated media',
+      sessionId: 'session-legacy-media-maximum',
+      turnId: 'turn-legacy-media-maximum-retry',
+    })
+
+    expect(retry.intentId).toBe(expectedIntentId)
+  }, 120_000)
+
+  it('fails closed when legacy media-key recovery exceeds its distinct identity bound', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-media-distinct-bound-',
+    )
+    const first = await createIntent(vaultRoot, {
+      dedupeToken: 'current-intent-before-distinct-legacy-candidates',
+      deliveryIdempotencyKey:
+        'current-intent-before-distinct-legacy-candidates',
+      message: 'current intent',
+      sessionId: 'session-legacy-dedupe-distinct-bound',
+      turnId: 'turn-legacy-dedupe-distinct-bound',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await Promise.all(Array.from({ length: 101 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const legacyDedupeToken = `legacy-distinct-bound-token-${suffix}`
+      const media = [{
+        kind: 'image' as const,
+        url: `https://cdn.example.test/legacy-bound/${suffix}.png`,
+        alt: `Legacy candidate ${suffix}`,
+        source: `legacy-distinct-bound-${suffix}`,
+      }]
+      const intent = {
+        ...first,
+        createdAt: new Date(
+          Date.parse(first.createdAt) + index * 1_000,
+        ).toISOString(),
+        dedupeKey: hashAssistantOutboxLegacyMediaDedupeIdentity({
+          dedupeToken: legacyDedupeToken,
+          media,
+        })!,
+        deliveryIdempotencyKey: null,
+        intentId: `outbox_legacy_distinct_bound_${suffix}`,
+        media,
+        updatedAt: new Date(
+          Date.parse(first.updatedAt) + index * 1_000,
+        ).toISOString(),
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+    await expect(createIntent(vaultRoot, {
+      dedupeToken: 'unmatched-distinct-legacy-media-token',
+      message: 'new intent that cannot bypass ambiguous legacy state',
+      sessionId: 'session-legacy-dedupe-distinct-bound',
+      turnId: 'turn-legacy-dedupe-distinct-bound-new',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_LEGACY_DEDUPE_BOUND_EXCEEDED',
+    })
+  }, 120_000)
+
   it('dedupes hosted-key retries against legacy no-token active intents', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-legacy-idempotency-dedupe-')
     const deliveryIdempotencyKey = 'sha256:legacy-final-reply-key'
@@ -2304,6 +3037,77 @@ describe('assistant outbox runtime', () => {
     expect(retry.message).toBe(first.message)
     expect(retry.media).toEqual(first.media)
   })
+
+  it('keeps group-email recipient fanout distinct across projection rebuilds and retries', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-email-shared-transport-',
+    )
+    const deliveryIdempotencyKey =
+      'group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123'
+    const parent = await createIntent(vaultRoot, {
+      channel: 'email',
+      dedupeToken: `group-email-parent:${deliveryIdempotencyKey}`,
+      deliveryIdempotencyKey,
+      explicitTarget: serializeHostedEmailThreadTarget({
+        groupId: 'group_123',
+        subject: 'Weekly health note',
+        targetKind: 'group',
+      }),
+      message: 'newsletter parent manifest',
+      sessionId: 'session-newsletter-parent',
+      threadIsDirect: false,
+      turnId: 'turn-newsletter-parent',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+
+    const createChild = (memberId: string) => createIntent(
+      vaultRoot,
+      {
+        channel: 'email',
+        dedupeToken: `hosted-email-group-recipient:${parent.intentId}:${memberId}`,
+        deliveryIdempotencyKey,
+        deliveryTransportIdempotent: false,
+        explicitTarget: serializeHostedEmailThreadTarget({
+          groupId: 'group_123',
+          recipientMemberId: memberId,
+          subject: 'Weekly health note',
+          targetKind: 'group',
+        }),
+        message: 'newsletter recipient delivery',
+        sessionId: 'session-newsletter-parent',
+        threadIsDirect: false,
+        turnId: 'turn-newsletter-parent',
+      },
+    )
+    const firstChildren = await Promise.all([
+      createChild('member_one'),
+      createChild('member_two'),
+    ])
+    expect(firstChildren.map((intent) => intent.intentId)).not.toContain(
+      parent.intentId,
+    )
+    expect(new Set(firstChildren.map((intent) => intent.intentId)).size).toBe(2)
+
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+    const retriedChildren = await Promise.all([
+      createChild('member_one'),
+      createChild('member_two'),
+    ])
+    expect(retriedChildren.map((intent) => intent.intentId)).toEqual(
+      firstChildren.map((intent) => intent.intentId),
+    )
+
+    const intents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(intents).toHaveLength(3)
+    expect(intents.filter((intent) =>
+      parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId
+    )).toHaveLength(2)
+  }, 120_000)
 
   it('prefers active stable dedupe-key intents before legacy media-sensitive matches', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-stable-before-legacy-')
@@ -2904,7 +3708,7 @@ describe('assistant outbox runtime', () => {
     const sentChild = await createIntent(vaultRoot, {
       channel: 'email',
       createdAt: '2026-03-01T00:01:00.000Z',
-      deliveryIdempotencyKey,
+      deliveryIdempotencyKey: null,
       explicitTarget: childTarget,
       message: 'newsletter sent recipient child',
       sessionId: 'session-newsletter-sent-child',
@@ -2913,6 +3717,10 @@ describe('assistant outbox runtime', () => {
     })
     await saveAssistantOutboxIntent(vaultRoot, {
       ...sentChild,
+      // Legacy fanout children shared their parent's occurrence key. Seed the
+      // historical record directly instead of asking the current exact-key
+      // creator to admit a second effect under that transport identity.
+      deliveryIdempotencyKey,
       sentAt: '2026-03-01T00:06:00.000Z',
       status: 'sent',
       updatedAt: '2026-03-01T00:06:00.000Z',
@@ -2920,7 +3728,7 @@ describe('assistant outbox runtime', () => {
     const failedChild = await createIntent(vaultRoot, {
       channel: 'email',
       createdAt: '2026-03-01T00:02:00.000Z',
-      deliveryIdempotencyKey,
+      deliveryIdempotencyKey: null,
       explicitTarget: serializeHostedEmailThreadTarget({
         groupId: 'group_123',
         recipientMemberId: 'member_two',
@@ -2934,6 +3742,7 @@ describe('assistant outbox runtime', () => {
     })
     await saveAssistantOutboxIntent(vaultRoot, {
       ...failedChild,
+      deliveryIdempotencyKey,
       lastError: {
         code: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
         message: 'pre-provider recipient authority changed',

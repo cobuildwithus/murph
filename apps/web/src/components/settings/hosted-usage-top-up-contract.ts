@@ -64,6 +64,7 @@ interface HostedUsageTopUpDialogProps {
   scope?: "family" | "group" | "personal";
   targetLabel?: string;
   triggerClassName?: string;
+  triggerLabel?: string;
   triggerSize?: VariantProps<typeof buttonVariants>["size"];
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
 }

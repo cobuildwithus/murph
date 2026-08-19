@@ -4736,6 +4736,20 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "operational",
     portability: "portable",
   });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/outbox-dedupe.sqlite")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+    rebuildable: true,
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/outbox-dedupe.sqlite-wal")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/hosted-pending-image-completion-hint.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+    rebuildable: true,
+  });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/session-routing.sqlite")).toMatchObject({
     classification: "operational",
     portability: "portable",

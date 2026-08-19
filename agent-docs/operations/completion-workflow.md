@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-17
+Last verified: 2026-08-19
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -248,6 +248,11 @@ Every PR includes:
 - **Evidence.** List the direct journey proof and focused checks. For frontend
   work, state the changed states and viewports. Link screenshots only when they
   add proof. There is no screenshot quota and no required catalog link.
+- **Deployment concerns.** Add exactly one `## Deployment concerns` section.
+  Select `Deployment: applicable` and complete the deployment contract when the
+  change crosses a deploy boundary; otherwise select
+  `Deployment: not applicable` with a concrete reason. The pull-request
+  evidence guard validates this section.
 - **Changelog.** Add exactly one `## Changelog` section with
   `Changelog: updated` and its item IDs, or `Changelog: not applicable` with a
   concrete reason. The changelog guard validates this section.
@@ -268,6 +273,28 @@ Use this form when members cannot see the change:
 - Reason: Internal workflow and review tooling only.
 ```
 
+Use this form when the change crosses a deploy boundary:
+
+```markdown
+## Deployment concerns
+- Deployment: applicable
+- Supported skew: Old and new readers accept both deployed record shapes.
+- Safe order: Deploy the backward-compatible reader before the new writer.
+- Rollback floor: Rollback stays safe until the new writer publishes state.
+- Expected exposure: At most one rollout window can observe mixed versions.
+- Reversibility: Disable the writer before reverting the compatible reader.
+- Convergence proof: Smoke confirms every instance reports the new version.
+- Post-deploy checks: Verify the version and inspect bounded error aggregates.
+```
+
+Use this form when deployment concerns do not apply:
+
+```markdown
+## Deployment concerns
+- Deployment: not applicable
+- Reason: Internal review tooling does not change a runtime deploy boundary.
+```
+
 Add a **Risks** section only when the changed path needs it. Include the
 smallest useful details for the applicable risk:
 
@@ -278,7 +305,6 @@ smallest useful details for the applicable risk:
 - hot reply path calls and timing;
 - maximum-cardinality database fanout and concurrency;
 - complete provider-visible input measurements;
-- deployment skew, rollback floors, or compatibility; and
 - deliberately deferred work.
 
 When one of these paths changes, include its real proof rather than a generic
@@ -296,9 +322,11 @@ sentence:
   tokens and UTF-8 bytes, and attribute the change across instructions,
   tool/schema/generated guidance, and other provider-visible fields. Do not
   claim a measured zero from authored prompt text alone.
-- For a deploy boundary, state the supported skew, safe order, rollback floor,
-  expected exposure, reversibility, convergence proof, and post-deploy check.
-  Use evidenced current scale, not hypothetical future scale.
+
+For an applicable deploy boundary, the dedicated `## Deployment concerns`
+section must state the supported skew, safe order, rollback floor, expected
+exposure, reversibility, convergence proof, and post-deploy checks. Use
+evidenced current scale, not hypothetical future scale.
 
 Before the final ReviewGPT gate starts, add exactly one machine-readable
 `ReviewGPT context sensitivity: routine` or
@@ -308,8 +336,8 @@ sends a full guarded snapshot. PRs that do not enter that gate do not need the
 line.
 
 The applicable invariant and review docs own the required content for each
-risk. Do not paste empty risk sections, a manual line-count table, the full work
-plan, or a repeated list of review lenses into every PR.
+risk and deploy boundary. Do not paste empty risk sections, a manual line-count
+table, the full work plan, or a repeated list of review lenses into every PR.
 
 ## Review-Resolution Loop
 
