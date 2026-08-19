@@ -8,7 +8,6 @@ import {
   HostedAccountProviderAccessRemovalConfirmation,
 } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
-import { HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE } from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import {
   HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
   HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE,
@@ -17,9 +16,8 @@ import {
 
 /**
  * Exceptional confirmation states of the delete-account dialog: a concurrent
- * billing change, maintenance, an OAuth callback whose provider-side result is
- * no longer knowable, and a connected-app setup that still owns its completion
- * window.
+ * billing change, an OAuth callback whose provider-side result is no longer
+ * knowable, and a connected-app setup that still owns its completion window.
  *
  * What this frame proves: the exact sentence a member reads, and that it fits
  * its container at desktop and mobile widths. The sentence is imported from the
@@ -30,24 +28,20 @@ import {
  * affordance, or constrained-height scrolling. It does mount the production
  * error alert used by /settings. The arrival and retry paths are proven by the
  * route and component tests.
- *
- * Once the OC buckets are retired, delete only the temporary maintenance copy
- * and frames. Keep the durable billing, provider, and connected-app recovery
- * sections in the catalog.
  */
-export function AccountDeletionMaintenanceStudy() {
+export function AccountDeletionRecoveryStudy() {
   return (
     <div
       className="flex flex-col gap-8"
-      data-design-study="account-deletion-maintenance"
-      id="account-deletion-maintenance"
+      data-design-study="account-deletion-recovery"
+      id="account-deletion-recovery"
     >
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
         Recoverable delete-account conflicts in <code>/settings</code>. A billing
         change keeps the dialog, typed confirmation, and retry action in place.
-        Storage maintenance declines before the deletion starts. These frames
-        use the production error alert to prove its copy and containment; focus,
-        close, and scroll behaviour belong to the real dialog.
+        These frames use the production error alert to prove copy and
+        containment; focus, close, and scroll behaviour belong to the real
+        dialog.
       </p>
 
       <div
@@ -80,28 +74,6 @@ export function AccountDeletionMaintenanceStudy() {
               />
             </DialogFrame>
           </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-4">
-        <div className="max-w-2xl space-y-1">
-          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
-            Storage maintenance
-          </h3>
-        </div>
-        <div className="grid gap-6 lg:grid-cols-2">
-          <DialogFrame label="Desktop" width="max-w-md">
-            <AccountDeletionMessageDialogBody
-              id="design-maintenance-desktop"
-              message={HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE}
-            />
-          </DialogFrame>
-          <DialogFrame label="Mobile · 390px" width="max-w-[390px]">
-            <AccountDeletionMessageDialogBody
-              id="design-maintenance-mobile"
-              message={HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE}
-            />
-          </DialogFrame>
         </div>
       </div>
 

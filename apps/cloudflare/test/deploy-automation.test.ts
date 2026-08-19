@@ -629,8 +629,8 @@ describe("hosted deploy automation helpers", () => {
 
     const expectedDefaultInstanceType = {
       disk_mb: 6000,
-      memory_mib: 3072,
-      vcpu: 1,
+      memory_mib: 6144,
+      vcpu: 2,
     };
     expect(generatedConfig.containers.map(({ instance_type }) => instance_type)).toEqual([
       expectedDefaultInstanceType,
@@ -1116,38 +1116,32 @@ describe("hosted deploy automation helpers", () => {
     ]);
   });
 
-  it("keeps retirement instructions aligned with the canonical R2 deploy surface", async () => {
+  it("keeps the canonical R2 deploy surface free of retired migration controls", async () => {
     const deployGuide = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
     const docsIndex = await readFile(
       new URL("../../../agent-docs/index.md", import.meta.url),
-      "utf8",
-    );
-    const maintenanceGuard = await readFile(
-      new URL("../../web/src/lib/hosted-privacy/account-deletion-maintenance.ts", import.meta.url),
       "utf8",
     );
     const deployPreflight = await readFile(
       new URL("../scripts/deploy-preflight.ts", import.meta.url),
       "utf8",
     );
-    const currentSurfaces = [deployGuide, docsIndex, maintenanceGuard, deployPreflight].join("\n");
+    const currentSurfaces = [deployGuide, docsIndex, deployPreflight].join("\n");
 
     expect(deployGuide).toContain("- `CF_BUNDLES_BUCKET`");
     expect(deployGuide).toContain("- `CF_BUNDLES_PREVIEW_BUCKET`");
+    expect(deployGuide).toContain(
+      "Any Worker release that references the retired OC binding or fallback is below the physical-retirement rollback floor and must not be restored.",
+    );
     expect(deployPreflight).toContain('"CF_BUNDLES_BUCKET"');
     expect(deployPreflight).toContain('"CF_BUNDLES_PREVIEW_BUCKET"');
     expect(currentSurfaces).not.toContain("CF_BUNDLES_RETIRING_OC");
     expect(currentSurfaces).not.toContain("all four configured R2 bucket names");
     expect(currentSurfaces).not.toContain("deletion-only binding");
     expect(currentSurfaces).not.toContain("deletion-only retirement bindings");
-
-    const deployNoOcWorker = /Deploy\s+Cloudflare first/u.exec(deployGuide)?.index ?? -1;
-    const deleteOcBuckets = /empty\s+and delete only the exact retired production and preview OC buckets/u
-      .exec(deployGuide)?.index ?? -1;
-    const removeWebGuard = /Only\s+after physical absence is proven/u.exec(deployGuide)?.index ?? -1;
-    expect(deployNoOcWorker).toBeGreaterThan(-1);
-    expect(deleteOcBuckets).toBeGreaterThan(deployNoOcWorker);
-    expect(removeWebGuard).toBeGreaterThan(deleteOcBuckets);
+    expect(currentSurfaces).not.toContain("one-time single-region retirement release");
+    expect(currentSurfaces).not.toContain("account-deletion maintenance guard");
+    expect(currentSurfaces).not.toContain("exact retired production and preview OC buckets");
   });
 
   it("keeps the daily-report rollback floor after transient mailbox state drains", async () => {
