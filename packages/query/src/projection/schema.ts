@@ -20,7 +20,9 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 20: Rebuild canonical workout-day rollups and split workout from activity minutes.
 // 21: Rebuild stored body-state summaries after adding composition metric envelopes.
 // 22: Rebuild activity summaries with independent intensity and daily heart-rate facts.
-export const QUERY_PROJECTION_SQLITE_VERSION = 22;
+// 23: Rebuild body summaries and MetricPoints after sparse-body selection semantics.
+// 24: Store bounded per-workout stream features in wearable activity summaries.
+export const QUERY_PROJECTION_SQLITE_VERSION = 24;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

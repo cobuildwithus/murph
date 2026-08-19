@@ -4,26 +4,36 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { beforeEach, describe, test, vi } from "vitest";
-import { initializeVault, updateVaultSummary } from "@murphai/core";
+import { initializeVault, readJsonlRecords, updateVaultSummary } from "@murphai/core";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  eventRevisionFromLifecycle,
+  isDeletedEventLifecycle,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
+import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "@murphai/device-syncd/public-account";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   type DeviceSyncAccount,
@@ -44,6 +54,7 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 
 import {
+  canonicalizeHostedJunctionSources,
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,
   requireHostedRuntimeDeviceSyncStore,
@@ -89,8 +100,54 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
+
 const DEVICE_SYNC_SECRET = "secret-for-tests";
 type ApplyUpdatesRequest = Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0];
+const FROZEN_PRE_EPOCH_SOURCE_APPLY_FIELDS = new Set([
+  "displayName",
+  "firstSeenAt",
+  "lastDataAt",
+  "lastErrorCode",
+  "lastErrorMessage",
+  "lastSeenAt",
+  "observedLastSeenAt",
+  "resourceAvailabilitySummary",
+  "sourceInstanceKey",
+  "sourceProviderSlug",
+  "status",
+]);
+
+function assertFrozenPreEpochSourceApplyAccepts(request: ApplyUpdatesRequest): void {
+  const wireRequest: unknown = JSON.parse(
+    JSON.stringify({ ...request, userId: "member_123" }),
+  );
+  assert.ok(wireRequest !== null && typeof wireRequest === "object");
+  const updates = Reflect.get(wireRequest, "updates");
+  assert.ok(Array.isArray(updates));
+  for (const [updateIndex, update] of updates.entries()) {
+    assert.ok(update !== null && typeof update === "object");
+    const sources = Reflect.get(update, "sources");
+    assert.ok(sources === undefined || Array.isArray(sources));
+    for (const [sourceIndex, source] of (sources ?? []).entries()) {
+      assert.ok(source !== null && typeof source === "object");
+      for (const field of Object.keys(source)) {
+        assert.equal(
+          FROZEN_PRE_EPOCH_SOURCE_APPLY_FIELDS.has(field),
+          true,
+          `Legacy source apply rejects updates[${updateIndex}].sources[${sourceIndex}].${field}`,
+        );
+      }
+    }
+  }
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest(wireRequest, "member_123");
+}
 
 beforeEach(() => {
   hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
@@ -297,6 +354,7 @@ function buildRuntimeSnapshot(input: {
   };
   metadata?: Record<string, unknown>;
   provider?: string;
+  providerConfigs?: HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"];
   setupExpiresAt?: string | null;
   setupPhase?: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
   status?: HostedExecutionDeviceSyncRuntimeConnectionStatus;
@@ -369,6 +427,7 @@ function buildRuntimeSnapshot(input: {
       },
     ],
     generatedAt: input.generatedAt ?? "2026-04-04T09:10:00.000Z",
+    ...(input.providerConfigs === undefined ? {} : { providerConfigs: input.providerConfigs }),
     userId: "member_123",
   };
 }
@@ -537,6 +596,39 @@ function readJobsForAccount(service: DeviceSyncService, accountId: string) {
   } finally {
     database.close();
   }
+}
+
+async function readCanonicalEventRecords(vaultRoot: string) {
+  const eventPaths = ["ledger/events/2026/2026-04.jsonl"];
+  return (
+    await Promise.all(eventPaths.map(async (relativePath) => {
+      try {
+        return await readJsonlRecords({ vaultRoot, relativePath });
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+          return [];
+        }
+        throw error;
+      }
+    }))
+  ).flat();
+}
+
+function eventHasMetric(
+  record: Awaited<ReturnType<typeof readCanonicalEventRecords>>[number],
+  metric: string,
+): boolean {
+  if (record.kind === "observation") {
+    return record.metric === metric;
+  }
+  return record.kind === "measurement"
+    && Array.isArray(record.measurements)
+    && record.measurements.some((measurement) =>
+      typeof measurement === "object"
+      && measurement !== null
+      && !Array.isArray(measurement)
+      && Reflect.get(measurement, "metric") === metric
+    );
 }
 
 function setAccountUpdatedAtForTesting(
@@ -885,6 +977,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T10:05:00.000Z",
+            lifecycleEpoch: 1,
             resourceAvailabilitySummary: {
               activity: true,
               heartrate: true,
@@ -1059,6 +1152,7 @@ describe("hosted device-sync runtime", () => {
             {
               displayName: "Garmin",
               firstSeenAt: "2026-04-01T09:00:00.000Z",
+              lifecycleEpoch: 1,
               lastErrorCode: null,
               lastErrorMessage: null,
               lastSeenAt,
@@ -1202,6 +1296,7 @@ describe("hosted device-sync runtime", () => {
         {
           displayName: seededSource.displayName,
           firstSeenAt: seededSource.firstSeenAt,
+          lifecycleEpoch: seededSource.lifecycleEpoch,
           lastErrorCode: seededSource.lastErrorCode,
           lastErrorMessage: seededSource.lastErrorMessage,
           lastSeenAt: seededSource.lastSeenAt,
@@ -1213,6 +1308,7 @@ describe("hosted device-sync runtime", () => {
         {
           displayName: "Garmin",
           firstSeenAt: "2026-04-01T09:00:00.000Z",
+          lifecycleEpoch: 1,
           lastErrorCode: null,
           lastErrorMessage: null,
           lastSeenAt: "2026-04-04T09:00:00.000Z",
@@ -1233,6 +1329,7 @@ describe("hosted device-sync runtime", () => {
           {
             displayName: "Garmin updated",
             firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lifecycleEpoch: 1,
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:12:00.000Z",
@@ -1279,6 +1376,7 @@ describe("hosted device-sync runtime", () => {
         lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
         lastErrorMessage: "Historical data remained incomplete.",
         firstSeenAt: refreshedSource.firstSeenAt,
+        lifecycleEpoch: refreshedSource.lifecycleEpoch,
         lastSeenAt: "2026-04-06T09:15:00.000Z",
       });
 
@@ -1296,6 +1394,45 @@ describe("hosted device-sync runtime", () => {
       assert.equal(preservedSource?.status, "error");
       assert.equal(preservedSource?.lastErrorCode, "HISTORICAL_DATA_RECONNECT_REQUIRED");
       assert.equal(preservedSource?.lastSeenAt, "2026-04-06T09:15:00.000Z");
+
+      snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_source_hydration",
+        externalAccountId: connected.account.externalAccountId,
+        sources: [
+          {
+            displayName: "Garmin reconnected",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lifecycleEpoch: 2,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T09:14:00.000Z",
+            lastDataAt: null,
+            resourceCount: 3,
+            resourceAvailabilitySummary: {
+              activity: true,
+              hypnogram: true,
+              sleep: true,
+            },
+            sourceInstanceKey: "hosted-source-garmin",
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:21:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const [reconnectedSource] = getStore(service).listConnectionSources({
+        connectionId: connected.account.id,
+      });
+
+      assert.equal(reconnectedSource?.lifecycleEpoch, 2);
+      assert.equal(reconnectedSource?.status, "connected");
+      assert.equal(reconnectedSource?.lastErrorCode, null);
+      assert.equal(reconnectedSource?.lastSeenAt, "2026-04-06T09:14:00.000Z");
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -1319,7 +1456,7 @@ describe("hosted device-sync runtime", () => {
         region: "us",
         summaryBackfillDays: 2,
         summaryResources: ["activity", "sleep"],
-        timeseriesResources: [],
+        timeseriesResources: ["blood_pressure", "caffeine"],
       },
     });
     assert.ok(provider);
@@ -1347,10 +1484,22 @@ describe("hosted device-sync runtime", () => {
       metadata: retryingMetadata,
       provider: "junction",
     });
+    const applyRequests: Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0][] = [];
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       ...createNoDirtyStateDeviceSyncPortMethods(),
-      async applyUpdates() {
-        throw new Error("applyUpdates should not be called during source hydration.");
+      async applyUpdates(input) {
+        applyRequests.push(input);
+        return {
+          appliedAt: "2026-04-06T09:40:00.000Z",
+          updates: input.updates.map((update) => ({
+            connection: null,
+            connectionId: update.connectionId,
+            status: "updated" as const,
+            tokenUpdate: "unchanged" as const,
+            writeUpdate: "applied" as const,
+          })),
+          userId: "member_123",
+        };
       },
       async createConnectLink() {
         throw new Error("createConnectLink should not be called during source hydration.");
@@ -1361,7 +1510,7 @@ describe("hosted device-sync runtime", () => {
     };
 
     try {
-      const state = await syncHostedDeviceSyncControlPlaneState({
+      let state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T09:00:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
@@ -1388,11 +1537,42 @@ describe("hosted device-sync runtime", () => {
         lastErrorCode: null,
         lastErrorMessage: null,
         lastSeenAt: "2026-04-06T09:20:00.000Z",
-        resourceAvailabilitySummary: { activity: true },
+        resourceAvailabilitySummary: { activity: true, blood_pressure: true, caffeine: true },
         sourceInstanceKey: localSourceInstanceKey,
         sourceProviderSlug: "garmin",
         status: "connected",
       });
+      const withingsSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: localAccountId,
+        sourceProviderSlug: "withings",
+      });
+      assert.ok(withingsSourceInstanceKey);
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        firstSeenAt: "2026-04-02T09:00:00.000Z",
+        lastSeenAt: "2026-04-06T09:20:00.000Z",
+        resourceAvailabilitySummary: { blood_pressure: true, caffeine: true },
+        sourceInstanceKey: withingsSourceInstanceKey,
+        sourceProviderSlug: "withings",
+        status: "connected",
+      });
+      let unpublishedMetadata = retryingMetadata as Record<string, unknown>;
+      for (const [providerSlug, resource] of [
+        ["garmin", "blood_pressure"],
+        ["garmin", "caffeine"],
+        ["withings", "blood_pressure"],
+        ["withings", "caffeine"],
+      ] as const) {
+        const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+          metadata: unpublishedMetadata,
+          providerSlug,
+          resource,
+          version: historyCoverageVersion(resource),
+        });
+        assert.ok(update);
+        unpublishedMetadata = { ...unpublishedMetadata, [update.metadataKey]: update.value };
+      }
+      getStore(service).patchAccount(localAccountId, { metadata: unpublishedMetadata });
       hostedSnapshot = buildRuntimeSnapshot({
         connectionId: hostedConnectionId,
         credential: {
@@ -1401,26 +1581,32 @@ describe("hosted device-sync runtime", () => {
           providerConfigKey: "junction",
         },
         externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:25:00.000Z",
         metadata: retryingMetadata,
         provider: "junction",
         sources: [
           {
             displayName: "Garmin",
             firstSeenAt: "2026-04-01T09:00:00.000Z",
-            lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
-            lastErrorMessage: "Historical data remained incomplete.",
+            lastErrorCode: "SOURCE_START_CLEANUP_IN_PROGRESS",
+            lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:25:00.000Z",
             lastDataAt: null,
             resourceCount: 2,
-            resourceAvailabilitySummary: { activity: true, sleep: true },
+            resourceAvailabilitySummary: {
+              activity: true,
+              blood_pressure: true,
+              caffeine: true,
+              sleep: true,
+            },
             sourceInstanceKey: hostedSourceInstanceKey,
             sourceProviderSlug: "garmin",
-            status: "error",
+            status: "connected",
           },
         ],
       });
 
-      await syncHostedDeviceSyncControlPlaneState({
+      state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T09:25:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
@@ -1430,19 +1616,50 @@ describe("hosted device-sync runtime", () => {
       const sources = getStore(service).listConnectionSources({
         connectionId: localAccountId,
       });
-      assert.equal(sources.length, 1);
-      assert.equal(sources[0]?.sourceInstanceKey, localSourceInstanceKey);
-      assert.equal(sources[0]?.sourceProviderSlug, "garmin");
-      assert.equal(sources[0]?.status, "error");
+      assert.equal(sources.length, 2);
+      const garminSource = sources.find((source) => source.sourceProviderSlug === "garmin");
+      assert.equal(garminSource?.sourceInstanceKey, localSourceInstanceKey);
+      assert.equal(garminSource?.status, "connected");
       assert.equal(
-        sources[0]?.lastErrorCode,
-        "HISTORICAL_DATA_RECONNECT_REQUIRED",
+        garminSource?.lastErrorCode,
+        "SOURCE_START_CLEANUP_IN_PROGRESS",
       );
-      assert.equal(sources[0]?.lastSeenAt, "2026-04-06T09:25:00.000Z");
-      assert.deepEqual(sources[0]?.resourceAvailabilitySummary, {
+      assert.equal(garminSource?.lastSeenAt, "2026-04-06T09:25:00.000Z");
+      assert.deepEqual(garminSource?.resourceAvailabilitySummary, {
         activity: true,
+        blood_pressure: true,
+        caffeine: true,
         sleep: true,
       });
+      const sourceStartMetadata =
+        getStore(service).getAccountById(localAccountId)?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          sourceStartMetadata,
+          "garmin",
+          "blood_pressure",
+          historyCoverageVersion("blood_pressure"),
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          sourceStartMetadata,
+          "garmin",
+          "caffeine",
+          historyCoverageVersion("caffeine"),
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          sourceStartMetadata,
+          "withings",
+          "blood_pressure",
+          historyCoverageVersion("blood_pressure"),
+        ),
+        true,
+      );
 
       hostedSnapshot = buildRuntimeSnapshot({
         connectionId: hostedConnectionId,
@@ -1464,7 +1681,12 @@ describe("hosted device-sync runtime", () => {
             lastSeenAt: "2026-04-06T09:30:00.000Z",
             lastDataAt: null,
             resourceCount: 1,
-            resourceAvailabilitySummary: { activity: true },
+            resourceAvailabilitySummary: {
+              activity: true,
+              blood_pressure: true,
+              caffeine: true,
+            },
+            lifecycleEpoch: 2,
             sourceInstanceKey: hostedSourceInstanceKey,
             sourceProviderSlug: "garmin",
             status: "connected",
@@ -1472,7 +1694,7 @@ describe("hosted device-sync runtime", () => {
         ],
       });
 
-      await syncHostedDeviceSyncControlPlaneState({
+      state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
@@ -1482,15 +1704,539 @@ describe("hosted device-sync runtime", () => {
       const reconnectedSources = getStore(service).listConnectionSources({
         connectionId: localAccountId,
       });
-      assert.equal(reconnectedSources.length, 1);
-      assert.equal(reconnectedSources[0]?.sourceInstanceKey, localSourceInstanceKey);
-      assert.equal(reconnectedSources[0]?.status, "connected");
-      assert.equal(reconnectedSources[0]?.lastErrorCode, null);
-      assert.equal(reconnectedSources[0]?.lastSeenAt, "2026-04-06T09:30:00.000Z");
+      assert.equal(reconnectedSources.length, 2);
+      const reconnectedGarmin = reconnectedSources.find(
+        (source) => source.sourceProviderSlug === "garmin",
+      );
+      assert.equal(reconnectedGarmin?.sourceInstanceKey, localSourceInstanceKey);
+      assert.equal(reconnectedGarmin?.lifecycleEpoch, 2);
+      assert.equal(reconnectedGarmin?.status, "connected");
+      assert.equal(reconnectedGarmin?.lastErrorCode, null);
+      assert.equal(reconnectedGarmin?.lastSeenAt, "2026-04-06T09:30:00.000Z");
       assert.equal(
         getStore(service).getAccountById(localAccountId)?.metadata
           .junctionHistoricalBackfillStatus,
         "coverage_v3_retrying",
+      );
+      const reconnectedMetadata = getStore(service).getAccountById(localAccountId)?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reconnectedMetadata,
+          "garmin",
+          "caffeine",
+          historyCoverageVersion("caffeine"),
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reconnectedMetadata,
+          "withings",
+          "caffeine",
+          historyCoverageVersion("caffeine"),
+        ),
+        true,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reconnectedMetadata,
+          "withings",
+          "blood_pressure",
+          historyCoverageVersion("blood_pressure"),
+        ),
+        true,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reconnectedMetadata,
+          "garmin",
+          "blood_pressure",
+          historyCoverageVersion("blood_pressure"),
+        ),
+        false,
+      );
+
+      getStore(service).patchAccount(localAccountId, {
+        nextReconcileAt: "2026-04-06T09:30:00.000Z",
+      });
+      const scheduled = await service.runSchedulerOnce(localAccountId);
+      const caffeineJob = scheduled.find((job) => job.payload.resource === "caffeine");
+      const bloodPressureJob = scheduled.find(
+        (job) => job.payload.resource === "blood_pressure",
+      );
+      assert.equal(caffeineJob?.payload.sourceProviderSlug, "garmin");
+      assert.equal(caffeineJob?.payload.sourceLifecycleEpoch, 2);
+      assert.equal(bloodPressureJob?.payload.sourceProviderSlug, "garmin");
+      assert.equal(bloodPressureJob?.payload.sourceLifecycleEpoch, 2);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+        wake: buildCronWake("2026-04-06T09:40:00.000Z"),
+      });
+      const appliedMetadata = applyRequests.at(-1)?.updates[0]?.connection?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          appliedMetadata,
+          "garmin",
+          "caffeine",
+          historyCoverageVersion("caffeine"),
+        ),
+        false,
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("semantic Junction source ties prefer fail-closed status and deterministic timestamps", () => {
+    const source = (
+      status: "connected" | "unavailable" | "error" | "disconnected",
+      displayName: string,
+      lastSeenAt?: string,
+    ) => ({
+      displayName,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lifecycleEpoch: 1,
+      sourceProviderSlug: displayName.includes("alias") ? "apple_health" : "apple_health_kit",
+      status,
+      ...(lastSeenAt === undefined ? {} : { lastSeenAt }),
+    });
+    const statusOrder = ["connected", "unavailable", "error", "disconnected"] as const;
+    for (let index = 1; index < statusOrder.length; index += 1) {
+      const lower = source(statusOrder[index - 1]!, "alias-lower", "2026-04-07T00:00:00.000Z");
+      const higher = source(statusOrder[index]!, "canonical-higher");
+      assert.equal(canonicalizeHostedJunctionSources([lower, higher])[0]?.status, higher.status);
+      assert.equal(canonicalizeHostedJunctionSources([higher, lower])[0]?.status, higher.status);
+    }
+
+    const missingTimestamp = source("connected", "alias-missing");
+    const validTimestamp = source("connected", "canonical-valid", "2026-04-06T00:00:00.000Z");
+    assert.equal(
+      canonicalizeHostedJunctionSources([missingTimestamp, validTimestamp])[0]?.displayName,
+      validTimestamp.displayName,
+    );
+    assert.equal(
+      canonicalizeHostedJunctionSources([validTimestamp, missingTimestamp])[0]?.displayName,
+      validTimestamp.displayName,
+    );
+
+    const connectionId = "hosted_conn_same_epoch_merge";
+    const merged = canonicalizeHostedJunctionSources([
+      {
+        ...source("connected", "alias-fenced", "2026-04-05T00:00:00.000Z"),
+        firstSeenAt: "2026-04-02T00:00:00.000Z",
+        lastDataAt: "2026-04-05T01:00:00.000Z",
+        lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+        lastErrorMessage: "Disconnect is still being finalized.",
+        lifecycleEpoch: 2,
+        resourceAvailabilitySummary: { activity: true },
+        sourceInstanceKey: "legacy-alias-key",
+      },
+      {
+        ...source("connected", "canonical-current", "2026-04-06T00:00:00.000Z"),
+        firstSeenAt: "2026-04-03T00:00:00.000Z",
+        lastDataAt: "2026-04-04T01:00:00.000Z",
+        lifecycleEpoch: 2,
+        resourceAvailabilitySummary: { sleep: true },
+        sourceInstanceKey: "canonical-current-key",
+      },
+      {
+        ...source("disconnected", "alias-legacy", "2026-04-07T00:00:00.000Z"),
+        firstSeenAt: "2026-03-01T00:00:00.000Z",
+        lastDataAt: "2026-04-06T01:00:00.000Z",
+        lastErrorCode: "LEGACY_DISCONNECT",
+        lifecycleEpoch: 1,
+        resourceAvailabilitySummary: { weight: true },
+        sourceInstanceKey: "legacy-older-key",
+      },
+    ], connectionId)[0];
+    assert.ok(merged);
+    assert.equal(merged.sourceProviderSlug, "apple_health_kit");
+    assert.equal(
+      merged.sourceInstanceKey,
+      buildJunctionProviderSourceInstanceKey({
+        connectionId,
+        sourceProviderSlug: "apple_health_kit",
+      }),
+    );
+    assert.equal(merged.lastErrorCode, DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE);
+    assert.deepEqual(merged.resourceAvailabilitySummary, {
+      activity: true,
+      sleep: true,
+      weight: true,
+    });
+    assert.equal(merged.firstSeenAt, "2026-03-01T00:00:00.000Z");
+    assert.equal(merged.lastSeenAt, "2026-04-07T00:00:00.000Z");
+    assert.equal(merged.lastDataAt, "2026-04-06T01:00:00.000Z");
+  });
+
+  test("sync treats Apple Health aliases as one lifecycle before metadata merge and provider admission", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-apple-lifecycle-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const providerRequests: string[] = [];
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async (request) => {
+          providerRequests.push(readTestUrl(request));
+          throw new Error("A stale Apple Health lifecycle must be fenced before provider access.");
+        },
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity", "sleep"],
+        timeseriesResources: ["blood_pressure", "caffeine"],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const hostedConnectionId = "hosted_conn_junction_apple_lifecycle";
+    const externalAccountId = "junction-apple-lifecycle";
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const retryingMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillEvidence: `e2|${windowStart}|${windowEnd}|apple-health:1`,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillWindowEnd: windowEnd,
+      junctionHistoricalBackfillWindowStart: windowStart,
+    };
+    let hostedSnapshot = buildRuntimeSnapshot({
+      connectionId: hostedConnectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId,
+      metadata: retryingMetadata,
+      provider: "junction",
+    });
+    const applyRequests: ApplyUpdatesRequest[] = [];
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(input) {
+        applyRequests.push(input);
+        return {
+          appliedAt: "2026-04-06T09:40:00.000Z",
+          updates: input.updates.map((update) => ({
+            connection: null,
+            connectionId: update.connectionId,
+            status: "updated" as const,
+            tokenUpdate: "unchanged" as const,
+            writeUpdate: "applied" as const,
+          })),
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during source hydration.");
+      },
+      async fetchSnapshot() {
+        return hostedSnapshot;
+      },
+    };
+
+    try {
+      let state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const legacyAppleSourceInstanceKey = `jxn_src_${createHash("sha256")
+        .update(JSON.stringify([
+          "junction-provider-source",
+          localAccountId,
+          "apple_health",
+        ]))
+        .digest("hex")
+        .slice(0, 32)}`;
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        displayName: "Apple Health",
+        firstSeenAt: "2026-04-01T09:00:00.000Z",
+        lastSeenAt: "2026-04-06T09:20:00.000Z",
+        lifecycleEpoch: 1,
+        resourceAvailabilitySummary: { blood_pressure: true, caffeine: true },
+        sourceInstanceKey: legacyAppleSourceInstanceKey,
+        sourceProviderSlug: "apple_health",
+        status: "connected",
+      });
+      const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
+      try {
+        database.prepare(`
+          update device_connection_source
+          set source_instance_key = ?, source_provider_slug = ?
+          where connection_id = ?
+        `).run(
+          legacyAppleSourceInstanceKey,
+          "apple_health",
+          localAccountId,
+        );
+      } finally {
+        database.close();
+      }
+      const withingsSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: localAccountId,
+        sourceProviderSlug: "withings",
+      });
+      assert.ok(withingsSourceInstanceKey);
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        firstSeenAt: "2026-04-02T09:00:00.000Z",
+        lastSeenAt: "2026-04-06T09:20:00.000Z",
+        lifecycleEpoch: 1,
+        resourceAvailabilitySummary: { caffeine: true },
+        sourceInstanceKey: withingsSourceInstanceKey,
+        sourceProviderSlug: "withings",
+        status: "connected",
+      });
+      let unpublishedMetadata = retryingMetadata as Record<string, unknown>;
+      for (const [providerSlug, resource] of [
+        ["apple_health", "blood_pressure"],
+        ["apple_health", "caffeine"],
+        ["withings", "caffeine"],
+      ] as const) {
+        const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+          metadata: unpublishedMetadata,
+          providerSlug,
+          resource,
+          version: historyCoverageVersion(resource),
+        });
+        assert.ok(update);
+        unpublishedMetadata = { ...unpublishedMetadata, [update.metadataKey]: update.value };
+      }
+      getStore(service).patchAccount(localAccountId, { metadata: unpublishedMetadata });
+
+      const canonicalHostedSourceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: hostedConnectionId,
+        sourceProviderSlug: "apple_health_kit",
+      });
+      const legacyHostedSourceKey = `jxn_src_${createHash("sha256")
+        .update(JSON.stringify([
+          "junction-provider-source",
+          hostedConnectionId,
+          "apple_health",
+        ]))
+        .digest("hex")
+        .slice(0, 32)}`;
+      assert.ok(canonicalHostedSourceKey);
+      assert.notEqual(legacyHostedSourceKey, canonicalHostedSourceKey);
+      const buildHostedAppleSource = (input: {
+        lastErrorCode?: string | null;
+        lastErrorMessage?: string | null;
+        lifecycleEpoch: number;
+        resourceAvailabilitySummary?: Record<string, boolean>;
+        sourceInstanceKey: string;
+        sourceProviderSlug: string;
+        timestamp: string;
+      }) => ({
+        displayName: "Apple Health",
+        firstSeenAt: input.timestamp,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.timestamp,
+        lastDataAt: null,
+        lifecycleEpoch: input.lifecycleEpoch,
+        resourceCount: 2,
+        resourceAvailabilitySummary: input.resourceAvailabilitySummary
+          ?? { blood_pressure: true, caffeine: true },
+        sourceInstanceKey: input.sourceInstanceKey,
+        sourceProviderSlug: input.sourceProviderSlug,
+        status: "connected" as const,
+      });
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:30:00.000Z",
+        metadata: retryingMetadata,
+        provider: "junction",
+        sources: [
+          buildHostedAppleSource({
+            lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+            lastErrorMessage: "Disconnect is still being finalized.",
+            lifecycleEpoch: 2,
+            resourceAvailabilitySummary: { blood_pressure: true },
+            sourceInstanceKey: legacyHostedSourceKey,
+            sourceProviderSlug: "apple_health",
+            timestamp: "2026-04-06T09:20:00.000Z",
+          }),
+          buildHostedAppleSource({
+            lifecycleEpoch: 2,
+            resourceAvailabilitySummary: { caffeine: true },
+            sourceInstanceKey: canonicalHostedSourceKey,
+            sourceProviderSlug: "apple_health_kit",
+            timestamp: "2026-04-06T09:30:00.000Z",
+          }),
+        ],
+      });
+
+      state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const sources = getStore(service).listConnectionSources({ connectionId: localAccountId });
+      const appleSources = sources.filter((source) =>
+        ["apple_health", "apple_health_kit", "apple_healthkit"].includes(
+          source.sourceProviderSlug,
+        )
+      );
+      assert.equal(appleSources.length, 1);
+      assert.equal(appleSources[0]?.sourceProviderSlug, "apple_health");
+      assert.equal(
+        appleSources[0]?.sourceInstanceKey,
+        legacyAppleSourceInstanceKey,
+      );
+      assert.equal(appleSources[0]?.lifecycleEpoch, 2);
+      assert.equal(
+        appleSources[0]?.lastErrorCode,
+        DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+      );
+      assert.deepEqual(appleSources[0]?.resourceAvailabilitySummary, {
+        blood_pressure: true,
+        caffeine: true,
+      });
+      assert.equal(sources.find((source) => source.sourceProviderSlug === "withings")?.lifecycleEpoch, 1);
+
+      const hydratedMetadata = getStore(service).getAccountById(localAccountId)?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          hydratedMetadata,
+          "apple_health_kit",
+          "caffeine",
+          historyCoverageVersion("caffeine"),
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          hydratedMetadata,
+          "apple_health_kit",
+          "blood_pressure",
+          historyCoverageVersion("blood_pressure"),
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          hydratedMetadata,
+          "withings",
+          "caffeine",
+          historyCoverageVersion("caffeine"),
+        ),
+        true,
+      );
+
+      const staleJob = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:35:00.000Z",
+        dedupeKey: "stale-apple-health-epoch-one",
+        kind: "resource",
+        payload: {
+          historicalBackfill: true,
+          historicalBackfillVersion: 1,
+          historicalWindowStart: "2026-03-01T00:00:00.000Z",
+          resource: "caffeine",
+          resourceCategory: "timeseries",
+          sourceLifecycleEpoch: 1,
+          sourceProviderSlug: "apple_health",
+          windowEnd: "2026-04-06T00:00:00.000Z",
+          windowStart: "2026-03-01T00:00:00.000Z",
+        },
+        priority: 1_000,
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.equal(getStore(service).getJobById(staleJob.id)?.status, "succeeded");
+      const fencedCurrentJob = getStore(service).enqueueJob({
+        ...staleJob,
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:35:00.000Z",
+        dedupeKey: "fenced-apple-health-epoch-two",
+        kind: "resource",
+        payload: { ...staleJob.payload, sourceLifecycleEpoch: 2 },
+        priority: 1_000,
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.equal(getStore(service).getJobById(fencedCurrentJob.id)?.status, "succeeded");
+      assert.deepEqual(providerRequests, []);
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:31:00.000Z",
+        metadata: retryingMetadata,
+        provider: "junction",
+        sources: [buildHostedAppleSource({
+          lifecycleEpoch: 2,
+          sourceInstanceKey: canonicalHostedSourceKey,
+          sourceProviderSlug: "apple_health_kit",
+          timestamp: "2026-04-06T09:31:00.000Z",
+        })],
+      });
+      state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:36:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      getStore(service).patchAccount(localAccountId, {
+        nextReconcileAt: "2026-04-06T09:30:00.000Z",
+      });
+      const scheduled = await service.runSchedulerOnce(localAccountId);
+      const caffeineJob = scheduled.find((job) => job.payload.resource === "caffeine");
+      const bloodPressureJob = scheduled.find(
+        (job) => job.payload.resource === "blood_pressure",
+      );
+      assert.equal(caffeineJob?.payload.sourceProviderSlug, "apple_health_kit");
+      assert.equal(caffeineJob?.payload.sourceLifecycleEpoch, 2);
+      assert.equal(bloodPressureJob?.payload.sourceProviderSlug, "apple_health_kit");
+      assert.equal(bloodPressureJob?.payload.sourceLifecycleEpoch, 2);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+        wake: buildCronWake("2026-04-06T09:40:00.000Z"),
+      });
+      const appliedMetadata = applyRequests.at(-1)?.updates[0]?.connection?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          appliedMetadata,
+          "apple_health_kit",
+          "caffeine",
+          historyCoverageVersion("caffeine"),
+        ),
+        false,
       );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -1809,17 +2555,12 @@ describe("hosted device-sync runtime", () => {
       });
 
       const sources = getStore(service).listConnectionSources({ connectionId: localAccountId });
-      assert.equal(sources.length, 2);
+      assert.equal(sources.length, 1);
       const establishedSource = sources.find(
         (source) => source.sourceInstanceKey === establishedSourceInstanceKey,
       );
-      const laterDuplicate = sources.find(
-        (source) => source.sourceInstanceKey === hostedSourceInstanceKey,
-      );
       assert.equal(establishedSource?.sourceProviderSlug, "apple_health");
       assert.equal(establishedSource?.lastSeenAt, "2026-04-06T09:25:00.000Z");
-      assert.equal(laterDuplicate?.sourceProviderSlug, "apple_healthkit");
-      assert.equal(laterDuplicate?.lastSeenAt, "2026-04-06T09:21:00.000Z");
       const job = getStore(service).enqueueJob({
         accountId: localAccountId,
         availableAt: "2026-04-06T09:25:00.000Z",
@@ -2380,7 +3121,7 @@ describe("hosted device-sync runtime", () => {
           finalSources.find((source) => source.sourceProviderSlug === "garmin")
             ?.sourceInstanceKey,
           buildJunctionProviderSourceInstanceKey({
-            connectionId: hostedConnectionId,
+            connectionId: localAccountId,
             sourceProviderSlug: "garmin",
           }),
         );
@@ -2404,11 +3145,11 @@ describe("hosted device-sync runtime", () => {
         assert.ok(scheduledPressureHistory);
         assert.equal(
           scheduledPressureHistory.payload?.historicalWindowStart,
-          "2026-07-22T00:00:00.000Z",
+          "2026-01-28T00:00:00.000Z",
         );
         assert.equal(
           scheduledPressureHistory.payload?.windowStart,
-          "2026-07-22T00:00:00.000Z",
+          "2026-01-28T00:00:00.000Z",
         );
         assert.equal(
           scheduledPressureHistory.payload?.windowEnd,
@@ -2789,6 +3530,11 @@ describe("hosted device-sync runtime", () => {
         secret: DEVICE_SYNC_SECRET,
         service,
       });
+      assert.equal(
+        getStore(service).listConnectionSources({ connectionId: connected.account.id })[0]
+          ?.lifecycleEpoch,
+        1,
+      );
 
       // Only the arrival advances; everything else matches the baseline. If the
       // outbound comparator ignored lastDataAt this would be dropped as a no-op
@@ -2810,10 +3556,146 @@ describe("hosted device-sync runtime", () => {
       const projectedSources = appliedRequests
         .flatMap((request) => request.updates)
         .flatMap((update) => update.sources ?? []);
+      assert.equal(Object.hasOwn(projectedSources[0] ?? {}, "observedLifecycleEpoch"), false);
       assert.deepEqual(
         projectedSources.map((source) => (source as { lastDataAt?: string | null }).lastDataAt),
         ["2026-04-06T10:08:00.000Z"],
       );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test.each([
+    {
+      hostedLifecycleEpoch: undefined,
+      protocol: "pre-epoch Web",
+    },
+    {
+      hostedLifecycleEpoch: 2,
+      protocol: "epoch-bearing Web",
+    },
+  ])("Junction reconciliation preserves lifecycle epoch wire presence for $protocol", async ({
+    hostedLifecycleEpoch,
+  }) => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-junction-epoch-presence-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async () => {
+          throw new Error("Junction network access is not expected during source reconciliation.");
+        },
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity", "sleep"],
+        timeseriesResources: ["blood_pressure", "caffeine"],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const hostedConnectionId = `hosted_conn_junction_epoch_presence_${hostedLifecycleEpoch ?? 1}`;
+    const source = (sourceProviderSlug: "apple_health" | "apple_health_kit") => ({
+      displayName: "Apple Health",
+      firstSeenAt: "2026-04-06T09:00:00.000Z",
+      lastDataAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-04-06T10:05:00.000Z",
+      resourceCount: 2,
+      resourceAvailabilitySummary: {
+        activity: true,
+        sleep: true,
+      },
+      sourceInstanceKey: `legacy-${sourceProviderSlug}`,
+      sourceProviderSlug,
+      status: "connected" as const,
+      ...(hostedLifecycleEpoch === undefined ? {} : { lifecycleEpoch: hostedLifecycleEpoch }),
+    });
+    const snapshot = buildRuntimeSnapshot({
+      capabilities: { connectionSourceApply: true },
+      connectionId: hostedConnectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: `junction-epoch-presence-${hostedLifecycleEpoch ?? 1}`,
+      provider: "junction",
+      sources: [source("apple_health"), source("apple_health_kit")],
+    });
+    const appliedRequests: ApplyUpdatesRequest[] = [];
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(request) {
+        appliedRequests.push(request);
+        return {
+          appliedAt: "2026-04-06T10:10:01.000Z",
+          updates: [],
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during source reconciliation");
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:06:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const [hydratedSource] = getStore(service).listConnectionSources({
+        connectionId: localAccountId,
+      });
+      const expectedHydratedSourceProviderSlug = hostedLifecycleEpoch === undefined
+        ? "apple_health"
+        : "apple_health_kit";
+      assert.equal(
+        hydratedSource?.sourceProviderSlug,
+        expectedHydratedSourceProviderSlug,
+      );
+      assert.equal(hydratedSource?.lifecycleEpoch, hostedLifecycleEpoch ?? 1);
+
+      getStore(service).markConnectionSourceDataReceived({
+        connectionId: localAccountId,
+        now: "2026-04-06T10:08:00.000Z",
+        sourceProviderSlug: "apple_health_kit",
+      });
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.equal(appliedRequests.length, 1);
+      const projectedSources = appliedRequests[0]?.updates.flatMap(
+        (update) => update.sources ?? [],
+      ) ?? [];
+      assert.equal(projectedSources.length, 1);
+      assert.equal(projectedSources[0]?.sourceProviderSlug, "apple_health_kit");
+      assert.equal(projectedSources[0]?.lastDataAt, "2026-04-06T10:08:00.000Z");
+      if (hostedLifecycleEpoch === undefined) {
+        assert.equal(Object.hasOwn(projectedSources[0] ?? {}, "observedLifecycleEpoch"), false);
+        assertFrozenPreEpochSourceApplyAccepts(appliedRequests[0]!);
+      } else {
+        assert.equal(projectedSources[0]?.observedLifecycleEpoch, hostedLifecycleEpoch);
+      }
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -7879,28 +8761,54 @@ describe("hosted device-sync runtime", () => {
       "hosted-device-sync-runtime-",
     );
     await mkdir(vaultRoot, { recursive: true });
-    const service = createDeviceSyncServiceForVault(vaultRoot);
+    const demoProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...demoProvider,
+      provider: "junction",
+      descriptor: {
+        ...demoProvider.descriptor,
+        provider: "junction",
+        displayName: "Junction",
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
-        code: "manual-reconcile",
-        provider: "demo",
-        state: begin.state,
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId: "manual-reconcile",
+        provider: "junction",
+        scopes: [],
+        status: "active",
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_manual_reconcile",
-        externalAccountId: connected.account.externalAccountId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: account.externalAccountId,
         localState: {
           nextReconcileAt: "2026-04-04T12:00:00.000Z",
         },
+        provider: "junction",
+        tokenBundle: null,
       });
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
         wake: buildDeviceSyncWake({
           connectionId: "hosted_conn_manual_reconcile",
-          hint: { reason: "manual_reconcile" },
+          hint: {
+            reason: "manual_reconcile",
+          },
           occurredAt: "2026-04-04T10:00:00.000Z",
           reason: "reconcile_due",
         }),
@@ -7908,13 +8816,14 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const jobs = readJobsForAccount(service, connected.account.id);
+      const jobs = readJobsForAccount(service, account.id);
       assert.equal(jobs.length, 1);
       assert.equal(jobs[0]?.kind, "reconcile");
       assert.equal(jobs[0]?.priority, 80);
+      assert.deepEqual(JSON.parse(jobs[0]?.payloadJson ?? "{}"), {});
       assert.equal(jobs[0]?.status, "queued");
       assert.equal(
-        getStore(service).getAccountById(connected.account.id)?.nextReconcileAt,
+        getStore(service).getAccountById(account.id)?.nextReconcileAt,
         "2026-04-04T12:00:00.000Z",
       );
     } finally {
@@ -12298,6 +13207,938 @@ describe("hosted device-sync runtime", () => {
         occurredAt: "2026-04-06T10:10:00.000Z",
         updates: [],
       });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test.each([
+    {
+      dayEnd: "2026-04-23T07:00:00.000Z",
+      dayStart: "2026-04-22T07:00:00.000Z",
+      initialNow: "2026-04-25T06:00:00.000Z",
+      jobWindowEnd: "2026-04-24T00:00:00.000Z",
+      jobWindowStart: "2026-04-22T00:00:00.000Z",
+      slug: "los-angeles",
+      timeZone: "America/Los_Angeles",
+    },
+    {
+      dayEnd: "2026-04-22T15:00:00.000Z",
+      dayStart: "2026-04-21T15:00:00.000Z",
+      initialNow: "2026-04-24T14:00:00.000Z",
+      jobWindowEnd: "2026-04-23T00:00:00.000Z",
+      jobWindowStart: "2026-04-21T00:00:00.000Z",
+      slug: "tokyo",
+      timeZone: "Asia/Tokyo",
+    },
+  ])("hosted Junction forwards $timeZone authority through populated-to-empty replacement", async ({
+    dayEnd,
+    dayStart,
+    initialNow,
+    jobWindowEnd,
+    jobWindowStart,
+    slug,
+    timeZone,
+  }) => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      `hosted-device-sync-junction-temporal-authority-${slug}-`,
+    );
+    await initializeVault({
+      createdAt: "2026-04-01T00:00:00.000Z",
+      timezone: timeZone,
+      vaultRoot,
+    });
+    const hostedConnectionId = `hosted_conn_junction_temporal_authority_${slug}`;
+    const externalAccountId = `junction-temporal-authority-${slug}`;
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    assert.ok(sourceInstanceKey);
+    const snapshot = buildRuntimeSnapshot({
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      connectionId: hostedConnectionId,
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      externalAccountId,
+      generatedAt: initialNow,
+      hostedUpdatedAt: initialNow,
+      localState: { nextReconcileAt: null },
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2026-03-01T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-01T00:00:00.000Z",
+      },
+      provider: "junction",
+      providerConfigs: {
+        junction: {
+          environment: "sandbox",
+          reconcileDays: 3,
+          reconcileIntervalMs: 60 * 60_000,
+          region: "us",
+          summaryBackfillDays: 3,
+          summaryResources: [],
+          timeseriesBackfillDays: 3,
+        },
+      },
+      sources: [{
+        displayName: "Garmin",
+        firstSeenAt: "2026-04-01T00:00:00.000Z",
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: initialNow,
+        resourceCount: 1,
+        resourceAvailabilitySummary: { stress_level: true },
+        sourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }],
+    });
+    let currentNow = initialNow;
+    let phase: "empty" | "populated" = "populated";
+    const requestedWindows: Array<[string | null, string | null]> = [];
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileDays: 3,
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 3,
+        summaryResources: [],
+        timeseriesBackfillDays: 3,
+        timeseriesResources: ["stress_level"],
+        fetchImpl: async (input) => {
+          const url = new URL(readTestUrl(input));
+          if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({ providers: [{
+              id: "provider-garmin-temporal-authority",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: { stress_level: true },
+            }] });
+          }
+          if (url.pathname.startsWith("/v2/summary/")
+            && url.pathname.endsWith(`/${externalAccountId}`)) {
+            return createTestJsonResponse({ data: [] });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+            requestedWindows.push([
+              url.searchParams.get("start_date"),
+              url.searchParams.get("end_date"),
+            ]);
+            if (phase === "empty") {
+              return createTestJsonResponse({ groups: {} });
+            }
+            if (url.searchParams.get("next_cursor") === "temporal-page-2") {
+              return createTestJsonResponse({ groups: { garmin: [{
+                data: [
+                  { timestamp: "2026-04-22T18:00:00", value: 70 },
+                  { timestamp: "2026-04-22T18:05:00", value: 80 },
+                ],
+                source: { provider: "garmin", type: "watch" },
+              }] } });
+            }
+            return createTestJsonResponse({
+              next_cursor: "temporal-page-2",
+              groups: { garmin: [{
+                data: [
+                  { timestamp: "2026-04-22T07:00:00", value: 20 },
+                  { timestamp: "2026-04-22T07:05:00", value: 30 },
+                ],
+                source: { provider: "garmin", type: "watch" },
+              }] },
+            });
+          }
+          throw new Error(`Unexpected Junction temporal-authority request: ${url.pathname}`);
+        },
+      },
+    });
+    assert.ok(provider);
+    const service = createHostedRuntimeDeviceSyncService({
+      clock: { now: () => new Date(currentNow) },
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+      providers: [provider],
+      secret: DEVICE_SYNC_SECRET,
+    });
+    const liveRecords = async () => {
+      const latestById = new Map<string, Awaited<ReturnType<typeof readCanonicalEventRecords>>[number]>();
+      for (const record of await readCanonicalEventRecords(vaultRoot)) {
+        if (typeof record.id !== "string") {
+          continue;
+        }
+        const existing = latestById.get(record.id);
+        if (!existing || eventRevisionFromLifecycle(record.lifecycle)
+          > eventRevisionFromLifecycle(existing.lifecycle)) {
+          latestById.set(record.id, record);
+        }
+      }
+      return [...latestById.values()].filter((record) =>
+        !isDeletedEventLifecycle(record.lifecycle)
+      );
+    };
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        snapshot,
+        wake: buildCronWake(currentNow),
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const enqueueReconcile = (dedupeKey: string) => getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: currentNow,
+        dedupeKey,
+        kind: "reconcile",
+        payload: {
+          windowStart: jobWindowStart,
+          windowEnd: jobWindowEnd,
+        },
+        priority: 40,
+        provider: "junction",
+      });
+
+      enqueueReconcile("junction-temporal-populated");
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      // The facet-only temporal import publishes facets immediately; the
+      // ordinary stress-level fact arrives through the ordinary continuation.
+      const inlinePopulated = await liveRecords();
+      assert.equal(inlinePopulated.some((record) => eventHasMetric(record, "stress-level")), false);
+      assert.equal(inlinePopulated.some((record) =>
+        record.kind === "observation"
+        && typeof record.metric === "string"
+        && record.metric.startsWith("stress-")
+        && record.metric !== "stress-level"
+      ), true);
+      for (let ordinaryDrain = 0; ordinaryDrain < 10; ordinaryDrain += 1) {
+        const queuedContinuation = readJobsForAccount(service, localAccountId).find((job) =>
+          job.kind === "reconcile" && job.status === "queued"
+        );
+        if (queuedContinuation === undefined) {
+          break;
+        }
+        const drained = await service.runWorkerOnce();
+        assert.equal(drained?.kind, "reconcile");
+      }
+      const ordinaryPopulated = await liveRecords();
+      assert.equal(ordinaryPopulated.some((record) => eventHasMetric(record, "stress-level")), true);
+      assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      currentNow = new Date(Date.parse(initialNow) + 1).toISOString();
+      assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      const populated = await liveRecords();
+      assert.equal(populated.some((record) => eventHasMetric(record, "stress-level")), true);
+      await rebuildQueryProjection(vaultRoot);
+      const populatedPoints = await listMetricPoints(vaultRoot, { limit: null });
+      assert.equal(populatedPoints.some((point) => point.metricKey === "stress-level"), true);
+      assert.equal(populatedPoints.some((point) =>
+        point.metricKey.startsWith("stress-") && point.metricKey !== "stress-level"
+      ), true);
+
+      phase = "empty";
+      currentNow = new Date(Date.parse(initialNow) + 30 * 60_000).toISOString();
+      enqueueReconcile("junction-temporal-empty");
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      const replaced = await liveRecords();
+      assert.equal(replaced.some((record) => eventHasMetric(record, "stress-level")), true);
+      assert.equal(replaced.some((record) =>
+        record.kind === "observation"
+        && typeof record.metric === "string"
+        && record.metric.startsWith("stress-")
+        && record.metric !== "stress-level"
+      ), false);
+      await rebuildQueryProjection(vaultRoot);
+      const replacedPoints = await listMetricPoints(vaultRoot, { limit: null });
+      assert.equal(replacedPoints.some((point) => point.metricKey === "stress-level"), true);
+      assert.equal(replacedPoints.some((point) =>
+        point.metricKey.startsWith("stress-")
+        && point.metricKey !== "stress-level"
+        && (point.context?.qualifiers as Record<string, unknown> | undefined)
+          ?.["feature-policy-version"] === undefined
+      ), false);
+      const windowedRequests = requestedWindows.filter(([start, end]) => start !== end);
+      const ordinaryProviderDateRequests = requestedWindows.filter(([start, end]) =>
+        start !== null && start === end
+      );
+      assert.equal(windowedRequests.length, 7);
+      assert.equal(windowedRequests.filter(([start, end]) =>
+        start === dayStart && end === dayEnd
+      ).length, 3);
+      assert.deepEqual(windowedRequests[0], [dayStart, dayEnd]);
+      assert.deepEqual(windowedRequests.at(-1), [dayStart, dayEnd]);
+      assert.equal(ordinaryProviderDateRequests.length, 4);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test.each([
+    { restoredTimeZone: "UTC", slug: "same-timezone" },
+    { restoredTimeZone: "America/Chicago", slug: "changed-timezone" },
+  ])("hosted cold restore preserves Junction temporal authority ($slug)", async ({
+    restoredTimeZone,
+    slug,
+  }) => {
+    const buildWorkspaceService = async (workspaceSlug: string, timeZone: string) => {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        `hosted-device-sync-junction-temporal-cold-restore-${slug}-${workspaceSlug}-`,
+      );
+      await initializeVault({
+        createdAt: "2026-04-01T00:00:00.000Z",
+        timezone: timeZone,
+        vaultRoot,
+      });
+      return { cleanup, vaultRoot };
+    };
+    const hostedConnectionId = `hosted_conn_junction_temporal_cold_restore_${slug.replaceAll("-", "_")}`;
+    const externalAccountId = `junction-temporal-cold-restore-${slug}`;
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    assert.ok(sourceInstanceKey);
+    const now = "2026-04-24T12:00:00.000Z";
+    const snapshot = buildRuntimeSnapshot({
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      connectionId: hostedConnectionId,
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      externalAccountId,
+      generatedAt: now,
+      hostedUpdatedAt: now,
+      localState: { nextReconcileAt: null },
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2026-03-01T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-01T00:00:00.000Z",
+      },
+      provider: "junction",
+      providerConfigs: {
+        junction: {
+          environment: "sandbox",
+          reconcileDays: 3,
+          reconcileIntervalMs: 60 * 60_000,
+          region: "us",
+          summaryBackfillDays: 3,
+          summaryResources: [],
+          timeseriesBackfillDays: 3,
+        },
+      },
+      sources: [{
+        displayName: "Garmin",
+        firstSeenAt: "2026-04-01T00:00:00.000Z",
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: now,
+        resourceCount: 1,
+        resourceAvailabilitySummary: { stress_level: true },
+        sourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }],
+    });
+    const buildProvider = () => {
+      const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+        junction: {
+          apiKey: "sk_us_test_123",
+          clientUserIdSecret: "junction-client-user-id-secret",
+          environment: "sandbox",
+          region: "us",
+          reconcileDays: 3,
+          reconcileIntervalMs: 60 * 60_000,
+          summaryBackfillDays: 3,
+          summaryResources: [],
+          timeseriesBackfillDays: 3,
+          timeseriesResources: ["stress_level"],
+          fetchImpl: async (input) => {
+            const url = new URL(readTestUrl(input));
+            if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+              return createTestJsonResponse({ providers: [{
+                id: "provider-garmin-temporal-cold-restore",
+                slug: "garmin",
+                name: "Garmin",
+                status: "connected",
+                resource_availability: { stress_level: true },
+              }] });
+            }
+            if (url.pathname.startsWith("/v2/summary/")
+              && url.pathname.endsWith(`/${externalAccountId}`)) {
+              return createTestJsonResponse({ data: [] });
+            }
+            if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+              return createTestJsonResponse({ groups: { garmin: [{
+                data: [
+                  { timestamp: "2026-04-22T07:00:00.000Z", value: 20 },
+                  { timestamp: "2026-04-22T07:05:00.000Z", value: 30 },
+                  { timestamp: "2026-04-22T19:00:00.000Z", value: 70 },
+                  { timestamp: "2026-04-22T19:05:00.000Z", value: 80 },
+                ],
+                source: { provider: "garmin", type: "watch" },
+              }] } });
+            }
+            throw new Error(`Unexpected Junction cold-restore request: ${url.pathname}`);
+          },
+        },
+      });
+      assert.ok(provider);
+      return provider;
+    };
+    const buildService = (vaultRoot: string) => createHostedRuntimeDeviceSyncService({
+      clock: { now: () => new Date(now) },
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+      providers: [buildProvider()],
+      secret: DEVICE_SYNC_SECRET,
+    });
+
+    const firstWorkspace = await buildWorkspaceService("first", "UTC");
+    const restoredWorkspace = await buildWorkspaceService("restored", restoredTimeZone);
+    const firstService = buildService(firstWorkspace.vaultRoot);
+    const restoredService = buildService(restoredWorkspace.vaultRoot);
+    let firstClosed = false;
+
+    try {
+      const wake = buildDeviceSyncWake({
+        connectionId: hostedConnectionId,
+        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+        occurredAt: now,
+        provider: "junction",
+        reason: "webhook_hint",
+      });
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        snapshot,
+        wake,
+      });
+      const firstAccountId = firstState.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(firstAccountId);
+      getStore(firstService).enqueueJob({
+        accountId: firstAccountId,
+        availableAt: now,
+        dedupeKey: "junction-temporal-authority:v1:cold-restore",
+        kind: "resource",
+        payload: {
+          resource: "stress_level",
+          resourceCategory: "timeseries",
+          temporalAuthorityTimeZone: "UTC",
+          windowEnd: "2026-04-23T00:00:00.000Z",
+          windowStart: "2026-04-22T00:00:00.000Z",
+        },
+        priority: 45,
+        provider: "junction",
+      });
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake,
+      });
+      assert.ok(recovery);
+      const retainedHint = (recovery.wake.hint?.jobs ?? []).find((hint) =>
+        (hint.payload as { resource?: string } | undefined)?.resource === "stress_level"
+      );
+      assert.ok(retainedHint);
+      assert.equal(
+        (retainedHint.payload as { temporalAuthorityTimeZone?: string }).temporalAuthorityTimeZone,
+        "UTC",
+      );
+      assert.equal(
+        (retainedHint.payload as { windowStart?: string }).windowStart,
+        "2026-04-22T00:00:00.000Z",
+      );
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+        snapshot,
+        wake: recovery.wake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(restoredAccountId);
+      const processed = await restoredService.runWorkerOnce(restoredAccountId);
+      assert.equal(processed?.kind, "resource");
+
+      if (restoredTimeZone === "UTC") {
+        const records = await readCanonicalEventRecords(restoredWorkspace.vaultRoot);
+        assert.equal(records.some((record) =>
+          record.kind === "observation"
+          && typeof record.metric === "string"
+          && record.metric.startsWith("stress-")
+          && record.metric !== "stress-level"
+        ), true);
+        assert.equal(records.some((record) => eventHasMetric(record, "stress-level")), false);
+      } else {
+        // The retained authority timezone no longer matches the account; the
+        // stale job must terminate without minting authority and without
+        // running as ordinary ingestion for the temporal resource.
+        await assert.rejects(
+          readCanonicalEventRecords(restoredWorkspace.vaultRoot),
+          /VAULT_FILE_MISSING|Missing required file/u,
+        );
+      }
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("hosted custom importers without a timezone resolver remain ordinary and fail authority closed", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-junction-no-timezone-resolver-",
+    );
+    await initializeVault({
+      createdAt: "2026-04-01T00:00:00.000Z",
+      timezone: "America/Los_Angeles",
+      vaultRoot,
+    });
+    const hostedConnectionId = "hosted_conn_junction_no_timezone_resolver";
+    const snapshot = buildRuntimeSnapshot({
+      connectionId: hostedConnectionId,
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      externalAccountId: "junction-no-timezone-resolver",
+      provider: "junction",
+      providerConfigs: {
+        junction: {
+          environment: "sandbox",
+          region: "us",
+        },
+      },
+      sources: [],
+    });
+    const [configuredProvider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+      },
+    });
+    assert.ok(configuredProvider);
+    let observedTimeZone: string | undefined;
+    const provider: DeviceSyncProvider = {
+      ...configuredProvider,
+      jobExecutor: {
+        async executeJob(context) {
+          observedTimeZone = context.vaultTimeZone;
+          await context.importSnapshot({
+            accountId: context.account.externalAccountId,
+            importedAt: context.now,
+            timeseries: { stress_level: [{ timestamp: "2026-04-22T12:00:00", value: 45 }] },
+          });
+          return {};
+        },
+      },
+    };
+    const importerInputs: unknown[] = [];
+    const service = createHostedRuntimeDeviceSyncService({
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+      importer: {
+        async importDeviceProviderSnapshot(input) {
+          importerInputs.push(input);
+          return { events: [{}] };
+        },
+      },
+      providers: [provider],
+      secret: DEVICE_SYNC_SECRET,
+    });
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        snapshot,
+        wake: buildCronWake("2026-04-25T06:00:00.000Z"),
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-25T06:00:00.000Z",
+        kind: "reconcile",
+        payload: {},
+        provider: "junction",
+      });
+
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      assert.equal(observedTimeZone, undefined);
+      assert.equal(importerInputs.length, 1);
+      assert.equal(
+        Object.hasOwn(importerInputs[0] as Record<string, unknown>, "completeSourceDay"),
+        false,
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("hosted Junction yields keep prior daily resources durable across multiple slow peers", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-junction-resource-boundary-",
+    );
+    await initializeVault({
+      createdAt: "2026-04-01T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const connectedAt = "2026-04-01T00:00:00.000Z";
+    const externalAccountId = "junction-hosted-resource-boundary";
+    const hostedConnectionId = "hosted_conn_junction_resource_boundary";
+    const yieldedAt = "2026-04-03T12:00:00.000Z";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    assert.ok(sourceInstanceKey);
+    const metadata = {
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2026-03-31T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: connectedAt,
+    };
+    const snapshot = buildRuntimeSnapshot({
+      connectedAt,
+      connectionId: hostedConnectionId,
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      externalAccountId,
+      generatedAt: yieldedAt,
+      hostedUpdatedAt: yieldedAt,
+      localState: { nextReconcileAt: yieldedAt },
+      metadata,
+      provider: "junction",
+      providerConfigs: {
+        junction: {
+          environment: "sandbox",
+          reconcileDays: 1,
+          reconcileIntervalMs: 60 * 60_000,
+          region: "us",
+          summaryBackfillDays: 1,
+          summaryResources: ["activity"],
+          timeseriesBackfillDays: 1,
+        },
+      },
+      sources: [{
+        displayName: "Garmin",
+        firstSeenAt: connectedAt,
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: yieldedAt,
+        resourceCount: 4,
+        resourceAvailabilitySummary: {
+          blood_oxygen: true,
+          caffeine: true,
+          stress_level: true,
+          water: true,
+        },
+        sourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }],
+    });
+    let failurePhase: "stress" | "caffeine" | "recovered" = "stress";
+    let shouldYield = false;
+    let stressRequestCount = 0;
+    let caffeineRequestCount = 0;
+    let waterRequestCount = 0;
+    let resolveSlowStressRequest: (() => void) | null = null;
+    let resolveSlowCaffeineRequest: (() => void) | null = null;
+    const slowStressRequest = new Promise<void>((resolve) => {
+      resolveSlowStressRequest = resolve;
+    });
+    const slowCaffeineRequest = new Promise<void>((resolve) => {
+      resolveSlowCaffeineRequest = resolve;
+    });
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileDays: 1,
+        reconcileIntervalMs: 60 * 60_000,
+        requestTimeoutMs: 500,
+        summaryBackfillDays: 1,
+        summaryResources: ["activity"],
+        timeseriesBackfillDays: 1,
+        timeseriesResources: ["blood_oxygen", "stress_level", "caffeine", "water"],
+        fetchImpl: async (input, init) => {
+          const url = new URL(readTestUrl(input));
+          if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({ providers: [{
+              id: "provider-garmin-hosted-resource-boundary",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                blood_oxygen: true,
+                caffeine: true,
+                stress_level: true,
+                water: true,
+              },
+            }] });
+          }
+          if (url.pathname.startsWith("/v2/summary/") && url.pathname.endsWith(`/${externalAccountId}`)) {
+            return createTestJsonResponse({ data: [] });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`) {
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{
+                id: "blood-oxygen-hosted-stable",
+                timestamp: "2026-04-01T08:00:00.000Z",
+                unit: "%",
+                value: 97,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }] } });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+            stressRequestCount += 1;
+            if (failurePhase === "stress") {
+              resolveSlowStressRequest?.();
+              await new Promise<void>((resolve, reject) => {
+                const abort = () => reject(init?.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                init?.signal?.addEventListener("abort", abort, { once: true });
+                setTimeout(resolve, 2_000);
+              });
+              throw new Error("The hosted yield should abort the slow resource request.");
+            }
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{ start: "2026-04-01T09:00:00.000Z", value: 31 }],
+              source: { provider: "garmin", type: "watch" },
+            }] } });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/caffeine/grouped`) {
+            caffeineRequestCount += 1;
+            if (failurePhase === "caffeine") {
+              resolveSlowCaffeineRequest?.();
+              await new Promise<void>((resolve, reject) => {
+                const abort = () => reject(init?.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                init?.signal?.addEventListener("abort", abort, { once: true });
+                setTimeout(resolve, 2_000);
+              });
+              throw new Error("The hosted yield should abort the second slow resource request.");
+            }
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{
+                id: "caffeine-hosted-slow-1",
+                start: "2026-04-02T10:00:00.000Z",
+                end: "2026-04-02T10:05:00.000Z",
+                unit: "g",
+                value: 0.095,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }] } });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/water/grouped`) {
+            waterRequestCount += 1;
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{
+                id: "water-hosted-slow-1",
+                start: "2026-04-02T11:00:00.000Z",
+                end: "2026-04-02T11:05:00.000Z",
+                unit: "mL",
+                value: 250,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }] } });
+          }
+          throw new Error(`Unexpected Junction hosted-resource request: ${url.pathname}`);
+        },
+      },
+    });
+    assert.ok(provider);
+    const service = createHostedRuntimeDeviceSyncService({
+      clock: { now: () => new Date(yieldedAt) },
+      deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+      secret: DEVICE_SYNC_SECRET,
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        shouldYieldJobExecution: () => shouldYield,
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      providers: [provider],
+    });
+
+    try {
+      const deviceSyncPort = createSnapshotOnlyDeviceSyncPort(snapshot);
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        snapshot,
+        wake: buildCronWake(yieldedAt),
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      await service.runSchedulerOnce();
+      const scheduledJobs = readJobsForAccount(service, localAccountId);
+      assert.equal(
+        scheduledJobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length,
+        1,
+        JSON.stringify(scheduledJobs),
+      );
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      assert.equal(stressRequestCount, 0);
+      const yieldingWorker = service.runWorkerOnce();
+      await Promise.race([
+        slowStressRequest,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("Timed out waiting for Junction's slow stress request.")), 10_000);
+        }),
+      ]);
+      shouldYield = true;
+      assert.equal((await yieldingWorker)?.kind, "reconcile");
+      shouldYield = false;
+
+      // Facet-only temporal imports publish no ordinary facts, and a single
+      // sample is insufficient for a facet, so no canonical event exists yet.
+      await assert.rejects(readCanonicalEventRecords(vaultRoot), /VAULT_FILE_MISSING|Missing required file/u);
+      assert.equal(caffeineRequestCount, 0);
+      assert.equal(waterRequestCount, 0);
+      assert.equal(
+        Object.hasOwn(
+          getStore(service).getAccountById(localAccountId)?.metadata ?? {},
+          "junctionExtendedHistoryCoverage",
+        ),
+        false,
+      );
+      const yieldedJobs = readJobsForAccount(service, localAccountId);
+      assert.equal(yieldedJobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length, 1);
+      const retainedTemporalJobs = yieldedJobs.filter((job) =>
+        job.kind === "resource" && job.status === "queued"
+      );
+      assert.ok(retainedTemporalJobs.length > 0);
+      assert.equal(retainedTemporalJobs.every((job) => job.priority === 30), true);
+
+      failurePhase = "recovered";
+      for (let ordinaryDrain = 0; ordinaryDrain < 10; ordinaryDrain += 1) {
+        const queuedContinuation = readJobsForAccount(service, localAccountId).find((job) =>
+          job.kind === "reconcile" && job.status === "queued"
+        );
+        if (queuedContinuation === undefined) {
+          break;
+        }
+        const continuationCursor = (getStore(service).getJobById(queuedContinuation.id)?.payload as
+          { timeseriesResourceCursor?: string } | undefined)?.timeseriesResourceCursor;
+        if (continuationCursor === "caffeine") {
+          break;
+        }
+        assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      }
+      const ordinaryRecords = await readCanonicalEventRecords(vaultRoot);
+      const firstSpo2 = ordinaryRecords.filter((record) => eventHasMetric(record, "spo2"));
+      assert.equal(firstSpo2.length, 1);
+      assert.equal(
+        ordinaryRecords.filter((record) => eventHasMetric(record, "stress-level")).length,
+        1,
+      );
+      assert.equal(ordinaryRecords.some((record) => eventHasMetric(record, "caffeine")), false);
+      failurePhase = "caffeine";
+      const secondYieldingWorker = service.runWorkerOnce();
+      await Promise.race([
+        slowCaffeineRequest,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("Timed out waiting for Junction's slow caffeine request.")), 10_000);
+        }),
+      ]);
+      shouldYield = true;
+      assert.equal((await secondYieldingWorker)?.kind, "reconcile");
+      shouldYield = false;
+
+      const secondRecords = await readCanonicalEventRecords(vaultRoot);
+      assert.equal(
+        secondRecords.filter((record) => eventHasMetric(record, "stress-level")).length,
+        1,
+      );
+      assert.equal(secondRecords.some((record) => eventHasMetric(record, "caffeine")), false);
+      assert.equal(waterRequestCount, 0);
+      const twiceYieldedJobs = readJobsForAccount(service, localAccountId);
+      assert.equal(twiceYieldedJobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length, 1);
+
+      failurePhase = "recovered";
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      for (const _retainedTemporalJob of retainedTemporalJobs) {
+        assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      }
+      const recoveredRecords = await readCanonicalEventRecords(vaultRoot);
+      for (const firstRecord of firstSpo2) {
+        assert.deepEqual(
+          recoveredRecords
+            .filter((record) => record.id === firstRecord.id)
+            .map((record) => eventRevisionFromLifecycle(record.lifecycle)),
+          [1],
+        );
+      }
+      const recoveredStress = recoveredRecords.filter((record) =>
+        eventHasMetric(record, "stress-level")
+      );
+      assert.equal(recoveredStress.length, 1);
+      assert.deepEqual(
+        recoveredStress.map((record) => eventRevisionFromLifecycle(record.lifecycle)),
+        [1],
+      );
+      assert.equal(recoveredRecords.filter((record) => eventHasMetric(record, "caffeine")).length, 2);
+      assert.equal(recoveredRecords.filter((record) => eventHasMetric(record, "water")).length, 2);
+      // The retained-lease checkpoint prevents the already-terminal stress
+      // resource from replaying after the later caffeine request is aborted.
+      // The separately retained caffeine resource still executes once after
+      // its ordinary retry and converges through the stable canonical id.
+      assert.equal(stressRequestCount, 3);
+      assert.equal(caffeineRequestCount, 3);
+      assert.equal(waterRequestCount, 1);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

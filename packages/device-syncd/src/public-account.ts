@@ -74,6 +74,7 @@ export interface DeviceSyncSourceIdentity {
 }
 
 export interface DeviceSyncSourceLifecycleState {
+  lifecycleEpoch?: number | null;
   lastDataAt?: string | null;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
@@ -91,6 +92,14 @@ export interface ResolvedDeviceSyncSourceState<
 }
 
 type DeviceSyncSourceStateUnavailable = () => unknown;
+
+const DEVICE_SYNC_SOURCE_AVAILABILITY_LIMIT = 64;
+const DEVICE_SYNC_SOURCE_STATUS_AUTHORITY = {
+  connected: 0,
+  unavailable: 1,
+  error: 2,
+  disconnected: 3,
+} as const satisfies Record<DeviceConnectionSourceStatus, number>;
 
 export function compareDeviceSyncSourceIdentity(
   left: DeviceSyncSourceIdentity,
@@ -110,6 +119,10 @@ export function resolveDeviceSyncSourceState<
   sources: readonly [T, ...T[]],
   unavailable: DeviceSyncSourceStateUnavailable,
 ): ResolvedDeviceSyncSourceState<T> {
+  if (sources.some((source) => source.lifecycleEpoch !== undefined)) {
+    return resolveVersionedDeviceSyncSourceState(sources, unavailable);
+  }
+
   let identitySource = sources[0];
   let lifecycleSource = sources[0];
   parseDeviceSyncSourceTimestamp(lifecycleSource.lastSeenAt, unavailable);
@@ -145,6 +158,63 @@ export function resolveDeviceSyncSourceState<
   }
 
   return { identitySource, lastDataAt, lifecycleSource };
+}
+
+function resolveVersionedDeviceSyncSourceState<
+  T extends DeviceSyncSourceIdentity & DeviceSyncSourceLifecycleState,
+>(
+  sources: readonly [T, ...T[]],
+  unavailable: DeviceSyncSourceStateUnavailable,
+): ResolvedDeviceSyncSourceState<T> {
+  let identitySource = sources[0];
+  let lastDataAt: string | null = null;
+  let latestLastSeenAt: string | null = null;
+
+  for (const source of sources) {
+    if (compareDeviceSyncSourceIdentity(source, identitySource) < 0) {
+      identitySource = source;
+    }
+    lastDataAt = mergeDeviceSyncSourceLastDataAt(
+      source.lastDataAt,
+      lastDataAt,
+      unavailable,
+    );
+    latestLastSeenAt = mergeOptionalDeviceSyncSourceTimestamp(
+      source.lastSeenAt,
+      latestLastSeenAt,
+    );
+  }
+
+  const ordered = [...sources].sort(compareVersionedDeviceSyncSourceLifecycle);
+  const lifecycleSource = ordered[0];
+  if (!lifecycleSource) {
+    throw unavailable();
+  }
+  const lifecycleEpoch = effectiveDeviceSyncSourceLifecycleEpoch(lifecycleSource);
+  const currentLifecycleSources = ordered.filter(
+    (source) => effectiveDeviceSyncSourceLifecycleEpoch(source) === lifecycleEpoch,
+  );
+  const disconnectFence = currentLifecycleSources.find(
+    isDeviceSyncSourceDisconnectFenced,
+  );
+  const resourceAvailabilitySummary = mergeDeviceSyncSourceAvailability(ordered);
+
+  return {
+    identitySource,
+    lastDataAt,
+    lifecycleSource: {
+      ...lifecycleSource,
+      lifecycleEpoch,
+      ...(latestLastSeenAt === null ? {} : { lastSeenAt: latestLastSeenAt }),
+      resourceAvailabilitySummary,
+      ...(disconnectFence
+        ? {
+            lastErrorCode: disconnectFence.lastErrorCode,
+            lastErrorMessage: disconnectFence.lastErrorMessage,
+          }
+        : {}),
+    },
+  };
 }
 
 export function dedupeDeviceSyncSourcesByIdentity<
@@ -207,6 +277,72 @@ function compareDeviceSyncSourceLifecycle(
 ): number {
   return parseDeviceSyncSourceTimestamp(left.lastSeenAt, unavailable)
     - parseDeviceSyncSourceTimestamp(right.lastSeenAt, unavailable);
+}
+
+function compareVersionedDeviceSyncSourceLifecycle(
+  left: DeviceSyncSourceIdentity & DeviceSyncSourceLifecycleState,
+  right: DeviceSyncSourceIdentity & DeviceSyncSourceLifecycleState,
+): number {
+  return effectiveDeviceSyncSourceLifecycleEpoch(right)
+      - effectiveDeviceSyncSourceLifecycleEpoch(left)
+    || DEVICE_SYNC_SOURCE_STATUS_AUTHORITY[right.status]
+      - DEVICE_SYNC_SOURCE_STATUS_AUTHORITY[left.status]
+    || parseOptionalDeviceSyncSourceTimestamp(right.lastSeenAt)
+      - parseOptionalDeviceSyncSourceTimestamp(left.lastSeenAt)
+    || compareDeviceSyncSourceIdentity(left, right);
+}
+
+function effectiveDeviceSyncSourceLifecycleEpoch(
+  source: DeviceSyncSourceLifecycleState,
+): number {
+  const lifecycleEpoch = source.lifecycleEpoch ?? 1;
+  return Number.isSafeInteger(lifecycleEpoch) && lifecycleEpoch > 0
+    ? lifecycleEpoch
+    : 1;
+}
+
+function mergeOptionalDeviceSyncSourceTimestamp(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): string | null {
+  const leftTimestamp = parseOptionalDeviceSyncSourceTimestamp(left);
+  const rightTimestamp = parseOptionalDeviceSyncSourceTimestamp(right);
+  if (leftTimestamp === Number.NEGATIVE_INFINITY) {
+    return right ?? null;
+  }
+  return leftTimestamp > rightTimestamp ? left ?? null : right ?? null;
+}
+
+function parseOptionalDeviceSyncSourceTimestamp(
+  value: string | null | undefined,
+): number {
+  if (typeof value !== "string") {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function mergeDeviceSyncSourceAvailability(
+  sources: readonly DeviceSyncSourceLifecycleState[],
+): DeviceConnectionSourceResourceAvailabilitySummary {
+  const merged: DeviceConnectionSourceResourceAvailabilitySummary = {};
+  let count = 0;
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(
+      source.resourceAvailabilitySummary ?? {},
+    ).sort(([left], [right]) => left.localeCompare(right))) {
+      if (count >= DEVICE_SYNC_SOURCE_AVAILABILITY_LIMIT) {
+        return merged;
+      }
+      if (Object.hasOwn(merged, key)) {
+        continue;
+      }
+      merged[key] = value;
+      count += 1;
+    }
+  }
+  return merged;
 }
 
 function parseDeviceSyncSourceTimestamp(

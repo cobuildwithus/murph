@@ -23,7 +23,6 @@ import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "./client.ts";
-
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -368,6 +367,8 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  /** Absent only during rolling deploys from a pre-epoch Web producer. */
+  lifecycleEpoch?: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload carrying this source's data; null until one has. */
@@ -441,6 +442,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   sourceInstanceKey: string;
   sourceProviderSlug: string;
   observedLastSeenAt: string | null;
+  observedLifecycleEpoch?: number;
   displayName?: string | null;
   status: DeviceConnectionSourceStatus;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
@@ -744,12 +746,14 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   occurredAt: "isoTimestamp",
   resource: "string",
   resourceCategory: "string",
+  sourceLifecycleEpoch: "number",
   resourceId: "string",
   resourceType: "string",
   sourceEventType: "string",
   sourceProviderSlug: "string",
   summaryPhaseComplete: "boolean",
   summaryResourceCursor: "string",
+  temporalAuthorityTimeZone: "string",
   timeseriesCursor: "isoTimestamp",
   timeseriesResourceCursor: "string",
   timeseriesWindowHours: "number",
@@ -1774,6 +1778,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
     lastErrorMessage: sanitizeHostedRuntimeErrorText(
       readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
     ),
+    ...(record.lifecycleEpoch === undefined
+      ? {}
+      : {
+          lifecycleEpoch: requirePositiveInteger(
+            record.lifecycleEpoch,
+            `${label}.lifecycleEpoch`,
+          ),
+        }),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
     // Absent means "produced before this field existed", which must stay
     // parseable: a runner-first deploy would otherwise reject every snapshot
@@ -1909,6 +1921,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
     "lastErrorCode",
     "lastErrorMessage",
     "lastSeenAt",
+    "observedLifecycleEpoch",
     "observedLastSeenAt",
     "resourceAvailabilitySummary",
     "sourceInstanceKey",
@@ -1938,6 +1951,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       record.observedLastSeenAt,
       `${label}.observedLastSeenAt`,
     ),
+    observedLifecycleEpoch: record.observedLifecycleEpoch === undefined
+      ? undefined
+      : requirePositiveInteger(
+          record.observedLifecycleEpoch,
+          `${label}.observedLifecycleEpoch`,
+        ),
     sourceInstanceKey: requireString(record.sourceInstanceKey, `${label}.sourceInstanceKey`),
     sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
     ...(record.displayName === undefined
