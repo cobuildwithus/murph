@@ -37338,6 +37338,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: false,
       checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
@@ -37347,6 +37348,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: true,
       checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
@@ -37356,6 +37358,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: true,
       checkpointConversationInputAhead: true,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: false,
       checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
@@ -37365,6 +37368,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: true,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: true,
       checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
@@ -37374,6 +37378,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: false,
       checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
@@ -37383,6 +37388,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: true,
       checkpointTrustedCompletion: false,
       checkpointSystemControl: true,
@@ -37392,6 +37398,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: true,
       checkpointTrustedCompletion: true,
       checkpointSystemControl: false,
@@ -37401,6 +37408,7 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: true,
       checkpointTrustedCompletion: false,
       checkpointTrustedCompletionRetry: true,
@@ -37412,6 +37420,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointAssistantInputRetry: "conversation" as const,
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: false,
       checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
@@ -37422,17 +37431,29 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointAssistantInputRetry: "hosted-image" as const,
       checkpointConversation: false,
       checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: false,
       checkpointRuntimeWake: false,
       checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
       generatedImageRetention: false,
       handoff: "retried hosted image completion quiet window",
     },
+    {
+      checkpointConversation: false,
+      checkpointConversationInputAhead: false,
+      checkpointFreshTerminalConversation: true,
+      checkpointRuntimeWake: true,
+      checkpointTrustedCompletion: false,
+      checkpointSystemControl: false,
+      generatedImageRetention: false,
+      handoff: "fresh terminal conversation without borrowed quiet window",
+    },
   ])("older due assistant carry honors $handoff before persisting a later reminder", async (
     {
       checkpointAssistantInputRetry,
       checkpointConversation,
       checkpointConversationInputAhead,
+      checkpointFreshTerminalConversation,
       checkpointRuntimeWake,
       checkpointTrustedCompletion,
       checkpointTrustedCompletionRetry,
@@ -37466,6 +37487,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const reminderWakePersisted = createDeferred<void>();
     const assistantInputRetryFailed = createDeferred<void>();
     const assistantInputRetryHandled = createDeferred<void>();
+    const freshTerminalConversationHandled = createDeferred<void>();
     const trustedCompletionHandled = createDeferred<void>();
     const trustedCompletionRetryFailed = createDeferred<void>();
     const firstCheckpointConversationHandled = createDeferred<void>();
@@ -37479,6 +37501,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let assistantPass = 0;
     let assistantInputRetryAttempts = 0;
     let assistantInputRetryId: string | null = null;
+    let freshTerminalConversationInputId: string | null = null;
     let reminderReconciled = false;
     let snapshotCount = 0;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
@@ -37568,6 +37591,23 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push(`mailbox.importItem:${item.item.id}`);
             if (
               item.item.id
+                === "mailbox_item_entrypoint_assistant_carry_mask_fresh_terminal"
+            ) {
+              freshTerminalConversationInputId =
+                await stagePendingLinqAssistantInputForMailboxItem({
+                  causalSeq: item.item.laneSeq,
+                  item: item.item,
+                  vaultRoot,
+                });
+              assert.ok(context?.onConversationInputStaged);
+              context.onConversationInputStaged("linq");
+              return {
+                assistantInputId: freshTerminalConversationInputId,
+                status: "imported",
+              };
+            }
+            if (
+              item.item.id
                 === "mailbox_item_entrypoint_assistant_carry_mask_input_retry"
             ) {
               assistantInputRetryId = checkpointAssistantInputRetry === "hosted-image"
@@ -37644,6 +37684,14 @@ describe("hosted workspace runtime entrypoint", () => {
                       laneSeq: "3",
                     }));
                   }
+                  if (checkpointFreshTerminalConversation) {
+                    mailboxItems.push(createMailboxItem({
+                      id:
+                        "mailbox_item_entrypoint_assistant_carry_mask_"
+                        + "fresh_terminal",
+                      laneSeq: "3",
+                    }));
+                  }
                   if (checkpointSystemControl) {
                     mailboxItems.push(createMailboxItem({
                       id: "mailbox_item_entrypoint_assistant_carry_mask_system_001",
@@ -37697,6 +37745,33 @@ describe("hosted workspace runtime entrypoint", () => {
             assistantPass += 1;
             const presentedWakeAt = input.workspace?.nextWakeAt ?? "none";
             events.push(`assistant:${assistantPass}:${presentedWakeAt}:${Date.now()}`);
+
+            if (
+              freshTerminalConversationInputId !== null
+              && !events.includes("fresh-terminal-conversation:handled")
+            ) {
+              const release = await input.beforeProviderAcceptedInputs?.({
+                turnId: "turn_hosted_runtime_test",
+                acceptedInputs: [{
+                  id: freshTerminalConversationInputId,
+                  source: "assistant-input",
+                }],
+              });
+              assert.ok(release);
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: freshTerminalConversationInputId,
+                vaultRoot,
+              });
+              await release?.();
+              events.push("fresh-terminal-conversation:handled");
+              freshTerminalConversationHandled.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: reconciliationWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
 
             if (
               assistantInputRetryId !== null
@@ -37933,6 +38008,13 @@ describe("hosted workspace runtime entrypoint", () => {
           () => events.join(","),
         );
       }
+      if (checkpointFreshTerminalConversation) {
+        await withRealTimeout(
+          freshTerminalConversationHandled.promise,
+          15_000,
+          () => events.join(","),
+        );
+      }
       if (generatedImageRetention) {
         assert.deepEqual(
           (await readHostedSystemMailboxState(vaultRoot)).pending,
@@ -38159,6 +38241,26 @@ describe("hosted workspace runtime entrypoint", () => {
             + 1_000
             + idleCheckpointDelayMs
           }`,
+        );
+        return;
+      }
+      if (checkpointFreshTerminalConversation) {
+        assert.equal(
+          events[secondSnapshotIndex],
+          `snapshot:2:idle_shutdown:${Date.parse(TEST_NOW) + idleCheckpointDelayMs}`,
+        );
+        assert.ok(
+          requireEventIndex(
+            events,
+            "mailbox.importItem:"
+            + "mailbox_item_entrypoint_assistant_carry_mask_fresh_terminal",
+          ) < secondSnapshotIndex,
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, "fresh-terminal-conversation:handled")
+            < secondSnapshotIndex,
+          events.join(","),
         );
         return;
       }
