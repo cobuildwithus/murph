@@ -1446,6 +1446,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     const mailboxBudgetExhausted = () => mailboxBudget.exhausted;
     let preCheckpointExternalCompletionImported = false;
+    let foregroundPriorityWorkOrdinal = 0;
     let deviceSyncMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
     const createMailboxImportContext = (
@@ -1464,9 +1465,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       onConversationActivityObserved: () => {
         options.onConversationActivityObserved?.("observed");
       },
-      onConversationInputStaged:
-        context?.onConversationInputStaged
-        ?? startCodexProcessPreparationForConversation,
+      onConversationInputStaged: (channel) => {
+        foregroundPriorityWorkOrdinal += 1;
+        const notifyConversationInputStaged =
+          context?.onConversationInputStaged
+          ?? startCodexProcessPreparationForConversation;
+        notifyConversationInputStaged?.(channel);
+      },
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
     });
@@ -3135,6 +3140,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantInputId: string | null = null;
+        let acceptedReadyImageCompletion = false;
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
@@ -3243,7 +3249,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       acceptedInputContext.conversationActivity,
                     );
                   }
-                  consumeReadyImageCompletionInputs(assistantInputIds);
+                  const consumedReadyImageCompletion =
+                    consumeReadyImageCompletionInputs(assistantInputIds);
+                  acceptedReadyImageCompletion ||= consumedReadyImageCompletion;
                   return () => {
                     currentAssistantInputId = null;
                   };
@@ -3299,6 +3307,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             workspace: passInput.workspace,
           });
         recordBrowserVaultReplicaRefreshIntent(passResult);
+        if (
+          passResult.runtimeStateDirty
+          && (
+            acceptedReadyImageCompletion
+            || passResult.assistantPhaseResult
+              ?.foregroundPrioritySystemCompletionProcessed === true
+          )
+        ) {
+          foregroundPriorityWorkOrdinal += 1;
+        }
         return passResult;
       } catch (error) {
         emitPhaseLog({
@@ -4196,15 +4214,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         wake: deferredDeviceSyncWake,
       };
     };
+    const resolveCanonicalWriteDueAssistantServiceBarrierKey = (): string | null => {
+      if (
+        pendingWakeAfterDueAssistantService === null
+        || hotProjectedAssistantWakeAttemptedKey === null
+        || buildHostedRuntimeWakeKey(pendingWake)
+          !== hotProjectedAssistantWakeAttemptedKey
+      ) {
+        return null;
+      }
+      return hotProjectedAssistantWakeAttemptedKey;
+    };
     const overlayPendingWakeOnCommittedWorkspace = (
       checkpointPendingBeforePass: boolean,
-      presentedInvocationLocalProjectedAssistantWakeKey: string | null,
+      presentedProjectedAssistantWakeKey: string | null,
     ): HostedWorkspaceState | null => {
         if (committedWorkspace === null) {
           return null;
         }
         let passWake = pendingWake;
-        if (presentedInvocationLocalProjectedAssistantWakeKey !== null) {
+        if (presentedProjectedAssistantWakeKey !== null) {
           return {
             ...committedWorkspace,
             nextWakeAt: pendingWake.nextWakeAt,
@@ -4252,7 +4281,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const canonicalWriteCount = await controller.flushCanonicalWrites(
           async (write, metadata) => {
             const workspace = mergeGeneratedImageRetentionWakeIntoWorkspace(
-              overlayPendingWakeOnCommittedWorkspace(runtimeStateDirty, null),
+              overlayPendingWakeOnCommittedWorkspace(
+                runtimeStateDirty,
+                resolveCanonicalWriteDueAssistantServiceBarrierKey(),
+              ),
               metadata.retentionWakeAt,
             );
             const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
@@ -4342,17 +4374,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const consumeReadyImageCompletionInputs = (
         acceptedInputIds: readonly string[],
-      ): void => {
+      ): boolean => {
         const readyBatch = readyImageCompletionInputBatch;
         if (!readyBatch) {
-          return;
+          return false;
         }
         const acceptedInputIdSet = new Set(acceptedInputIds);
         const retainedInputIds = readyBatch.assistantInputIds.filter(
           (inputId) => !acceptedInputIdSet.has(inputId),
         );
         if (retainedInputIds.length === readyBatch.assistantInputIds.length) {
-          return;
+          return false;
         }
         readyImageCompletionInputBatch = retainedInputIds.length === 0
           ? null
@@ -4360,12 +4392,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ...readyBatch,
               assistantInputIds: retainedInputIds,
             };
+        return true;
       };
       const absorbForegroundPassResult = (
         passResult: HostedWorkspaceRunnerResult,
         passWorkspace: HostedWorkspaceState | null,
         previousPendingWake: HostedRuntimePendingWake,
-        presentedInvocationLocalProjectedAssistantWakeKey: string | null,
+        presentedProjectedAssistantWakeKey: string | null,
         preserveDueAssistantWakeOnNoProgress: boolean,
       ): void => {
         const checkpointPendingBeforePass = runtimeStateDirty;
@@ -4381,6 +4414,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           result: passResult,
           workspace: passWorkspace,
         });
+        const assistantContinuationWakeAt =
+          passResult.assistantPhaseResult?.nextWakeAt ?? null;
+        const assistantContinuationWake =
+          assistantContinuationWakeAt !== null
+          && hostedRuntimeWakeReasonIsAssistant(
+            passResult.assistantPhaseResult?.nextWakeReason ?? null,
+          )
+            ? {
+                nextWakeAt: assistantContinuationWakeAt,
+                nextWakeReason:
+                  passResult.assistantPhaseResult?.nextWakeReason ?? null,
+              }
+            : null;
         const passWake = resolveHostedWorkspaceRunNextWake({
           assistantPhaseResult: passResult.assistantPhaseResult,
           committedWorkspace: committedPassWorkspace,
@@ -4423,13 +4469,44 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           assistantProjectedWakeKey: passProjectedAssistantWakeKey,
           checkpointPendingBeforePass,
           passWake,
-          presentedInvocationLocalProjectedAssistantWakeKey,
+          presentedProjectedAssistantWakeKey,
           previousPendingWake,
           preserveDueAssistantWakeOnNoProgress,
           replaceWake,
           nowMs: Date.now(),
         });
         pendingWake = wakeResolution.pendingWake;
+        // The older due token remains checkpoint authority until its hot
+        // service attempt is committed. Retain a distinct later assistant
+        // obligation in the existing successor slot instead of dropping it.
+        if (
+          checkpointPendingBeforePass
+          && presentedProjectedAssistantWakeKey === null
+          && assistantContinuationWake !== null
+          && hotProjectedAssistantWakeAttemptedKey !== null
+          && buildHostedRuntimeWakeKey(previousPendingWake)
+            === hotProjectedAssistantWakeAttemptedKey
+          && previousPendingWake.nextWakeAt !== null
+          && hostedRuntimeWakeReasonIsAssistant(previousPendingWake.nextWakeReason)
+          && hostedRuntimeWakeIsDue(previousPendingWake.nextWakeAt)
+          && Date.parse(assistantContinuationWake.nextWakeAt)
+            > Date.parse(previousPendingWake.nextWakeAt)
+          && hostedRuntimePendingWakeMatches(pendingWake, previousPendingWake)
+        ) {
+          pendingWakeAfterDueAssistantService = {
+            durableWake: selectEarliestHostedRuntimeWake([
+              {
+                at: pendingWakeAfterDueAssistantService?.durableWake.nextWakeAt ?? null,
+                reason:
+                  pendingWakeAfterDueAssistantService?.durableWake.nextWakeReason ?? null,
+              },
+              {
+                at: assistantContinuationWake.nextWakeAt,
+                reason: assistantContinuationWake.nextWakeReason,
+              },
+            ]),
+          };
+        }
         if (passProducedDefaultWake && passWake.nextWakeAt !== null) {
           recordUnservicedRecheckWake(passWake);
         }
@@ -4489,7 +4566,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
         providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
-        invocationLocalProjectedAssistantWakeKey?: string | null;
+        projectedAssistantWakeKey?: string | null;
         preserveDueAssistantWakeOnNoProgress?: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
         signal?: AbortSignal;
@@ -4516,19 +4593,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           idleWakeOrdinal += 1;
           const previousPendingWake = pendingWake;
           const checkpointPendingBeforePass = runtimeStateDirty;
-          const requestedInvocationLocalProjectedAssistantWakeKey =
-            singleWakeInput.invocationLocalProjectedAssistantWakeKey ?? null;
-          const presentedInvocationLocalProjectedAssistantWakeKey =
-            requestedInvocationLocalProjectedAssistantWakeKey !== null
-            && requestedInvocationLocalProjectedAssistantWakeKey
+          const requestedProjectedAssistantWakeKey =
+            singleWakeInput.projectedAssistantWakeKey ?? null;
+          const presentedProjectedAssistantWakeKey =
+            requestedProjectedAssistantWakeKey !== null
+            && requestedProjectedAssistantWakeKey
               === buildHostedRuntimeWakeKey(previousPendingWake)
             && hostedRuntimeWakeReasonIsAssistant(previousPendingWake.nextWakeReason)
             && hostedRuntimeWakeIsDue(previousPendingWake.nextWakeAt)
-              ? requestedInvocationLocalProjectedAssistantWakeKey
+              ? requestedProjectedAssistantWakeKey
               : null;
           const passWorkspace = overlayPendingWakeOnCommittedWorkspace(
             checkpointPendingBeforePass,
-            presentedInvocationLocalProjectedAssistantWakeKey,
+            presentedProjectedAssistantWakeKey,
           );
           result = await runWorkspaceForegroundPass({
             foregroundCausalOnly:
@@ -4553,7 +4630,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             result,
             passWorkspace,
             previousPendingWake,
-            presentedInvocationLocalProjectedAssistantWakeKey,
+            presentedProjectedAssistantWakeKey,
             singleWakeInput.preserveDueAssistantWakeOnNoProgress === true,
           );
           return result;
@@ -5179,7 +5256,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ) {
           hotProjectedAssistantWakeAttemptedKey = hotProjectedAssistantWake.key;
           await runForegroundPass({
-            invocationLocalProjectedAssistantWakeKey: hotProjectedAssistantWake.key,
+            projectedAssistantWakeKey: hotProjectedAssistantWake.key,
             latencySeed: null,
             preserveDueAssistantWakeOnNoProgress: true,
             requestIdKind: "idle-wake",
@@ -5325,7 +5402,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               persistGeneratedImageRetention: async (write) => {
                 const workspace = overlayPendingWakeOnCommittedWorkspace(
                   runtimeStateDirty,
-                  null,
+                  resolveCanonicalWriteDueAssistantServiceBarrierKey(),
                 );
                 const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
                   previousRedactedStatus:
@@ -5543,13 +5620,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const conversationInputAhead = checkpoint.conversationInputAhead === true;
         const hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint =
           hotProjectedAssistantWakeAttemptedKey;
+        const checkpointCompletedDueAssistantServiceBarrier =
+          pendingWakeAfterDueAssistantService !== null
+          && hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint !== null
+          && buildHostedRuntimeWakeKey({
+            nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+            nextWakeReason: checkpoint.workspace.nextWakeReason ?? null,
+          }) === hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint;
         rebaseCommittedWorkspace(checkpoint.workspace);
         runtimeStateDirty = false;
         idleCheckpointStartByMs = null;
         hotProjectedAssistantWakeAttemptedKey = null;
         durableCheckpointFollowUpPending = false;
+        if (checkpointCompletedDueAssistantServiceBarrier) {
+          reconcilePendingWakeAfterDueAssistantPass({
+            preservedDueAssistantWakeOnNoProgress: true,
+          });
+          durableCheckpointFollowUpPending = true;
+        }
         if (
-          latestCheckpointSnapshotCleanForWarmReuse
+          !runtimeStateDirty
+          && latestCheckpointSnapshotCleanForWarmReuse
           && durableCheckpointEffectCount === 0
         ) {
           await writeHostedWorkspaceCleanCheckpointMarkerBestEffort({
@@ -5589,6 +5680,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             throw error;
           }
         };
+        const resolveDueAssistantServiceBarrierSuccessorKey = (): string | null => {
+          if (
+            !checkpointCompletedDueAssistantServiceBarrier
+            || !mayRunPostCheckpointWork()
+            || invocationStatus === "budget_exhausted"
+            || !hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
+            || !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
+          ) {
+            return null;
+          }
+          return buildHostedRuntimeWakeKey(pendingWake);
+        };
+        const checkpointStartByAtBarrierRelease =
+          checkpointCompletedDueAssistantServiceBarrier
+            ? idleCheckpointStartByMs
+            : null;
+        const foregroundPriorityWorkOrdinalAtBarrierRelease =
+          foregroundPriorityWorkOrdinal;
         if (conversationInputAhead && mayRunPostCheckpointWork()) {
           await runOptionalPostCheckpointWork(
             async () =>
@@ -5597,7 +5706,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 signal: postCheckpointWorkSignal,
               }),
           );
-          if (runtimeStateDirty) {
+          if (
+            runtimeStateDirty
+            && resolveDueAssistantServiceBarrierSuccessorKey() === null
+          ) {
+            pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
             continue;
           }
         }
@@ -5665,10 +5778,37 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             if (checkpointWakeHandled === null && !mayRunPostCheckpointWork()) {
               mailboxWakeNeedsReplacement = true;
             }
-            if (runtimeStateDirty) {
-              continue;
+            if (checkpointWakeHandled !== null) {
+              checkpointWakeLatencySeed = null;
             }
           }
+        }
+        const dueAssistantServiceBarrierSuccessorKey =
+          resolveDueAssistantServiceBarrierSuccessorKey();
+        if (dueAssistantServiceBarrierSuccessorKey !== null) {
+          const dueAssistantWakeResult = await runOptionalPostCheckpointWork(
+            async () =>
+              await runForegroundPass({
+                latencySeed: null,
+                preserveDueAssistantWakeOnNoProgress: true,
+                projectedAssistantWakeKey:
+                  dueAssistantServiceBarrierSuccessorKey,
+                requestIdKind: "checkpoint-wake",
+                signal: postCheckpointWorkSignal,
+              }),
+          );
+          if (
+            dueAssistantWakeResult !== null
+            && checkpointStartByAtBarrierRelease !== null
+            && foregroundPriorityWorkOrdinal
+              === foregroundPriorityWorkOrdinalAtBarrierRelease
+          ) {
+            setIdleCheckpointStartBy(checkpointStartByAtBarrierRelease);
+          }
+        }
+        if (runtimeStateDirty) {
+          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
+          continue;
         }
         let vaultShareOpportunity: HostedVaultShareProjectionOpportunity | null = null;
         if (
@@ -6660,7 +6800,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
   checkpointPendingBeforePass: boolean;
   nowMs: number;
   passWake: HostedRuntimePendingWake;
-  presentedInvocationLocalProjectedAssistantWakeKey: string | null;
+  presentedProjectedAssistantWakeKey: string | null;
   previousPendingWake: HostedRuntimePendingWake;
   preserveDueAssistantWakeOnNoProgress: boolean;
   replaceWake: boolean;
@@ -6680,7 +6820,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
     && hostedRuntimeWakeIsDue(input.passWake.nextWakeAt, input.nowMs);
   const preservePendingWakeThroughPreCheckpointPass =
     input.checkpointPendingBeforePass
-    && input.presentedInvocationLocalProjectedAssistantWakeKey === null
+    && input.presentedProjectedAssistantWakeKey === null
     && input.previousPendingWake.nextWakeAt !== null
     && (
       !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
@@ -6696,7 +6836,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
 
   const previousWakeAt =
     input.checkpointPendingBeforePass
-      && input.presentedInvocationLocalProjectedAssistantWakeKey === null
+      && input.presentedProjectedAssistantWakeKey === null
       && !freshDueSupersedesCarriedDue
     ? input.previousPendingWake.nextWakeAt
     : normalizeHostedFutureWakeAt(input.previousPendingWake.nextWakeAt, input.nowMs);
@@ -6714,7 +6854,7 @@ function resolvePendingWakeAfterForegroundPass(input: {
 
   if (
     input.preserveDueAssistantWakeOnNoProgress
-    && input.presentedInvocationLocalProjectedAssistantWakeKey !== null
+    && input.presentedProjectedAssistantWakeKey !== null
     && input.assistantProjectedWakeKey === null
     && input.previousPendingWake.nextWakeAt !== null
     && hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
