@@ -39,6 +39,21 @@
 - Post-deploy checks: <!-- Required when applicable -->
 - Reason: <!-- Required only when not applicable -->
 
+## Change-shape breakdown
+
+<!-- Classify base-to-head added/deleted lines by primary purpose. Note binary files and keep generated output separate from authored source. Raw LOC is reviewer orientation and a scope-anomaly signal, not a quality target. -->
+
+Classification rule: <!-- Explain how paths were classified and note any binary files. -->
+
+| Category | Added | Deleted |
+| --- | ---: | ---: |
+| Source | 0 | 0 |
+| Tests / fixtures | 0 | 0 |
+| Docs | 0 | 0 |
+| Config / tooling | 0 | 0 |
+| Generated / other | 0 | 0 |
+| **Total** | **0** | **0** |
+
 ## Changelog
 
 <!-- Use `$write-changelog` for member-visible features and improvements. Choose exactly one disposition. -->

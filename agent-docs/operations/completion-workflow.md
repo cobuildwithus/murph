@@ -248,6 +248,14 @@ Every PR includes:
 - **Evidence.** List the direct journey proof and focused checks. For frontend
   work, state the changed states and viewports. Link screenshots only when they
   add proof. There is no screenshot quota and no required catalog link.
+- **Change-shape breakdown.** Report added and deleted lines from the
+  base-to-head diff, classified as source, tests/fixtures, docs,
+  config/tooling, and generated/other. State the classification rule, note
+  binary files, and keep generated code separate from authored source. Use a
+  five-row `Category | Added | Deleted` table plus a total. This is reviewer
+  orientation and a scope-anomaly signal, not a quality target or an automatic
+  merge or architecture verdict; moves and generated churn can distort raw
+  counts.
 - **Deployment concerns.** Add exactly one `## Deployment concerns` section.
   Select `Deployment: applicable` and complete the deployment contract when the
   change crosses a deploy boundary; otherwise select
@@ -336,8 +344,8 @@ sends a full guarded snapshot. PRs that do not enter that gate do not need the
 line.
 
 The applicable invariant and review docs own the required content for each
-risk and deploy boundary. Do not paste empty risk sections, a manual line-count table,
-the full work plan, or a repeated list of review lenses into every PR.
+risk and deploy boundary. Do not paste empty risk sections, the full work plan,
+or a repeated list of review lenses into every PR.
 
 ## Review-Resolution Loop
 
