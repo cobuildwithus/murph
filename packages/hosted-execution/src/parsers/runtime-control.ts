@@ -7238,6 +7238,14 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
   }
 
   return {
+    ...(record.assistantExecutionBlocked === undefined
+      ? {}
+      : {
+          assistantExecutionBlocked: requireExactTrue(
+            record.assistantExecutionBlocked,
+            "Hosted workspace invocation request assistantExecutionBlocked",
+          ),
+        }),
     attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),
     ...(record.budget === undefined || record.budget === null
       ? {}

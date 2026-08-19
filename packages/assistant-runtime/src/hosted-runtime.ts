@@ -959,6 +959,7 @@ function hostedAssistantInputBatchHasWork(
 }
 
 async function resolveHostedSystemMailboxProcessingModeWake(input: {
+  assistantExecutionBlocked?: boolean;
   extraCandidates?: readonly HostedRuntimeWakeCandidate[] | null;
   mailboxImportRetryAt?: string | null;
   nowMs: number;
@@ -995,36 +996,50 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     vaultRoot: input.vaultRoot,
   });
 
-  const selectedWake = assistantCronWake.dueNow
+  const modelFreeWake = selectEarliestHostedRuntimeWake([
+    ...(input.extraCandidates ?? []),
+    {
+      at: systemMailboxWake.at,
+      reason: systemMailboxWake.reason,
+    },
+    {
+      at: input.mailboxImportRetryAt ?? null,
+      reason: input.mailboxImportRetryAt ? "mailbox" : null,
+    },
+  ]);
+  const assistantWake = selectEarliestHostedRuntimeWake([
+    {
+      at: outboxWakeAt,
+      reason: outboxWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+    },
+    {
+      at: pendingAssistantInputWakeAt,
+      reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+    },
+    {
+      at: providerCleanupWakeAt,
+      reason: providerCleanupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+    },
+    {
+      at: assistantCronWake.at,
+      reason: assistantCronWake.reason,
+    },
+  ]);
+  const selectedWake = !input.assistantExecutionBlocked && assistantCronWake.dueNow
     ? {
         nextWakeAt: assistantCronWake.at,
         nextWakeReason: assistantCronWake.reason,
       }
+    : input.assistantExecutionBlocked && modelFreeWake.nextWakeAt
+    ? modelFreeWake
     : selectEarliestHostedRuntimeWake([
-        ...(input.extraCandidates ?? []),
         {
-          at: systemMailboxWake.at,
-          reason: systemMailboxWake.reason,
+          at: modelFreeWake.nextWakeAt,
+          reason: modelFreeWake.nextWakeReason,
         },
         {
-          at: input.mailboxImportRetryAt ?? null,
-          reason: input.mailboxImportRetryAt ? "mailbox" : null,
-        },
-        {
-          at: outboxWakeAt,
-          reason: outboxWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-        },
-        {
-          at: pendingAssistantInputWakeAt,
-          reason: pendingAssistantInputWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-        },
-        {
-          at: providerCleanupWakeAt,
-          reason: providerCleanupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
-        },
-        {
-          at: assistantCronWake.at,
-          reason: assistantCronWake.reason,
+          at: assistantWake.nextWakeAt,
+          reason: assistantWake.nextWakeReason,
         },
       ]);
   return {
@@ -1832,6 +1847,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     const systemMailboxProcessingMode =
       input.request.processingMode === "system_mailbox";
+    // This marker can only suppress assistant execution. The Cloudflare
+    // boundary sets it when platform policy has already made the normal
+    // assistant handoff impossible. Assistant sources remain durable in the
+    // vault and are re-derived when policy later wakes a default invocation.
+    const assistantExecutionBlocked =
+      systemMailboxProcessingMode
+      && input.request.assistantExecutionBlocked === true;
     let hostedCodexRuntime: Awaited<
       ReturnType<typeof prepareHostedCodexRuntimeEnvironment>
     > | null = null;
@@ -1951,6 +1973,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       input.request.processingMode === "system_mailbox"
         ? async () => {
             const projectedWake = await resolveHostedSystemMailboxProcessingModeWake({
+              assistantExecutionBlocked,
               mailboxImportRetryAt: null,
               nowMs: Date.now(),
               operatorHomeRoot: restored.operatorHomeRoot,
@@ -2158,6 +2181,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           : null;
       const nextWake = input.request.processingMode === "system_mailbox"
         ? await resolveHostedSystemMailboxProcessingModeWake({
+            assistantExecutionBlocked,
             mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
             nowMs: Date.now(),
             operatorHomeRoot: restored.operatorHomeRoot,
@@ -2172,7 +2196,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
       const stagedAssistantInput =
         hostedMailboxImportStagedConversationInput(initialMailboxImport);
-      const checkpointNextWake = assistantCronWake?.dueNow
+      const checkpointNextWake = !assistantExecutionBlocked && assistantCronWake?.dueNow
         ? {
             nextWakeAt: assistantCronWake.at,
             nextWakeReason: assistantCronWake.reason,
@@ -2187,12 +2211,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               reason: systemMailboxWake.reason,
             },
             {
-              at: assistantCronWake?.at ?? null,
-              reason: assistantCronWake?.reason ?? null,
+              at: assistantExecutionBlocked ? null : assistantCronWake?.at ?? null,
+              reason: assistantExecutionBlocked ? null : assistantCronWake?.reason ?? null,
             },
             {
-              at: stagedAssistantInput ? new Date().toISOString() : null,
-              reason: stagedAssistantInput ? "assistant" : null,
+              at: stagedAssistantInput && !assistantExecutionBlocked
+                ? new Date().toISOString()
+                : null,
+              reason: stagedAssistantInput && !assistantExecutionBlocked
+                ? "assistant"
+                : null,
             },
           ]);
       const returnedNextWake = selectEarliestHostedRuntimeWake([
@@ -2215,7 +2243,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         activeWorkspace?.nextWakeReason === HOSTED_ASSISTANT_WAKE_REASON
         && hostedRuntimeWakeIsDue(activeWorkspace.nextWakeAt ?? null);
       const dueAssistantHandoffRequiresCheckpoint =
-        assistantCronWake?.dueNow === true
+        !assistantExecutionBlocked
+        && assistantCronWake?.dueNow === true
         && !activeWorkspaceAlreadyOwnsDueAssistantWake;
 
       if (
@@ -2324,7 +2353,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
 
       const invocationResult = {
-        ...(assistantCronWake?.dueNow
+        ...(!assistantExecutionBlocked && assistantCronWake?.dueNow
           ? { immediateRecheckRequested: true as const }
           : {}),
         nextWakeAt: returnedNextWake.nextWakeAt,
@@ -2382,6 +2411,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const resolveSystemMailboxModeWake = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ) => await resolveHostedSystemMailboxProcessingModeWake({
+        assistantExecutionBlocked,
         extraCandidates,
         mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
         nowMs: Date.now(),
@@ -2650,7 +2680,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
         ]);
         const invocationResult = {
-          ...(foregroundWakeObserved || projectedWake.assistantCronDueNow
+          ...(foregroundWakeObserved
+              || (!assistantExecutionBlocked && projectedWake.assistantCronDueNow)
             ? { immediateRecheckRequested: true as const }
             : {}),
           nextWakeAt: returnedWake.nextWakeAt,
@@ -2724,7 +2755,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               preparationWake ? [preparationWake] : [],
             );
           }
-          if (projectedWake.assistantCronDueNow) {
+          if (!assistantExecutionBlocked && projectedWake.assistantCronDueNow) {
             return { preempted: true, prepared: preparation !== null };
           }
           if (hostAbortObserved || consumeForegroundWake()) {
@@ -2878,10 +2909,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const projectedAssistantCronDeadlineMs = Date.parse(
         initialProjectedWake.assistantCronWakeAt ?? "",
       );
-      assistantCronDeadlineMs = Number.isFinite(projectedAssistantCronDeadlineMs)
+      assistantCronDeadlineMs = !assistantExecutionBlocked
+        && Number.isFinite(projectedAssistantCronDeadlineMs)
         ? projectedAssistantCronDeadlineMs
         : null;
-      if (initialProjectedWake.assistantCronDueNow) {
+      if (!assistantExecutionBlocked && initialProjectedWake.assistantCronDueNow) {
         if (
           importOrStartupCheckpointPending
           || hostedSystemMailboxWakeChangedFromWorkspace({

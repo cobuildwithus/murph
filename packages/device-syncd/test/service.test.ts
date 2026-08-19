@@ -1297,6 +1297,170 @@ test("Junction resource success preserves the full-reconcile watermark and close
   }
 });
 
+test("Junction summary continuations survive service restart before one terminal watermark advance", async () => {
+  const now = new Date("2026-04-23T00:05:00.000Z");
+  const nextReconcileAt = "2026-04-23T00:20:00.000Z";
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-summary-restart");
+  const stateDatabasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const summaryRequests: Array<{ pass: number; resource: string }> = [];
+  const timeseriesRequests: Array<{ pass: number; resource: string }> = [];
+  let activePass = 0;
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    reconcileIntervalMs: 15 * 60_000,
+    region: "us",
+    summaryResources: ["activity", "sleep", "sleep_cycle", "body"],
+    timeseriesResources: ["steps"],
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              body: true,
+              sleep: true,
+              sleep_cycle: true,
+              steps: true,
+            },
+          }],
+        });
+      }
+      const summaryResource = new URL(url).pathname.match(
+        /^\/v2\/summary\/([^/]+)\/junction-user-1$/u,
+      )?.[1];
+      if (summaryResource) {
+        summaryRequests.push({ pass: activePass, resource: summaryResource });
+        return createJsonResponse({ data: [] });
+      }
+      const timeseriesResource = new URL(url).pathname.match(
+        /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+      )?.[1];
+      if (timeseriesResource) {
+        timeseriesRequests.push({ pass: activePass, resource: timeseriesResource });
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected Junction request during summary restart test: ${url}`);
+    },
+  });
+  const createFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      shouldYieldJobExecution: () => false,
+      stateDatabasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { ok: true };
+      },
+    },
+    providers: [provider],
+  });
+  let fixture: ReturnType<typeof createFixture> | null = createFixture();
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-20T00:00:00.000Z",
+      nextReconcileAt: now.toISOString(),
+    });
+    const window = {
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    };
+    fixture.store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: window,
+      priority: 40,
+      availableAt: now.toISOString(),
+    });
+
+    const expectedPartialPayloads: Array<Record<string, unknown>> = [
+      { summaryResourceCursor: "sleep" },
+      { summaryResourceCursor: "body" },
+      { summaryPhaseComplete: true },
+      {
+        timeseriesCursor: window.windowStart,
+        timeseriesResourceCursor: "steps",
+      },
+    ];
+    let continuationDedupeKey: string | null = null;
+    for (const [index, expectedPayload] of expectedPartialPayloads.entries()) {
+      activePass = index + 1;
+      const completed = await fixture.service.runWorkerOnce();
+      assert.equal(completed?.kind, "reconcile");
+      assert.equal(fixture.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      assert.equal(fixture.store.getAccountById(account.id)?.nextReconcileAt, nextReconcileAt);
+      const queuedRows: ReturnType<typeof readJobsForAccountForTesting> =
+        readJobsForAccountForTesting(fixture.store, account.id)
+          .filter((job) => job.status === "queued");
+      assert.equal(queuedRows.length, 1);
+      const successor = fixture.store.getJobById(queuedRows[0]!.id);
+      assert.ok(successor);
+      for (const [key, value] of Object.entries(expectedPayload)) {
+        assert.equal(successor.payload[key], value);
+      }
+      assert.equal(successor.payload.windowStart, window.windowStart);
+      assert.equal(successor.payload.windowEnd, window.windowEnd);
+      continuationDedupeKey ??= successor.dedupeKey;
+      assert.equal(successor.dedupeKey, continuationDedupeKey);
+
+      if (index === 0) {
+        const previousFixture = fixture;
+        fixture = null;
+        previousFixture.close();
+        fixture = createFixture();
+      }
+    }
+
+    activePass = 5;
+    const terminal = await fixture.service.runWorkerOnce();
+    assert.equal(terminal?.kind, "reconcile");
+    assert.equal(
+      fixture.store.getAccountById(account.id)?.lastSyncCompletedAt,
+      now.toISOString(),
+    );
+    assert.equal(fixture.store.getAccountById(account.id)?.nextReconcileAt, nextReconcileAt);
+    assert.equal(
+      readJobsForAccountForTesting(fixture.store, account.id)
+        .filter((job) => job.status === "queued").length,
+      0,
+    );
+    assert.deepEqual(
+      summaryRequests,
+      [
+        { pass: 1, resource: "activity" },
+        { pass: 2, resource: "sleep" },
+        { pass: 2, resource: "sleep_cycle" },
+        { pass: 3, resource: "body" },
+      ],
+    );
+    assert.deepEqual(timeseriesRequests, [{ pass: 5, resource: "steps" }]);
+  } finally {
+    fixture?.close();
+  }
+});
+
 test("Junction yielded full-sync continuations advance the watermark only at terminal completion", async () => {
   const now = new Date("2026-04-23T00:05:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-yielded-watermark");

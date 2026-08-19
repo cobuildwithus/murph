@@ -3523,6 +3523,7 @@ export type HostedWorkspaceInvocationProcessingMode =
   (typeof HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES)[number];
 
 export interface HostedWorkspaceInvocationRequest {
+  assistantExecutionBlocked?: true;
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
   idleCheckpointDelayMs?: number | null;
