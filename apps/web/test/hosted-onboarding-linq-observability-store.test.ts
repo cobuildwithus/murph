@@ -2267,10 +2267,10 @@ describe("hosted Linq observability stores", () => {
 
   it("reclaims an identifiable Linq usage-limit rich-link partial with the same provider key", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const attemptedAt = new Date("2026-03-26T12:05:00.000Z");
+    const attemptedAt = new Date("2026-03-26T12:00:00.052Z");
     const previousAttemptedAt = new Date("2026-03-26T12:00:00.000Z");
-    const failedAt = new Date("2026-03-26T12:00:30.000Z");
-    const updatedAt = new Date("2026-03-26T12:00:31.000Z");
+    const failedAt = new Date("2026-03-26T12:00:00.050Z");
+    const updatedAt = new Date("2026-03-26T12:00:00.051Z");
     const currentIdempotencyKey = buildCurrentAiUsageNoticeKey();
     const linqChatLookupKey = createHostedLinqChatLookupKey("chat_123");
     const messageLookupKey = createHostedLinqMessageLookupKey(

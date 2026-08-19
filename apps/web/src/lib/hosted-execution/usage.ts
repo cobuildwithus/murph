@@ -330,7 +330,16 @@ async function sendHostedAiUsageLimitLinqNoticeWithPartialRecovery(
     if (!isHostedAiUsageLimitRichLinkPartialDeliveryFailure(error)) {
       throw error;
     }
-    await sendClaimedHostedAiUsageLimitNoticeToLinqChat(input);
+    await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+      ...input,
+      claimToken: {
+        ...input.claimToken,
+        sentAt: new Date(Math.max(
+          Date.now(),
+          Date.parse(input.claimToken.sentAt) + 1,
+        )).toISOString(),
+      },
+    });
   }
 }
 

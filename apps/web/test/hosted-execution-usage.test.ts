@@ -407,7 +407,16 @@ describe("recordHostedAiUsageRecords", () => {
       .toHaveBeenCalledTimes(2);
     const [firstAttempt, replay] =
       noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock.calls;
-    expect(replay?.[0]).toEqual(firstAttempt?.[0]);
+    expect(replay?.[0]).toEqual({
+      ...firstAttempt?.[0],
+      claimToken: {
+        ...firstAttempt?.[0].claimToken,
+        sentAt: expect.any(String),
+      },
+    });
+    expect(Date.parse(replay?.[0].claimToken.sentAt ?? "")).toBeGreaterThan(
+      Date.parse(firstAttempt?.[0].claimToken.sentAt ?? ""),
+    );
     expect(noticeMocks.projectHostedAiUsageLimitNoticeForDelivery)
       .toHaveBeenCalledOnce();
   });
