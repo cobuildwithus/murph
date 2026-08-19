@@ -1,6 +1,6 @@
 # Restore Cloudflare container resources
 
-Status: active
+Status: completed
 
 ## Outcome
 
@@ -28,7 +28,7 @@ Effort: Patch. The resource rollback targets measured cold-start and
 workspace-restore regressions without changing message semantics, recovery, or
 the ten-minute conversation warmth policy.
 
-Status: Hold until the protected production workflow accepts the generated
+Status: completed
 Wrangler config, deploy smoke passes, and a de-identified cold-path walkthrough
 confirms correct reply delivery with the restored profile.
 
@@ -89,4 +89,18 @@ confirms correct reply delivery with the restored profile.
   its phase timings are compared with the available pre-cut 2-vCPU trace; a hot
   follow-up inside the ten-minute lease remains warm.
 
+## Completion
+
+- The resource/config implementation, focused tests, full Cloudflare verify,
+  exact-head CI, clean current-base merge proof, and final ReviewGPT round are
+  complete.
+- ReviewGPT's preliminary coverage and Product UX findings were accepted. The
+  plan and PR now classify this as a Patch and do not claim platform-native or
+  member-observable proof before it exists.
+- Production release remains on Hold until the protected post-merge workflow
+  passes its generated Wrangler dry run and deploy smoke, followed by the
+  de-identified cold-path and warm-follow-up checks above.
+
 Updated: 2026-08-19
+Completed: 2026-08-19
+Completed: 2026-08-19
