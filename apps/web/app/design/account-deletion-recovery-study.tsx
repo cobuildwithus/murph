@@ -183,7 +183,10 @@ function ProviderRecoveryDialogBody({ id }: { id: string }) {
         </p>
       </div>
 
-      <HostedAccountDeletionErrorAlert message="Remove Murph access from Oura and Strava, then confirm below." />
+      <HostedAccountDeletionErrorAlert
+        message="Remove Murph access from Oura and Strava, then confirm below."
+        providerAccessRemovalRequired
+      />
 
       <div className="flex flex-col gap-2">
         <Label className="block leading-5" htmlFor={`${id}-phrase`}>

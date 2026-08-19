@@ -910,10 +910,11 @@ describe("HostedDataPrivacySettings", () => {
     });
 
     expect(container.textContent).toContain(recoveryMessage);
-    const recoveryLink = [...container.querySelectorAll("a")]
-      .find((link) => link.textContent?.trim() === "Manage wearables");
-    assert.ok(recoveryLink);
-    expect(recoveryLink.getAttribute("href")).toBe("/connect");
+    const recoveryAnchors = [...container.querySelectorAll('[role="alert"] a')]
+      .map((link) => [link.textContent?.trim(), link.getAttribute("href")]);
+    // Reconnecting is owned by Murph, so the named provider must not also offer
+    // an external route that cannot perform it.
+    expect(recoveryAnchors).toEqual([["Manage wearables", "/connect"]]);
   });
 
   test("sends provider-access removal to the named providers' own sites", async () => {

@@ -397,6 +397,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
             <HostedAccountDeletionErrorAlert
               deviceReconnectRequired={deviceReconnectRequired}
               message={dialogError}
+              providerAccessRemovalRequired={providerAccessRemovalRequired}
             />
           ) : null}
           {dialogStep === "reason" ? (
@@ -466,16 +467,22 @@ function HostedDataPrivacySettingsAuthorized(props: {
 export function HostedAccountDeletionErrorAlert({
   deviceReconnectRequired = false,
   message,
+  providerAccessRemovalRequired = false,
 }: {
   deviceReconnectRequired?: boolean;
   message: string;
+  providerAccessRemovalRequired?: boolean;
 }) {
   return (
     <div
       role="alert"
       className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive [overflow-wrap:anywhere]"
     >
-      <p>{linkProviderAccessSites(message)}</p>
+      <p>
+        {providerAccessRemovalRequired
+          ? linkProviderAccessSites(message)
+          : message}
+      </p>
       {deviceReconnectRequired ? (
         <Link
           className="self-start font-medium underline underline-offset-4"
@@ -489,10 +496,11 @@ export function HostedAccountDeletionErrorAlert({
 }
 
 // A deletion fenced on an ambiguous OAuth callback can only be cleared where the
-// grant lives, which is the provider's own account and never a Murph page. The
-// alert therefore links each named provider to its own site so the member can
-// get there, and claims nothing about what Murph can revoke for them. Only
-// direct-OAuth providers can leave the session behind that raises this message.
+// grant lives, which is the provider's own account and never a Murph page. That
+// state alone gets provider-site links; the credential-refresh recovery names
+// the same providers but is owned by Murph's own reconnect surface, so its
+// message stays unlinked. Only direct-OAuth providers can leave the session
+// behind that raises the provider-removal message.
 // `hosted-data-privacy-settings.test.ts` pins these labels to the canonical
 // device-sync provider labels so a rename cannot silently unlink them.
 const PROVIDER_ACCESS_SITES: readonly { label: string; url: string }[] = [
