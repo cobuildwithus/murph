@@ -426,6 +426,7 @@ fi
     );
     expect(normalizedBody.match(/^## Why and outcome$/gmu)).toHaveLength(1);
     expect(normalizedBody.match(/^## Evidence$/gmu)).toHaveLength(1);
+    expect(normalizedBody.match(/^## Deployment concerns$/gmu)).toHaveLength(1);
     expect(normalizedBody.match(/^## Changelog$/gmu)).toHaveLength(1);
     expect(
       normalizedBody.match(/<!-- murph:frog-pr-context:start -->/gu),
@@ -448,6 +449,19 @@ fi
       },
     );
     expect(changelogValidation.status, changelogValidation.stderr).toBe(0);
+    const deploymentValidation = spawnSync(
+      process.execPath,
+      [path.join(repoRoot, "scripts", "check-pr-deployment-concerns.mjs")],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          MURPH_PR_BODY: normalizedBody,
+        },
+      },
+    );
+    expect(deploymentValidation.status, deploymentValidation.stderr).toBe(0);
 
     const readme = readRepoFile(".agents", "friction-log", "README.md");
     expect(readme).toContain("FROG_APP_CLIENT_ID");
