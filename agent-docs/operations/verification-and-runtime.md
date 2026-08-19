@@ -623,17 +623,21 @@ Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
 For every user-facing `apps/web` UI diff, verification also includes
-`pnpm test:frontend-evidence` and evidence matched to the changed visual,
-state, interaction, and responsive risk. The pull-request workflow repeats the
-evidence check against the final base-to-head diff and PR body. Embed at least
-one redacted, production-faithful screenshot in the PR Evidence section.
-Inspect and submit phone and desktop screenshots when responsive behavior can
-change. Prefer an attached in-app Browser for visual proof, then use the
+`pnpm test:frontend-design-proof`, a supported absolute anchored component,
+consent, or section-study link, and evidence matched to the changed visual,
+state, interaction, and responsive risk. The preliminary frontend review owns
+repository origin, reachability, currentness, and representation quality. Add
+or update the representation only when no existing route and anchor render the
+changed state. The pull-request workflow repeats the structural design-proof check
+against the final base-to-head diff and PR body. Inspect phone and desktop
+when responsive behavior can change; do not add a viewport only to meet a
+quota. Prefer an attached in-app Browser for visual proof, then use the
 repository-installed Playwright runtime when no tab is attached or the
 connection is unusable. Report a blocker only when the material claim cannot
-be judged after the applicable fallback. Crop screenshots to the changed
-component or section and inspect them at native resolution. Do not use a long
-full-page capture that makes review text smaller than the rendered UI.
+be judged after the applicable fallback. When screenshots add proof, crop them
+to the changed component or section and inspect them at native resolution. Do
+not use a long full-page capture that makes review text smaller than the
+rendered UI.
 
 Use `/screenshots` only for difficult or reusable presentation states. Its
 pages render real production components with synthetic props, no live data, no

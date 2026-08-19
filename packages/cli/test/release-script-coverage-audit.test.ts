@@ -23,7 +23,6 @@ import {
   detectWorkspacePackageCycles,
   formatWorkspacePackageCycles,
 } from '../../../scripts/check-workspace-package-cycles.mjs'
-import { buildHostedWebVitestArgs } from '../../../apps/web/scripts/run-hosted-web-vitest.mjs'
 import { withoutNodeV8Coverage } from './cli-test-helpers.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -84,6 +83,7 @@ type ReviewGptHarnessOptions = {
   hangVersionAtCall?: number
   idleDraftStateRoot?: string
   idleDraftTimeoutMs?: number
+  minimumMarkedResponseMs?: number
   prompt?: string
   remotePort?: string
   responseFile?: string
@@ -182,7 +182,9 @@ function loadReviewGptOpenTargetHarness(
     'module.exports.__isRetryableSocketErrorTest = isRetryableSocketError;',
     'module.exports.__mainTest = main;',
     'module.exports.__mainWithRetryTest = mainWithRetry;',
+    'module.exports.__assertMarkedResponseDurationTrustedTest = assertMarkedResponseDurationTrusted;',
     'module.exports.__markedResponseDurationFailureTest = markedResponseDurationFailure;',
+    'module.exports.__minimumMarkedResponseMsTest = minimumMarkedResponseMs;',
     'module.exports.__modelAttestationTurnNonceTest = modelAttestationTurnNonce;',
     'module.exports.__modelAttestationForSnapshotTest = modelAttestationForSnapshot;',
     'module.exports.__prepareRuntimeConfigTest = prepareRuntimeConfig;',
@@ -544,6 +546,9 @@ function loadReviewGptOpenTargetHarness(
       ...process.env,
       ORACLE_DRAFT_FILES: '',
       ORACLE_DRAFT_MODE: options.draftMode ?? 'chat',
+      ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: String(
+        options.minimumMarkedResponseMs ?? 5 * 60 * 1000,
+      ),
       ORACLE_DRAFT_MODEL: 'gpt-5.6-sol',
       ORACLE_DRAFT_PROMPT: options.prompt ?? 'Review the requested changes.',
       ORACLE_DRAFT_REMOTE_PORT: options.remotePort ?? '9999',
@@ -607,7 +612,10 @@ function loadReviewGptOpenTargetHarness(
   const isRetryableSocketError = moduleRecord.exports.__isRetryableSocketErrorTest
   const main = moduleRecord.exports.__mainTest
   const mainWithRetry = moduleRecord.exports.__mainWithRetryTest
+  const assertMarkedResponseDurationTrusted =
+    moduleRecord.exports.__assertMarkedResponseDurationTrustedTest
   const markedResponseDurationFailure = moduleRecord.exports.__markedResponseDurationFailureTest
+  const minimumMarkedResponseMs = moduleRecord.exports.__minimumMarkedResponseMsTest
   const modelAttestationTurnNonce = moduleRecord.exports.__modelAttestationTurnNonceTest
   const modelAttestationForSnapshot = moduleRecord.exports.__modelAttestationForSnapshotTest
   const modelConfirmationFailure = moduleRecord.exports.modelConfirmationFailure
@@ -626,7 +634,9 @@ function loadReviewGptOpenTargetHarness(
     typeof isRetryableSocketError !== 'function' ||
     typeof main !== 'function' ||
     typeof mainWithRetry !== 'function' ||
+    typeof assertMarkedResponseDurationTrusted !== 'function' ||
     typeof markedResponseDurationFailure !== 'function' ||
+    typeof minimumMarkedResponseMs !== 'number' ||
     typeof modelAttestationTurnNonce !== 'string' ||
     typeof modelAttestationForSnapshot !== 'function' ||
     typeof modelConfirmationFailure !== 'function' ||
@@ -641,6 +651,19 @@ function loadReviewGptOpenTargetHarness(
   const socketOwner = Reflect.apply(createWebSocketOwner, undefined, [])
 
   return {
+    assertMarkedResponseDurationTrusted: (
+      responseResult: {
+        responseDurationFailure?: string
+        responseText?: string
+        status?: string
+      },
+      responseFilePath = '',
+    ) => {
+      Reflect.apply(assertMarkedResponseDurationTrusted, undefined, [
+        responseResult,
+        responseFilePath,
+      ])
+    },
     commands,
     connectTarget: async (desiredUrl: string) => {
       return Reflect.apply(connectTarget, undefined, [desiredUrl, socketOwner])
@@ -695,6 +718,7 @@ function loadReviewGptOpenTargetHarness(
       responseMarker: string,
       responseElapsedMs: number,
     ) => String(Reflect.apply(markedResponseDurationFailure, undefined, [{
+      minimumResponseMs: minimumMarkedResponseMs,
       responseElapsedMs,
       responseMarker,
       targetModel,
@@ -1359,6 +1383,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain(
       'A marked concrete-model response shorter than the trust threshold fails closed as untrusted',
     )
+    expect(reviewGptReadme).toContain(
+      'The threshold defaults to 5 minutes and can be raised or lowered',
+    )
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
     expect(reviewGptDriver).toContain('precedingUserMessageSignature')
@@ -1562,12 +1589,17 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
+    expect(reviewGptConfig).toContain(
+      'if [[ ! -x "$review_gpt_installed_browser_binary" && ! -d "$review_gpt_selected_browser_app" ]]',
+    )
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "Vonneumann" ;;')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "9446" ;;')
+    expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "Apollo" ;;')
+    expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "9454" ;;')
     expect(reviewGptConfig).toContain(
-      'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann)',
+      'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann apollo)',
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
@@ -1842,18 +1874,20 @@ describe('monorepo release flow coverage audit', () => {
       'The `pr-review` prompt lives at',
     )
     expect(prReviewGptLoop).toContain(
-      'Both stages use the managed Eragon, Phlebas, Hercules, Mountain, and Vonneumann browser',
+      'Both stages use the managed Eragon, Phlebas, Hercules, Mountain, Vonneumann, and',
     )
     expect(prReviewGptLoop).toContain('default randomized usable managed')
     expect(prReviewGptLoop).toContain('Hercules on `9444`')
     expect(prReviewGptLoop).toContain('Vonneumann on `9446`')
-    expect(prReviewGptLoop).toContain('through five lanes and defaults to four')
+    expect(prReviewGptLoop).toContain('Apollo on')
+    expect(prReviewGptLoop).toContain('`9454`, always with profile `Default`')
+    expect(prReviewGptLoop).toContain('through six lanes and defaults to four')
     expect(prReviewGptLoop).toContain('current installed Brave binary')
     expect(prReviewGptLoop).toContain(
       "passes none of Chromium's background-timer, occluded-window, or renderer",
     )
     expect(prReviewGptLoop).toContain(
-      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain|vonneumann`',
+      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain|vonneumann|apollo`',
     )
     expect(prReviewGptLoop).toContain('6,500 UTF-8 bytes')
     expect(prReviewGptLoop).toContain(
@@ -2024,9 +2058,11 @@ describe('monorepo release flow coverage audit', () => {
       'may skip the individual required local audit subagent passes',
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
-    expect(completionWorkflow).not.toContain('Change-shape breakdown')
+    expect(completionWorkflow).toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('ReviewGPT context sensitivity: sensitive')
-    expect(completionWorkflow).toContain('manual line-count table')
+    expect(completionWorkflow).toContain(
+      'five-row `Category | Added | Deleted` table plus a total',
+    )
     expect(completionWorkflow).toContain('evidenced current scale')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
     expect(completionWorkflow).not.toContain(
@@ -2104,12 +2140,14 @@ describe('monorepo release flow coverage audit', () => {
   it('applies ReviewGPT response timeout precedence from repo config to one run', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-timeout-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
+    const harnessBin = path.join(harnessRoot, 'bin')
     const reviewGptBin = path.join(
       repoRoot,
       'node_modules',
       '.bin',
       'cobuild-review-gpt',
     )
+    writeHarnessFile(harnessRoot, 'bin/mdfind', '#!/bin/sh\nexit 0\n', true)
     const runDry = (extraArgs: string[] = []) =>
       spawnSync(
         reviewGptBin,
@@ -2131,6 +2169,7 @@ describe('monorepo release flow coverage audit', () => {
           env: {
             ...withoutNodeV8Coverage(),
             HOME: harnessRoot,
+            PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
             REVIEW_GPT_BROWSER_LANE_COUNT: '1',
             XDG_CONFIG_HOME: localConfigRoot,
           },
@@ -2186,6 +2225,7 @@ describe('monorepo release flow coverage audit', () => {
       'installed',
       'Brave Browser',
     )
+    const harnessBin = path.join(harnessRoot, 'bin')
     const copiedBrowserPath = path.join(
       controlledRepoRoot,
       'output-packages',
@@ -2217,6 +2257,7 @@ describe('monorepo release flow coverage audit', () => {
       '#!/usr/bin/env bash\nexit 0\n',
       true,
     )
+    writeHarnessFile(harnessRoot, 'bin/mdfind', '#!/usr/bin/env bash\nexit 47\n', true)
     const configHarness = `
 set -euo pipefail
 review_gpt_register_dir_preset() { :; }
@@ -2239,6 +2280,7 @@ printf '%s|%s|%s|%s|%s|%s|%s\n' \
           ...withoutNodeV8Coverage(),
           CONFIG_PATH: controlledConfigPath,
           HOME: harnessRoot,
+          PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
           REVIEW_GPT_BROWSER_LANE: 'eragon',
           XDG_CONFIG_HOME: path.join(harnessRoot, 'config'),
           browser_binary_path: '',
@@ -2269,6 +2311,16 @@ printf '%s|%s|%s|%s|%s|%s|%s\n' \
         ].join('|'),
       )
 
+      rmSync(
+        path.join(
+          controlledRepoRoot,
+          'output-packages',
+          'review-gpt-profiles',
+          'eragon',
+          'Eragon.app',
+        ),
+        { force: true, recursive: true },
+      )
       writeHarnessFile(
         harnessRoot,
         'installed/Brave Browser',
@@ -2298,8 +2350,9 @@ printf '%s|%s|%s|%s|%s|%s|%s\n' \
     const localConfigRoot = path.join(harnessRoot, 'config')
     const configHarness = `
 set -euo pipefail
-# Keep live local CDP ports out of the lock fixture.
+# Keep live local CDP ports and macOS app indexes out of the lock fixture.
 curl() { return 1; }
+mdfind() { return 0; }
 review_gpt_register_dir_preset() { :; }
 review_gpt_register_preset_group() { :; }
 source "$REPO_ROOT/scripts/review-gpt.config.sh"
@@ -2421,9 +2474,34 @@ printf '%s|%s|%s|%s|%s\n' \
       )
 
       writeHarnessFile(
+        harnessRoot,
+        'Library/Application Support/MurphReviewGPT/Vonneumann/SingletonLock',
+        'locked\n',
+      )
+      writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
         'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
+      )
+      const sixLaneResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(sixLaneResult.status, sixLaneResult.stderr).toBe(0)
+      expect(sixLaneResult.stdout.trim()).toBe(
+        'apollo|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+      )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=7\n',
       )
       const invalidLaneCountResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2437,12 +2515,12 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(invalidLaneCountResult.status).not.toBe(0)
       expect(invalidLaneCountResult.stderr).toContain(
-        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 5',
+        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 6',
       )
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
       )
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
@@ -2554,7 +2632,7 @@ printf '%s|%s|%s|%s|%s\n' \
       const correctionPresetHarness = `${configHarness}
 printf '%s|%s|%s|%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_selected_browser_display" "$review_gpt_selected_browser_port" "$managed_browser_user_data_dir" "$review_gpt_pr_review_prompt_file"
 review_gpt_managed_ports=()
-for review_gpt_lane in main eragon phlebas hercules mountain vonneumann; do
+for review_gpt_lane in main eragon phlebas hercules mountain vonneumann apollo; do
   review_gpt_managed_ports+=("$(review_gpt_browser_lane_port "$review_gpt_lane")")
 done
 printf '%s\n' "\${review_gpt_managed_ports[*]}"
@@ -2569,7 +2647,7 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
             ...cleanBrowserPreferenceEnv(),
             HOME: harnessRoot,
             REPO_ROOT: repoRoot,
-            REVIEW_GPT_BROWSER_LANE: 'vonneumann',
+            REVIEW_GPT_BROWSER_LANE: 'apollo',
             REVIEW_GPT_REVIEW_PHASE: 'final',
             REVIEW_GPT_ROUND_NUMBER: '2',
             REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
@@ -2583,12 +2661,12 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
         .split('\n')
       expect(correctionPresetLines.at(-2)).toBe(
         [
-          'vonneumann',
-          'Vonneumann',
-          '9446',
+          'apollo',
+          'Apollo',
+          '9454',
           path.join(
             harnessRoot,
-            'Library/Application Support/MurphReviewGPT/Vonneumann',
+            'Library/Application Support/MurphReviewGPT/Apollo',
           ),
           'pr-followup-review.md',
         ].join('|'),
@@ -2601,6 +2679,7 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
         '9444',
         '9450',
         '9446',
+        '9454',
       ])
       expect(new Set(managedPorts).size).toBe(managedPorts.length)
 
@@ -3363,6 +3442,50 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     expect(
       harness.markedResponseDurationFailure('current', 'ROUND_OUTCOME:', 37_000),
     ).toBe('')
+
+    const configuredHarness = loadReviewGptOpenTargetHarness(1, undefined, {
+      minimumMarkedResponseMs: 30_000,
+    })
+    expect(
+      configuredHarness.markedResponseDurationFailure(
+        'gpt-5.6-sol',
+        'ROUND_OUTCOME:',
+        29_999,
+      ),
+    ).toContain('below the 30s minimum')
+    expect(
+      configuredHarness.markedResponseDurationFailure(
+        'gpt-5.6-sol',
+        'ROUND_OUTCOME:',
+        30_000,
+      ),
+    ).toBe('')
+    expect(() =>
+      loadReviewGptOpenTargetHarness(1, undefined, {
+        minimumMarkedResponseMs: 0,
+      }).prepareRuntimeConfig(),
+    ).toThrow('Invalid ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS')
+
+    const outputDirectory = mkdtempSync(
+      path.join(os.tmpdir(), 'review-gpt-response-too-fast-'),
+    )
+    try {
+      const responseFile = path.join(outputDirectory, 'response.md')
+      expect(() =>
+        configuredHarness.assertMarkedResponseDurationTrusted(
+          {
+            responseDurationFailure: 'Injected response duration failure.',
+            responseText: 'Rejected response\r\n',
+            status: 'response-too-fast',
+          },
+          responseFile,
+        ),
+      ).toThrow('Injected response duration failure.')
+      expect(readFileSync(responseFile, 'utf8')).toBe('Rejected response\n')
+      expect(existsSync(`${responseFile}.model-verification.json`)).toBe(false)
+    } finally {
+      rmSync(outputDirectory, { force: true, recursive: true })
+    }
   })
 
   it('writes private model evidence atomically and invalidates it before validation', () => {
@@ -5210,12 +5333,6 @@ printf 'ZIP: %s (%s bytes)\n' \
     expect(hostedWebPackageJson.scripts?.['test:prepared']).toContain(
       'tsx apps/web/scripts/run-hosted-web-vitest.mts',
     )
-    expect(buildHostedWebVitestArgs([])).toEqual([
-      'run',
-      '--config',
-      'apps/web/vitest.workspace.ts',
-      '--no-coverage',
-    ])
     expect(webVerify).toContain('MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV=1 pnpm dev:smoke')
     expect(webVerify).toContain('pnpm test:prepared')
     expect(webVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED')

@@ -433,8 +433,6 @@ export function HostedBillingSettings(props: {
               )
             : !pulseCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
               ? `Scheduled to start ${pendingPulseSwitchDate}`
-              : starterAccessActive
-              ? "Starter usage does not expire. Choose Pulse for monthly included usage."
               : null,
       price: formatHostedBillingPrice(
         getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents,
@@ -516,9 +514,7 @@ export function HostedBillingSettings(props: {
                     )
                   : !maxCurrent && hasPendingMaxSwitch && pendingMaxSwitchDate
                     ? `Scheduled to start ${pendingMaxSwitchDate}`
-                    : starterAccessActive
-                      ? "Starter usage does not expire. Choose Max for the highest monthly included usage."
-                      : null,
+                    : null,
             price: formatHostedBillingPrice(
               getHostedBillingPlanDefinition("launch_max_monthly")
                 .recurringAmountUsdCents,

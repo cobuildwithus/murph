@@ -215,11 +215,11 @@ a tooling retry, not an additional substantive ReviewGPT round.
 
 ## Evidence so far
 
-- The user additionally required screenshot submission for every UI-touching
-  PR. This candidate restores that rule in the workflow owner docs, PR
-  template, and executable frontend-evidence guard. The current PR will embed
-  the already-inspected production-faithful desktop and mobile migration
-  states in its Evidence section.
+- The screenshot-submission rule this candidate once carried is now owned by
+  the current base through `scripts/check-frontend-design-proof.mjs` and its
+  workflow owner docs, so the merge keeps the base contract and this PR carries
+  no competing evidence policy. The PR still embeds the already-inspected
+  production-faithful desktop and mobile migration states.
 
 - Core: 46 files, 803 tests passed after the round-8 correction.
 - Importers: 19 files, 479 tests passed.

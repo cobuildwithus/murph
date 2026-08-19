@@ -481,7 +481,6 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
-            inert
             management={{
               authorizationId: "hgsa_design_recovery",
               chargedThisPeriodMinor: 500,

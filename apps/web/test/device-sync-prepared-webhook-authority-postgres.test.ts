@@ -5,7 +5,7 @@ import {
   createDeviceSyncRegistry,
   createJunctionDeviceSyncProvider,
   createStravaDeviceSyncProvider,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,

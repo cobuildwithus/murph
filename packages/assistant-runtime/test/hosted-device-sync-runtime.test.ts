@@ -65,7 +65,10 @@ import {
   HostedRuntimeArtifactWriteError,
   type HostedRuntimeDeviceSyncPort,
 } from "../src/hosted-runtime/platform.ts";
-import { recordHostedDeviceSyncDirtyPostCheckpointRecord } from "../src/hosted-runtime/system-mailbox.ts";
+import {
+  recordHostedDeviceSyncDirtyPostCheckpointRecord,
+  recordHostedSystemMailboxItemAfterCheckpoint,
+} from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
@@ -10938,7 +10941,7 @@ describe("hosted device-sync runtime", () => {
     }), null);
   });
 
-  test("retains a Junction summary cursor through mailbox persistence and cold reconstruction", async () => {
+  test("retains a failed Junction summary continuation from a manual reconcile wake through cold reconstruction", async () => {
     const firstWorkspace = await createHostedRuntimeWorkspace(
       "hosted-device-sync-junction-child-first-",
     );
@@ -10954,11 +10957,14 @@ describe("hosted device-sync runtime", () => {
           throw new Error("Junction network access is not expected in child recovery proof.");
         },
         region: "us",
+        summaryBackfillDays: 0,
         summaryResources: ["activity"],
         timeseriesResources: [],
       },
     });
     assert.ok(junctionProvider);
+    const occurredAt = "2026-04-04T09:10:00.000Z";
+    const retryAt = "2026-04-04T09:12:00.000Z";
     const firstService = createDeviceSyncServiceForVault(
       firstWorkspace.vaultRoot,
       [junctionProvider],
@@ -10967,22 +10973,11 @@ describe("hosted device-sync runtime", () => {
       restoredWorkspace.vaultRoot,
       [junctionProvider],
     );
-    const occurredAt = "2026-04-04T09:10:00.000Z";
-    const retryAt = "2026-04-04T09:12:00.000Z";
+    const failedRetryAt = "2026-04-04T09:13:00.000Z";
     const connectionId = "hosted_conn_junction_child";
     const wake = buildDeviceSyncWake({
       connectionId,
-      hint: {
-        jobs: [{
-          availableAt: occurredAt,
-          dedupeKey: "junction-seed-window",
-          kind: "reconcile",
-          payload: {
-            windowEnd: "2026-04-04T00:00:00.000Z",
-            windowStart: "2026-03-01T00:00:00.000Z",
-          },
-        }],
-      },
+      hint: { reason: "manual_reconcile" },
       occurredAt,
       provider: "junction",
       reason: "reconcile_due",
@@ -11006,11 +11001,19 @@ describe("hosted device-sync runtime", () => {
           externalAccountId: "junction-child-recovery",
           hostedUpdatedAt: occurredAt,
           localState: { nextReconcileAt: "2026-04-04T15:00:00.000Z" },
+          metadata: {
+            hosted: true,
+            junctionHistoricalBackfillStatus: "coverage_v3_complete",
+            junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+            junctionHistoricalBackfillWindowStart: "2026-04-04T00:00:00.000Z",
+          },
           provider: "junction",
         });
       },
     });
 
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(occurredAt));
     try {
       const firstState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createPort(),
@@ -11023,8 +11026,11 @@ describe("hosted device-sync runtime", () => {
       const firstStore = getStore(firstService);
       const account = firstStore.getAccountById(firstAccountId);
       assert.ok(account);
+      assert.equal(readJobsForAccount(firstService, firstAccountId).length, 1);
       const parent = firstStore.claimDueJob("worker_junction_child", occurredAt, 60_000);
       assert.ok(parent);
+      assert.equal(parent.maxAttempts, 5);
+      assert.equal(parent.priority, 80);
       assert.equal(firstStore.completeJobsMarkSyncSucceededAndEnqueueJobs({
         accountId: firstAccountId,
         completedAt: occurredAt,
@@ -11034,7 +11040,7 @@ describe("hosted device-sync runtime", () => {
           availableAt: retryAt,
           dedupeKey: "junction-child-window-cursor",
           kind: "reconcile",
-          maxAttempts: 3,
+          maxAttempts: 5,
           payload: {
             sourceProviderSlug: "garmin",
             summaryResourceCursor: "sleep",
@@ -11048,6 +11054,30 @@ describe("hosted device-sync runtime", () => {
         syncSuccessOptions: {},
         workerId: "worker_junction_child",
       }), true);
+      const failedChild = firstStore.claimDueJob(
+        "worker_junction_child_retry",
+        retryAt,
+        60_000,
+      );
+      assert.ok(failedChild);
+      assert.equal(failedChild.dedupeKey, "junction-child-window-cursor");
+      assert.deepEqual(
+        firstStore.failJobIfOwned(
+          failedChild.id,
+          "worker_junction_child_retry",
+          retryAt,
+          "JUNCTION_API_REQUEST_FAILED",
+          "retryable",
+          failedRetryAt,
+          true,
+        ),
+        {
+          attempts: 1,
+          disposition: "queued",
+          maxAttempts: 5,
+          remainingAttempts: 4,
+        },
+      );
 
       const recovery = resolveHostedDeviceSyncWakeRecovery({
         service: firstService,
@@ -11055,11 +11085,13 @@ describe("hosted device-sync runtime", () => {
         wake,
       });
       assert.ok(recovery);
+      assert.equal(recovery.retryAt, failedRetryAt);
+      assert.equal(recovery.wake.hint?.reason, "manual_reconcile");
       assert.deepEqual(recovery.wake.hint?.jobs, [{
-        availableAt: retryAt,
+        availableAt: failedRetryAt,
         dedupeKey: "junction-child-window-cursor",
         kind: "reconcile",
-        maxAttempts: 3,
+        maxAttempts: 4,
         payload: {
           sourceProviderSlug: "garmin",
           summaryResourceCursor: "sleep",
@@ -11078,13 +11110,14 @@ describe("hosted device-sync runtime", () => {
         lastErrorMessage: null,
         mailboxDedupeKey: "device-sync.wake:junction-summary-cursor",
         mailboxLaneSeq: "1",
-        nextAttemptAt: retryAt,
+        nextAttemptAt: failedRetryAt,
         occurredAt,
         postCheckpointRecord: {
           kind: "device-sync.dirty-processed-batch",
-          nextWakeAt: retryAt,
+          nextWakeAt: failedRetryAt,
           records: [],
           retainedWake: recovery.wake,
+          retainMailboxItemUntil: failedRetryAt,
         },
         preferenceCausalSeq: null,
         requestId: null,
@@ -11095,18 +11128,26 @@ describe("hosted device-sync runtime", () => {
       await updateHostedSystemMailboxState(firstWorkspace.vaultRoot, () => ({
         pending: [retainedMailboxItem],
       }));
+      const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
+        item: retainedMailboxItem,
+        runtime: createDeviceSyncPostCheckpointRuntime(createPort()),
+        vaultRoot: firstWorkspace.vaultRoot,
+      });
+      assert.equal(recordResult.nextWakeAt, failedRetryAt);
       const [reloadedMailboxItem] = (
         await readHostedSystemMailboxState(firstWorkspace.vaultRoot)
       ).pending;
-      const reloadedRecord = reloadedMailboxItem?.postCheckpointRecord;
-      assert.equal(reloadedRecord?.kind, "device-sync.dirty-processed-batch");
-      if (reloadedRecord?.kind !== "device-sync.dirty-processed-batch") {
-        throw new Error("Expected the retained device-sync recovery record after reload.");
+      assert.ok(reloadedMailboxItem);
+      assert.equal(reloadedMailboxItem.status, "pending");
+      assert.equal(reloadedMailboxItem.postCheckpointRecord, null);
+      const retainedWake = reloadedMailboxItem.wake;
+      assert.equal(retainedWake.kind, "device-sync.wake");
+      if (retainedWake.kind !== "device-sync.wake") {
+        throw new Error("Expected the retained mailbox item to carry a device-sync wake.");
       }
-      assert.ok(reloadedRecord.retainedWake);
-      assert.deepEqual(reloadedRecord.retainedWake, recovery.wake);
+      assert.deepEqual(retainedWake, recovery.wake);
       assert.equal(
-        reloadedRecord.retainedWake?.hint?.jobs?.[0]?.payload?.summaryResourceCursor,
+        retainedWake.hint?.jobs?.[0]?.payload?.summaryResourceCursor,
         "sleep",
       );
 
@@ -11114,14 +11155,17 @@ describe("hosted device-sync runtime", () => {
         deviceSyncPort: createPort(),
         secret: DEVICE_SYNC_SECRET,
         service: restoredService,
-        wake: reloadedRecord.retainedWake,
+        wake: retainedWake,
       });
       const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
       assert.ok(restoredAccountId);
-      const [restoredChild] = readJobsForAccount(restoredService, restoredAccountId);
+      const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
+      assert.equal(restoredJobs.length, 1);
+      const [restoredChild] = restoredJobs;
       assert.equal(restoredChild?.dedupeKey, "junction-child-window-cursor");
-      assert.equal(restoredChild?.availableAt, retryAt);
-      assert.equal(restoredChild?.maxAttempts, 3);
+      assert.equal(restoredChild?.availableAt, failedRetryAt);
+      assert.equal(restoredChild?.maxAttempts, 4);
+      assert.equal(restoredChild?.priority, 50);
       assert.deepEqual(JSON.parse(restoredChild?.payloadJson ?? "{}"), {
         sourceProviderSlug: "garmin",
         summaryResourceCursor: "sleep",
@@ -11129,6 +11173,7 @@ describe("hosted device-sync runtime", () => {
         windowStart: "2026-02-01T00:00:00.000Z",
       });
     } finally {
+      vi.useRealTimers();
       closeHostedRuntimeDeviceSyncService(firstService);
       closeHostedRuntimeDeviceSyncService(restoredService);
       await firstWorkspace.cleanup();

@@ -29,12 +29,15 @@ export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 =
   "hosted-usage-credit-checkout-v2" as const;
 export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V3 =
   "hosted-usage-credit-checkout-v3" as const;
-export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
+export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4 =
   "hosted-usage-credit-checkout-v4" as const;
+export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
+  "hosted-usage-credit-checkout-v5" as const;
 export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSIONS = [
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V3,
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
 ] as const;
 export type HostedUsageCreditCheckoutRequestPolicyVersion =
@@ -53,6 +56,7 @@ export function parseHostedUsageCreditCheckoutRequestPolicyVersion(
   return value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1 ||
       value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 ||
       value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V3 ||
+      value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4 ||
       value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
     ? value
     : null;
@@ -63,6 +67,7 @@ export function isHostedUsageCreditSavedCardPolicyVersion(
 ): boolean {
   return value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 ||
     value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V3 ||
+    value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4 ||
     value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION;
 }
 
@@ -71,6 +76,7 @@ export function hostedUsageCreditPolicySupportsSavedCardTarget(input: {
   targetKind: HostedUsageCreditTargetKind;
 }): boolean {
   return input.policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V3 ||
+    input.policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4 ||
     input.policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION ||
     (
       input.policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 &&

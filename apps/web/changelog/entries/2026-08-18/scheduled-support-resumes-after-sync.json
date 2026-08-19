@@ -9,6 +9,6 @@
     "summary": "Reminders and other scheduled support now resume after connected-health maintenance checkpoints instead of being mistaken for work that is already running.",
     "details": "Fresh messages keep priority, and existing engagement, account-access, usage, and delivery-health safeguards still decide whether proactive support can run and send.",
     "relevanceTags": ["assistant", "automations", "connected-health", "reliability"],
-    "sourcePullRequests": [1993]
+    "sourcePullRequests": [1993, 2009]
   }
 }

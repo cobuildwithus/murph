@@ -247,10 +247,10 @@ Examples include:
 - timing, delivery, failure, and recovery traces; and
 - focused user-visible tests for stable behavior.
 
-Every user-facing UI diff must embed at least one redacted,
-production-faithful screenshot in the PR Evidence section. Add enough
-screenshots to show the material changed states. When responsive behavior can
-change, inspect and submit the relevant phone and desktop states.
+There is no screenshot quota. A change can need no screenshots, one
+screenshot, or many. When responsive behavior can change, inspect the relevant
+phone and desktop states. Do not create a second viewport only to satisfy a
+template.
 
 Record:
 
