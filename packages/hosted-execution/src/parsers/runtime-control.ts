@@ -7894,7 +7894,10 @@ function isHostedRuntimeFailureLogEntry(entry: HostedRuntimeLogEntry): boolean {
     || entry.eventCode === "checkpoint.snapshot_failed"
     || entry.eventCode === "mailbox.parser_drain_failed"
     || entry.eventCode === "mailbox.parser_jobs_failed"
+    || entry.eventCode === "assistant.device_activity_automation_failed"
+    || entry.eventCode === "device-sync.dirty_ack_persistence_failed"
     || entry.eventCode === "device-sync.job_failed"
+    || entry.eventCode === "device-sync.maintenance_failed"
     || entry.eventCode === "device-sync.module_load_failed"
     || (entry.eventCode === "assistant.device_connect" && entry.level === "warn")
     || (entry.eventCode === "assistant.automation_detail"

@@ -841,6 +841,13 @@ describe("hosted device-sync runtime", () => {
         store,
         "readNextJobWakeAtForAccount",
       );
+      const sourcesByAccountId = new Map<
+        string,
+        ReturnType<typeof store.listConnectionSources>
+      >();
+      vi.spyOn(store, "listConnectionSources").mockImplementation(
+        ({ connectionId }) => sourcesByAccountId.get(connectionId) ?? [],
+      );
       const updateCount = HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT + 1;
       const localToHostedAccountIds = new Map<string, string>();
       const hostedToLocalAccountIds = new Map<string, string>();
@@ -863,11 +870,17 @@ describe("hosted device-sync runtime", () => {
         localToHostedAccountIds.set(account.id, hostedConnectionId);
         hostedToLocalAccountIds.set(hostedConnectionId, account.id);
         observedTokenVersions.set(hostedConnectionId, null);
-        for (let sourceIndex = 0; sourceIndex < 64; sourceIndex += 1) {
-          store.upsertConnectionSource({
+        sourcesByAccountId.set(
+          account.id,
+          Array.from({ length: 64 }, (_, sourceIndex) => ({
             connectionId: account.id,
+            createdAt: "2026-04-06T09:00:00.000Z",
             displayName: null,
             firstSeenAt: "2026-04-06T09:00:00.000Z",
+            id: `source_row_${index}_${sourceIndex}`,
+            lastDataAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
             lastSeenAt: "2026-04-06T10:05:00.000Z",
             resourceAvailabilitySummary: {
               activity: true,
@@ -876,9 +889,10 @@ describe("hosted device-sync runtime", () => {
             sourceInstanceKey:
               `source_${String(index).padStart(3, "0")}_${String(sourceIndex).padStart(2, "0")}_${"x".repeat(80)}`,
             sourceProviderSlug: `source_${sourceIndex}`,
-            status: "connected",
-          });
-        }
+            status: "connected" as const,
+            updatedAt: "2026-04-06T10:05:00.000Z",
+          })),
+        );
       }
 
       let activeApplyCalls = 0;
@@ -3545,7 +3559,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation strips worker-only workout candidate context from Web diagnostics", async () => {
+  test("reconciliation keeps worker-only workout candidate context out of Web updates", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -3651,21 +3665,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(request.occurredAt, "2026-04-06T09:18:00.000Z");
       assert.equal(request.updates.length, 1);
       assert.equal(request.updates[0]?.connectionId, "hosted_conn_failure_diagnostic");
-      assert.deepEqual(request.updates[0]?.failureDiagnostic, {
-        accountStatus: null,
-        code: "JUNCTION_API_REQUEST_FAILED",
-        details: {
-          providerHttpStatus: 500,
-          providerRequestEndpointKind: "junction_workout_stream",
-          providerRequestMethod: "GET",
-        },
-        retryable: true,
-      });
-      const failureDetails = request.updates[0]?.failureDiagnostic?.details;
-      assert.ok(failureDetails);
-      assert.equal("providerRequestCandidateAliasSource" in failureDetails, false);
-      assert.equal("providerRequestCandidateCount" in failureDetails, false);
-      assert.equal("providerRequestCandidateOrdinal" in failureDetails, false);
+      assert.equal(request.updates[0]?.failureDiagnostic, undefined);
       assert.equal(
         request.updates[0]?.localState?.lastErrorMessage,
         "Junction workout stream request failed.",
@@ -10302,20 +10302,23 @@ describe("hosted device-sync runtime", () => {
       const claimed = firstStore.claimDueJob("worker_exact_recovery", occurredAt, 60_000);
       assert.ok(claimed);
       assert.equal(claimed.attempts, 1);
-      assert.deepEqual(firstStore.failJobIfOwned(
-        claimed.id,
-        "worker_exact_recovery",
-        occurredAt,
-        "PROVIDER_RETRYABLE",
-        "retryable",
-        retryAt,
-        true,
-      ), {
-        attempts: 1,
-        disposition: "queued",
-        maxAttempts: 5,
-        remainingAttempts: 4,
-      });
+      assert.deepEqual(
+        firstStore.failJobIfOwned(
+          claimed.id,
+          "worker_exact_recovery",
+          occurredAt,
+          "PROVIDER_RETRYABLE",
+          "retryable",
+          retryAt,
+          true,
+        ),
+        {
+          attempts: 1,
+          disposition: "queued",
+          maxAttempts: 5,
+          remainingAttempts: 4,
+        },
+      );
 
       const recovery = resolveHostedDeviceSyncWakeRecovery({
         service: firstService,

@@ -7,6 +7,7 @@ import {
   automationAssistantTargetOverrideSchema,
   automationActiveUntilSchema,
   automationContinuityPolicyValues,
+  automationContextReferencesSchema,
   automationPlannedOccurrenceOffsetMsSchema,
   automationDeviceActivityKindSchema,
   automationRouteSchema,
@@ -18,6 +19,7 @@ import {
   automationStatusValues,
   buildAutomationSupportSeriesTag,
   type AutomationAssistantTargetOverride,
+  type AutomationContextReference,
   type AutomationRoute,
   type AutomationScaffoldPayload,
   type AutomationDeviceActivityKind,
@@ -110,6 +112,7 @@ export const automationRecordSchema = z
     plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema
       .nullable()
       .default(null),
+    contextReferences: automationContextReferencesSchema.default([]),
     continuityPolicy: z.enum(automationContinuityPolicyValues),
     tags: z.array(z.string().min(1)),
     createdAt: z.string().min(1),
@@ -401,6 +404,56 @@ function buildAutomationPlannedOccurrenceOffsetPatchFromOptions(input: {
   return input.plannedOccurrenceOffsetMs;
 }
 
+function normalizeAutomationContextReferenceOptions(
+  values: readonly string[] | undefined,
+): AutomationContextReference[] | undefined {
+  const entries = normalizeRepeatableFlagOption(values, "context-reference");
+  if (entries === undefined) {
+    return undefined;
+  }
+
+  const references = entries.map((entry) => {
+    const separatorIndex = entry.indexOf("=");
+    if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
+      return invalidAutomationOption(
+        "Each --context-reference must use <entity-kind>=<entity-id> form.",
+      );
+    }
+
+    return {
+      entityKind: entry.slice(0, separatorIndex),
+      entityId: entry.slice(separatorIndex + 1),
+    };
+  });
+  const parsed = automationContextReferencesSchema.safeParse(references);
+  if (!parsed.success) {
+    return invalidAutomationOption(
+      `Invalid --context-reference: ${parsed.error.issues.map((issue) => issue.message).join(" ")}`,
+    );
+  }
+
+  return parsed.data;
+}
+
+function buildAutomationContextReferencesPatchFromOptions(input: {
+  clearContextReferences?: boolean;
+  contextReference?: readonly string[];
+}): AutomationContextReference[] | undefined {
+  const contextReferences = normalizeAutomationContextReferenceOptions(
+    input.contextReference,
+  );
+  if (input.clearContextReferences === true) {
+    if (contextReferences !== undefined) {
+      return invalidAutomationOption(
+        "--clear-context-references cannot be combined with --context-reference.",
+      );
+    }
+    return [];
+  }
+
+  return contextReferences;
+}
+
 function normalizeAutomationTagOptions(input: {
   existingTags?: readonly string[];
   supportSeriesId?: string;
@@ -521,6 +574,10 @@ const automationSharedOptionSchemas = {
   plannedOccurrenceOffsetMs: automationPlannedOccurrenceOffsetMsSchema
     .optional()
     .describe("Milliseconds from this reminder to the planned session occurrence."),
+  contextReference: z
+    .array(z.string().min(3))
+    .optional()
+    .describe("Exact canonical record in <entity-kind>=<entity-id> form. Repeat for multiple records; routing and interpretation context only."),
   continuityPolicy: z
     .enum(automationContinuityPolicyValues)
     .optional()
@@ -649,6 +706,10 @@ const automationEditOptionSchemas = {
     .boolean()
     .optional()
     .describe("Clear the planned session occurrence offset."),
+  clearContextReferences: z
+    .boolean()
+    .optional()
+    .describe("Clear all canonical routing and interpretation references."),
   clearAssistantTargetOverride: z
     .boolean()
     .optional()
@@ -725,6 +786,9 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         }),
         supportKind: context.options.supportKind,
         plannedOccurrenceOffsetMs: context.options.plannedOccurrenceOffsetMs,
+        contextReferences: normalizeAutomationContextReferenceOptions(
+          context.options.contextReference,
+        ),
         instructions: context.options.instructions,
         route,
         schedule: buildAutomationScheduleFromOptions({
@@ -847,6 +911,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         plannedOccurrenceOffsetMs: buildAutomationPlannedOccurrenceOffsetPatchFromOptions({
           clearPlannedOccurrenceOffset: context.options.clearPlannedOccurrenceOffset,
           plannedOccurrenceOffsetMs: context.options.plannedOccurrenceOffsetMs,
+        }),
+        contextReferences: buildAutomationContextReferencesPatchFromOptions({
+          clearContextReferences: context.options.clearContextReferences,
+          contextReference: context.options.contextReference,
         }),
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,

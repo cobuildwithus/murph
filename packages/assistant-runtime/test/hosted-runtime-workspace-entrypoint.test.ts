@@ -12273,6 +12273,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:dirty-ack-failure",
       id: "mailbox_item_system_mailbox_device_dirty_ack_failure",
@@ -12349,6 +12350,7 @@ describe("hosted workspace runtime entrypoint", () => {
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort,
+            logRequests,
             mailboxPort: createMailboxPort({ events, items: [] }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -12379,6 +12381,34 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "0",
       );
+      const failureEntries = logRequests.flatMap((request) => request.entries);
+      assert.equal(
+        failureEntries.filter((entry) => entry.eventCode === "device-sync.job_failed").length,
+        0,
+      );
+      const persistenceFailure = failureEntries.find(
+        (entry) => entry.eventCode === "device-sync.dirty_ack_persistence_failed",
+      );
+      if (!persistenceFailure) {
+        throw new Error("Expected a distinct dirty-ack persistence failure diagnostic.");
+      }
+      assert.equal(typeof persistenceFailure.at, "string");
+      assert.equal(persistenceFailure.component, "device-sync");
+      assert.equal(persistenceFailure.errorCode, "runtime_error");
+      assert.equal(
+        persistenceFailure.eventCode,
+        "device-sync.dirty_ack_persistence_failed",
+      );
+      assert.equal(persistenceFailure.level, "warn");
+      assert.equal(persistenceFailure.phase, "checkpoint");
+      assert.deepEqual(persistenceFailure.redactedJson, {
+        errorCode: "runtime_error",
+        nextWakeAtPresent: true,
+        safeErrorMessage: "Hosted execution runtime failed.",
+      });
+      assert.ok(!JSON.stringify(persistenceFailure).includes("synthetic dirty ack failure"));
+      assert.ok(!JSON.stringify(persistenceFailure).includes("device_sync_connection_synthetic"));
+      assert.ok(!JSON.stringify(persistenceFailure).includes("dirty_payload_synthetic"));
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

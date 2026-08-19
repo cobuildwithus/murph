@@ -20,6 +20,7 @@ import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
 import {
   createDeviceSyncService,
+  DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT,
   resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
 } from "../src/service.ts";
@@ -10020,7 +10021,8 @@ test("device sync service bounds in-memory job failure diagnostics to recent fai
   const processedBackfill = await service.runWorkerOnce();
   assert.equal(processedBackfill?.kind, "backfill");
 
-  for (let index = 0; index < 55; index += 1) {
+  const failureCount = DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT + 5;
+  for (let index = 0; index < failureCount; index += 1) {
     store.enqueueJob({
       accountId: connected.account.id,
       provider: "demo",
@@ -10032,11 +10034,14 @@ test("device sync service bounds in-memory job failure diagnostics to recent fai
     });
   }
 
-  assert.equal(await service.drainWorker(60), 55);
+  assert.equal(await service.drainWorker(failureCount), failureCount);
   const diagnostics = service.listJobFailureDiagnostics();
-  assert.equal(diagnostics.length, 50);
+  assert.equal(diagnostics.length, DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT);
   assert.equal(diagnostics[0]?.code, "BOUNDED_FAILURE_5");
-  assert.equal(diagnostics.at(-1)?.code, "BOUNDED_FAILURE_54");
+  assert.equal(
+    diagnostics.at(-1)?.code,
+    `BOUNDED_FAILURE_${failureCount - 1}`,
+  );
 
   close();
 });

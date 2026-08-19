@@ -93,6 +93,11 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
     workflow.includes("--jq '.[] | .filename, (.previous_filename // empty)'"),
     "renamed paths must be evaluated through previous_filename",
   );
+  assert.match(
+    workflow,
+    /group: native-ios-hosted-e2e-live\n\s+queue: max\n\s+cancel-in-progress: false/u,
+    "trusted live runs must queue without replacing an existing pending run",
+  );
   assert.equal(runWorkflowSelector(workflow, "apps/web/app/page.tsx"), "selected");
   assert.equal(TRUSTED_DEFAULT_BRANCH_CONTROLLERS.length, 5);
   for (const controller of TRUSTED_DEFAULT_BRANCH_CONTROLLERS) {

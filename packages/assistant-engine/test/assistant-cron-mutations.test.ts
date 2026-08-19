@@ -512,6 +512,7 @@ function createAutomationSource(
     automationId: 'automation_invalid_email',
     relativePath: 'bank/automations/invalid-email-reminder.md',
     continuityPolicy: 'fresh',
+    contextReferences: [],
     createdAt: '2026-04-08T07:00:00.000Z',
     instructions: 'Send the reminder.',
     kind: 'automation',
