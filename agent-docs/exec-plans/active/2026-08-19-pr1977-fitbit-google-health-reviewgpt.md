@@ -39,8 +39,10 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
    ReviewGPT round 6 on the remediated head.
 7. [x] Reproduce and correct round 6's same-source reauthorization epoch rewind
    without adding a persisted owner or retry path.
-8. [ ] Push the exact correction and run the final allowed ReviewGPT round 7.
-9. [ ] Prove a clean current-base merge, mark the
+8. [x] Push the round-6 correction and run the final allowed ReviewGPT round 7.
+9. [ ] Resolve round 7's durable job-lineage finding through the existing Web
+   source epoch without adding a persisted owner, then push focused proof.
+10. [ ] Prove a clean current-base merge, mark the
    PR ready, and archive this plan without merging.
 
 ## ReviewGPT ledger
@@ -70,20 +72,64 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
   callbacks fail their source fence, and runtime updates cannot rewrite an
   existing Web `firstSeenAt`. Same-epoch provider aliases retain their existing
   consolidation behavior.
+- Final round 7: accepted that queued, leased, deferred-retry, timeseries, or
+  workout jobs could retain proof flags and cursors from the prior Web-owned
+  source epoch, then write a new completion timestamp after reauthorization.
+  The requirement-level decision is that explicit Google reauthorization needs
+  a fully fresh exact Google and Fitbit proof. One existing mechanism owns that
+  decision: proof jobs bind to the authorizing Web source slug and `firstSeenAt`,
+  that pair joins the existing dedupe identity, and stale lineages are
+  superseded before more provider work, continuation, or marker projection.
+  Already accepted canonical imports remain; no timestamp owner, migration
+  ledger, queue, scheduler, manager, or reconciliation process is added.
+
+## Round-7 retrospective
+
+- Source row: continue the round-6 design. Web's persisted `firstSeenAt` remains
+  the sole authorization epoch; hosted job-time listing now prefers that Web
+  value over a stale local copy.
+- Job lineage: redesign the existing backfill payload and dedupe identity so the
+  Web epoch is carried through current proof-producing work. Old unbound jobs
+  remain import carriers only and cannot project migration completion.
+- Cutover proof: keep the single completion timestamp, but accept it only from a
+  job whose existing epoch binding is still current. There is no new completion
+  guard owner or per-continuation state machine.
+- Deletion choice: superseded bound jobs finish without provider I/O or another
+  continuation; their old cursors and Boolean evidence are not migrated into a
+  replacement mechanism. The fresh exact jobs already scheduled by the current
+  authorization are the only proof path.
+- Composition proof covers same-day and cross-day epochs; queued, running,
+  deferred, timeseries, and workout payloads; a reauthorization during provider
+  work; warm/cold Web-authoritative source reads; fresh Google arrival before
+  terminal history; and the existing exactly-once Fitbit revoke boundary.
+- Immutable review growth: the first-reviewed patch was 60 files and 5,983
+  changed lines; this round-7 remediation candidate is 73 files and 8,917
+  changed lines, a review-driven increase of 13 files and 2,934 lines. With
+  tests, docs, changelog, package/TypeScript configuration, and the inert design
+  study excluded consistently, authored production churn is 4,424 lines, 726
+  above the first-reviewed head. This remediation itself is 622 changed lines,
+  of which 231 are authored production source and the remainder is focused
+  proof and owner documentation. The retained concepts remain one Web source
+  epoch, existing backfill jobs/continuations, one terminal source marker, and
+  the existing cutover lock; the review did not add a state owner or process.
 
 ## Evidence so far
 
 - Importers: 19 files, 475 tests passed.
-- Device Sync: 49 files, 1,178 tests passed after the round-6 correction.
-- Focused Web migration/connect proof: 3 files, 290 tests passed.
+- Device Sync: 49 files, 1,181 tests passed after the round-7 correction;
+  focused epoch and blood-pressure recovery proof passed 376 tests.
+- Focused Web migration/connect proof: 3 files, 263 tests passed.
 - Round-6 Web authority proof: 1 file, 76 tests passed.
 - Assistant Runtime: 89 files passed, 1 skipped; 2,404 tests passed, 5 skipped.
 - Device Sync, Assistant Runtime, Importers, and Web prepared typechecks passed.
-- Package-local scoped Web lint passed.
+- Package-local scoped Web lint, documentation drift, documentation gardening,
+  and diff whitespace checks passed.
 - Round-6 warm/cold hydration, local-store epoch replacement, delayed callback
   rejection, current-epoch arrival, same-epoch alias, and maintenance retry
-  proofs pass. The final ReviewGPT/CI gate remains pending; GitHub Actions
-  currently cannot start because of an account billing lock.
+  proofs pass. The final ReviewGPT/CI gate remains pending: round 7 exhausted
+  the seven-round hard cap, so review of this candidate requires explicit user
+  authorization for round 8, and GitHub Actions currently cannot start because
+  of an account billing lock.
 
 ## Deployment concern
 

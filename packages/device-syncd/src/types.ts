@@ -1009,6 +1009,10 @@ export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
   buildSourceConnectionWork?(input: {
+    historicalProofAuthorization?: {
+      firstSeenAt: string;
+      sourceProviderSlug: string;
+    };
     now: string;
     sourceProviderSlug: string;
   }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;

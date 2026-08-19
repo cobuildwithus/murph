@@ -145,6 +145,10 @@ export class HostedDeviceSyncPublicIngressService {
               );
             const legacyWork = legacy
               ? provider.connectionHandler?.buildSourceConnectionWork?.({
+                  historicalProofAuthorization: {
+                    firstSeenAt: now,
+                    sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+                  },
                   now,
                   sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
                 })

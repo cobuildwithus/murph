@@ -780,6 +780,14 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const sourceConnectionWork = buildSourceConnectionWork({
+      ...(context.sourceProviderSlug
+        ? {
+            historicalProofAuthorization: {
+              firstSeenAt: context.now,
+              sourceProviderSlug: context.sourceProviderSlug,
+            },
+          }
+        : {}),
       now: context.now,
       sourceProviderSlug: context.sourceProviderSlug,
     });
@@ -1349,9 +1357,30 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
   ): Promise<ProviderJobResult> {
     const skippedOptionalResources: JunctionSkippedOptionalResource[] = [];
+
+    if (job.kind === JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND) {
+      return executePushSourceRecoveryJob(context, job);
+    }
+
+    const historicalProofAuthorization = readJunctionHistoricalProofAuthorization(job);
+    if (
+      historicalProofAuthorization
+      && !await isJunctionHistoricalProofAuthorizationCurrent(
+        context,
+        historicalProofAuthorization,
+      )
+    ) {
+      return {
+        nextReconcileAt: resolveJunctionNextReconcileAt(
+          context.account,
+          context.now,
+          addMilliseconds(context.now, reconcileIntervalMs),
+        ),
+      };
+    }
+
     const completedWorkoutStreamIdentities =
       readJunctionWorkoutStreamCompletedIdentities(job);
-
     if (job.kind === "resource") {
       return executeResourceJob(
         context,
@@ -1359,10 +1388,6 @@ export function createJunctionDeviceSyncProvider(
         skippedOptionalResources,
         completedWorkoutStreamIdentities,
       );
-    }
-
-    if (job.kind === JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND) {
-      return executePushSourceRecoveryJob(context, job);
     }
 
     if (isFullJobTimeseriesContinuation(job)) {
@@ -1677,7 +1702,12 @@ export function createJunctionDeviceSyncProvider(
           window.windowEnd,
         )
       );
-    const timeseriesContinuation = shouldScheduleTimeseries
+    const historicalProofStillCurrent = !historicalProofAuthorization
+      || await isJunctionHistoricalProofAuthorizationCurrent(
+        context,
+        historicalProofAuthorization,
+      );
+    const timeseriesContinuation = shouldScheduleTimeseries && historicalProofStillCurrent
       ? buildFullJobTimeseriesContinuationJob({
           deferredEmptyBackfillAttempts:
             readDeferredEmptyBackfillAttempts(backfillFollowUp),
@@ -1707,11 +1737,16 @@ export function createJunctionDeviceSyncProvider(
         skippedOptionalResources,
       );
     }
-    if (job.kind === "backfill" && !backfillFollowUp.scheduledJobs?.length) {
+    if (
+      job.kind === "backfill"
+      && historicalProofStillCurrent
+      && !backfillFollowUp.scheduledJobs?.length
+    ) {
       await completeSourceScopedHistoricalBackfill({
         context,
         historicalProviderRecordsSeen,
         historicalRecordsSeen,
+        job,
         sourceProviderSlug,
         sourceProviders,
       });
@@ -1720,7 +1755,7 @@ export function createJunctionDeviceSyncProvider(
       context,
       withJunctionMetadataPatch(
         {
-          ...backfillFollowUp,
+          ...(historicalProofStillCurrent ? backfillFollowUp : {}),
           nextReconcileAt,
         },
         profileMetadataPatch,
@@ -4998,8 +5033,28 @@ export function createJunctionDeviceSyncProvider(
     const sourceProviderSlug = normalizeProviderSlug(
       input.job.payload.sourceProviderSlug,
     );
+    const historicalProofAuthorization = readJunctionHistoricalProofAuthorization(
+      input.job,
+    );
     const retryJob = buildExactWindowJob({
       kind: "backfill",
+      payload: {
+        emptyBackfillAttempts,
+        ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+        ...(historicalProofAuthorization
+          ? {
+              historicalProofFirstSeenAt: historicalProofAuthorization.firstSeenAt,
+              historicalProofSourceProviderSlug:
+                historicalProofAuthorization.sourceProviderSlug,
+            }
+          : {}),
+        ...(input.historicalProviderRecordsSeen
+          ? { historicalProviderRecordsSeen: true }
+          : {}),
+        ...(input.historicalRecordsSeen
+          ? { historicalRecordsSeen: true }
+          : {}),
+      },
       priority: Math.max(
         input.job.priority,
         JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
@@ -5010,17 +5065,6 @@ export function createJunctionDeviceSyncProvider(
     return {
       ...retryJob,
       availableAt: addMilliseconds(input.now, retryDelayMs),
-      payload: {
-        ...(retryJob.payload ?? {}),
-        emptyBackfillAttempts,
-        ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
-        ...(input.historicalProviderRecordsSeen
-          ? { historicalProviderRecordsSeen: true }
-          : {}),
-        ...(input.historicalRecordsSeen
-          ? { historicalRecordsSeen: true }
-          : {}),
-      },
     };
   }
 
@@ -5028,11 +5072,20 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext;
     historicalProviderRecordsSeen: boolean;
     historicalRecordsSeen: boolean;
+    job: DeviceSyncJobRecord;
     sourceProviderSlug: string | null;
     sourceProviders: readonly JunctionProviderConnection[];
   }): Promise<void> {
+    const historicalProofAuthorization = readJunctionHistoricalProofAuthorization(
+      input.job,
+    );
     if (
       !input.sourceProviderSlug
+      || !historicalProofAuthorization
+      || !await isJunctionHistoricalProofAuthorizationCurrent(
+        input.context,
+        historicalProofAuthorization,
+      )
       || (input.historicalProviderRecordsSeen && !input.historicalRecordsSeen)
       || !input.sourceProviders.some((provider) =>
         areJunctionProviderSlugsDataEquivalent(
@@ -5058,7 +5111,15 @@ export function createJunctionDeviceSyncProvider(
     sourceProviders: readonly JunctionProviderConnection[];
     window: { windowEnd: string; windowStart: string };
   }): Promise<ProviderJobResult> {
-    const continuationJob = input.continuation
+    const historicalProofAuthorization = readJunctionHistoricalProofAuthorization(
+      input.job,
+    );
+    const historicalProofStillCurrent = !historicalProofAuthorization
+      || await isJunctionHistoricalProofAuthorizationCurrent(
+        input.context,
+        historicalProofAuthorization,
+      );
+    const continuationJob = input.continuation && historicalProofStillCurrent
       ? buildFullJobTimeseriesContinuationJob({
           deferredEmptyBackfillAttempts:
             readHistoricalBackfillJobEmptyAttempts(input.job),
@@ -5069,9 +5130,11 @@ export function createJunctionDeviceSyncProvider(
           window: input.window,
         })
       : null;
-    const scheduledJob = continuationJob
-      ? { ...continuationJob, availableAt: input.context.now }
-      : buildDeferredNonConnectHistoricalBackfillRetry({
+    const scheduledJob = !historicalProofStillCurrent
+      ? null
+      : continuationJob
+        ? { ...continuationJob, availableAt: input.context.now }
+        : buildDeferredNonConnectHistoricalBackfillRetry({
           account: input.context.account,
           historicalProviderRecordsSeen: input.historicalProviderRecordsSeen,
           historicalRecordsSeen: input.historicalRecordsSeen,
@@ -5084,6 +5147,7 @@ export function createJunctionDeviceSyncProvider(
         context: input.context,
         historicalProviderRecordsSeen: input.historicalProviderRecordsSeen,
         historicalRecordsSeen: input.historicalRecordsSeen,
+        job: input.job,
         sourceProviderSlug: normalizeProviderSlug(
           input.job.payload.sourceProviderSlug,
         ),
@@ -5139,6 +5203,9 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
+    const historicalProofAuthorization = readJunctionHistoricalProofAuthorization(
+      input.job,
+    );
     const historicalProviderRecordsSeen =
       input.historicalProviderRecordsSeen === true
       || input.job.payload.historicalProviderRecordsSeen === true;
@@ -5151,6 +5218,13 @@ export function createJunctionDeviceSyncProvider(
           ? { emptyBackfillAttempts: input.deferredEmptyBackfillAttempts }
           : {}),
         ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+        ...(historicalProofAuthorization
+          ? {
+              historicalProofFirstSeenAt: historicalProofAuthorization.firstSeenAt,
+              historicalProofSourceProviderSlug:
+                historicalProofAuthorization.sourceProviderSlug,
+            }
+          : {}),
         ...(input.job.kind === "backfill" && historicalProviderRecordsSeen
           ? { historicalProviderRecordsSeen: true }
           : {}),
@@ -5275,23 +5349,33 @@ export function createJunctionDeviceSyncProvider(
   function buildInitialJobs(
     now: string,
     sourceProviderSlug?: string | null,
+    historicalProofAuthorization?: JunctionHistoricalProofAuthorization | null,
   ): DeviceSyncJobInput[] {
     const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
-    const payload = normalizedSourceProviderSlug
-      ? { sourceProviderSlug: normalizedSourceProviderSlug }
+    const sourcePayload = normalizedSourceProviderSlug
+      ? {
+          sourceProviderSlug: normalizedSourceProviderSlug,
+        }
       : undefined;
     return [
       buildWindowJob({
         kind: "backfill",
         now,
-        payload,
+        payload: sourcePayload && historicalProofAuthorization
+          ? {
+              ...sourcePayload,
+              historicalProofFirstSeenAt: historicalProofAuthorization.firstSeenAt,
+              historicalProofSourceProviderSlug:
+                historicalProofAuthorization.sourceProviderSlug,
+            }
+          : sourcePayload,
         windowStart: subtractDays(now, summaryBackfillDays),
         priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
       }),
       buildWindowJob({
         kind: "reconcile",
         now,
-        payload,
+        payload: sourcePayload,
         windowStart: subtractDays(now, reconcileDays),
         priority: JUNCTION_SCHEDULED_RECONCILE_PRIORITY,
       }),
@@ -5299,11 +5383,20 @@ export function createJunctionDeviceSyncProvider(
   }
 
   function buildSourceConnectionWork(input: {
+    historicalProofAuthorization?: JunctionHistoricalProofAuthorization;
     now: string;
     sourceProviderSlug: string | null | undefined;
   }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt"> {
+    const sourceProviderSlug = normalizeProviderSlug(input.sourceProviderSlug);
+    const historicalProofAuthorization = normalizeJunctionHistoricalProofAuthorization(
+      input.historicalProofAuthorization,
+    );
     return {
-      initialJobs: buildInitialJobs(input.now, input.sourceProviderSlug),
+      initialJobs: buildInitialJobs(
+        input.now,
+        sourceProviderSlug,
+        historicalProofAuthorization,
+      ),
       nextReconcileAt: addMilliseconds(input.now, reconcileIntervalMs),
     };
   }
@@ -9368,6 +9461,55 @@ type JunctionWindowJobPayload<Kind extends "backfill" | "reconcile"> = Omit<
   "windowStart" | "windowEnd"
 >;
 
+interface JunctionHistoricalProofAuthorization {
+  firstSeenAt: string;
+  sourceProviderSlug: string;
+}
+
+function normalizeJunctionHistoricalProofAuthorization(
+  input: JunctionHistoricalProofAuthorization | null | undefined,
+): JunctionHistoricalProofAuthorization | null {
+  const firstSeenAt = normalizeString(input?.firstSeenAt);
+  const sourceProviderSlug = normalizeProviderSlug(input?.sourceProviderSlug);
+  if (
+    !firstSeenAt
+    || !Number.isFinite(Date.parse(firstSeenAt))
+    || !sourceProviderSlug
+  ) {
+    return null;
+  }
+  return { firstSeenAt, sourceProviderSlug };
+}
+
+function readJunctionHistoricalProofAuthorization(
+  job: DeviceSyncJobRecord,
+): JunctionHistoricalProofAuthorization | null {
+  if (job.kind !== "backfill") {
+    return null;
+  }
+  return normalizeJunctionHistoricalProofAuthorization({
+    firstSeenAt: normalizeString(job.payload.historicalProofFirstSeenAt) ?? "",
+    sourceProviderSlug:
+      normalizeProviderSlug(job.payload.historicalProofSourceProviderSlug) ?? "",
+  });
+}
+
+async function isJunctionHistoricalProofAuthorizationCurrent(
+  context: ProviderJobContext,
+  authorization: JunctionHistoricalProofAuthorization,
+): Promise<boolean> {
+  const sources = context.listConnectionSources
+    ? await context.listConnectionSources()
+    : context.account.sources ?? [];
+  return sources.some((source) =>
+    source.firstSeenAt === authorization.firstSeenAt
+    && areJunctionProviderSlugsDataEquivalent(
+      source.sourceProviderSlug,
+      authorization.sourceProviderSlug,
+    )
+  );
+}
+
 function buildWindowJob<Kind extends "backfill" | "reconcile">(input: {
   kind: Kind;
   now: string;
@@ -9396,14 +9538,33 @@ function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
   windowEnd: string;
   priority: number;
 }): DeviceSyncJobInput {
-  const windowPayload: { sourceProviderSlug?: string } | undefined = input.payload;
+  const windowPayload: {
+    historicalProofFirstSeenAt?: string;
+    historicalProofSourceProviderSlug?: string;
+    sourceProviderSlug?: string;
+  } | undefined = input.payload;
   const sourceProviderSlug = normalizeString(windowPayload?.sourceProviderSlug);
+  const historicalProofAuthorization = normalizeJunctionHistoricalProofAuthorization(
+    windowPayload?.historicalProofFirstSeenAt
+      && windowPayload.historicalProofSourceProviderSlug
+      ? {
+          firstSeenAt: windowPayload.historicalProofFirstSeenAt,
+          sourceProviderSlug: windowPayload.historicalProofSourceProviderSlug,
+        }
+      : null,
+  );
   const dedupeIdentity = [
     "junction",
     input.kind,
     input.windowStart,
     input.windowEnd,
     ...(sourceProviderSlug ? [sourceProviderSlug] : []),
+    ...(historicalProofAuthorization
+      ? [
+          historicalProofAuthorization.sourceProviderSlug,
+          historicalProofAuthorization.firstSeenAt,
+        ]
+      : []),
   ];
   return {
     kind: input.kind,

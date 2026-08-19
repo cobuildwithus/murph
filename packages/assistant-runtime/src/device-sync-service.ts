@@ -166,7 +166,7 @@ async function listHostedJobConnectionSources(input: {
 
       return {
         ...source,
-        firstSeenAt: localSource?.firstSeenAt ?? source.firstSeenAt,
+        firstSeenAt: source.firstSeenAt ?? localSource?.firstSeenAt,
         ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
         sourceProviderSlug: localSource?.sourceProviderSlug ?? source.sourceProviderSlug,
       };

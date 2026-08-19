@@ -268,6 +268,8 @@ describe("deviceSyncProviderManifests", () => {
     expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "backfill")).toEqual({
       payload: {
         emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
+        historicalProofFirstSeenAt: { kind: "string", includeInHostedHint: true },
+        historicalProofSourceProviderSlug: { kind: "string", includeInHostedHint: true },
         historicalProviderRecordsSeen: { kind: "boolean", includeInHostedHint: true },
         historicalRecordsSeen: { kind: "boolean", includeInHostedHint: true },
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },

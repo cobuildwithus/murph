@@ -1805,6 +1805,7 @@ describe("hosted device-sync runtime", () => {
       historicalBackfillCompletedAt: "2026-04-06T09:00:00.000Z",
     };
     let jobSources: Array<{
+      firstSeenAt?: string;
       resourceAvailabilitySummary?: Record<string, unknown>;
       sourceInstanceKey?: string;
       sourceProviderSlug: string;
@@ -1824,6 +1825,7 @@ describe("hosted device-sync runtime", () => {
           jobSources = (await context.listConnectionSources?.({
             sourceProviderSlug: String(job.payload.sourceProviderSlug),
           }) ?? []).map((source) => ({
+            firstSeenAt: source.firstSeenAt,
             resourceAvailabilitySummary: source.resourceAvailabilitySummary,
             ...(source.sourceInstanceKey
               ? { sourceInstanceKey: source.sourceInstanceKey }
@@ -1940,6 +1942,24 @@ describe("hosted device-sync runtime", () => {
         ],
       );
 
+      const localGoogle = firstSources.find((source) =>
+        source.sourceProviderSlug === "google_health"
+      );
+      assert.ok(localGoogle, "Hydration should create the Google Health source.");
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        displayName: localGoogle.displayName,
+        firstSeenAt: "2026-04-05T08:30:00.000Z",
+        lastDataAt: localGoogle.lastDataAt,
+        lastErrorCode: localGoogle.lastErrorCode,
+        lastErrorMessage: localGoogle.lastErrorMessage,
+        lastSeenAt: localGoogle.lastSeenAt,
+        replaceFirstSeenAt: true,
+        resourceAvailabilitySummary: localGoogle.resourceAvailabilitySummary,
+        sourceInstanceKey: localGoogle.sourceInstanceKey,
+        sourceProviderSlug: localGoogle.sourceProviderSlug,
+        status: localGoogle.status,
+      });
       const job = getStore(service).enqueueJob({
         accountId: localAccountId,
         availableAt: "2026-04-06T10:00:00.000Z",
@@ -1950,6 +1970,7 @@ describe("hosted device-sync runtime", () => {
       await service.runWorkerOnce();
       assert.equal(getStore(service).getJobById(job.id)?.status, "succeeded");
       assert.deepEqual(jobSources, [{
+        firstSeenAt: "2026-04-06T08:30:00.000Z",
         resourceAvailabilitySummary: googleSummary,
         sourceInstanceKey: googleSourceInstanceKey,
         sourceProviderSlug: "google_health",

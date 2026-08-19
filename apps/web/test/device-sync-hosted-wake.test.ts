@@ -5695,11 +5695,22 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("enqueues exact legacy Fitbit history when Google Health starts migration", async () => {
-    const buildSourceConnectionWork = vi.fn(() => ({
+    const buildSourceConnectionWork = vi.fn((input: {
+      historicalProofAuthorization?: {
+        firstSeenAt: string;
+        sourceProviderSlug: string;
+      };
+      now: string;
+      sourceProviderSlug: string;
+    }) => ({
       initialJobs: [{
         dedupeKey: "junction:fitbit-history",
         kind: "backfill" as const,
         payload: {
+          historicalProofFirstSeenAt:
+            input.historicalProofAuthorization?.firstSeenAt,
+          historicalProofSourceProviderSlug:
+            input.historicalProofAuthorization?.sourceProviderSlug,
           sourceProviderSlug: "fitbit",
           windowEnd: "2026-03-26T12:00:00.000Z",
           windowStart: "2025-09-27T12:00:00.000Z",
@@ -5741,6 +5752,8 @@ describe("hosted device-sync wakes", () => {
               dedupeKey: "junction:google-history",
               kind: "backfill",
               payload: {
+                historicalProofFirstSeenAt: "2026-03-26T12:00:00.000Z",
+                historicalProofSourceProviderSlug: "google_health",
                 sourceProviderSlug: "google_health",
                 windowEnd: "2026-03-26T12:00:00.000Z",
                 windowStart: "2025-09-27T12:00:00.000Z",
@@ -5769,6 +5782,10 @@ describe("hosted device-sync wakes", () => {
     });
 
     expect(buildSourceConnectionWork).toHaveBeenCalledWith({
+      historicalProofAuthorization: {
+        firstSeenAt: "2026-03-26T12:00:00.000Z",
+        sourceProviderSlug: "google_health",
+      },
       now: "2026-03-26T12:00:00.000Z",
       sourceProviderSlug: "fitbit",
     });
@@ -5777,11 +5794,19 @@ describe("hosted device-sync wakes", () => {
     expect(jobs).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "backfill",
-        payload: expect.objectContaining({ sourceProviderSlug: "google_health" }),
+        payload: expect.objectContaining({
+          historicalProofFirstSeenAt: "2026-03-26T12:00:00.000Z",
+          historicalProofSourceProviderSlug: "google_health",
+          sourceProviderSlug: "google_health",
+        }),
       }),
       expect.objectContaining({
         kind: "backfill",
-        payload: expect.objectContaining({ sourceProviderSlug: "fitbit" }),
+        payload: expect.objectContaining({
+          historicalProofFirstSeenAt: "2026-03-26T12:00:00.000Z",
+          historicalProofSourceProviderSlug: "google_health",
+          sourceProviderSlug: "fitbit",
+        }),
       }),
     ]));
     expect(jobs).not.toEqual(expect.arrayContaining([

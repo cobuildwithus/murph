@@ -397,7 +397,10 @@ function createAuthorityHarness(input: {
   });
 
   const findFirst = vi.fn(async () => currentRecord);
-  const upsertConnectionSource = vi.fn(async () => undefined);
+  const upsertConnectionSource = vi.fn(async (input: Record<string, unknown>) => {
+    void input;
+    return undefined;
+  });
   const update = vi.fn(async ({ data }: { data: Partial<ReturnType<typeof buildHostedRecord>> }) => {
     currentRecord = {
       ...currentRecord,
