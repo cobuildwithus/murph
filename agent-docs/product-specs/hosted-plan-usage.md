@@ -185,6 +185,30 @@ disclose current terms before seeking an explicit choice. The read-only
 `murph.plan_usage` tool cannot start checkout, upgrade a plan, grant credit, or
 claim that a billing change happened.
 
+When authenticated Settings opens the exact usage-recovery destination, its
+existing plan visibility and eligibility facts may promote the next eligible
+recurring tier as the primary recovery action. Starter chooses the first
+visible paid plan, direct Group, Pulse, and Edge choose the next eligible tier,
+and Max has no higher recurring action. A Family owner may likewise be offered
+the next eligible tier for their own seat. Settings derives these actions from
+its plan-card authority rather than from `subscriptionActionQuote`; the quote
+remains disclosure for an exact assistant-mediated choice, not a
+recommendation. An eligible one-time usage purchase remains secondary when a
+higher recurring tier exists and becomes primary only when none exists.
+The recovery query requests presentation; it is not proof that usage remains
+exhausted. Authenticated Settings auto-opens recovery only while the live usage
+projection is `exhausted`. An exact returned or nonterminal usage purchase owns
+presentation before plan or Family recovery, preserving its frozen-target
+resume, cancel, retry, polling, failure, and completion surfaces across later
+billing-relationship changes. While the live projection remains exhausted, an
+exact successful return keeps that purchase dialog visibly open through
+confirmation and completion; Settings may use quiet successful-return handling
+only beside a recovered, non-exhausted meter. Active, unavailable, reset, or
+otherwise recovered usage ignores a stale recovery query.
+An eligible Family-owner recovery banner follows that same current exhausted
+state during both ordinary and message-linked Settings visits; the exact query
+controls only whether its confirmation dialog opens initially.
+
 Family Settings may expose the same fixed-pack dialog beside each active member
 to the current active owner. That owner pays through the Family billing
 customer and the selected member alone receives the credit. This is account

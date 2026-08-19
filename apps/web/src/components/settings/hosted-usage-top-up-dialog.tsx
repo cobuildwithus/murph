@@ -162,6 +162,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     props.scope === "family" && props.targetLabel ? props.targetLabel : null;
   const triggerLabel =
     purchaseTriggerLabel ??
+    props.triggerLabel ??
     (props.scope === "group"
       ? groupPaymentMode === "one_time"
         ? "Make a one-time contribution"

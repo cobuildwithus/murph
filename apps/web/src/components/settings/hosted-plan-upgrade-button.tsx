@@ -19,6 +19,7 @@ export function UpgradeToEdgeButton(props: {
   expectedCurrentPlanCode:
     | Extract<HostedBillingPlanCode, "launch_group_monthly" | "launch_monthly">;
   onPendingChange?: (pending: boolean) => void;
+  primary?: boolean;
   presentation?: "banner" | "settings";
 }) {
   const presentation = props.presentation ?? "settings";
@@ -84,7 +85,9 @@ export function UpgradeToEdgeButton(props: {
     <div className={cn("flex flex-col gap-2", props.block ? "items-stretch" : "items-start sm:items-end")}>
       <Button
         type="button"
-        variant={props.block ? "secondary" : "default"}
+        variant={
+          props.primary ? "default" : props.block ? "secondary" : "default"
+        }
         onClick={() => void handleUpgrade()}
         disabled={disabled}
         className={props.block ? "w-full" : undefined}
