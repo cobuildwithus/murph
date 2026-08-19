@@ -40,7 +40,7 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
 7. [x] Reproduce and correct round 6's same-source reauthorization epoch rewind
    without adding a persisted owner or retry path.
 8. [x] Push the round-6 correction and run the final allowed ReviewGPT round 7.
-9. [ ] Resolve round 7's durable job-lineage finding through the existing Web
+9. [x] Resolve round 7's durable job-lineage finding through the existing Web
    source epoch without adding a persisted owner, then push focused proof.
 10. [ ] Prove a clean current-base merge, mark the
    PR ready, and archive this plan without merging.
@@ -103,11 +103,11 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
   work; warm/cold Web-authoritative source reads; fresh Google arrival before
   terminal history; and the existing exactly-once Fitbit revoke boundary.
 - Immutable review growth: the first-reviewed patch was 60 files and 5,983
-  changed lines; this round-7 remediation candidate is 73 files and 8,917
-  changed lines, a review-driven increase of 13 files and 2,934 lines. With
+  changed lines; this round-7 remediation candidate is 73 files and 8,931
+  changed lines, a review-driven increase of 13 files and 2,948 lines. With
   tests, docs, changelog, package/TypeScript configuration, and the inert design
   study excluded consistently, authored production churn is 4,424 lines, 726
-  above the first-reviewed head. This remediation itself is 622 changed lines,
+  above the first-reviewed head. This remediation itself is 646 changed lines,
   of which 231 are authored production source and the remainder is focused
   proof and owner documentation. The retained concepts remain one Web source
   epoch, existing backfill jobs/continuations, one terminal source marker, and
