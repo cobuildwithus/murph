@@ -3,7 +3,6 @@
 import { useState } from "react";
 
 import { AccountExitReasonStep } from "@/src/components/settings/account-exit-reason-step";
-import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import type { HostedAccountExitReasonCode } from "@/src/lib/hosted-privacy/account-data-shared";
 
 export function AccountExitReasonStudy() {
@@ -19,8 +18,8 @@ export function AccountExitReasonStudy() {
         to the confirmation step, and Continue only turns on once a reason is
         picked. The note field appears after a reason is chosen so a written note
         always arrives attached to one. The live step is interactive here; the
-        two previews below are inert. The terminal states show the same
-        production status component for completed and still-converging cleanup.
+        two previews below are inert. Successful deletion leaves this dashboard
+        for the public farewell page.
       </p>
 
       <StepFrame label="Interactive">
@@ -49,15 +48,6 @@ export function AccountExitReasonStudy() {
           />
         </StepFrame>
       </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <StatusFrame label="External cleanup converged" state="cleanup-complete">
-          <HostedAccountDeletionStatus cleanupPending={false} />
-        </StatusFrame>
-        <StatusFrame label="External cleanup still retrying" state="cleanup-pending">
-          <HostedAccountDeletionStatus cleanupPending />
-        </StatusFrame>
-      </div>
     </div>
   );
 }
@@ -78,21 +68,6 @@ function InteractiveExitReasonStep() {
         setNote("");
       }}
     />
-  );
-}
-
-function StatusFrame(props: {
-  children: React.ReactNode;
-  label: string;
-  state: string;
-}) {
-  return (
-    <div className="flex max-w-md flex-col gap-3" data-design-state={props.state}>
-      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-        {props.label}
-      </p>
-      {props.children}
-    </div>
   );
 }
 
