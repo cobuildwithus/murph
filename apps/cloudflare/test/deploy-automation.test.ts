@@ -1130,6 +1130,9 @@ describe("hosted deploy automation helpers", () => {
 
     expect(deployGuide).toContain("- `CF_BUNDLES_BUCKET`");
     expect(deployGuide).toContain("- `CF_BUNDLES_PREVIEW_BUCKET`");
+    expect(deployGuide).toContain(
+      "Any Worker release that references the retired OC binding or fallback is below the physical-retirement rollback floor and must not be restored.",
+    );
     expect(deployPreflight).toContain('"CF_BUNDLES_BUCKET"');
     expect(deployPreflight).toContain('"CF_BUNDLES_PREVIEW_BUCKET"');
     expect(currentSurfaces).not.toContain("CF_BUNDLES_RETIRING_OC");

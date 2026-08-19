@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -45,6 +45,10 @@ describe("settings sensitive-action challenge route", () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("derives the binding from the authenticated member and session", async () => {
     const response = await route.POST(new Request(
       "https://join.example.test/api/settings/sensitive-action-challenge",
@@ -72,6 +76,35 @@ describe("settings sensitive-action challenge route", () => {
       prisma: mocks.prisma,
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("creates an account-delete challenge when the retired maintenance value is still present", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/settings/sensitive-action-challenge",
+      {
+        body: JSON.stringify({ kind: "account.delete" }),
+        headers: {
+          "content-type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.buildSettingsSensitiveActionBinding).toHaveBeenCalledWith({
+      kind: "account.delete",
+      memberId: "member_123",
+      sessionId: "session_123",
+    });
+    expect(mocks.createSensitiveActionChallenge).toHaveBeenCalledWith({
+      bindingHash: "a".repeat(64),
+      kind: "account.delete",
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
   });
 
   it("rejects action kinds outside the closed settings union", async () => {
