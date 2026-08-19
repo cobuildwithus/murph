@@ -12,7 +12,7 @@
 
 ## Evidence
 
-<!-- List direct journey proof and focused checks. For frontend work, name the states and viewports checked. Link screenshots only when they add proof. -->
+<!-- List direct journey proof and focused checks. Every user-facing UI change must embed at least one screenshot here. Name the states and viewports checked, and add phone and desktop screenshots when responsive behavior can differ. -->
 
 - Direct: <!-- Real path, channel output, provider-shaped scenario, trace, test, or rendered state -->
 - Coverage: <!-- Why this evidence covers the changed claim -->

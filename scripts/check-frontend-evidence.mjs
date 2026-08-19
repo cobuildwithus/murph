@@ -54,6 +54,10 @@ function hasMeaningfulListItem(section, label) {
   return value.length >= 8 && !isExplicitProofAbsence(value);
 }
 
+function hasRenderedScreenshot(section) {
+  return /<img\b[^>]*\bsrc\s*=/iu.test(section);
+}
+
 function validateFrontendEvidence({ changedPaths, prBodyHtml }) {
   const uiPaths = changedPaths.filter(isFrontendUiPath);
   if (uiPaths.length === 0) {
@@ -73,6 +77,11 @@ function validateFrontendEvidence({ changedPaths, prBodyHtml }) {
     if (!hasMeaningfulListItem(evidence, "Coverage")) {
       errors.push(
         "The Evidence section must explain which states and viewports were checked and why that proof is sufficient.",
+      );
+    }
+    if (!hasRenderedScreenshot(evidence)) {
+      errors.push(
+        "Embed at least one screenshot in the Evidence section for every user-facing UI change.",
       );
     }
   }
@@ -108,7 +117,7 @@ async function main() {
     return;
   }
   console.log(
-    `Frontend evidence passed for ${result.uiPaths.length} user-facing UI path(s).`,
+    `Frontend screenshot evidence passed for ${result.uiPaths.length} user-facing UI path(s).`,
   );
 }
 

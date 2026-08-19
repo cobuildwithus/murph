@@ -23,6 +23,7 @@ const COMPLETE_HTML = `
 <li>Direct: Browser walkthrough of the real settings path.</li>
 <li>Coverage: Empty and populated states on a narrow phone; desktop structure did not change.</li>
 </ul>
+<p><img src="https://example.com/settings.png" alt="Settings on a narrow phone"></p>
 `;
 
 test("detects user-facing UI and excludes reference pages", () => {
@@ -42,7 +43,7 @@ test("detects user-facing UI and excludes reference pages", () => {
   );
 });
 
-test("accepts direct frontend evidence without a catalog link or screenshot", () => {
+test("accepts direct frontend evidence with an embedded screenshot", () => {
   assert.deepEqual(
     validateFrontendEvidence({
       changedPaths: ["apps/web/app/settings/page.tsx"],
@@ -53,6 +54,24 @@ test("accepts direct frontend evidence without a catalog link or screenshot", ()
       required: true,
       uiPaths: ["apps/web/app/settings/page.tsx"],
     },
+  );
+});
+
+test("rejects frontend evidence without an embedded screenshot", () => {
+  assert.deepEqual(
+    validateFrontendEvidence({
+      changedPaths: ["apps/web/app/settings/page.tsx"],
+      prBodyHtml: `
+<h2>Evidence</h2>
+<ul>
+<li>Direct: Browser walkthrough of the real settings path.</li>
+<li>Coverage: Empty and populated states on a narrow phone; desktop structure did not change.</li>
+</ul>
+`,
+    }).errors,
+    [
+      "Embed at least one screenshot in the Evidence section for every user-facing UI change.",
+    ],
   );
 });
 
@@ -74,6 +93,7 @@ test("rejects missing, pending, or absent proof", () => {
 <li>Direct: Evidence is pending.</li>
 <li>Coverage: Phone and desktop were not checked.</li>
 </ul>
+<img src="https://example.com/pending.png" alt="Pending proof">
 `,
     }).errors,
     [
@@ -89,6 +109,7 @@ test("does not borrow proof from another heading", () => {
     prBodyHtml: `
 <h2>Evidence</h2>
 <ul><li>Coverage: Phone settings state at the changed width.</li></ul>
+<img src="https://example.com/settings.png" alt="Settings on a phone">
 <h2>Notes</h2>
 <ul><li>Direct: Browser walkthrough.</li></ul>
 `,
@@ -139,7 +160,7 @@ test("CLI validates GitHub-rendered evidence", async () => {
     const endpoint = `http://127.0.0.1:${address.port}`;
 
     const valid = await runCli(fixture, endpoint, "valid");
-    assert.match(valid.stdout, /Frontend evidence passed/u);
+    assert.match(valid.stdout, /Frontend screenshot evidence passed/u);
 
     const invalid = await runCli(fixture, endpoint, "invalid");
     assert.equal(invalid.code, 1);

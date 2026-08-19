@@ -47,7 +47,7 @@ jobs:
           MURPH_GITHUB_TOKEN: ${{ github.token }}
           MURPH_PR_BODY: ${{ github.event.pull_request.body }}
 
-      - name: Require direct evidence for frontend changes
+      - name: Require screenshot evidence for frontend changes
         run: node scripts/check-frontend-evidence.mjs
         env:
           MURPH_GITHUB_TOKEN: ${{ github.token }}

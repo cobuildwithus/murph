@@ -191,7 +191,9 @@ product-decision owners.
    - prompt-primary changes activate the prompt lens in the preliminary specialist ReviewGPT pass; when the prompt also changes a product-owned dimension, activate the Product UX lens too
    - user-facing `apps/web` UI changes outside the copy-only fast path activate
      the frontend lens and require enough redacted rendered evidence to judge
-     each material visual, state, interaction, and responsive claim
+     each material visual, state, interaction, and responsive claim; every such
+     PR must embed at least one production-faithful screenshot in its Evidence
+     section
    - the coverage lens applies when the diff changes executable behavior or changes the tests, fixtures, configuration, or direct-proof scaffolding that establishes its proof; this does not depend on running a local coverage umbrella command
    - any product-owned dimension activates the Product UX lens, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
    - when the cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
@@ -203,9 +205,10 @@ product-decision owners.
    complete the Product UX Walkthrough with direct evidence in addition to
    scripted tests. Match the evidence to each affected person's changed claim.
    Inspect every material changed state and each viewport where the result can
-   differ. Check phone and desktop when responsive behavior can change; do not
-   add a second viewport only to meet a quota. Use the real page for journey
-   proof. Use `/screenshots` only when a difficult or reusable presentation
+   differ. Embed at least one redacted, production-faithful screenshot in the
+   PR Evidence section. Include phone and desktop screenshots when responsive
+   behavior can change. Use the real page for journey proof. Use `/screenshots`
+   only when a difficult or reusable presentation
    state needs stable synthetic data. Prefer an attached in-app Browser when
    available, then use the
    repository-installed Playwright runtime when no tab is attached or the
@@ -246,8 +249,10 @@ Every PR includes:
   exclusions, and any difference from the approved plan. For internal work,
   state why Product UX does not apply.
 - **Evidence.** List the direct journey proof and focused checks. For frontend
-  work, state the changed states and viewports. Link screenshots only when they
-  add proof. There is no screenshot quota and no required catalog link.
+  work, state the changed states and viewports and embed at least one redacted,
+  production-faithful screenshot in this section. Include phone and desktop
+  screenshots when responsive behavior can differ. A catalog link is not
+  required.
 - **Deployment concerns.** Add exactly one `## Deployment concerns` section.
   Select `Deployment: applicable` and complete the deployment contract when the
   change crosses a deploy boundary; otherwise select
@@ -499,7 +504,8 @@ The preliminary specialist pass receives one exact pushed-head packet through
 - the exact focused local proof and current exact-head CI status;
 - the affected prompt stack and tool descriptions when the prompt lens applies;
 - selected redacted rendered evidence for every material frontend state,
-  interaction, and viewport claim when the frontend lens applies;
+  interaction, and viewport claim when the frontend lens applies, including at
+  least one screenshot for every user-facing UI diff;
 - direct scenario evidence or the exact remaining gap;
 - the Product UX owner plus applicable prompt, frontend, and coverage lens
   references; and

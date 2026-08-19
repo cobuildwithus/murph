@@ -149,6 +149,12 @@ a tooling retry, not an additional substantive ReviewGPT round.
 
 ## Evidence so far
 
+- The user additionally required screenshot submission for every UI-touching
+  PR. This candidate restores that rule in the workflow owner docs, PR
+  template, and executable frontend-evidence guard. The current PR will embed
+  the already-inspected production-faithful desktop and mobile migration
+  states in its Evidence section.
+
 - Core: 46 files, 803 tests passed after the round-8 correction.
 - Importers: 19 files, 479 tests passed.
 - Device Sync: 49 files, 1,181 tests passed after the round-7 correction;
