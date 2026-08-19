@@ -424,14 +424,19 @@ export async function createAssistantOutboxIntent(
               media,
               message,
             })
+    const exactDeliveryIdempotencyKey =
+      hasSharedHostedEmailGroupDeliveryIdentity(persistedTarget)
+        ? null
+        : deliveryIdempotencyKey
     const existing = await findAssistantOutboxIntentByDedupeIdentity({
       dedupeKey,
       dedupeToken: input.dedupeToken,
-      deliveryIdempotencyKey,
+      deliveryIdempotencyKey: exactDeliveryIdempotencyKey,
       legacyDedupeKey: hashAssistantOutboxLegacyMediaDedupeIdentity({
         dedupeToken: input.dedupeToken,
         media,
       }),
+      skipLegacyMediaFallback: deliveryIdempotencyKey !== null,
       vault: input.vault,
     })
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
@@ -2932,6 +2937,20 @@ function isReplaySafeHostedEmailGroupFanoutPlanner(
   const hostedTarget = parseHostedEmailThreadTarget(serializedTarget)
   return hostedTarget?.targetKind === 'group'
     && hostedTarget.recipientMemberId === null
+}
+
+function hasSharedHostedEmailGroupDeliveryIdentity(
+  target: AssistantOutboxPersistedTarget,
+): boolean {
+  if (normalizeNullableString(target.channel)?.toLowerCase() !== 'email') {
+    return false
+  }
+
+  const serializedTarget = target.explicitTarget
+    ?? (target.bindingDelivery?.kind === 'thread'
+      ? target.bindingDelivery.target
+      : null)
+  return parseHostedEmailThreadTarget(serializedTarget)?.targetKind === 'group'
 }
 
 function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {

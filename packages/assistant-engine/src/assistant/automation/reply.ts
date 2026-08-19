@@ -4689,12 +4689,9 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
     }
   }
 
-  // Every consumer of this resolver quotes delivery text (latest fallback,
-  // reaction context, cross-session context), so media-only records stay out
-  // and its behavior is unchanged by their attestation elsewhere.
   const replyToMessageId = input.replyToMessageId
   const matchingDeliveries =
-    (await listAssistantAutoReplyMatchingOutboxDeliveries({
+    await listAssistantAutoReplyMatchingOutboxDeliveries({
       allowAcceptedNonSentMedia: replyToMessageId !== null,
       deliveryTarget,
       historyReader: input.historyReader,
@@ -4702,7 +4699,7 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
       providerMessageIds: replyToMessageId === null
         ? []
         : [replyToMessageId],
-    })).filter((delivery) => delivery.message !== null)
+    })
   const replyTargetDelivery = replyToMessageId === null
     ? null
     : resolveAssistantAutoReplyExactOutboxDelivery(

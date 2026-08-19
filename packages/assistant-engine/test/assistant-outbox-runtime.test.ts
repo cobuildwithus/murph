@@ -33,7 +33,10 @@ import {
   updateExperiment,
   upsertAutomation,
 } from '@murphai/core'
-import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
+import {
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
 import { openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
 import { readMaterializedExportPackReceipt } from '@murphai/vault-usecases/export-packs'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
@@ -3035,6 +3038,77 @@ describe('assistant outbox runtime', () => {
     expect(retry.media).toEqual(first.media)
   })
 
+  it('keeps group-email recipient fanout distinct across projection rebuilds and retries', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-email-shared-transport-',
+    )
+    const deliveryIdempotencyKey =
+      'group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123'
+    const parent = await createIntent(vaultRoot, {
+      channel: 'email',
+      dedupeToken: `group-email-parent:${deliveryIdempotencyKey}`,
+      deliveryIdempotencyKey,
+      explicitTarget: serializeHostedEmailThreadTarget({
+        groupId: 'group_123',
+        subject: 'Weekly health note',
+        targetKind: 'group',
+      }),
+      message: 'newsletter parent manifest',
+      sessionId: 'session-newsletter-parent',
+      threadIsDirect: false,
+      turnId: 'turn-newsletter-parent',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+
+    const createChild = (memberId: string) => createIntent(
+      vaultRoot,
+      {
+        channel: 'email',
+        dedupeToken: `hosted-email-group-recipient:${parent.intentId}:${memberId}`,
+        deliveryIdempotencyKey,
+        deliveryTransportIdempotent: false,
+        explicitTarget: serializeHostedEmailThreadTarget({
+          groupId: 'group_123',
+          recipientMemberId: memberId,
+          subject: 'Weekly health note',
+          targetKind: 'group',
+        }),
+        message: 'newsletter recipient delivery',
+        sessionId: 'session-newsletter-parent',
+        threadIsDirect: false,
+        turnId: 'turn-newsletter-parent',
+      },
+    )
+    const firstChildren = await Promise.all([
+      createChild('member_one'),
+      createChild('member_two'),
+    ])
+    expect(firstChildren.map((intent) => intent.intentId)).not.toContain(
+      parent.intentId,
+    )
+    expect(new Set(firstChildren.map((intent) => intent.intentId)).size).toBe(2)
+
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+    const retriedChildren = await Promise.all([
+      createChild('member_one'),
+      createChild('member_two'),
+    ])
+    expect(retriedChildren.map((intent) => intent.intentId)).toEqual(
+      firstChildren.map((intent) => intent.intentId),
+    )
+
+    const intents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(intents).toHaveLength(3)
+    expect(intents.filter((intent) =>
+      parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId
+    )).toHaveLength(2)
+  }, 120_000)
+
   it('prefers active stable dedupe-key intents before legacy media-sensitive matches', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-stable-before-legacy-')
     const dedupeToken = 'stable-key-wins-over-legacy-token'
@@ -3634,7 +3708,7 @@ describe('assistant outbox runtime', () => {
     const sentChild = await createIntent(vaultRoot, {
       channel: 'email',
       createdAt: '2026-03-01T00:01:00.000Z',
-      deliveryIdempotencyKey,
+      deliveryIdempotencyKey: null,
       explicitTarget: childTarget,
       message: 'newsletter sent recipient child',
       sessionId: 'session-newsletter-sent-child',
@@ -3643,6 +3717,10 @@ describe('assistant outbox runtime', () => {
     })
     await saveAssistantOutboxIntent(vaultRoot, {
       ...sentChild,
+      // Legacy fanout children shared their parent's occurrence key. Seed the
+      // historical record directly instead of asking the current exact-key
+      // creator to admit a second effect under that transport identity.
+      deliveryIdempotencyKey,
       sentAt: '2026-03-01T00:06:00.000Z',
       status: 'sent',
       updatedAt: '2026-03-01T00:06:00.000Z',
@@ -3650,7 +3728,7 @@ describe('assistant outbox runtime', () => {
     const failedChild = await createIntent(vaultRoot, {
       channel: 'email',
       createdAt: '2026-03-01T00:02:00.000Z',
-      deliveryIdempotencyKey,
+      deliveryIdempotencyKey: null,
       explicitTarget: serializeHostedEmailThreadTarget({
         groupId: 'group_123',
         recipientMemberId: 'member_two',
@@ -3664,6 +3742,7 @@ describe('assistant outbox runtime', () => {
     })
     await saveAssistantOutboxIntent(vaultRoot, {
       ...failedChild,
+      deliveryIdempotencyKey,
       lastError: {
         code: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
         message: 'pre-provider recipient authority changed',

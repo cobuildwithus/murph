@@ -294,6 +294,7 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
   dedupeToken?: string | null
   deliveryIdempotencyKey?: string | null
   legacyDedupeKey?: string | null
+  skipLegacyMediaFallback?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
   const paths = resolveAssistantStatePaths(input.vault)
@@ -336,10 +337,11 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
   if (projectedMatch) {
     return projectedMatch
   }
-  if (deliveryIdempotencyKey) {
+  if (deliveryIdempotencyKey || input.skipLegacyMediaFallback) {
     // A rebuilt exact transport route owns hosted retry identity. Once that
-    // route misses, media-sensitive pre-migration recovery cannot legitimately
-    // match and must not turn unrelated retained media into an admission cap.
+    // route misses, or a caller has a stable shared transport identity,
+    // media-sensitive pre-migration recovery cannot legitimately match and
+    // must not turn unrelated retained media into an admission cap.
     return null
   }
 
