@@ -599,7 +599,10 @@ async function resolveHostedGroupSponsorshipPaymentMethod(input: {
       paidAt: { not: null },
       payerMemberId,
       status: HostedUsageCreditPurchaseStatus.fulfilled,
-      stripeCheckoutSessionLookupKey: { not: null },
+      OR: [
+        { groupSponsorshipChargeOrdinal: 0 },
+        { stripeCheckoutSessionLookupKey: { not: null } },
+      ],
       stripePaymentIntentIdEncrypted: { not: null },
       stripePaymentIntentLookupKey: { not: null },
     },
@@ -613,11 +616,28 @@ async function resolveHostedGroupSponsorshipPaymentMethod(input: {
     purchase: source,
     stripe: input.stripe,
   });
-  assertHostedGroupSponsorshipCheckoutPaymentIntent({
-    customerId: input.customerId,
-    paymentIntent,
-    purchase: source,
-  });
+  if (source.stripeCheckoutSessionLookupKey) {
+    assertHostedGroupSponsorshipCheckoutPaymentIntent({
+      customerId: input.customerId,
+      paymentIntent,
+      purchase: source,
+    });
+  } else {
+    if (source.groupSponsorshipChargeOrdinal !== 0) {
+      throw buildHostedUsageCreditInvariantError(
+        "group_sponsorship_payment_source_invalid",
+      );
+    }
+    assertHostedUsageCreditPaymentIntentMatchesPurchase({
+      paymentIntent,
+      purchase: source,
+    });
+    if (paymentIntent.status !== "succeeded") {
+      throw buildHostedUsageCreditInvariantError(
+        "group_sponsorship_payment_identity_invalid",
+      );
+    }
+  }
   const paymentMethodId = coerceStripeObjectId(paymentIntent.payment_method);
   if (!paymentMethodId) {
     throw buildHostedUsageCreditInvariantError(

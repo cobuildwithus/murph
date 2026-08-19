@@ -1069,8 +1069,10 @@ v4 reuse and stay in Checkout. New purchases freeze
 `hosted-usage-credit-checkout-v5`, which retains the explicit save choice but
 forces future-use saving only for monthly sponsorship activation and recovery.
 Automatic sponsorship refills derive their exact reusable method from the
-latest verified sponsorship Checkout rather than attached-method count, card
-fingerprints, or a one-time contribution. Versions one through four retain
+latest verified explicit sponsorship payment: either the ordinal-zero direct
+activation or a Checkout-backed activation or recovery. Sessionless automatic
+refills, attached-method count, card fingerprints, and one-time contributions
+never become a new payment authority. Versions one through four retain
 their original request and selection shapes.
 Every retry and Stripe proof check uses the purchase's frozen policy version
 rather than the latest global version.
