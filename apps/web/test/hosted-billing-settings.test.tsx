@@ -2377,6 +2377,7 @@ describe("HostedBillingSettings", () => {
       authenticated: true,
       billingStatus: "active",
       canStartDirectPlan: true,
+      showMaxPlan: true,
       usageStatus: buildStarterStatus(),
     }));
 
@@ -2386,6 +2387,10 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Starter ·/);
     assert.match(markup, /Choose Pulse/);
     assert.match(markup, /Choose Edge/);
+    assert.match(markup, /Choose Max/);
+    // The usage meter above already states the Starter terms, so neither
+    // recurring card repeats them under its feature list.
+    assert.doesNotMatch(markup, /starter usage does not expire/i);
     assert.doesNotMatch(markup, /days? left|expires/i);
   });
 

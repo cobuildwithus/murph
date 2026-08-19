@@ -166,7 +166,6 @@ import {
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import {
   HostedAccountDeletionErrorAlert,
-  HostedAccountDeletionStatus,
 } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
@@ -1392,15 +1391,6 @@ export function ComponentsContent() {
               sourceLabel="Oura"
               title="Unable to finish connection"
             />
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Account Deletion Status">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <HostedAccountDeletionStatus cleanupPending={false} />
-            <HostedAccountDeletionStatus cleanupPending />
           </div>
         </Section>
 

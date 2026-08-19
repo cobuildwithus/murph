@@ -6,7 +6,6 @@ import {
 } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { assertHostedAccountDeletionAvailable } from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import {
   buildSettingsSensitiveActionBinding,
   createSensitiveActionChallenge,
@@ -30,14 +29,6 @@ export const POST = withJsonError(async (request: Request) => {
       httpStatus: 400,
       message: "Sensitive action kind is invalid.",
     });
-  }
-
-  // Decline the deletion window here, before the member is asked to approve
-  // anything. The delete route keeps the same guard as the effect boundary,
-  // but this is where the member finds out, with the dialog still open and no
-  // passkey prompt or browser-vault teardown behind them.
-  if (body.kind === "account.delete") {
-    assertHostedAccountDeletionAvailable();
   }
 
   return jsonOk(await createSensitiveActionChallenge({
