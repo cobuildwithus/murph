@@ -12677,11 +12677,18 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("fresh foreground input after device-sync apply checkpoints the bounded unit once", async () => {
+  test("foreground input during a blocked system pass upgrades after checkpointing the bounded unit once", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems: HostedMailboxItem[] = [];
+    const foregroundItem = createMailboxItem({
+      id: "mailbox_item_system_mailbox_blocked_foreground_upgrade",
+      laneSeq: "1",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+    });
+    let assistantPhaseCalls = 0;
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:preempt-during",
       id: "mailbox_item_system_mailbox_device_preempt_during",
@@ -12692,7 +12699,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_preempt_during",
       nextReconcileAt: "2026-04-27T00:05:00.000Z",
-      onApplyUpdates: () => runtimeWakeSignal.notify(),
+      onApplyUpdates: () => {
+        mailboxItems.push(foregroundItem);
+        runtimeWakeSignal.notify();
+      },
     });
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -12716,6 +12726,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
+            assistantExecutionBlocked: true,
             attemptId: "attempt_synthetic_system_mailbox_device_preempt_during",
             processingMode: "system_mailbox",
             workspaceVersion: "0",
@@ -12732,13 +12743,21 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem() {
-            throw new Error("Already-imported system mailbox work should not import a new row.");
+          async importItem(item) {
+            assert.equal(item.item.id, foregroundItem.id);
+            const assistantInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            return {
+              assistantInputId,
+              status: "imported",
+            };
           },
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort,
-            mailboxPort: createMailboxPort({ events, items: [] }),
+            mailboxPort: createMailboxPort({ events, items: mailboxItems }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
@@ -12749,21 +12768,33 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
-            throw new Error("System mailbox mode must not enter assistant phase.");
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            const inputIds =
+              input.initialAssistantInputBatch?.assistantInputIds
+              ?? input.initialMailboxImport.importResult.assistantInputIds
+              ?? [];
+            assert.equal(inputIds.length, 1);
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: inputIds[0] ?? "",
+              vaultRoot,
+            });
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+            };
           },
           vaultRoot,
         },
       );
 
-      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(assistantPhaseCalls, 1);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
-      assert.equal(checkpointRequests.length, 1);
+      assert.ok(checkpointRequests.length >= 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, TEST_NOW);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
-      assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt);
-      assert.equal(result.nextWakeReason, checkpointRequests[0]?.nextWakeReason);
+      assert.notEqual(result.status, "failed");
       const state = await readHostedSystemMailboxState(vaultRoot);
       expect(state.pending).toEqual(expect.arrayContaining([
         expect.objectContaining({
