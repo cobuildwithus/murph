@@ -2161,11 +2161,11 @@ test("Junction yieldable reconcile times out provider inventory once before the 
 });
 
 test("Junction yieldable reconcile bounds maximum provider projection to fixed source reads", async () => {
-  const providers = Array.from({ length: JUNCTION_MAX_USER_PROVIDERS }, (_, index) => ({
+  const providers = Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
     id: `provider-${index}`,
     name: `Provider ${index}`,
     resource_availability: { activity: true },
-    slug: `provider-${index}`,
+    slug: `provider-${index % JUNCTION_MAX_USER_PROVIDERS}`,
     status: "connected",
   }));
   const provider = createJunctionProvider(async (input) => {
@@ -2258,18 +2258,16 @@ test("Junction non-connect backfill window uses bounded job retry without histor
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
-        providers: [
-          {
-            id: "provider-garmin-1",
-            slug: "garmin",
-            name: "Garmin",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-              sleep: true,
-            },
+        providers: Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+          id: `provider-garmin-${index}`,
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: {
+            activity: true,
+            sleep: true,
           },
-        ],
+        })),
       });
     }
 
@@ -2836,19 +2834,17 @@ test("Junction backfill diagnostic reports redacted provider call counts", async
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
-        providers: [
-          {
-            id: "provider-garmin-1",
-            slug: "garmin",
-            name: "Garmin",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-              heartrate: true,
-              sleep: { status: "unavailable" },
-            },
+        providers: Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+          id: `provider-garmin-${index}`,
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: {
+            activity: true,
+            heartrate: true,
+            sleep: { status: "unavailable" },
           },
-        ],
+        })),
       });
     }
 
@@ -7680,8 +7676,11 @@ test("Junction provider revokes remote provider slugs unless Junction already re
     if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
         data: [
-          { slug: "garmin", status: "connected" },
-          { slug: "Garmin", status: "active" },
+          ...Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+            id: `garmin-${index}`,
+            slug: index % 2 === 0 ? "garmin" : "Garmin",
+            status: index % 2 === 0 ? "connected" : "active",
+          })),
           { slug: "apple_health_kit", status: "error" },
           { slug: "fitbit", status: "revoked" },
           { provider: "Oura", status: "unknown" },
@@ -7730,7 +7729,11 @@ test("Junction provider cleanup deregisters only the requested source", async ()
     if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
         data: [
-          { slug: "garmin", status: "connected" },
+          ...Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+            id: `garmin-${index}`,
+            slug: "garmin",
+            status: "disconnected",
+          })),
           { slug: "fitbit", status: "connected" },
         ],
       });

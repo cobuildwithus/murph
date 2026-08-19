@@ -136,6 +136,20 @@ frontiers advance after deployment.
   cannot duplicate it. The full 327-test workspace-entrypoint suite, 103-test
   hosted device-runtime suite, 152-test Cloudflare alarm suite, and all affected
   typechecks pass on the correction.
+- Final ReviewGPT round three accepted the scalar-wake and retained-payload
+  corrections, then found review-induced scope drift in the Junction inventory
+  bound: the raw-row check lived in the shared transport parser, before valid
+  sibling provider rows were normalized, so it could block revocation, source
+  status, diagnostics, and historical work outside the bounded-summary lane.
+- The required round-four retrospective is recorded on the pull request. The
+  correction is revert-and-shrink: delete the shared raw-row guard, retain the
+  single 64-source bound after provider-slug normalization at the database
+  fanout owner, and make that existing branch return the typed provider-limit
+  error. Existing tests now use more than 64 raw sibling rows across yieldable
+  collection, non-yieldable backfill, diagnostics, whole-account revocation,
+  and exact-source revocation/status, while 65 distinct logical sources still
+  fail before source reads or writes. The focused six-test proof passes.
+  The full device-syncd suite passes all 1,128 tests, and its typecheck is green.
 
 ## State
 

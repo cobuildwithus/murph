@@ -10194,7 +10194,12 @@ async function projectJunctionSources(
     providers,
   );
   if (projectedSources.length > JUNCTION_MAX_USER_PROVIDERS) {
-    throw new TypeError("Junction projected sources exceeded the connected-provider bound.");
+    throw deviceSyncError({
+      code: "JUNCTION_USER_PROVIDER_LIMIT",
+      message: "Junction projected sources exceeded the supported provider bound.",
+      retryable: true,
+      httpStatus: 502,
+    });
   }
   const existingSources = context.listConnectionSources
     ? [...await context.listConnectionSources()]

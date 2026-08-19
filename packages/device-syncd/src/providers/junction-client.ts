@@ -1446,14 +1446,6 @@ function parseJunctionUser(payload: Record<string, unknown>, label: string): Jun
 
 function parseJunctionProviders(payload: unknown): JunctionProviderConnection[] {
   const records = extractCollectionRecords(payload);
-  if (records.length > JUNCTION_MAX_USER_PROVIDERS) {
-    throw deviceSyncError({
-      code: "JUNCTION_USER_PROVIDER_LIMIT",
-      message: "Junction connected-provider response exceeded the supported provider bound.",
-      retryable: true,
-      httpStatus: 502,
-    });
-  }
   return records
     .map(parseJunctionProviderConnection)
     .filter((provider): provider is JunctionProviderConnection => Boolean(provider));
