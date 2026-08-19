@@ -17,6 +17,7 @@ import {
 } from "@murphai/importers/device-providers/junction-resources";
 import {
   buildJunctionDailyTimeseriesAggregateResourceId,
+  deriveJunctionCanonicalCoverageEvidence,
   normalizeJunctionSnapshot,
   type JunctionSnapshotInput,
 } from "@murphai/importers/device-providers/junction";
@@ -9565,6 +9566,7 @@ test("Junction source-scoped history completes only after terminal admitted work
     jobSourceProviderSlug?: "fitbit" | "google_health";
     summaryRecordOnlyFirstAttempt?: boolean;
     summaryRecordSource?: "fitbit" | "google_health" | null;
+    timeseriesRecordSource?: "fitbit" | "google_health" | null;
     timeseriesResources: readonly string[];
   }) => {
     const requests: Array<{ method: string; url: URL }> = [];
@@ -9576,7 +9578,11 @@ test("Junction source-scoped history completes only after terminal admitted work
         slug: "fitbit",
         name: "Fitbit",
         status: "connected",
-        resource_availability: { activity: true },
+        resource_availability: {
+          activity: true,
+          blood_oxygen: true,
+          blood_pressure: true,
+        },
       },
       {
         id: "provider-google-health-1",
@@ -9630,6 +9636,47 @@ test("Junction source-scoped history completes only after terminal admitted work
             status: 500,
           });
         }
+        if (
+          input.timeseriesRecordSource
+          && url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped"
+        ) {
+          return createJsonResponse({
+            groups: {
+              [input.timeseriesRecordSource]: [{
+                data: [{
+                  end: "2026-04-02T12:05:00.000Z",
+                  start: "2026-04-02T12:00:00.000Z",
+                  unit: "%",
+                  value: 97,
+                }],
+                source: {
+                  provider: input.timeseriesRecordSource,
+                  type: "watch",
+                },
+              }],
+            },
+          });
+        }
+        if (
+          input.timeseriesRecordSource
+          && url.pathname === "/v2/timeseries/junction-user-1/blood_pressure/grouped"
+        ) {
+          return createJsonResponse({
+            groups: {
+              [input.timeseriesRecordSource]: [{
+                data: [{
+                  diastolic: 80,
+                  systolic: 120,
+                  timestamp: "2026-04-02T12:00:00.000Z",
+                }],
+                source: {
+                  provider: input.timeseriesRecordSource,
+                  type: "cuff",
+                },
+              }],
+            },
+          });
+        }
         return createJsonResponse({ data: [] });
       }
       throw new Error(`Unexpected request: ${url.toString()}`);
@@ -9669,24 +9716,21 @@ test("Junction source-scoped history completes only after terminal admitted work
       }),
       connectionSourceAdmissionMode: "listed_only",
       importSnapshot: async (snapshot) => {
-        const serialized = JSON.stringify(snapshot);
-        if (serialized.includes(`activity-${input.summaryRecordSource}`)) {
+        const junctionSnapshot = snapshot as Parameters<typeof normalizeJunctionSnapshot>[0];
+        const normalized = normalizeJunctionSnapshot(junctionSnapshot, {
+          defaultTimeZone: "UTC",
+        });
+        const events = normalized.events ?? [];
+        if (events.length > 0) {
           importedSnapshots.push(snapshot);
         }
-        const acceptedFitbitActivity = serialized.includes("activity-fitbit");
         return {
-          canonicalEventCount: acceptedFitbitActivity ? 1 : 0,
-          durableDeliveryAccepted: acceptedFitbitActivity,
-          ...(acceptedFitbitActivity
-            ? {
-                junctionCanonicalCoverage: [{
-                  coverageBoundary: "2026-04-02",
-                  coverageFinalizedAt: "2026-04-03T00:00:00.000Z",
-                  resource: "activity",
-                  sourceProviderSlug: "fitbit",
-                }],
-              }
-            : {}),
+          canonicalEventCount: events.length,
+          durableDeliveryAccepted: events.length > 0,
+          junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(events, {
+            defaultTimeZone: "UTC",
+            providerPulledAt: junctionSnapshot.canonicalCoverageProviderPulledAt,
+          }),
         };
       },
       listConnectionSources: async (filter = {}) => liveSources.filter((source) =>
@@ -9846,6 +9890,42 @@ test("Junction source-scoped history completes only after terminal admitted work
     "2026-04-03T00:00:00.000Z",
   );
 
+  const rebuiltLegacyTimeseries = await runScenario({
+    days: 2,
+    jobSourceProviderSlug: "fitbit",
+    summaryRecordSource: null,
+    timeseriesRecordSource: "fitbit",
+    timeseriesResources: ["blood_oxygen"],
+  });
+  const rebuiltLegacyTimeseriesSummary = rebuiltLegacyTimeseries.liveSources.find(
+    (source) => source.sourceProviderSlug === "fitbit",
+  )?.resourceAvailabilitySummary;
+  assert.equal(typeof rebuiltLegacyTimeseriesSummary?.[completedAtKey], "string");
+  assert.equal(
+    rebuiltLegacyTimeseriesSummary?.canonicalCoverageBoundary_blood_oxygen,
+    "2026-04-02",
+  );
+  assert.equal(
+    rebuiltLegacyTimeseriesSummary?.canonicalCoverageFinalizedAt_blood_oxygen,
+    "2026-04-03T00:00:00.000Z",
+  );
+
+  const rebuiltLegacyInterval = await runScenario({
+    days: 2,
+    jobSourceProviderSlug: "fitbit",
+    summaryRecordSource: null,
+    timeseriesRecordSource: "fitbit",
+    timeseriesResources: ["blood_pressure"],
+  });
+  const rebuiltLegacyIntervalSummary = rebuiltLegacyInterval.liveSources.find(
+    (source) => source.sourceProviderSlug === "fitbit",
+  )?.resourceAvailabilitySummary;
+  assert.equal(typeof rebuiltLegacyIntervalSummary?.[completedAtKey], "string");
+  assert.equal(
+    rebuiltLegacyIntervalSummary?.canonicalCoverageBoundary_blood_pressure,
+    "2026-04-02T12:00:00.000Z",
+  );
+
   const long = await runScenario({
     days: 60,
     failFirstTimeseriesPass: true,
@@ -9878,6 +9958,232 @@ test("Junction source-scoped history completes only after terminal admitted work
     stableKeys,
   );
   assert.equal(long.importedSnapshots.length, 0);
+});
+
+test("Junction hosted bounded summaries finalize accepted Fitbit daily coverage", async () => {
+  const now = "2026-04-03T12:00:00.000Z";
+  const provider = createJunctionProvider(async (request) => {
+    const url = new URL(readUrl(request));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-fitbit-1",
+          slug: "fitbit",
+          name: "Fitbit",
+          status: "connected",
+          resource_availability: { activity: true },
+        }, {
+          id: "provider-google-health-1",
+          slug: "google_health",
+          name: "Google Health",
+          status: "connected",
+          resource_availability: { activity: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({
+        data: [{
+          connectionId: "provider-fitbit-1",
+          date: "2026-04-02",
+          id: "activity-fitbit-closed-day",
+          sourceProviderSlug: "fitbit",
+          steps: 4_321,
+        }],
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+
+  let liveSources = [
+    createConnectionSource({
+      id: "source-fitbit",
+      resourceAvailabilitySummary: {
+        activity: true,
+        canonicalCoverageBoundary_activity: "2026-04-02",
+      },
+      sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+        connectionId: "acct-junction-1",
+        sourceProviderSlug: "fitbit",
+      }), "Fitbit source key should be available."),
+      sourceProviderSlug: "fitbit",
+    }),
+    createConnectionSource({
+      id: "source-google-health",
+      sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+        connectionId: "acct-junction-1",
+        sourceProviderSlug: "google_health",
+      }), "Google Health source key should be available."),
+      sourceProviderSlug: "google_health",
+    }),
+  ];
+  const context = createJunctionJobContext({
+    account: createAccount({
+      sources: liveSources.map((source) => ({
+        ...source,
+        resourceCount: Object.keys(source.resourceAvailabilitySummary ?? {}).length,
+      })),
+    }),
+    connectionSourceAdmissionMode: "listed_only",
+    importSnapshot: async (snapshot) => {
+      const junctionSnapshot = snapshot as Parameters<typeof normalizeJunctionSnapshot>[0];
+      const events = normalizeJunctionSnapshot(junctionSnapshot, {
+        defaultTimeZone: "UTC",
+      }).events ?? [];
+      return {
+        canonicalEventCount: events.length,
+        durableDeliveryAccepted: events.length > 0,
+        junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(events, {
+          defaultTimeZone: "UTC",
+          providerPulledAt: junctionSnapshot.canonicalCoverageProviderPulledAt,
+        }),
+      };
+    },
+    listConnectionSources: async (filter = {}) => liveSources.filter((source) =>
+      (!filter.sourceProviderSlug || source.sourceProviderSlug === filter.sourceProviderSlug)
+      && (!filter.status || source.status === filter.status)
+    ),
+    now,
+    shouldYield: () => false,
+    upsertConnectionSource: async (update) => {
+      const existingIndex = liveSources.findIndex((source) =>
+        source.sourceProviderSlug === update.sourceProviderSlug
+      );
+      const existing = liveSources[existingIndex];
+      const next = createConnectionSource({
+        ...(existing ?? {}),
+        ...update,
+        id: existing?.id ?? `source-${update.sourceProviderSlug}`,
+        connectionId: "acct-junction-1",
+        displayName: update.displayName ?? existing?.displayName ?? null,
+        firstSeenAt: update.firstSeenAt ?? existing?.firstSeenAt ?? update.lastSeenAt,
+        resourceAvailabilitySummary: update.resourceAvailabilitySummary
+          ?? existing?.resourceAvailabilitySummary
+          ?? {},
+      });
+      liveSources = existingIndex < 0
+        ? [...liveSources, next]
+        : liveSources.map((source, index) => index === existingIndex ? next : source);
+      return next;
+    },
+  });
+
+  await executeJunctionJob(provider, context, createJob("reconcile", {
+    sourceProviderSlug: "fitbit",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  }));
+
+  const legacySummary = liveSources.find((source) =>
+    source.sourceProviderSlug === "fitbit"
+  )?.resourceAvailabilitySummary;
+  assert.equal(legacySummary?.canonicalCoverageBoundary_activity, "2026-04-02");
+  assert.equal(legacySummary?.canonicalCoverageFinalizedAt_activity, now);
+});
+
+test("Junction hosted bounded summaries enforce terminal Fitbit coverage on Google", async () => {
+  const now = "2026-04-03T12:00:00.000Z";
+  const provider = createJunctionProvider(async (request) => {
+    const url = new URL(readUrl(request));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-google-health-1",
+          slug: "google_health",
+          name: "Google Health",
+          status: "connected",
+          resource_availability: { activity: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({
+        data: [{
+          connectionId: "provider-google-health-1",
+          date: "2026-04-02",
+          id: "activity-google-overlap",
+          sourceProviderSlug: "google_health",
+          steps: 4_321,
+        }],
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+  const sources = [
+    createConnectionSource({
+      id: "source-fitbit",
+      lastErrorCode: null,
+      resourceAvailabilitySummary: {
+        activity: true,
+        canonicalCoverageBoundary_activity: "2026-04-02",
+      },
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
+    }),
+    createConnectionSource({
+      firstSeenAt: "2026-04-03T00:00:00.000Z",
+      id: "source-google-health",
+      lastDataAt: "2026-04-03T01:00:00.000Z",
+      resourceAvailabilitySummary: {
+        activity: true,
+        historicalBackfillCompletedAt: "2026-04-03T00:30:00.000Z",
+      },
+      sourceProviderSlug: "google_health",
+    }),
+  ];
+  const importedSnapshots: JunctionSnapshotInput[] = [];
+  let canonicalEventCount = -1;
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        sources: sources.map((source) => ({
+          ...source,
+          resourceCount: Object.keys(source.resourceAvailabilitySummary ?? {}).length,
+        })),
+      }),
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: async (snapshot) => {
+        const importedSnapshot = snapshot as Parameters<typeof normalizeJunctionSnapshot>[0];
+        importedSnapshots.push(importedSnapshot);
+        canonicalEventCount = normalizeJunctionSnapshot(importedSnapshot, {
+          defaultTimeZone: "UTC",
+        }).events?.length ?? 0;
+        return {
+          canonicalEventCount,
+          durableDeliveryAccepted: canonicalEventCount > 0,
+        };
+      },
+      listConnectionSources: async (filter = {}) => sources.filter((source) =>
+        (!filter.sourceProviderSlug || source.sourceProviderSlug === filter.sourceProviderSlug)
+        && (!filter.status || source.status === filter.status)
+      ),
+      now,
+      shouldYield: () => false,
+    }),
+    createJob("reconcile", {
+      sourceProviderSlug: "google_health",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  const importedSnapshot = requireValue(
+    importedSnapshots[0],
+    "Bounded Google summary should reach the canonical importer.",
+  );
+  assert.deepEqual(importedSnapshot.canonicalCoverageFence, {
+    coverageBoundaryByResource: { activity: "2026-04-02" },
+    sourceProviderSlug: "google_health",
+  });
+  assert.equal(importedSnapshot.canonicalCoverageProviderPulledAt, now);
+  assert.equal(canonicalEventCount, 0);
 });
 
 test("Junction scheduled polling uses stable closed-day windows", () => {

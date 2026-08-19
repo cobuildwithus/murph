@@ -305,6 +305,15 @@ interface PreparedJunctionImportSnapshot {
   snapshots: Record<string, unknown[]>;
 }
 
+type JunctionCanonicalImportSnapshot = Pick<
+  JunctionSnapshotInput,
+  | "importedAt"
+  | "strictSparseCalendarRepair"
+  | "timeseriesWindowKind"
+  | "windowEnd"
+  | "windowStart"
+> & Required<Pick<JunctionSnapshotInput, "summaries" | "timeseries">>;
+
 interface JunctionHistoricalBackfillCoverage {
   complete: boolean;
   pendingProviderSlugs: string[];
@@ -1486,23 +1495,17 @@ export function createJunctionDeviceSyncProvider(
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
-      const snapshot = {
-        provider: "junction",
-        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-        connectionId: context.account.id,
-        importedAt: summaryWindow.windowEnd,
-        windowStart: summaryWindow.windowStart,
-        windowEnd: summaryWindow.windowEnd,
-        connections: importConnections,
-        canonicalCoverageFence: preparedSummaryImport.canonicalCoverageFence,
-        canonicalCoverageProviderPulledAt: context.now,
-        summaries: importSummaries,
-        timeseries: {},
-      };
-      const receipt = await context.importSnapshot(snapshot);
-      await recordAcceptedJunctionFitbitCoverage(
+      await commitPreparedJunctionCanonicalImport(
         context,
-        receipt,
+        preparedSummaryImport,
+        {
+          importedAt: summaryWindow.windowEnd,
+          windowStart: summaryWindow.windowStart,
+          windowEnd: summaryWindow.windowEnd,
+          summaries: importSummaries,
+          timeseries: {},
+        },
+        context.now,
       );
     }
     const historicalProviderRecordsSeen = sourceProviderSlug !== null
@@ -2944,23 +2947,17 @@ export function createJunctionDeviceSyncProvider(
       summaries,
       sourceProviders,
     );
-    const snapshot = {
-      provider: "junction",
-      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-      connectionId: context.account.id,
-      importedAt: context.now,
-      windowStart: window.windowStart,
-      windowEnd: window.windowEnd,
-      connections: preparedImport.connections,
-      canonicalCoverageFence: preparedImport.canonicalCoverageFence,
-      canonicalCoverageProviderPulledAt: context.now,
-      summaries: preparedImport.snapshots,
-      timeseries: {},
-    };
-    const receipt = await context.importSnapshot(snapshot);
-    await recordAcceptedJunctionFitbitCoverage(
+    await commitPreparedJunctionCanonicalImport(
       context,
-      receipt,
+      preparedImport,
+      {
+        importedAt: context.now,
+        windowStart: window.windowStart,
+        windowEnd: window.windowEnd,
+        summaries: preparedImport.snapshots,
+        timeseries: {},
+      },
+      context.now,
     );
 
     return withJunctionHistoricalCoverageVerification(
@@ -3586,17 +3583,18 @@ export function createJunctionDeviceSyncProvider(
       summaries,
       input.sourceProviders,
     );
-    await input.context.importSnapshot({
-      provider: "junction",
-      accountId: buildJunctionImportAccountId(input.context.account.externalAccountId),
-      connectionId: input.context.account.id,
-      importedAt: input.summaryWindow.windowEnd,
-      windowStart: input.summaryWindow.windowStart,
-      windowEnd: input.summaryWindow.windowEnd,
-      connections: preparedSummaryImport.connections,
-      summaries: preparedSummaryImport.snapshots,
-      timeseries: {},
-    });
+    await commitPreparedJunctionCanonicalImport(
+      input.context,
+      preparedSummaryImport,
+      {
+        importedAt: input.summaryWindow.windowEnd,
+        windowStart: input.summaryWindow.windowStart,
+        windowEnd: input.summaryWindow.windowEnd,
+        summaries: preparedSummaryImport.snapshots,
+        timeseries: {},
+      },
+      input.context.now,
+    );
 
     const nextResource = eligibleUnits[cursorIndex >= 0 ? cursorIndex + 1 : 1]?.[0] ?? null;
     const sourceProviderSlug = normalizeProviderSlug(
@@ -3974,24 +3972,18 @@ export function createJunctionDeviceSyncProvider(
           windowStart: executionWindowStart,
         });
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          const snapshot = {
-            provider: "junction",
-            accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-            connectionId: context.account.id,
-            importedAt: executionWindowEnd,
-            windowStart: executionWindowStart,
-            windowEnd: executionWindowEnd,
-            timeseriesWindowKind: "precise",
-            connections: preparedImport.connections,
-            canonicalCoverageFence: preparedImport.canonicalCoverageFence,
-            canonicalCoverageProviderPulledAt: context.now,
-            summaries: {},
-            timeseries: preparedImport.snapshots,
-          };
-          const receipt = await context.importSnapshot(snapshot);
-          await recordAcceptedJunctionFitbitCoverage(
+          const receipt = await commitPreparedJunctionCanonicalImport(
             context,
-            receipt,
+            preparedImport,
+            {
+              importedAt: executionWindowEnd,
+              windowStart: executionWindowStart,
+              windowEnd: executionWindowEnd,
+              timeseriesWindowKind: "precise",
+              summaries: {},
+              timeseries: preparedImport.snapshots,
+            },
+            context.now,
           );
           providerRecordsExamined = true;
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
@@ -4177,30 +4169,35 @@ export function createJunctionDeviceSyncProvider(
         },
       );
       if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        const receipt = await context.importSnapshot({
-          provider: "junction",
-          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-          connectionId: context.account.id,
-          importedAt: window.windowEnd,
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-          timeseriesWindowKind: "calendar_day",
-          ...(emptySparseCalendarSource
-            ? {
-                strictSparseCalendarRepair: {
-                  dayKey: window.windowStart.slice(0, 10),
-                  resource: windowResources[0],
-                  ...emptySparseCalendarSource,
-                  sourceProviderSlug: normalizeJunctionSourceProviderSlug(
-                    emptySparseCalendarSource.sourceProviderSlug,
-                  ) ?? emptySparseCalendarSource.sourceProviderSlug,
-                },
-              }
-            : {}),
-          connections: preparedImport.connections,
-          summaries: {},
-          timeseries: preparedImport.snapshots,
-        });
+        const receipt = await commitPreparedJunctionCanonicalImport(
+          context,
+          preparedImport,
+          {
+            importedAt: window.windowEnd,
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+            timeseriesWindowKind: "calendar_day",
+            ...(emptySparseCalendarSource
+              ? {
+                  strictSparseCalendarRepair: {
+                    dayKey: window.windowStart.slice(0, 10),
+                    ...emptySparseCalendarSource,
+                    // Calendar-refresh admission already proved this member of
+                    // the fixed sparse resource set before collection began.
+                    resource: windowResources[0] as NonNullable<
+                      JunctionSnapshotInput["strictSparseCalendarRepair"]
+                    >["resource"],
+                    sourceProviderSlug: normalizeJunctionSourceProviderSlug(
+                      emptySparseCalendarSource.sourceProviderSlug,
+                    ) ?? emptySparseCalendarSource.sourceProviderSlug,
+                  },
+                }
+              : {}),
+            summaries: {},
+            timeseries: preparedImport.snapshots,
+          },
+          context.now,
+        );
         for (const resourceId of readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt) ?? []) {
           appliedDailyAggregateResourceIds.add(resourceId);
         }
@@ -4588,18 +4585,19 @@ export function createJunctionDeviceSyncProvider(
         yieldedAt: null,
       };
     }
-    await input.context.importSnapshot({
-      provider: "junction",
-      accountId: buildJunctionImportAccountId(input.context.account.externalAccountId),
-      connectionId: input.context.account.id,
-      importedAt: input.windowEnd,
-      windowStart: input.windowStart,
-      windowEnd: input.windowEnd,
-      ...(calendarDayAggregate ? { timeseriesWindowKind: "calendar_day" as const } : {}),
-      connections: preparedImport.connections,
-      summaries: {},
-      timeseries: preparedImport.snapshots,
-    });
+    await commitPreparedJunctionCanonicalImport(
+      input.context,
+      preparedImport,
+      {
+        importedAt: input.windowEnd,
+        windowStart: input.windowStart,
+        windowEnd: input.windowEnd,
+        ...(calendarDayAggregate ? { timeseriesWindowKind: "calendar_day" as const } : {}),
+        summaries: {},
+        timeseries: preparedImport.snapshots,
+      },
+      input.context.now,
+    );
     return {
       historicalProviderRecordsSeen: providerRecordsSeen,
       historicalRecordsSeen: sourceScopedHistoricalRecordsSeen,
@@ -4773,20 +4771,18 @@ export function createJunctionDeviceSyncProvider(
           input.sourceProviders,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          const receipt = await input.context.importSnapshot({
-            provider: "junction",
-            accountId: buildJunctionImportAccountId(input.context.account.externalAccountId),
-            connectionId: input.context.account.id,
-            importedAt: input.windowEnd,
-            windowStart: input.windowStart,
-            windowEnd: input.windowEnd,
-            connections: preparedImport.connections,
-            canonicalCoverageFence: preparedImport.canonicalCoverageFence,
-            canonicalCoverageProviderPulledAt: input.context.now,
-            summaries: {},
-            timeseries: preparedImport.snapshots,
-          });
-          await recordAcceptedJunctionFitbitCoverage(input.context, receipt);
+          await commitPreparedJunctionCanonicalImport(
+            input.context,
+            preparedImport,
+            {
+              importedAt: input.windowEnd,
+              windowStart: input.windowStart,
+              windowEnd: input.windowEnd,
+              summaries: {},
+              timeseries: preparedImport.snapshots,
+            },
+            input.context.now,
+          );
         }
       } catch (error) {
         return carryTerminalProgressOrThrow(error);
@@ -4839,22 +4835,16 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const snapshot = {
-      provider: "junction",
-      accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-      connectionId: context.account.id,
-      importedAt: context.now,
-      windowStart,
-      windowEnd,
-      connections,
-      canonicalCoverageFence: preparedImport.canonicalCoverageFence,
-      summaries,
-      timeseries: {},
-    };
-    const receipt = await context.importSnapshot(snapshot);
-    await recordAcceptedJunctionFitbitCoverage(
+    const receipt = await commitPreparedJunctionCanonicalImport(
       context,
-      receipt,
+      preparedImport,
+      {
+        importedAt: context.now,
+        windowStart,
+        windowEnd,
+        summaries,
+        timeseries: {},
+      },
     );
     return {
       durableDeliveryAccepted: readProviderSnapshotDurableDeliveryAccepted(receipt),
@@ -7257,6 +7247,27 @@ function filterJunctionImportSnapshots(
       ),
     ]),
   );
+}
+
+async function commitPreparedJunctionCanonicalImport(
+  context: ProviderJobContext,
+  preparedImport: PreparedJunctionImportSnapshot,
+  snapshot: JunctionCanonicalImportSnapshot,
+  providerPulledAt?: string,
+) {
+  const receipt = await context.importSnapshot({
+    provider: "junction",
+    accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+    connectionId: context.account.id,
+    ...snapshot,
+    connections: preparedImport.connections,
+    canonicalCoverageFence: preparedImport.canonicalCoverageFence,
+    ...(providerPulledAt
+      ? { canonicalCoverageProviderPulledAt: providerPulledAt }
+      : {}),
+  });
+  await recordAcceptedJunctionFitbitCoverage(context, receipt);
+  return receipt;
 }
 
 async function recordAcceptedJunctionFitbitCoverage(
