@@ -20,15 +20,14 @@ const SCRIPT_PATH = fileURLToPath(
 const COMPLETE_HTML = `
 <h2>Design proof</h2>
 <ul>
-<li>Design page: <code>/design?tab=sections#settings</code></li>
+<li>Design page: <a href="https://preview.example.test/screenshots/settings#settings-model-provider-save-controls">Settings states</a></li>
 <li>Evidence: Browser walkthrough of the rendered settings states.</li>
 <li>Coverage: Empty and populated states on a narrow phone; desktop structure is unchanged.</li>
 </ul>
 `;
-const UI_PATHS = [
-  "apps/web/app/settings/page.tsx",
-  "apps/web/app/design/sections-content.tsx",
-];
+const UI_PATHS = ["apps/web/app/settings/page.tsx"];
+const DESTINATION_ERROR =
+  "The Design proof section must include a reviewer-openable link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.";
 
 test("detects user-facing UI and excludes reference pages", () => {
   assert.equal(isFrontendUiPath("apps/web/app/home/page.tsx"), true);
@@ -44,7 +43,7 @@ test("detects user-facing UI and excludes reference pages", () => {
   assert.equal(isFrontendUiPath("apps/web/test/hosted-settings.test.tsx"), false);
 });
 
-test("requires catalog coverage and dedicated design proof", () => {
+test("requires dedicated proof while accepting an existing live representation", () => {
   assert.deepEqual(
     validateFrontendDesignProof({
       changedPaths: UI_PATHS,
@@ -62,10 +61,7 @@ test("requires catalog coverage and dedicated design proof", () => {
       changedPaths: ["apps/web/app/settings/page.tsx"],
       prBodyHtml: "<h2>Evidence</h2><p>Settings changed.</p>",
     }).errors,
-    [
-      "Update the design page component, consent, or sections catalog for this frontend UI change.",
-      "Add a `## Design proof` section to the pull request body.",
-    ],
+    ["Add a `## Design proof` section to the pull request body."],
   );
 });
 
@@ -74,16 +70,49 @@ test("accepts a reasoned walkthrough without a screenshot", () => {
     validateFrontendDesignProof({
       changedPaths: [
         "apps/web/src/components/legal/hosted-legal-consent-card.tsx",
-        "apps/web/app/design/consent-content.tsx",
       ],
       prBodyHtml: `
 <h2>Design proof</h2>
 <ul>
-<li>Design page: <code>/design?tab=consent#launch-consent</code></li>
+<li>Design page: <a href="https://preview.example.test/design?tab=consent#launch-consent">Launch consent states</a></li>
 <li>Evidence: Keyboard and screen-reader walkthrough of the existing visual state.</li>
 <li>Coverage: Focus order changed; layout and responsive styles did not change.</li>
 </ul>
 `,
+    }).errors,
+    [],
+  );
+});
+
+test("requires an actual anchored destination owned by the current routes", () => {
+  const invalidDesignItems = [
+    "<code>/design?tab=components#settings</code>",
+    "https://preview.example.test/design?tab=components#settings",
+    '<a href="https://preview.example.test/not-design">/design?tab=components#settings</a>',
+    '<a href="https://preview.example.test/design?tab=components">Components</a>',
+    '<a href="https://preview.example.test/design?tab=sections#settings">Stale sections tab</a>',
+    '<a href="/design?tab=components#settings">Relative GitHub destination</a>',
+  ];
+
+  for (const designItem of invalidDesignItems) {
+    const result = validateFrontendDesignProof({
+      changedPaths: UI_PATHS,
+      prBodyHtml: COMPLETE_HTML.replace(
+        /<a href="[^"]+">Settings states<\/a>/u,
+        designItem,
+      ),
+    });
+    assert.deepEqual(result.errors, [DESTINATION_ERROR]);
+  }
+
+  const componentsProof = COMPLETE_HTML.replace(
+    "https://preview.example.test/screenshots/settings#settings-model-provider-save-controls",
+    "https://preview.example.test/design?tab=components#assistant-provider-picker",
+  );
+  assert.deepEqual(
+    validateFrontendDesignProof({
+      changedPaths: UI_PATHS,
+      prBodyHtml: componentsProof,
     }).errors,
     [],
   );
@@ -103,7 +132,7 @@ test("rejects missing, pending, or misplaced proof", () => {
 `,
     }).errors,
     [
-      "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
+      DESTINATION_ERROR,
       "The Design proof section must include evidence matched to the changed visual, state, interaction, or responsive risk.",
       "The Design proof section must explain which states and viewports were checked and why that evidence is sufficient.",
     ],
@@ -115,7 +144,7 @@ test("rejects missing, pending, or misplaced proof", () => {
       prBodyHtml: `
 <h2>Design proof</h2>
 <ul>
-<li>Design page: <code>/design?tab=components#settings</code></li>
+<li>Design page: <a href="https://preview.example.test/screenshots/settings#settings-model-provider-save-controls">Settings states</a></li>
 <li>Coverage: Settings states at the changed width.</li>
 </ul>
 <h2>Evidence</h2>
@@ -202,14 +231,9 @@ async function createCliFixture() {
   }).trim();
 
   await mkdir(join(directory, "apps/web/app/settings"), { recursive: true });
-  await mkdir(join(directory, "apps/web/app/design"), { recursive: true });
   await writeFile(
     join(directory, "apps/web/app/settings/page.tsx"),
     "export default function Page() { return null; }\n",
-  );
-  await writeFile(
-    join(directory, "apps/web/app/design/sections-content.tsx"),
-    "export function SectionsContent() { return null; }\n",
   );
   execFileSync("git", ["add", "apps"], { cwd: directory });
   execFileSync("git", ["commit", "--quiet", "-m", "head"], { cwd: directory });

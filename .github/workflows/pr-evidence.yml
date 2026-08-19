@@ -54,7 +54,7 @@ jobs:
           MURPH_GITHUB_TOKEN: ${{ github.token }}
           MURPH_PR_BODY: ${{ github.event.pull_request.body }}
 
-      - name: Require design-catalog coverage and frontend design proof
+      - name: Require live frontend design proof
         run: node scripts/check-frontend-design-proof.mjs
         env:
           MURPH_GITHUB_TOKEN: ${{ github.token }}

@@ -14,8 +14,8 @@ post-deploy checks; other changes record one concrete not-applicable reason.
 Every PR also records non-obvious affected surfaces, a mechanically validated
 architecture/reuse summary, foreground reply-path impact, complete initial
 provider-input impact, and categorized added/deleted LOC. User-facing hosted
-Web UI changes additionally carry a mechanically validated design-catalog edit
-and dedicated risk-matched design proof.
+Web UI changes additionally carry a mechanically validated live catalog/study
+destination and dedicated risk-matched design proof.
 The contract and its proof are specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/references/testing-ci-map.md`.
@@ -460,7 +460,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/strategy.md` | Internal product north star for making member-valued health progress radically easier through progressively complete context, connected evidence, useful action, authorized proactive support, and delight. | Current product strategy | High | 2026-07-15 |
 | `agent-docs/PRODUCT_SENSE.md` | Current product posture for a broad personal health assistant, including immediate value, compounding context, consequential discovery, proactive support, composable primitives, first-visit personalization, conversation-first control, channel-native Telegram and iMessage presentation with bounded model-authored Telegram rich content and exclusive semantic-card ownership, uncertainty-aware profile/contact speaker labels, public product-link sharing, pre-save capacity disclosure, and product guardrails. | Current product behavior | High | 2026-08-13 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules, including selective proactivity and progressively deeper member-controlled context. | Product principles | High | 2026-07-15 |
-| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources (`PRODUCT.md`, `DESIGN.md`), model-neutral implementation routing, required component/section catalog updates, risk-based rendered proof, preliminary ReviewGPT frontend review, and completion-workflow routing. | Current frontend implementation guidance | Medium | 2026-08-15 |
+| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources (`PRODUCT.md`, `DESIGN.md`), model-neutral implementation routing, live component/consent/section proof destinations, representation updates when needed, risk-based rendered proof, preliminary ReviewGPT frontend review, and completion-workflow routing. | Current frontend implementation guidance | Medium | 2026-08-19 |
 | `agent-docs/product-marketing-context.md` | Product marketing context for Murph as a broad personal health assistant, with honest fact/strategy/hypothesis/target-state labels, longitudinal-context and proactivity differentiation, delight, private-first onboarding, optional social support, and experiments as one primitive. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User-interview kit for testing first useful threads, longitudinal context value, follow-through, primitive selection, and optional social support without leading the participant. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |

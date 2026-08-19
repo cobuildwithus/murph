@@ -8,11 +8,6 @@ import {
   renderedText,
 } from "./pr-body-markdown.mjs";
 
-const DESIGN_CATALOG_PATHS = new Set([
-  "apps/web/app/design/components-content.tsx",
-  "apps/web/app/design/consent-content.tsx",
-  "apps/web/app/design/sections-content.tsx",
-]);
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
 
 function isFrontendUiPath(filePath) {
@@ -51,19 +46,13 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   }
 
   const errors = [];
-  if (!changedPaths.some((filePath) => DESIGN_CATALOG_PATHS.has(filePath))) {
-    errors.push(
-      "Update the design page component, consent, or sections catalog for this frontend UI change.",
-    );
-  }
-
   const designProof = readRenderedSection(prBodyHtml, "Design proof");
   if (!designProof) {
     errors.push("Add a `## Design proof` section to the pull request body.");
   } else {
-    if (!hasDesignPageItem(designProof)) {
+    if (!hasLiveDesignDestination(designProof)) {
       errors.push(
-        "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
+        "The Design proof section must include a reviewer-openable link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.",
       );
     }
     if (!hasMeaningfulListItem(designProof, "Evidence")) {
@@ -81,25 +70,41 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   return { errors, required: true, uiPaths };
 }
 
-function hasDesignPageItem(section) {
+function hasLiveDesignDestination(section) {
   const item = findRenderedListItem(section, "Design page");
   if (!item) {
     return false;
-  }
-  const designRoute = /\/design\?tab=(?:components|consent|sections)(?:[#&\s"'<]|$)/iu;
-  if (designRoute.test(renderedText(item))) {
-    return true;
   }
 
   const anchorPattern = /<a\b([^>]*)>/giu;
   let anchorMatch;
   while ((anchorMatch = anchorPattern.exec(item)) !== null) {
     const href = readQuotedAttribute(anchorMatch[1], "href");
-    if (href && designRoute.test(decodeHtmlEntities(href))) {
+    if (href && isLiveDesignDestination(decodeHtmlEntities(href))) {
       return true;
     }
   }
   return false;
+}
+
+function isLiveDesignDestination(href) {
+  let destination;
+  try {
+    destination = new URL(href);
+  } catch {
+    return false;
+  }
+  if (destination.protocol !== "http:" && destination.protocol !== "https:") {
+    return false;
+  }
+  if (!destination.hash || destination.hash === "#") {
+    return false;
+  }
+  if (destination.pathname === "/design") {
+    const tab = destination.searchParams.get("tab");
+    return tab === "components" || tab === "consent";
+  }
+  return /^\/screenshots\/[a-z0-9-]+$/u.test(destination.pathname);
 }
 
 function readQuotedAttribute(attributes, name) {
