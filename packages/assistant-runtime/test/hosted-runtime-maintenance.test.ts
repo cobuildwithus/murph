@@ -4603,6 +4603,7 @@ describe("runHostedAssistantAutomationLane", () => {
       });
       return {
         nextWakeAt: "2026-04-08T01:00:00.000Z",
+        outboxOnlyNextWakeAt: "2026-04-08T01:00:00.000Z",
         progressed: false,
       };
     });
@@ -4640,6 +4641,8 @@ describe("runHostedAssistantAutomationLane", () => {
     });
 
     expect(result).toMatchObject({
+      assistantAutomationOutboxOnlyNextWakeAt:
+        "2026-04-08T01:00:00.000Z",
       nextWakeAt: "2026-04-08T01:00:00.000Z",
       redactedLogEntries: [
         expect.objectContaining({

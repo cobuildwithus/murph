@@ -2572,6 +2572,8 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     let assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
       assistantNextWakeAt,
+      assistantOutboxOnlyNextWakeAt:
+        assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
     });
     const deferredPendingSystemMailboxMaintenance =
       await runBackgroundMaintenanceAfterDeferredPendingAssistantInput({
@@ -2633,6 +2635,8 @@ export async function runHostedWorkspaceAssistantPhase(
       });
       assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
         assistantNextWakeAt,
+        assistantOutboxOnlyNextWakeAt:
+          assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
       });
       backgroundMaintenanceYielded =
         backgroundMaintenanceYielded
@@ -6638,6 +6642,8 @@ async function runForegroundAssistantReplyPhase(input: {
   });
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
+    assistantOutboxOnlyNextWakeAt:
+      input.assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
   });
   const selectedInputWakeAt = resolveHostedAssistantAutomationNextWakeAt({
     input: input.input,
@@ -9439,10 +9445,14 @@ function assistantMetricsProgressed(
   );
 }
 
-function resolveHostedAssistantAutomationNextWakeReason(_input: {
+function resolveHostedAssistantAutomationNextWakeReason(input: {
   assistantNextWakeAt: string | null;
+  assistantOutboxOnlyNextWakeAt: string | null;
 }): string | null {
-  return null;
+  return input.assistantNextWakeAt !== null
+    && input.assistantNextWakeAt === input.assistantOutboxOnlyNextWakeAt
+    ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+    : null;
 }
 
 function shouldResolveHostedAssistantCronWakeAfterAssistantPass(input: {
@@ -9604,6 +9614,8 @@ function resolveHostedFastDispatchBaseNextWake(input: {
   });
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
+    assistantOutboxOnlyNextWakeAt:
+      input.assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
   });
   return selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
