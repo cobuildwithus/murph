@@ -599,7 +599,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expect(productUpdatesRecord?.tags).toContain('murph-managed:weekly-product-updates')
     expect(productUpdatesRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
+    expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=0')
     expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
     expect(productUpdatesRecord?.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
     expect(productUpdatesRecord?.instructions).toContain('choose the feature discovery kind')
@@ -622,16 +622,13 @@ describe('applyMurphManagedAutomations core integration', () => {
       'member-facing product update, not a dump of release notes',
     )
     expect(productUpdatesRecord?.instructions).toContain(
+      'Never pitch reliability work.',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'drop it even if the feed lists it as a feature and even if this member hit that issue',
+    )
+    expect(productUpdatesRecord?.instructions).not.toContain(
       'member encountered the corresponding issue',
-    )
-    expect(productUpdatesRecord?.instructions).toContain(
-      'Do not infer relevance merely from a connected provider',
-    )
-    expect(productUpdatesRecord?.instructions).toContain(
-      'WHOOP sync should be more reliable now.',
-    )
-    expect(productUpdatesRecord?.instructions).toContain(
-      'Omit implementation details such as retries, transient writes, artifacts, workers, checkpoints, migrations, or data plumbing',
     )
     expect(productUpdatesRecord?.instructions).toContain(
       'lower priority than exciting capabilities',
@@ -2074,7 +2071,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expectEveryTwoWeeksSchedule(productNotesRecord?.schedule)
     expect(productNotesRecord?.instructions).toContain('Goal: every two weeks')
     expect(productNotesRecord?.instructions).toContain(
-      '/api/changelog?days=14&featureLimit=70&improvementLimit=10',
+      '/api/changelog?days=14&featureLimit=70&improvementLimit=0',
     )
     expect(productNotesRecord?.instructions).toContain(
       'last recorded changelog means feature discovery now',
