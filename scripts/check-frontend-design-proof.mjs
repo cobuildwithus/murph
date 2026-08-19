@@ -50,9 +50,9 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   if (!designProof) {
     errors.push("Add a `## Design proof` section to the pull request body.");
   } else {
-    if (!hasLiveDesignDestination(designProof)) {
+    if (!hasSupportedDesignProofLink(designProof)) {
       errors.push(
-        "The Design proof section must include a reviewer-openable link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.",
+        "The Design proof section must include an absolute HTTP(S) link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.",
       );
     }
     if (!hasMeaningfulListItem(designProof, "Evidence")) {
@@ -70,7 +70,7 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   return { errors, required: true, uiPaths };
 }
 
-function hasLiveDesignDestination(section) {
+function hasSupportedDesignProofLink(section) {
   const item = findRenderedListItem(section, "Design page");
   if (!item) {
     return false;
@@ -80,14 +80,14 @@ function hasLiveDesignDestination(section) {
   let anchorMatch;
   while ((anchorMatch = anchorPattern.exec(item)) !== null) {
     const href = readQuotedAttribute(anchorMatch[1], "href");
-    if (href && isLiveDesignDestination(decodeHtmlEntities(href))) {
+    if (href && isSupportedDesignProofDestination(decodeHtmlEntities(href))) {
       return true;
     }
   }
   return false;
 }
 
-function isLiveDesignDestination(href) {
+function isSupportedDesignProofDestination(href) {
   let destination;
   try {
     destination = new URL(href);

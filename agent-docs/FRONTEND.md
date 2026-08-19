@@ -91,7 +91,7 @@ cd apps/web && pnpm typecheck
 - Verify UI changes in the browser at every viewport where the result can
   materially differ. Check phone and desktop when responsive behavior can
   change.
-- Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate. Every user-facing hosted Web UI diff needs a reviewer-openable live representation: the real production component or consent surface on the matching `/design` tab, or the composed section under `/screenshots/<category>`. Add or update a catalog/study state only when no existing route and anchor render the changed state.
+- Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate. Every user-facing hosted Web UI diff needs a repository-owned, reviewer-openable representation: the real production component or consent surface on the matching `/design` tab, or the composed section under `/screenshots/<category>`. Add or update a catalog/study state only when no existing route and anchor render the changed state.
 - Add a `/screenshots` study only when a difficult or reusable state benefits from stable presentation proof. Render the real production component with synthetic props, no live data, no live requests, and all interactive controls `inert`. A screenshot study proves presentation only, not the complete product journey.
 - Treat the unlinked and noindex route as a discovery control, not security. Never put private member data or credentials there.
 - Match rendered evidence to the changed visual, state, interaction, and
@@ -100,10 +100,12 @@ cd apps/web && pnpm typecheck
   useful, crop it to the changed component or section and inspect it at native
   resolution so ordinary body copy is legible.
 - The `Pull request evidence` check requires a dedicated `Design proof` section
-  with a reviewer-openable anchored `Design page` link plus risk-matched
-  `Evidence` and `Coverage` for user-facing UI diffs. It does not impose a
-  screenshot count. Design and screenshot-study-only changes are exempt so
-  those references can be maintained independently.
+  with an absolute anchored `Design page` link plus risk-matched `Evidence` and
+  `Coverage` for user-facing UI diffs. It validates structure only. The
+  preliminary frontend review owns repository origin, reachability, currentness,
+  and representation quality; refresh an expired or inaccessible preview. The
+  check does not impose a screenshot count. Design and screenshot-study-only
+  changes are exempt so those references can be maintained independently.
 
 ## Docs to update
 

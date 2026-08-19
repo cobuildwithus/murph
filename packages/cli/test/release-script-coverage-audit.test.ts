@@ -2058,9 +2058,11 @@ describe('monorepo release flow coverage audit', () => {
       'may skip the individual required local audit subagent passes',
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
-    expect(completionWorkflow).not.toContain('Change-shape breakdown')
+    expect(completionWorkflow).toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('ReviewGPT context sensitivity: sensitive')
-    expect(completionWorkflow).toContain('manual line-count table')
+    expect(completionWorkflow).toContain(
+      'five-row `Category | Added | Deleted` table plus a total',
+    )
     expect(completionWorkflow).toContain('evidenced current scale')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
     expect(completionWorkflow).not.toContain(

@@ -27,7 +27,7 @@ const COMPLETE_HTML = `
 `;
 const UI_PATHS = ["apps/web/app/settings/page.tsx"];
 const DESTINATION_ERROR =
-  "The Design proof section must include a reviewer-openable link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.";
+  "The Design proof section must include an absolute HTTP(S) link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.";
 
 test("detects user-facing UI and excludes reference pages", () => {
   assert.equal(isFrontendUiPath("apps/web/app/home/page.tsx"), true);
@@ -43,7 +43,7 @@ test("detects user-facing UI and excludes reference pages", () => {
   assert.equal(isFrontendUiPath("apps/web/test/hosted-settings.test.tsx"), false);
 });
 
-test("requires dedicated proof while accepting an existing live representation", () => {
+test("requires dedicated proof while accepting an existing representation link", () => {
   assert.deepEqual(
     validateFrontendDesignProof({
       changedPaths: UI_PATHS,
@@ -84,7 +84,7 @@ test("accepts a reasoned walkthrough without a screenshot", () => {
   );
 });
 
-test("requires an actual anchored destination owned by the current routes", () => {
+test("requires an absolute anchored link with a supported route shape", () => {
   const invalidDesignItems = [
     "<code>/design?tab=components#settings</code>",
     "https://preview.example.test/design?tab=components#settings",
@@ -92,6 +92,7 @@ test("requires an actual anchored destination owned by the current routes", () =
     '<a href="https://preview.example.test/design?tab=components">Components</a>',
     '<a href="https://preview.example.test/design?tab=sections#settings">Stale sections tab</a>',
     '<a href="/design?tab=components#settings">Relative GitHub destination</a>',
+    '<a href="ftp://preview.example.test/design?tab=components#settings">Non-HTTP destination</a>',
   ];
 
   for (const designItem of invalidDesignItems) {

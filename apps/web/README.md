@@ -19,10 +19,11 @@ never place private member data or credentials there.
 Match evidence to the changed visual, state, interaction, and responsive risk.
 A change can need no screenshots, one screenshot, or many. Inspect phone and
 desktop when responsive behavior can change. The `Pull request evidence`
-workflow requires a dedicated design proof linked to a live catalog or study
-destination. Add or update the representation only when no existing route and
-anchor render the changed state. The workflow does not impose a screenshot
-count.
+workflow requires a dedicated design proof with a supported absolute anchored
+link plus Evidence and Coverage. The preliminary frontend review verifies that
+the destination is repository-owned, reachable, current, and representative.
+Add or update the representation only when no existing route and anchor render
+the changed state. The workflow does not impose a screenshot count.
 
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,

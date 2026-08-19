@@ -95,7 +95,6 @@ import {
 } from "@/src/components/biomarkers/biomarker-design-data";
 import { DesignPage } from "@/app/design/design-page";
 import { SectionsContent } from "@/app/design/sections-content";
-import ScreenshotCategoryPage from "@/app/screenshots/[category]/page";
 import { SCREENSHOT_CATEGORIES } from "@/app/screenshots/categories";
 import { metadata as screenshotsMetadata } from "@/app/screenshots/page";
 
@@ -312,16 +311,6 @@ test("screenshot categories keep the production studies available without one gi
   expect(groupFundingStudySource).toContain(
     'mode="one_time"',
   );
-});
-
-test("settings screenshot route renders its linked proof anchor", async () => {
-  const page = await ScreenshotCategoryPage({
-    params: Promise.resolve({ category: "settings" }),
-  });
-  const markup = renderToStaticMarkup(page);
-
-  expect(markup).toContain('data-screenshot-category="settings"');
-  expect(markup).toContain('id="settings-model-provider-save-controls"');
 });
 
 test("home screenshot studies keep their footer preview inert", () => {

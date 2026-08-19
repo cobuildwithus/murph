@@ -56,7 +56,7 @@
 
 ## Design proof
 
-<!-- Required for user-facing apps/web UI changes; remove for other PRs. Link a reviewer-openable absolute URL with a fragment to the reusable component on /design?tab=components, consent surface on /design?tab=consent, or composed-section study on /screenshots/<category>. Add or update the representation only when no existing route and anchor render the changed state. Choose evidence for the actual visual, state, interaction, and responsive risks; there is no screenshot quota. -->
+<!-- Required for user-facing apps/web UI changes; remove for other PRs. Link a repository-owned, reviewer-openable absolute URL with a fragment to the reusable component on /design?tab=components, consent surface on /design?tab=consent, or composed-section study on /screenshots/<category>. Refresh an expired or inaccessible preview; use production only when it already renders the changed state. Add or update the representation only when no existing route and anchor render the changed state. Choose evidence for the actual visual, state, interaction, and responsive risks; there is no screenshot quota. -->
 
 - Design page: <!-- [proof label](https://<preview-host>/design?tab=components#...), [proof label](https://<preview-host>/design?tab=consent#...), or [proof label](https://<preview-host>/screenshots/<category>#...) -->
 - Evidence: <!-- Links, images, browser walkthrough, or a clear reason why an image adds no proof -->

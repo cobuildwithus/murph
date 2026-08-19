@@ -14,8 +14,8 @@ post-deploy checks; other changes record one concrete not-applicable reason.
 Every PR also records non-obvious affected surfaces, a mechanically validated
 architecture/reuse summary, foreground reply-path impact, complete initial
 provider-input impact, and categorized added/deleted LOC. User-facing hosted
-Web UI changes additionally carry a mechanically validated live catalog/study
-destination and dedicated risk-matched design proof.
+Web UI changes additionally carry mechanically validated design-proof fields
+and dedicated risk-matched catalog/study evidence.
 The contract and its proof are specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/references/testing-ci-map.md`.

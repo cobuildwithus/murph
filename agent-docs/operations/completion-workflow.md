@@ -54,8 +54,8 @@ smallest correct ownership boundary with truthful proof and no unresolved
 accepted review finding. Completion requires the routed verification, the
 preliminary specialist ReviewGPT pass when any lens applies, parent final
 review, plan closure, and scoped commit. User-facing frontend UI work also
-requires a live anchored representation of the production component, consent
-surface, or composed section plus risk-matched design proof;
+requires a repository-owned, reviewer-openable representation of the production
+component, consent surface, or composed section plus risk-matched design proof;
 PR-lane work additionally requires green CI and, when the change is eligible,
 the separate final pushed-head ReviewGPT gate.
 
@@ -203,11 +203,12 @@ product-decision owners.
 6. For user-visible, persisted-state, operational, or trust-boundary changes,
    complete the Product UX Walkthrough with direct evidence in addition to
    scripted tests. Match the evidence to each affected person's changed claim.
-   Every user-facing hosted Web UI change must have a reviewer-openable live
-   representation: its real production component on `/design?tab=components`,
-   consent surface on `/design?tab=consent`, or composed page section or flow
-   under `/screenshots/<category>`. Add or update a catalog/study state only
-   when no existing route and anchor render the changed state.
+   Every user-facing hosted Web UI change must have a repository-owned,
+   reviewer-openable representation: its real production component on
+   `/design?tab=components`, consent surface on `/design?tab=consent`, or
+   composed page section or flow under `/screenshots/<category>`. Add or update
+   a catalog/study state only when no existing route and anchor render the
+   changed state.
    Inspect every material changed state and each viewport where the result can
    differ. Check phone and desktop when responsive behavior can change; do not
    add a second viewport only to meet a quota. Use the real page for journey
@@ -282,18 +283,20 @@ Every PR includes:
   surface changed, write `Not applicable` for both runtimes with the reason;
   do not claim a measured zero from authored prompt text alone.
 - **Design proof.** Required for every user-facing hosted Web UI change. Link a
-  reviewer-openable absolute URL with a fragment to the production component on
-  `/design?tab=components`, consent surface on `/design?tab=consent`, or composed
-  page section/flow under `/screenshots/<category>`. Add or update the
-  catalog/study state only when no existing route and anchor render the changed
-  state. In a dedicated `## Design proof` section, include that `Design page:`
-  link, `Evidence:` matched to the changed visual, state, interaction, and
-  responsive risks, and `Coverage:` naming the states and viewports checked. A
-  reasoned walkthrough is valid when an image adds no proof; there is no
-  screenshot quota. The pull-request evidence guard validates the rendered
-  section and destination shape when the diff changes hosted Web UI; the
-  preliminary frontend review checks whether the linked representation covers
-  the changed state.
+  repository-owned, reviewer-openable absolute URL with a fragment to the
+  production component on `/design?tab=components`, consent surface on
+  `/design?tab=consent`, or composed page section/flow under
+  `/screenshots/<category>`. Refresh an expired or inaccessible preview; use a
+  production link only when it already renders the changed state. Add or update
+  the catalog/study state only when no existing route and anchor render the
+  changed state. In a dedicated `## Design proof` section, include that
+  `Design page:` link, `Evidence:` matched to the changed visual, state,
+  interaction, and responsive risks, and `Coverage:` naming the states and
+  viewports checked. A reasoned walkthrough is valid when an image adds no
+  proof; there is no screenshot quota. The pull-request evidence guard validates
+  only the rendered fields and supported absolute-link shape; the preliminary
+  frontend review owns repository origin, reachability, currentness, and whether
+  the linked representation covers the changed state.
 - **Change-shape breakdown.** Report added and deleted lines from the
   base-to-head diff, classified as source, tests/fixtures, docs,
   config/tooling, and generated/other. State the classification rule, note
