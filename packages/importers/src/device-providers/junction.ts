@@ -222,12 +222,14 @@ export interface JunctionCanonicalCoverageEvidence {
 }
 
 export interface JunctionCanonicalCoverageDerivationOptions {
-  readonly defaultTimeZone?: string;
   readonly providerPulledAt?: string;
 }
 
 export interface JunctionCanonicalCoverageEvent {
-  readonly dataOrigin?: { readonly sourceProviderSlug?: string };
+  readonly dataOrigin?: {
+    readonly sourceProviderSlug?: string;
+    readonly timeZoneOffsetMinutes?: number | null;
+  };
   readonly dayKey?: string;
   readonly endAt?: string;
   readonly externalRef?: { readonly resourceType: string };
@@ -1276,26 +1278,18 @@ export function deriveJunctionCanonicalCoverageEvidence(
   events: readonly JunctionCanonicalCoverageEvent[],
   options?: JunctionCanonicalCoverageDerivationOptions,
 ): readonly JunctionCanonicalCoverageEvidence[] {
-  const coverageBySourceAndResource = new Map<string, JunctionCanonicalCoverageEvidence>();
+  const coverageBySourceAndResource = new Map<string, {
+    evidence: JunctionCanonicalCoverageEvidence;
+    providerDayClosedAt?: string;
+  }>();
   for (const event of events) {
     const evidence = resolveJunctionCanonicalCoverageEvidence(event);
     if (!evidence) {
       continue;
     }
-    const coverageFinalizedAt = options
-        && isJunctionDailyCanonicalCoverageResource(evidence.resource)
-      ? resolveJunctionProviderDayFinalizedAt(
-          evidence.coverageBoundary,
-          options.defaultTimeZone,
-          options.providerPulledAt,
-        )
+    const providerDayClosedAt = isJunctionDailyCanonicalCoverageResource(evidence.resource)
+      ? resolveJunctionProviderDayClosedAt(evidence.coverageBoundary, event)
       : undefined;
-    const resolvedEvidence = coverageFinalizedAt
-      ? {
-          ...evidence,
-          coverageFinalizedAt,
-        }
-      : evidence;
 
     const key = `${evidence.sourceProviderSlug}\u0000${evidence.resource}`;
     const existing = coverageBySourceAndResource.get(key);
@@ -1303,72 +1297,131 @@ export function deriveJunctionCanonicalCoverageEvidence(
       !existing
       || maxJunctionCanonicalCoverageBoundary(
           evidence.resource,
-          existing.coverageBoundary,
+          existing.evidence.coverageBoundary,
           evidence.coverageBoundary,
         ) === evidence.coverageBoundary
     ) {
       coverageBySourceAndResource.set(
         key,
-        existing?.coverageBoundary === resolvedEvidence.coverageBoundary
+        existing?.evidence.coverageBoundary === evidence.coverageBoundary
           ? {
-              ...resolvedEvidence,
-              coverageFinalizedAt:
-                existing.coverageFinalizedAt ?? resolvedEvidence.coverageFinalizedAt,
+              evidence,
+              providerDayClosedAt: laterOptionalIsoTimestamp(
+                existing.providerDayClosedAt,
+                providerDayClosedAt,
+              ),
             }
-          : resolvedEvidence,
+          : { evidence, providerDayClosedAt },
       );
     }
   }
 
-  return [...coverageBySourceAndResource.values()].sort((left, right) =>
-    left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
-    || left.resource.localeCompare(right.resource)
+  const providerPulledAt = normalizeJunctionCoverageProviderPulledAt(
+    options?.providerPulledAt,
+  );
+  return [...coverageBySourceAndResource.values()]
+    .map(({ evidence, providerDayClosedAt }) =>
+      providerPulledAt
+        && providerDayClosedAt
+        && providerPulledAt >= providerDayClosedAt
+        ? { ...evidence, coverageFinalizedAt: providerPulledAt }
+        : evidence
+    )
+    .sort((left, right) =>
+      left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+      || left.resource.localeCompare(right.resource)
+    );
+}
+
+const JUNCTION_PROVIDER_DAY_LATEST_UNPROVEN_CLOSE_OFFSET_MINUTES = -12 * 60;
+
+function resolveJunctionProviderDayClosedAt(
+  dayKey: string,
+  event: JunctionCanonicalCoverageEvent,
+): string {
+  const timeZone = event.timeZone?.trim();
+  if (timeZone) {
+    const timeZoneClose = resolveJunctionProviderDayClosedAtInTimeZone(
+      dayKey,
+      timeZone,
+    );
+    if (timeZoneClose) {
+      return timeZoneClose;
+    }
+  }
+
+  const offsetMinutes = event.dataOrigin?.timeZoneOffsetMinutes;
+  if (
+    Number.isInteger(offsetMinutes)
+    && offsetMinutes !== null
+    && offsetMinutes !== undefined
+    && Math.abs(offsetMinutes) <= 24 * 60
+  ) {
+    return resolveJunctionProviderDayClosedAtOffset(dayKey, offsetMinutes);
+  }
+
+  // Junction's closed-calendar importer waits until a date has closed at
+  // UTC-12. Date-only accepted records therefore converge safely without
+  // borrowing the member's mutable vault timezone.
+  return resolveJunctionProviderDayClosedAtOffset(
+    dayKey,
+    JUNCTION_PROVIDER_DAY_LATEST_UNPROVEN_CLOSE_OFFSET_MINUTES,
   );
 }
 
-function resolveJunctionProviderDayFinalizedAt(
+function resolveJunctionProviderDayClosedAtInTimeZone(
   dayKey: string,
-  defaultTimeZone: string | undefined,
-  providerPulledAt: string | undefined,
+  timeZone: string,
 ): string | undefined {
-  if (!defaultTimeZone || !providerPulledAt) {
-    return undefined;
-  }
-
   try {
-    const providerPulledAtMs = Date.parse(providerPulledAt);
-    if (!Number.isFinite(providerPulledAtMs)) {
-      return undefined;
-    }
-    const normalizedProviderPulledAt = new Date(providerPulledAtMs).toISOString();
-    if (normalizedProviderPulledAt !== providerPulledAt) {
-      return undefined;
-    }
     const nextDayKey = addDaysToIsoDate(dayKey, 1);
     const nominalNextDayMs = Date.parse(`${nextDayKey}T00:00:00.000Z`);
     let lowerBoundMs = nominalNextDayMs - 36 * 60 * 60_000;
     let upperBoundMs = nominalNextDayMs + 36 * 60 * 60_000;
     if (
-      toLocalDayKey(lowerBoundMs, defaultTimeZone) > dayKey
-      || toLocalDayKey(upperBoundMs, defaultTimeZone) <= dayKey
+      toLocalDayKey(lowerBoundMs, timeZone) > dayKey
+      || toLocalDayKey(upperBoundMs, timeZone) <= dayKey
     ) {
       return undefined;
     }
 
     while (upperBoundMs - lowerBoundMs > 1) {
       const midpointMs = Math.floor((lowerBoundMs + upperBoundMs) / 2);
-      if (toLocalDayKey(midpointMs, defaultTimeZone) > dayKey) {
+      if (toLocalDayKey(midpointMs, timeZone) > dayKey) {
         upperBoundMs = midpointMs;
       } else {
         lowerBoundMs = midpointMs;
       }
     }
-    return providerPulledAtMs >= upperBoundMs
-      ? normalizedProviderPulledAt
-      : undefined;
+    return new Date(upperBoundMs).toISOString();
   } catch {
     return undefined;
   }
+}
+
+function resolveJunctionProviderDayClosedAtOffset(
+  dayKey: string,
+  offsetMinutes: number,
+): string {
+  const nextDayKey = addDaysToIsoDate(dayKey, 1);
+  const nominalNextDayMs = Date.parse(`${nextDayKey}T00:00:00.000Z`);
+  return new Date(nominalNextDayMs - offsetMinutes * 60_000).toISOString();
+}
+
+function normalizeJunctionCoverageProviderPulledAt(
+  providerPulledAt: string | undefined,
+): string | undefined {
+  if (!providerPulledAt) {
+    return undefined;
+  }
+  const providerPulledAtMs = Date.parse(providerPulledAt);
+  if (!Number.isFinite(providerPulledAtMs)) {
+    return undefined;
+  }
+  const normalizedProviderPulledAt = new Date(providerPulledAtMs).toISOString();
+  return normalizedProviderPulledAt === providerPulledAt
+    ? normalizedProviderPulledAt
+    : undefined;
 }
 
 function applyJunctionCanonicalCoverageFence(

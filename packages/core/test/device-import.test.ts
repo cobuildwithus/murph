@@ -7705,7 +7705,7 @@ test("importDeviceBatch lets Junction sleep summary stages supersede prior cycle
   assert.deepEqual(records.map((record) => record.externalRef?.version), [undefined, undefined]);
 });
 
-test("importDeviceBatch preserves explicit device dayKey without vault timezone backfill", async () => {
+test("importDeviceBatch preserves explicit Junction provider days without vault timezone backfill", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-explicit-day-no-timezone");
   await initializeVault({
     vaultRoot,
@@ -7724,18 +7724,17 @@ test("importDeviceBatch preserves explicit device dayKey without vault timezone 
         occurredAt: "2026-06-25T03:00:00.000Z",
         recordedAt: "2026-06-25T03:00:00.000Z",
         dayKey: "2026-06-24",
-        title: "Junction light sleep",
+        title: "Junction daily blood oxygen",
         externalRef: {
           system: "junction",
-          resourceType: "junction-whoop-sleep",
-          resourceId: "sleep-stage-window-1",
-          facet: "sleep-light-minutes",
+          resourceType: "junction-fitbit-blood-oxygen",
+          resourceId: "fitbit-blood-oxygen-2026-06-24",
         },
         fields: {
-          metric: "sleep-light-minutes",
+          metric: "spo2",
           observationGrain: "summary",
-          value: 30,
-          unit: "minutes",
+          value: 97,
+          unit: "percent",
         },
       },
     ],

@@ -308,7 +308,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
       resultRecord.events.filter(isEventRecord),
       {
-        defaultTimeZone: resolvedDefaultTimeZone,
         providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
       },
     ),

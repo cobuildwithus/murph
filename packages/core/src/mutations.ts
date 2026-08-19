@@ -1316,7 +1316,8 @@ function normalizeDeviceEventInputs(
       inputDayKey &&
         !inputTimeZone &&
         (
-          isJunctionSleepStageExternalRefInput(eventInput.externalRef)
+          context.provider === "junction"
+          || isJunctionSleepStageExternalRefInput(eventInput.externalRef)
           || isDateOnlyFloatingProviderDayInput(inputDayKey, eventInput.dataOrigin)
         ),
     );

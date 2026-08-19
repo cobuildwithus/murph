@@ -9842,6 +9842,7 @@ test("Junction source-scoped history completes only after terminal admitted work
     days: number;
     failFirstTimeseriesPass?: boolean;
     jobSourceProviderSlug?: "fitbit" | "google_health";
+    now?: string;
     summaryRecordOnlyFirstAttempt?: boolean;
     summaryRecordSource?: "fitbit" | "google_health" | null;
     timeseriesRecordSource?: "fitbit" | "google_health" | null;
@@ -10006,7 +10007,6 @@ test("Junction source-scoped history completes only after terminal admitted work
           canonicalEventCount: events.length,
           durableDeliveryAccepted: events.length > 0,
           junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(events, {
-            defaultTimeZone: "UTC",
             providerPulledAt: junctionSnapshot.canonicalCoverageProviderPulledAt,
           }),
         };
@@ -10016,6 +10016,7 @@ test("Junction source-scoped history completes only after terminal admitted work
           || source.sourceProviderSlug === filter.sourceProviderSlug)
         && (!filter.status || source.status === filter.status)
       ),
+      ...(input.now ? { now: input.now } : {}),
       upsertConnectionSource: async (update) => {
         const existingIndex = liveSources.findIndex((source) =>
           source.sourceProviderSlug === update.sourceProviderSlug
@@ -10175,12 +10176,28 @@ test("Junction source-scoped history completes only after terminal admitted work
   );
   assert.equal(
     rebuiltLegacySummary?.canonicalCoverageFinalizedAt_activity,
-    "2026-04-03T00:00:00.000Z",
+    null,
+  );
+
+  const rebuiltLegacyClosed = await runScenario({
+    days: 2,
+    jobSourceProviderSlug: "fitbit",
+    now: "2026-04-03T12:00:00.000Z",
+    summaryRecordSource: "fitbit",
+    timeseriesResources: [],
+  });
+  const rebuiltLegacyClosedSummary = rebuiltLegacyClosed.liveSources.find((source) =>
+    source.sourceProviderSlug === "fitbit"
+  )?.resourceAvailabilitySummary;
+  assert.equal(
+    rebuiltLegacyClosedSummary?.canonicalCoverageFinalizedAt_activity,
+    "2026-04-03T12:00:00.000Z",
   );
 
   const rebuiltLegacyTimeseries = await runScenario({
     days: 2,
     jobSourceProviderSlug: "fitbit",
+    now: "2026-04-03T12:00:00.000Z",
     summaryRecordSource: null,
     timeseriesRecordSource: "fitbit",
     timeseriesResources: ["blood_oxygen"],
@@ -10195,7 +10212,7 @@ test("Junction source-scoped history completes only after terminal admitted work
   );
   assert.equal(
     rebuiltLegacyTimeseriesSummary?.canonicalCoverageFinalizedAt_blood_oxygen,
-    "2026-04-03T00:00:00.000Z",
+    "2026-04-03T12:00:00.000Z",
   );
 
   const rebuiltLegacyInterval = await runScenario({
@@ -10325,7 +10342,6 @@ test("Junction hosted bounded summaries finalize accepted Fitbit daily coverage"
         canonicalEventCount: events.length,
         durableDeliveryAccepted: events.length > 0,
         junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(events, {
-          defaultTimeZone: "UTC",
           providerPulledAt: junctionSnapshot.canonicalCoverageProviderPulledAt,
         }),
       };

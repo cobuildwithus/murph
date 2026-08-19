@@ -11671,18 +11671,18 @@ test("Junction migration daily coverage finalizes only after the provider-local 
     externalRef: { resourceType: "junction-fitbit-activity" },
     kind: "observation",
     occurredAt: "2026-08-11T00:00:00.000Z",
+    timeZone: "America/New_York",
   };
   const cases = [
     {
       expectedFinalizedAt: undefined,
       name: "inline accepted fact has no provider pull proof",
-      options: { defaultTimeZone: "America/New_York" },
+      options: {},
     },
     {
       expectedFinalizedAt: undefined,
       name: "pre-close pull",
       options: {
-        defaultTimeZone: "America/New_York",
         providerPulledAt: "2026-08-12T03:59:59.999Z",
       },
     },
@@ -11690,7 +11690,6 @@ test("Junction migration daily coverage finalizes only after the provider-local 
       expectedFinalizedAt: "2026-08-12T04:00:00.000Z",
       name: "first post-close pull",
       options: {
-        defaultTimeZone: "America/New_York",
         providerPulledAt: "2026-08-12T04:00:00.000Z",
       },
     },
@@ -11699,7 +11698,6 @@ test("Junction migration daily coverage finalizes only after the provider-local 
       expectedFinalizedAt: undefined,
       name: "DST fall-back day before its 25-hour close",
       options: {
-        defaultTimeZone: "America/New_York",
         providerPulledAt: "2026-11-02T04:59:59.999Z",
       },
     },
@@ -11708,7 +11706,6 @@ test("Junction migration daily coverage finalizes only after the provider-local 
       expectedFinalizedAt: "2026-11-02T05:00:00.000Z",
       name: "DST fall-back day at close",
       options: {
-        defaultTimeZone: "America/New_York",
         providerPulledAt: "2026-11-02T05:00:00.000Z",
       },
     },
@@ -11728,6 +11725,273 @@ test("Junction migration daily coverage finalizes only after the provider-local 
       }],
       value.name,
     );
+  }
+});
+
+test("Junction migration uses the accepted provider timezone instead of the mutable vault timezone", () => {
+  const event = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+    timeZone: "America/Los_Angeles",
+  };
+
+  for (const providerPulledAt of [
+    "2026-08-12T04:00:00.000Z",
+    "2026-08-12T05:00:00.000Z",
+    "2026-08-12T06:59:59.999Z",
+  ]) {
+    assert.deepEqual(
+      deriveJunctionCanonicalCoverageEvidence([event], {
+        providerPulledAt,
+      }),
+      [{
+        coverageBoundary: "2026-08-11",
+        resource: "activity",
+        sourceProviderSlug: "fitbit",
+      }],
+      providerPulledAt,
+    );
+  }
+
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([event], {
+      providerPulledAt: "2026-08-12T07:00:00.000Z",
+    }),
+    [{
+      coverageBoundary: "2026-08-11",
+      coverageFinalizedAt: "2026-08-12T07:00:00.000Z",
+      resource: "activity",
+      sourceProviderSlug: "fitbit",
+    }],
+  );
+});
+
+test("Junction migration resolves provider day close from IANA, offset, and conservative provenance", () => {
+  const event = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+  };
+  const evidenceAt = (
+    candidate: typeof event & {
+      dataOrigin: typeof event.dataOrigin & { timeZoneOffsetMinutes?: number | null };
+      timeZone?: string;
+    },
+    providerPulledAt: string,
+  ) => deriveJunctionCanonicalCoverageEvidence([candidate], { providerPulledAt });
+
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: -420,
+        },
+        timeZone: "America/New_York",
+      },
+      "2026-08-12T04:00:00.000Z",
+    )[0]?.coverageFinalizedAt,
+    "2026-08-12T04:00:00.000Z",
+    "The accepted IANA zone must outrank a conflicting fixed offset.",
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: -420,
+        },
+      },
+      "2026-08-12T06:59:59.999Z",
+    )[0]?.coverageFinalizedAt,
+    undefined,
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: -420,
+        },
+      },
+      "2026-08-12T07:00:00.000Z",
+    )[0]?.coverageFinalizedAt,
+    "2026-08-12T07:00:00.000Z",
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: -420,
+        },
+        timeZone: "not/a-zone",
+      },
+      "2026-08-12T07:00:00.000Z",
+    )[0]?.coverageFinalizedAt,
+    "2026-08-12T07:00:00.000Z",
+    "An invalid IANA label must fall back to the accepted provider offset.",
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: null,
+        },
+        timeZone: "not/a-zone",
+      },
+      "2026-08-12T11:59:59.999Z",
+    )[0]?.coverageFinalizedAt,
+    undefined,
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: null,
+        },
+        timeZone: "not/a-zone",
+      },
+      "2026-08-12T12:00:00.000Z",
+    )[0]?.coverageFinalizedAt,
+    "2026-08-12T12:00:00.000Z",
+    "Date-only records converge at the existing globally closed UTC-12 boundary.",
+  );
+});
+
+test("Junction migration waits for the latest accepted provider close on one source day", () => {
+  const event = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+  };
+  const events = [
+    { ...event, timeZone: "America/New_York" },
+    { ...event, occurredAt: "2026-08-11T01:00:00.000Z", timeZone: "America/Los_Angeles" },
+  ];
+
+  assert.equal(
+    deriveJunctionCanonicalCoverageEvidence(events, {
+      providerPulledAt: "2026-08-12T04:00:00.000Z",
+    })[0]?.coverageFinalizedAt,
+    undefined,
+  );
+  assert.equal(
+    deriveJunctionCanonicalCoverageEvidence(events, {
+      providerPulledAt: "2026-08-12T07:00:00.000Z",
+    })[0]?.coverageFinalizedAt,
+    "2026-08-12T07:00:00.000Z",
+  );
+});
+
+test("Junction canonical import keeps provider day close independent of vault timezone mutation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-provider-day-time-zone");
+  const input = {
+    provider: "junction",
+    vaultRoot,
+    snapshot: {
+      canonicalCoverageProviderPulledAt: "2026-08-12T05:00:00.000Z",
+      importedAt: "2026-08-12T05:00:00.000Z",
+      summaries: {
+        activity: [{
+          date: "2026-08-11",
+          id: "fitbit-provider-day-time-zone",
+          sourceProviderSlug: "fitbit",
+          steps: 4_000,
+          timeZone: "America/Los_Angeles",
+        }],
+      },
+      timeseries: {
+        blood_oxygen: [{
+          source: { provider: "fitbit", type: "watch" },
+          timestamp: "2026-08-11T12:00:00.000Z",
+          timeZoneOffsetMinutes: -420,
+          value: 97,
+        }],
+      },
+    },
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-08-11T00:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const beforeVaultChange = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>> & {
+        junctionCanonicalCoverage?: readonly {
+          coverageFinalizedAt?: string;
+          resource: string;
+        }[];
+      }
+    >(input, { corePort: coreRuntime });
+    assert.deepEqual(
+      beforeVaultChange.junctionCanonicalCoverage?.map((evidence) => ({
+        coverageFinalizedAt: evidence.coverageFinalizedAt,
+        resource: evidence.resource,
+      })),
+      [
+        { coverageFinalizedAt: undefined, resource: "activity" },
+        { coverageFinalizedAt: undefined, resource: "blood_oxygen" },
+      ],
+    );
+
+    await coreRuntime.updateVaultSummary({
+      timezone: "Pacific/Honolulu",
+      vaultRoot,
+    });
+    const afterVaultChange = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>> & {
+        junctionCanonicalCoverage?: readonly {
+          coverageFinalizedAt?: string;
+          resource: string;
+        }[];
+      }
+    >(
+      {
+        ...input,
+        snapshot: {
+          ...input.snapshot,
+          canonicalCoverageProviderPulledAt: "2026-08-12T07:00:00.000Z",
+          importedAt: "2026-08-12T07:00:00.000Z",
+        },
+      },
+      { corePort: coreRuntime },
+    );
+    assert.deepEqual(
+      afterVaultChange.junctionCanonicalCoverage?.map((evidence) => ({
+        coverageFinalizedAt: evidence.coverageFinalizedAt,
+        resource: evidence.resource,
+      })),
+      [
+        {
+          coverageFinalizedAt: "2026-08-12T07:00:00.000Z",
+          resource: "activity",
+        },
+        {
+          coverageFinalizedAt: "2026-08-12T07:00:00.000Z",
+          resource: "blood_oxygen",
+        },
+      ],
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
   }
 });
 

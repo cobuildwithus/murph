@@ -42,8 +42,12 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
 8. [x] Push the round-6 correction and run the final allowed ReviewGPT round 7.
 9. [x] Resolve round 7's durable job-lineage finding through the existing Web
    source epoch without adding a persisted owner, then push focused proof.
-10. [ ] Prove a clean current-base merge, mark the
-   PR ready, and archive this plan without merging.
+10. [x] Run the explicitly authorized round 8 and resolve its provider-day
+    timezone-authority finding without adding persisted state or provider work.
+11. [ ] Commit and push the round-8 remediation with exact-head evidence.
+12. [ ] Obtain explicit authorization for a round-9 zero-finding review, then
+    prove a clean current-base merge, mark the PR ready, and archive this plan
+    without merging.
 
 ## ReviewGPT ledger
 
@@ -82,6 +86,19 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
   superseded before more provider work, continuation, or marker projection.
   Already accepted canonical imports remain; no timestamp owner, migration
   ledger, queue, scheduler, manager, or reconciliation process is added.
+- Final round 8: accepted that daily finalization still used the member vault's
+  mutable timezone rather than the accepted Fitbit provider day. The correction
+  removes the vault timezone from coverage authority, preserves timezone-free
+  Junction provider-day events at Core's canonical boundary, resolves close by
+  accepted IANA timezone then accepted offset, retains the latest close for
+  mixed same-day provenance, and falls back to the existing UTC-12 global-close
+  boundary. The sole substantive finding was accepted; none was rejected. The
+  response's rendered-evidence observation was not a backend correctness
+  finding. No state, schema, job, queue, provider call, or fanout was added.
+
+The first round-8 invocation rejected a malformed PR-body hash token before
+review. Correcting the packaging metadata and retrying the same invocation was
+a tooling retry, not an additional substantive ReviewGPT round.
 
 ## Round-7 retrospective
 
@@ -113,23 +130,45 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
   epoch, existing backfill jobs/continuations, one terminal source marker, and
   the existing cutover lock; the review did not add a state owner or process.
 
+## Round-8 retrospective
+
+- Authority: the committed provider event now exclusively owns daily close
+  provenance. The vault timezone still supports ordinary normalization but no
+  longer participates in migration-finalization authority.
+- Fallback: valid provider IANA timezone wins, followed by a valid fixed offset;
+  invalid or absent provenance waits for the already-established UTC-12
+  globally closed boundary. Multiple events for one source/resource/day wait
+  for the latest close.
+- Core boundary: Junction events with an explicit provider day and no explicit
+  timezone remain timezone-free, preventing Core from synthesizing mutable
+  profile state that could outrank a real provider offset.
+- Complexity: the correction extends the existing pure coverage reducer and
+  deletes its vault-timezone input. It adds transient close calculation and
+  focused proof only; no persisted owner, schema, process, retry path, provider
+  request, or database fanout was introduced.
+
 ## Evidence so far
 
-- Importers: 19 files, 475 tests passed.
+- Core: 46 files, 803 tests passed after the round-8 correction.
+- Importers: 19 files, 479 tests passed.
 - Device Sync: 49 files, 1,181 tests passed after the round-7 correction;
   focused epoch and blood-pressure recovery proof passed 376 tests.
-- Focused Web migration/connect proof: 3 files, 263 tests passed.
+- Focused Web migration/connect proof: 3 files, 124 tests passed on the current
+  candidate.
 - Round-6 Web authority proof: 1 file, 76 tests passed.
 - Assistant Runtime: 89 files passed, 1 skipped; 2,404 tests passed, 5 skipped.
-- Device Sync, Assistant Runtime, Importers, and Web prepared typechecks passed.
+- Core, Device Sync, Assistant Runtime, Importers, and Web prepared typechecks
+  passed.
 - Package-local scoped Web lint, documentation drift, documentation gardening,
   and diff whitespace checks passed.
 - Round-6 warm/cold hydration, local-store epoch replacement, delayed callback
   rejection, current-epoch arrival, same-epoch alias, and maintenance retry
-  proofs pass. The final ReviewGPT/CI gate remains pending: round 7 exhausted
-  the seven-round hard cap, so review of this candidate requires explicit user
-  authorization for round 8, and GitHub Actions currently cannot start because
-  of an account billing lock.
+  proofs pass. Round-8 provider-timezone proof covers IANA and offset precedence,
+  DST, invalid and absent provenance, mixed same-day provenance, mutable vault
+  timezone changes, and the UTC-12 convergence boundary. The remediated head
+  still requires explicit authorization for round 9 before it can satisfy the
+  zero-finding ReviewGPT criterion. GitHub Actions currently cannot start
+  because of an account billing lock.
 
 ## Deployment concern
 
