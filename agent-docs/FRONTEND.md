@@ -91,7 +91,7 @@ cd apps/web && pnpm typecheck
 - Verify UI changes in the browser at every viewport where the result can
   materially differ. Check phone and desktop when responsive behavior can
   change.
-- Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate, and add each new shared component there. Do not update the catalog for every UI diff.
+- Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate. For every user-facing hosted Web UI diff, represent the real production component, consent surface, or composed section on the matching `/design` catalog tab.
 - Add a `/screenshots` study only when a difficult or reusable state benefits from stable presentation proof. Render the real production component with synthetic props, no live data, no live requests, and all interactive controls `inert`. A screenshot study proves presentation only, not the complete product journey.
 - Treat the unlinked and noindex route as a discovery control, not security. Never put private member data or credentials there.
 - Match rendered evidence to the changed visual, state, interaction, and
@@ -99,10 +99,11 @@ cd apps/web && pnpm typecheck
   Do not capture another viewport only to meet a quota. When a screenshot is
   useful, crop it to the changed component or section and inspect it at native
   resolution so ordinary body copy is legible.
-- The `Pull request evidence` check requires direct evidence and a coverage
-  explanation for user-facing UI diffs. It does not require a catalog update or
-  screenshot count. Design and screenshot-study changes are exempt so those
-  references can be maintained independently.
+- The `Pull request evidence` check requires a matching `/design` catalog edit
+  plus a dedicated `Design proof` section with a `Design page`, risk-matched
+  `Evidence`, and `Coverage` explanation for user-facing UI diffs. It does not
+  impose a screenshot count. Design and screenshot-study-only changes are
+  exempt so those references can be maintained independently.
 
 ## Docs to update
 

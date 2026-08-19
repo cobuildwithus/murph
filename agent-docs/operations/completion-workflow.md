@@ -54,7 +54,8 @@ smallest correct ownership boundary with truthful proof and no unresolved
 accepted review finding. Completion requires the routed verification, the
 preliminary specialist ReviewGPT pass when any lens applies, parent final
 review, plan closure, and scoped commit. User-facing frontend UI work also
-requires direct evidence matched to the changed claim;
+requires the production component, consent surface, or composed section on the
+matching `/design` catalog tab plus risk-matched design proof;
 PR-lane work additionally requires green CI and, when the change is eligible,
 the separate final pushed-head ReviewGPT gate.
 
@@ -202,6 +203,10 @@ product-decision owners.
 6. For user-visible, persisted-state, operational, or trust-boundary changes,
    complete the Product UX Walkthrough with direct evidence in addition to
    scripted tests. Match the evidence to each affected person's changed claim.
+   Every user-facing hosted Web UI change must render its real production
+   component on `/design?tab=components`, its consent surface on
+   `/design?tab=consent`, or its composed page section or flow on
+   `/design?tab=sections`.
    Inspect every material changed state and each viewport where the result can
    differ. Check phone and desktop when responsive behavior can change; do not
    add a second viewport only to meet a quota. Use the real page for journey
@@ -213,7 +218,7 @@ product-decision owners.
    material visual claim cannot be judged after the applicable fallback. For
    user-facing `apps/web` work, package only the selected redacted rendered
    evidence that helps a reviewer judge the changed claim.
-7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the outcome, Product UX result, direct evidence, changelog decision, and any risk details required below.
+7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the outcome, Product UX result, direct evidence, non-obvious surfaces, architecture and reuse, hot reply path impact, provider-input impact, deployment and changelog decisions, the change-shape breakdown, and applicable design proof required below.
 8. Prepare exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant Product UX, prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not four audits.
 9. When the final ReviewGPT gate is selected, establish its immutable round-one baseline on the same exact pushed candidate head and launch the preliminary pass and final round 1 concurrently. When the final gate does not apply, launch the preliminary pass by itself. The candidate must already have focused local proof and a parent candidate review, but preliminary findings, plan closure, and the parent's final review do not need to finish before both ReviewGPT jobs start. Run both jobs concurrently with CI and keep their outputs and state separate.
 10. Triage every finding from both ReviewGPT stages locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned specialist thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted findings in the parent, rerun focused proof, commit, and push one combined corrected candidate. When accepted Product UX remediation materially changes a product-owned dimension, the parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to that corrected pushed head and updated direct journey evidence, then record the refreshed product purpose verdict. This is a bounded parent revalidation, not another subagent or ReviewGPT invocation. Do not rerun the preliminary pass after a substantive result; use the final gate's next substantive round to verify all behavior-bearing remediation, including specialist-driven fixes. The final-gate packager chooses a fresh full audit for a sensitive, undeclared, or large current PR and a same-thread correction delta only for an explicitly routine PR below both size cutoffs.
@@ -247,7 +252,44 @@ Every PR includes:
   state why Product UX does not apply.
 - **Evidence.** List the direct journey proof and focused checks. For frontend
   work, state the changed states and viewports. Link screenshots only when they
-  add proof. There is no screenshot quota and no required catalog link.
+  add proof. There is no screenshot quota.
+- **Non-obvious affected surfaces.** Name every production behavior, shared
+  subsystem, workflow, state owner, or deploy/runtime surface changed even
+  though it is not obvious from the PR's purpose. State why each change is
+  necessary and name its regression proof. Write `None` when there are none.
+- **Architecture and reuse.** Complete four concrete bullets labeled `Existing
+  systems reused`, `New logic`, `New abstractions`, and `Complexity
+  intentionally avoided`. Describe the final diff. When an answer is none,
+  explain which existing contract is sufficient instead of using a bare
+  placeholder. The pull-request evidence guard validates this section on every
+  PR.
+- **Hot reply path impact.** State whether the PR changes the `Foreground Reply
+  Critical Path` defined in `docs/contracts/00-invariants.md`: durable
+  acceptance of a current conversation message through provider start and
+  durable reply handoff. If not, write `Not applicable` with a reason. If it
+  does, list every database, network/provider, and other awaited operation
+  added or moved onto the path. Include maximum call counts, serial/parallel
+  ordering, timeout/retry/fallback behavior, expected or measured latency, and
+  before/after proof.
+- **Murph initial provider input impact.** For representative individual and
+  group turns, report the complete first provider-visible request assembled by
+  Murph and Codex at base and head. Use identical fixtures and the target model
+  tokenizer. Report absolute and delta tokens, signed percentage change,
+  absolute UTF-8 bytes, and byte delta. Attribute the change across assembled
+  instructions, tool/schema/generated guidance, and other provider-visible
+  input. Name the measurement method and exclusions. If no provider-input
+  surface changed, write `Not applicable` for both runtimes with the reason;
+  do not claim a measured zero from authored prompt text alone.
+- **Design proof.** Required for every user-facing hosted Web UI change. Add the
+  production component to `/design?tab=components`, consent surface to
+  `/design?tab=consent`, or composed page section/flow to
+  `/design?tab=sections`. In a dedicated `## Design proof` section, include a
+  `Design page:` link, `Evidence:` matched to the changed visual, state,
+  interaction, and responsive risks, and `Coverage:` naming the states and
+  viewports checked. A reasoned walkthrough is valid when an image adds no
+  proof; there is no screenshot quota. The pull-request evidence guard validates
+  both the catalog edit and rendered section when the diff changes hosted Web
+  UI.
 - **Change-shape breakdown.** Report added and deleted lines from the
   base-to-head diff, classified as source, tests/fixtures, docs,
   config/tooling, and generated/other. State the classification rule, note
@@ -267,17 +309,20 @@ Every PR includes:
 
 Complete this launch preflight before starting PR gates:
 
-1. Write the complete PR body first. Confirm it contains exactly one
-   `## Changelog` section and exactly one `## Deployment concerns` section,
-   including a concrete reason when either disposition is `not applicable`.
+1. Write the complete PR body first. Confirm it contains the required
+   non-obvious-surface, architecture, hot reply path, provider-input,
+   change-shape, changelog, and deployment sections, plus design proof for an
+   applicable frontend diff. Include a concrete reason whenever a disposition
+   is `not applicable`.
 2. When final ReviewGPT applies, resolve the candidate with
    `git rev-parse HEAD`—never `git rev-parse --short HEAD`—prove that full
    40-character SHA equals the pushed PR head, and add the exact line
    `ReviewGPT first-reviewed head: <full-sha>` to the body.
-3. Re-read the rendered PR body and confirm the changelog, deployment, Product
-   UX, evidence, and ReviewGPT metadata required for this task are present
-   before launching ReviewGPT. An incomplete body is a launch blocker, not a
-   finding to repair after a review has started.
+3. Re-read the rendered PR body and confirm the architecture, path/input
+   impacts, changelog, deployment, Product UX, evidence, design proof, and
+   ReviewGPT metadata required for this task are present before launching
+   ReviewGPT. An incomplete body is a launch blocker, not a finding to repair
+   after a review has started.
 4. Start applicable ReviewGPT passes concurrently with CI immediately after
    this preflight. Do not wait for CI to finish. Later PR-body-only edits
    retrigger Pull Request Evidence but do not change the reviewed commit
@@ -326,11 +371,7 @@ smallest useful details for the applicable risk:
 
 - correctness, security, privacy, consent, billing, health-safety, or exposure
   invariants;
-- non-obvious owners, affected surfaces, architecture choices, or new
-  abstractions;
-- hot reply path calls and timing;
 - maximum-cardinality database fanout and concurrency;
-- complete provider-visible input measurements;
 - deliberately deferred work.
 
 When one of these paths changes, include its real proof rather than a generic
