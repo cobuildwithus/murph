@@ -1,6 +1,6 @@
 # Prefer completion-triggered ReviewGPT waiting
 
-Status: active
+Status: completed
 Created: 2026-08-19
 Updated: 2026-08-19
 
@@ -45,11 +45,11 @@ Updated: 2026-08-19
 
 ## Tasks
 
-1. Add the compact top-level workflow rule.
-2. Add detailed wait and wake ownership to the canonical ReviewGPT loop and
+1. [x] Add the compact top-level workflow rule.
+2. [x] Add detailed wait and wake ownership to the canonical ReviewGPT loop and
    route agents to it.
-3. Run readback, reference checks, the focused policy coverage test, and final
-   diff inspection.
+3. [x] Run readback, reference checks, the focused policy coverage test, and
+   final diff inspection.
 
 ## Decisions
 
@@ -61,7 +61,16 @@ Updated: 2026-08-19
 
 ## Verification
 
-- Commands to run: `git diff --check`; focused CLI release policy coverage test;
-  targeted stale-reference searches and final diff readback.
-- Expected outcomes: all commands pass and the final diff contains no private
-  identifiers or unrelated changes.
+- Passed `scripts/check-agent-docs-drift.sh`, `git diff --check`, targeted policy
+  token checks, stale-reference searches, and the private-identifier scan.
+- The exact CLI release policy file passed 46 tests, including its real release
+  tarball audit.
+- Full acceptance passed typechecks, documentation checks, package-shape and
+  repository guards, lint, development smoke proof, the web suite, production
+  compilation, and most package coverage. Seven runtime assertions failed only
+  under heavy parallel contention; the exact affected files then passed all
+  484 assertions serially on the same candidate head.
+- A fresh remote acceptance run independently passed the visible build and test
+  lanes, including the release-tarball test, before its wrapper reported a
+  post-verification model-call failure.
+Completed: 2026-08-19
