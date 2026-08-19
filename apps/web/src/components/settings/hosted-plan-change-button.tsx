@@ -38,7 +38,9 @@ export function HostedPlanChangeButton(props: {
     expectedCurrentPlanCode?: never;
     mode: "schedule";
   }
-)) {
+) & {
+  primary?: boolean;
+}) {
   const router = useRouter();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -98,7 +100,9 @@ export function HostedPlanChangeButton(props: {
     )}>
       <Button
         type="button"
-        variant={props.block ? "secondary" : "default"}
+        variant={
+          props.primary ? "default" : props.block ? "secondary" : "default"
+        }
         onClick={props.mode === "schedule"
           ? () => setConfirmationOpen(true)
           : () => void handleConfirm()}

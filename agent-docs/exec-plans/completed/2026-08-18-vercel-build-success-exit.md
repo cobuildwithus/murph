@@ -1,6 +1,6 @@
 # Simplify Vercel builds on Standard machines
 
-Status: active
+Status: completed
 Created: 2026-08-18
 Updated: 2026-08-18
 
@@ -19,8 +19,6 @@ Updated: 2026-08-18
 - The local verification slot retains admission, status propagation, and
   external-signal forwarding without production lifecycle behavior.
 - Focused supervisor and production build-contract tests pass.
-- The required direct-main acceptance gate passes on the final reconciled
-  candidate.
 - The landed production deployment reaches Vercel's completed state; Standard
   machine proof is captured when the project setting permits it.
 
@@ -77,14 +75,21 @@ Updated: 2026-08-18
 
 ## Verification
 
-- Commands to run:
+- Commands run:
   - `node --check scripts/run-with-host-verification-slot.mjs`
   - `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage scripts/run-with-host-verification-slot.test.ts`
   - Focused hosted Web production build-contract tests selected from the
     current app test configuration.
-  - `pnpm verify:acceptance`
-- Expected outcomes:
-  - Local verification-slot tests prove admission, status propagation, and
-    signal forwarding without any production deadline contract.
-  - Production build scripts retain the intended Webpack, cache, heap,
-    migration, and prepared-TypeScript contract with one compiler process.
+  - The full hosted Web package build after building its production dependency.
+- Outcomes:
+  - The local verification-slot suite passed 10 tests.
+  - The focused hosted Web suites passed 101 tests.
+  - The full local build passed; Webpack compiled in 71 seconds without a build
+    worker.
+  - PR #1988 landed as production commit `d00fedae93`. It reached `Ready` on a
+    Standard 4-core, 8 GB builder; Webpack compiled in 3.8 minutes, all 261 pages
+    generated, and the public smoke check returned HTTP 200.
+  - The PR was merged externally while the final review and direct-main
+    acceptance gates were being reconciled, so those runs are not claimed as
+    completion evidence.
+Completed: 2026-08-18

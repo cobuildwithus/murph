@@ -71,6 +71,8 @@ vi.mock('../src/assistant/outbox.ts', async () => {
   return {
     ...actual,
     listAssistantOutboxIntents: replyEventPathMocks.listAssistantOutboxIntents,
+    listAssistantOutboxIntentsForAutoReplyRoute:
+      replyEventPathMocks.listAssistantOutboxIntents,
   }
 })
 
@@ -414,6 +416,74 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).toContain('Prior Murph message.')
     expect(prompt).not.toContain('Native reply context:')
     expect(prompt).not.toContain('linq-msg-murph-target')
+  })
+
+  it('loads every exact Murph anchor in a compound native-reply group', async () => {
+    const vault = await createTempVault()
+    const deliveries = [
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-compound-murph-target-first',
+        message: 'First prior Murph message.',
+        providerMessageId: 'linq-msg-compound-murph-target-first',
+        sentAt: '2026-08-07T21:08:00.000Z',
+        sessionId: 'session-automation-first',
+        target: 'thread-1',
+      }),
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-compound-murph-target-second',
+        message: 'Second prior Murph message.',
+        providerMessageId: 'linq-msg-compound-murph-target-second',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation-second',
+        target: 'thread-1',
+      }),
+    ]
+    replyEventPathMocks.listAssistantOutboxIntents.mockImplementation(
+      async (query: { providerMessageIds?: readonly string[] | null }) => {
+        const providerMessageIds = new Set(query.providerMessageIds ?? [])
+        return deliveries.filter((intent) =>
+          providerMessageIds.has(intent.delivery?.providerMessageId ?? ''),
+        )
+      },
+    )
+    const firstReply = createLinqGroupCandidate({
+      inputId: 'ain_68686868686868686868686868686868',
+      messageId: 'linq-msg-compound-reply-first',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-compound-murph-target-first',
+      text: 'Replying to the first message.',
+    })
+    const secondReply = createLinqGroupCandidate({
+      inputId: 'ain_69696969696969696969696969696969',
+      messageId: 'linq-msg-compound-reply-second',
+      occurredAt: '2026-08-07T21:10:01.000Z',
+      replyToMessageId: 'linq-msg-compound-murph-target-second',
+      text: 'Replying to the second message.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContextFromCandidates([firstReply, secondReply]),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain('First prior Murph message.')
+    expect(prompt).toContain('Second prior Murph message.')
+    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerMessageIds: [
+          'linq-msg-compound-murph-target-first',
+          'linq-msg-compound-murph-target-second',
+        ],
+      }),
+    )
   })
 
   it('fails closed when multiple Murph deliveries claim the same provider message id', async () => {
@@ -5310,7 +5380,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
-  it('shares one lazy outbox read between self-echo and context selection', async () => {
+  it('keeps provider-anchored self-echo and unanchored route context distinct', async () => {
     const vault = await createTempVault()
     const candidate = createAssistantInputCandidate({
       actorIsSelf: true,
@@ -5339,7 +5409,15 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledOnce()
-    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledTimes(2)
+    expect(
+      replyEventPathMocks.listAssistantOutboxIntents.mock.calls.map(
+        ([query]) => query.providerMessageIds,
+      ),
+    ).toEqual([
+      [candidate.event.replyTarget?.messageId],
+      [],
+    ])
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 

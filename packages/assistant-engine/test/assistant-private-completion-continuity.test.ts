@@ -1,4 +1,5 @@
-import { rm } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
@@ -637,6 +638,129 @@ describe('private completion continuity', () => {
       fixture.vaultRoot,
       pending.intentId,
     )).resolves.not.toHaveProperty('privateCompletionContinuity')
+  })
+
+  it('excludes ordinary direct intents from the private-completion candidate bound', async () => {
+    const fixture = await createContinuityFixture(
+      'private-continuity-ordinary-route-bound-',
+    )
+    const ordinary = await createAssistantOutboxIntent({
+      actorId: locator.actorId,
+      bindingDelivery: {
+        kind: locator.deliveryKind,
+        target: locator.bindingDeliveryTarget,
+      },
+      channel: locator.channel,
+      deliveryIdempotencyKey: 'ordinary-direct-delivery-0',
+      deliveryTransportIdempotent: true,
+      identityId: locator.identityId,
+      message: 'Ordinary direct reply 0.',
+      sessionId: fixture.ordinarySession.sessionId,
+      threadId: locator.threadId,
+      threadIsDirect: true,
+      turnId: 'turn_ordinary_direct_0',
+      vault: fixture.vaultRoot,
+    })
+    const paths = resolveAssistantStatePaths(fixture.vaultRoot)
+    await Promise.all(Array.from({ length: 100 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const intent = {
+        ...ordinary,
+        dedupeKey: index.toString(16).padStart(64, '0'),
+        deliveryIdempotencyKey: `ordinary-direct-delivery-${index}`,
+        intentId: `outbox_ordinary_direct_${suffix}`,
+        message: `Ordinary direct reply ${index}.`,
+        turnId: `turn_ordinary_direct_${index}`,
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+    const delivered = await createDeliveredPrivateCompletion({
+      continuitySessionId: fixture.ordinarySession.sessionId,
+      deliverySession: fixture.ordinarySession,
+      vault: fixture.vaultRoot,
+    })
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+
+    await expect(reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
+      sessionId: fixture.ordinarySession.sessionId,
+      vault: fixture.vaultRoot,
+    })).resolves.toMatchObject({
+      sessionId: fixture.ordinarySession.sessionId,
+      turnCount: 1,
+    })
+
+    const transcript = await listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )
+    expect(transcript).toEqual([
+      expect.objectContaining({
+        sourceOutboxIntentId: delivered.intentId,
+        text: delivered.message,
+      }),
+    ])
+    await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
+      sessionId: fixture.ordinarySession.sessionId,
+      vault: fixture.vaultRoot,
+    })
+    await expect(listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )).resolves.toEqual(transcript)
+  })
+
+  it('fails closed above the marker-defined private-completion candidate bound', async () => {
+    const fixture = await createContinuityFixture(
+      'private-continuity-marker-route-bound-',
+    )
+    const first = await createPrivateCompletionIntent({
+      completionId: 'aask_done_private_continuity_bound_0',
+      continuitySessionId: fixture.ordinarySession.sessionId,
+      deliverySession: fixture.ordinarySession,
+      vault: fixture.vaultRoot,
+    })
+    const paths = resolveAssistantStatePaths(fixture.vaultRoot)
+    await Promise.all(Array.from({ length: 100 }, async (_, offset) => {
+      const index = offset + 1
+      const suffix = index.toString().padStart(3, '0')
+      const completionId = `aask_done_private_continuity_bound_${index}`
+      const intent = {
+        ...first,
+        answeredMailboxItemIds: [completionId],
+        dedupeKey: index.toString(16).padStart(64, '0'),
+        deliveryIdempotencyKey:
+          createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+            completionId,
+          ),
+        intentId: `outbox_private_completion_bound_${suffix}`,
+        turnId: `turn_private_continuity_bound_${index}`,
+      }
+      await writeFile(
+        path.join(paths.outboxDirectory, `${intent.intentId}.json`),
+        JSON.stringify(intent),
+        'utf8',
+      )
+    }))
+    await rm(path.join(paths.stateDirectory, 'outbox-dedupe.sqlite'), {
+      force: true,
+    })
+
+    await expect(reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
+      sessionId: fixture.ordinarySession.sessionId,
+      vault: fixture.vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_PRIVATE_COMPLETION_ROUTE_BOUND_EXCEEDED',
+    })
   })
 
   it('recovers a prepared partial write without duplicating transcript or turn count', async () => {
