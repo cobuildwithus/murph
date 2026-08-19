@@ -1018,9 +1018,9 @@ The Stripe Session uses:
 - Session metadata containing only purchase ID, purpose, and policy version;
 - the same opaque purchase ID in `payment_intent_data.metadata` for later
   refund/dispute correlation;
-- `setup_future_usage=off_session` for current-policy personal, Family, and
-  group Checkout, so the collected card can be reused for a later explicit
-  top-up;
+- `setup_future_usage=off_session` for current-policy monthly sponsorship
+  activation and recovery Checkout, so the exact approved method can fund
+  later automatic refills; ordinary one-time Checkout does not force saving;
 - `saved_payment_method_options.payment_method_save=enabled` for current-policy
   Checkout, so the payer can let Stripe present the method again in later
   Checkout flows;
@@ -1058,24 +1058,29 @@ without card saving so an in-flight idempotent Checkout request never changes
 shape. Version two remains reconstructible with future-use saving and direct
 saved-card payment for group purchases only. New purchases freeze
 version three with both behaviors for personal, Family, and group targets.
-New purchases freeze `hosted-usage-credit-checkout-v4`, which retains those
-targets, adds Stripe's explicit payment-method save choice to Checkout, and
+Version four remains reconstructible with forced future-use saving for every
+target, adds Stripe's explicit payment-method save choice to Checkout, and
 binds personal and Family card selection to the target's exact Murph billing
 Subscription. It uses that Subscription's explicit default or inherited
 Customer default regardless of whether Stripe may redisplay the card in
 Checkout. Group funding remains Customer-scoped because it has no required
 Murph billing Subscription. Legacy default Sources are unsupported for direct
-v4 reuse and stay in Checkout.
-Versions one through three retain their original request and selection shapes.
+v4 reuse and stay in Checkout. New purchases freeze
+`hosted-usage-credit-checkout-v5`, which retains the explicit save choice but
+forces future-use saving only for monthly sponsorship activation and recovery.
+Automatic sponsorship refills derive their exact reusable method from the
+latest verified sponsorship Checkout rather than attached-method count, card
+fingerprints, or a one-time contribution. Versions one through four retain
+their original request and selection shapes.
 Every retry and Stripe proof check uses the purchase's frozen policy version
 rather than the latest global version.
 
-After production persists its first v4 purchase, a v4-capable Web bundle is the
+After production persists its first v5 purchase, a v5-capable Web bundle is the
 minimum compatible consumer for status, cancellation, Stripe reconciliation,
-and account deletion involving retained v4 financial state. A safe rollback
-first disables new Add usage and group-funding intake, keeps v4-compatible
+and account deletion involving retained v5 financial state. A safe rollback
+first disables new Add usage and group-funding intake, keeps v5-compatible
 consumers running, and forward-fixes. Rolling Web below that floor requires
-proof that no v4 purchase or retained v4 financial state exists.
+proof that no v5 purchase or retained v5 financial state exists.
 
 ## Stripe Catalog And Payment Configuration
 

@@ -220,3 +220,45 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
   );
   expect(cancellationRequests).toBe(4);
 });
+
+test("payment recovery stays retryable when Checkout cannot open", async ({
+  page,
+}) => {
+  await page.route("**/api/design/group-sponsorship-management", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        checkout: {
+          purchaseId: "hucp_design_recovery",
+          status: "reconciling",
+        },
+      }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+
+  const response = await page.goto("/screenshots/groups", {
+    waitUntil: "load",
+  });
+  expect(response?.status(), "screenshot study should respond 200").toBe(200);
+
+  const recoveryStudy = page.locator('[data-design-state="monthly-recovery"]');
+  await expect(recoveryStudy).toHaveCount(1);
+  await page.locator("[inert]").evaluateAll((elements) => {
+    for (const element of elements) {
+      element.removeAttribute("inert");
+    }
+  });
+
+  const reviewButton = recoveryStudy.getByRole("button", {
+    name: "Review payment",
+  });
+  const originalUrl = page.url();
+  await reviewButton.click();
+
+  await expect(recoveryStudy.getByRole("alert")).toContainText(
+    "Payment review couldn’t open. Try again.",
+  );
+  await expect(reviewButton).toBeEnabled();
+  expect(page.url()).toBe(originalUrl);
+});

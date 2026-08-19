@@ -186,6 +186,46 @@ test.each([
   }
 });
 
+test("keeps payment recovery actionable when the server returns no Checkout URL", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({
+      checkout: {
+        purchaseId: "hucp_recovery_abcdefghijkl",
+        status: "reconciling",
+      },
+    }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  try {
+    const reviewButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review payment");
+    assert.ok(reviewButton);
+    await act(async () => {
+      reviewButton.click();
+    });
+
+    expect(rendered.reload).not.toHaveBeenCalled();
+    expect(rendered.container.textContent).toContain(
+      "Payment review couldn’t open. Try again.",
+    );
+    expect(reviewButton.disabled).toBe(false);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("binds a confirmed cap increase to the displayed authorization", async () => {
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
     json: async () => ({

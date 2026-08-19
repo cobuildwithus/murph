@@ -107,8 +107,7 @@ export function GroupSponsorshipManagementCard({
           window.location.assign(checkoutUrl);
           return true;
         }
-        window.location.reload();
-        return true;
+        throw new Error("Payment review couldn’t open. Try again.");
       }
       if (value.management === null) {
         if (body.action === "cancel") {
