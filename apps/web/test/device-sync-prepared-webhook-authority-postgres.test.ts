@@ -4,7 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import {
   createDeviceSyncRegistry,
   createStravaDeviceSyncProvider,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 import { createConfiguredDeviceSyncRegistryFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import {

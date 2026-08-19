@@ -2811,6 +2811,44 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("forwards an orchestration-owned assistant block to system mailbox execution", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      platformAiUsageAllowed: true,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      assistantExecutionBlocked: true,
+      orchestrationAttemptId: "test-engagement-blocked-system-attempt",
+      processingMode: "system_mailbox",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledOnce();
+      expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+        assistantExecutionBlocked: true,
+        processingMode: "system_mailbox",
+      });
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        failure_count: 0,
+        last_error_code: null,
+        wake_at: null,
+      });
+    });
+  });
+
   it("starts a default invocation on the restored-policy owner recheck", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

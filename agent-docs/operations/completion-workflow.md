@@ -257,6 +257,24 @@ Every PR includes:
   `Changelog: updated` and its item IDs, or `Changelog: not applicable` with a
   concrete reason. The changelog guard validates this section.
 
+Complete this launch preflight before starting PR gates:
+
+1. Write the complete PR body first. Confirm it contains exactly one
+   `## Changelog` section and exactly one `## Deployment concerns` section,
+   including a concrete reason when either disposition is `not applicable`.
+2. When final ReviewGPT applies, resolve the candidate with
+   `git rev-parse HEAD`—never `git rev-parse --short HEAD`—prove that full
+   40-character SHA equals the pushed PR head, and add the exact line
+   `ReviewGPT first-reviewed head: <full-sha>` to the body.
+3. Re-read the rendered PR body and confirm the changelog, deployment, Product
+   UX, evidence, and ReviewGPT metadata required for this task are present
+   before launching ReviewGPT. An incomplete body is a launch blocker, not a
+   finding to repair after a review has started.
+4. Start applicable ReviewGPT passes concurrently with CI immediately after
+   this preflight. Do not wait for CI to finish. Later PR-body-only edits
+   retrigger Pull Request Evidence but do not change the reviewed commit
+   baseline.
+
 Use this form when the changelog changed:
 
 ```markdown
@@ -336,8 +354,8 @@ sends a full guarded snapshot. PRs that do not enter that gate do not need the
 line.
 
 The applicable invariant and review docs own the required content for each
-risk and deploy boundary. Do not paste empty risk sections, a manual line-count
-table, the full work plan, or a repeated list of review lenses into every PR.
+risk and deploy boundary. Do not paste empty risk sections, a manual line-count table,
+the full work plan, or a repeated list of review lenses into every PR.
 
 ## Review-Resolution Loop
 

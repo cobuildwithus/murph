@@ -972,6 +972,7 @@ describe("selectHostedAssistantInputIds", () => {
     expect(acceptedContext).toEqual({
       conversationActivity: "observed",
       currentInputId: fresh.inputId,
+      foregroundPriorityInputAccepted: true,
     });
   });
 
@@ -1144,6 +1145,7 @@ describe("selectHostedAssistantInputIds", () => {
     expect(foregroundContext).toEqual({
       conversationActivity: "observed",
       currentInputId: newestFresh.inputId,
+      foregroundPriorityInputAccepted: true,
     });
   });
 
@@ -1619,6 +1621,7 @@ describe("selectHostedAssistantInputIds", () => {
     })).resolves.toEqual({
       conversationActivity: "observed",
       currentInputId: null,
+      foregroundPriorityInputAccepted: true,
     });
   });
 
@@ -1965,6 +1968,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     })).resolves.toEqual({
       conversationActivity: "not_observed",
       currentInputId: null,
+      foregroundPriorityInputAccepted: false,
     });
   });
 
@@ -1997,6 +2001,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     })).resolves.toEqual({
       conversationActivity: "observed",
       currentInputId: second.inputId,
+      foregroundPriorityInputAccepted: true,
     });
   });
 
@@ -2029,6 +2034,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     })).resolves.toEqual({
       conversationActivity: "observed",
       currentInputId: null,
+      foregroundPriorityInputAccepted: true,
     });
   });
 
@@ -2041,6 +2047,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     })).resolves.toEqual({
       conversationActivity: "uncertain",
       currentInputId: null,
+      foregroundPriorityInputAccepted: true,
     });
   });
 
@@ -2056,6 +2063,47 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       vaultRoot,
     })).resolves.toMatchObject({
       conversationActivity: "not_observed",
+      foregroundPriorityInputAccepted: false,
+    });
+  });
+
+  it("treats an accepted hosted image completion as foreground-priority input", async () => {
+    const vaultRoot = await createTempVault();
+    const origin = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_accepted_image_origin",
+        eventId: "event_accepted_image_origin",
+        itemId: "item_accepted_image_origin",
+        routeAuthority: true,
+        sessionId: "asst_accepted_image",
+        threadIsDirect: false,
+      }),
+    });
+    const completion = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: null,
+        dedupeKey: "dedupe_accepted_image_completion",
+        eventId: "event_accepted_image_completion",
+        itemId: "item_accepted_image_completion",
+        lane: "system",
+        laneSeq: "image-completion:accepted",
+        payloadSchema: "murph.hosted-image-completion.v1",
+        routeAuthority: true,
+        sessionId: "asst_accepted_image",
+        text: createHostedImageCompletionText(origin.inputId),
+        threadIsDirect: false,
+        wakeSchema: "murph.hosted-image-completion.v1",
+      }),
+    });
+
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+      assistantInputIds: [completion.inputId],
+      vaultRoot,
+    })).resolves.toMatchObject({
+      conversationActivity: "not_observed",
+      foregroundPriorityInputAccepted: true,
     });
   });
 
@@ -2071,6 +2119,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       vaultRoot,
     })).resolves.toMatchObject({
       conversationActivity: "observed",
+      foregroundPriorityInputAccepted: true,
     });
   });
 });

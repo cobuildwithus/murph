@@ -2423,6 +2423,7 @@ export { createDeviceSyncRegistry } from "./registry.ts";
 export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
 export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
+export { createJunctionDeviceSyncProvider } from "./providers/junction.ts";
 export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";

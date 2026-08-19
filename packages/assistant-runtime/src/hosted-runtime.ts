@@ -19,6 +19,9 @@ import {
   isHostedRuntimeFutureMailboxContinuation,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
   detectVaultMetadataFormatVersion,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
@@ -404,8 +407,10 @@ export {
 const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
-const HOSTED_SYSTEM_MAILBOX_DEVICE_SYNC_ROUTE_ACTIONS = ["run-device-sync-wake"] as const;
-const HOSTED_SYSTEM_MAILBOX_DEVICE_SYNC_WAKE_KINDS = ["device-sync.wake"] as const;
+const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
+  "apply-runtime-control-request",
+  "run-device-sync-wake",
+] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
 const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
@@ -988,6 +993,8 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     vaultRoot: input.vaultRoot,
   });
   const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
+    allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
     vaultRoot: input.vaultRoot,
   });
   const assistantCronWake = await resolveHostedAssistantCronWakeAfterInitialImport({
@@ -2934,13 +2941,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return await returnSystemMailboxModeResult();
       }
 
-      const devicePass = await runSystemMailboxLifecycleItem({
-        allowedRouteActions: HOSTED_SYSTEM_MAILBOX_DEVICE_SYNC_ROUTE_ACTIONS,
-        allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_DEVICE_SYNC_WAKE_KINDS,
-        stagePrefix: "system_mailbox.device_sync",
+      const modelFreePass = await runSystemMailboxLifecycleItem({
+        allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
+        allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+        stagePrefix: "system_mailbox.model_free",
       });
       assertRuntimeNotAborted();
-      if (devicePass.preempted) {
+      if (modelFreePass.preempted) {
         return await returnSystemMailboxModeResult();
       }
 
@@ -3140,7 +3147,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantInputId: string | null = null;
-        let acceptedReadyImageCompletion = false;
+        let acceptedForegroundPriorityAssistantInput = false;
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
@@ -3249,9 +3256,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       acceptedInputContext.conversationActivity,
                     );
                   }
-                  const consumedReadyImageCompletion =
-                    consumeReadyImageCompletionInputs(assistantInputIds);
-                  acceptedReadyImageCompletion ||= consumedReadyImageCompletion;
+                  acceptedForegroundPriorityAssistantInput ||=
+                    acceptedInputContext.foregroundPriorityInputAccepted;
+                  consumeReadyImageCompletionInputs(assistantInputIds);
                   return () => {
                     currentAssistantInputId = null;
                   };
@@ -3310,7 +3317,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (
           passResult.runtimeStateDirty
           && (
-            acceptedReadyImageCompletion
+            acceptedForegroundPriorityAssistantInput
             || passResult.assistantPhaseResult
               ?.foregroundPrioritySystemCompletionProcessed === true
           )
@@ -4374,17 +4381,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const consumeReadyImageCompletionInputs = (
         acceptedInputIds: readonly string[],
-      ): boolean => {
+      ): void => {
         const readyBatch = readyImageCompletionInputBatch;
         if (!readyBatch) {
-          return false;
+          return;
         }
         const acceptedInputIdSet = new Set(acceptedInputIds);
         const retainedInputIds = readyBatch.assistantInputIds.filter(
           (inputId) => !acceptedInputIdSet.has(inputId),
         );
         if (retainedInputIds.length === readyBatch.assistantInputIds.length) {
-          return false;
+          return;
         }
         readyImageCompletionInputBatch = retainedInputIds.length === 0
           ? null
@@ -4392,7 +4399,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ...readyBatch,
               assistantInputIds: retainedInputIds,
             };
-        return true;
       };
       const absorbForegroundPassResult = (
         passResult: HostedWorkspaceRunnerResult,
