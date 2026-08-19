@@ -11731,9 +11731,8 @@ test("Junction migration daily coverage finalizes only after the provider-local 
   }
 });
 
-test("Junction migration preserves daily facts when close cannot yet be proven", () => {
+test("Junction migration preserves daily facts before close", () => {
   const payload = normalizeJunctionSnapshot({
-    canonicalCoverageDailyClosedOnlySourceProviderSlug: "fitbit",
     importedAt: "2026-08-12T04:00:00.000Z",
     summaries: {
       activity: [{
@@ -11778,9 +11777,8 @@ test("Junction migration interval coverage uses the accepted canonical end", () 
   );
 });
 
-test("Junction migration keeps active Fitbit on closed days and admits successor only after each fence", () => {
+test("Junction migration keeps active Fitbit facts and admits successor only after each fence", () => {
   const payload = normalizeJunctionSnapshot({
-    canonicalCoverageDailyClosedOnlySourceProviderSlug: "fitbit",
     canonicalCoverageFence: {
       coverageBoundaryByResource: {
         activity: "2026-08-11",
@@ -11843,6 +11841,7 @@ test("Junction migration keeps active Fitbit on closed days and admits successor
     .map((event) => [event.dataOrigin?.sourceProviderSlug, event.dayKey]);
   assert.deepEqual(activityDays, [
     ["fitbit", "2026-08-11"],
+    ["fitbit", "2026-08-12"],
     ["google-health", "2026-08-12"],
   ]);
 

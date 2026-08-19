@@ -3,6 +3,8 @@ import {
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
 import {
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   normalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
@@ -10,6 +12,7 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncSourceDisconnectFenced,
 } from "@murphai/device-syncd/public-account";
 import {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
@@ -127,9 +130,42 @@ export class HostedDeviceSyncPublicIngressService {
             });
           }
 
+          let connectionWork = connection;
+          if (
+            account.provider === "junction"
+            && normalizeJunctionProviderSlug(sourceProviderSlug)
+              === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+          ) {
+            const legacy = (await this.context.store.listConnectionSources(account.id))
+              .find((source) =>
+                normalizeJunctionProviderSlug(source.sourceProviderSlug)
+                  === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+                && source.status !== "disconnected"
+                && !isDeviceSyncSourceDisconnectFenced(source)
+              );
+            const legacyWork = legacy
+              ? provider.connectionHandler?.buildSourceConnectionWork?.({
+                  now,
+                  sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+                })
+              : null;
+            const legacyBackfillJobs = legacyWork?.initialJobs?.filter(
+              (job) => job.kind === "backfill",
+            ) ?? [];
+            if (legacyBackfillJobs.length > 0) {
+              connectionWork = {
+                ...connection,
+                initialJobs: [
+                  ...(connection.initialJobs ?? []),
+                  ...legacyBackfillJobs,
+                ],
+              };
+            }
+          }
+
           await handleHostedDeviceSyncConnectionEstablished({
             account,
-            connection,
+            connection: connectionWork,
             connectionStartedAt: connectionStartedAt ?? null,
             now,
             sourceProviderSlug: sourceProviderSlug ?? null,

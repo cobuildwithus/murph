@@ -74,6 +74,7 @@ function source(input: {
           activity: true,
           canonicalCoverageBoundary_activity: "2026-08-16",
           canonicalCoverageFinalizedAt_activity: NOW,
+          historicalBackfillCompletedAt: "2026-08-17T17:00:00.000Z",
         }
       : {
           activity: true,

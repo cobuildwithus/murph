@@ -178,7 +178,6 @@ export interface JunctionSnapshotInput {
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
   canonicalCoverageFence?: JunctionCanonicalCoverageFence;
-  canonicalCoverageDailyClosedOnlySourceProviderSlug?: string;
   canonicalCoverageProviderPulledAt?: string;
 }
 
@@ -321,7 +320,6 @@ const junctionSnapshotSchema = z.object({
     coverageBoundaryByResource: z.record(z.string(), z.string().nullable()),
     sourceProviderSlug: z.string(),
   }).strict().optional(),
-  canonicalCoverageDailyClosedOnlySourceProviderSlug: z.string().optional(),
   canonicalCoverageProviderPulledAt: z.string().optional(),
 }).catchall(z.unknown());
 
@@ -1240,11 +1238,6 @@ export function normalizeJunctionSnapshot(
     context,
     snapshot.canonicalCoverageFence,
   );
-  applyJunctionClosedDailyCoverageAdmission(
-    context,
-    snapshot.canonicalCoverageDailyClosedOnlySourceProviderSlug,
-    snapshot.canonicalCoverageProviderPulledAt ?? importedAt,
-  );
   assertJunctionTimeseriesOutputBounds({
     eventCount: events.length,
     evidencePartCount: evidenceParts.length,
@@ -1269,39 +1262,6 @@ export function normalizeJunctionSnapshot(
       companionHrvRmssdObservations: companionHrvRmssd ? 1 : 0,
     }),
   });
-}
-
-function applyJunctionClosedDailyCoverageAdmission(
-  context: NormalizationContext,
-  sourceProviderSlug: string | undefined,
-  observedAt: string | undefined,
-): void {
-  const normalizedSourceProviderSlug = normalizeJunctionSourceProviderSlug(sourceProviderSlug);
-  if (!normalizedSourceProviderSlug) {
-    return;
-  }
-
-  const observedAtMs = typeof observedAt === "string" ? Date.parse(observedAt) : Number.NaN;
-  const openDayKey = context.defaultTimeZone && Number.isFinite(observedAtMs)
-    ? toLocalDayKey(observedAtMs, context.defaultTimeZone)
-    : null;
-  const admittedEvents = context.events.filter((event) => {
-    if (
-      normalizeJunctionSourceProviderSlug(event.dataOrigin?.sourceProviderSlug)
-        !== normalizedSourceProviderSlug
-    ) {
-      return true;
-    }
-    const evidence = resolveJunctionCanonicalCoverageEvidence(event);
-    if (!evidence || !isJunctionDailyCanonicalCoverageResource(evidence.resource)) {
-      return true;
-    }
-    // Preserve accepted facts when the account time zone or pull timestamp is
-    // unavailable. Finalization remains fail-closed, so cutover cannot proceed
-    // until a later provider pull proves the daily boundary closed.
-    return openDayKey === null || evidence.coverageBoundary < openDayKey;
-  });
-  context.events.splice(0, context.events.length, ...admittedEvents);
 }
 
 /**
@@ -5174,14 +5134,11 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
 
   const {
     canonicalCoverageFence: _canonicalCoverageFence,
-    canonicalCoverageDailyClosedOnlySourceProviderSlug:
-      _canonicalCoverageDailyClosedOnlySourceProviderSlug,
     canonicalCoverageProviderPulledAt: _canonicalCoverageProviderPulledAt,
     strictSparseCalendarRepair: _strictSparseCalendarRepair,
     ...sanitizedSnapshot
   } = sanitized;
   void _canonicalCoverageFence;
-  void _canonicalCoverageDailyClosedOnlySourceProviderSlug;
   void _canonicalCoverageProviderPulledAt;
   void _strictSparseCalendarRepair;
 

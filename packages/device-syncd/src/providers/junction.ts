@@ -300,7 +300,6 @@ interface JunctionHistoricalUnresolvedProviderRecords {
 
 interface PreparedJunctionImportSnapshot {
   canonicalCoverageFence?: JunctionSnapshotInput["canonicalCoverageFence"];
-  canonicalCoverageDailyClosedOnlySourceProviderSlug?: string;
   connections: Array<Record<string, unknown>>;
   sourceProviders: readonly JunctionProviderConnection[];
   snapshots: Record<string, unknown[]>;
@@ -1496,8 +1495,6 @@ export function createJunctionDeviceSyncProvider(
         windowEnd: summaryWindow.windowEnd,
         connections: importConnections,
         canonicalCoverageFence: preparedSummaryImport.canonicalCoverageFence,
-        canonicalCoverageDailyClosedOnlySourceProviderSlug:
-          preparedSummaryImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
         canonicalCoverageProviderPulledAt: context.now,
         summaries: importSummaries,
         timeseries: {},
@@ -2956,8 +2953,6 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: window.windowEnd,
       connections: preparedImport.connections,
       canonicalCoverageFence: preparedImport.canonicalCoverageFence,
-      canonicalCoverageDailyClosedOnlySourceProviderSlug:
-        preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
       canonicalCoverageProviderPulledAt: context.now,
       summaries: preparedImport.snapshots,
       timeseries: {},
@@ -3989,8 +3984,6 @@ export function createJunctionDeviceSyncProvider(
             timeseriesWindowKind: "precise",
             connections: preparedImport.connections,
             canonicalCoverageFence: preparedImport.canonicalCoverageFence,
-            canonicalCoverageDailyClosedOnlySourceProviderSlug:
-              preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
             canonicalCoverageProviderPulledAt: context.now,
             summaries: {},
             timeseries: preparedImport.snapshots,
@@ -4789,8 +4782,6 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: input.windowEnd,
             connections: preparedImport.connections,
             canonicalCoverageFence: preparedImport.canonicalCoverageFence,
-            canonicalCoverageDailyClosedOnlySourceProviderSlug:
-              preparedImport.canonicalCoverageDailyClosedOnlySourceProviderSlug,
             canonicalCoverageProviderPulledAt: input.context.now,
             summaries: {},
             timeseries: preparedImport.snapshots,
@@ -7213,8 +7204,6 @@ function prepareJunctionImportSnapshotForSources(
 
   return {
     canonicalCoverageFence: buildJunctionGoogleHealthCanonicalCoverageFence(currentSources),
-    canonicalCoverageDailyClosedOnlySourceProviderSlug:
-      resolveJunctionFitbitMigrationClosedDailySource(currentSources),
     connections: sanitizeJunctionImportConnections(
       sourceProviders,
       options.sourceIdentities,
@@ -7232,22 +7221,6 @@ function prepareJunctionImportSnapshotForSources(
       options,
     ),
   };
-}
-
-function resolveJunctionFitbitMigrationClosedDailySource(
-  sources: readonly JunctionImportAdmissionSource[],
-): string | undefined {
-  const activeFitbit = sources.some((source) =>
-    normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-    && source.status !== "disconnected"
-  );
-  const activeGoogleHealth = sources.some((source) =>
-    normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-    && source.status !== "disconnected"
-  );
-  return activeFitbit && activeGoogleHealth
-    ? JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-    : undefined;
 }
 
 function filterJunctionImportSnapshots(

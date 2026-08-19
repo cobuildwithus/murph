@@ -3,6 +3,7 @@ import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   normalizeJunctionCanonicalCoverageBoundary,
+  normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
 
 import {
@@ -148,18 +149,19 @@ export function isGoogleHealthFitbitMigrationLegacyTerminal(source: {
 
 export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
   legacyAccessTerminal?: boolean;
+  legacyHistoricalBackfillComplete?: boolean;
   legacySummary: Record<string, unknown> | null | undefined;
   successorSummary: Record<string, unknown> | null | undefined;
 }): boolean {
+  if (
+    input.legacyAccessTerminal !== true
+    && input.legacyHistoricalBackfillComplete !== true
+  ) {
+    return false;
+  }
   const produced = [...CANONICAL_RESOURCES].filter((resource) =>
     readDeviceSyncSourceCanonicalCoverageBoundary(input.legacySummary, resource) !== null
   );
-  if ([...CANONICAL_RESOURCES].some((resource) =>
-    isAvailableDeviceSyncSourceResource(resource, input.legacySummary?.[resource])
-    && !produced.includes(resource)
-  )) {
-    return false;
-  }
   if (
     input.legacyAccessTerminal !== true
     && produced.some((resource) =>
@@ -169,11 +171,15 @@ export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
   ) {
     return false;
   }
-  return produced.length === 0
-    ? input.legacyAccessTerminal === true
-    : produced.every((resource) =>
-      isAvailableDeviceSyncSourceResource(resource, input.successorSummary?.[resource])
-    );
+  const successorResources = new Set(
+    Object.entries(input.successorSummary ?? {}).flatMap(([resource, availability]) => {
+      const normalized = normalizeJunctionResourceName(resource);
+      return normalized && isAvailableDeviceSyncSourceResource(resource, availability)
+        ? [normalized]
+        : [];
+    }),
+  );
+  return produced.every((resource) => successorResources.has(resource));
 }
 
 export function countAvailableDeviceSyncSourceResources(
@@ -253,6 +259,10 @@ export function isGoogleHealthFitbitMigrationCutoverReady(input: {
   )
     && isGoogleHealthFitbitMigrationLegacyCoverageReady({
       legacyAccessTerminal: legacyTerminal,
+      legacyHistoricalBackfillComplete: isDeviceSyncSourceHistoricalBackfillComplete({
+        firstSeenAt: successor.firstSeenAt,
+        resourceAvailabilitySummary: legacy.resourceAvailabilitySummary,
+      }),
       legacySummary: legacy.resourceAvailabilitySummary,
       successorSummary: successor.resourceAvailabilitySummary,
     })

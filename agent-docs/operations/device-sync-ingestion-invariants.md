@@ -526,7 +526,7 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 ## Fitbit to Google Health authority replacement
 
 - `fitbit` and `google_health` remain distinct persisted authorities while the browser projects one Fitbit / Pixel Watch card.
-- Legacy Fitbit stays active until Google Health has explicit authorization, a completed historical provider pull, a fresh supported fact, and canonical coverage for every legacy resource.
-- Accepted daily facts are provisional cutover evidence until a provider pull begins after that provider-local day closes. Interval resources fence on their accepted canonical end. Successor admission is strictly after each per-resource boundary.
+- Legacy Fitbit stays active until Google Health has explicit authorization, both exact-source historical pulls are terminal, Google Health has a fresh supported fact, and its normalized capabilities cover every canonical resource actually produced by Fitbit. An advertised sparse resource whose exact Fitbit pull finishes empty creates no transfer obligation.
+- Accepted Fitbit daily facts remain canonically visible during verification but are provisional cutover evidence until a provider pull begins after that provider-local day closes. Interval resources fence on their accepted canonical end. Successor admission is strictly after each per-resource boundary.
 - Mixed or source-unknown migration data is retryable: ingress must not acknowledge the trace or create canonical dirty work by guessing.
 - Cutover reuses the connection lock and source row. Pending dirty work must be drained and acknowledged before the exact Fitbit revoke claim or finalization; provider failure restores active legacy state and a bounded retry marker.

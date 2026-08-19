@@ -8,6 +8,7 @@ import {
   listConfiguredDeviceSyncPublicProviderDescriptors,
 } from "@murphai/device-syncd/public-provider-descriptors";
 import {
+  isDeviceSyncSourceHistoricalBackfillComplete,
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isGoogleHealthFitbitMigrationLegacyTerminal,
 } from "@murphai/device-syncd/fitbit-migration";
@@ -174,6 +175,10 @@ function buildSettingsSources(input: {
         && successor
         && isGoogleHealthFitbitMigrationLegacyCoverageReady({
           legacyAccessTerminal: isGoogleHealthFitbitMigrationLegacyTerminal(legacy),
+          legacyHistoricalBackfillComplete: isDeviceSyncSourceHistoricalBackfillComplete({
+            firstSeenAt: successor.firstSeenAt,
+            resourceAvailabilitySummary: legacy.resourceAvailabilitySummary,
+          }),
           legacySummary: legacy.resourceAvailabilitySummary,
           successorSummary: successor.resourceAvailabilitySummary,
         }),

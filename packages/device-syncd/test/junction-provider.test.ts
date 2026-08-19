@@ -9562,6 +9562,7 @@ test("Junction source-scoped history completes only after terminal admitted work
   const runScenario = async (input: {
     days: number;
     failFirstTimeseriesPass?: boolean;
+    jobSourceProviderSlug?: "fitbit" | "google_health";
     summaryRecordOnlyFirstAttempt?: boolean;
     summaryRecordSource?: "fitbit" | "google_health" | null;
     timeseriesResources: readonly string[];
@@ -9602,7 +9603,9 @@ test("Junction source-scoped history completes only after terminal admitted work
         return createJsonResponse({
           data: includeRecord
             ? [{
-                connectionId: "provider-google-health-1",
+                connectionId: input.summaryRecordSource === "fitbit"
+                  ? "provider-fitbit-1"
+                  : "provider-google-health-1",
                 date: "2026-04-02",
                 id: `activity-${input.summaryRecordSource}`,
                 sourceProviderSlug: input.summaryRecordSource,
@@ -9666,12 +9669,24 @@ test("Junction source-scoped history completes only after terminal admitted work
       }),
       connectionSourceAdmissionMode: "listed_only",
       importSnapshot: async (snapshot) => {
-        if (JSON.stringify(snapshot).includes("activity-google_health")) {
+        const serialized = JSON.stringify(snapshot);
+        if (serialized.includes(`activity-${input.summaryRecordSource}`)) {
           importedSnapshots.push(snapshot);
         }
+        const acceptedFitbitActivity = serialized.includes("activity-fitbit");
         return {
-          canonicalEventCount: 0,
-          durableDeliveryAccepted: false,
+          canonicalEventCount: acceptedFitbitActivity ? 1 : 0,
+          durableDeliveryAccepted: acceptedFitbitActivity,
+          ...(acceptedFitbitActivity
+            ? {
+                junctionCanonicalCoverage: [{
+                  coverageBoundary: "2026-04-02",
+                  coverageFinalizedAt: "2026-04-03T00:00:00.000Z",
+                  resource: "activity",
+                  sourceProviderSlug: "fitbit",
+                }],
+              }
+            : {}),
         };
       },
       listConnectionSources: async (filter = {}) => liveSources.filter((source) =>
@@ -9718,8 +9733,9 @@ test("Junction source-scoped history completes only after terminal admitted work
     const windowStart = new Date(
       Date.parse(windowEnd) - input.days * 24 * 60 * 60_000,
     ).toISOString();
+    const jobSourceProviderSlug = input.jobSourceProviderSlug ?? "google_health";
     let job = createJob("backfill", {
-      sourceProviderSlug: "google_health",
+      sourceProviderSlug: jobSourceProviderSlug,
       windowEnd,
       windowStart,
     });
@@ -9729,7 +9745,7 @@ test("Junction source-scoped history completes only after terminal admitted work
     let terminalJob = job;
 
     for (let index = 0; index < 2_000; index += 1) {
-      assert.equal(job.payload.sourceProviderSlug, "google_health");
+      assert.equal(job.payload.sourceProviderSlug, jobSourceProviderSlug);
       let result: Awaited<ReturnType<typeof executeJunctionJob>>;
       try {
         result = await executeJunctionJob(provider, makeContext(), job);
@@ -9810,6 +9826,25 @@ test("Junction source-scoped history completes only after terminal admitted work
   );
   assert.equal(empty.importedSnapshots.length, 0);
   assert.equal(empty.completionWrites, 1);
+
+  const rebuiltLegacy = await runScenario({
+    days: 2,
+    jobSourceProviderSlug: "fitbit",
+    summaryRecordSource: "fitbit",
+    timeseriesResources: [],
+  });
+  const rebuiltLegacySummary = rebuiltLegacy.liveSources.find((source) =>
+    source.sourceProviderSlug === "fitbit"
+  )?.resourceAvailabilitySummary;
+  assert.equal(typeof rebuiltLegacySummary?.[completedAtKey], "string");
+  assert.equal(
+    rebuiltLegacySummary?.canonicalCoverageBoundary_activity,
+    "2026-04-02",
+  );
+  assert.equal(
+    rebuiltLegacySummary?.canonicalCoverageFinalizedAt_activity,
+    "2026-04-03T00:00:00.000Z",
+  );
 
   const long = await runScenario({
     days: 60,

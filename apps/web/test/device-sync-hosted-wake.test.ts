@@ -5694,6 +5694,104 @@ describe("hosted device-sync wakes", () => {
     expect(sourceInstanceKey).not.toMatch(/dsc|junction|garmin/u);
   });
 
+  it("enqueues exact legacy Fitbit history when Google Health starts migration", async () => {
+    const buildSourceConnectionWork = vi.fn(() => ({
+      initialJobs: [{
+        dedupeKey: "junction:fitbit-history",
+        kind: "backfill" as const,
+        payload: {
+          sourceProviderSlug: "fitbit",
+          windowEnd: "2026-03-26T12:00:00.000Z",
+          windowStart: "2025-09-27T12:00:00.000Z",
+        },
+      }, {
+        dedupeKey: "junction:fitbit-reconcile",
+        kind: "reconcile" as const,
+        payload: {
+          sourceProviderSlug: "fitbit",
+          windowEnd: "2026-03-26T12:00:00.000Z",
+          windowStart: "2026-03-19T12:00:00.000Z",
+        },
+      }],
+      nextReconcileAt: "2026-03-26T12:15:00.000Z",
+    }));
+    mocks.listConnectionSources.mockResolvedValue([
+      buildHostedConnectionSource("dsc_123", "fitbit"),
+    ]);
+    mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection({
+      id: "dsc_123",
+      provider: "junction",
+      scopes: [],
+    }));
+    mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
+      hooks?: {
+        onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(async () => {
+        await input.hooks?.onConnectionEstablished?.({
+          account: buildHostedConnection({
+            id: "dsc_123",
+            provider: "junction",
+            scopes: [],
+          }),
+          connection: {
+            initialJobs: [{
+              dedupeKey: "junction:google-history",
+              kind: "backfill",
+              payload: {
+                sourceProviderSlug: "google_health",
+                windowEnd: "2026-03-26T12:00:00.000Z",
+                windowStart: "2025-09-27T12:00:00.000Z",
+              },
+            }],
+            nextReconcileAt: "2026-03-26T12:15:00.000Z",
+          },
+          now: "2026-03-26T12:00:00.000Z",
+          provider: {
+            connectionHandler: { buildSourceConnectionWork },
+            provider: "junction",
+          },
+          sourceProviderSlug: "google_health",
+        });
+        return { connection: { id: "dsc_123" } };
+      }),
+      handleWebhook: vi.fn(),
+      startConnection: vi.fn(),
+    }));
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/connect/junction/callback?state=xyz"),
+    );
+
+    await controlPlane.handleConnectionCallback("junction", {
+      expectedOwnerId: "user-123",
+    });
+
+    expect(buildSourceConnectionWork).toHaveBeenCalledWith({
+      now: "2026-03-26T12:00:00.000Z",
+      sourceProviderSlug: "fitbit",
+    });
+    const jobs = mocks.appendHostedMailboxEnvelope.mock.calls.at(-1)?.[0]
+      ?.envelope.hint.jobs;
+    expect(jobs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "backfill",
+        payload: expect.objectContaining({ sourceProviderSlug: "google_health" }),
+      }),
+      expect.objectContaining({
+        kind: "backfill",
+        payload: expect.objectContaining({ sourceProviderSlug: "fitbit" }),
+      }),
+    ]));
+    expect(jobs).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "reconcile",
+        payload: expect.objectContaining({ sourceProviderSlug: "fitbit" }),
+      }),
+    ]));
+  });
+
   it("reuses the same Junction source row key for repeated slugs and keeps distinct slugs separate", async () => {
     const upsertedSourceKeys: Array<{ sourceInstanceKey: string; sourceProviderSlug: string }> = [];
     const connectTargets: Array<"garmin" | "garmin" | "peloton"> = ["garmin", "garmin", "peloton"];

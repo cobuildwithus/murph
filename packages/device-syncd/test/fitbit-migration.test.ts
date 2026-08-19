@@ -66,6 +66,7 @@ function sources(input: {
         activity: true,
         activityBoundary: "2026-08-11",
         activityFinalizedAt: LAST_DATA_AT,
+        backfill: true,
       }),
       sourceProviderSlug: "fitbit",
       status: input.legacyStatus ?? "connected",
@@ -120,13 +121,19 @@ describe("Google Health Fitbit migration evidence", () => {
     {
       expected: false,
       legacyAccessTerminal: false,
-      legacySummary: summary({ activity: true }),
-      name: "available legacy resource without an accepted canonical boundary",
+      legacyHistoricalBackfillComplete: false,
+      legacySummary: summary({
+        activity: true,
+        activityBoundary: "2026-08-11",
+        activityFinalizedAt: LAST_DATA_AT,
+      }),
+      name: "nonterminal exact legacy history pull",
       successorSummary: summary({ activity: true }),
     },
     {
       expected: false,
       legacyAccessTerminal: false,
+      legacyHistoricalBackfillComplete: true,
       legacySummary: summary({ activity: true, activityBoundary: "2026-08-11" }),
       name: "active daily authority without a post-close provider pull",
       successorSummary: summary({ activity: true }),
@@ -134,6 +141,7 @@ describe("Google Health Fitbit migration evidence", () => {
     {
       expected: true,
       legacyAccessTerminal: false,
+      legacyHistoricalBackfillComplete: true,
       legacySummary: summary({
         activity: true,
         activityBoundary: "2026-08-11",
@@ -145,6 +153,7 @@ describe("Google Health Fitbit migration evidence", () => {
     {
       expected: true,
       legacyAccessTerminal: false,
+      legacyHistoricalBackfillComplete: true,
       legacySummary: summary({
         bloodPressure: true,
         bloodPressureBoundary: "2026-08-11T12:00:00.000Z",
@@ -155,6 +164,7 @@ describe("Google Health Fitbit migration evidence", () => {
     {
       expected: false,
       legacyAccessTerminal: false,
+      legacyHistoricalBackfillComplete: true,
       legacySummary: summary({
         activity: true,
         activityBoundary: "2026-08-11",
@@ -162,6 +172,40 @@ describe("Google Health Fitbit migration evidence", () => {
       }),
       name: "successor cannot omit a legacy canonical resource",
       successorSummary: summary(),
+    },
+    {
+      expected: true,
+      legacyAccessTerminal: false,
+      legacyHistoricalBackfillComplete: true,
+      legacySummary: {
+        activity: true,
+        body: true,
+        workouts: true,
+        canonicalCoverageBoundary_activity: "2026-08-11",
+        canonicalCoverageFinalizedAt_activity: LAST_DATA_AT,
+      },
+      name: "terminal sparse capabilities without canonical facts",
+      successorSummary: summary({ activity: true }),
+    },
+    {
+      expected: true,
+      legacyAccessTerminal: false,
+      legacyHistoricalBackfillComplete: true,
+      legacySummary: {
+        canonicalCoverageBoundary_fat: "2026-08-11",
+        canonicalCoverageFinalizedAt_fat: LAST_DATA_AT,
+        fat: true,
+      },
+      name: "normalized successor capability alias",
+      successorSummary: { body_fat: true },
+    },
+    {
+      expected: true,
+      legacyAccessTerminal: false,
+      legacyHistoricalBackfillComplete: true,
+      legacySummary: summary(),
+      name: "terminal valid-empty legacy history",
+      successorSummary: summary({ activity: true }),
     },
     {
       expected: true,
@@ -192,6 +236,18 @@ describe("Google Health Fitbit cutover readiness", () => {
       expected: false,
       input: { successorLastDataAt: FIRST_SEEN_AT },
       name: "no fresh successor fact after authorization",
+    },
+    {
+      expected: false,
+      input: {
+        legacySummary: {
+          activity: true,
+          canonicalCoverageBoundary_activity: "2026-08-11",
+          canonicalCoverageFinalizedAt_activity: LAST_DATA_AT,
+          historicalBackfillCompletedAt: "2026-08-10T00:00:00.000Z",
+        },
+      },
+      name: "legacy history completed only before successor authorization",
     },
     {
       expected: false,
