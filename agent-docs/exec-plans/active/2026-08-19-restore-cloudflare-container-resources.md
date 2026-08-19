@@ -24,20 +24,28 @@ disk allocation and ten-minute post-completion conversation idle lease.
 
 ## Product UX Plan
 
-Effort: Product change. The resource rollback targets measured cold-start and
+Effort: Patch. The resource rollback targets measured cold-start and
 workspace-restore regressions without changing message semantics, recovery, or
 the ten-minute conversation warmth policy.
 
-- Outcome: cold hosted conversations recover the prior CPU and memory capacity;
-  warm conversations retain the current ten-minute idle lease.
+Status: Hold until the protected production workflow accepts the generated
+Wrangler config, deploy smoke passes, and a de-identified cold-path walkthrough
+confirms correct reply delivery with the restored profile.
+
+- Outcome: same-size cold workspace restore and accepted-to-reply timing return
+  toward the preceding 2-vCPU profile's measured band, with correct reply
+  delivery and the current ten-minute idle lease retained.
 - Entry and promise: ordinary hosted conversation ingress and delivery remain
-  unchanged, while cold container startup and large workspace restores should
-  improve.
+  unchanged; the first post-deploy cold conversation must complete normally and
+  its container-start, Node-start, workspace-restore, and accepted-to-reply
+  phases must be compared with the privacy-safe pre-cut trace.
 - Reaches: cold conversations and CPU-heavy hosted reads. Follow-ups after ten
   idle minutes remain eligible for the cold path exactly as they are today.
-- Proof: focused deploy-contract tests and a generated-config check must prove
-  the resource object and unchanged idle TTL, followed by protected deployment
-  smoke on the exact merged source.
+- Proof: focused deploy-contract tests and a generated-config check prove the
+  resource object and unchanged idle TTL before merge. The protected workflow
+  intentionally resolves only public `main`, so its platform-native generated
+  Wrangler dry run, deployment smoke, and de-identified cold-path comparison
+  are post-merge release gates before this patch is called Ready.
 
 ## Evidence
 
@@ -72,9 +80,13 @@ the ten-minute conversation warmth policy.
 - Cloudflare package typecheck passes.
 - Rendered deploy config contains the 2-vCPU custom instance object and the
   unchanged 600,000-millisecond idle TTL.
-- Wrangler accepts both container bindings in a deployment dry run.
+- The protected production workflow's generated Wrangler dry run accepts both
+  container bindings on the exact merged source.
 - Required exact-head CI and routed ReviewGPT gates pass with no unresolved
   accepted findings.
 - Protected production deployment and live smoke succeed on the merged source.
+- A de-identified cold conversation completes through final reply delivery, and
+  its phase timings are compared with the available pre-cut 2-vCPU trace; a hot
+  follow-up inside the ten-minute lease remains warm.
 
 Updated: 2026-08-19
