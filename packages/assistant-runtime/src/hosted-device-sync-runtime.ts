@@ -686,15 +686,18 @@ async function applyHostedDeviceSyncWakeHint(input: {
     return false;
   }
 
+  const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
+  // manual_reconcile is one-shot root creation. Once recovery has attached
+  // exact jobs, those jobs own retry history and provider continuation cursors;
+  // recreating the root would reset both on every cold restore.
   if (
     input.wake.reason === "reconcile_due"
     && wake.hint?.reason === "manual_reconcile"
+    && jobHints.length === 0
   ) {
     input.service.queueManualReconcile(localAccountId);
     return false;
   }
-
-  const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
 
   for (const [index, hint] of jobHints.entries()) {
     const job = hostedJobHintToDeviceSyncJobInput(
