@@ -111,6 +111,7 @@ import {
 } from "../junction-resources.ts";
 import {
   JunctionClient,
+  JUNCTION_MAX_USER_PROVIDERS,
   type JunctionClientConfig,
   type JunctionCollectionWorkLimit,
   type JunctionDateQueryFormat,
@@ -536,6 +537,28 @@ const TIMESERIES_HOUR_MS = 60 * 60_000;
 const JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT = Object.freeze({
   maxAttemptsPerPage: 1,
   maxPages: 3,
+  requestTimeoutMs: 8_000,
+} satisfies JunctionCollectionWorkLimit);
+// Most hosted summary continuation units contain one resource. Match the
+// bounded timeseries contract so a complete three-page unit remains below the
+// 45-second outer maintenance budget and can persist its next cursor.
+const JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
+  maxAttemptsPerPage: 1,
+  maxPages: 3,
+  requestTimeoutMs: 8_000,
+} satisfies JunctionCollectionWorkLimit);
+// Sleep summaries and sleep cycles share canonical stage ownership, so they
+// must be normalized in one import. Keep their combined worst-case provider
+// wait at 30 seconds to leave room for projection/import inside the hosted
+// worker's 45-second outer maintenance budget.
+const JUNCTION_FULL_JOB_COUPLED_SUMMARY_COLLECTION_WORK_LIMIT = Object.freeze({
+  maxAttemptsPerPage: 1,
+  maxPages: 3,
+  requestTimeoutMs: 5_000,
+} satisfies JunctionCollectionWorkLimit);
+const JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT = Object.freeze({
+  maxAttemptsPerPage: 1,
+  maxPages: 1,
   requestTimeoutMs: 8_000,
 } satisfies JunctionCollectionWorkLimit);
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
@@ -1264,6 +1287,9 @@ export function createJunctionDeviceSyncProvider(
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
     const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
+      ...(job.kind === "reconcile" && context.shouldYield
+        ? { collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT }
+        : {}),
       signal: context.signal ?? null,
     });
     await projectJunctionSources(context, sourceProviders);
@@ -1277,14 +1303,38 @@ export function createJunctionDeviceSyncProvider(
       job.kind === "reconcile" && !isCurrentSummaryReconcile && isFullUtcDayWindow(summaryWindow)
         ? "date"
         : "datetime";
-    const summaries = await fetchSummarySnapshots(
-      context,
-      summaryWindow.windowStart,
-      summaryWindow.windowEnd,
-      skippedOptionalResources,
-      { dateQueryFormat: summaryDateQueryFormat },
-    );
-    const profileSummaryResult = await fetchProfileSummaryOnce(context, skippedOptionalResources);
+    if (
+      job.kind === "reconcile"
+      && context.shouldYield
+      && job.payload.summaryPhaseComplete !== true
+    ) {
+      const boundedSummaryResult = await executeBoundedSummaryReconcile({
+        context,
+        dateQueryFormat: summaryDateQueryFormat,
+        job,
+        skippedOptionalResources,
+        sourceProviders,
+        summaryWindow,
+        window,
+      });
+      if (boundedSummaryResult) {
+        return boundedSummaryResult;
+      }
+    }
+    const summaryPhaseComplete =
+      job.kind === "reconcile" && job.payload.summaryPhaseComplete === true;
+    const summaries = summaryPhaseComplete
+      ? {}
+      : await fetchSummarySnapshots(
+          context,
+          summaryWindow.windowStart,
+          summaryWindow.windowEnd,
+          skippedOptionalResources,
+          { dateQueryFormat: summaryDateQueryFormat },
+        );
+    const profileSummaryResult = summaryPhaseComplete
+      ? { checked: false, records: [] }
+      : await fetchProfileSummaryOnce(context, skippedOptionalResources);
     const profileMetadataPatch = profileSummaryResult.checked
       ? buildJunctionProfileSummaryCheckedMetadataPatch(context)
       : {};
@@ -3288,9 +3338,136 @@ export function createJunctionDeviceSyncProvider(
     return snapshots;
   }
 
+  async function executeBoundedSummaryReconcile(input: {
+    context: ProviderJobContext;
+    dateQueryFormat: JunctionDateQueryFormat;
+    job: DeviceSyncJobRecord;
+    skippedOptionalResources: JunctionSkippedOptionalResource[];
+    sourceProviders: readonly JunctionProviderConnection[];
+    summaryWindow: { windowEnd: string; windowStart: string };
+    window: { windowEnd: string; windowStart: string };
+  }): Promise<ProviderJobResult | null> {
+    const profileAlreadyChecked = hasCheckedJunctionProfileSummary(
+      input.context.account.metadata,
+    );
+    const eligibleResources = summaryResources.filter((resource) =>
+      !isJunctionProfileSummaryResource(resource) || !profileAlreadyChecked
+    );
+    const eligibleUnits = eligibleResources.reduce<string[][]>((units, resource) => {
+      if (resource === "sleep_cycle" && eligibleResources.includes("sleep")) {
+        return units;
+      }
+      units.push(
+        resource === "sleep" && eligibleResources.includes("sleep_cycle")
+          ? ["sleep", "sleep_cycle"]
+          : [resource],
+      );
+      return units;
+    }, []);
+    const requestedCursor = normalizeString(input.job.payload.summaryResourceCursor);
+    const cursorIndex = requestedCursor
+      ? eligibleUnits.findIndex((unit) => unit.includes(requestedCursor))
+      : 0;
+    const resources = eligibleUnits[cursorIndex >= 0 ? cursorIndex : 0] ?? null;
+    if (!resources) {
+      return null;
+    }
+
+    const summaries: Record<string, unknown[]> = {};
+    let profileMetadataPatch: Record<string, unknown> = {};
+    const profileResource = resources.find(isJunctionProfileSummaryResource);
+    if (profileResource) {
+      const profileSummaryResult = await fetchProfileSummaryOnce(
+        input.context,
+        input.skippedOptionalResources,
+        { collectionWorkLimit: JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT },
+      );
+      if (profileSummaryResult.checked) {
+        profileMetadataPatch = buildJunctionProfileSummaryCheckedMetadataPatch(
+          input.context,
+        );
+      }
+      if (profileSummaryResult.records.length > 0) {
+        summaries[profileResource] = profileSummaryResult.records;
+      }
+    } else {
+      const collectionWorkLimit = resources.length > 1
+        ? JUNCTION_FULL_JOB_COUPLED_SUMMARY_COLLECTION_WORK_LIMIT
+        : JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT;
+      for (const resource of resources) {
+        summaries[resource] = await fetchOptionalJunctionResourceRecords(
+          input.context,
+          "summary",
+          resource,
+          input.skippedOptionalResources,
+          () => client.listSummary({
+            collectionWorkLimit,
+            dateQueryFormat: input.dateQueryFormat,
+            resource,
+            signal: input.context.signal ?? null,
+            userId: input.context.account.externalAccountId,
+            windowEnd: input.summaryWindow.windowEnd,
+            windowStart: input.summaryWindow.windowStart,
+          }),
+        );
+      }
+    }
+
+    const preparedSummaryImport = await prepareJunctionImportSnapshot(
+      input.context,
+      summaries,
+      input.sourceProviders,
+    );
+    await input.context.importSnapshot({
+      provider: "junction",
+      accountId: buildJunctionImportAccountId(input.context.account.externalAccountId),
+      connectionId: input.context.account.id,
+      importedAt: input.summaryWindow.windowEnd,
+      windowStart: input.summaryWindow.windowStart,
+      windowEnd: input.summaryWindow.windowEnd,
+      connections: preparedSummaryImport.connections,
+      summaries: preparedSummaryImport.snapshots,
+      timeseries: {},
+    });
+
+    const nextResource = eligibleUnits[cursorIndex >= 0 ? cursorIndex + 1 : 1]?.[0] ?? null;
+    const sourceProviderSlug = normalizeProviderSlug(
+      input.job.payload.sourceProviderSlug,
+    );
+    const continuation = buildExactWindowJob({
+      availableAt: input.context.now,
+      kind: "reconcile",
+      payload: {
+        ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+        ...(nextResource
+          ? { summaryResourceCursor: nextResource }
+          : { summaryPhaseComplete: true }),
+      },
+      priority: input.job.priority,
+      windowEnd: input.window.windowEnd,
+      windowStart: input.window.windowStart,
+    });
+    return withJunctionSkippedResourceMetadata(
+      input.context,
+      withJunctionMetadataPatch(
+        {
+          nextReconcileAt: resolveJunctionNextReconcileAt(
+            input.context.account,
+            input.context.now,
+            addMilliseconds(input.context.now, reconcileIntervalMs),
+          ),
+          scheduledJobs: [continuation],
+        },
+        profileMetadataPatch,
+      ),
+      input.skippedOptionalResources,
+    );
+  }
+
   async function fetchProfileSummaryOnce(
     context: ProviderJobContext,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
+    options: { collectionWorkLimit?: JunctionCollectionWorkLimit } = {},
   ): Promise<{ checked: boolean; records: unknown[] }> {
     if (
       !summaryResources.some(isJunctionProfileSummaryResource)
@@ -3305,6 +3482,9 @@ export function createJunctionDeviceSyncProvider(
       JUNCTION_PROFILE_SUMMARY_RESOURCE,
       skippedOptionalResources,
       () => client.listProfileSummary({
+        ...(options.collectionWorkLimit
+          ? { collectionWorkLimit: options.collectionWorkLimit }
+          : {}),
         signal: context.signal ?? null,
         userId: context.account.externalAccountId,
       }),
@@ -10009,17 +10189,26 @@ async function projectJunctionSources(
     options.preserveHistoricalReconnectProviderSlugs === undefined
       ? null
       : new Set(options.preserveHistoricalReconnectProviderSlugs);
-  for (const source of projectJunctionSourcesByProviderSlug(
+  const projectedSources = projectJunctionSourcesByProviderSlug(
     context.account.id,
     providers,
-  )) {
-    const existingSources = context.listConnectionSources
-      ? await context.listConnectionSources()
-      : [];
-    const admissionSources: readonly JunctionImportAdmissionSource[] =
-      context.listConnectionSources
-        ? existingSources
-        : context.account.sources ?? [];
+  );
+  if (projectedSources.length > JUNCTION_MAX_USER_PROVIDERS) {
+    throw deviceSyncError({
+      code: "JUNCTION_USER_PROVIDER_LIMIT",
+      message: "Junction projected sources exceeded the supported provider bound.",
+      retryable: true,
+      httpStatus: 502,
+    });
+  }
+  const existingSources = context.listConnectionSources
+    ? [...await context.listConnectionSources()]
+    : [];
+  const admissionSources: readonly JunctionImportAdmissionSource[] =
+    context.listConnectionSources
+      ? existingSources
+      : context.account.sources ?? [];
+  for (const source of projectedSources) {
     const listedOnly = context.connectionSourceAdmissionMode === "listed_only";
     if (
       (
@@ -10060,7 +10249,7 @@ async function projectJunctionSources(
           : requiresHistoricalResetDeviceSyncSource(existing)
       );
     const historicalReconnectError = keepHistoricalReconnect ? existing : null;
-    await context.upsertConnectionSource({
+    const persistedSource = await context.upsertConnectionSource({
       sourceInstanceKey:
         accountSourceIdentity?.sourceInstanceKey ?? source.sourceInstanceKey,
       sourceProviderSlug:
@@ -10084,6 +10273,14 @@ async function projectJunctionSources(
         : {}),
       lastSeenAt: context.now,
     });
+    const persistedIndex = existingSources.findIndex((candidate) =>
+      candidate.sourceInstanceKey === persistedSource.sourceInstanceKey
+    );
+    if (persistedIndex >= 0) {
+      existingSources[persistedIndex] = persistedSource;
+    } else {
+      existingSources.push(persistedSource);
+    }
   }
 }
 

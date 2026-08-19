@@ -748,6 +748,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   resourceType: "string",
   sourceEventType: "string",
   sourceProviderSlug: "string",
+  summaryPhaseComplete: "boolean",
+  summaryResourceCursor: "string",
   timeseriesCursor: "isoTimestamp",
   timeseriesResourceCursor: "string",
   timeseriesWindowHours: "number",

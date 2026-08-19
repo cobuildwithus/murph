@@ -9,6 +9,6 @@
     "summary": "Default connected-health syncs now stay within a bounded health-data set so new readings can continue arriving instead of getting stuck behind oversized catch-up work.",
     "details": "Explicitly configured integrations keep their exact data selections, and existing consent and disconnect safeguards still apply.",
     "relevanceTags": ["connected-health", "wearables", "sync", "reliability"],
-    "sourcePullRequests": [1980, 1984, 1985]
+    "sourcePullRequests": [1980, 1984, 1985, 1992]
   }
 }
