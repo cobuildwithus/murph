@@ -1050,6 +1050,7 @@ describe("createHostedUsageCreditCheckout", () => {
   it("starts monthly group sponsorship through initial capacity admission", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) => {
+      expect(request.payment_method_types).toEqual(["card"]);
       expect(request.payment_intent_data).toMatchObject({
         metadata: expect.objectContaining({
           policyVersion: "hosted-usage-credit-checkout-v5",
@@ -1086,6 +1087,37 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_5_usd",
     });
     expect(fake.usageCreditCapacityQueryCalls).toHaveLength(2);
+
+    const purchase = onlyPurchase(fake.purchases);
+    purchase.checkoutRequestPolicyVersion =
+      "hosted-usage-credit-checkout-v4";
+    const legacyRequest =
+      await reconstructHostedUsageCreditStripeCheckoutRequest({
+        prisma: fake.prisma as never,
+        purchase: purchase as never,
+      });
+    expect(legacyRequest).not.toHaveProperty("payment_method_types");
+  });
+
+  it("rejects a current monthly sponsorship Session outside the card domain", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) => ({
+      ...buildStripeSession(request),
+      payment_method_types: ["us_bank_account"],
+    }));
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      monthlyCapMinor: 1_000,
+      now: NOW,
+      offerCode: "usage_5_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      sponsorshipKind: "monthly",
+    })).rejects.toMatchObject({
+      details: { code: "stripe_session_mismatch" },
+    });
   });
 
   it.each([
@@ -5319,6 +5351,37 @@ describe("automatic group refill saved-card recovery", () => {
     expect(mocks.stripeSubscriptionsList).not.toHaveBeenCalled();
   });
 
+  it("recovers when a legacy explicit sponsorship method is not a reusable card", async () => {
+    const fake = createFakePrisma();
+    const fixture = installAutomaticGroupRefillFixture(fake);
+    mocks.stripePaymentIntentRetrieve.mockResolvedValueOnce(
+      buildSponsorshipDirectActivationPaymentIntent({
+        paymentMethodId: "pm_legacy_payment_method",
+      }),
+    );
+    mocks.stripePaymentMethodRetrieve.mockResolvedValueOnce({
+      ...buildAttachedPaymentMethod("pm_legacy_payment_method"),
+      type: "us_bank_account",
+    });
+
+    await expect(tryChargeHostedUsageCreditSavedCard({
+      billingAuthority: {
+        automaticSponsorship: fixture.authority,
+        kind: "group",
+      },
+      checkoutRequest: { customer: "cus_group_payer" } as never,
+      now: NOW,
+      policyVersion: "hosted-usage-credit-checkout-v5",
+      prisma: fake.prisma as never,
+      purchase: fixture.refill as never,
+      stripe: mocks.requireHostedStripeApiMode().stripe as never,
+    })).resolves.toBeNull();
+
+    expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+    expect(mocks.stripeCustomerRetrieve).not.toHaveBeenCalled();
+    expect(mocks.stripePaymentMethodsList).not.toHaveBeenCalled();
+  });
+
   it("repairs a pre-fix failed refill and opens Checkout on the first recovery attempt", async () => {
     const fake = createFakePrisma();
     const fixture = installRecoverableAutomaticGroupRefillFixture(fake);
@@ -5345,9 +5408,13 @@ describe("automatic group refill saved-card recovery", () => {
       "usagePurchase",
     )).toBe(fixture.refill.id);
     expect(fake.purchases.size).toBe(2);
+    expect(fixture.refill.checkoutRequestPolicyVersion).toBe(
+      "hosted-usage-credit-checkout-v5",
+    );
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({ purchaseId: fixture.refill.id }),
+        payment_method_types: ["card"],
       }),
       expect.objectContaining({
         idempotencyKey: expect.stringContaining(fixture.refill.id),
@@ -6769,6 +6836,7 @@ function buildStripeSession(request: Record<string, unknown>) {
     livemode: false,
     metadata: request.metadata,
     mode: "payment",
+    payment_method_types: request.payment_method_types,
     payment_status: "unpaid",
     status: "open",
     url: "https://checkout.stripe.test/session",
@@ -7166,6 +7234,12 @@ function buildStripeSessionFromPurchase(purchase: Record<string, unknown>) {
       purpose: "hosted_usage_credit",
     },
     mode: "payment",
+    payment_method_types:
+      purchase.checkoutRequestPolicyVersion ===
+        "hosted-usage-credit-checkout-v5" &&
+      purchase.groupSponsorshipAuthorizationId !== null
+        ? ["card"]
+        : undefined,
     payment_status: "unpaid",
     status: "open",
     url: "https://checkout.stripe.test/session",

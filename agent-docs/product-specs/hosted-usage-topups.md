@@ -1028,6 +1028,9 @@ The Stripe Session uses:
 - `setup_future_usage=off_session` for current-policy monthly sponsorship
   activation and recovery Checkout, so the exact approved method can fund
   later automatic refills; ordinary one-time Checkout does not force saving;
+- `payment_method_types=["card"]` for current-policy monthly sponsorship
+  activation and recovery Checkout, including wallets that materialize as card
+  methods; ordinary one-time Checkout retains Dashboard-managed dynamic methods;
 - `saved_payment_method_options.payment_method_save=enabled` for current-policy
   Checkout, so the payer can let Stripe present the method again in later
   Checkout flows;
@@ -1074,7 +1077,12 @@ Checkout. Group funding remains Customer-scoped because it has no required
 Murph billing Subscription. Legacy default Sources are unsupported for direct
 v4 reuse and stay in Checkout. New purchases freeze
 `hosted-usage-credit-checkout-v5`, which retains the explicit save choice but
-forces future-use saving only for monthly sponsorship activation and recovery.
+forces future-use saving and card-only Checkout only for monthly sponsorship
+activation and recovery. Ordinary one-time Checkout retains Dashboard-managed
+dynamic payment methods. A legacy explicit sponsorship method outside the
+reusable-card domain is unavailable to automatic refill and returns to explicit
+recovery without substituting an attached method; an unbound legacy failed
+refill upgrades to the current request policy before opening recovery Checkout.
 Automatic sponsorship refills derive their exact reusable method from the
 latest verified explicit sponsorship payment: either the ordinal-zero direct
 activation or a Checkout-backed activation or recovery. Sessionless automatic
@@ -1109,10 +1117,12 @@ is the exact active one-time, per-unit, single-currency amount frozen on the
 purchase. Do not use custom unit amounts, transformed quantity, or extra
 currency options for v1.
 
-Use Dashboard-managed dynamic payment methods unless a reviewed requirement
-limits the top-up configuration to immediately confirmed methods. Delayed
-methods are safe only because the UI and fulfillment model include
-`payment_pending`; Checkout completion alone never grants credit.
+Use Dashboard-managed dynamic payment methods for ordinary one-time top-ups.
+Current-policy monthly sponsorship activation and recovery explicitly use the
+card-method domain required by automatic refills; delayed methods stay outside
+that recurring authority. Delayed methods remain safe for one-time top-ups only
+because the UI and fulfillment model include `payment_pending`; Checkout
+completion alone never grants credit.
 
 Before live launch, finance/counsel must classify the prepaid service credit
 and confirm the Product tax code and Price tax behavior. V1 does not enable

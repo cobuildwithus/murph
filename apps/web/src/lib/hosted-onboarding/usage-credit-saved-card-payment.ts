@@ -656,12 +656,14 @@ async function resolveHostedGroupSponsorshipPaymentMethod(input: {
   }
   if (
     paymentMethod.id !== paymentMethodId ||
-    paymentMethod.type !== "card" ||
     paymentMethod.livemode !== input.purchase.stripeLiveMode
   ) {
     throw buildHostedUsageCreditInvariantError(
       "group_sponsorship_payment_method_invalid",
     );
+  }
+  if (paymentMethod.type !== "card") {
+    return null;
   }
   return coerceStripeObjectId(paymentMethod.customer) === input.customerId
     ? paymentMethod.id

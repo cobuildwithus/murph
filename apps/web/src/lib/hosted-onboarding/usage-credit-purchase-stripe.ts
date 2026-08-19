@@ -229,6 +229,9 @@ export async function reconstructHostedUsageCreditStripeCheckoutRequest(input: {
     showPaymentMethodSaveControl:
       policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4 ||
       policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+    sponsorshipCardOnly:
+      policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION &&
+      input.purchase.groupSponsorshipAuthorizationId !== null,
     priceId,
     purchaseId: input.purchase.id,
     stripeCustomerId,
@@ -253,6 +256,7 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
   purchaseId: string;
   savePaymentMethod: boolean;
   showPaymentMethodSaveControl: boolean;
+  sponsorshipCardOnly: boolean;
   stripeCustomerId: string;
 }): Stripe.Checkout.SessionCreateParams {
   const paymentIntentData: NonNullable<
@@ -280,6 +284,9 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
       allow_redisplay_filters: ["always"],
       payment_method_save: "enabled",
     };
+  }
+  if (input.sponsorshipCardOnly) {
+    checkoutParams.payment_method_types = ["card"];
   }
   return checkoutParams;
 }
@@ -370,6 +377,10 @@ export function assertHostedUsageCreditStripeSessionMatchesPurchase(input: {
     input.purchase.id,
     policyVersion,
   );
+  const sponsorshipCardOnly =
+    policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION &&
+    input.purchase.groupSponsorshipAuthorizationId !== null;
+  const sessionPaymentMethodTypes = input.session.payment_method_types ?? [];
   const sessionCustomerId = coerceStripeObjectId(input.session.customer);
   if (
     input.session.adaptive_pricing?.enabled !== false ||
@@ -380,6 +391,13 @@ export function assertHostedUsageCreditStripeSessionMatchesPurchase(input: {
     !createHostedStripeCustomerLookupKeyReadCandidates(sessionCustomerId)
       .includes(input.purchase.stripeCustomerLookupKey) ||
     input.session.expires_at !== Math.floor(input.purchase.checkoutExpiresAt.getTime() / 1_000) ||
+    (
+      sponsorshipCardOnly &&
+      (
+        sessionPaymentMethodTypes.length !== 1 ||
+        sessionPaymentMethodTypes[0] !== "card"
+      )
+    ) ||
     !hostedUsageCreditMetadataEqual(input.session.metadata, expectedMetadata)
   ) {
     throw buildHostedUsageCreditInvariantError("stripe_session_mismatch");

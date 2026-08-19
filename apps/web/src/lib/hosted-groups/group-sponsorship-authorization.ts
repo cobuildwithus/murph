@@ -840,6 +840,8 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
     const reset = await input.tx.hostedUsageCreditPurchase.updateMany({
       data: {
         checkoutExpiresAt: boundedCheckoutExpiresAt,
+        checkoutRequestPolicyVersion:
+          HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
         ...returnUrls,
         grantSlotReleasedAt: null,
         lastReconciledAt: null,
