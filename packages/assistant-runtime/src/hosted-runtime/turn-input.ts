@@ -70,18 +70,21 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
 }): Promise<{
   conversationActivity: HostedConversationActivityObservation;
   currentInputId: string | null;
+  foregroundPriorityInputAccepted: boolean;
 }> {
   const inputIds = uniqueStrings(input.assistantInputIds);
   if (inputIds.length === 0) {
     return {
       conversationActivity: "not_observed",
       currentInputId: null,
+      foregroundPriorityInputAccepted: false,
     };
   }
   if (inputIds.length !== input.assistantInputIds.length) {
     return {
       conversationActivity: "uncertain",
       currentInputId: null,
+      foregroundPriorityInputAccepted: true,
     };
   }
   let events: AssistantInputEventRecord[];
@@ -94,17 +97,23 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     return {
       conversationActivity: "uncertain",
       currentInputId: null,
+      foregroundPriorityInputAccepted: true,
     };
   }
   if (events.length !== inputIds.length) {
     return {
       conversationActivity: "uncertain",
       currentInputId: null,
+      foregroundPriorityInputAccepted: true,
     };
   }
   const conversationActivity = events.some(isHostedConversationActivityInputEvent)
     ? "observed"
     : "not_observed";
+  const foregroundPriorityInputAccepted = events.some((event) =>
+    isHostedConversationActivityInputEvent(event)
+    || isAssistantHostedImageCompletionEvent(event)
+  );
   let batch: AssistantInputEventRecord[];
   try {
     batch = await selectHostedImageCompletionInputEventBatch({
@@ -121,6 +130,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     return {
       conversationActivity,
       currentInputId: null,
+      foregroundPriorityInputAccepted,
     };
   }
   return {
@@ -128,6 +138,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     currentInputId: batch.length === events.length
       ? batch.at(-1)?.inputId ?? null
       : null,
+    foregroundPriorityInputAccepted,
   };
 }
 

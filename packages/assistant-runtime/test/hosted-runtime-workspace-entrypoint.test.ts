@@ -37399,8 +37399,29 @@ describe("hosted workspace runtime entrypoint", () => {
       generatedImageRetention: false,
       handoff: "retried trusted completion quiet window",
     },
+    {
+      checkpointAssistantInputRetry: "conversation" as const,
+      checkpointConversation: false,
+      checkpointConversationInputAhead: false,
+      checkpointRuntimeWake: false,
+      checkpointTrustedCompletion: false,
+      checkpointSystemControl: false,
+      generatedImageRetention: false,
+      handoff: "retried conversation input quiet window",
+    },
+    {
+      checkpointAssistantInputRetry: "hosted-image" as const,
+      checkpointConversation: false,
+      checkpointConversationInputAhead: false,
+      checkpointRuntimeWake: false,
+      checkpointTrustedCompletion: false,
+      checkpointSystemControl: false,
+      generatedImageRetention: false,
+      handoff: "retried hosted image completion quiet window",
+    },
   ])("older due assistant carry honors $handoff before persisting a later reminder", async (
     {
+      checkpointAssistantInputRetry,
       checkpointConversation,
       checkpointConversationInputAhead,
       checkpointRuntimeWake,
@@ -37434,6 +37455,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const olderWakePersisted = createDeferred<void>();
     const reminderCreated = createDeferred<void>();
     const reminderWakePersisted = createDeferred<void>();
+    const assistantInputRetryFailed = createDeferred<void>();
+    const assistantInputRetryHandled = createDeferred<void>();
     const trustedCompletionHandled = createDeferred<void>();
     const trustedCompletionRetryFailed = createDeferred<void>();
     const firstCheckpointConversationHandled = createDeferred<void>();
@@ -37445,6 +37468,8 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ];
     let assistantPass = 0;
+    let assistantInputRetryAttempts = 0;
+    let assistantInputRetryId: string | null = null;
     let reminderReconciled = false;
     let snapshotCount = 0;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
@@ -37532,6 +37557,29 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item, context) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (
+              item.item.id
+                === "mailbox_item_entrypoint_assistant_carry_mask_input_retry"
+            ) {
+              assistantInputRetryId = checkpointAssistantInputRetry === "hosted-image"
+                ? await stagePendingHostedImageCompletionInputForMailboxItem({
+                    item: item.item,
+                    vaultRoot,
+                  })
+                : await stagePendingLinqAssistantInputForMailboxItem({
+                    causalSeq: item.item.laneSeq,
+                    item: item.item,
+                    vaultRoot,
+                  });
+              if (checkpointAssistantInputRetry === "conversation") {
+                assert.ok(context?.onConversationInputStaged);
+                context.onConversationInputStaged("linq");
+              }
+              return {
+                assistantInputId: assistantInputRetryId,
+                status: "imported",
+              };
+            }
             if (item.item.lane === "system") {
               if (item.item.kind === "assistant.notification.requested") {
                 if (checkpointTrustedCompletionRetry) {
@@ -37641,6 +37689,55 @@ describe("hosted workspace runtime entrypoint", () => {
             const presentedWakeAt = input.workspace?.nextWakeAt ?? "none";
             events.push(`assistant:${assistantPass}:${presentedWakeAt}:${Date.now()}`);
 
+            if (
+              assistantInputRetryId !== null
+              && !events.includes("assistant-input-retry:handled")
+            ) {
+              assistantInputRetryAttempts += 1;
+              const release = await input.beforeProviderAcceptedInputs?.({
+                turnId: "turn_hosted_runtime_test",
+                acceptedInputs: [{
+                  id: assistantInputRetryId,
+                  source: "assistant-input",
+                }],
+              });
+              await release?.();
+              events.push(
+                `assistant-input-retry:attempt:${assistantInputRetryAttempts}`,
+              );
+              if (assistantInputRetryAttempts === 1) {
+                if (checkpointAssistantInputRetry === "hosted-image") {
+                  assistantInputRetryFailed.resolve();
+                }
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  invocationLocalAssistantWakeAt: olderDueWakeAt,
+                  nextWakeAt: olderDueWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+              if (
+                assistantInputRetryAttempts === 2
+                && checkpointAssistantInputRetry === "conversation"
+              ) {
+                assistantInputRetryFailed.resolve();
+                return { progressed: false };
+              }
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: assistantInputRetryId,
+                vaultRoot,
+              });
+              events.push("assistant-input-retry:handled");
+              assistantInputRetryHandled.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: reconciliationWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
             const handlesTrustedCompletion =
               (checkpointTrustedCompletion || checkpointTrustedCompletionRetry)
               && events.includes(
@@ -37716,6 +37813,14 @@ describe("hosted workspace runtime entrypoint", () => {
                   kind: "assistant.notification.requested",
                   lane: "system",
                   laneSeq: "1",
+                }));
+                runtimeWakeSignal.notify(Date.now());
+              }
+              if (checkpointAssistantInputRetry) {
+                mailboxItems.push(createMailboxItem({
+                  id:
+                    "mailbox_item_entrypoint_assistant_carry_mask_input_retry",
+                  laneSeq: "3",
                 }));
                 runtimeWakeSignal.notify(Date.now());
               }
@@ -37801,6 +37906,13 @@ describe("hosted workspace runtime entrypoint", () => {
       }));
       runtimeWakeSignal.notify(Date.parse(TEST_NOW));
       await withRealTimeout(reminderCreated.promise, 15_000, () => events.join(","));
+      if (checkpointAssistantInputRetry) {
+        await withRealTimeout(
+          assistantInputRetryFailed.promise,
+          15_000,
+          () => events.join(","),
+        );
+      }
       await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
       await waitForFakeTimerScheduled(() => events.join(","));
       await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
@@ -37883,6 +37995,52 @@ describe("hosted workspace runtime entrypoint", () => {
           events.join(","),
         );
         await vi.advanceTimersByTimeAsync(1);
+      }
+
+      if (checkpointAssistantInputRetry) {
+        await withRealTimeout(
+          assistantInputRetryHandled.promise,
+          15_000,
+          () => events.join(","),
+        );
+        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+        await waitForFakeTimerScheduled(() => events.join(","));
+        assert.equal(
+          events.some((event) => event.startsWith("snapshot:2:")),
+          false,
+          events.join(","),
+        );
+        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+        assert.equal(
+          events.some((event) => event.startsWith("snapshot:2:")),
+          false,
+          events.join(","),
+        );
+        await vi.advanceTimersByTimeAsync(1);
+        await withRealTimeout(
+          (async () => {
+            while (!events.some((event) => event.startsWith("snapshot:2:"))) {
+              await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+          })(),
+          15_000,
+          () => events.join(","),
+        );
+        const secondSnapshotIndex = events.findIndex((event) =>
+          event.startsWith("snapshot:2:")
+        );
+        assert.equal(
+          events[secondSnapshotIndex],
+          `snapshot:2:idle_shutdown:${
+            Date.parse(TEST_NOW) + 2 * idleCheckpointDelayMs
+          }`,
+        );
+        assert.ok(
+          requireEventIndex(events, "assistant-input-retry:handled")
+            < secondSnapshotIndex,
+          events.join(","),
+        );
+        return;
       }
 
       if (checkpointConversation) {
@@ -40197,6 +40355,86 @@ async function stagePendingLinqAssistantInputForMailboxItem(input: {
     vaultRoot: input.vaultRoot,
   });
   return inputId;
+}
+
+async function stagePendingHostedImageCompletionInputForMailboxItem(input: {
+  item: HostedMailboxItem;
+  vaultRoot: string;
+}): Promise<string> {
+  const originAssistantInputId = await stageAssistantInputEventForMailboxItem({
+    item: createMailboxItem({
+      id: `${input.item.id}_origin`,
+      laneSeq: "2",
+    }),
+    sessionId: "asst_assistant_carry_mask_image_retry",
+    threadId: "thread_assistant_carry_mask_image_retry",
+    threadIsDirect: false,
+    vaultRoot: input.vaultRoot,
+  });
+  const text = [
+    "System note: synthetic trusted hosted image completion.",
+    `<hosted_image_result>${JSON.stringify({
+      originAssistantInputId,
+      originAssistantInputIdExact: true,
+      status: "failed",
+    })}</hosted_image_result>`,
+  ].join("\n");
+  const staged = await upsertAssistantInputEvent({
+    event: {
+      content: {
+        text,
+        transcriptText: text,
+        userMessageContent: [{ text, type: "text" as const }],
+      },
+      conversation: {
+        accountId: "acct_1",
+        actorId: null,
+        actorIsSelf: false,
+        sessionId: "asst_assistant_carry_mask_image_retry",
+        source: "linq",
+        threadId: "thread_assistant_carry_mask_image_retry",
+        threadIsDirect: false,
+      },
+      occurredAt: input.item.occurredAt,
+      receivedAt: input.item.createdAt,
+      replyTarget: {
+        channel: "linq",
+        messageId: `msg_${input.item.id}`,
+        threadId: "thread_assistant_carry_mask_image_retry",
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: "linq" as const,
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: "iMessage",
+      },
+      sourceRef: {
+        dedupeKey: input.item.dedupeKey,
+        eventId: input.item.dedupeKey,
+        itemId: input.item.id,
+        kind: "hosted-mailbox" as const,
+        lane: "system" as const,
+        laneSeq: "image-completion:assistant-carry-mask-retry",
+        payloadSchema: "murph.hosted-image-completion.v1",
+        payloadSource: "inline" as const,
+        source: "hosted-mailbox" as const,
+        wakeSchema: "murph.hosted-image-completion.v1",
+      },
+    },
+    vault: input.vaultRoot,
+  });
+  await updateAssistantInputProjection({
+    inputId: staged.inputId,
+    projection: { status: "pending" },
+    vault: input.vaultRoot,
+  });
+  await enqueueHostedPendingAssistantInputId({
+    inputId: staged.inputId,
+    vaultRoot: input.vaultRoot,
+  });
+  return staged.inputId;
 }
 
 async function writeSyntheticAssistantAutoReplyTerminalEvidence(input: {
