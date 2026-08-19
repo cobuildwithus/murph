@@ -358,11 +358,13 @@ The per-user workflow reads source-less reconciliation facts from web:
 - `blocked`: nullable product/access block with `reason` and `retryAt`
 - `mailboxLag`: lane lag counters only
 - `workspace`: nullable projection with `nextWakeAt`, `nextWakeReason`,
-  `inboxMediaRetentionWakeAt`, and `version`
+  `inboxMediaRetentionWakeAt`, optional `systemMailboxFrontier`, and `version`
 
-Facts do not contain run/idle decisions, producer source/reason, raw mailbox
-payloads, workspace redacted status, signed usage decisions, or direct wake
-flags. Temporal interprets the facts mechanically: fresh mailbox signals may
+Facts do not contain run/idle decisions, raw mailbox kinds, producer
+source/reason, raw mailbox payloads, workspace redacted status, signed usage
+decisions, or direct wake flags. The frontier classification exposes only
+whether the first retained system item is bounded model-free work or remains
+default-owned. Temporal interprets the facts mechanically: fresh mailbox signals may
 ensure processing directly; carried pointers and timers re-read facts;
 conversation lag or a due assistant workspace wake selects default processing;
 system-only lag selects `system_mailbox` processing; a due inbox media retention

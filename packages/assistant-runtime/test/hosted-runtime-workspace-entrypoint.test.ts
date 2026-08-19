@@ -10768,7 +10768,10 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("system mailbox device recovery leaves operator maintenance receipts pending", async () => {
+  test.each([
+    "runtime.maintenance-requested",
+    "runtime.browser-vault-refresh-requested",
+  ] as const)("system mailbox mode drains model-free %s control work", async (kind) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -10776,7 +10779,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const maintenanceItem = createMailboxItem({
       dedupeKey: "runtime.maintenance-requested:device-recovery-owner",
       id: "mailbox_item_system_mailbox_operator_maintenance",
-      kind: "runtime.maintenance-requested",
+      kind,
       lane: "system",
       laneSeq: "1",
     });
@@ -10790,7 +10793,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
         wake: buildHostedExecutionRuntimeControlWake({
           eventId: maintenanceItem.dedupeKey,
-          kind: "runtime.maintenance-requested",
+          kind,
           occurredAt: maintenanceItem.occurredAt,
           userId: TEST_USER_ID,
         }),
@@ -10803,7 +10806,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       });
 
-      await runHostedWorkspaceRuntimeJobInProcess(
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_operator_maintenance",
@@ -10847,10 +10850,14 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
-      const state = await readHostedSystemMailboxState(vaultRoot);
-      assert.equal(state.pending.length, 1);
-      assert.equal(state.pending[0]?.itemId, maintenanceItem.id);
-      assert.equal(state.pending[0]?.status, "pending");
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.nextWakeReason ?? null, null);
+      assert.equal(result.status, "idle");
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

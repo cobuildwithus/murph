@@ -7,6 +7,7 @@ import {
   HOSTED_RUNTIME_PROCESSING_MODES,
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
+  HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
   type HostedRuntimeEnsureProcessingRequest,
   type HostedRuntimeEnsureProcessingResponse,
   type HostedRuntimeReconciliationFacts,
@@ -151,6 +152,7 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
     "inboxMediaRetentionWakeAt",
     "nextWakeAt",
     "nextWakeReason",
+    "systemMailboxFrontier",
     "version",
   ]);
 
@@ -179,6 +181,15 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
       record.nextWakeReason,
       "Hosted runtime reconciliation facts workspace nextWakeReason",
     ),
+    ...(record.systemMailboxFrontier === undefined
+      ? {}
+      : {
+          systemMailboxFrontier: parseNullableAllowedString(
+            record.systemMailboxFrontier,
+            "Hosted runtime reconciliation facts workspace systemMailboxFrontier",
+            HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
+          ),
+        }),
     version: readRequiredNullableBoundedString(
       record.version,
       "Hosted runtime reconciliation facts workspace version",

@@ -31,6 +31,12 @@ boundaries between Web, Temporal, and the Cloudflare runtime.
   `assistantExecutionBlocked: true` reaches the same invocation: eligible
   system work drains, assistant execution remains skipped, and the assistant
   reminder stays durable for policy restoration.
+- The retained system frontier is itself heterogeneous. At the current
+  imported-but-unhandled boundary, aggregate production proof found twelve
+  workspaces headed by operator-maintenance controls, three by browser-vault
+  refresh controls, and six by device-sync work. System mode advertised all of
+  those items as runnable but executed only device-sync, so the first fix alone
+  could not converge the dominant frontiers.
 
 All evidence is aggregate and contains no production identifiers.
 
@@ -56,15 +62,18 @@ All evidence is aggregate and contains no production identifiers.
    ensure-processing contract, valid only for explicit `system_mailbox` work.
 2. Forward the field through Cloudflare to the existing runtime invocation
    guard, without adding persisted state, another policy read, or a new owner.
-3. Publish the additive public contract and deploy the tolerant Cloudflare
+3. Align system-mode wake projection and execution on the same exact bounded
+   model-free set: device sync, operator maintenance, and browser-vault refresh.
+   Leave every other system item with its default owner.
+4. Publish the additive public contract and deploy the tolerant Cloudflare
    consumer before updating the private Temporal producer.
-4. Have Temporal derive the field from the current authoritative blocked fact
+5. Have Temporal derive the field from the current authoritative blocked fact
    only when it dispatches model-free system work. Preserve default/conversation
    processing, canonical wakes, mailbox pointers, and Temporal command order.
-5. Run focused contract, Cloudflare, runtime, Temporal, replay, typecheck, and
+6. Run focused contract, Cloudflare, runtime, Temporal, replay, typecheck, and
    production-bundle proof. Push exact candidates and run preliminary and final
    ReviewGPT gates alongside required CI.
-6. Merge and deploy in compatibility order, then verify multiple complete
+7. Merge and deploy in compatibility order, then verify multiple complete
    production windows until churn collapses and the retained system gap drains
    without lost assistant wakes or shifted errors.
 

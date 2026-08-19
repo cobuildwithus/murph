@@ -1,5 +1,6 @@
 import {
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+  type HostedMailboxKind,
   type HostedMailboxLane,
   type HostedMailboxLaneLag,
   type HostedWorkspaceInvocationProcessingMode,
@@ -65,11 +66,26 @@ export const HOSTED_RUNTIME_PROCESSING_MODES =
 
 export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
+export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
+  "device-sync.wake",
+  "runtime.browser-vault-refresh-requested",
+  "runtime.maintenance-requested",
+] as const satisfies readonly HostedMailboxKind[];
+
+export const HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES = [
+  "default_owned",
+  "model_free",
+] as const;
+
+export type HostedRuntimeSystemMailboxFrontierClass =
+  (typeof HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES)[number];
+
 export interface HostedRuntimeReconciliationFactsWorkspace {
   hostedMailboxSystemHandledThroughSeq?: string;
   inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  systemMailboxFrontier?: HostedRuntimeSystemMailboxFrontierClass | null;
   version: string | null;
 }
 
