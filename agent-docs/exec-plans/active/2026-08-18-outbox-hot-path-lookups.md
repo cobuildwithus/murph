@@ -110,9 +110,18 @@ Updated: 2026-08-18
   full-module mocks for the new turn-receipt reader, reply-event assertions for
   the old scan/metric contract, and one disappearing-file race. These are being
   returned to ReviewGPT before the PR head is published.
-- Current remaining work is integrate and verify that correction, publish the
-  candidate, add the changelog entry, run pushed-head specialist/final
-  ReviewGPT gates concurrently with CI, and complete the PR handoff.
+- Applied ReviewGPT's five-test correction byte-for-byte after verifying its
+  declared SHA-256 and path scope. The final minimal variant preserves real
+  module exports in the affected mocks, asserts bounded lookup metrics and the
+  absence of canonical scans, and narrows the disappearing-file race fixture
+  to the intended canonical rename. The repository's documented 6 GiB
+  assistant-engine lane passes all five files (349 tests) and the package
+  typecheck passes. Two later diagnostic patch variants were evaluated and
+  discarded as unnecessary after identifying the repository's explicit heap
+  requirement; they remain ignored audit evidence only.
+- Current remaining work is publish the candidate, add the changelog entry,
+  run pushed-head specialist/final ReviewGPT gates concurrently with CI, and
+  complete the PR handoff.
 
 ## Verification
 
@@ -136,4 +145,8 @@ Updated: 2026-08-18
     timeout under host contention; repository timeouts were not changed;
   - affected package/app typechecks passed across the diff-aware workspace run;
   - the full assistant-engine suite passed 3,820 tests and failed 20 tests in
-    five files plus one mock-load suite, now queued for ReviewGPT correction.
+    five files plus one mock-load suite, all covered by the verified ReviewGPT
+    correction;
+  - corrected assistant-engine surfaces: 5 files, 349 tests passed under the
+    repository's 6 GiB/single-worker lane;
+  - assistant-engine TypeScript check passed after the correction.

@@ -175,6 +175,13 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/cron/output-history.js')
 })
 
+function mockAssistantTurnsWithTurnId(turnId: string): void {
+  vi.doMock('../src/assistant/turns.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../src/assistant/turns.js')>()),
+    createAssistantTurnId: () => turnId,
+  }))
+}
+
 test('sendAssistantNotificationLocal scopes cron output history to the resolved conversation session', async () => {
   const session = createAssistantSession({
     sessionId: 'session-current-cron-history',
@@ -468,9 +475,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-notification',
-  }))
+  mockAssistantTurnsWithTurnId('turn-notification')
   vi.doMock('../src/assistant/channel-adapters.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/channel-adapters.ts')
@@ -916,9 +921,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-exact',
-  }))
+  mockAssistantTurnsWithTurnId('turn-exact')
   vi.doMock('../src/assistant/channel-adapters.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/channel-adapters.ts')
@@ -1166,9 +1169,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-exact-deferred',
-  }))
+  mockAssistantTurnsWithTurnId('turn-exact-deferred')
   vi.doMock('../src/assistant/channel-adapters.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/channel-adapters.ts')
@@ -1409,9 +1410,7 @@ test('sendAssistantNotificationLocal keeps a queued exact-text welcome when the 
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-exact-diagnostic-failure',
-  }))
+  mockAssistantTurnsWithTurnId('turn-exact-diagnostic-failure')
   vi.doMock('../src/assistant/channel-adapters.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/channel-adapters.ts')
@@ -1565,9 +1564,7 @@ test('an organic same-route reply supersedes the exact-text signup welcome throu
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-supersede',
-  }))
+  mockAssistantTurnsWithTurnId('turn-supersede')
   vi.doMock('../src/assistant/channel-adapters.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/channel-adapters.ts')
@@ -1774,9 +1771,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-hosted-linq-notification',
-  }))
+  mockAssistantTurnsWithTurnId('turn-hosted-linq-notification')
   vi.doMock('../src/assistant/channel-adapters.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/channel-adapters.ts')
@@ -1957,9 +1952,7 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-hosted-linq-notification-target',
-  }))
+  mockAssistantTurnsWithTurnId('turn-hosted-linq-notification-target')
   vi.doMock('../src/assistant/channel-adapters.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/channel-adapters.ts')
@@ -2136,9 +2129,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-notification-local-visible',
-  }))
+  mockAssistantTurnsWithTurnId('turn-notification-local-visible')
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
@@ -2309,9 +2300,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-notification-skip',
-  }))
+  mockAssistantTurnsWithTurnId('turn-notification-skip')
   vi.doMock('../src/assistant/channel-typing.js', () => ({
     assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
       kind === 'sent' || kind === 'queued',
@@ -4263,9 +4252,7 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
     vi.doMock('../src/assistant/service-turn-routes.js', () => ({
       resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
     }))
-    vi.doMock('../src/assistant/turns.js', () => ({
-      createAssistantTurnId: () => 'turn-notification-hosted-cwd',
-    }))
+    mockAssistantTurnsWithTurnId('turn-notification-hosted-cwd')
     vi.doMock('../src/assistant/turn-lock.js', () => ({
       withAssistantTurnLock: mocks.withAssistantTurnLock,
     }))
@@ -4405,9 +4392,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-notification-delivery-error',
-  }))
+  mockAssistantTurnsWithTurnId('turn-notification-delivery-error')
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
@@ -4576,9 +4561,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-notification-delivery-throw',
-  }))
+  mockAssistantTurnsWithTurnId('turn-notification-delivery-throw')
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
@@ -4695,9 +4678,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-notification-provider-error',
-  }))
+  mockAssistantTurnsWithTurnId('turn-notification-provider-error')
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
@@ -4965,9 +4946,7 @@ test('sendAssistantNotificationLocal drops generated email thread subjects befor
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-notification-thread-subject',
-  }))
+  mockAssistantTurnsWithTurnId('turn-notification-thread-subject')
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
@@ -5652,13 +5631,7 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../src/assistant/turns.js')>()
-    return {
-      ...actual,
-      createAssistantTurnId: () => input.turnId,
-    }
-  })
+  mockAssistantTurnsWithTurnId(input.turnId)
   vi.doMock('../src/assistant/channel-typing.js', () => ({
     assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
       kind === 'sent' || kind === 'queued',

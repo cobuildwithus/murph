@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename as renameFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -784,16 +784,20 @@ describe('assistant runtime thresholds', () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-runtime-thresholds-outbox-race-',
     )
+    const brokenIntentPath = path.join(paths.outboxDirectory, 'broken.json')
     await writeFile(
-      path.join(paths.outboxDirectory, 'broken.json'),
+      brokenIntentPath,
       '{"schema":"murph.assistant-outbox-intent.v1"',
       'utf8',
     )
 
-    const rename = vi.fn(async () => {
-      throw Object.assign(new Error('already gone'), {
-        code: 'ENOENT',
-      })
+    const rename = vi.fn(async (...args: Parameters<typeof renameFile>) => {
+      if (args[0] === brokenIntentPath) {
+        throw Object.assign(new Error('already gone'), {
+          code: 'ENOENT',
+        })
+      }
+      return await renameFile(...args)
     })
     const recordAssistantDiagnosticEvent = vi.fn(async () => undefined)
 
@@ -813,7 +817,10 @@ describe('assistant runtime thresholds', () => {
     const outbox = await import('../src/assistant/outbox.ts')
 
     await expect(outbox.listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
-    expect(rename).toHaveBeenCalledOnce()
+    expect(rename).toHaveBeenCalledWith(
+      brokenIntentPath,
+      expect.stringContaining(`${path.sep}.quarantine${path.sep}broken.`),
+    )
     expect(recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
   })
 

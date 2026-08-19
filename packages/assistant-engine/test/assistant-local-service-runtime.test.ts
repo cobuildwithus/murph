@@ -9727,7 +9727,8 @@ async function loadLocalServiceModule(input?: {
         }
       : null,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
+  vi.doMock('../src/assistant/turns.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../src/assistant/turns.js')>()),
     appendAssistantTurnReceiptEvent: mocks.appendAssistantTurnReceiptEvent,
     createAssistantTurnReceipt: mocks.createAssistantTurnReceipt,
     finalizeAssistantTurnReceipt: mocks.finalizeAssistantTurnReceipt,

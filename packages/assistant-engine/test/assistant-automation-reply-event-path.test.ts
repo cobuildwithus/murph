@@ -5071,7 +5071,7 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledOnce()
-    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantOutboxIntents).not.toHaveBeenCalled()
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
@@ -5108,7 +5108,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 
-  it('memoizes each lazy history inventory and exposes only scan measurements', async () => {
+  it('memoizes each lazy history inventory and reports zero lookup aggregates', async () => {
     const vault = await createTempVault()
     const outboxIntents = [createOutboxMessage({
       intentId: 'intent-history-reader',
@@ -5162,6 +5162,14 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
     expect(replyEventPathMocks.listAssistantTurnReceipts).toHaveBeenCalledOnce()
     expect(reader.readMetrics()).toEqual({
+      outboxLookupBytesRead: 0,
+      outboxLookupCanonicalValidationBytesRead: 0,
+      outboxLookupCanonicalValidationFilesRead: 0,
+      outboxLookupElapsedMs: 0,
+      outboxLookupFallbackCount: 0,
+      outboxLookupFilesRead: 0,
+      outboxLookupPublicationRetries: 0,
+      outboxLookupReads: 0,
       outboxScanBytesRead: 8_192,
       outboxScanElapsedMs: expect.any(Number),
       outboxScanFilesRead: 10,
@@ -5234,7 +5242,7 @@ describe('assistant auto-reply event-first path', () => {
 
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     expect(sendInput).not.toHaveProperty('turnContext')
-    expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
+    expect(replyEventPathMocks.listAssistantOutboxIntents).not.toHaveBeenCalled()
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
   })
 

@@ -24,7 +24,8 @@ vi.mock('../src/assistant/diagnostics.ts', () => ({
   recordAssistantDiagnosticEvent:
     diagnosticsMocks.recordAssistantDiagnosticEvent,
 }))
-vi.mock('../src/assistant/turns.ts', () => ({
+vi.mock('../src/assistant/turns.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/assistant/turns.ts')>()),
   appendAssistantTurnReceiptEvent: turnsMocks.appendAssistantTurnReceiptEvent,
 }))
 
