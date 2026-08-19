@@ -41,6 +41,7 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
+export const HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT = 64;
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES =
@@ -750,6 +751,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   resourceType: "string",
   sourceEventType: "string",
   sourceProviderSlug: "string",
+  summaryPhaseComplete: "boolean",
+  summaryResourceCursor: "string",
   temporalAuthorityTimeZone: "string",
   timeseriesCursor: "isoTimestamp",
   timeseriesResourceCursor: "string",

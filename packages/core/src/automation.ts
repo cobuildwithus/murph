@@ -8,6 +8,7 @@ import {
   MIN_AUTOMATION_EVERY_MS,
   assistantReasoningEffortValues,
   automationActiveUntilSchema,
+  automationContextReferencesSchema,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
@@ -22,6 +23,7 @@ import {
   parseAutomationSupportSeriesTag,
   resolveNextDeviceActivityCoverageCursor,
   type AutomationAssistantTargetOverride,
+  type AutomationContextReference,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -97,6 +99,7 @@ function normalizeRecurringScheduleTimeZone(
 
 export type {
   AutomationAssistantTargetOverride,
+  AutomationContextReference,
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
@@ -118,6 +121,7 @@ export interface AutomationRecord {
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
   supportKind: AutomationSupportKind | null;
   plannedOccurrenceOffsetMs: number | null;
+  contextReferences: AutomationContextReference[];
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -166,6 +170,7 @@ export interface PatchAutomationInput {
   assistantTargetOverride?: AutomationAssistantTargetOverride | null;
   supportKind?: AutomationSupportKind | null;
   plannedOccurrenceOffsetMs?: number | null;
+  contextReferences?: AutomationContextReference[];
   schedule?: AutomationSchedule;
   slug?: string;
   status?: AutomationStatus;
@@ -626,6 +631,19 @@ function normalizeAutomationInstructions(value: unknown): string {
   return instructions;
 }
 
+function normalizeAutomationContextReferences(
+  value: unknown,
+): AutomationContextReference[] {
+  try {
+    return automationContextReferencesSchema.parse(value ?? []);
+  } catch {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "contextReferences must contain unique canonical entityKind and entityId pairs.",
+    );
+  }
+}
+
 function normalizeAutomationTags(value: unknown): string[] {
   if (value === undefined || value === null) {
     return [];
@@ -793,6 +811,9 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     ...(record.plannedOccurrenceOffsetMs === null
       ? {}
       : { plannedOccurrenceOffsetMs: record.plannedOccurrenceOffsetMs }),
+    ...(record.contextReferences.length === 0
+      ? {}
+      : { contextReferences: record.contextReferences }),
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
     createdAt: record.createdAt,
@@ -841,6 +862,9 @@ function parseAutomationRecord(
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
       attributes.plannedOccurrenceOffsetMs,
+    ),
+    contextReferences: normalizeAutomationContextReferences(
+      attributes.contextReferences,
     ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
@@ -1118,6 +1142,10 @@ export async function patchAutomation(
           : normalizeAutomationPlannedOccurrenceOffsetMs(
               input.plannedOccurrenceOffsetMs,
             ),
+      contextReferences:
+        input.contextReferences === undefined
+          ? existingRecord.contextReferences
+          : normalizeAutomationContextReferences(input.contextReferences),
       schedule: input.schedule === undefined
         ? existingRecord.schedule
         : resolveAutomationPatchSchedule({
@@ -1705,6 +1733,10 @@ async function upsertAutomationWithLatestRegistry(
         : normalizeAutomationPlannedOccurrenceOffsetMs(
             input.plannedOccurrenceOffsetMs,
           ),
+    contextReferences:
+      input.contextReferences === undefined
+        ? existingRecord?.contextReferences ?? []
+        : normalizeAutomationContextReferences(input.contextReferences),
     continuityPolicy:
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
     tags,
@@ -1779,6 +1811,9 @@ export function buildAutomationMarkdownPreview(
     supportKind: normalizeAutomationSupportKind(input.supportKind),
     plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
       input.plannedOccurrenceOffsetMs,
+    ),
+    contextReferences: normalizeAutomationContextReferences(
+      input.contextReferences,
     ),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),

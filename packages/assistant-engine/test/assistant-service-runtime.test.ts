@@ -2429,6 +2429,7 @@ describe("assistant delivery orchestration seam", () => {
       actorId: "audience-actor",
       answeredMailboxItemIds: [],
       automationAuthority: null,
+      automationContextReferences: null,
       bindingDelivery: {
         kind: "participant",
         target: "audience-delivery",

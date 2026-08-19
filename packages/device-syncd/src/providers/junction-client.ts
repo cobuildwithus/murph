@@ -129,6 +129,7 @@ export interface JunctionWindowInput {
 }
 
 export interface JunctionProfileSummaryInput {
+  collectionWorkLimit?: JunctionCollectionWorkLimit;
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
   userId: string;
@@ -215,6 +216,7 @@ const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
+export const JUNCTION_MAX_USER_PROVIDERS = 64;
 const MAX_SDK_COMPAT_RESPONSE_BYTES = 32 * 1_024 * 1_024;
 export const JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES = 8 * 1_024 * 1_024;
 // These summary endpoints declare `start_date`/`end_date` as YYYY-MM-DD dates
@@ -389,11 +391,23 @@ export class JunctionClient {
 
   async listUserProviders(
     userId: string,
-    options: { signal?: AbortSignal | null } = {},
+    options: {
+      collectionWorkLimit?: JunctionCollectionWorkLimit;
+      signal?: AbortSignal | null;
+    } = {},
   ): Promise<JunctionProviderConnection[]> {
     const payload = await this.requestSdkResource<unknown>(
       "GET",
-      { endpointKind: "junction_user_providers", signal: options.signal ?? null },
+      {
+        endpointKind: "junction_user_providers",
+        signal: options.signal ?? null,
+        ...(options.collectionWorkLimit
+          ? {
+              maxAttempts: options.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: options.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
+      },
       (clientOptions, requestOptions) => new UserClient(clientOptions)
         .getConnectedProviders({ userId }, requestOptions),
     );
@@ -456,6 +470,12 @@ export class JunctionClient {
         endpointKind: "junction_summary_collection",
         queryParameterNames: provider ? ["provider"] : [],
         signal: input.signal ?? null,
+        ...(input.collectionWorkLimit
+          ? {
+              maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
       },
       (clientOptions, requestOptions) => {
         const request: GetProfileRequest = { userId: input.userId };
@@ -700,6 +720,12 @@ export class JunctionClient {
         endpointKind: "junction_summary_collection",
         queryParameterNames,
         signal: input.signal ?? null,
+        ...(input.collectionWorkLimit
+          ? {
+              maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
       },
       (clientOptions, requestOptions) => {
         if (cursor) {
@@ -1427,7 +1453,8 @@ function parseJunctionUser(payload: Record<string, unknown>, label: string): Jun
 }
 
 function parseJunctionProviders(payload: unknown): JunctionProviderConnection[] {
-  return extractCollectionRecords(payload)
+  const records = extractCollectionRecords(payload);
+  return records
     .map(parseJunctionProviderConnection)
     .filter((provider): provider is JunctionProviderConnection => Boolean(provider));
 }

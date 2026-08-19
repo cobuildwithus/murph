@@ -939,3 +939,43 @@ collection-to-member-read chain, verify the recorded collection/consent/privacy
 contract, inspect real rendered changelog evidence at phone and desktop widths,
 and accept only direct rich, sparse, malformed, replacement, lifecycle, load,
 bundle, and exact-head CI proof.
+
+## Current-main integration proof for round 17
+
+- The user explicitly authorized one current-main integration cycle for the
+  combined rollout. ReviewGPT authored the semantic resolution against
+  `83c8d82223e3ddba0c3c13378c31dea92b28f3a9`: eleven textual conflicts plus the
+  two directly coupled public-ingress/admission paths. Local inspection applied
+  the complete artifact, then regenerated the canonical CLI skill fingerprint
+  twice with identical `47eeeb7e3adbeb45` output.
+- Focused proof exposed stale pre-integration assumptions rather than another
+  lifecycle owner: Web mocks still supplied serialized source rows to the new
+  bounded candidate API; temporal-yield tests skipped current main's new bounded
+  summary continuation; and the load replay expected current main's physical-row
+  SQL ranking rather than the combined semantic alias-group read. The corrected
+  tests now exercise the semantic candidate, explicit summary-complete boundary,
+  and one bounded alias-group read per locked admission pass.
+- Prepared Web typecheck also proved that current main's ingress candidate type
+  had reintroduced an unused physical row ID. The merged contract deletes that
+  field, preserving round 11's requirement that physical rekeying cannot change
+  semantic lifecycle authority. No schema, queue, retry, manager, or additional
+  state owner was added.
+- Complete `@murphai/device-syncd` proof passes 47 files and 1,197 tests. The
+  assistant hosted-device-sync file passes 113 tests, and the focused Web source,
+  wake, runtime-authority, and internal-apply owners pass 283 tests. Device-sync,
+  assistant-runtime, importers, query, CLI, Cloudflare, and prepared Web
+  typechecks pass.
+- The isolated migrated-Postgres prepared-webhook/lifecycle proof passes nine
+  tests. The incident-shaped load and admission-overlap proof passes nine tests,
+  including 1,641 source-attributed receipts with exactly two bounded semantic
+  source reads apiece and no stranded durable work.
+- The CLI fingerprint owner passes two tests; production/runtime migration owners
+  pass 66 tests; and the focused runner-bundle owner passes 13 tests. Production
+  runner assembly passes all eight parity probes. Vault CLI total is
+  `9,328,687/9,344,553` bytes; runner entry is `1,698,662` bytes, static closure
+  is `8,397,101` bytes, and total is `10,979,091/11,393,617` bytes.
+- The real changelog page renders all five combined-release items at 390 by 844
+  and 1440 by 900 viewports with no horizontal overflow. Both full-page captures
+  were inspected; the focused Playwright evidence passes two tests. Final
+  conflict-marker, diff-check, and identifier scans remain required immediately
+  before the merge checkpoint.

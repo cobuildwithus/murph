@@ -340,7 +340,7 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
   window before a dirty invocation checkpoints and returns; production rejects
   lower values so routine checkpoints cannot bypass the three-minute quiet floor
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the post-completion
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` for the post-completion
   conversation warm lease (code default is `300000` when unset)
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=45000` (must exceed the web-control timeout by at least 5 seconds)

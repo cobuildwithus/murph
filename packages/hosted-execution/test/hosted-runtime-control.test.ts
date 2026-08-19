@@ -279,12 +279,19 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.post_checkpoint_effects_finished");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("assistant.device_connect");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain(
+      "assistant.device_activity_automation_failed",
+    );
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain(
       "assistant.onboarding_followup_reconciled",
     );
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.dense_raw_retention");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain(
+      "device-sync.dirty_ack_persistence_failed",
+    );
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.import_completed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.job_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.maintenance_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.module_load_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.wake_projection_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
@@ -722,6 +729,22 @@ describe("hosted runtime control contracts", () => {
       ...workspaceInvocationRequest,
       processingMode: "system_mailbox",
     });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      assistantExecutionBlocked: true,
+      processingMode: "system_mailbox",
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      assistantExecutionBlocked: true,
+      processingMode: "system_mailbox",
+    });
+    expect(() => parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      assistantExecutionBlocked: false,
+      processingMode: "system_mailbox",
+    })).toThrow(
+      "Hosted workspace invocation request assistantExecutionBlocked must be true.",
+    );
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       processingMode: "assistant",
@@ -2686,6 +2709,50 @@ describe("hosted runtime control contracts", () => {
         attemptStillActive: true,
       },
     })).toThrow(/redacted safe error message/u);
+    const nonAttemptDeviceSyncFailureEntries = [
+      {
+        ...entry,
+        component: "device-sync",
+        errorCode: "runtime_error",
+        eventCode: "device-sync.dirty_ack_persistence_failed",
+        level: "warn",
+        phase: "checkpoint",
+        redactedJson: {
+          safeErrorMessage: "Hosted device-sync dirty checkpoint ack failed.",
+        },
+      },
+      {
+        ...entry,
+        component: "device-sync",
+        errorCode: "runtime_error",
+        eventCode: "device-sync.maintenance_failed",
+        level: "warn",
+        phase: "idle",
+        redactedJson: {
+          safeErrorMessage: "Hosted idle device-sync maintenance failed.",
+        },
+      },
+      {
+        ...entry,
+        component: "runtime",
+        errorCode: "runtime_error",
+        eventCode: "assistant.device_activity_automation_failed",
+        level: "warn",
+        phase: "idle",
+        redactedJson: {
+          safeErrorMessage: "Hosted device activity automation scheduling failed.",
+        },
+      },
+    ] as const;
+    for (const failureEntry of nonAttemptDeviceSyncFailureEntries) {
+      expect(parseHostedRuntimeLogEntry(failureEntry)).toEqual(failureEntry);
+      expect(() => parseHostedRuntimeLogEntry({
+        ...failureEntry,
+        redactedJson: {
+          failurePresent: true,
+        },
+      })).toThrow(/redacted safe error message/u);
+    }
     const computerToolFailureEntry = {
       ...entry,
       component: "assistant",

@@ -270,6 +270,8 @@ export function createAssistantHostedToolContext(input: {
   const groupEmailOutboxTool = groupEmailHost && input.groupEmailOutbox
     ? createAssistantGroupEmailOutboxTool({
         automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
+        automationContextReferences:
+          input.messageInput.outboxAutomationContextReferences ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
         groupTool: groupEmailHost,
         recordPendingDeliveryIntentId:

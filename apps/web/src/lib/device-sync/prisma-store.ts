@@ -10,6 +10,7 @@ import type {
   ConsumeOAuthStateResult,
   DiscardUnconsumedOAuthStateResult,
   DeviceSyncPublicIngressStore,
+  DeviceSyncPublicIngressWebhookConnectionLookupResult,
   DeviceSyncWebhookTraceClaimResult,
   GetPublicDeviceSyncOAuthCleanupAccountInput,
   ListDeviceConnectionSourcesInput,
@@ -306,6 +307,13 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionByExternalAccount(provider, externalAccountId);
   }
 
+  async getWebhookConnectionByExternalAccount(
+    provider: string,
+    externalAccountId: string,
+  ): Promise<DeviceSyncPublicIngressWebhookConnectionLookupResult | null> {
+    return this.connections.getWebhookConnectionByExternalAccount(provider, externalAccountId);
+  }
+
   async getConnectionById(accountId: string): Promise<PublicDeviceSyncAccount | null> {
     return this.connections.getConnectionById(accountId);
   }
@@ -567,6 +575,14 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.hasPendingDirtyConnection(connectionId, tx);
   }
 
+  async readPendingDirtyConnectionSnapshot(input: {
+    connectionId: string;
+    provider: string;
+    userId: string;
+  }): Promise<{ dirtyRevision: bigint; processedRevision: bigint } | null> {
+    return this.dirtyConnections.readPendingDirtyConnectionSnapshot(input);
+  }
+
   async shouldRequestWakeForDirtyConnectionUpsert(input: {
     connectionId: string;
     tx: HostedPrismaTransactionClient;
@@ -693,12 +709,13 @@ export class PrismaDeviceSyncControlPlaneStore
     );
   }
 
-  async listConnectionSourceAdmissionCandidates(input: {
+  async resolveConnectionSourceAdmissionCandidate(input: {
     connectionId: string;
+    sourceInstanceKey?: string;
     sourceProviderSlug: string;
     tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
-    return this.sources.listConnectionSourceAdmissionCandidates(input);
+  }): Promise<HostedConnectionSourceAdmissionCandidate | null> {
+    return this.sources.resolveConnectionSourceAdmissionCandidate(input);
   }
 
   async listConnectionSourcesForConnections(

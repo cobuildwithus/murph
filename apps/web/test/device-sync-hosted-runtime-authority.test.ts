@@ -3167,7 +3167,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
-  it("records sanitized provider failure diagnostics when runtime apply advances a sync failure", async () => {
+  it("persists an advanced sync failure without emitting a second job-failed attempt", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
         id: "conn_whoop",
@@ -3194,48 +3194,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
               failureDiagnostic: {
                 accountStatus: "reauthorization_required",
                 code: "WHOOP_TOKEN_REQUEST_FAILED",
-                details: {
-                  providerHttpStatus: 400,
-                  providerHttpStatusText: "Bad Request",
-                  providerRequestAuthKind: "oauth_client_secret_body",
-                  providerRequestAuthPlacement: "body_parameters",
-                  providerRequestBodyFieldCount: 5,
-                  providerRequestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
-                  providerRequestBodyKind: "form_urlencoded",
-                  providerRequestContentType: "application_x_www_form_urlencoded",
-                  providerRequestCredentialPresent: true,
-                  providerRequestEndpointKind: "whoop_oauth_token",
-                  providerRequestMethod: "POST",
-                  providerRequestQueryParameterCount: 0,
-                  providerResponseErrorCode: "invalid_grant",
-                  providerResponseErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-                  providerResponseErrorDescriptionFieldPresent: true,
-                  providerResponseErrorFieldPresent: true,
-                  providerResponseShapeKind: "json_object",
-                  providerOAuthErrorCode: "invalid_grant",
-                  providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-                  providerOAuthGrantType: "refresh_token",
-                  providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-                  providerOAuthRequestClientAuthPlacement: "body_parameters",
-                  providerOAuthRequestClientCredentialPresent: true,
-                  providerOAuthRequestClientIdPresent: true,
-                  providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-                  providerOAuthRequestDuplicateParameterCount: 0,
-                  providerOAuthRequestEncodingKind: "form_urlencoded",
-                  providerOAuthRequestHasDuplicateParameters: false,
-                  providerOAuthRequestMethod: "POST",
-                  providerOAuthRequestOfflineScopePresent: true,
-                  providerOAuthRequestParameterCount: 5,
-                  providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-                  providerOAuthRequestRefreshCredentialPresent: true,
-                  providerOAuthRequestScopeCount: 1,
-                  providerOAuthRequestScopePresent: true,
-                  providerOAuthRequestScopeValue: "offline",
-                  providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-                  providerOAuthResponseErrorDescriptionFieldPresent: true,
-                  providerOAuthResponseErrorFieldPresent: true,
-                  providerOAuthResponseShapeKind: "json_object",
-                },
                 retryable: false,
               },
               localState: {
@@ -3262,74 +3220,26 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       writeUpdate: "applied",
     });
     expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
-    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledWith({
-      entries: [expect.objectContaining({
-        at: "2026-05-19T22:03:27.378Z",
-        component: "device-sync",
-        errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
-        eventCode: "device-sync.job_failed",
-        level: "warn",
-        phase: "invoke",
-        redactedJson: expect.objectContaining({
-        failureCode: "WHOOP_TOKEN_REQUEST_FAILED",
-        failureEventOrigin: "canonical_apply",
-        failureRetryable: false,
-        failureSummary: "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
-        hadPriorFailure: true,
-        hadPriorSuccess: true,
-        nextReconcileAt: "2026-05-20T04:03:27.376Z",
-        provider: "whoop",
-        providerAccountStatus: "reauthorization_required",
-        providerHttpStatus: 400,
-        providerHttpStatusText: "Bad Request",
-        providerRequestAuthKind: "oauth_client_secret_body",
-        providerRequestAuthPlacement: "body_parameters",
-        providerRequestBodyFieldCount: 5,
-        providerRequestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
-        providerRequestBodyKind: "form_urlencoded",
-        providerRequestContentType: "application_x_www_form_urlencoded",
-        providerRequestCredentialPresent: true,
-        providerRequestEndpointKind: "whoop_oauth_token",
-        providerRequestMethod: "POST",
-        providerRequestQueryParameterCount: 0,
-        providerResponseErrorCode: "invalid_grant",
-        providerResponseErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-        providerResponseErrorDescriptionFieldPresent: true,
-        providerResponseErrorFieldPresent: true,
-        providerResponseShapeKind: "json_object",
-        providerOAuthErrorCode: "invalid_grant",
-        providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-        providerOAuthGrantType: "refresh_token",
-        providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-        providerOAuthRequestClientAuthPlacement: "body_parameters",
-        providerOAuthRequestClientCredentialPresent: true,
-        providerOAuthRequestClientIdPresent: true,
-        providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-        providerOAuthRequestDuplicateParameterCount: 0,
-        providerOAuthRequestEncodingKind: "form_urlencoded",
-        providerOAuthRequestHasDuplicateParameters: false,
-        providerOAuthRequestMethod: "POST",
-        providerOAuthRequestOfflineScopePresent: true,
-        providerOAuthRequestParameterCount: 5,
-        providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-        providerOAuthRequestRefreshCredentialPresent: true,
-        providerOAuthRequestScopeCount: 1,
-        providerOAuthRequestScopePresent: true,
-        providerOAuthRequestScopeValue: "offline",
-        providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-        providerOAuthResponseErrorDescriptionFieldPresent: true,
-        providerOAuthResponseErrorFieldPresent: true,
-        providerOAuthResponseShapeKind: "json_object",
-        status: "active",
-        syncCompletedAt: "2026-05-15T21:59:24.539Z",
-        syncFailedAt: "2026-05-19T22:03:27.378Z",
-        }),
-      })],
-      userId: "user_123",
+    expect(harness.syncDurableConnectionState.mock.calls[0]?.[0]).toMatchObject({
+      lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+      lastErrorMessage:
+        "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
+      lastSyncCompletedAt: "2026-05-15T21:59:24.539Z",
+      lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
+      nextReconcileAt: "2026-05-20T04:03:27.376Z",
+      provider: "whoop",
+      status: "active",
     });
+    expect(harness.record).toMatchObject({
+      lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+      lastSyncCompletedAt: "2026-05-15T21:59:24.539Z",
+      lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
+      nextReconcileAt: "2026-05-20T04:03:27.376Z",
+    });
+    expect(mocks.writeHostedRuntimeLogs).not.toHaveBeenCalled();
   });
 
-  it("flushes diagnostics for committed updates when a later update fails", async () => {
+  it("does not synthesize a job attempt when failure-state persistence rejects", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
         id: "conn_whoop",
@@ -3337,28 +3247,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-05-19T22:00:44.000Z",
       }),
     });
-    const originalError = new Error("second update failed");
-    const scheduledTasks: Array<() => Promise<void>> = [];
-    let primaryTransactionActive = false;
-    const defaultWithConnectionMutationLock = harness.store.withConnectionMutationLock
-      .getMockImplementation();
-    if (!defaultWithConnectionMutationLock) {
-      throw new Error("Expected the authority harness to own the connection lock.");
-    }
-    harness.store.withConnectionMutationLock.mockImplementation(async (
-      connectionId,
-      callback,
-    ) => {
-      primaryTransactionActive = true;
-      try {
-        if (connectionId === "conn_second") {
-          throw originalError;
-        }
-        return await defaultWithConnectionMutationLock(connectionId, callback);
-      } finally {
-        primaryTransactionActive = false;
-      }
-    });
+    const originalError = new Error("failure state persistence failed");
+    harness.syncDurableConnectionState.mockRejectedValueOnce(originalError);
     const { applyHostedDeviceSyncRuntimeResult } = await import(
       "@/src/lib/device-sync/hosted-runtime-authority"
     );
@@ -3383,32 +3273,16 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
               observedConnectedAt: "2026-04-06T09:00:00.000Z",
               observedUpdatedAt: "2026-05-19T22:00:44.000Z",
             },
-            {
-              connectionId: "conn_second",
-            },
           ],
           userId: "user_123",
         }),
         method: "POST",
       }),
-      scheduleFailureDiagnostics: (task) => {
-        expect(primaryTransactionActive).toBe(false);
-        scheduledTasks.push(task);
-      },
       trustedUserId: "user_123",
     })).rejects.toBe(originalError);
 
-    expect(scheduledTasks).toHaveLength(1);
+    expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
     expect(mocks.writeHostedRuntimeLogs).not.toHaveBeenCalled();
-    await scheduledTasks[0]?.();
-    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledTimes(1);
-    expect(mocks.writeHostedRuntimeLogs).toHaveBeenCalledWith({
-      entries: [expect.objectContaining({
-        errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
-        eventCode: "device-sync.job_failed",
-      })],
-      userId: "user_123",
-    });
   });
 
   it("does not clear OAuth tokens from a disconnected status update without a credential mutation", async () => {

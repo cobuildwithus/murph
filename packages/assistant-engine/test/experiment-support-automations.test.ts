@@ -157,6 +157,12 @@ it('seeds stable day-four progress and final-results moments for an eligible act
   const progress = seeds.find((seed) => seed.slug === 'experiment-progress-sauna-rhr-day-4')
   const supportSeriesTag =
     `system:support-series:experiment-lifecycle:${sauna.experiment.id}`
+  const experimentContextReferences = [
+    {
+      entityKind: 'experiment',
+      entityId: sauna.experiment.id,
+    },
+  ]
   expect(progress).toMatchObject({
     continuityPolicy: 'fresh',
     // Vault timezone defaults to UTC, so 09:00 local = 09:00 UTC.
@@ -164,6 +170,7 @@ it('seeds stable day-four progress and final-results moments for an eligible act
     summary: 'A grounded progress check after the first three scheduled intervention days.',
   })
   expect(progress?.automationId).toMatch(/^automation_[0-9A-F]{26}$/u)
+  expect(progress?.contextReferences).toEqual(experimentContextReferences)
   expect(progress?.tags).toEqual(expect.arrayContaining([
     'milestone',
     supportSeriesTag,
@@ -199,6 +206,9 @@ it('seeds stable day-four progress and final-results moments for an eligible act
     schedule: { kind: 'at', at: '2026-04-29T09:00:00.000Z' },
     summary: 'A celebratory final review after the experiment finishes.',
   })
+  expect(finalResults?.contextReferences).toEqual(
+    experimentContextReferences,
+  )
   expect(finalResults?.tags).toEqual(expect.arrayContaining([
     'final-results',
     supportSeriesTag,

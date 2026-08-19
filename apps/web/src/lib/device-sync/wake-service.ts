@@ -84,7 +84,6 @@ import {
   HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
   HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
-  isHostedConnectionSourceAdmitted,
   isHostedSourceDisconnectFenced,
   resolveHostedJunctionConnectionSource,
 } from "./connection-source-lifecycle";
@@ -1455,18 +1454,22 @@ async function commitHostedDeviceSyncConnectionEstablishedTx(input: {
     sourceProviderSlug: input.sourceProviderSlug ?? null,
   });
   if (linkedSource) {
-    const currentSource = input.currentSource
+    const currentSourceCandidate = input.currentSource
+      ?? await input.store.resolveConnectionSourceAdmissionCandidate({
+        connectionId: input.account.id,
+        sourceInstanceKey: linkedSource.sourceInstanceKey,
+        sourceProviderSlug: linkedSource.sourceProviderSlug,
+        tx: input.tx,
+      });
+    const currentSource = currentSourceCandidate
       ? {
-          ...input.currentSource,
-          lastSeenAt: input.currentSource.lastSeenAt.toISOString(),
+          ...currentSourceCandidate,
+          lastSeenAt: currentSourceCandidate.lastSeenAt.toISOString(),
         }
-      : resolveHostedJunctionConnectionSource(
-          await input.store.listConnectionSources(input.account.id, input.tx),
-          linkedSource.sourceProviderSlug,
-        );
+      : null;
     const sourceAdmission = decideJunctionSourceCallbackAdmission({
       connectionStartedAt: input.connectionStartedAt,
-      currentSource: currentSource ?? null,
+      currentSource,
     });
     if (sourceAdmission === "reject") {
       throw connectionEstablishmentStaleError();
@@ -1848,7 +1851,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
         provider: input.account.provider,
         traceId,
       })
-    : { kind: "not_required" } as const;
+    : { kind: "not_required", preparationAuthorityProven: false } as const;
   if (sourceObservation.kind === "terminal") {
     return;
   }
@@ -1876,6 +1879,8 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     scopes: input.account.scopes ?? [],
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     sourceObservation: resolvedSourceObservation,
+    preparationAuthorityProven: sourceObservation.kind === "provider_read"
+      || sourceObservation.preparationAuthorityProven,
     status: input.account.status ?? "active",
     store: input.store,
     claimToken: input.claimToken,
@@ -1885,7 +1890,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 }
 
 type HostedWebhookSourceObservationPreparation =
-  | { kind: "not_required" }
+  | { kind: "not_required"; preparationAuthorityProven: boolean }
   | { kind: "terminal" }
   | {
       buildSourceConnectionWork: NonNullable<
@@ -1911,7 +1916,7 @@ async function prepareHostedWebhookSourceObservation(input: {
 }): Promise<HostedWebhookSourceObservationPreparation> {
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.webhook.sourceProviderSlug);
   if (input.provider !== "junction" || !sourceProviderSlug) {
-    return { kind: "not_required" };
+    return { kind: "not_required", preparationAuthorityProven: false };
   }
 
   try {
@@ -1954,12 +1959,17 @@ async function prepareHostedWebhookSourceObservation(input: {
           return { kind: "terminal" };
         }
 
-        const matchingSources = await input.store.listConnectionSourceAdmissionCandidates({
+        const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
           connectionId: input.account.id,
+          sourceProviderSlug,
+        });
+        const source = await input.store.resolveConnectionSourceAdmissionCandidate({
+          connectionId: input.account.id,
+          ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
           sourceProviderSlug,
           tx,
         });
-        if (matchingSources.length === 0) {
+        if (!source) {
           throw deviceSyncError({
             code: "WEBHOOK_SOURCE_NOT_READY",
             message: "Device source setup is not visible yet. Retry shortly.",
@@ -1967,17 +1977,11 @@ async function prepareHostedWebhookSourceObservation(input: {
             httpStatus: 503,
           });
         }
-        const source = matchingSources[0];
-        if (!source) {
-          throw deviceSyncError({
-            code: "WEBHOOK_SOURCE_NOT_READY",
-            message: "Device source authority could not be resolved. Retry shortly.",
-            retryable: true,
-            httpStatus: 503,
-          });
-        }
-        if (isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {
-          return { kind: "not_required" };
+        if (
+          source.status === "connected"
+          && !isHostedSourceDisconnectFenced(source)
+        ) {
+          return { kind: "not_required", preparationAuthorityProven: true };
         }
         if (
           source.status !== "disconnected"
@@ -2328,12 +2332,20 @@ async function requireHostedCompanionAdmissionTx(input: {
       httpStatus: 409,
     });
   }
-  const sources = await input.store.listConnectionSourceAdmissionCandidates({
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
     connectionId: input.connectionId,
+    sourceProviderSlug: input.sourceProviderSlug,
+  });
+  const source = await input.store.resolveConnectionSourceAdmissionCandidate({
+    connectionId: input.connectionId,
+    ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
     sourceProviderSlug: input.sourceProviderSlug,
     tx: input.tx,
   });
-  if (!isHostedConnectionSourceAdmitted(sources, input.sourceProviderSlug)) {
+  if (
+    source
+    && (source.status !== "connected" || isHostedSourceDisconnectFenced(source))
+  ) {
     throw deviceSyncError({
       code: "COMPANION_HEALTH_SOURCE_REQUIRED",
       message: "Reconnect this health source before syncing health data.",
@@ -2637,6 +2649,7 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   occurredAt: string;
   processingAttemptedAt: string;
   provider: string;
+  preparationAuthorityProven: boolean;
   resourceCategory?: string | null;
   scopes: string[];
   sourceProviderSlug: string | null;
@@ -2665,52 +2678,72 @@ async function persistHostedDeviceSyncWebhookAccepted(
     );
   let result: { wakeMailboxItemIds: string[] };
   try {
-    result = await runWithHostedDeviceSyncPreparedWriteReplan(async () => {
+    result = await runWithHostedDeviceSyncPreparedWriteReplan(async (attempt) => {
       const hasPayloadResources = input.dirtyResources.some(
         hasHostedDeviceSyncDirtyResourcePayload,
       );
-      const initialAdmission = await input.store.withHealthDataAdmissionLock(
-      input.userId,
-      input.connectionId,
-      async (tx) => {
-        const status = await inspectHostedDeviceSyncWebhookAdmissionTx(
-          input,
-          tx,
+      const allowConditionalPreparation = attempt === 0;
+      const pendingDirtySnapshot = (
+        allowConditionalPreparation
+        && input.acceptanceMode === "level_dirty_hint"
+        && !hasPayloadResources
+        && input.sourceObservation === null
+      )
+        ? await input.store.readPendingDirtyConnectionSnapshot({
+            connectionId: input.connectionId,
+            provider: input.provider,
+            userId: input.userId,
+          })
+        : null;
+      const skipInitialAdmission = allowConditionalPreparation
+        && (
+          input.preparationAuthorityProven
+          || (!hasPayloadResources && pendingDirtySnapshot !== null)
         );
-        if (status.kind === "completed") {
-          return { status } as const;
-        }
-        return {
-          shouldPrepareWake: hasPayloadResources
-            ? false
-            : await input.store.shouldRequestWakeForDirtyConnectionUpsert({
-                connectionId: input.connectionId,
+      const initialAdmission = skipInitialAdmission
+        ? null
+        : await input.store.withHealthDataAdmissionLock(
+            input.userId,
+            input.connectionId,
+            async (tx) => {
+              const status = await inspectHostedDeviceSyncWebhookAdmissionTx(
+                input,
                 tx,
-                userId: input.userId,
-              }),
-          status,
-        } as const;
-      },
-      {
-        memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
-      },
-    );
-      if (initialAdmission.status.kind === "completed") {
+              );
+              if (status.kind === "completed") {
+                return { status } as const;
+              }
+              return {
+                shouldPrepareWake: hasPayloadResources
+                  ? false
+                  : await input.store.shouldRequestWakeForDirtyConnectionUpsert({
+                      connectionId: input.connectionId,
+                      tx,
+                      userId: input.userId,
+                    }),
+                status,
+              } as const;
+            },
+            {
+              memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
+            },
+          );
+      if (initialAdmission?.status.kind === "completed") {
         return { wakeMailboxItemIds: [] };
       }
 
       const preparedDirty = hasPayloadResources
-      ? await input.store.prepareDirtyConnectionUpsert({
-          connectionId: input.connectionId,
-          dirtyAt: input.occurredAt,
-          eventType: input.eventType,
-          provider: input.provider,
-          resourceCategory: input.resourceCategory ?? null,
-          resources: input.dirtyResources,
-          traceId: input.traceId,
-          userId: input.userId,
-        })
-      : null;
+        ? await input.store.prepareDirtyConnectionUpsert({
+            connectionId: input.connectionId,
+            dirtyAt: input.occurredAt,
+            eventType: input.eventType,
+            provider: input.provider,
+            resourceCategory: input.resourceCategory ?? null,
+            resources: input.dirtyResources,
+            traceId: input.traceId,
+            userId: input.userId,
+          })
+        : null;
       const sourceConnectionAccount = input.sourceObservation
         ? {
             connectedAt: input.expectedConnectedAt,
@@ -2728,170 +2761,189 @@ async function persistHostedDeviceSyncWebhookAccepted(
             ownerId: input.userId,
           })
         : null;
-      const preparedMailbox = (
-      input.sourceObservation !== null
-      || (preparedDirty?.shouldRequestWake ?? initialAdmission.shouldPrepareWake)
-    )
-      ? await prepareHostedMailboxItemAppendCrypto({
-          prisma: input.store.prisma,
-          userId: input.userId,
-        })
-      : null;
+      const shouldPrepareMailbox = input.sourceObservation !== null
+        || preparedDirty?.shouldRequestWake === true
+        || initialAdmission?.shouldPrepareWake === true
+        || (
+          input.preparationAuthorityProven
+          && !hasPayloadResources
+          && pendingDirtySnapshot === null
+        );
+      const preparedMailbox = shouldPrepareMailbox
+        ? await prepareHostedMailboxItemAppendCrypto({
+            prisma: input.store.prisma,
+            userId: input.userId,
+          })
+        : null;
 
       return runWithHostedDomainRootProviderCallsDisabled(() =>
         input.store.withHealthDataAdmissionLock(
-        input.userId,
-        input.connectionId,
-        async (tx) => {
-          const finalAdmission = await inspectHostedDeviceSyncWebhookAdmissionTx(
-            input,
-            tx,
-          );
-          if (finalAdmission.kind === "completed") {
-            return { wakeMailboxItemIds: [] };
-          }
-
-          const wakeMailboxItemIds: string[] = [];
-          if (input.sourceObservation) {
-            if (
-              !preparedMailbox
-              || !sourceConnectionAccount
-              || !sourceConnectionWake
-              || !finalAdmission.currentConnectionRecord
-              || !finalAdmission.currentSource
-            ) {
-              throw createHostedDeviceSyncDirtyPreparationMismatchError();
-            }
-            const sourceMailboxAppend = await commitHostedDeviceSyncConnectionEstablishedTx({
-              account: sourceConnectionAccount,
-              connection: input.sourceObservation.connectionWork,
-              connectionStartedAt: input.sourceObservation.source.lastSeenAt.toISOString(),
-              currentConnectionRecord: finalAdmission.currentConnectionRecord,
-              currentSource: finalAdmission.currentSource,
-              now: input.acceptedAt,
-              ownerId: input.userId,
-              preparedMailbox,
-              sourceProviderSlug: input.sourceObservation.source.sourceProviderSlug,
-              store: input.store,
-              tx,
-              wake: sourceConnectionWake,
-            });
-            wakeMailboxItemIds.push(sourceMailboxAppend.item.id);
-            if (finalAdmission.setupPending) {
-              await tx.deviceConnection.update({
-                where: { id: input.connectionId },
-                data: {
-                  setupExpiresAt: null,
-                  setupPhase: "source_confirmed",
-                },
-              });
-            }
-          }
-
-          // Every accepted hint merges into dirty state so coalesced timing remains
-          // representative. Only the clean-to-dirty transition appends a wake.
-          const dirtyUpdate = preparedDirty
-            ? await input.store.upsertDirtyConnectionWithPreparedPlanTx({
-                prepared: preparedDirty,
+          input.userId,
+          input.connectionId,
+          async (tx) => {
+            let finalAdmission: HostedDeviceSyncWebhookAdmissionStatus;
+            try {
+              finalAdmission = await inspectHostedDeviceSyncWebhookAdmissionTx(
+                input,
                 tx,
-              })
-            : await input.store.upsertDirtyConnection({
-                connectionId: input.connectionId,
-                dirtyAt: input.occurredAt,
-                eventType: input.eventType,
-                provider: input.provider,
-                resourceCategory: input.resourceCategory ?? null,
-                resources: input.dirtyResources,
-                traceId: input.traceId,
-                tx,
-                userId: input.userId,
-              });
-          await input.store.markWebhookReceived(input.connectionId, input.acceptedAt, tx);
-          if (input.dataSourceProviderSlug) {
-            await input.store.markConnectionSourceDataReceived({
-              connectionId: input.connectionId,
-              now: input.acceptedAt,
-              sourceProviderSlug: input.dataSourceProviderSlug,
-              tx,
-            });
-          }
-          await completeHostedWebhookTraceTx(input, tx);
-
-          if (
-            dirtyUpdate.shouldRequestWake
-            && !sourceEstablishmentOwnsWebhookHandoff
-          ) {
-            if (!preparedMailbox) {
-              throw createHostedDeviceSyncDirtyPreparationMismatchError();
+              );
+            } catch (error) {
+              if (
+                skipInitialAdmission
+                && isHostedWebhookAdmissionAuthorityDriftError(error)
+              ) {
+                throw createHostedDeviceSyncDirtyPreparationMismatchError();
+              }
+              throw error;
             }
-            const wake = buildHostedDeviceSyncWake({
-              connectionId: input.connectionId,
-              eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
-                connectionId: input.connectionId,
-                dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
-                expectedConnectedAt: input.expectedConnectedAt,
-                provider: input.provider,
-                userId: input.userId,
-              }),
-              expectedConnectedAt: input.expectedConnectedAt,
-              hint: buildHostedDeviceSyncSignalPayload({
-                hint: {
+            if (finalAdmission.kind === "completed") {
+              if (skipInitialAdmission) {
+                throw createHostedDeviceSyncDirtyPreparationMismatchError();
+              }
+              return { wakeMailboxItemIds: [] };
+            }
+
+            const wakeMailboxItemIds: string[] = [];
+            if (input.sourceObservation) {
+              if (
+                !preparedMailbox
+                || !sourceConnectionAccount
+                || !sourceConnectionWake
+                || !finalAdmission.currentConnectionRecord
+                || !finalAdmission.currentSource
+              ) {
+                throw createHostedDeviceSyncDirtyPreparationMismatchError();
+              }
+              const sourceMailboxAppend = await commitHostedDeviceSyncConnectionEstablishedTx({
+                account: sourceConnectionAccount,
+                connection: input.sourceObservation.connectionWork,
+                connectionStartedAt: input.sourceObservation.source.lastSeenAt.toISOString(),
+                currentConnectionRecord: finalAdmission.currentConnectionRecord,
+                currentSource: finalAdmission.currentSource,
+                now: input.acceptedAt,
+                ownerId: input.userId,
+                preparedMailbox,
+                sourceProviderSlug: input.sourceObservation.source.sourceProviderSlug,
+                store: input.store,
+                tx,
+                wake: sourceConnectionWake,
+              });
+              wakeMailboxItemIds.push(sourceMailboxAppend.item.id);
+              if (finalAdmission.setupPending) {
+                await tx.deviceConnection.update({
+                  where: { id: input.connectionId },
+                  data: {
+                    setupExpiresAt: null,
+                    setupPhase: "source_confirmed",
+                  },
+                });
+              }
+            }
+
+            // Every accepted hint merges into dirty state so coalesced timing remains
+            // representative. Only the clean-to-dirty transition appends a wake.
+            const dirtyUpdate = preparedDirty
+              ? await input.store.upsertDirtyConnectionWithPreparedPlanTx({
+                  prepared: preparedDirty,
+                  tx,
+                })
+              : await input.store.upsertDirtyConnection({
+                  connectionId: input.connectionId,
+                  dirtyAt: input.occurredAt,
                   eventType: input.eventType,
-                  occurredAt: input.occurredAt,
-                  reason: "webhook_dirty_transition",
+                  provider: input.provider,
                   resourceCategory: input.resourceCategory ?? null,
-                },
+                  resources: input.dirtyResources,
+                  traceId: input.traceId,
+                  tx,
+                  userId: input.userId,
+                });
+            await input.store.markWebhookReceived(input.connectionId, input.acceptedAt, tx);
+            if (input.dataSourceProviderSlug) {
+              await input.store.markConnectionSourceDataReceived({
+                connectionId: input.connectionId,
+                now: input.acceptedAt,
+                sourceProviderSlug: input.dataSourceProviderSlug,
+                tx,
+              });
+            }
+            await completeHostedWebhookTraceTx(input, tx);
+
+            if (
+              dirtyUpdate.shouldRequestWake
+              && !sourceEstablishmentOwnsWebhookHandoff
+            ) {
+              if (!preparedMailbox) {
+                throw createHostedDeviceSyncDirtyPreparationMismatchError();
+              }
+              const wake = buildHostedDeviceSyncWake({
+                connectionId: input.connectionId,
+                eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
+                  connectionId: input.connectionId,
+                  dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+                  expectedConnectedAt: input.expectedConnectedAt,
+                  provider: input.provider,
+                  userId: input.userId,
+                }),
+                expectedConnectedAt: input.expectedConnectedAt,
+                hint: buildHostedDeviceSyncSignalPayload({
+                  hint: {
+                    eventType: input.eventType,
+                    occurredAt: input.occurredAt,
+                    reason: "webhook_dirty_transition",
+                    resourceCategory: input.resourceCategory ?? null,
+                  },
+                  occurredAt: input.occurredAt,
+                  traceId: input.traceId,
+                }),
+                occurredAt: input.occurredAt,
+                provider: input.provider,
+                source: "webhook-hint",
+                traceId: null,
+                userId: input.userId,
+              });
+              const mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+                envelope: wake,
+                prepared: preparedMailbox,
+                tx,
+              });
+              if (mailboxAppend.dedupeConflict) {
+                throw deviceSyncError({
+                  code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+                  httpStatus: 503,
+                  message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",
+                  retryable: true,
+                });
+              }
+              wakeMailboxItemIds.push(mailboxAppend.item.id);
+            }
+            if (
+              !sourceEstablishmentOwnsWebhookHandoff
+              && (
+                input.acceptanceMode !== "level_dirty_hint"
+                || dirtyUpdate.shouldRequestWake
+              )
+            ) {
+              await input.store.createSignal({
+                userId: input.userId,
+                connectionId: input.connectionId,
+                provider: input.provider,
+                kind: "webhook_hint",
                 occurredAt: input.occurredAt,
                 traceId: input.traceId,
-              }),
-              occurredAt: input.occurredAt,
-              provider: input.provider,
-              source: "webhook-hint",
-              traceId: null,
-              userId: input.userId,
-            });
-            const mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
-              envelope: wake,
-              prepared: preparedMailbox,
-              tx,
-            });
-            if (mailboxAppend.dedupeConflict) {
-              throw deviceSyncError({
-                code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
-                httpStatus: 503,
-                message: "Hosted device-sync dirty wake conflicted with an existing wake identity.",
-                retryable: true,
+                eventType: input.eventType,
+                resourceCategory: input.resourceCategory ?? null,
+                sourceProviderSlug: input.dataSourceProviderSlug,
+                createdAt: input.acceptedAt,
+                tx,
               });
             }
-            wakeMailboxItemIds.push(mailboxAppend.item.id);
-          }
-          if (
-            !sourceEstablishmentOwnsWebhookHandoff
-            && (
-              input.acceptanceMode !== "level_dirty_hint"
-              || dirtyUpdate.shouldRequestWake
-            )
-          ) {
-            await input.store.createSignal({
-              userId: input.userId,
-              connectionId: input.connectionId,
-              provider: input.provider,
-              kind: "webhook_hint",
-              occurredAt: input.occurredAt,
-              traceId: input.traceId,
-              eventType: input.eventType,
-              resourceCategory: input.resourceCategory ?? null,
-              sourceProviderSlug: input.dataSourceProviderSlug,
-              createdAt: input.acceptedAt,
-              tx,
-            });
-          }
 
-          return { wakeMailboxItemIds };
-        },
-        {
-          memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
-        },
+            return { wakeMailboxItemIds };
+          },
+          {
+            memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
+          },
         )
       );
     });
@@ -2995,12 +3047,16 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
   let currentSource: HostedConnectionSourceAdmissionCandidate | null = null;
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (sourceProviderSlug) {
-    const matchingSources = await input.store.listConnectionSourceAdmissionCandidates({
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId: input.connectionId,
+      sourceProviderSlug,
+    });
+    const source = await input.store.resolveConnectionSourceAdmissionCandidate({
+      connectionId: input.connectionId,
+      ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
       sourceProviderSlug,
       tx,
     });
-    const source = matchingSources[0];
     if (input.sourceObservation) {
       if (!sourceCredentialCurrent || !source) {
         throw deviceSyncError({
@@ -3055,7 +3111,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
         });
       }
 
-      if (!isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {
+      if (source.status !== "connected" || isHostedSourceDisconnectFenced(source)) {
         if (
           source.status === "disconnected"
           && source.lastErrorCode === null
@@ -3208,8 +3264,18 @@ function createHostedDeviceSyncDirtyPreparationMismatchError(): Error & {
   );
 }
 
+function isHostedWebhookAdmissionAuthorityDriftError(error: unknown): boolean {
+  if (!isDeviceSyncError(error)) {
+    return false;
+  }
+
+  return error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+    || error.code === "WEBHOOK_SOURCE_NOT_READY"
+    || error.code === "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE";
+}
+
 async function runWithHostedDeviceSyncPreparedWriteReplan<T>(
-  operation: () => Promise<T>,
+  operation: (attempt: number) => Promise<T>,
 ): Promise<T> {
   for (
     let attempt = 0;
@@ -3217,9 +3283,10 @@ async function runWithHostedDeviceSyncPreparedWriteReplan<T>(
     attempt += 1
   ) {
     try {
+      const attemptOperation = () => operation(attempt);
       return await (attempt === 0
-        ? runWithHostedDomainRootUnwrapCache(operation)
-        : runWithFreshHostedDomainRootUnwrapCache(operation));
+        ? runWithHostedDomainRootUnwrapCache(attemptOperation)
+        : runWithFreshHostedDomainRootUnwrapCache(attemptOperation));
     } catch (error) {
       if (!isHostedDeviceSyncPreparedWriteReplanError(error)) {
         throw error;

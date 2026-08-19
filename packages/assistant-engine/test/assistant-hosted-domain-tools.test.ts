@@ -923,6 +923,16 @@ describe('hosted domain dynamic tools', () => {
     expect(readToolRequest('automation', {
       action: 'save',
       activeUntil: '2026-08-01T00:00:00.000Z',
+      contextReferences: [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+        {
+          entityKind: 'experiment',
+          entityId: 'exp_01JQ8PWXP5A68SQM1W0GYM41WB',
+        },
+      ],
       instructions: 'Send a short reminder to wind down.',
       plannedOccurrenceOffsetMs: 900_000,
       schedule: { kind: 'dailyLocal', localTime: '22:30' },
@@ -935,6 +945,16 @@ describe('hosted domain dynamic tools', () => {
       request: {
         action: 'save',
         activeUntil: '2026-08-01T00:00:00.000Z',
+        contextReferences: [
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+          },
+          {
+            entityKind: 'experiment',
+            entityId: 'exp_01JQ8PWXP5A68SQM1W0GYM41WB',
+          },
+        ],
         instructions: 'Send a short reminder to wind down.',
         plannedOccurrenceOffsetMs: 900_000,
         schedule: { kind: 'dailyLocal', localTime: '22:30' },
@@ -1234,6 +1254,12 @@ describe('hosted domain dynamic tools', () => {
         action: 'save' as const,
         automationId: 'automation-1',
         created: true,
+        contextReferences: [
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+          },
+        ],
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
         nextOccurrenceAt: null,
@@ -1251,6 +1277,12 @@ describe('hosted domain dynamic tools', () => {
     }
     const request = readToolRequest('automation', {
       action: 'save',
+      contextReferences: [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+      ],
       instructions: 'Send a short reminder to wind down.',
       schedule: {
         kind: 'dailyLocal',
@@ -1276,6 +1308,12 @@ describe('hosted domain dynamic tools', () => {
 
     expect(automationTool.request).toHaveBeenCalledWith({
       action: 'save',
+      contextReferences: [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+      ],
       instructions: 'Send a short reminder to wind down.',
       schedule: {
         kind: 'dailyLocal',
@@ -1289,6 +1327,12 @@ describe('hosted domain dynamic tools', () => {
       action: 'save',
       automationId: 'automation-1',
       created: true,
+      contextReferences: [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+      ],
       effectiveTimeZone: 'America/Chicago',
       lookupId: 'evening-wind-down',
       nextOccurrenceAt: null,

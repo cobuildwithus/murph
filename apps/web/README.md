@@ -1666,33 +1666,25 @@ machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
-The production build launches the parent Next process explicitly through Node
-with `--max-old-space-size=1024` while appending
-`--max-old-space-size=3072` to `NODE_OPTIONS` for the Webpack build worker. The
-same runner first performs route type generation and an explicit app-local
-generated-contract TypeScript check with a 3.5 GiB limit, then marks only that
-prepared check complete before starting the Webpack build. Node gives the direct
-CLI flag precedence in the parent. Next 16.3 reconstructs non-isolated child
-options from the parent arguments followed by `NODE_OPTIONS`, so the sequential
-Webpack compiler workers receive the 3 GiB limit while the separate TypeScript
-validation child receives 3.5 GiB. Next removes that option from its isolated
-static workers. The existing caller options are preserved. The shared script is
-used by the Vercel package build and the CI
-memory-observation lane. This bounds the compile parent without starving the
-later validation worker or changing the compiled application. The worker was
-ratcheted from 3 GiB only after an exact cold generated-contract check
-deterministically exhausted that heap and passed at the next 512 MiB step.
-Repeated
-forced-cold Standard previews remain the direct acceptance evidence, and a Next
-upgrade must revalidate this worker boundary.
+The production runner first performs route type generation and an explicit
+app-local generated-contract TypeScript check with a 3.5 GiB limit. It marks
+only that prepared check complete before starting Webpack. Compilation then
+runs in the Next CLI process with a 3 GiB old-space limit; the runner preserves
+unrelated inherited Node options while replacing inherited old-space flags.
+These phases are sequential, so their limits do not compose. The same runner is
+used by the Vercel package build and the CI memory-observation lane. Forced-cold
+Standard previews remain the direct acceptance evidence, and a Next upgrade
+must revalidate the heap boundary.
 
 Production builds use Next 16.3's supported Webpack fallback. The production
-script passes `--webpack`, and the Next config explicitly enables
-`webpackBuildWorker` plus `webpackMemoryOptimizations` because the Workflow
-integration contributes Webpack configuration that otherwise prevents Next
-from selecting the isolated build worker automatically. The hosted local-
-development wrapper remains on Turbopack and rejects an explicit Webpack flag.
-The production runner also owns a versioned cache epoch inside `.next/cache`.
+script passes `--webpack` and enables `webpackMemoryOptimizations`. The Workflow
+integration contributes custom Webpack configuration, so Next's canonical
+default is to compile in the CLI process. Do not force `webpackBuildWorker`:
+that creates a second compiler-process owner and previously left Standard
+deployments stuck inside an opaque worker after compilation stopped making
+progress. The hosted local-development wrapper remains on Turbopack and rejects
+an explicit Webpack flag. The production runner also owns a versioned cache
+epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
 compilation and writes the epoch only after Next succeeds. Production Webpack
 compiles are additionally cold-cache by policy: the runner removes
@@ -1702,23 +1694,11 @@ Webpack cache can never reach the compiler regardless of what an earlier
 deployment uploaded. Warm restored Webpack caches on Vercel's 8 GB Standard builder
 were the trigger for the August 2026 steady-state OOM kills and silent
 compile hangs; only the cold path is proven. Other cache subtrees such as SWC
-remain warm. On Vercel production builds (`VERCEL=1` with
-`VERCEL_ENV=production`), `scripts/vercel-build.sh` arms a 15-minute
-whole-build deadline (`MURPH_VERIFY_HOST_COMMAND_TIMEOUT_MS=900000`) that the
-package-build process owner, `scripts/run-with-host-verification-slot.mjs`,
-enforces on the one detached process group it already creates: at the deadline
-it TERMs the entire group, force-kills survivors with KILL (each phase bounded
-by a 30-second grace, so a leader that exits mid-grace hands surviving
-descendants to one fresh grace before their KILL), waits until the group has
-fully exited, and returns exit 124 with an explicit
-diagnostic. Because the deadline owns the whole group, a wedged Webpack
-compiler worker descendant is terminated too, and an externally cancelled
-build is reaped with the same escalation instead of orphaning the compile.
-Either way a wedged compile fails the build in minutes instead of occupying
-the deploy queue until Vercel's 45-minute ceiling. Local and CI verify
-invocations build
-with `VERCEL_ENV=preview` and never arm the deadline. Bump the epoch only
-when a proven compiler/cache transition requires another full invalidation.
+remain warm. Vercel owns cancellation and build deadlines. The production
+package script therefore runs directly instead of passing through the local
+shared-host verification slot or adding a second watchdog and process-group
+reaper. Bump the epoch only when a proven compiler/cache transition requires
+another full invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions
@@ -2047,14 +2027,22 @@ Current hosted billing assumptions:
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
   rows, and labels the mailbox retention boundary. The table and reset reuse the
   runtime's canonical allowance gate. A row reset verifies the displayed
-  current-period and usage-credit versions, then atomically clears current
-  included spend and the block while releasing only that capacity epoch's
-  logical notice claim. It preserves immutable usage, usage credit, billing
-  state, mailbox rows, and delivery history, and refuses to race an in-flight
-  notice dispatch. After commit it signals the existing runtime recheck; a
+  current-period and usage-credit versions. Paid, Family, and container resets
+  atomically clear current included spend and the block. An exhausted canonical
+  Starter reset instead appends one fresh $4.50 grant under the beneficiary
+  lock, keyed to the displayed ledger version, then clears the derived period.
+  The distinct Ops grant source is excluded from Starter enrollment and
+  conversion metrics. Both paths release only that capacity epoch's logical
+  notice claim, preserve immutable usage, prior grants and debits, purchased and
+  referral credit, billing state, mailbox rows, and delivery history, and refuse
+  to race an in-flight notice dispatch. After commit the route signals the
+  existing runtime recheck; a
   rejected or bounded-timeout wake is returned as a committed partial result
-  with a wake-only retry. The table reads its decision and reset version from
-  one repeatable database snapshot, and derives blocked/available only from
+  with a wake-only retry. For Starter recovery, the page reconstructs that
+  wake-only action after close or reload from the active Ops grant and
+  unconsumed mailbox work previously denied for usage. The table reads its
+  decision and reset version from one repeatable database snapshot, and derives
+  blocked/available only from
   that canonical decision rather than the potentially stale persisted marker.
   Historical notice status is displayed independently from current admission.
   A later crossing reuses the logical claim key but receives a fresh durable

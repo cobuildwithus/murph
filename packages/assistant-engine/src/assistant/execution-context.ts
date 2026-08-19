@@ -16,6 +16,7 @@ import type {
 } from '@murphai/hosted-execution/routes'
 import type {
   AutomationAssistantTargetOverride,
+  AutomationContextReference,
   AutomationContinuityPolicy,
   AutomationSchedule,
   AutomationStatus,
@@ -180,6 +181,7 @@ export type AssistantHostedAutomationToolRequest =
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       automationId?: string
       continuityPolicy?: AutomationContinuityPolicy
+      contextReferences?: readonly AutomationContextReference[]
       instructions: string
       plannedOccurrenceOffsetMs?: number | null
       schedule: AutomationSchedule
@@ -196,6 +198,7 @@ export type AssistantHostedAutomationToolRequest =
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
+      contextReferences?: readonly AutomationContextReference[]
       expectedUpdatedAt: string
       instructions?: string
       lookup: string
@@ -226,6 +229,7 @@ export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
       automationId: string
+      contextReferences?: readonly AutomationContextReference[]
       effectiveTimeZone: string | null
       lookupId: string
       nextOccurrenceAt: string | null
@@ -239,6 +243,7 @@ export type AssistantHostedAutomationToolResponse =
   | {
       action: 'patch' | 'save'
       automationId: string
+      contextReferences?: readonly AutomationContextReference[]
       created: boolean
       effectiveTimeZone: string | null
       lookupId: string

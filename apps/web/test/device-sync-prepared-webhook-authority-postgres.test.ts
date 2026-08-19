@@ -631,14 +631,14 @@ describe.skipIf(!runPostgresProof)(
           sourceProviderSlug: "apple_health_kit",
           status: "connected",
         });
-        await expect(fixture.store.listConnectionSourceAdmissionCandidates({
+        await expect(fixture.store.resolveConnectionSourceAdmissionCandidate({
           connectionId: fixture.connectionId,
           sourceProviderSlug: "apple_health_kit",
-        })).resolves.toEqual([expect.objectContaining({
+        })).resolves.toEqual(expect.objectContaining({
           lifecycleEpoch: 2,
           sourceInstanceKey: opaqueSourceInstanceKey,
           status: "disconnected",
-        })]);
+        }));
 
         const secondParentBefore = await fixture.prisma.deviceConnection.findUniqueOrThrow({
           select: { updatedAt: true },

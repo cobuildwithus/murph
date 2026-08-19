@@ -481,6 +481,17 @@ export interface DeviceSyncPublicIngressStore {
     provider: string,
     externalAccountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  /**
+   * Webhook-only account resolution. The store derives the owner from the same
+   * exact connection row as the blind-index lookup; callers cannot supply or
+   * override this authority.
+   */
+  getWebhookConnectionByExternalAccount(
+    provider: string,
+    externalAccountId: string,
+  ): DeviceSyncPublicIngressWebhookConnectionLookupResult
+    | null
+    | Promise<DeviceSyncPublicIngressWebhookConnectionLookupResult | null>;
   upsertConnectionSource(
     input: UpsertDeviceConnectionSourceInput,
     options?: { fenceActiveWorkOnReconnect?: boolean },
@@ -508,6 +519,15 @@ export interface DeviceSyncPublicIngressStore {
       | "sourceProviderSlug"
       | "status"
     >>>;
+  resolveConnectionSourceAdmissionCandidate(
+    input: {
+      connectionId: string;
+      sourceInstanceKey?: string;
+      sourceProviderSlug: string;
+    },
+  ): DeviceSyncPublicIngressSourceAdmissionCandidate
+    | null
+    | Promise<DeviceSyncPublicIngressSourceAdmissionCandidate | null>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
@@ -524,6 +544,23 @@ export interface DeviceSyncPublicIngressStore {
     sourceProviderSlug: string;
   }): number | Promise<number>;
 }
+
+export interface DeviceSyncPublicIngressWebhookConnectionLookupResult {
+  account: PublicDeviceSyncAccount;
+  connectionOwnerId: string | null;
+}
+
+export type DeviceSyncPublicIngressSourceAdmissionCandidate = Pick<
+  PublicDeviceConnectionSource,
+  | "lastErrorCode"
+  | "lastErrorMessage"
+  | "sourceInstanceKey"
+  | "sourceProviderSlug"
+  | "status"
+> & {
+  /** Public stores may expose ISO text; transaction-owned stores retain Date. */
+  lastSeenAt: Date | string;
+};
 
 export interface DeviceSyncJobInput {
   kind: string;
@@ -761,6 +798,8 @@ export interface DeviceSyncPublicIngressConnectionSourceObservedInput {
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
   claimToken: string;
+  /** Store-derived from the exact blind-index lookup; never caller-selected. */
+  connectionOwnerId: string | null;
   /** Delivery-attempt instant; do not use as provider event or receipt time. */
   processingAttemptedAt: string;
   /** True only when hosted admission must finish exact-source recovery. */

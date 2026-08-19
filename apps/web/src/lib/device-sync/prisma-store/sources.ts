@@ -58,8 +58,11 @@ export type HostedConnectionSourceAdmissionCandidate = Omit<
     | "sourceProviderSlug"
     | "status"
   >,
-  "lifecycleEpoch"
-> & { lifecycleEpoch: number };
+  "lifecycleEpoch" | "status"
+> & {
+  lifecycleEpoch: number;
+  status: DeviceConnectionSourceStatus;
+};
 
 export interface HostedDeviceConnectionSource {
   id: string;
@@ -358,11 +361,12 @@ export class PrismaHostedConnectionSourceStore {
       .map(mapHostedConnectionSourceRecord);
   }
 
-  async listConnectionSourceAdmissionCandidates(input: {
+  async resolveConnectionSourceAdmissionCandidate(input: {
     connectionId: string;
+    sourceInstanceKey?: string;
     sourceProviderSlug: string;
     tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
+  }): Promise<HostedConnectionSourceAdmissionCandidate | null> {
     const prisma = input.tx ?? this.prisma;
     const connectionId = requireConnectionId(input.connectionId);
     const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug)
@@ -395,15 +399,14 @@ export class PrismaHostedConnectionSourceStore {
         "Hosted device connection source admission exceeded its bounded semantic authority.",
       );
     }
-    const matchingSources = collapseHostedConnectionSourceRecords(records)
-      .filter((record) => record.sourceProviderSlug === sourceProviderSlug)
+    const semanticSources = collapseHostedConnectionSourceRecords(records)
       .map(mapHostedConnectionSourceRecord);
     const source = resolveHostedJunctionConnectionSource(
-      matchingSources,
+      semanticSources,
       sourceProviderSlug,
     );
     return source
-      ? [{
+      ? {
           lastErrorCode: source.lastErrorCode,
           lastErrorMessage: source.lastErrorMessage,
           lifecycleEpoch: source.lifecycleEpoch,
@@ -411,8 +414,8 @@ export class PrismaHostedConnectionSourceStore {
           sourceInstanceKey: source.sourceInstanceKey,
           sourceProviderSlug: source.sourceProviderSlug,
           status: source.status,
-        }]
-      : [];
+        }
+      : null;
   }
 
   async listConnectionSourcesForConnections(

@@ -1075,7 +1075,24 @@ Last verified: 2026-08-16
   runner rebuilds from those owners; it never projects local retry timing into
   `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
-  for another.
+  for another. Per-attempt `device-sync.job_failed` telemetry has one owner:
+  assistant-runtime maintenance emits it from the failed local job diagnostic
+  before Web state application. Web persists canonical failure state and never
+  translates state application or a persistence failure into another provider or
+  job-attempt event. Dirty-ack persistence uses
+  `device-sync.dirty_ack_persistence_failed`, outer maintenance uses
+  `device-sync.maintenance_failed`, and activity scheduling uses
+  `assistant.device_activity_automation_failed`; none increments the
+  failed-attempt metric.
+  This event taxonomy is a strict Web parser boundary. Shared workspace packages
+  are build inputs, not separately deployed planes. Deploy the Web artifact that
+  contains its parser first, then deploy and fully recycle the Cloudflare
+  runner, verifying its exact fingerprint across the fleet. During that window,
+  Web accepts and ignores the legacy optional `failureDiagnostic` apply field from
+  old runners. New runners stop producing that redundant field. Keep the
+  compatibility parser until no old runner can send it, then remove it in a
+  separate change. Roll back the runner first and verify the old producer is
+  active before rolling Web below the new event codes.
   The focused WHOOP regression fixes one canonical schedule-event identity and
   one durable mailbox-item identity. The fixture first commits the clean input
   workspace through the production v2 checkpoint bridge. The initial incident
@@ -1340,19 +1357,32 @@ Last verified: 2026-08-16
   generation is stale and reopens the current obligations. This keeps the
   rollout fence in the existing queue, scheduler, and account-metadata owners
   without another repair loop or lifecycle manager.
-- Junction full reconcile and backfill jobs finish inventory, summary, profile,
-  and historical scheduling once, then advance timeseries-only work through the
-  existing job payload. Each attempt owns one canonical resource and one
-  complete UTC day. A collection may use at most three sequential pages with one
-  bounded request attempt per page. Page-heavy active-calorie and heart-rate
-  days deterministically retry as complete UTC hours; no partial aggregate or
-  vendor cursor is persisted. `timeseriesCursor` and
-  `timeseriesResourceCursor` identify the next complete unit without changing
-  job dedupe identity. The deployed v1 resource envelope is read only at this
-  provider boundary, validated exactly, and projected immediately to its active
-  scalar resource; new successors never write the envelope or consult its
-  completed-resource names. Every partial continuation preserves
-  `lastSyncCompletedAt`; only terminal current full work may advance it.
+- Junction historical backfill and non-yieldable full jobs finish inventory,
+  summary, profile, and historical scheduling once. A yieldable full reconcile
+  instead commits one configured normalization-safe summary unit per full-job
+  continuation, after a live provider inventory read for that attempt, before
+  entering the existing timeseries continuation. The inventory read is one
+  attempt capped at eight seconds, accepts at most 64 provider rows, and its
+  source projection reads the current local source set once before at most 64
+  serial upserts; summary admission adds one fixed local-source read independent
+  of provider cardinality. Ordinary units contain one resource and allow at
+  most three sequential pages with one eight-second request attempt per page.
+  Sleep and sleep-cycle remain one canonical unit so
+  stage-owner suppression sees both resources; their one-attempt page timeout
+  is five seconds, bounding the paired six-page worst case at 30 seconds. A
+  typed provider failure therefore reaches ordinary job backoff before the
+  hosted 45-second maintenance cancellation can release it as an unclassified
+  yield. Each timeseries attempt owns one canonical resource and one complete
+  UTC day under the three-page, single-attempt bound. Page-heavy active-
+  calorie and heart-rate days deterministically retry as complete UTC hours;
+  no partial aggregate or vendor cursor is persisted. `summaryResourceCursor`,
+  `summaryPhaseComplete`, `timeseriesCursor`, and `timeseriesResourceCursor`
+  identify the next complete unit without changing job dedupe identity. The
+  deployed v1 resource envelope is read only at this provider boundary,
+  validated exactly, and projected immediately to its active scalar resource;
+  new successors never write the envelope or consult its completed-resource
+  names. Every partial continuation preserves `lastSyncCompletedAt`; only
+  terminal current full work may advance it.
 - Junction workout streams stay inside that existing resource/day continuation
   owner. One admitted workout index yields serial exact-workout SDK reads; each
   response has an 8 MiB cap and reduces before import to one compact overall
