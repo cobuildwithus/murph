@@ -439,6 +439,14 @@ Request summary:
 
 - `orchestrationAttemptId`: an opaque Temporal attempt id for observability and
   idempotency at the orchestration boundary.
+- `processingMode`: an optional narrow execution lane selected from current
+  reconciliation facts.
+- `assistantExecutionBlocked`: an optional positive-only execution guard valid
+  only with `system_mailbox`. Temporal includes it when Web blocks assistant
+  admission but retained model-free system work remains runnable. Cloudflare
+  forwards it to the runtime invocation without persisting a second policy
+  projection; the runtime drains eligible system work, skips assistant
+  execution, and preserves the canonical assistant wake for later restoration.
 
 The request does not carry signed AI usage decisions. Web reconciliation facts
 gate mailbox lag and workspace wakes that strongly imply foreground model work

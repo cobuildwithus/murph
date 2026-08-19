@@ -283,12 +283,34 @@ describe("hosted orchestration control contracts", () => {
       processingMode: "inbox_media_retention",
     });
     expect(parseHostedRuntimeEnsureProcessingRequest({
+      assistantExecutionBlocked: true,
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "system_mailbox",
     })).toEqual({
+      assistantExecutionBlocked: true,
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "system_mailbox",
     });
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      assistantExecutionBlocked: false,
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "system_mailbox",
+    })).toThrow(
+      "Hosted runtime ensure-processing request assistantExecutionBlocked must be true.",
+    );
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      assistantExecutionBlocked: true,
+      orchestrationAttemptId: "orchestration_attempt_test",
+    })).toThrow(
+      "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
+    );
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      assistantExecutionBlocked: true,
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "default",
+    })).toThrow(
+      "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
+    );
     expect(() => parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "assistant",

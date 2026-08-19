@@ -121,6 +121,9 @@ type FreshRuntimeStartPreparation =
 
 function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
   return {
+    ...(input.assistantExecutionBlocked
+      ? { assistantExecutionBlocked: true as const }
+      : {}),
     ...(input.orchestration ? { orchestration: input.orchestration } : {}),
     orchestrationAttemptId: input.orchestrationAttemptId,
     ...(input.processingMode ? { processingMode: input.processingMode } : {}),

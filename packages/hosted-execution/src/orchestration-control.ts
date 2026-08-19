@@ -85,6 +85,7 @@ export interface HostedRuntimeReconciliationFacts {
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
+  assistantExecutionBlocked?: true;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

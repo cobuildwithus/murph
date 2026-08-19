@@ -11,30 +11,26 @@ boundaries between Web, Temporal, and the Cloudflare runtime.
 
 ## Production Evidence
 
-- The previously deployed cross-mode controller correction did not materially
-  change churn.
-- A current five-minute sample contained 1,635 attempts, 1,625 empty mailbox
-  imports, 1,635 retained-wake idle checkpoints, and no errors.
-- The canonical workspace table still contained a small due cohort: 17
-  assistant wakes and 2 device-sync wakes.
-- Assistant-pass completion events were nearly absent relative to the repeated
-  runtime attempts, so the investigation is focused on the path that retains a
-  due assistant wake without executing assistant work.
-- A fifteen-minute export contained 10,075 typed or server-redacted runtime
-  events. Of 4,764 two-event attempts, 4,747 imported no mailbox work and 4,752
-  checkpointed a retained assistant wake; the repeated snapshots were otherwise
-  structurally unchanged.
-- Production still runs the commit immediately before the already-merged later
-  reminder handoff. Its production-shaped seven-interleaving regression passes
-  on current main, including the no-signal predecessor/successor case matching
-  the live trace.
-- The first deploy attempt containing that handoff resolved current main but
-  stopped before Cloudflare because later merged bounded foreground-state work
-  intentionally grew the existing vault CLI graph by 29,972 bytes without
-  rebaselining its narrow deployment ratchet. Local production assembly then
-  exposed the same reviewed graph's 35,529-byte static runner-entrypoint excess;
-  both existing ratchets require measured baseline updates, with entry and
-  platform tolerances unchanged.
+- The previously deployed cross-mode controller correction and exact new runner
+  bundle did not materially change churn: production continued to emit roughly
+  280 to 310 empty mailbox imports and idle checkpoints per minute.
+- Nineteen due workspaces had no mailbox rows beyond their imported system
+  frontier. Seventeen retained a gap between imported and handled-through state,
+  totaling 1,234 unconsumed model-free system items.
+- Current Web reconciliation logs prove those invocations are blocked by the
+  engagement policy while preserving a due assistant wake and two lagging
+  mailbox lanes.
+- The private Temporal worker correctly selects `system_mailbox` while Web is
+  blocked. Cloudflare currently forwards only the processing mode because its
+  separate workspace projection exposes no engagement-policy decision.
+- The runtime therefore sees the due assistant cron as runnable, checkpoints
+  the system-to-assistant handoff before processing a retained system item, and
+  wakes Temporal again. The empty checkpoint advances workspace version but not
+  the system handled-through frontier, reproducing the one-to-three-second loop.
+- An existing runtime regression proves the intended behavior when
+  `assistantExecutionBlocked: true` reaches the same invocation: eligible
+  system work drains, assistant execution remains skipped, and the assistant
+  reminder stays durable for policy restoration.
 
 All evidence is aggregate and contains no production identifiers.
 
@@ -56,30 +52,28 @@ All evidence is aggregate and contains no production identifiers.
 
 ## Plan
 
-1. Trace the exact no-progress wake path and obtain an independent ReviewGPT
-   diagnosis from the same code and aggregate evidence.
-2. Confirm the already-merged production-shaped predecessor/successor
-   regression covers the live no-signal churn before adding another wake owner.
-3. Rebaseline only the measured runner-bundle total-byte ratchet required to
-   deploy current main; preserve its entry and static-closure limits.
-4. Run the real bundle assembly, focused policy test, typecheck, and hosted
-   reminder proof.
-5. Push the exact unblocker candidate, run preliminary and final ReviewGPT gates
-   alongside required CI, and resolve every accepted finding.
-6. Merge, deploy the exact reviewed head with immediate container rollout, and
-   verify sustained convergence in at least two complete production windows
-   before retiring the worktree.
+1. Add an optional positive-only `assistantExecutionBlocked` field to the shared
+   ensure-processing contract, valid only for explicit `system_mailbox` work.
+2. Forward the field through Cloudflare to the existing runtime invocation
+   guard, without adding persisted state, another policy read, or a new owner.
+3. Publish the additive public contract and deploy the tolerant Cloudflare
+   consumer before updating the private Temporal producer.
+4. Have Temporal derive the field from the current authoritative blocked fact
+   only when it dispatches model-free system work. Preserve default/conversation
+   processing, canonical wakes, mailbox pointers, and Temporal command order.
+5. Run focused contract, Cloudflare, runtime, Temporal, replay, typecheck, and
+   production-bundle proof. Push exact candidates and run preliminary and final
+   ReviewGPT gates alongside required CI.
+6. Merge and deploy in compatibility order, then verify multiple complete
+   production windows until churn collapses and the retained system gap drains
+   without lost assistant wakes or shifted errors.
 
 ## Verification
 
-- Seven predecessor/successor wake interleavings: passed.
-- Independent ReviewGPT root-cause audit: current main's existing held-successor
-  correction matches the live loop; no new runtime owner or Cloudflare wake
-  suppression is warranted. It requested one empty checkpoint-runtime-recheck
-  coverage case, now included in the existing parameterized regression.
-- Local production bundle assembly: passed at 9,265,283 vault CLI bytes and an
-  8,397,990-byte static runner-entrypoint closure with the measured ratchets.
-- Cloudflare typecheck and 55 focused bundle-policy tests: passed.
-- Empty checkpoint-runtime-recheck wake regression: 8 parameterized cases
-  passed.
-- Exact-head ReviewGPT gates, CI, deploy, and production convergence: pending.
+- Root cause: proven from current production aggregates, authoritative Web
+  reconciliation logs, exact deployed code, and the existing runtime guard
+  regression.
+- Independent ReviewGPT root-cause audit: running.
+- Public contract/Cloudflare tests, private Temporal/replay tests, typechecks,
+  bundle proof, exact-head ReviewGPT gates, CI, deploy, and production
+  convergence: pending.

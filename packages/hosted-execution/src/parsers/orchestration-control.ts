@@ -191,24 +191,39 @@ export function parseHostedRuntimeEnsureProcessingRequest(
 ): HostedRuntimeEnsureProcessingRequest {
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
+    "assistantExecutionBlocked",
     "orchestrationAttemptId",
     "processingMode",
   ]);
 
+  const processingMode = record.processingMode === undefined
+    ? undefined
+    : parseNullableAllowedString(
+        record.processingMode,
+        "Hosted runtime ensure-processing request processingMode",
+        HOSTED_RUNTIME_PROCESSING_MODES,
+      );
+  const assistantExecutionBlocked = record.assistantExecutionBlocked === undefined
+    ? undefined
+    : requireExactTrue(
+        record.assistantExecutionBlocked,
+        "Hosted runtime ensure-processing request assistantExecutionBlocked",
+      );
+  if (assistantExecutionBlocked && processingMode !== "system_mailbox") {
+    throw new TypeError(
+      "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
+    );
+  }
+
   return {
+    ...(assistantExecutionBlocked === undefined
+      ? {}
+      : { assistantExecutionBlocked }),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",
     ),
-    ...(record.processingMode === undefined
-      ? {}
-      : {
-          processingMode: parseNullableAllowedString(
-            record.processingMode,
-            "Hosted runtime ensure-processing request processingMode",
-            HOSTED_RUNTIME_PROCESSING_MODES,
-          ),
-        }),
+    ...(processingMode === undefined ? {} : { processingMode }),
   };
 }
 
@@ -403,6 +418,14 @@ function parseNullableAllowedString<T extends string>(
   }
 
   return parseAllowedString(value, label, allowed);
+}
+
+function requireExactTrue(value: unknown, label: string): true {
+  if (value !== true) {
+    throw new TypeError(`${label} must be true.`);
+  }
+
+  return true;
 }
 
 function assertExactKeys(

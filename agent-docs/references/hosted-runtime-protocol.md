@@ -1297,6 +1297,13 @@ Because the Temporal worker can deploy automatically before the manual
 Cloudflare worker rollout, new Temporal-to-Cloudflare `ensure-processing` fields
 must either be accepted by the currently deployed worker or keep processing
 pending with `retry_later` until the consumer deployment catches up.
+The positive-only `assistantExecutionBlocked` field is therefore deployed to
+Cloudflare before Temporal begins sending it. It is valid only with an explicit
+`system_mailbox` mode and exists for one invocation: Web remains the policy
+owner, Temporal derives the field from the current blocked reconciliation fact,
+and the runtime skips assistant admission while still draining model-free
+system work and retaining the canonical assistant wake. It is not durable
+Cloudflare state and cannot attach to default foreground processing.
 Web-to-Temporal signal kinds have the same compatibility constraint: add
 workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and
