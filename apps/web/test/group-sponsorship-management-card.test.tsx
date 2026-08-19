@@ -117,6 +117,7 @@ const baseManagement = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -234,7 +235,7 @@ test.each([
   },
   {
     checkoutStatus: "fulfilled",
-    expectedText: "Pause automatic refills",
+    expectedText: "Payment confirmed",
     managementStatus: "active" as const,
   },
 ])("converges a no-URL $checkoutStatus recovery without inviting another payment", async ({
@@ -278,6 +279,146 @@ test.each([
       "Payment review couldn’t open. Try again.",
     );
     expect(rendered.container.textContent).not.toContain("Review payment");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("carries one no-navigation recovery from pending to an explicit focused completion", async () => {
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        json: async () => ({
+          checkout: {
+            purchaseId: "hucp_recovery_abcdefghijkl",
+            status: "payment_pending",
+          },
+          management: {
+            ...baseManagement,
+            status: "recovery_required",
+          },
+        }),
+        ok: true,
+      };
+    }
+    return {
+      json: async () => ({
+        management: { ...baseManagement, status: "active" },
+      }),
+      ok: true,
+    };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  vi.useFakeTimers();
+  try {
+    const reviewButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review payment");
+    assert.ok(reviewButton);
+    await act(async () => {
+      reviewButton.click();
+    });
+
+    const recoveryStatus = rendered.container.querySelector<HTMLElement>(
+      "[role='status']",
+    );
+    assert.ok(recoveryStatus);
+    expect(recoveryStatus.textContent).toContain("Payment is processing");
+    expect(recoveryStatus.tabIndex).toBe(-1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(recoveryStatus.textContent).toContain("Payment confirmed");
+    expect(rendered.container.textContent).toContain("Pause automatic refills");
+    expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual([
+      "POST",
+      "GET",
+    ]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("offers a read-only recheck after bounded pending polls without starting another payment", async () => {
+  let managementReadCount = 0;
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        json: async () => ({
+          checkout: {
+            purchaseId: "hucp_recovery_abcdefghijkl",
+            status: "payment_pending",
+          },
+          management: {
+            ...baseManagement,
+            status: "recovery_required",
+          },
+        }),
+        ok: true,
+      };
+    }
+    managementReadCount += 1;
+    return {
+      json: async () => ({
+        management: {
+          ...baseManagement,
+          status: managementReadCount >= 4 ? "active" : "recovery_required",
+        },
+      }),
+      ok: true,
+    };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  vi.useFakeTimers();
+  try {
+    const reviewButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review payment");
+    assert.ok(reviewButton);
+    await act(async () => {
+      reviewButton.click();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_000);
+    });
+
+    expect(rendered.container.textContent).toContain("No new payment is needed");
+    const recheckButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Check payment status");
+    assert.ok(recheckButton);
+    await act(async () => {
+      recheckButton.click();
+    });
+
+    expect(rendered.container.textContent).toContain("Payment confirmed");
+    expect(fetchMock.mock.calls.filter(
+      (call) => call[1]?.method === "POST",
+    )).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(
+      (call) => call[1]?.method === "GET",
+    )).toHaveLength(4);
   } finally {
     await rendered.cleanup();
   }

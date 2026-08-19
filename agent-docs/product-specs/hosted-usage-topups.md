@@ -181,6 +181,13 @@ charge still fits under the current cap. If the payer has since reduced the cap
 to fulfilled spend, recovery leaves the failed purchase as immutable history
 and returns the authorization to active-at-cap without starting Stripe.
 
+When recovery returns no Checkout URL because the exact payment is pending,
+the payer page keeps one focused live status region and performs a bounded,
+authenticated read of the existing management projection. The same region
+transitions to explicit confirmation when the authorization becomes active. If
+the bounded reads cannot establish completion, it offers a read-only status
+recheck; it does not submit recovery again or invite a second payment.
+
 Periods roll forward lazily from the successful activation anchor with
 calendar-month and end-of-month semantics. The cap resets, but unused credit
 remains available in the existing ledger. An increase requires explicit payer

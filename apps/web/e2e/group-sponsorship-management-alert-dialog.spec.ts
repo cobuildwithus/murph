@@ -224,12 +224,26 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 test("payment recovery reports retry, processing, and completion at responsive widths", async ({
   page,
 }, testInfo) => {
+  const recoveryManagement = {
+    ...management,
+    authorizationId: "hgsa_design_recovery",
+  };
   let recoveryStatus: "fulfilled" | "payment_pending" | "reconciling" =
     "reconciling";
+  let managementReadCount = 0;
   await page.route("**/api/design/group-sponsorship-management", async (route) => {
+    if (route.request().method() === "GET") {
+      managementReadCount += 1;
+      await route.fulfill({
+        body: JSON.stringify({ management: recoveryManagement }),
+        contentType: "application/json",
+        status: 200,
+      });
+      return;
+    }
     const responseManagement = recoveryStatus === "fulfilled"
-      ? management
-      : { ...management, status: "recovery_required" };
+      ? recoveryManagement
+      : { ...recoveryManagement, status: "recovery_required" };
     await route.fulfill({
       body: JSON.stringify({
         checkout: {
@@ -255,6 +269,7 @@ test("payment recovery reports retry, processing, and completion at responsive w
       { height: 720, label: "desktop", width: 1_280 },
       { height: 844, label: "phone", width: 390 },
     ]) {
+      managementReadCount = 0;
       await page.setViewportSize(viewport);
       const response = await page.goto("/screenshots/groups", {
         waitUntil: "load",
@@ -282,6 +297,7 @@ test("payment recovery reports retry, processing, and completion at responsive w
       });
       const originalUrl = page.url();
       await reviewButton.click();
+      let capturedPendingState = false;
 
       if (status === "reconciling") {
         await expect(recoveryStudy.getByRole("alert")).toContainText(
@@ -290,11 +306,31 @@ test("payment recovery reports retry, processing, and completion at responsive w
         await expect(reviewButton).toBeEnabled();
         await expect(reviewButton).toBeFocused();
       } else if (status === "payment_pending") {
-        await expect(recoveryStudy.getByRole("status")).toContainText(
+        const recoveryStatusRegion = recoveryStudy.getByRole("status");
+        await expect(recoveryStatusRegion).toContainText(
           "Payment is processing",
         );
+        await expect(recoveryStatusRegion).toBeFocused();
         await expect(reviewButton).toHaveCount(0);
+        await recoveryStudy.screenshot({
+          animations: "disabled",
+          path: testInfo.outputPath(
+            `payment-recovery-${status}-${viewport.label}.png`,
+          ),
+        });
+        capturedPendingState = true;
+        await expect(recoveryStatusRegion).toContainText("Payment confirmed");
+        await expect(recoveryStatusRegion).toBeFocused();
+        await expect(
+          recoveryStudy.getByRole("button", {
+            name: "Pause automatic refills",
+          }),
+        ).toBeVisible();
+        expect(managementReadCount).toBe(1);
       } else {
+        const recoveryStatusRegion = recoveryStudy.getByRole("status");
+        await expect(recoveryStatusRegion).toContainText("Payment confirmed");
+        await expect(recoveryStatusRegion).toBeFocused();
         await expect(
           recoveryStudy.getByRole("button", {
             name: "Pause automatic refills",
@@ -303,12 +339,14 @@ test("payment recovery reports retry, processing, and completion at responsive w
         await expect(reviewButton).toHaveCount(0);
       }
       expect(page.url()).toBe(originalUrl);
-      await recoveryStudy.screenshot({
-        animations: "disabled",
-        path: testInfo.outputPath(
-          `payment-recovery-${status}-${viewport.label}.png`,
-        ),
-      });
+      if (!capturedPendingState) {
+        await recoveryStudy.screenshot({
+          animations: "disabled",
+          path: testInfo.outputPath(
+            `payment-recovery-${status}-${viewport.label}.png`,
+          ),
+        });
+      }
     }
   }
 });

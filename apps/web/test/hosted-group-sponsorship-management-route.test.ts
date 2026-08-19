@@ -54,7 +54,7 @@ vi.mock("@/src/lib/http", () => ({
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 
-import { POST } from "@/app/api/groups/fund/[joinCode]/sponsorship/route";
+import { GET, POST } from "@/app/api/groups/fund/[joinCode]/sponsorship/route";
 
 describe("group sponsorship management route", () => {
   beforeEach(() => {
@@ -77,6 +77,40 @@ describe("group sponsorship management route", () => {
       runtimeMemberId: "member_group_runtime",
     });
     mocks.manageHostedGroupSponsorshipAuthorization.mockResolvedValue(null);
+  });
+
+  it("reads the exact payer management projection without starting recovery again", async () => {
+    const management = {
+      authorizationId: "hgsa_abcdefghijklmnop",
+      status: "active",
+    };
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValue(
+      management,
+    );
+
+    await expect(GET(new Request(
+      "https://join.example.test/api/groups/fund/group_join_code_1234/sponsorship",
+    ), {
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }) as Promise<unknown>).resolves.toEqual({ management });
+
+    expect(
+      mocks.readHostedGroupUsageFundingManagementTargetByLocator,
+    ).toHaveBeenCalledWith({
+      locator: "group_join_code_1234",
+      prisma: { label: "prisma" },
+    });
+    expect(
+      mocks.readHostedGroupSponsorshipManagementProjection,
+    ).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_group_runtime",
+      payerMemberId: "member_payer",
+      prisma: { label: "prisma" },
+    });
+    expect(
+      mocks.recoverHostedGroupSponsorshipUsageCreditCheckout,
+    ).not.toHaveBeenCalled();
+    expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
   });
 
   it("allows the exact suspended payer to cancel through an inactive target", async () => {

@@ -24,6 +24,35 @@ import { getPrisma } from "@/src/lib/prisma";
 
 const BODY_LIMIT_BYTES = 1_024;
 
+export const GET = withJsonError(async (
+  request: Request,
+  context: { params: Promise<{ joinCode: string }> },
+) => {
+  const auth = await requireHostedAppSessionFromRequest(request);
+  const rawJoinCode = await resolveDecodedRouteParam(
+    context.params,
+    "joinCode",
+  );
+  const locator = normalizeHostedGroupUsageFundingLocator(rawJoinCode);
+  const prisma = getPrisma();
+  const target = locator
+    ? await readHostedGroupUsageFundingManagementTargetByLocator({
+        locator,
+        prisma,
+      })
+    : null;
+  if (!target) {
+    return jsonOk({ management: null });
+  }
+  const management =
+    await readHostedGroupSponsorshipManagementProjection({
+      beneficiaryMemberId: target.runtimeMemberId,
+      payerMemberId: auth.member.id,
+      prisma,
+    });
+  return jsonOk({ management });
+});
+
 export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ joinCode: string }> },
