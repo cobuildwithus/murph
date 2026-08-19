@@ -7,6 +7,10 @@ import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+// Imported before the tests swap in linkedom's globals, which do not carry the
+// URL constructor the device-sync config needs at import time.
+import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/provider-label";
+
 const mocks = vi.hoisted(() => ({
   ConnectedAccountCard: vi.fn(({ action, label, value }: {
     action?: React.ReactNode;
@@ -910,6 +914,88 @@ describe("HostedDataPrivacySettings", () => {
       .find((link) => link.textContent?.trim() === "Manage wearables");
     assert.ok(recoveryLink);
     expect(recoveryLink.getAttribute("href")).toBe("/connect");
+  });
+
+  test("sends provider-access removal to the named providers' own sites", async () => {
+    const recoveryMessage =
+      "Remove Murph access from Oura and Strava, then confirm below.";
+    mockHostedDataPrivacyDeleteFlowState({
+      dialogError: recoveryMessage,
+      providerAccessRemovalRequired: true,
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    const alert = container.querySelector('[role="alert"]');
+    assert.ok(alert);
+    // The sentence must survive linking, since it is the server's exact copy.
+    expect(alert.textContent).toContain(recoveryMessage);
+    const providerLinks = [...alert.querySelectorAll("a")].map((link) => [
+      link.textContent?.trim(),
+      link.getAttribute("href"),
+    ]);
+    expect(providerLinks).toEqual([
+      ["Oura", "https://ouraring.com"],
+      ["Strava", "https://www.strava.com"],
+    ]);
+    // Deletion cannot be completed from Murph here, so nothing may imply that a
+    // Murph page performs the removal.
+    expect(providerLinks.some(([, href]) => href === "/connect")).toBe(false);
+  });
+
+  test("labels the provider sites with the canonical device-sync provider labels", () => {
+    const linkedLabels = ["Oura", "Strava", "WHOOP"];
+
+    expect(
+      ["oura", "strava", "whoop"].map(formatHostedDeviceSyncProviderLabel),
+    ).toEqual(linkedLabels);
+  });
+
+  test("starts the confirmation field empty with no placeholder to copy", async () => {
+    mockHostedDataPrivacyDeleteFlowState({ confirmationPhrase: "" });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    const phraseInput = container.querySelector<HTMLInputElement>(
+      "#hosted-account-delete-phrase",
+    );
+    assert.ok(phraseInput);
+    expect(phraseInput.value).toBe("");
+    // A placeholder holding the phrase reads as a pre-filled confirmation.
+    expect(phraseInput.getAttribute("placeholder")).toBeNull();
+    assert.equal(findButton(container, "Delete account").disabled, true);
   });
 
   test("an authorization failure does not invalidate an unchanged session", async () => {

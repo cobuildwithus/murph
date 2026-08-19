@@ -475,7 +475,7 @@ export function HostedAccountDeletionErrorAlert({
       role="alert"
       className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive [overflow-wrap:anywhere]"
     >
-      <p>{linkProviderAccessRemoval(message)}</p>
+      <p>{linkProviderAccessSites(message)}</p>
       {deviceReconnectRequired ? (
         <Link
           className="self-start font-medium underline underline-offset-4"
@@ -488,27 +488,45 @@ export function HostedAccountDeletionErrorAlert({
   );
 }
 
-// The provider-recovery message asks the member to remove Murph's access before
-// deletion can continue, so the instruction itself links to the page that does
-// it instead of leaving them to find /connect on their own.
-const PROVIDER_ACCESS_REMOVAL_INSTRUCTION = "Remove";
+// A deletion fenced on an ambiguous OAuth callback can only be cleared where the
+// grant lives, which is the provider's own account and never a Murph page. The
+// alert therefore links each named provider to its own site so the member can
+// get there, and claims nothing about what Murph can revoke for them. Only
+// direct-OAuth providers can leave the session behind that raises this message.
+// `hosted-data-privacy-settings.test.ts` pins these labels to the canonical
+// device-sync provider labels so a rename cannot silently unlink them.
+const PROVIDER_ACCESS_SITES: readonly { label: string; url: string }[] = [
+  { label: "Oura", url: "https://ouraring.com" },
+  { label: "Strava", url: "https://www.strava.com" },
+  { label: "WHOOP", url: "https://www.whoop.com" },
+];
 
-function linkProviderAccessRemoval(message: string): ReactNode {
-  if (!message.startsWith(`${PROVIDER_ACCESS_REMOVAL_INSTRUCTION} `)) {
+function linkProviderAccessSites(message: string): ReactNode {
+  const pattern = new RegExp(
+    `\\b(${PROVIDER_ACCESS_SITES.map((site) => site.label).join("|")})\\b`,
+    "gu",
+  );
+  const segments = message.split(pattern);
+  if (segments.length === 1) {
     return message;
   }
 
-  return (
-    <>
-      <Link
+  return segments.map((segment, index) => {
+    const site = PROVIDER_ACCESS_SITES.find((entry) => entry.label === segment);
+    return site ? (
+      <a
+        key={`${index}-${segment}`}
         className="font-medium underline-offset-4 hover:underline"
-        href="/connect"
+        href={site.url}
+        rel="noreferrer"
+        target="_blank"
       >
-        {PROVIDER_ACCESS_REMOVAL_INSTRUCTION}
-      </Link>
-      {message.slice(PROVIDER_ACCESS_REMOVAL_INSTRUCTION.length)}
-    </>
-  );
+        {segment}
+      </a>
+    ) : (
+      segment
+    );
+  });
 }
 
 export function HostedAccountProviderAccessRemovalConfirmation({
