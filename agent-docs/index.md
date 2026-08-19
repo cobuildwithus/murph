@@ -7,8 +7,8 @@ Last verified: 2026-08-19
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-Every pull request carries one mechanically validated deployment-concerns
-disposition. Applicable deploy boundaries record supported skew, safe order,
+Every pull request carries one mechanically validated, field-complete
+deployment-concerns disposition. Applicable deploy boundaries record supported skew, safe order,
 rollback floor, expected exposure, reversibility, convergence proof, and
 post-deploy checks; other changes record one concrete not-applicable reason.
 The contract and its proof are specified by
