@@ -1,6 +1,6 @@
 # Retire the OC R2 compatibility bridge
 
-Status: active
+Status: completed
 Created: 2026-08-06
 Updated: 2026-08-19
 
@@ -141,3 +141,15 @@ Updated: 2026-08-19
 - Focused Web tests passed 32 checks after the ordinary generated Prisma-client
   prerequisite. The Cloudflare deploy-contract test passed 25 checks, Web and
   Cloudflare typechecks passed, and the diff passed whitespace validation.
+- The post-retirement preliminary specialist review required direct proof that
+  the retired maintenance variable no longer has authority at either Web route
+  boundary. Both routes now succeed with that stale value present; the focused
+  two-file run passed all eight checks.
+- Final ReviewGPT found that deleting the one-time rollout procedure had also
+  removed the permanent physical-retirement rollback floor. The canonical
+  deploy guide and its existing contract test now forbid restoring any Worker
+  release that references the retired OC binding or fallback. The focused
+  deploy-contract run passed all 25 checks, the broader Cloudflare node run
+  passed 2,598 checks with two skips, and both Web and Cloudflare typechecks
+  remained green.
+Completed: 2026-08-19
