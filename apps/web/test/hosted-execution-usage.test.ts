@@ -372,6 +372,46 @@ describe("recordHostedAiUsageRecords", () => {
       .not.toHaveBeenCalled();
   });
 
+  it("replays one persisted Linq rich-link partial before completing usage recording", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const noticeDeliveryTarget = {
+      channel: "linq" as const,
+      replyToMessageId: "linq_message_usage_partial",
+      routeAuthority: null,
+      target: "chat_home_123",
+    };
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+    noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat
+      .mockRejectedValueOnce(Object.assign(
+        new Error("Linq rich-link delivery needs exact recovery."),
+        { code: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY" },
+      ))
+      .mockResolvedValueOnce({ status: "sent" });
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      noticeDeliveryTarget,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledTimes(2);
+    const [firstAttempt, replay] =
+      noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock.calls;
+    expect(replay?.[0]).toEqual(firstAttempt?.[0]);
+    expect(noticeMocks.projectHostedAiUsageLimitNoticeForDelivery)
+      .toHaveBeenCalledOnce();
+  });
+
   it("sends a crossing notice back to the originating Telegram thread", async () => {
     const hostedAiUsageUpsert = vi.fn(
       async (args: { create: Record<string, unknown> }) => args.create,
@@ -708,6 +748,8 @@ describe("recordHostedAiUsageRecords", () => {
     })).resolves.toEqual({
       recordedIds: ["turn_123.attempt-1"],
     });
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledOnce();
     consoleWarnSpy.mockRestore();
   });
 

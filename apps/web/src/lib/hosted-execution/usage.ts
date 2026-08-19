@@ -28,6 +28,9 @@ import {
   readHostedLinqHomeLineAuthority,
 } from "../hosted-onboarding/linq-home-routing";
 import {
+  HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
+} from "../hosted-onboarding/linq-delivery-store";
+import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "../hosted-onboarding/logging";
@@ -223,7 +226,7 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
 
   try {
     if (input.noticeDeliveryTarget?.channel === "linq") {
-      await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+      await sendHostedAiUsageLimitLinqNoticeWithPartialRecovery({
         chatId: input.noticeDeliveryTarget.target,
         claimToken: {
           periodStart: input.candidate.periodStart.toISOString(),
@@ -292,7 +295,7 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
       return;
     }
 
-    await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+    await sendHostedAiUsageLimitLinqNoticeWithPartialRecovery({
       chatId: route.chatId,
       claimToken: {
         periodStart: input.candidate.periodStart.toISOString(),
@@ -316,6 +319,28 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
   } catch (error) {
     logHostedAiUsageLimitNoticeDelivery("send_failed", input.candidate, error);
   }
+}
+
+async function sendHostedAiUsageLimitLinqNoticeWithPartialRecovery(
+  input: Parameters<typeof sendClaimedHostedAiUsageLimitNoticeToLinqChat>[0],
+): Promise<void> {
+  try {
+    await sendClaimedHostedAiUsageLimitNoticeToLinqChat(input);
+  } catch (error) {
+    if (!isHostedAiUsageLimitRichLinkPartialDeliveryFailure(error)) {
+      throw error;
+    }
+    await sendClaimedHostedAiUsageLimitNoticeToLinqChat(input);
+  }
+}
+
+function isHostedAiUsageLimitRichLinkPartialDeliveryFailure(
+  error: unknown,
+): boolean {
+  return error !== null
+    && typeof error === "object"
+    && "code" in error
+    && error.code === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE;
 }
 
 function logHostedAiUsageLimitNoticeDelivery(
