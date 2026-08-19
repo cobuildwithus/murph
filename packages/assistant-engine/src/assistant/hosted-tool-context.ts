@@ -77,11 +77,13 @@ export interface AssistantHostedToolRequestKeyScope {
 export interface AssistantHostedUserActionScope
   extends AssistantHostedToolRequestKeyScope {
   conversationScope: AssistantConversationScope
+  resultNotificationChannel?: HostedPhoneCallResultNotificationChannel | null
   originSessionId: string
 }
 
 export interface AssistantHostedScheduledPhoneCallScope
   extends HostedRuntimeScheduledAutomationAuthority {
+  resultNotificationChannel?: HostedPhoneCallResultNotificationChannel
   originSessionId: string
 }
 
@@ -268,6 +270,8 @@ export function createAssistantHostedToolContext(input: {
   const groupEmailOutboxTool = groupEmailHost && input.groupEmailOutbox
     ? createAssistantGroupEmailOutboxTool({
         automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
+        automationContextReferences:
+          input.messageInput.outboxAutomationContextReferences ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
         groupTool: groupEmailHost,
         recordPendingDeliveryIntentId:
@@ -326,10 +330,16 @@ export function createAssistantHostedToolContext(input: {
       return null
     }
     const deliveryContext = readDeliveryContext()
+    const conversationScope =
+      input.getConversationScope?.() ?? 'unverified-external'
     return {
       ...buildRequestKeyScope(acceptedInputIds),
-      conversationScope:
-        input.getConversationScope?.() ?? 'unverified-external',
+      conversationScope,
+      resultNotificationChannel:
+        resolveAssistantHostedPhoneCallResultNotificationChannel({
+          channel: deliveryContext.messageInput.channel,
+          conversationScope,
+        }),
       originSessionId: deliveryContext.session.sessionId,
     }
   }
@@ -373,28 +383,8 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     })
   }
-  const phoneCallPort = executionContext?.phoneCalls ?? null
-  const phoneCalls: AssistantPhoneCallPort | null = phoneCallPort
-    ? {
-        start: (request, options) => {
-          const deliveryContext = readDeliveryContext()
-          const scheduledPhoneCallScope = readCurrentScheduledPhoneCallScope()
-          const resultNotificationChannel = scheduledPhoneCallScope
-            ? resolveAssistantHostedPhoneCallResultNotificationChannel({
-                channel: deliveryContext.messageInput.channel,
-                conversationScope:
-                  input.getConversationScope?.() ?? 'unverified-external',
-              })
-            : null
-          return phoneCallPort.start({
-            ...request,
-            ...(resultNotificationChannel
-              ? { resultNotificationChannel }
-              : {}),
-          }, options)
-        },
-      }
-    : null
+  const phoneCalls: AssistantPhoneCallPort | null =
+    executionContext?.phoneCalls ?? null
   let subscriptionActionClaimed = false
   let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
@@ -654,6 +644,7 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   return {
     automationId: scope.origin.automationId,
     occurrenceAt: scope.origin.occurrenceAt,
+    resultNotificationChannel: channel,
     originSessionId: scope.originSessionId ?? input.originSessionId,
   }
 }
@@ -666,7 +657,9 @@ export function resolveAssistantHostedPhoneCallResultNotificationChannel(input: 
     return null
   }
   const channel = input.channel?.trim().toLowerCase()
-  return channel === 'telegram' ? channel : null
+  return channel === 'linq' || channel === 'telegram'
+    ? channel
+    : null
 }
 
 function scopeHostedDeliveryContextPart(input: {

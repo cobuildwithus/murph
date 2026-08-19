@@ -3484,7 +3484,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       requiresFollowUpCheckpoint: boolean;
       wake: HostedRuntimePendingWake;
     }> => {
-      const effects = pendingDurableCheckpointEffects.splice(0);
+      const effects = [...pendingDurableCheckpointEffects];
+      pendingDurableCheckpointEffects.splice(0);
       let requiresFollowUpCheckpoint = false;
       let durableWake: HostedRuntimePendingWake = {
         nextWakeAt: null,
@@ -3509,6 +3510,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     : undefined,
                 );
           requiresFollowUpCheckpoint ||= effectResult?.requiresFollowUpCheckpoint === true;
+          if (effectResult?.redactedStatus) {
+            redactedStatus = mergeHostedWorkspaceInvocationRedactedStatus(
+              redactedStatus,
+              effectResult.redactedStatus,
+            );
+          }
           const effectWake = readHostedWorkspaceDurableCheckpointEffectWake(effectResult);
           if (effectWake.nextWakeAt) {
             requiresFollowUpCheckpoint = true;
@@ -3525,6 +3532,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             durableWake = selectedWake;
           }
         } catch (error) {
+          // A durable effect may have changed portable state before failing.
+          // Persist that state through the same interruptible checkpoint path.
+          requiresFollowUpCheckpoint = true;
           emitPhaseLog({
             error,
             input,
@@ -3536,7 +3546,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       return { requiresFollowUpCheckpoint, wake: durableWake };
     };
-    const waitForMailboxPostCheckpointEffects = async (): Promise<
+    const waitForMailboxPostCheckpointEffects = async (waitOptions: {
+      allowRuntimeWakeInterruption?: boolean;
+    } = {}): Promise<
       HostedRuntimeMailboxPostCheckpointEffectWaitResult
     > => {
       const pendingCompletions = pendingMailboxPostCheckpointEffectCompletions;
@@ -3548,7 +3560,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const effectsFinished = Promise.all([
           ...pendingCompletions,
         ]);
-        const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
+        const runtimeWakeSignal = waitOptions.allowRuntimeWakeInterruption === false
+          ? null
+          : options.runtimeWakeSignal ?? null;
         if (!runtimeWakeSignal) {
           await raceHostedRuntimeCancellation(
             effectsFinished,
@@ -5186,6 +5200,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (
           options.shutdownSignal?.aborted !== true
           && imageGenerationController?.hasWork()
+          && pendingDurableCheckpointEffects.length === 0
+          && !durableCheckpointFollowUpPending
         ) {
           markIdleCheckpointTimerAfterDirtyWork();
           continue;
@@ -5225,6 +5241,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         const idleMaintenancePendingWork =
           assistantProviderHandoffRequested
+          || pendingDurableCheckpointEffects.length > 0
+          || durableCheckpointFollowUpPending
           || invocationStatus === "budget_exhausted"
           || (pendingWake.nextWakeAt !== null
             && Date.parse(pendingWake.nextWakeAt) - Date.now()
@@ -5235,8 +5253,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           ?? null;
         let idleMaintenance: HostedIdleMaintenanceOutcome;
         try {
-          idleMaintenance = dirtyWindowCheckpointTrigger === "shutdown_signal"
-            ? buildHostedShutdownIdleMaintenanceOutcome()
+          idleMaintenance =
+            dirtyWindowCheckpointTrigger === "shutdown_signal"
+            ? {
+                kind: "skipped",
+                reason: "shutdown",
+                threadContextTokensBefore: null,
+              }
             : await runHostedPendingInputProtectedIdleMaintenance({
               // The compact call rides the same warm-process credential as turns,
               // so attribute it the same way: members using their own provider key
@@ -5467,7 +5490,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           throw error;
         }
-        resumeDetachedAssistantAskAfterWorkspaceBoundary();
         if (checkpointWakeNotificationAfterCommit) {
           checkpointWakeLatencySeed ??= createHostedRuntimeWakeLatencySeed(
             checkpointWakeNotificationAfterCommit,
@@ -5508,6 +5530,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // createHostedWorkspaceSnapshotCheckpointRequestBuilder.recordCheckpoint;
         // re-mutating it here would be a duplicate state owner and is the seam
         // that previously let inboxMediaRetentionWakeAt drift.
+        resumeDetachedAssistantAskAfterWorkspaceBoundary();
         const mayRunPostCheckpointWork = (): boolean =>
           idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal"
           && options.shutdownSignal?.aborted !== true;

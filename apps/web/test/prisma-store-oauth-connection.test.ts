@@ -2285,37 +2285,64 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     );
   });
 
-  it("keeps webhook-ingress external-account lookups on the durable Prisma owner", async () => {
+  it("keeps webhook-ingress external-account lookup secret-free and returns its proven owner", async () => {
     const connection = createConnection({
       id: "dsc_123",
       provider: "oura",
       status: "active",
       userId: "user-123",
     });
-
+    const findUnique = vi.fn(async ({ where }: {
+      select: Record<string, boolean>;
+      where: {
+        provider_providerAccountBlindIndex: {
+          provider: string;
+          providerAccountBlindIndex: string;
+        };
+      };
+    }) =>
+      where.provider_providerAccountBlindIndex.provider === "oura"
+        && where.provider_providerAccountBlindIndex.providerAccountBlindIndex === buildHostedProviderAccountBlindIndex({
+          key: BLIND_INDEX_KEY,
+          provider: "oura",
+          externalAccountId: "acct_456",
+        })
+        ? cloneConnection(connection)
+        : null,
+    );
     const store = new PrismaDeviceSyncControlPlaneStore({
-      codec: TEST_CODEC,
       prisma: {
-        deviceConnection: {
-          findUnique: async ({ where }: { where: { provider_providerAccountBlindIndex: { provider: string; providerAccountBlindIndex: string } } }) =>
-            where.provider_providerAccountBlindIndex.provider === "oura"
-              && where.provider_providerAccountBlindIndex.providerAccountBlindIndex === buildHostedProviderAccountBlindIndex({
-                key: BLIND_INDEX_KEY,
-                provider: "oura",
-                externalAccountId: "acct_456",
-              })
-              ? cloneConnection(connection)
-              : null,
-        },
+        deviceConnection: { findUnique },
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
 
-    await expect(store.getConnectionByExternalAccount("oura", "acct_456")).resolves.toEqual(expect.objectContaining({
-      id: "dsc_123",
-      provider: "oura",
-      status: "active",
-    }));
+    await expect(
+      store.getWebhookConnectionByExternalAccount("oura", "acct_456"),
+    ).resolves.toEqual({
+      account: expect.objectContaining({
+        externalAccountId: "acct_456",
+        id: "dsc_123",
+        provider: "oura",
+        status: "active",
+      }),
+      connectionOwnerId: "user-123",
+    });
+    expect(findUnique).toHaveBeenCalledOnce();
+    expect(findUnique).toHaveBeenCalledWith({
+      select: hostedRuntimeRedactedConnectionRecordArgs.select,
+      where: {
+        provider_providerAccountBlindIndex: {
+          provider: "oura",
+          providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+            key: BLIND_INDEX_KEY,
+            provider: "oura",
+            externalAccountId: "acct_456",
+          }),
+        },
+      },
+    });
+    expect(openHostedUserSecureBoxStringMock).not.toHaveBeenCalled();
   });
 
   it("rehydrates seeded hosted callback accounts by durable connection id", async () => {

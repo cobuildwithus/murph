@@ -5,6 +5,7 @@ import {
   MIN_AUTOMATION_EVERY_MS,
   assistantReasoningEffortValues,
   automationActiveUntilSchema,
+  automationContextReferencesSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
@@ -16,6 +17,7 @@ import {
   parseAutomationSupportSeriesTag,
   VAULT_LAYOUT,
   type AutomationAssistantTargetOverride,
+  type AutomationContextReference,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -45,6 +47,7 @@ type AutomationAssistantReasoningEffort = NonNullable<
 
 export type {
   AutomationAssistantTargetOverride,
+  AutomationContextReference,
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
@@ -66,6 +69,7 @@ export interface AutomationQueryRecord {
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
   supportKind: AutomationSupportKind | null;
   plannedOccurrenceOffsetMs: number | null;
+  contextReferences: AutomationContextReference[];
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -451,6 +455,12 @@ function normalizeAutomationRouteDeliverySource(
   };
 }
 
+function normalizeAutomationContextReferences(
+  value: unknown,
+): AutomationContextReference[] {
+  return automationContextReferencesSchema.parse(value ?? []);
+}
+
 function normalizeTags(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -525,6 +535,9 @@ function parseAutomationRecord(
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
       attributes.plannedOccurrenceOffsetMs,
+    ),
+    contextReferences: normalizeAutomationContextReferences(
+      attributes.contextReferences,
     ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),

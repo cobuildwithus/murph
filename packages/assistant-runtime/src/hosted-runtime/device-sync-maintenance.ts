@@ -26,7 +26,7 @@ import {
 } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import {
-  sanitizeHostedRuntimeErrorText,
+  sanitizeHostedRuntimeDiagnosticText,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import { evaluatePushPrimarySourceStaleness } from "@murphai/device-syncd/source-staleness";
@@ -66,6 +66,7 @@ import type {
 import {
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
+  writeHostedRuntimeLogEntriesBestEffort,
 } from "./runtime-logs.ts";
 import {
   closeHostedRuntimeDeviceSyncService,
@@ -89,7 +90,7 @@ import {
 } from "./background-maintenance-cancellation.ts";
 
 const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
-const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
+const HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK = "Hosted device-sync job failed.";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_MAX_ATTEMPTS_PER_PASS = 4;
@@ -299,9 +300,22 @@ export async function runHostedDeviceSyncPass(
       platform: options.runtimeLogPlatform ?? null,
       processedJobs,
       service,
+      shouldYield,
       state: syncState,
       wake,
     });
+
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs,
+        retainFollowUpWakeUntilCheckpoint:
+          options.retainFollowUpWakeUntilCheckpoint ?? false,
+        service,
+        syncState,
+        wake,
+      });
+    }
+
     await writeHostedDeviceSyncSourceStalledRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,
       service,
@@ -501,7 +515,7 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
             level: "warn",
             phase: "invoke",
             redactedJson: {
-              errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+              errorSummary: sanitizeHostedRuntimeDiagnosticText(errorToString(error))
                 ?? "Fitbit migration cutover failed",
               provider: "junction",
               sourceProvider: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
@@ -626,7 +640,7 @@ export function resolveHostedDeviceSyncNextWakeAt(input: {
           level: "warn",
           phase: "invoke",
           redactedJson: {
-            errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+            errorSummary: sanitizeHostedRuntimeDiagnosticText(errorToString(error))
               ?? "device sync wake projection failed",
           },
         },
@@ -959,7 +973,7 @@ async function writeHostedDeviceSyncSourceStalledRuntimeLogs(input: {
         level: "warn",
         phase: "invoke",
         redactedJson: {
-          errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+          errorSummary: sanitizeHostedRuntimeDiagnosticText(errorToString(error))
             ?? "source staleness evaluation failed",
           failed: true,
         },
@@ -1022,7 +1036,7 @@ async function writeHostedDeviceSyncDenseRawRetentionFailureRuntimeLog(input: {
       level: "warn",
       phase: "invoke",
       redactedJson: {
-        errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(input.error))
+        errorSummary: sanitizeHostedRuntimeDiagnosticText(errorToString(input.error))
           ?? "dense raw retention failed",
         failed: true,
         hasMore: true,
@@ -1250,6 +1264,7 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   processedJobs: number;
   service: HostedDeviceSyncRuntimeService;
+  shouldYield: (() => boolean) | null;
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
 }): Promise<void> {
@@ -1257,11 +1272,11 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
     return;
   }
 
-  // Per-attempt failure diagnostics are recorded by the worker at the moment a
-  // job attempt fails, so they survive a later job success that clears the
-  // account-level last_sync_error_at state in the same drain. Webhook-triggered
-  // wakes and idle maintenance both reach this writer through
-  // runHostedDeviceSyncPass.
+  // This maintenance pass is the sole owner of per-attempt failure telemetry.
+  // It records the worker diagnostic at the moment a job attempt fails, so the
+  // event survives a later job success that clears account-level failure state
+  // in the same drain. Webhook-triggered wakes and idle maintenance both reach
+  // this writer through runHostedDeviceSyncPass.
   const failureDiagnostics = input.service.listJobFailureDiagnostics();
   if (failureDiagnostics.length === 0) {
     return;
@@ -1274,7 +1289,7 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
     input.service.listAccounts().map((account) => [account.id, account]),
   );
 
-  for (const failureDiagnostic of failureDiagnostics) {
+  const entries = failureDiagnostics.map((failureDiagnostic) => {
     const account = accountsByLocalAccountId.get(failureDiagnostic.accountId) ?? null;
     const hostedConnectionId =
       input.state.localToHostedAccountIds.get(failureDiagnostic.accountId) ?? null;
@@ -1282,26 +1297,28 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
       ? baselineByHostedConnectionId.get(hostedConnectionId) ?? null
       : null;
 
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...(failureDiagnostic.at ? { at: failureDiagnostic.at } : {}),
-        component: "device-sync",
-        errorCode: toHostedRuntimeLogCode(failureDiagnostic.code),
-        eventCode: "device-sync.job_failed",
-        level: "warn",
-        phase: "invoke",
-        redactedJson: buildHostedDeviceSyncFailureLogRedactedJson({
-          account,
-          baseline,
-          failureDiagnostic,
-          hostedConnectionKnown: Boolean(hostedConnectionId),
-          processedJobs: input.processedJobs,
-          wake: input.wake,
-        }),
-      },
-      platform: input.platform,
-    });
-  }
+    return {
+      ...(failureDiagnostic.at ? { at: failureDiagnostic.at } : {}),
+      component: "device-sync" as const,
+      errorCode: toHostedRuntimeLogCode(failureDiagnostic.code),
+      eventCode: "device-sync.job_failed" as const,
+      level: "warn" as const,
+      phase: "invoke" as const,
+      redactedJson: buildHostedDeviceSyncFailureLogRedactedJson({
+        account,
+        baseline,
+        failureDiagnostic,
+        hostedConnectionKnown: Boolean(hostedConnectionId),
+        processedJobs: input.processedJobs,
+        wake: input.wake,
+      }),
+    };
+  });
+  await writeHostedRuntimeLogEntriesBestEffort({
+    entries,
+    platform: input.platform,
+    shouldYieldBetweenBatches: input.shouldYield,
+  });
 }
 
 async function writeHostedLegacyDeviceSyncPlatformEnvLog(input: {
@@ -1345,7 +1362,7 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
   processedJobs: number;
   wake: HostedRuntimeEvent;
 }): Record<string, boolean | number | string | null> {
-  const summary = sanitizeHostedDeviceSyncFailureSummary(
+  const summary = sanitizeHostedRuntimeDiagnosticText(
     input.failureDiagnostic.summary
       ?? (input.account && input.account.lastErrorCode === input.failureDiagnostic.code
         ? input.account.lastErrorMessage
@@ -1375,7 +1392,7 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
     ...(input.failureDiagnostic.resource
       ? { failureResource: toHostedRuntimeLogCode(input.failureDiagnostic.resource) }
       : {}),
-    failureSummary: summary ?? "Hosted device-sync job failed.",
+    failureSummary: summary ?? HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK,
     ...buildHostedDeviceSyncFailureDiagnosticRedactedJson(input.failureDiagnostic),
     hadPriorFailure: Boolean(priorLocalState?.lastSyncErrorAt),
     hadPriorSuccess: Boolean(priorLocalState?.lastSyncCompletedAt),
@@ -1545,53 +1562,8 @@ function appendHostedDeviceSyncFailureDiagnosticReason(
     return;
   }
 
-  const reason = sanitizeHostedDeviceSyncFailureSummary(value);
-  if (reason) {
-    redacted[key] = reason;
-  }
-}
-
-function sanitizeHostedDeviceSyncFailureSummary(value: string | null): string | null {
-  const sanitized = sanitizeHostedRuntimeErrorText(value);
-
-  if (!sanitized) {
-    return null;
-  }
-
-  const redacted = sanitized
-    .replace(/\bfile:\/\/[^\s)"']+/giu, "<redacted-path>")
-    .replace(/(^|[\s(])\/[^\s)]+/gu, "$1<redacted-path>")
-    .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<redacted-path>")
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
-    .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
-    .replace(
-      /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+/giu,
-      "<redacted-secret>",
-    )
-    .trim();
-
-  const bounded = redacted.length <= HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH
-    ? redacted
-    : `${redacted.slice(0, HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH - 3).trimEnd()}...`;
-
-  return isHostedDeviceSyncSafeRuntimeLogSummary(bounded)
-    ? bounded
-    : "[redacted]";
-}
-
-function isHostedDeviceSyncSafeRuntimeLogSummary(value: string): boolean {
-  return value.length > 0
-    && value.length <= HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH
-    && !(
-      /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)
-      || /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)
-      || /\+\d[\d().\s-]{7,}\d/u.test(value)
-      || /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
-        .test(value)
-      || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
-      || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
-      || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
-    );
+  redacted[key] = sanitizeHostedRuntimeDiagnosticText(value)
+    ?? HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK;
 }
 
 async function preloadHostedDeviceSyncRuntimeSnapshot(input: {

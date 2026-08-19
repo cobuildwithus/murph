@@ -157,6 +157,7 @@ const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
 const HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS = 2_000;
 const HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS = 1_500;
+const HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX = "phone-call-result:";
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | string>;
@@ -1825,6 +1826,7 @@ function hasHostedAssistantOutboxConfirmationRetryPath(
 
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  selectedNonIdempotentEffectIds?: readonly string[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
@@ -1832,12 +1834,18 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
+  const selectedNonIdempotentEffectIds = new Set(
+    input.selectedNonIdempotentEffectIds ?? [],
+  );
   const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
     context: input.linqDeliveryContext ?? null,
     contexts: input.linqDeliveryContexts ?? null,
   });
   for (const effect of input.assistantDeliveryEffects) {
-    if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
+    if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(
+      effect,
+      selectedNonIdempotentEffectIds.has(effect.effectId),
+    )) {
       continue;
     }
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
@@ -1880,9 +1888,11 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 
 function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
+  explicitlyPrepareNonIdempotent: boolean,
 ): boolean {
   return !hasHostedAssistantVaultFileMedia(effect.payload)
-    && (effect.payload.transportIdempotent
+    && (explicitlyPrepareNonIdempotent
+      || effect.payload.transportIdempotent
       || isHostedAssistantReactionOnlyEffect(effect)
       || hasHostedAssistantVoiceMemoMedia(effect.payload)
       || isHostedSignupWelcomeDeliveryPayload(effect.payload));
@@ -2501,6 +2511,25 @@ function markHostedDeliveryPreProvider(error: unknown): unknown {
   });
 }
 
+function markHostedPhoneCallResultRouteRevocationRetryable(input: {
+  error: unknown;
+  idempotencyKey: string | null | undefined;
+}): unknown {
+  const idempotencyKey = input.idempotencyKey?.trim() ?? "";
+  if (
+    !idempotencyKey.startsWith(HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX)
+    || idempotencyKey.length === HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX.length
+    || typeof input.error !== "object"
+    || input.error === null
+    || !("code" in input.error)
+    || input.error.code !== "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
+  ) {
+    return input.error;
+  }
+
+  return markHostedDeliveryPreProviderRetryable(input.error);
+}
+
 function createHostedEmailGroupRecipientAmbiguityError(): VaultCliError & {
   deliveryMayHaveSucceeded: true;
   retryable: false;
@@ -2778,6 +2807,11 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
         }
       : {}),
     signal: input.signal,
+  }).catch((error: unknown) => {
+    throw markHostedPhoneCallResultRouteRevocationRetryable({
+      error,
+      idempotencyKey: input.intent?.deliveryIdempotencyKey,
+    });
   });
   if (assertion?.assistantAskFallbackRequired === true) {
     if (!reviewedCompletion) {
@@ -4199,6 +4233,8 @@ async function persistHostedEmailGroupFanoutIntents(input: {
         actorId: payload.actorId,
         answeredMailboxItemIds: payload.answeredMailboxItemIds,
         automationAuthority: parentIntent.automationAuthority ?? null,
+        automationContextReferences:
+          parentIntent.automationContextReferences ?? null,
         channel: "email",
         dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
         deliveryIdempotencyKey: payload.idempotencyKey,
@@ -6024,7 +6060,10 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       });
       return alreadyStarted;
     }
-    throw error;
+    throw markHostedPhoneCallResultRouteRevocationRetryable({
+      error,
+      idempotencyKey: input.idempotencyKey,
+    });
   }
   const normalized = normalizeHostedAssistantLinqEngagementResult(result);
   if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {

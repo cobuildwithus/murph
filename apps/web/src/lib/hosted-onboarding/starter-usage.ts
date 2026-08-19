@@ -48,7 +48,7 @@ export function buildHostedStarterUsageLifetimePeriod(): {
   };
 }
 
-const HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX =
+export const HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX =
   "hosted-starter-usage";
 const HOSTED_STARTER_USAGE_SOURCE_REFERENCE_PREFIX =
   "starter-usage-source";

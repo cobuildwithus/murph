@@ -22,12 +22,14 @@ import {
 } from "./junction-resources.ts";
 import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import {
   isDeviceSyncConnectionSetupPending,
+  isDeviceSyncSourceDisconnectFenced,
   toRedactedPublicDeviceSyncAccount,
 } from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
@@ -122,6 +124,12 @@ export function resolveDeviceSyncStoreNextWakeAt(input: {
 const DEVICE_SYNC_VALIDATION_ISSUE_LIMIT = 10;
 const DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT = 4;
 const DEVICE_SYNC_JOB_YIELD_POLL_MS = 100;
+// Never retain fewer diagnostics than one hosted pass can produce, and never
+// regress below the established 100-attempt observability window.
+export const DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT = Math.max(
+  100,
+  HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
+);
 const DEVICE_SYNC_CONNECTION_MUTATION_MAX_PENDING = 1;
 const DEVICE_SYNC_CONNECTION_MUTATION_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS = 50;
@@ -391,8 +399,34 @@ class DeviceSyncServiceController {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
         },
+        getWebhookConnectionByExternalAccount: (provider, externalAccountId) => {
+          const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
+          return account
+            ? {
+                account: this.toPublicAccount(account),
+                connectionOwnerId: null,
+              }
+            : null;
+        },
         upsertConnectionSource: (input) => this.store.upsertConnectionSource(input),
         listConnectionSources: (input) => this.store.listConnectionSources(input),
+        resolveConnectionSourceAdmissionCandidate: (input) =>
+          this.store.listConnectionSources(input)
+            .sort((left, right) => {
+              const leftExact = input.sourceInstanceKey !== undefined
+                && left.sourceInstanceKey === input.sourceInstanceKey;
+              const rightExact = input.sourceInstanceKey !== undefined
+                && right.sourceInstanceKey === input.sourceInstanceKey;
+              const leftAdmitted = left.status === "connected"
+                && !isDeviceSyncSourceDisconnectFenced(left);
+              const rightAdmitted = right.status === "connected"
+                && !isDeviceSyncSourceDisconnectFenced(right);
+              return Number(rightExact) - Number(leftExact)
+                || Number(rightAdmitted) - Number(leftAdmitted)
+                || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
+                || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
+                || left.id.localeCompare(right.id);
+            })[0] ?? null,
         claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
         completeWebhookTrace: (provider, traceId, claimToken) =>
           this.store.completeWebhookTrace(provider, traceId, claimToken),
@@ -1608,8 +1642,11 @@ class DeviceSyncServiceController {
       details: { ...entry.details },
     });
 
-    if (this.jobFailureDiagnostics.length > 50) {
-      this.jobFailureDiagnostics.splice(0, this.jobFailureDiagnostics.length - 50);
+    if (this.jobFailureDiagnostics.length > DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT) {
+      this.jobFailureDiagnostics.splice(
+        0,
+        this.jobFailureDiagnostics.length - DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT,
+      );
     }
   }
 

@@ -62,6 +62,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   summary: string | null
   supportKind: AutomationSupportKind | null
   plannedOccurrenceOffsetMs: number | null
+  contextReferences: AutomationQueryRecord['contextReferences']
   tags: string[]
   timeZone: string | null
   title: string
@@ -474,6 +475,7 @@ export function buildCanonicalAutomationUpsertInput(input: {
     | 'activeUntil'
     | 'assistantTargetOverride'
     | 'continuityPolicy'
+    | 'contextReferences'
     | 'slug'
     | 'summary'
     | 'tags'
@@ -508,6 +510,7 @@ export function buildCanonicalAutomationUpsertInput(input: {
         : input.assistantTargetOverride,
     continuityPolicy:
       input.continuityPolicy ?? input.automation?.continuityPolicy ?? 'preserve',
+    contextReferences: input.automation?.contextReferences ?? [],
     activeUntil:
       input.activeUntil === undefined
         ? input.automation?.activeUntil ?? undefined
@@ -596,6 +599,7 @@ function normalizeCanonicalAssistantCronRecord(
     summary: record.summary,
     supportKind: record.supportKind ?? null,
     plannedOccurrenceOffsetMs: record.plannedOccurrenceOffsetMs ?? null,
+    contextReferences: [...(record.contextReferences ?? [])],
     tags: [...record.tags],
     timeZone:
       record.schedule.kind === 'cron' || record.schedule.kind === 'dailyLocal'

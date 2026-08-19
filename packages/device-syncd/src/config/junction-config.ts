@@ -34,7 +34,7 @@ import type {
 } from "./provider-types.ts";
 
 // Production sets the exhaustive code-owned list explicitly. Omitted runtime
-// configuration resolves to the same registry, while explicit subsets remain
+// configuration resolves to the curated defaults, while explicit lists remain
 // exact and cannot be widened by member or environment data.
 export const JUNCTION_PRODUCTION_TIMESERIES_RESOURCES =
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES;

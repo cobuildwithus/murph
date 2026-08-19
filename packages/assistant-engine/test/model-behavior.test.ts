@@ -3271,6 +3271,12 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
     )
     expect(prompt).toContain(
+      'Only save `contextReferences` by copying ids from successful current canonical reads or create results that identify exactly one record.',
+    )
+    expect(prompt).toContain(
+      'does not prove that a referenced record exists or is the correct mutation target',
+    )
+    expect(prompt).toContain(
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
     expect(prompt).toContain(

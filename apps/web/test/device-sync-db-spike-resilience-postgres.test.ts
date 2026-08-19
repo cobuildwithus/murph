@@ -7,10 +7,14 @@ import {
 } from "@murphai/assistant-runtime/hosted-device-sync-status";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildJunctionProviderSourceInstanceKey,
   listConfiguredDeviceSyncReconnectTargets,
   listJunctionDeviceConnectRouteEntries,
 } from "@murphai/device-syncd/connect-config";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
+import {
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+} from "@murphai/device-syncd/public-account";
 
 const controlPlaneMocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
@@ -27,7 +31,6 @@ import {
 import { readCompanionDeviceSyncStatus } from "@/src/lib/device-sync/companion";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { handleHostedDeviceSyncWebhookAccepted } from "@/src/lib/device-sync/wake-service";
-import { readHostedHealthDataConsentState } from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   runWithPrismaOperationTimings,
@@ -60,6 +63,9 @@ const REPLAY_POOL_MAX = 15;
 const RUNTIME_APPLY_CONNECTIONS = 100;
 const RUNTIME_APPLY_FOREGROUND_READS = 40;
 const RUNTIME_APPLY_POOL_MAX = 2;
+const COMPACT_DIRTY_HINTS = 100;
+const COMPACT_DIRTY_HANDLER_SQL_BUDGET = 1_000;
+const DEFERRED_SOURCE_HANDLER_SQL_BUDGET = 20;
 
 describe.skipIf(!runPostgresProof)(
   "device-sync database-spike resilience (real PostgreSQL)",
@@ -85,7 +91,7 @@ describe.skipIf(!runPostgresProof)(
       );
       const boundedAdmissionSourceRead = vi.spyOn(
         store,
-        "listConnectionSourceAdmissionCandidates",
+        "resolveConnectionSourceAdmissionCandidate",
       );
       const preparedDirtyWrite = vi.spyOn(store, "prepareDirtyConnectionUpsert");
       const canonicalDirtyWrite = vi.spyOn(store, "upsertDirtyConnection");
@@ -96,6 +102,13 @@ describe.skipIf(!runPostgresProof)(
       const claimToken = `claim_device_sync_spike_${suffix}`;
       const connectedAt = new Date("2026-08-10T21:30:00.000Z");
       const incidentStartAt = new Date("2026-08-10T21:31:00.000Z");
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId,
+        sourceProviderSlug: "garmin",
+      });
+      if (!sourceInstanceKey) {
+        throw new Error("Synthetic replay could not build its exact source key.");
+      }
       const perSecondCounts = buildIncidentReceiptDistribution();
       const receipts = buildIncidentReceipts({
         incidentStartAt,
@@ -141,7 +154,7 @@ describe.skipIf(!runPostgresProof)(
             id: sourceId,
             lastSeenAt: connectedAt,
             resourceAvailabilitySummaryJson: {},
-            sourceInstanceKey: `garmin-${suffix}`,
+            sourceInstanceKey,
             sourceProviderSlug: "garmin",
             status: "connected",
           },
@@ -190,18 +203,6 @@ describe.skipIf(!runPostgresProof)(
             // 120-second bucket distribution and the 31-receipt peak second.
             const webhookPromises = receipts.map((receipt) =>
               limiter.run(async () => {
-                const ownerId = await store.getConnectionOwnerId(connectionId);
-                if (!ownerId) {
-                  throw new Error("Synthetic replay connection lost its owner mapping.");
-                }
-                const consent = await readHostedHealthDataConsentState({
-                  memberId: ownerId,
-                  prisma,
-                });
-                if (consent === "revoked") {
-                  throw new Error("Synthetic replay member unexpectedly has revoked consent.");
-                }
-
                 await handleHostedDeviceSyncWebhookAccepted({
                   account: {
                     connectedAt: connectedAt.toISOString(),
@@ -210,8 +211,8 @@ describe.skipIf(!runPostgresProof)(
                   },
                   claimToken,
                   now: receipt.receivedAt.toISOString(),
+                  ownerId: memberId,
                   processingAttemptedAt: receipt.receivedAt.toISOString(),
-                  ownerId,
                   store,
                   traceId: receipt.traceId,
                   webhook: {
@@ -318,6 +319,7 @@ describe.skipIf(!runPostgresProof)(
         );
         expect(boundedAdmissionSourceRead.mock.calls.every(([sourceInput]) =>
           sourceInput.connectionId === connectionId
+          && sourceInput.sourceInstanceKey === sourceInstanceKey
           && sourceInput.sourceProviderSlug === "garmin"
           && sourceInput.tx !== undefined
         )).toBe(true);
@@ -349,25 +351,21 @@ describe.skipIf(!runPostgresProof)(
           INCIDENT_SNAPSHOT_READS + 1,
         );
         expect(operationCounts.get("DeviceConnection.findUnique") ?? 0).toBe(
-          INCIDENT_WEBHOOK_RECEIPTS * 3,
+          INCIDENT_WEBHOOK_RECEIPTS * 2,
         );
         expect(operationCounts.get("DeviceConnection.updateMany") ?? 0).toBe(
           INCIDENT_WEBHOOK_RECEIPTS,
         );
         // Each source-attributed webhook deliberately rechecks live source
-        // admission in both the preflight and final locked transaction.
-        // Snapshot source projection uses one
-        // bounded raw set query per snapshot, independent of connection
-        // cardinality, so it does not add model-level findMany calls here.
-        expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(
-          INCIDENT_WEBHOOK_RECEIPTS * 2,
-        );
+        // admission in both locked passes. Admission is one exact raw resolver
+        // per pass; snapshots retain their independent bounded raw set query.
+        expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(0);
         expect(operationCounts.get("$queryRaw") ?? 0).toBeGreaterThanOrEqual(
-          INCIDENT_SNAPSHOT_READS + 1,
+          INCIDENT_WEBHOOK_RECEIPTS * 2 + INCIDENT_SNAPSHOT_READS + 1,
         );
         expect(boundedSnapshotSourceRead).toHaveBeenCalledTimes(INCIDENT_SNAPSHOT_READS + 1);
         const snapshotSourceInputs = boundedSnapshotSourceRead.mock.calls
-          .map(([sourceInput]) => sourceInput)
+          .map((call: [Parameters<PrismaDeviceSyncControlPlaneStore["listBoundedConnectionSourcesForConnections"]>[0]]) => call[0])
           .filter((sourceInput) => sourceInput.sourceProviderSlugs === null);
         expect(snapshotSourceInputs).toHaveLength(INCIDENT_SNAPSHOT_READS);
         for (const sourceInput of snapshotSourceInputs) {
@@ -405,6 +403,7 @@ describe.skipIf(!runPostgresProof)(
           deviceConnectionFindUnique: operationCounts.get("DeviceConnection.findUnique") ?? 0,
           deviceConnectionSourceFindMany:
             operationCounts.get("DeviceConnectionSource.findMany") ?? 0,
+          exactAdmissionSourceReads: boundedAdmissionSourceRead.mock.calls.length,
           boundedSnapshotSourceReads: boundedSnapshotSourceRead.mock.calls.length,
           maxObservedActiveSessions,
           maxObservedSessions,
@@ -437,6 +436,369 @@ describe.skipIf(!runPostgresProof)(
         controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
       }
     }, 180_000);
+
+    it("keeps 100 already-dirty compact hints to one canonical health transaction and 1,000 handler statements", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const prisma = createPrismaClient({
+        databaseUrl: withApplicationName(
+          databaseUrl,
+          `murph_device_sync_compact_dirty_${suffix}`,
+        ),
+        poolMax: 4,
+      });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const healthAdmission = vi.spyOn(store, "withHealthDataAdmissionLock");
+      const pendingDirtyRead = vi.spyOn(store, "readPendingDirtyConnectionSnapshot");
+      const genericWakeRead = vi.spyOn(
+        store,
+        "shouldRequestWakeForDirtyConnectionUpsert",
+      );
+      const preparedDirtyWrite = vi.spyOn(store, "prepareDirtyConnectionUpsert");
+      const canonicalDirtyWrite = vi.spyOn(store, "upsertDirtyConnection");
+      const memberId = `hbm_device_sync_compact_dirty_${suffix}`;
+      const connectionId = `dsc_device_sync_compact_dirty_${suffix}`;
+      const providerAccountBlindIndex = `blind_device_sync_compact_dirty_${suffix}`;
+      const claimToken = `claim_device_sync_compact_dirty_${suffix}`;
+      const connectedAt = new Date("2026-08-12T10:00:00.000Z");
+      const acceptedAt = new Date("2026-08-12T10:01:00.000Z");
+      const traces = Array.from({ length: COMPACT_DIRTY_HINTS }, (_, index) => ({
+        acceptedAt: new Date(acceptedAt.getTime() + index),
+        traceId: `trace_device_sync_compact_dirty_${suffix}_${index}`,
+      }));
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceConnection.create({
+          data: {
+            connectedAt,
+            credentialKind: "none",
+            credentialMetadataJson: {},
+            externalAccountIdEncrypted: null,
+            id: connectionId,
+            metadataJson: {},
+            provider: "oura",
+            providerAccountBlindIndex,
+            scopesJson: [],
+            setupPhase: "source_confirmed",
+            status: "active",
+            userId: memberId,
+          },
+        });
+        await prisma.deviceSyncDirtyConnection.create({
+          data: {
+            connectionId,
+            dirtyResourcesJson: {},
+            dirtyRevision: 1n,
+            eventCount: 1n,
+            firstDirtyAt: connectedAt,
+            latestDirtyAt: connectedAt,
+            processedRevision: 0n,
+            provider: "oura",
+            resourceCategoryCountsJson: {},
+            sourceProviderCountsJson: {},
+            userId: memberId,
+          },
+        });
+        await prisma.deviceWebhookTrace.createMany({
+          data: traces.map((trace) => ({
+            claimToken,
+            eventType: "daily.data.activity.created",
+            processingExpiresAt: new Date("2026-08-12T11:00:00.000Z"),
+            provider: "oura",
+            providerAccountBlindIndex,
+            receivedAt: trace.acceptedAt,
+            status: "processing",
+            traceId: trace.traceId,
+          })),
+        });
+
+        const operationTimings: PrismaOperationTiming[] = [];
+        await runWithPrismaOperationTimings(operationTimings, async () => {
+          for (const trace of traces) {
+            await handleHostedDeviceSyncWebhookAccepted({
+              account: {
+                connectedAt: connectedAt.toISOString(),
+                id: connectionId,
+                provider: "oura",
+              },
+              claimToken,
+              now: trace.acceptedAt.toISOString(),
+              ownerId: memberId,
+              processingAttemptedAt: trace.acceptedAt.toISOString(),
+              store,
+              traceId: trace.traceId,
+              webhook: {
+                acceptanceMode: "level_dirty_hint",
+                eventType: "daily.data.activity.created",
+                jobs: [],
+                occurredAt: trace.acceptedAt.toISOString(),
+                resourceCategory: "activity",
+              },
+            });
+          }
+        });
+        const operationCounts = countPrismaOperations(operationTimings);
+
+        expect(healthAdmission).toHaveBeenCalledTimes(COMPACT_DIRTY_HINTS);
+        expect(pendingDirtyRead).toHaveBeenCalledTimes(COMPACT_DIRTY_HINTS);
+        expect(genericWakeRead).not.toHaveBeenCalled();
+        expect(preparedDirtyWrite).not.toHaveBeenCalled();
+        expect(canonicalDirtyWrite).toHaveBeenCalledTimes(COMPACT_DIRTY_HINTS);
+        expect(operationTimings).toHaveLength(COMPACT_DIRTY_HANDLER_SQL_BUDGET);
+        expect(operationCounts.get("$queryRaw") ?? 0).toBe(
+          COMPACT_DIRTY_HINTS * 3,
+        );
+        expect(operationCounts.get("$executeRaw") ?? 0).toBe(
+          COMPACT_DIRTY_HINTS,
+        );
+        expect(operationCounts.get("HostedConsentGrant.findUnique") ?? 0).toBe(
+          COMPACT_DIRTY_HINTS,
+        );
+        expect(operationCounts.get("DeviceConnection.findUnique") ?? 0).toBe(
+          COMPACT_DIRTY_HINTS,
+        );
+        expect(
+          operationCounts.get("DeviceSyncDirtyConnection.findUnique") ?? 0,
+        ).toBe(COMPACT_DIRTY_HINTS);
+        expect(
+          operationCounts.get("DeviceSyncDirtyConnection.updateManyAndReturn") ?? 0,
+        ).toBe(COMPACT_DIRTY_HINTS);
+        expect(operationCounts.get("DeviceConnection.updateMany") ?? 0).toBe(
+          COMPACT_DIRTY_HINTS,
+        );
+        expect(operationCounts.get("DeviceWebhookTrace.updateMany") ?? 0).toBe(
+          COMPACT_DIRTY_HINTS,
+        );
+        expect(operationCounts.get("DeviceSyncSignal.create") ?? 0).toBe(0);
+
+        expect(await prisma.deviceWebhookTrace.count({
+          where: {
+            provider: "oura",
+            providerAccountBlindIndex,
+            status: "processed",
+          },
+        })).toBe(COMPACT_DIRTY_HINTS);
+        const dirty = await prisma.deviceSyncDirtyConnection.findUniqueOrThrow({
+          where: { connectionId },
+        });
+        expect(dirty.dirtyRevision).toBe(BigInt(COMPACT_DIRTY_HINTS + 1));
+        expect(dirty.eventCount).toBe(BigInt(COMPACT_DIRTY_HINTS + 1));
+        expect(await prisma.deviceSyncSignal.count({
+          where: { connectionId },
+        })).toBe(0);
+      } finally {
+        await prisma.deviceWebhookTrace.deleteMany({
+          where: { provider: "oura", providerAccountBlindIndex },
+        }).catch(() => undefined);
+        await prisma.deviceConnection.deleteMany({
+          where: { id: connectionId },
+        }).catch(() => undefined);
+        await prisma.hostedMember.deleteMany({
+          where: { id: memberId },
+        }).catch(() => undefined);
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("uses source preflight plus the final transaction for an admitted deferred source", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const prisma = createPrismaClient({
+        databaseUrl: withApplicationName(
+          databaseUrl,
+          `murph_device_sync_deferred_source_${suffix}`,
+        ),
+        poolMax: 4,
+      });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const healthAdmission = vi.spyOn(store, "withHealthDataAdmissionLock");
+      const exactSourceRead = vi.spyOn(
+        store,
+        "resolveConnectionSourceAdmissionCandidate",
+      );
+      const pendingDirtyRead = vi.spyOn(store, "readPendingDirtyConnectionSnapshot");
+      const genericWakeRead = vi.spyOn(
+        store,
+        "shouldRequestWakeForDirtyConnectionUpsert",
+      );
+      const preparedDirtyWrite = vi.spyOn(store, "prepareDirtyConnectionUpsert");
+      const broadSourceRead = vi.spyOn(store, "listConnectionSources");
+      const connectionReread = vi.spyOn(store, "getConnectionForUser");
+      const memberId = `hbm_device_sync_deferred_source_${suffix}`;
+      const connectionId = `dsc_device_sync_deferred_source_${suffix}`;
+      const providerAccountBlindIndex = `blind_device_sync_deferred_source_${suffix}`;
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId,
+        sourceProviderSlug: "garmin",
+      });
+      if (!sourceInstanceKey) {
+        throw new Error("Synthetic deferred-source proof could not build its exact key.");
+      }
+      const blockedSourceInstanceKey = `${sourceInstanceKey}_blocked`;
+      const claimToken = `claim_device_sync_deferred_source_${suffix}`;
+      const traceId = `trace_device_sync_deferred_source_${suffix}`;
+      const connectedAt = new Date("2026-08-12T12:00:00.000Z");
+      const acceptedAt = new Date("2026-08-12T12:01:00.000Z");
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceConnection.create({
+          data: {
+            connectedAt,
+            credentialKind: "none",
+            credentialMetadataJson: {},
+            externalAccountIdEncrypted: null,
+            id: connectionId,
+            metadataJson: {},
+            provider: "junction",
+            providerAccountBlindIndex,
+            scopesJson: [],
+            setupPhase: "source_confirmed",
+            status: "active",
+            userId: memberId,
+          },
+        });
+        await prisma.deviceConnectionSource.createMany({
+          data: [
+            {
+              connectionId,
+              firstSeenAt: connectedAt,
+              id: `dcs_device_sync_deferred_source_${suffix}`,
+              lastSeenAt: connectedAt,
+              resourceAvailabilitySummaryJson: {},
+              sourceInstanceKey,
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            },
+            {
+              connectionId,
+              firstSeenAt: acceptedAt,
+              id: `dcs_device_sync_deferred_source_blocked_${suffix}`,
+              lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+              lastSeenAt: acceptedAt,
+              resourceAvailabilitySummaryJson: {},
+              sourceInstanceKey: blockedSourceInstanceKey,
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            },
+          ],
+        });
+        await expect(store.resolveConnectionSourceAdmissionCandidate({
+          connectionId,
+          sourceProviderSlug: "garmin",
+        })).resolves.toMatchObject({
+          lastErrorCode: null,
+          sourceInstanceKey,
+          status: "connected",
+        });
+        await expect(store.resolveConnectionSourceAdmissionCandidate({
+          connectionId,
+          sourceInstanceKey: blockedSourceInstanceKey,
+          sourceProviderSlug: "garmin",
+        })).resolves.toMatchObject({
+          lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+          sourceInstanceKey: blockedSourceInstanceKey,
+          status: "connected",
+        });
+        await expect(store.resolveConnectionSourceAdmissionCandidate({
+          connectionId,
+          sourceInstanceKey: `${sourceInstanceKey}_missing`,
+          sourceProviderSlug: "garmin",
+        })).resolves.toMatchObject({
+          lastErrorCode: null,
+          sourceInstanceKey,
+          status: "connected",
+        });
+        exactSourceRead.mockClear();
+        await prisma.deviceSyncDirtyConnection.create({
+          data: {
+            connectionId,
+            dirtyResourcesJson: {},
+            dirtyRevision: 1n,
+            eventCount: 1n,
+            firstDirtyAt: connectedAt,
+            latestDirtyAt: connectedAt,
+            processedRevision: 0n,
+            provider: "junction",
+            resourceCategoryCountsJson: {},
+            sourceProviderCountsJson: {},
+            userId: memberId,
+          },
+        });
+        await prisma.deviceWebhookTrace.create({
+          data: {
+            claimToken,
+            eventType: "historical.data.activity.created",
+            processingExpiresAt: new Date("2026-08-12T13:00:00.000Z"),
+            provider: "junction",
+            providerAccountBlindIndex,
+            receivedAt: acceptedAt,
+            status: "processing",
+            traceId,
+          },
+        });
+
+        const operationTimings: PrismaOperationTiming[] = [];
+        await runWithPrismaOperationTimings(operationTimings, () =>
+          handleHostedDeviceSyncWebhookAccepted({
+            account: {
+              connectedAt: connectedAt.toISOString(),
+              id: connectionId,
+              provider: "junction",
+            },
+            claimToken,
+            now: acceptedAt.toISOString(),
+            ownerId: memberId,
+            processingAttemptedAt: acceptedAt.toISOString(),
+            sourceAdmissionDeferred: true,
+            store,
+            traceId,
+            webhook: {
+              acceptanceMode: "level_dirty_hint",
+              dataSourceProviderSlug: "garmin",
+              eventType: "historical.data.activity.created",
+              jobs: [],
+              occurredAt: acceptedAt.toISOString(),
+              resourceCategory: "activity",
+              sourceProviderSlug: "garmin",
+            },
+          })
+        );
+
+        expect(healthAdmission).toHaveBeenCalledTimes(2);
+        expect(exactSourceRead).toHaveBeenCalledTimes(2);
+        expect(exactSourceRead.mock.calls.every(([sourceInput]) =>
+          sourceInput.connectionId === connectionId
+          && sourceInput.sourceInstanceKey === sourceInstanceKey
+          && sourceInput.sourceProviderSlug === "garmin"
+          && sourceInput.tx !== undefined
+        )).toBe(true);
+        expect(pendingDirtyRead).toHaveBeenCalledOnce();
+        expect(genericWakeRead).not.toHaveBeenCalled();
+        expect(preparedDirtyWrite).not.toHaveBeenCalled();
+        expect(broadSourceRead).not.toHaveBeenCalled();
+        expect(connectionReread).not.toHaveBeenCalled();
+        expect(operationTimings.length).toBeLessThanOrEqual(
+          DEFERRED_SOURCE_HANDLER_SQL_BUDGET,
+        );
+        expect(await prisma.deviceWebhookTrace.findUniqueOrThrow({
+          where: { provider_traceId: { provider: "junction", traceId } },
+        })).toMatchObject({ status: "processed" });
+        expect(await prisma.deviceSyncSignal.count({
+          where: { connectionId },
+        })).toBe(0);
+      } finally {
+        await prisma.deviceWebhookTrace.deleteMany({
+          where: { provider: "junction", providerAccountBlindIndex },
+        }).catch(() => undefined);
+        await prisma.deviceConnection.deleteMany({
+          where: { id: connectionId },
+        }).catch(() => undefined);
+        await prisma.hostedMember.deleteMany({
+          where: { id: memberId },
+        }).catch(() => undefined);
+        await prisma.$disconnect();
+      }
+    }, 60_000);
 
     it("keeps the immutable runtime cursor complete when a page-two row receives a webhook", async () => {
       const suffix = randomUUID().replaceAll("-", "");
@@ -968,7 +1330,7 @@ describe.skipIf(!runPostgresProof)(
         expect(signalRead).toHaveBeenCalledOnce();
         expect(boundedSourceRead).toHaveBeenCalledTimes(2);
         const scopedSourceInput = boundedSourceRead.mock.calls
-          .map(([sourceInput]) => sourceInput)
+          .map((call: [Parameters<PrismaDeviceSyncControlPlaneStore["listBoundedConnectionSourcesForConnections"]>[0]]) => call[0])
           .find((sourceInput) => sourceInput.sourceProviderSlugs?.[0] === "health_connect");
         expect(scopedSourceInput).toMatchObject({
           excludeDisconnected: false,
