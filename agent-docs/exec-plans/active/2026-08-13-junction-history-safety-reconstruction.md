@@ -2,14 +2,16 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-17
+Updated: 2026-08-18
 
 ## Goal
 
-- Preserve current main's Junction catalog, pagination, dense/workout policies,
-  compact 13-slot matrix, and recent follow-up behavior while restoring the
-  exact-source lifecycle and sparse-history safety invariants that were unique
-  to superseded PR #1696.
+- Ship the combined Junction connected-health release: preserve current main's
+  pagination and bounded collection owners; restore exact-source lifecycle and
+  sparse-history safety; extend the selected initial-history horizon to 180
+  days; normalize and retain the newly supported bounded health and workout
+  facts; and expose those facts through the existing private query, assistant,
+  CLI, and public changelog surfaces.
 
 ## Success criteria
 
@@ -20,12 +22,17 @@ Updated: 2026-08-17
 - Extended sparse history offers at most one uncovered coordinate per scheduler
   pass, preserves current main's bounded continuation behavior, and emits no
   history root once every admitted coordinate has completion coverage.
-- Current main's 13-slot `m1` mapping/defaults, pagination, dense/workout
-  exclusions, and post-#1698/#1736 ownership remain unchanged unless focused
-  proof shows a direct incompatibility.
+- The compact 13-slot extended-history resource order, pagination, and bounded
+  dense/workout handling remain stable. The envelope advances to `m2` so old
+  pre-180-day completion bits are readable but cannot falsely certify the new
+  horizon.
 - Focused SQLite/hosted/runtime proofs, package suites, typechecks, runner bundle
   limits, preliminary specialist ReviewGPT, final ReviewGPT, and required PR CI
   are green on the exact replacement-PR head.
+- The enabled-by-default Junction resource policy, importer/persistence owners,
+  temporal and workout derivations, query/assistant/CLI reads, and five public
+  changelog items ship as one consent-preserving release with direct rich,
+  sparse, malformed, replacement, and rendered-presentation proof.
 
 ## Scope
 
@@ -35,15 +42,21 @@ Updated: 2026-08-17
   - Deterministic cap-one scheduling of uncovered sparse-history coordinates.
   - Existing SQLite/Postgres schema, hosted hint, runner, and direct proof
     surfaces required by those invariants.
+  - The nine Junction resources enabled by default in this release, the
+    bounded canonical facts derived from them, 180-day extended-history policy,
+    body-composition completeness, oxygen/stress temporal features, workout
+    stream reduction, query and CLI reads, assistant skill guidance, and five
+    public changelog items that describe the resulting member outcomes.
 - Out of scope:
   - Replacing or remapping current main's compact matrix.
-  - New provider resources, query/tool surfaces, dense samples, workouts, ECG,
-    prompts, frontend, or member-visible copy.
   - Wholesale commits, trees, docs, tests, migrations, or abstractions from the
     unrelated-history #1696 branch.
   - Rolling verification or late-fact recovery after a coordinate's existing
     completion bit is set; the composed provider load is not acceptable without
     a separate bounded ownership design.
+  - New consent scopes, provider connections, public/group health-data access,
+    raw dense-point retention, raw workout/source identifiers, new notification
+    flows, or a new frontend interaction.
 
 ## Constraints
 
@@ -63,6 +76,71 @@ Updated: 2026-08-17
   - Keep the old #1696 PR open until the replacement PR exists.
   - Use the PR worktree lane, exact-head ReviewGPT specialist/final gates, scoped
     commits, and plan closure through `scripts/finish-task`.
+
+## Combined Product UX Plan
+
+### Outcome
+
+Members who already authorize a Junction-backed wearable connection get more
+complete, history-aware health context from the same private Murph surfaces:
+bounded metabolic, respiratory, body-composition, oxygen/stress, and workout
+facts become available when the provider supplies enough evidence, while
+sparse or malformed data stays honestly absent rather than becoming a false
+insight.
+
+### Entry And Promise
+
+The entry remains the existing connected-device consent and connect/reconnect
+journey. No new permission, screen, or choice is introduced. Murph collects the
+configured provider resources during the existing background sync and bounded
+history jobs, then makes canonical facts available through existing private
+conversation, query, and CLI routes. The wait remains the existing provider and
+sync cadence; there is no separate completion notification. The public
+changelog describes capability, not an assurance that every provider or member
+will have every field.
+
+### Affected People And Safe Outcomes
+
+- A consented member with rich provider history receives bounded canonical
+  facts and useful derived context without raw provider identifiers or dense
+  point streams crossing the importer boundary.
+- A consented member with sparse, partial, delayed, malformed, or empty history
+  receives only supported facts. Authoritative successful empty replacement
+  retracts stale derived facets; failed or partial work cannot certify them.
+- An established member who reconnects or has legacy alias rows keeps one
+  semantic lifecycle and one physical source owner. Old work cannot import,
+  continue, or certify against the new lifecycle.
+- A member who disconnects or withdraws health-data consent keeps the existing
+  fail-closed stop and deletion behavior. This release creates no new consent
+  scope and cannot use default resource enablement to bypass current connection,
+  source, credential, or consent authority.
+- Group and public audiences gain no new health-data authority. Existing
+  audience and personal-read authorization remains the only path by which an
+  assistant response may use these private facts; the public surface contains
+  changelog copy only.
+
+### Collection, Privacy, And Retention Contract
+
+The shared Junction resource-policy owner determines configured collection.
+Provider transport remains bounded and serial under the existing page, time,
+attempt, date, and account fences. Importers retain normalized scalar evidence
+and bounded feature facets only. Raw dense arrays, full curves, coordinates,
+provider workout/source identifiers, credential material, and provider payloads
+do not enter canonical facts, query output, logs, assistant context, or the
+changelog. Query projections are rebuildable read models; canonical vault
+records remain evidence authority.
+
+### Proof Path And Done Condition
+
+Owner-specific fixtures exercise all enabled resource shapes, rich and sparse
+history, malformed/partial input, authoritative replacement and retraction,
+workout alignment and bounded reduction, temporal-feature authorization, query
+and CLI rendering, assistant guidance, legacy/reconnect lifecycle fencing, and
+maximum collection bounds. The five changelog items must render together on the
+real changelog page at phone and desktop widths with readable hierarchy,
+ordering, wrapping, and accessible markup. The walkthrough is `Ready` only when
+those focused checks, the rendered evidence, production bundle limits,
+exact-head ReviewGPT, and required CI are green.
 
 ## Risks and mitigations
 
@@ -116,7 +194,9 @@ Updated: 2026-08-17
   evidence only.
 - Port lifecycle safety before history terminality so every later job proof is
   bound to the real source epoch.
-- Preserve the current `m1` 13-slot layout and current pagination by default.
+- Preserve the 13-slot resource identity/order and current pagination. Advance
+  the envelope to `m2` so `m1` remains structurally readable but stale for the
+  new 180-day obligation.
 - Completion coverage is monotonic initial-obligation evidence, not a claim of
   permanent provider completeness.
 - Every resource classified by the package-owned Junction timeseries policy as
@@ -131,9 +211,10 @@ Updated: 2026-08-17
 - Use an intentional intermediate `scripts/committer` checkpoint before merging
   the newer current-main device-sync changes; keep this plan active until the
   integrated candidate completes its PR review gates.
-- Changelog is not applicable: this is internal lifecycle/scheduling hardening,
-  not a new member-visible capability, interaction, or safely distinct public
-  outcome.
+- Changelog is applicable to the combined rollout. Five isolated entries
+  describe the metabolic, body-composition, wearable-summary, oxygen/stress,
+  and workout-context outcomes. The lifecycle and scheduling hardening remains
+  internal supporting safety and is not separately announced.
 - Maximum schedule-time candidate cardinality remains 396 source/resource
   reconnect obligations: 33 source slots multiplied by 12 schedule-time
   resource/version coordinates. Blood pressure remains the thirteenth matrix
@@ -801,3 +882,60 @@ Updated: 2026-08-17
     scans pass before the merge checkpoint. ReviewGPT artifact recovery exposed
     one new fail-closed capture/download friction case; the required public-safe
     Frog record is included with the task.
+
+## Round 16 combined-rollout retrospective
+
+Final ReviewGPT round 16 reviewed exact head
+`08e4b6de39aeabbc65dd87bd13acb05045ecc1c5` and returned
+`ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` plus `REVIEW_COMPLETE`. It found no
+new recurrence of the physical-identity, lifecycle-epoch, stale-work, or
+scheduler-fairness bugs. It correctly found that the implementation and the
+still-lifecycle-only plan described different releases.
+
+The immutable first-reviewed head
+`37ab85e625df815e3b62c246bb8e3fcf76d21233` contained the reconstructed
+lifecycle foundation. By round 16, six dependent Junction PR branches had been
+merged into this integration branch instead of `main`, producing a 174-file
+base-to-head patch with 36,240 additions and 8,229 deletions. ReviewGPT
+classified the authored production portion as approximately 8,018 additions
+and 1,300 deletions across 71 files. The largest raw churn is concentrated in
+provider-shaped tests and fixtures; the authored growth is the connected-health
+family itself, not further lifecycle remediation.
+
+That family has one dependency chain:
+
+- the shared Junction resource policy enables the supported collection shapes;
+- the device provider and importer bound transport, normalize evidence, and
+  write canonical facts;
+- core mutation and authoritative replacement owners preserve or retract those
+  facts;
+- temporal and workout feature reducers derive bounded facets from complete
+  authorized inputs;
+- query projections, the CLI, and assistant guidance expose those facts through
+  existing private read paths; and
+- five changelog fragments communicate the resulting member outcomes.
+
+The user chose to land and deploy this family as one combined release. It is
+technically possible to extract another train, but doing so now would create a
+new partial-state and rollback matrix between collection policy, canonical
+evidence, derived facets, readers, and public claims. The smallest complete
+member outcome is therefore the complete chain above, governed by the lifecycle
+and consent fences already under review. This decision does not authorize
+unbounded scope: the exact combined surfaces are now listed in Scope, and new
+resources, consent scopes, readers, presentations, or state owners require a
+separate change.
+
+The combined continuation preserves existing health-data consent and audience
+authority, adds no new public or group read, retains only bounded normalized
+evidence and feature facets, and keeps raw provider identifiers, dense arrays,
+credentials, and payloads out of canonical/query/assistant/log/changelog
+surfaces. Deployment remains additive migration first, then an immediate
+Cloudflare runner rollout and exact-fingerprint smoke, then Web. The first
+epoch-bearing or new-shape work makes the compatible runner/Web pair the
+rollback floor.
+
+Round 17 must treat the combined release as the requirement: audit the full
+collection-to-member-read chain, verify the recorded collection/consent/privacy
+contract, inspect real rendered changelog evidence at phone and desktop widths,
+and accept only direct rich, sparse, malformed, replacement, lifecycle, load,
+bundle, and exact-head CI proof.
