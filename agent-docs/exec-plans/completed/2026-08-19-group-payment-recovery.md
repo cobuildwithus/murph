@@ -1,6 +1,6 @@
 # Group sponsorship payment recovery
 
-Status: active
+Status: completed
 Updated: 2026-08-19
 
 ## Goal
@@ -104,6 +104,16 @@ method deletion and historical inventory cleanup remain deliberately excluded.
 7. Resolve accepted findings, obtain ReviewGPT PASS and green required checks,
    close this plan, merge, and retire the worktree.
 
+## Retrospective outcome
+
+The final contract closes current monthly activation and recovery Checkout to
+reusable card methods, while ordinary one-time contributions retain dynamic
+payment methods. Automatic refill authority remains the exact card from the
+latest provider-verified explicit sponsorship payment. An incompatible legacy
+method returns to explicit recovery without substitution, and a provider-free
+legacy failed refill upgrades to the current policy before recovery Checkout.
+No new migration, queue, scheduler, or payment-authority owner was warranted.
+
 ## Verification
 
 - Focused Vitest suites for usage-credit purchase, sponsorship authorization,
@@ -120,8 +130,13 @@ method deletion and historical inventory cleanup remain deliberately excluded.
   control-plane evidence without persisting private facts.
 - [x] Create an isolated task worktree from current `main`.
 - [x] Add failing regressions and implement the corrections.
-- [x] Complete focused verification and direct journey proof: 258 focused
-  service/UI/reconciliation tests, Web typecheck and scoped lint, both billing
-  guards, and the real Chromium recovery journey pass.
-- [ ] Pass both ReviewGPT stages and exact-head CI.
-- [ ] Merge and retire the worktree.
+- [x] Complete exact-head verification and direct journey proof: 323 focused
+  service/UI/route/reconciliation/changelog tests, Web typecheck and scoped
+  lint, both billing guards, and the two-test Chromium responsive journey.
+- [x] Resolve the preliminary specialist findings, complete the required
+  payment-domain retrospective, and obtain a zero-finding final ReviewGPT PASS
+  on the pushed candidate.
+- [x] Complete merge preparation: all required GitHub checks are green, the
+  parent final review found no remaining gap, and plan closure precedes the
+  authorized merge and worktree retirement boundary.
+Completed: 2026-08-19
