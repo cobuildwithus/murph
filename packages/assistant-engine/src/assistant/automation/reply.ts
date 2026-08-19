@@ -23,6 +23,7 @@ import type {
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
   listAssistantOutboxIntents,
+  listAssistantOutboxIntentsForAutoReplyRoute,
   type AssistantOutboxDispatchMode,
   type AssistantOutboxInventoryScanMetrics,
 } from '../outbox.js'
@@ -180,6 +181,13 @@ type AssistantAutoReplyReceiptRecord =
 type AssistantAutoReplyOutboxIntent =
   Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
 
+export interface AssistantAutoReplyOutboxHistoryQuery {
+  conversation: AssistantInputConversationRef
+  deliveryTarget: string
+  providerMessageIds?: readonly string[] | null
+  source: string
+}
+
 export interface AssistantAutoReplyHistoryMetrics {
   outboxScanBytesRead?: number
   outboxScanElapsedMs?: number
@@ -194,7 +202,9 @@ export interface AssistantAutoReplyHistoryMetrics {
 
 export interface AssistantAutoReplyHistoryReader {
   readMetrics(): AssistantAutoReplyHistoryMetrics
-  readOutboxIntents(): Promise<readonly AssistantAutoReplyOutboxIntent[]>
+  readOutboxIntents(
+    query?: AssistantAutoReplyOutboxHistoryQuery,
+  ): Promise<readonly AssistantAutoReplyOutboxIntent[]>
   readReceipts(): Promise<readonly AssistantAutoReplyReceiptRecord[]>
 }
 
@@ -4320,9 +4330,13 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot(in
 export function createAssistantAutoReplyHistoryReader(input: {
   vault: string
 }): AssistantAutoReplyHistoryReader {
-  let outboxIntents:
+  let legacyOutboxIntents:
     | Promise<readonly AssistantAutoReplyOutboxIntent[]>
     | null = null
+  const projectedOutboxIntents = new Map<
+    string,
+    Promise<readonly AssistantAutoReplyOutboxIntent[]>
+  >()
   let outboxScanMetrics: AssistantOutboxInventoryScanMetrics | null = null
   let outboxScanElapsedMs: number | null = null
   let receiptScanMetrics: AssistantTurnReceiptScanMetrics | null = null
@@ -4352,8 +4366,35 @@ export function createAssistantAutoReplyHistoryReader(input: {
         receiptScanPerformed: receiptScanMetrics !== null,
       }
     },
-    readOutboxIntents() {
-      outboxIntents ??= (async () => {
+    readOutboxIntents(query) {
+      if (query) {
+        const conversation = conversationRefFromAssistantInputConversation(
+          query.conversation,
+        )
+        const key = JSON.stringify({
+          actorId: conversation.participantId,
+          channel: query.source,
+          deliveryTarget: query.deliveryTarget,
+          identityId: conversation.identityId,
+          providerMessageIds: query.providerMessageIds ?? null,
+          threadId: conversation.threadId,
+        })
+        let projected = projectedOutboxIntents.get(key)
+        if (!projected) {
+          projected = listAssistantOutboxIntentsForAutoReplyRoute({
+            actorId: conversation.participantId,
+            channel: query.source,
+            deliveryTarget: query.deliveryTarget,
+            identityId: conversation.identityId,
+            providerMessageIds: query.providerMessageIds,
+            threadId: conversation.threadId,
+            vault: input.vault,
+          })
+          projectedOutboxIntents.set(key, projected)
+        }
+        return projected
+      }
+      legacyOutboxIntents ??= (async () => {
         const startedAt = Date.now()
         try {
           return await listAssistantOutboxIntents(input.vault, (metrics) => {
@@ -4363,7 +4404,7 @@ export function createAssistantAutoReplyHistoryReader(input: {
           outboxScanElapsedMs = Math.max(0, Date.now() - startedAt)
         }
       })()
-      return outboxIntents
+      return legacyOutboxIntents
     },
     readReceipts() {
       receipts ??= listAssistantTurnReceipts(
@@ -4655,6 +4696,9 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
+      providerMessageIds: replyToMessageId === null
+        ? []
+        : [replyToMessageId],
     })
   const replyTargetDelivery = replyToMessageId === null
     ? null
@@ -4844,6 +4888,10 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
         deliveryTarget: input.deliveryTarget,
         historyReader: input.historyReader,
         input: input.input,
+        providerMessageIds: replyToMessageIds.filter(
+          (replyToMessageId): replyToMessageId is string =>
+            replyToMessageId !== null,
+        ),
       })
     : []
   const exactDeliveries = replyToMessageIds.map((replyToMessageId) =>
@@ -5130,6 +5178,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
+  providerMessageIds?: readonly string[] | null
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery[]> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
@@ -5137,7 +5186,21 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     return []
   }
 
-  const intents = await input.historyReader.readOutboxIntents()
+  const intents = await input.historyReader.readOutboxIntents({
+    conversation: input.input.conversation,
+    deliveryTarget,
+    providerMessageIds: input.providerMessageIds === undefined
+      ? [readAssistantTargetProviderScalar(input.input.replyTarget?.messageId)]
+          .filter((providerMessageId): providerMessageId is string =>
+            providerMessageId !== null
+          )
+      : (input.providerMessageIds ?? [])
+          .map(readAssistantTargetProviderScalar)
+          .filter((providerMessageId): providerMessageId is string =>
+            providerMessageId !== null
+          ),
+    source: channel,
+  })
   return intents.flatMap((intent) => {
     if (intent.operation !== null) {
       return []

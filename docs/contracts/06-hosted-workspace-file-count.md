@@ -295,6 +295,41 @@ landing; record the chosen posture here so the decision is reviewable.
   as the hard rollback floor; a pre-projection runtime must not reopen the
   workspace.
 
+- `.runtime/operations/assistant/state/outbox-dedupe.sqlite` is one portable,
+  rebuildable projection per workspace. It maps hashed exact dedupe and
+  transport-idempotency keys plus hashed foreground route, provider-message,
+  and private-completion tags to durable outbox intent ids. It retains normalized
+  media only for the legacy media-sensitive key migration; the intent JSON files
+  remain canonical delivery state. Auto-reply history canonical-validates at
+  most 100 projected candidates, prioritizing route-scoped exact
+  provider-message anchors before filling the remaining optional context window
+  with newest route history. Legacy media and
+  private-completion verification each retain their fixed 100-candidate
+  fail-closed bound.
+  Route cardinality grows rows, not workspace files. A missing or positively
+  corrupt projection is rebuilt from canonical intents and published atomically.
+  Interrupted rebuilds reuse and remove one excluded
+  `state/.tmp/outbox-dedupe.sqlite.rebuild` slot instead of accumulating files.
+  Ordinary creates and lifecycle transitions update it under the existing
+  assistant runtime write lock, while canonical validation removes stale routes
+  after quarantine or pruning. The store uses
+  `DELETE` journaling and closes every handle before hosted checkpointing, so
+  the steady state is one database file with no WAL/SHM family. Its first
+  publication shares the projection-capable runner rollback floor described in
+  the hosted runtime protocol; a pre-projection runtime must not reopen that
+  workspace.
+
+- `.runtime/operations/assistant/hosted-pending-image-completion-hint.json`
+  (`murph.hosted-pending-assistant-image-completion-hint.v1`) is one
+  fixed-size, portable, rebuildable projection per workspace. The growing
+  `hosted-pending-inputs.json` v2 index remains canonical; ordinary foreground
+  turns read only this boolean hint and consult the complete index only when
+  image-completion recovery may be required. A missing hint is rebuilt once
+  from the canonical index. The existing pending-index writer publishes a
+  positive hint before canonical state and clears it only after canonical state,
+  so an interrupted write can leave a safe false positive but not a false
+  negative. Repeated pending inputs overwrite the same two documents and do not
+  grow workspace file count.
 - `bank/habitat/*.md` (`murph.frontmatter.habitat.v1`) is canonical product
   truth included in hosted workspace snapshots. It stores one optional Markdown
   document per versioned habitat catalog aspect, and a habitat save creates at
