@@ -629,8 +629,8 @@ describe("hosted deploy automation helpers", () => {
 
     const expectedDefaultInstanceType = {
       disk_mb: 6000,
-      memory_mib: 3072,
-      vcpu: 1,
+      memory_mib: 6144,
+      vcpu: 2,
     };
     expect(generatedConfig.containers.map(({ instance_type }) => instance_type)).toEqual([
       expectedDefaultInstanceType,

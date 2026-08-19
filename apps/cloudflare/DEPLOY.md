@@ -1192,7 +1192,7 @@ than assuming one attempt per group.
 Core execution tuning:
 
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
-- `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":1,"memory_mib":3072,"disk_mb":6000}`. This restores the production shape used before the two-vCPU upgrade; heavier hosted reads can take longer on the smaller CPU and memory allocation, so deployment smoke proves function and recovery rather than claiming latency neutrality.
+- `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`. This restores the two-vCPU production shape after measured cold-start and same-size workspace-restore regressions on the smaller allocation. The post-completion conversation idle lease remains independently configured at ten minutes.
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
@@ -1459,7 +1459,7 @@ Device-sync provider runtime overrides:
 
 If the selected GitHub environment already defines container sizing overrides, update these existing vars there as well:
 
-- `CF_CONTAINER_INSTANCE_TYPE={"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
+- `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES=1000`
 
 When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.
