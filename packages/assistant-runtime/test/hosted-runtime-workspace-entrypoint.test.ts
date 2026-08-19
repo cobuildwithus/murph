@@ -37345,6 +37345,15 @@ describe("hosted workspace runtime entrypoint", () => {
       handoff: "no-signal reconciliation",
     },
     {
+      checkpointConversation: false,
+      checkpointConversationInputAhead: false,
+      checkpointRuntimeWake: true,
+      checkpointTrustedCompletion: false,
+      checkpointSystemControl: false,
+      generatedImageRetention: false,
+      handoff: "empty checkpoint runtime recheck",
+    },
+    {
       checkpointConversation: true,
       checkpointConversationInputAhead: true,
       checkpointRuntimeWake: false,
