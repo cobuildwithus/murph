@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, Trash2 } from "lucide-react";
 import Link from "next/link";
 
@@ -416,17 +416,19 @@ function HostedDataPrivacySettingsAuthorized(props: {
                   htmlFor="hosted-account-delete-phrase"
                 >
                   Type{" "}
-                  <span className="font-mono text-xs tracking-wide">
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.9em] tracking-wide text-foreground">
                     {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                   </span>{" "}
                   to confirm
                 </Label>
                 <Input
                   autoComplete="off"
+                  autoCorrect="off"
                   className="h-12 font-mono text-sm tracking-wide md:text-sm"
                   disabled={deletePending}
                   id="hosted-account-delete-phrase"
                   inputMode="text"
+                  spellCheck={false}
                   value={confirmationPhrase}
                   onChange={(event) => setConfirmationPhrase(event.target.value)}
                   onKeyDown={(event) => {
@@ -436,7 +438,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
                     }
                   }}
                   aria-invalid={confirmationPhrase.length > 0 && !phraseMatches}
-                  placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                 />
               </div>
               {providerAccessRemovalRequired ? (
@@ -474,7 +475,7 @@ export function HostedAccountDeletionErrorAlert({
       role="alert"
       className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive [overflow-wrap:anywhere]"
     >
-      <p>{message}</p>
+      <p>{linkProviderAccessRemoval(message)}</p>
       {deviceReconnectRequired ? (
         <Link
           className="self-start font-medium underline underline-offset-4"
@@ -484,6 +485,29 @@ export function HostedAccountDeletionErrorAlert({
         </Link>
       ) : null}
     </div>
+  );
+}
+
+// The provider-recovery message asks the member to remove Murph's access before
+// deletion can continue, so the instruction itself links to the page that does
+// it instead of leaving them to find /connect on their own.
+const PROVIDER_ACCESS_REMOVAL_INSTRUCTION = "Remove";
+
+function linkProviderAccessRemoval(message: string): ReactNode {
+  if (!message.startsWith(`${PROVIDER_ACCESS_REMOVAL_INSTRUCTION} `)) {
+    return message;
+  }
+
+  return (
+    <>
+      <Link
+        className="font-medium underline-offset-4 hover:underline"
+        href="/connect"
+      >
+        {PROVIDER_ACCESS_REMOVAL_INSTRUCTION}
+      </Link>
+      {message.slice(PROVIDER_ACCESS_REMOVAL_INSTRUCTION.length)}
+    </>
   );
 }
 

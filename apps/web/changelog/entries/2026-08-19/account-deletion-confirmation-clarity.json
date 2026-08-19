@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-19",
+  "order": 90,
+  "item": {
+    "id": "account-deletion-confirmation-clarity",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer delete-account confirmation",
+    "summary": "The phrase you have to type to delete your account now reads as a distinct value instead of repeating itself inside the empty field, and when deletion is waiting on provider access, the instruction links straight to the page where you manage it.",
+    "details": "The typed phrase still has to match exactly, and the provider-access confirmation step is unchanged.",
+    "relevanceTags": ["account", "privacy", "settings"],
+    "sourcePullRequests": []
+  }
+}
