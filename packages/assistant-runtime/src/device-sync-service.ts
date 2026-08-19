@@ -2,9 +2,11 @@ import path from "node:path";
 
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 import {
-  areJunctionDeviceConnectProviderSlugsEquivalent,
   buildJunctionProviderSourceInstanceKey,
 } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionProviderSlugsDataEquivalent,
+} from "@murphai/device-syncd/junction-inline-authority";
 
 import {
   createDefaultImporterPort,
@@ -133,7 +135,7 @@ async function listHostedJobConnectionSources(input: {
   });
   const projectedSources = connection.sources
     .filter((source) =>
-      !input.sourceProviderSlug || areHostedJunctionSourcesEquivalent(
+      !input.sourceProviderSlug || areHostedDeviceSourcesDataEquivalent(
         input.provider,
         source.sourceProviderSlug,
         input.sourceProviderSlug,
@@ -143,14 +145,14 @@ async function listHostedJobConnectionSources(input: {
       const exactLocalSource = localSources.find(
         (candidate) => candidate.sourceInstanceKey === source.sourceInstanceKey,
       );
-      const routeEquivalentLocalSource = selectHostedJunctionSource(
+      const dataEquivalentLocalSource = selectHostedDataEquivalentSource(
         input.provider,
         localSources,
         source.sourceProviderSlug,
       );
       const localSource = input.provider === "junction"
-        ? routeEquivalentLocalSource ?? exactLocalSource
-        : exactLocalSource ?? routeEquivalentLocalSource;
+        ? dataEquivalentLocalSource ?? exactLocalSource
+        : exactLocalSource ?? dataEquivalentLocalSource;
       const sourceInstanceKey = localSource?.sourceInstanceKey
         ?? source.sourceInstanceKey
         ?? (
@@ -178,7 +180,7 @@ async function listHostedJobConnectionSources(input: {
     : dedupedSources;
 }
 
-function areHostedJunctionSourcesEquivalent(
+function areHostedDeviceSourcesDataEquivalent(
   provider: string,
   left: string,
   right: string,
@@ -186,16 +188,16 @@ function areHostedJunctionSourcesEquivalent(
   if (provider !== "junction") {
     return left === right;
   }
-  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
+  return areJunctionProviderSlugsDataEquivalent(left, right);
 }
 
-function selectHostedJunctionSource(
+function selectHostedDataEquivalentSource(
   provider: string,
   sources: readonly ProviderJobConnectionSource[],
   sourceProviderSlug: string,
 ): ProviderJobConnectionSource | undefined {
   return sources
-    .filter((source) => areHostedJunctionSourcesEquivalent(
+    .filter((source) => areHostedDeviceSourcesDataEquivalent(
       provider,
       source.sourceProviderSlug,
       sourceProviderSlug,
@@ -217,7 +219,7 @@ function dedupeHostedJobConnectionSources(
   }
   return dedupeDeviceSyncSourcesByIdentity(
     sources,
-    (left, right) => areHostedJunctionSourcesEquivalent(
+    (left, right) => areHostedDeviceSourcesDataEquivalent(
       provider,
       left.sourceProviderSlug,
       right.sourceProviderSlug,

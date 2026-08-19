@@ -7,8 +7,8 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import {
-  areJunctionDeviceConnectProviderSlugsEquivalent,
-} from "@murphai/device-syncd/connect-config";
+  areJunctionProviderSlugsDataEquivalent,
+} from "@murphai/device-syncd/junction-inline-authority";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
@@ -444,10 +444,6 @@ function resolveHostedHydrationSourceInstanceKey(input: {
   return matchingSource?.sourceInstanceKey ?? input.sourceInstanceKey;
 }
 
-function areHostedJunctionSourceSlugsEquivalent(left: string, right: string): boolean {
-  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
-}
-
 function dedupeHostedHydrationConnectionSources(
   provider: string,
   sources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
@@ -457,7 +453,7 @@ function dedupeHostedHydrationConnectionSources(
   }
   return dedupeDeviceSyncSourcesByIdentity(
     sources,
-    (left, right) => areHostedJunctionSourceSlugsEquivalent(
+    (left, right) => areJunctionProviderSlugsDataEquivalent(
       left.sourceProviderSlug,
       right.sourceProviderSlug,
     ),
@@ -470,7 +466,7 @@ function selectHostedJunctionSource(
   sourceProviderSlug: string,
 ): StoredDeviceConnectionSource | undefined {
   return sources
-    .filter((source) => areHostedJunctionSourceSlugsEquivalent(
+    .filter((source) => areJunctionProviderSlugsDataEquivalent(
       source.sourceProviderSlug,
       sourceProviderSlug,
     ))

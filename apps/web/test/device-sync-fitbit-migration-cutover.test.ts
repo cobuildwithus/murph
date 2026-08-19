@@ -281,12 +281,20 @@ describe("hosted Google Health Fitbit cutover", () => {
       reason: "user_disconnect",
       sourceProviderSlug: "fitbit",
     });
-    expect(valueRegistry.get("junction")?.connectionHandler?.revokeSourceAccess)
-      .toHaveBeenCalledWith(
-        expect.objectContaining({ id: CONNECTION_ID }),
-        "fitbit",
-        { requiredActiveSourceProviderSlug: "google_health" },
-      );
+    const revokeSourceAccess =
+      valueRegistry.get("junction")?.connectionHandler?.revokeSourceAccess;
+    expect(revokeSourceAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ id: CONNECTION_ID }),
+      "fitbit",
+      { requiredActiveSourceProviderSlug: "google_health" },
+    );
+
+    await expect(complete(value, valueRegistry)).resolves.toEqual({
+      connectionId: CONNECTION_ID,
+      status: "complete",
+    });
+    expect(revokeSourceAccess).toHaveBeenCalledTimes(1);
+    expect(value.signals).toHaveLength(1);
   });
 
   it("does not claim or call the provider while dirty work is pending", async () => {

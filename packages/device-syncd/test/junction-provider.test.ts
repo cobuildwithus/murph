@@ -37,6 +37,7 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 import { DeviceSyncError } from "../src/errors.ts";
 import { JunctionTimeseriesProgressError } from "../src/junction-timeseries-progress.ts";
 import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
+import { HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT } from "../src/hosted-runtime.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -1178,7 +1179,7 @@ test("Junction deployed full-job progress resumes once and emits only scalar suc
     return createJsonResponse({ groups: {} });
   }, {
     summaryResources: [],
-    timeseriesResources: ["steps", "heartrate"],
+    timeseriesResources: ["steps", "heartrate", "workout_stream"],
   });
 
   const result = await executeJunctionJob(
@@ -9276,6 +9277,295 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
       job.payload,
     );
   }
+});
+
+test("Junction source-scoped history completes only after terminal admitted work", async () => {
+  const completedAtKey = "historicalBackfillCompletedAt";
+
+  const runScenario = async (input: {
+    days: number;
+    failFirstTimeseriesPass?: boolean;
+    summaryRecordOnlyFirstAttempt?: boolean;
+    summaryRecordSource?: "fitbit" | "google_health" | null;
+    timeseriesResources: readonly string[];
+  }) => {
+    const requests: Array<{ method: string; url: URL }> = [];
+    let failTimeseries = input.failFirstTimeseriesPass === true;
+    let summaryRequestCount = 0;
+    const providers = [
+      {
+        id: "provider-fitbit-1",
+        slug: "fitbit",
+        name: "Fitbit",
+        status: "connected",
+        resource_availability: { activity: true },
+      },
+      {
+        id: "provider-google-health-1",
+        slug: "google_health",
+        name: "Google Health",
+        status: "connected",
+        resource_availability: {
+          activity: true,
+          heartrate: true,
+          steps: true,
+        },
+      },
+    ];
+    const provider = createJunctionProvider(async (request, init) => {
+      const url = new URL(readUrl(request));
+      requests.push({ method: String(init?.method ?? "GET"), url });
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers });
+      }
+      if (url.pathname === "/v2/summary/activity/junction-user-1") {
+        summaryRequestCount += 1;
+        const includeRecord = Boolean(input.summaryRecordSource)
+          && (!input.summaryRecordOnlyFirstAttempt || summaryRequestCount === 1);
+        return createJsonResponse({
+          data: includeRecord
+            ? [{
+                connectionId: "provider-google-health-1",
+                date: "2026-04-02",
+                id: `activity-${input.summaryRecordSource}`,
+                sourceProviderSlug: input.summaryRecordSource,
+                steps: 4321,
+              }]
+            : [],
+        });
+      }
+      if (url.pathname === "/v2/summary/sleep/junction-user-1") {
+        return createJsonResponse({ data: [] });
+      }
+      if (url.pathname === "/v2/summary/workouts/junction-user-1") {
+        return createJsonResponse({ data: [] });
+      }
+      if (url.pathname.startsWith("/v2/timeseries/")) {
+        if (failTimeseries) {
+          return new Response(JSON.stringify({ error: "temporary failure" }), {
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": "0",
+            },
+            status: 500,
+          });
+        }
+        return createJsonResponse({ data: [] });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, {
+      summaryBackfillDays: input.days,
+      summaryResources: ["activity", "sleep"],
+      timeseriesBackfillDays: input.days,
+      timeseriesResources: [...input.timeseriesResources],
+    });
+
+    let liveSources = [
+      createConnectionSource({
+        id: "source-fitbit",
+        sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+          connectionId: "acct-junction-1",
+          sourceProviderSlug: "fitbit",
+        }), "Fitbit source key should be available."),
+        sourceProviderSlug: "fitbit",
+      }),
+      createConnectionSource({
+        id: "source-google-health",
+        sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+          connectionId: "acct-junction-1",
+          sourceProviderSlug: "google_health",
+        }), "Google Health source key should be available."),
+        sourceProviderSlug: "google_health",
+      }),
+    ];
+    const importedSnapshots: unknown[] = [];
+    let completionWrites = 0;
+    const makeContext = (): ProviderJobContext => createJunctionJobContext({
+      account: createAccount({
+        sources: liveSources.map((source) => ({
+          ...source,
+          resourceCount: Object.keys(source.resourceAvailabilitySummary ?? {}).length,
+        })),
+      }),
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: async (snapshot) => {
+        if (JSON.stringify(snapshot).includes("activity-google_health")) {
+          importedSnapshots.push(snapshot);
+        }
+        return {
+          canonicalEventCount: 0,
+          durableDeliveryAccepted: false,
+        };
+      },
+      listConnectionSources: async (filter = {}) => liveSources.filter((source) =>
+        (!filter.sourceProviderSlug
+          || source.sourceProviderSlug === filter.sourceProviderSlug)
+        && (!filter.status || source.status === filter.status)
+      ),
+      upsertConnectionSource: async (update) => {
+        const existingIndex = liveSources.findIndex((source) =>
+          source.sourceProviderSlug === update.sourceProviderSlug
+        );
+        const existing = liveSources[existingIndex];
+        const next = createConnectionSource({
+          ...(existing ?? {}),
+          ...update,
+          id: existing?.id ?? `source-${update.sourceProviderSlug}`,
+          connectionId: "acct-junction-1",
+          displayName: update.displayName ?? existing?.displayName ?? null,
+          firstSeenAt: update.firstSeenAt ?? existing?.firstSeenAt ?? update.lastSeenAt,
+          lastDataAt: update.lastDataAt === undefined
+            ? existing?.lastDataAt ?? null
+            : update.lastDataAt,
+          resourceAvailabilitySummary: update.resourceAvailabilitySummary
+            ?? existing?.resourceAvailabilitySummary
+            ?? {},
+        });
+        const wasComplete = existing?.resourceAvailabilitySummary?.[completedAtKey];
+        const isComplete = next.resourceAvailabilitySummary?.[completedAtKey];
+        if (!wasComplete && typeof isComplete === "string") {
+          completionWrites += 1;
+        }
+        if (existingIndex < 0) {
+          liveSources = [...liveSources, next];
+        } else {
+          liveSources = liveSources.map((source, index) =>
+            index === existingIndex ? next : source
+          );
+        }
+        return next;
+      },
+    });
+
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const windowStart = new Date(
+      Date.parse(windowEnd) - input.days * 24 * 60 * 60_000,
+    ).toISOString();
+    let job = createJob("backfill", {
+      sourceProviderSlug: "google_health",
+      windowEnd,
+      windowStart,
+    });
+    let processedJobs = 0;
+    let failedExecutions = 0;
+    let markerBeforePassBoundary = false;
+    let terminalJob = job;
+
+    for (let index = 0; index < 2_000; index += 1) {
+      assert.equal(job.payload.sourceProviderSlug, "google_health");
+      let result: Awaited<ReturnType<typeof executeJunctionJob>>;
+      try {
+        result = await executeJunctionJob(provider, makeContext(), job);
+      } catch (error) {
+        if (!failTimeseries) {
+          throw error;
+        }
+        failedExecutions += 1;
+        failTimeseries = false;
+        assert.equal(
+          liveSources.find((source) => source.sourceProviderSlug === "google_health")
+            ?.resourceAvailabilitySummary?.[completedAtKey],
+          undefined,
+        );
+        // A fresh context models process restart before retrying the same durable job.
+        continue;
+      }
+      processedJobs += 1;
+      terminalJob = job;
+      if (processedJobs === HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT) {
+        markerBeforePassBoundary = liveSources.some((source) =>
+          typeof source.resourceAvailabilitySummary?.[completedAtKey] === "string"
+        );
+      }
+      const next = result.scheduledJobs?.[0];
+      if (!next) {
+        return {
+          completionWrites,
+          failedExecutions,
+          importedSnapshots,
+          liveSources,
+          markerBeforePassBoundary,
+          processedJobs,
+          providerRequests: requests.filter(({ url }) =>
+            url.pathname.includes("/summary/") || url.pathname.includes("/timeseries/")
+          ),
+          replayTerminal: async () =>
+            executeJunctionJob(provider, makeContext(), terminalJob),
+          requests,
+        };
+      }
+      job = createJobFromInput(next, index);
+    }
+    throw new Error("Source-scoped Junction backfill did not terminate.");
+  };
+
+  const rejected = await runScenario({
+    days: 2,
+    summaryRecordOnlyFirstAttempt: true,
+    summaryRecordSource: "fitbit",
+    timeseriesResources: [],
+  });
+  const rejectedGoogle = rejected.liveSources.find((source) =>
+    source.sourceProviderSlug === "google_health"
+  );
+  assert.equal(
+    rejectedGoogle?.resourceAvailabilitySummary?.[completedAtKey],
+    undefined,
+  );
+  assert.equal(
+    rejected.liveSources.find((source) => source.sourceProviderSlug === "fitbit")
+      ?.status,
+    "connected",
+  );
+  assert.equal(rejected.importedSnapshots.length, 0);
+  assert.equal(rejected.completionWrites, 0);
+
+  const empty = await runScenario({
+    days: 2,
+    summaryRecordSource: null,
+    timeseriesResources: [],
+  });
+  assert.equal(
+    typeof empty.liveSources.find((source) =>
+      source.sourceProviderSlug === "google_health"
+    )?.resourceAvailabilitySummary?.[completedAtKey],
+    "string",
+  );
+  assert.equal(empty.importedSnapshots.length, 0);
+  assert.equal(empty.completionWrites, 1);
+
+  const long = await runScenario({
+    days: 60,
+    failFirstTimeseriesPass: true,
+    summaryRecordSource: "google_health",
+    timeseriesResources: ["steps", "heartrate"],
+  });
+  assert.ok(
+    long.processedJobs > HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
+  );
+  assert.equal(long.markerBeforePassBoundary, false);
+  assert.equal(long.failedExecutions, 1);
+  assert.equal(long.completionWrites, 1);
+  assert.equal(long.importedSnapshots.length, 0);
+  assert.equal(
+    long.liveSources.find((source) => source.sourceProviderSlug === "fitbit")
+      ?.status,
+    "connected",
+  );
+  assert.ok(
+    long.providerRequests.length > HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
+  );
+  for (const { url } of long.providerRequests) {
+    assert.equal(url.searchParams.get("provider"), "google_health");
+  }
+  assert.equal(long.requests.some(({ method }) => method === "DELETE"), false);
+  const stableKeys = long.liveSources.map((source) => source.sourceInstanceKey);
+  await long.replayTerminal();
+  assert.deepEqual(
+    long.liveSources.map((source) => source.sourceInstanceKey),
+    stableKeys,
+  );
+  assert.equal(long.importedSnapshots.length, 0);
 });
 
 test("Junction scheduled polling uses stable closed-day windows", () => {
