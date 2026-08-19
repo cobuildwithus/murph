@@ -605,12 +605,16 @@ async function prepareLinqMaterializedThreadReply(
     async loadOperation() {
       const {
         createAssistantAutoReplyGroupContext,
+        createAssistantAutoReplyHistoryReader,
         processAssistantAutoReplyGroup,
       } = await import('../src/assistant/automation/reply.ts')
       const context = createAssistantAutoReplyGroupContext([contextItem])
       if (!context) {
         throw new Error('Expected one unanchored Linq context.')
       }
+      const historyReader = createAssistantAutoReplyHistoryReader({
+        vault: vaultRoot,
+      })
 
       return async () => {
         boundaries.executeProvider.mockClear()
@@ -626,6 +630,7 @@ async function prepareLinqMaterializedThreadReply(
               userEnvKeys: [],
             },
           },
+          historyReader,
           inboxServices: createInboxServices(),
           requestId: null,
           sessionMaxAgeMs: null,
@@ -659,6 +664,9 @@ async function prepareLinqMaterializedThreadReply(
           },
           channel: 'linq',
           status: 'pending',
+        })
+        expect(historyReader.readMetrics()).toMatchObject({
+          outboxScanPerformed: false,
         })
       }
     },
