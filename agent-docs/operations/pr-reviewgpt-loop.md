@@ -233,8 +233,9 @@ changes, a dirty worktree, or a checkout that is not at the pushed head.
 
 The PR body must carry the short intent, Product UX result, direct evidence,
 changelog decision, and any risk details required by
-`agent-docs/operations/completion-workflow.md` § PR Description. Before firing
-a round, confirm that information is present and current.
+`agent-docs/operations/completion-workflow.md` § PR Description. Complete that
+section's ordered launch preflight before firing a round; do not use a running
+ReviewGPT job to discover missing PR-body metadata.
 
 Before the final gate starts, the PR body must also contain exactly one
 `ReviewGPT context sensitivity: routine` or
@@ -250,7 +251,8 @@ At round 1, record the exact first-reviewed head in the PR body. Include the exa
 immutable. The packager fails if its supplied first head differs from this
 persisted PR-body value. Later substantive rounds report the remediation delta
 from that baseline without asking the author to maintain a manual line-count
-table.
+table. Here `<full-sha>` means exactly the 40-character lowercase hexadecimal
+value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. Final round 1 may run in parallel with both CI and the
