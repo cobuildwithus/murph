@@ -3140,7 +3140,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantInputId: string | null = null;
-        let acceptedReadyImageCompletion = false;
+        let acceptedForegroundPriorityAssistantInput = false;
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
@@ -3249,9 +3249,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       acceptedInputContext.conversationActivity,
                     );
                   }
-                  const consumedReadyImageCompletion =
-                    consumeReadyImageCompletionInputs(assistantInputIds);
-                  acceptedReadyImageCompletion ||= consumedReadyImageCompletion;
+                  acceptedForegroundPriorityAssistantInput ||=
+                    acceptedInputContext.foregroundPriorityInputAccepted;
+                  consumeReadyImageCompletionInputs(assistantInputIds);
                   return () => {
                     currentAssistantInputId = null;
                   };
@@ -3310,7 +3310,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (
           passResult.runtimeStateDirty
           && (
-            acceptedReadyImageCompletion
+            acceptedForegroundPriorityAssistantInput
             || passResult.assistantPhaseResult
               ?.foregroundPrioritySystemCompletionProcessed === true
           )
@@ -4374,17 +4374,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const consumeReadyImageCompletionInputs = (
         acceptedInputIds: readonly string[],
-      ): boolean => {
+      ): void => {
         const readyBatch = readyImageCompletionInputBatch;
         if (!readyBatch) {
-          return false;
+          return;
         }
         const acceptedInputIdSet = new Set(acceptedInputIds);
         const retainedInputIds = readyBatch.assistantInputIds.filter(
           (inputId) => !acceptedInputIdSet.has(inputId),
         );
         if (retainedInputIds.length === readyBatch.assistantInputIds.length) {
-          return false;
+          return;
         }
         readyImageCompletionInputBatch = retainedInputIds.length === 0
           ? null
@@ -4392,7 +4392,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ...readyBatch,
               assistantInputIds: retainedInputIds,
             };
-        return true;
       };
       const absorbForegroundPassResult = (
         passResult: HostedWorkspaceRunnerResult,

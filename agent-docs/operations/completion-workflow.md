@@ -336,8 +336,8 @@ sends a full guarded snapshot. PRs that do not enter that gate do not need the
 line.
 
 The applicable invariant and review docs own the required content for each
-risk and deploy boundary. Do not paste empty risk sections, a manual line-count
-table, the full work plan, or a repeated list of review lenses into every PR.
+risk and deploy boundary. Do not paste empty risk sections, a manual line-count table,
+the full work plan, or a repeated list of review lenses into every PR.
 
 ## Review-Resolution Loop
 
