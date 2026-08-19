@@ -90,7 +90,12 @@ jobs:
             ## Evidence
 
             - Direct: The Frog reconciliation workflow reports the linked issue and pull-request state.
-            - Coverage: The workflow guard checks the generated body and changelog declaration.
+            - Coverage: The workflow guard checks the generated body, deployment disposition, and changelog declaration.
+
+            ## Deployment concerns
+
+            - Deployment: not applicable
+            - Reason: This bookkeeping-only pull request does not change code, configuration, or runtime deploy boundaries.
 
             ## Changelog
 

@@ -19,11 +19,25 @@
 
 ## Risks (only when relevant)
 
-<!-- Delete this section when no special risk applies. Include only affected invariants, hidden owners, architecture choices, hot-path calls, database fanout, provider-input measurements, deployment skew, rollback floors, or deferred work. -->
+<!-- Delete this section when no special risk applies. Include only affected invariants, hidden owners, architecture choices, hot-path calls, database fanout, provider-input measurements, or deferred work. -->
 
 <!-- Add the next two lines only before a final ReviewGPT gate. Missing or invalid sensitivity defaults safely to a full review packet. -->
 <!-- ReviewGPT context sensitivity: routine OR sensitive -->
 <!-- Classification reason: ... -->
+
+## Deployment concerns
+
+<!-- Keep this section in every PR. Select exactly one disposition. For an applicable deploy boundary, complete every deployment detail and remove Reason. Otherwise remove the deployment-detail bullets and explain why deployment concerns do not apply. -->
+
+- Deployment: <!-- applicable OR not applicable -->
+- Supported skew: <!-- Required when applicable -->
+- Safe order: <!-- Required when applicable -->
+- Rollback floor: <!-- Required when applicable -->
+- Expected exposure: <!-- Required when applicable -->
+- Reversibility: <!-- Required when applicable -->
+- Convergence proof: <!-- Required when applicable -->
+- Post-deploy checks: <!-- Required when applicable -->
+- Reason: <!-- Required only when not applicable -->
 
 ## Changelog
 
