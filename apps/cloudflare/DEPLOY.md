@@ -979,19 +979,6 @@ hidden.
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
 `HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the canonical Worker R2 binding. Deploy preflight requires the canonical runtime and preview buckets to be ENAM Standard. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
 
-For the one-time single-region retirement release, update
-`CF_BUNDLES_BUCKET`, `CF_BUNDLES_PREVIEW_BUCKET`, and
-`HOSTED_R2_PRESIGN_BUCKET_NAME` to their existing ENAM bucket names as one
-candidate-deploy operation. Changing GitHub Environment values does not mutate
-the already deployed Worker, so do not run an older phase/fallback deploy after
-that change. Keep the Web account-deletion maintenance guard enabled. Deploy
-Cloudflare first and require 100 percent rollout, the ordinary direct-R2 and
-runtime smokes, and an API check proving that the live Worker has only the
-canonical `BUNDLES` R2 binding. Then rerun the final current-owner check, empty
-and delete only the exact retired production and preview OC buckets, and verify
-that both bucket APIs report them absent. Only after physical absence is proven
-may the post-retirement Web cleanup remove the maintenance guard. The former OC
-buckets are not Worker bindings or rollback targets.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and

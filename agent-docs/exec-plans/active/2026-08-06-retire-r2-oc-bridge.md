@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-06
-Updated: 2026-08-06
+Updated: 2026-08-19
 
 ## Goal
 
@@ -120,3 +120,24 @@ Updated: 2026-08-06
   reconciliation, both exact bucket deletions, and API absence before the Web
   cleanup. A deploy-surface regression check plus the retained Web guard tests
   passed 26 and 12 checks respectively.
+- On 2026-08-19, the live Worker remained at 100 percent with one canonical R2
+  binding and no retired binding. Historical-to-current deploy configuration
+  resolved exactly two stale live buckets, both in OC, without logging their
+  names or object keys. The preview target had one pre-retirement object and no
+  lock rule; it was emptied, deleted, and proved absent.
+- The production target reported 120,359 objects and 25.9 GB. A complete
+  121-page inventory found 120,359 unique objects totaling 25,900,114,432
+  bytes, with the newest write at 2026-08-07T08:12:24.856Z and zero writes on
+  or after the 2026-08-08 UTC retirement cutoff. This composed with the prior
+  current-owner reconciliation and forward repair above, so the target was
+  emptied in bounded sequential batches and deleted. A fresh list contained
+  ten live buckets and neither stale target; direct reads for both returned the
+  provider's nonexistent-bucket code.
+- The production-only Web maintenance variable was removed after physical
+  absence and a fresh Vercel environment listing found zero remaining values
+  with that name. The post-retirement cleanup removes the temporary guard from
+  both Web routes, its migration-only tests and catalog frames, and the one-time
+  rollout instructions while preserving durable deletion recovery states.
+- Focused Web tests passed 32 checks after the ordinary generated Prisma-client
+  prerequisite. The Cloudflare deploy-contract test passed 25 checks, Web and
+  Cloudflare typechecks passed, and the diff passed whitespace validation.
