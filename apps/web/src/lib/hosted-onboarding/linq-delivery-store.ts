@@ -83,6 +83,7 @@ export type HostedAiUsageLimitNoticeDeliveryClaim =
   | {
     idempotencyKey: string;
     providerIdempotencyKey: string;
+    resumeRichLinkAfterAcceptedText?: true;
     status: "claimed";
   }
   | {
@@ -323,6 +324,7 @@ export type HostedLinqDeliveryProviderDispatchClaim = {
   failureCode?: string | null;
   id: string | null;
   outcome?: "completed" | "incompatible";
+  resumeRichLinkAfterAcceptedText?: true;
   retryAt?: Date;
 };
 
@@ -805,6 +807,9 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
         idempotencyKey,
         providerIdempotencyKey:
           buildHostedAiUsageNoticeProviderIdempotencyKey(claim.id),
+        ...(claim.resumeRichLinkAfterAcceptedText
+          ? { resumeRichLinkAfterAcceptedText: true as const }
+          : {}),
         status: "claimed",
       };
     }
@@ -929,6 +934,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   messageId?: string | null;
   messageIds?: readonly string[];
   prisma: HostedLinqDeliveryClient;
+  recoveredRichLinkPrimary?: boolean;
 }): Promise<{
   deliveryStatus: HostedLinqAcceptedMilestoneStatus;
   reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
@@ -951,11 +957,9 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   const finalMessageId =
     providerMessageIds.at(-1) ?? normalizeNullable(input.messageId);
   const messageLookupKey = createHostedLinqMessageLookupKey(finalMessageId);
-  const recoveredPrimaryMessageLookupKeys = providerMessageIds.length > 1
-    ? createHostedLinqMessageLookupKeyReadCandidates(
-        providerMessageIds[0] ?? null,
-      )
-    : [];
+  const recoveredRichLinkPrimary =
+    input.recoveredRichLinkPrimary === true
+    && providerMessageIds.length === 1;
   return runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     const signupAttempt = parseHostedLinqInviteSignupEffectId(
       input.idempotencyKey,
@@ -982,15 +986,13 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
             failedAt: { not: null },
             messageLookupKey: null,
           },
-          ...(recoveredPrimaryMessageLookupKeys.length > 0
+          ...(recoveredRichLinkPrimary
             ? [{
                 acceptedAt: null,
                 failedAt: { not: null },
                 failureCode:
                   HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
-                messageLookupKey: {
-                  in: recoveredPrimaryMessageLookupKeys,
-                },
+                messageLookupKey: { not: null },
                 status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
               }]
             : []),
@@ -1031,7 +1033,15 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
         template: true,
       },
     });
-    if (delivery && providerMessageIds.length > 1) {
+    if (delivery && recoveredRichLinkPrimary) {
+      await recordHostedLinqDeliveryMessagesTx({
+        acceptedAt,
+        deliveryId: delivery.id,
+        messageIds: providerMessageIds,
+        ordinalOffset: 1,
+        prisma,
+      });
+    } else if (delivery && providerMessageIds.length > 1) {
       await recordHostedLinqDeliveryMessagesTx({
         acceptedAt,
         deliveryId: delivery.id,
@@ -1046,7 +1056,10 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
       messageLookupKey,
       messageLookupKeyCandidates:
         createHostedLinqMessageLookupKeyReadCandidates(finalMessageId),
-      messageIds: providerMessageIds.length > 1 ? providerMessageIds : undefined,
+      messageIds:
+        recoveredRichLinkPrimary || providerMessageIds.length > 1
+          ? providerMessageIds
+          : undefined,
       prisma,
     });
     if (!replay.advanced || !replay.receipt) {
@@ -1519,6 +1532,7 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   linqChatId?: string | null;
   messageIds?: readonly string[];
   prisma: HostedLinqDeliveryClient;
+  recoveredRichLinkPrimary?: boolean;
   retryAfterAt?: Date | null;
 }): Promise<void> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
@@ -1535,8 +1549,6 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   );
   const finalMessageId = providerMessageIds.at(-1) ?? null;
   const finalMessageLookupKey = createHostedLinqMessageLookupKey(finalMessageId);
-  const finalMessageLookupKeyCandidates =
-    createHostedLinqMessageLookupKeyReadCandidates(finalMessageId);
   await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     const updated = await prisma.hostedLinqDelivery.updateMany({
       where: {
@@ -1549,15 +1561,13 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
         lastReceiptAt: null,
         OR: [
           { messageLookupKey: null },
-          ...(failureCode
+          ...(input.recoveredRichLinkPrimary === true
+            && failureCode
               === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
-            && finalMessageLookupKeyCandidates.length > 0
             ? [{
                 failureCode:
                   HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
-                messageLookupKey: {
-                  in: finalMessageLookupKeyCandidates,
-                },
+                messageLookupKey: { not: null },
                 status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
               }]
             : []),
@@ -2268,6 +2278,7 @@ async function recordHostedLinqDeliveryMessagesTx(input: {
   acceptedAt: Date;
   deliveryId: string;
   messageIds: readonly string[];
+  ordinalOffset?: number;
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
   const messageIds = normalizeHostedLinqProviderMessageIds(input.messageIds, null);
@@ -2275,15 +2286,18 @@ async function recordHostedLinqDeliveryMessagesTx(input: {
     return;
   }
   await input.prisma.hostedLinqDeliveryMessage.createMany({
-    data: messageIds.map((messageId, ordinal) => ({
-      acceptedAt: input.acceptedAt,
-      deliveryId: input.deliveryId,
-      id: buildHostedLinqDeliveryMessageId(input.deliveryId, ordinal),
-      messageIdSuffix: toHostedOnboardingLogIdSuffix(messageId),
-      messageLookupKey: requireHostedLinqMessageLookupKey(messageId),
-      ordinal,
-      status: "accepted",
-    })),
+    data: messageIds.map((messageId, index) => {
+      const ordinal = (input.ordinalOffset ?? 0) + index;
+      return {
+        acceptedAt: input.acceptedAt,
+        deliveryId: input.deliveryId,
+        id: buildHostedLinqDeliveryMessageId(input.deliveryId, ordinal),
+        messageIdSuffix: toHostedOnboardingLogIdSuffix(messageId),
+        messageLookupKey: requireHostedLinqMessageLookupKey(messageId),
+        ordinal,
+        status: "accepted",
+      };
+    }),
     skipDuplicates: true,
   });
 }
@@ -2875,6 +2889,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     return {
       claimed: updated.count === 1,
       id: input.delivery.id,
+      ...(updated.count === 1
+        ? { resumeRichLinkAfterAcceptedText: true as const }
+        : {}),
     };
   }
 

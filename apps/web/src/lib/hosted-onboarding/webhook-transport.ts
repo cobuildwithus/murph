@@ -829,6 +829,7 @@ async function sendHostedLinqSideEffect(
   let deliveryEffect = effect;
   let providerIdempotencyKey = effect.effectId;
   let providerRequestCompleted = false;
+  let recoveredRichLinkPrimary = false;
   let usageLimitDispatchClaimed = false;
 
   try {
@@ -945,6 +946,8 @@ async function sendHostedLinqSideEffect(
       }
       usageLimitDispatchClaimed = true;
       providerIdempotencyKey = dispatch.providerIdempotencyKey;
+      recoveredRichLinkPrimary =
+        dispatch.resumeRichLinkAfterAcceptedText === true;
       deliveryEffect = dispatch.idempotencyKey === effect.effectId
         ? effect
         : { ...effect, effectId: dispatch.idempotencyKey };
@@ -964,6 +967,9 @@ async function sendHostedLinqSideEffect(
       idempotencyKey: providerIdempotencyKey,
       message,
       replyToMessageId: deliveryEffect.payload.replyToMessageId,
+      ...(recoveredRichLinkPrimary
+        ? { resumeRichLinkAfterAcceptedText: true }
+        : {}),
       signal: options.signal,
     });
     providerRequestCompleted = true;
@@ -976,6 +982,9 @@ async function sendHostedLinqSideEffect(
       messageId: result.messageId,
       messageIds: result.providerMessageIds,
       prisma: options.prisma,
+      ...(recoveredRichLinkPrimary
+        ? { recoveredRichLinkPrimary: true }
+        : {}),
       throwOnError:
         deliveryEffect.payload.template === "ai_usage_quota"
         || options.completeProviderOutcomeBeforeReturn,
@@ -1037,6 +1046,9 @@ async function sendHostedLinqSideEffect(
                 linqChatId: partialDelivery.linqChatId,
                 messageIds: partialDelivery.messageIds,
                 prisma: options.prisma,
+                ...(recoveredRichLinkPrimary
+                  ? { recoveredRichLinkPrimary: true }
+                  : {}),
               }
             : {
                 expectedAttemptedAt: new Date(
@@ -1884,6 +1896,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
   messageId: string | null;
   messageIds?: readonly string[];
   prisma: HostedLinqTransportPersistenceClient;
+  recoveredRichLinkPrimary?: boolean;
   throwOnError?: boolean;
 }): Promise<void> {
   const template = input.effect.payload.template;
@@ -1901,6 +1914,9 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
         messageId: input.messageId,
         ...(input.messageIds ? { messageIds: input.messageIds } : {}),
         prisma,
+        ...(input.recoveredRichLinkPrimary
+          ? { recoveredRichLinkPrimary: true }
+          : {}),
       });
       if (milestone.reopenOnboardingLink) {
         const groupJoinReplyContext =

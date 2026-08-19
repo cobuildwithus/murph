@@ -911,6 +911,41 @@ describe("sendHostedLinqChatMessage", () => {
     ]);
   });
 
+  it("resumes a rich-link partial without replaying its accepted text", async () => {
+    const requestBodies: unknown[] = [];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestBodies.push(readJsonRequestBody(init));
+        return createJsonResponse({
+          chat_id: "chat_123",
+          message: { id: "msg_link" },
+        }, 200);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqChatMessage({
+      chatId: "chat_123",
+      idempotencyKey: "payment-message:evt_123",
+      message:
+        "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+      resumeRichLinkAfterAcceptedText: true,
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      messageId: "msg_link",
+    });
+
+    expect(requestBodies).toEqual([{
+      message: {
+        idempotency_key: "payment-message:evt_123:link",
+        parts: [{
+          type: "link",
+          value: "https://pay.example.test/checkout/session_123",
+        }],
+      },
+    }]);
+  });
+
   it("keeps a reaction-bound consent prompt and its terminal link in one text message", async () => {
     const requestBodies: unknown[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
