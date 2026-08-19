@@ -5,8 +5,9 @@ Hosted integration control plane for Vercel deployments.
 ## Frontend evidence
 
 The public design reference is available at `/design` with Brand, Components,
-and Consent tabs. Reuse the component catalog before creating a near-duplicate,
-and add new shared components there.
+and Consent tabs. Composed-section studies live under `/screenshots/<category>`.
+Reuse the component catalog before creating a near-duplicate. The canonical
+catalog and PR-proof contract lives in `agent-docs/FRONTEND.md`.
 
 Unlinked, noindex presentation studies live under `/screenshots`. Add a study
 only for a difficult or reusable state. It must render the real production
@@ -18,8 +19,11 @@ never place private member data or credentials there.
 Match evidence to the changed visual, state, interaction, and responsive risk.
 A change can need no screenshots, one screenshot, or many. Inspect phone and
 desktop when responsive behavior can change. The `Pull request evidence`
-workflow checks the direct evidence and coverage description. It does not
-require a catalog update or screenshot count.
+workflow requires a dedicated design proof with a supported absolute anchored
+link plus Evidence and Coverage. The preliminary frontend review verifies that
+the destination is repository-owned, reachable, current, and representative.
+Add or update the representation only when no existing route and anchor render
+the changed state. The workflow does not impose a screenshot count.
 
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,

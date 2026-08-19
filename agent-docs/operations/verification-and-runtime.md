@@ -623,9 +623,13 @@ Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
 For every user-facing `apps/web` UI diff, verification also includes
-`pnpm test:frontend-evidence` and evidence matched to the changed visual,
-state, interaction, and responsive risk. The pull-request workflow repeats the
-evidence check against the final base-to-head diff and PR body. Inspect phone and desktop
+`pnpm test:frontend-design-proof`, a supported absolute anchored component,
+consent, or section-study link, and evidence matched to the changed visual,
+state, interaction, and responsive risk. The preliminary frontend review owns
+repository origin, reachability, currentness, and representation quality. Add
+or update the representation only when no existing route and anchor render the
+changed state. The pull-request workflow repeats the structural design-proof check
+against the final base-to-head diff and PR body. Inspect phone and desktop
 when responsive behavior can change; do not add a viewport only to meet a
 quota. Prefer an attached in-app Browser for visual proof, then use the
 repository-installed Playwright runtime when no tab is attached or the
