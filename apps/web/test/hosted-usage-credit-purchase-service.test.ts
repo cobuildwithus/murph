@@ -4962,9 +4962,61 @@ describe("createHostedUsageCreditCheckout", () => {
 });
 
 describe("automatic group refill saved-card recovery", () => {
-  it("uses the exact verified sponsorship Checkout method when attached card records are ambiguous", async () => {
+  it("uses the latest verified sponsorship Checkout method amid attached cards and later one-time history", async () => {
     const fake = createFakePrisma();
     const fixture = installAutomaticGroupRefillFixture(fake);
+    const activation = fake.purchases.get("hucp_activation_abcdefghijkl");
+    expect(activation).toBeDefined();
+    const priorPeriodStartedAt = new Date("2026-06-30T12:00:00.000Z");
+    Object.assign(activation!, {
+      createdAt: priorPeriodStartedAt,
+      groupSponsorshipPeriodStartedAt: priorPeriodStartedAt,
+      lastReconciledAt: priorPeriodStartedAt,
+      paidAt: priorPeriodStartedAt,
+      terminalAt: priorPeriodStartedAt,
+      updatedAt: priorPeriodStartedAt,
+    });
+    const authorization = fake.sponsorshipAuthorizations.get(
+      fixture.authority.authorizationId,
+    );
+    expect(authorization).toBeDefined();
+    authorization!.createdAt = priorPeriodStartedAt;
+    const recoveryPurchaseId = "hucp_recovery_abcdefghijkl";
+    const recoveryPaidAt = new Date("2026-07-01T12:00:00.000Z");
+    fake.purchases.set(recoveryPurchaseId, {
+      ...activation,
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v5",
+      clientRequestKey: "group-sponsorship:recovery:1",
+      groupSponsorshipChargeOrdinal: 1,
+      id: recoveryPurchaseId,
+      lastReconciledAt: recoveryPaidAt,
+      paidAt: recoveryPaidAt,
+      stripeChargeIdEncrypted: "encrypted:ch_recovery",
+      stripeChargeLookupKey: "billing:ch_recovery",
+      stripeCheckoutSessionIdEncrypted: "encrypted:cs_recovery",
+      stripeCheckoutSessionLookupKey: "checkout:cs_recovery",
+      stripePaymentIntentIdEncrypted: "encrypted:pi_recovery",
+      stripePaymentIntentLookupKey: "billing:pi_recovery",
+      terminalAt: recoveryPaidAt,
+      updatedAt: recoveryPaidAt,
+    });
+    fake.purchases.set("hucp_one_time_abcdefghijkl", {
+      ...activation,
+      clientRequestKey: "one-time-after-recovery",
+      groupSponsorshipAuthorizationId: null,
+      groupSponsorshipChargeOrdinal: null,
+      groupSponsorshipPeriodStartedAt: null,
+      id: "hucp_one_time_abcdefghijkl",
+      lastReconciledAt: new Date("2026-08-01T10:00:00.000Z"),
+      paidAt: new Date("2026-08-01T10:00:00.000Z"),
+      stripeChargeIdEncrypted: "encrypted:ch_one_time",
+      stripeChargeLookupKey: "billing:ch_one_time",
+      stripeCheckoutSessionIdEncrypted: "encrypted:cs_one_time",
+      stripeCheckoutSessionLookupKey: "checkout:cs_one_time",
+      stripePaymentIntentIdEncrypted: "encrypted:pi_one_time",
+      stripePaymentIntentLookupKey: "billing:pi_one_time",
+      terminalAt: new Date("2026-08-01T10:00:00.000Z"),
+    });
     mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
       default_source: null,
       id: "cus_group_payer",
@@ -4984,10 +5036,16 @@ describe("automatic group refill saved-card recovery", () => {
       url: "/v1/payment_methods",
     });
     mocks.stripePaymentIntentRetrieve.mockResolvedValueOnce(
-      buildSponsorshipCheckoutPaymentIntent(),
+      buildSponsorshipCheckoutPaymentIntent({
+        chargeId: "ch_recovery",
+        paymentIntentId: "pi_recovery",
+        paymentMethodId: "pm_sponsorship_recovery",
+        policyVersion: "hosted-usage-credit-checkout-v5",
+        purchaseId: recoveryPurchaseId,
+      }),
     );
     mocks.stripePaymentMethodRetrieve.mockResolvedValueOnce(
-      buildAttachedPaymentMethod("pm_sponsorship_exact"),
+      buildAttachedPaymentMethod("pm_sponsorship_recovery"),
     );
     mocks.stripePaymentIntentCreate.mockResolvedValueOnce(
       buildSavedCardPaymentIntent({
@@ -5025,15 +5083,23 @@ describe("automatic group refill saved-card recovery", () => {
     });
 
     expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledWith(
-      "pi_activation",
+      "pi_recovery",
       { expand: ["latest_charge"] },
     );
     expect(mocks.stripePaymentMethodRetrieve).toHaveBeenCalledWith(
-      "pm_sponsorship_exact",
+      "pm_sponsorship_recovery",
     );
     expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ payment_method: "pm_sponsorship_exact" }),
+      expect.objectContaining({ payment_method: "pm_sponsorship_recovery" }),
       expect.any(Object),
+    );
+    expect(fake.prisma.hostedUsageCreditPurchase.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ paidAt: "desc" }, { id: "desc" }],
+        where: expect.objectContaining({
+          groupSponsorshipAuthorizationId: fixture.authority.authorizationId,
+        }),
+      }),
     );
     expect(mocks.stripeCustomerRetrieve).not.toHaveBeenCalled();
     expect(mocks.stripePaymentMethodsList).not.toHaveBeenCalled();
@@ -6680,22 +6746,29 @@ function buildAttachedPaymentMethod(id: string) {
   };
 }
 
-function buildSponsorshipCheckoutPaymentIntent() {
+function buildSponsorshipCheckoutPaymentIntent(input: {
+  chargeId?: string;
+  paymentIntentId?: string;
+  paymentMethodId?: string;
+  policyVersion?: "hosted-usage-credit-checkout-v4" | "hosted-usage-credit-checkout-v5";
+  purchaseId?: string;
+} = {}) {
   return {
     amount: 500,
     amount_received: 500,
     currency: "usd",
     customer: "cus_group_payer",
-    id: "pi_activation",
-    latest_charge: "ch_activation",
+    id: input.paymentIntentId ?? "pi_activation",
+    latest_charge: input.chargeId ?? "ch_activation",
     livemode: false,
     metadata: {
-      policyVersion: "hosted-usage-credit-checkout-v4",
-      purchaseId: "hucp_activation_abcdefghijkl",
+      policyVersion:
+        input.policyVersion ?? "hosted-usage-credit-checkout-v4",
+      purchaseId: input.purchaseId ?? "hucp_activation_abcdefghijkl",
       purpose: "hosted_usage_credit",
     },
     object: "payment_intent",
-    payment_method: "pm_sponsorship_exact",
+    payment_method: input.paymentMethodId ?? "pm_sponsorship_exact",
     setup_future_usage: "off_session",
     status: "succeeded",
   };
@@ -6960,9 +7033,12 @@ function createFakePrisma(input: {
       return record;
     }),
     findFirst: vi.fn(async (query: PurchaseQuery) => {
-      const record = [...purchases.values()].find((candidate) =>
-        matchesPurchaseWhere(candidate, query.where)
-      ) ?? null;
+      const record = sortFakePurchaseRecords(
+        [...purchases.values()].filter((candidate) =>
+          matchesPurchaseWhere(candidate, query.where)
+        ),
+        query.orderBy,
+      )[0] ?? null;
       const projected = projectFakeRecord(record, query.select);
       return projected && query.include?.payer
         ? {
@@ -7156,8 +7232,56 @@ function createFakePrisma(input: {
 
 interface PurchaseQuery {
   include?: Record<string, unknown>;
+  orderBy?:
+    | Record<string, "asc" | "desc">
+    | Array<Record<string, "asc" | "desc">>;
   select?: Record<string, boolean>;
   where: Record<string, unknown>;
+}
+
+function sortFakePurchaseRecords(
+  records: Array<Record<string, unknown>>,
+  orderBy: PurchaseQuery["orderBy"],
+): Array<Record<string, unknown>> {
+  const clauses = orderBy
+    ? Array.isArray(orderBy) ? orderBy : [orderBy]
+    : [];
+  return [...records].sort((left, right) => {
+    for (const clause of clauses) {
+      const entry = Object.entries(clause)[0];
+      if (!entry) {
+        continue;
+      }
+      const [field, direction] = entry;
+      const compared = compareFakePurchaseOrderValues(
+        left[field],
+        right[field],
+      );
+      if (compared !== 0) {
+        return direction === "desc" ? -compared : compared;
+      }
+    }
+    return 0;
+  });
+}
+
+function compareFakePurchaseOrderValues(left: unknown, right: unknown): number {
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() - right.getTime();
+  }
+  if (typeof left === "string" && typeof right === "string") {
+    return left.localeCompare(right);
+  }
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right;
+  }
+  if (typeof left === "bigint" && typeof right === "bigint") {
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+  if (left === right) {
+    return 0;
+  }
+  return left === null || left === undefined ? -1 : 1;
 }
 
 function matchesPurchaseWhere(

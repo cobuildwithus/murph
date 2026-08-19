@@ -65,6 +65,17 @@ export const POST = withJsonError(async (
         prisma,
       });
     if (checkout) {
+      if (
+        checkout.status === "payment_pending" || checkout.status === "fulfilled"
+      ) {
+        const management =
+          await readHostedGroupSponsorshipManagementProjection({
+            beneficiaryMemberId: target.runtimeMemberId,
+            payerMemberId: auth.member.id,
+            prisma,
+          });
+        return jsonOk({ checkout, management });
+      }
       return jsonOk({ checkout });
     }
     const management =

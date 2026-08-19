@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
 import { Button } from "@/src/components/ui/button";
@@ -34,6 +34,8 @@ type GroupSponsorshipManagementError = {
   message: string;
 };
 
+type GroupSponsorshipRecoveryProgress = "fulfilled" | "payment_pending";
+
 export type GroupSponsorshipManagementConfirmation =
   | {
     currentMonthlyCapMinor: MonthlyCapMinor;
@@ -64,9 +66,24 @@ export function GroupSponsorshipManagementCard({
   const [busy, setBusy] = useState(false);
   const [canceled, setCanceled] = useState(false);
   const [error, setError] = useState<GroupSponsorshipManagementError | null>(null);
+  const [recoveryProgress, setRecoveryProgress] = useState<
+    GroupSponsorshipRecoveryProgress | null
+  >(null);
   const [confirmation, setConfirmation] = useState<
     GroupSponsorshipManagementConfirmation | null
   >(null);
+  const recoveryButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (
+      !busy &&
+      error?.certainty === "indeterminate" &&
+      management.status === "recovery_required" &&
+      recoveryProgress === null
+    ) {
+      recoveryButtonRef.current?.focus();
+    }
+  }, [busy, error, management.status, recoveryProgress]);
 
   const submit = async (body: Record<string, unknown>): Promise<boolean> => {
     if (inert || busy) {
@@ -105,6 +122,20 @@ export function GroupSponsorshipManagementCard({
           : null;
         if (checkoutUrl) {
           window.location.assign(checkoutUrl);
+          return true;
+        }
+        const checkoutStatus = value.checkout.status;
+        if (
+          checkoutStatus === "payment_pending" || checkoutStatus === "fulfilled"
+        ) {
+          const next = readManagementProjection(value.management);
+          if (next) {
+            setManagement(next);
+            setSelectedMonthlyCapMinor(
+              next.pendingMonthlyCapMinor ?? next.monthlyCapMinor,
+            );
+          }
+          setRecoveryProgress(checkoutStatus);
           return true;
         }
         throw new Error("Payment review couldn’t open. Try again.");
@@ -234,6 +265,22 @@ export function GroupSponsorshipManagementCard({
         <p className="text-sm leading-6 text-muted-foreground">
           Billing changes are unavailable, but you can still stop future automatic refills.
         </p>
+      ) : management.status === "recovery_required" && recoveryProgress ? (
+        <div
+          className="rounded-2xl border border-border bg-muted/40 p-4"
+          role="status"
+        >
+          <p className="font-medium">
+            {recoveryProgress === "payment_pending"
+              ? "Payment is processing"
+              : "Payment confirmed"}
+          </p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            {recoveryProgress === "payment_pending"
+              ? "Automatic refills will resume after payment is confirmed."
+              : "Automatic refills are ready to resume."}
+          </p>
+        </div>
       ) : management.status === "recovery_required" ? (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
           <p className="font-medium">Payment needs attention</p>
@@ -244,6 +291,7 @@ export function GroupSponsorshipManagementCard({
             type="button"
             className="mt-3"
             disabled={busy || inert}
+            ref={recoveryButtonRef}
             size="sm"
             onClick={() => void submit({ action: "recover" })}
           >
