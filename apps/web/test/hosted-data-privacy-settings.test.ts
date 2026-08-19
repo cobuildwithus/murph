@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
   publishBrowserVaultSessionEnding: vi.fn(),
   publishBrowserVaultSessionInvalidation: vi.fn(),
+  privyLogoutOnDone: null as (() => void) | null,
   reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultExport: vi.fn(),
@@ -57,6 +58,14 @@ vi.mock("react", async () => {
     }) as typeof actual.useState,
   };
 });
+
+vi.mock("next/image", () => ({
+  default: (props: Record<string, unknown>) => {
+    const imageProps = { ...props };
+    delete imageProps.priority;
+    return createElement("img", imageProps);
+  },
+}));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
   const actual = await importOriginal<
@@ -99,7 +108,10 @@ vi.mock("../src/components/settings/hosted-settings-session-state", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-privy-logout", () => ({
-  HostedPrivyLogout: () => null,
+  HostedPrivyLogout: ({ onDone }: { onDone: () => void }) => {
+    mocks.privyLogoutOnDone = onDone;
+    return null;
+  },
 }));
 
 vi.mock("@/src/components/ui/alert", () => ({
@@ -149,6 +161,7 @@ beforeEach(() => {
   mocks.useStateRecords = [];
   mocks.useStateSetters = [];
   mocks.useStateValues = [];
+  mocks.privyLogoutOnDone = null;
   mocks.authorize.mockResolvedValue({
     signature: `0x${"11".repeat(65)}`,
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
@@ -998,10 +1011,81 @@ describe("HostedDataPrivacySettings", () => {
 
     assert.ok(
       container.textContent?.includes(
-        "Your account and live Murph data have been deleted",
+        "Your Murph account and live data have been deleted.",
       ),
     );
+    assert.ok(container.textContent?.includes("Farewell for now."));
+    assert.ok(container.querySelector('[data-account-deletion-farewell="true"]'));
     assert.equal([...container.querySelectorAll("button")].length, 0);
+  });
+
+  test("replaces the deleted dashboard with the public farewell after Privy logout", async () => {
+    mockHostedDataPrivacyDeletedState();
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    const replace = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { replace },
+    });
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+    assert.ok(mocks.privyLogoutOnDone);
+
+    await act(async () => {
+      mocks.privyLogoutOnDone?.();
+    });
+
+    expect(replace).toHaveBeenCalledWith("/farewell");
+  });
+
+  test("falls back to the pending-cleanup farewell when Privy logout does not settle", async () => {
+    vi.useFakeTimers();
+    mockHostedDataPrivacyDeletedState({ cleanupPending: true });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    const replace = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { replace },
+    });
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+    expect(replace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(8_000);
+    });
+
+    expect(replace).toHaveBeenCalledWith("/farewell?cleanup=pending");
   });
 
   test("reports durable external cleanup as pending after account deletion", async () => {
@@ -1027,8 +1111,14 @@ describe("HostedDataPrivacySettings", () => {
 
     assert.ok(
       container.textContent?.includes(
-        "Your account was deleted. We're finishing some cleanup on our side",
+        "Your account has been deleted. Murph is finishing a small amount of technical cleanup in the background; no action is needed.",
       ),
+    );
+    assert.equal(
+      container.querySelector('[data-account-deletion-farewell="true"]')
+        ?.getAttribute("class")
+        ?.includes("fixed"),
+      true,
     );
     assert.equal([...container.querySelectorAll("button")].length, 0);
   });
@@ -1039,7 +1129,7 @@ describe("HostedDataPrivacySettings", () => {
 // exportSuccess, deletePending, dialogOpen, dialogStep, exitReason, exitNote,
 // confirmationPhrase, dialogError, deviceReconnectRequired, providerAccessRemovalRequired,
 // providerAccessRemovalConfirmed, providerAccessRemovalConfirmationToken,
-// deleted, cleanupPending, privyLogoutDone.
+// deleted, cleanupPending.
 function mockHostedVaultExportFlowState(input: {
   acknowledgedSensitiveDownload?: boolean;
 } = {}) {
@@ -1060,7 +1150,6 @@ function mockHostedVaultExportFlowState(input: {
     false,
     false,
     null,
-    false,
     false,
     false,
   ];
@@ -1097,7 +1186,6 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     input.providerAccessRemovalConfirmationToken ?? null,
     false,
     false,
-    false,
   ];
 }
 
@@ -1123,7 +1211,6 @@ function mockHostedDataPrivacyDeletedState(input: {
     null,
     true,
     input.cleanupPending ?? false,
-    false,
   ];
 }
 

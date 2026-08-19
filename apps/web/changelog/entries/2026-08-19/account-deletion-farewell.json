@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-19",
+  "order": 110,
+  "item": {
+    "id": "account-deletion-farewell",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "A gentler finish after account deletion",
+    "summary": "After deleting your account, Murph now leaves the dashboard immediately and opens a simple farewell page instead of showing an unavailable dashboard.",
+    "details": "The page confirms deletion, explains when small technical cleanup is still finishing automatically, and keeps a clear path back to Murph if you decide to return.",
+    "relevanceTags": ["account", "privacy", "settings"],
+    "sourcePullRequests": [2012]
+  }
+}
