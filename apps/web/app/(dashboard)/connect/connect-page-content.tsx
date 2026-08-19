@@ -207,8 +207,7 @@ const CONNECT_SOURCE_UI = {
     name: "Eight Sleep",
   },
   fitbit: {
-    description:
-      "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+    description: "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
     logo: logoAsset("fitbit.svg"),
     name: "Fitbit",
   },

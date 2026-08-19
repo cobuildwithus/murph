@@ -328,7 +328,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     {
       assetPath: "/brand-logos/connect/fitbit.svg",
       description:
-        "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+        "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
       name: "Fitbit",
     },
     {
@@ -6345,7 +6345,7 @@ test("ConnectSourcesGrid keeps automatic Fitbit continuation live and accelerabl
     assert.equal(status.getAttribute("aria-atomic"), "true");
     assert.match(
       status.textContent ?? "",
-      /Daily data may need the next provider pull after that day closes\./u,
+      /new data can take a day to arrive\./u,
     );
     assert.match(status.textContent ?? "", /You can leave this page/u);
 
@@ -6361,7 +6361,7 @@ test("ConnectSourcesGrid keeps automatic Fitbit continuation live and accelerabl
     assert.equal(rendered.container.querySelector('[role="status"]'), status);
     assert.match(
       status.textContent ?? "",
-      /Murph will keep retrying the automatic switch/u,
+      /Murph is retrying the switch/u,
     );
     assert.match(status.textContent ?? "", /You can leave this page/u);
     assert.equal(rendered.container.querySelector('[role="alert"]'), null);
@@ -6391,7 +6391,7 @@ test("ConnectSourcesGrid keeps automatic Fitbit continuation live and accelerabl
     assert.equal(rendered.container.querySelector('[role="status"]'), status);
     assert.match(
       rendered.container.textContent ?? "",
-      /Murph will keep retrying, and you can leave this page\./u,
+      /Fitbit is still syncing while Murph retries the switch\./u,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -6450,8 +6450,7 @@ function createFitbitMigrationSource(input: {
 }) {
   return {
     connected: true,
-    description:
-      "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+    description: "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
     disconnectConnectionId: "dsc_junction_fitbit",
     ...(input.migrationState === "cutover_ready"
       ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG }

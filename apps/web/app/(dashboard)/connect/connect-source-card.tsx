@@ -58,13 +58,13 @@ export function SourceCard({
       : "Connect";
   const migrationRetryRequired = source.migrationRetryRequired === true;
   const migrationStatusText = migrationState === "authorization_required"
-    ? "Authorize Google Health to keep Fitbit and Pixel Watch syncing. Murph will keep the legacy Fitbit connection active until Google Health is verified, then switch automatically."
+    ? "Fitbit now syncs through Google Health. Your current connection keeps working until Murph switches over."
     : migrationState === "verifying_successor"
-      ? "Google Health is authorized. You can leave this page while Murph imports historical data and waits for a fresh supported update. Daily data may need the next provider pull after that day closes. Fitbit stays active until verification finishes."
+      ? "Google Health is authorized. Murph is importing your history, and new data can take a day to arrive. Fitbit keeps syncing until then. You can leave this page."
       : migrationState === "cutover_ready"
         ? migrationRetryRequired
-          ? "Google Health is verified. Murph will keep retrying the automatic switch in the background while Fitbit stays active. You can leave this page, or choose Retry now to accelerate the next attempt."
-          : "Google Health is verified. Murph is switching automatically; you can leave this page, and your existing history stays in place."
+          ? "Google Health is verified. Murph is retrying the switch, and Fitbit keeps syncing until it lands. You can leave this page."
+          : "Google Health is verified. Murph is switching over now, and your history stays in place. You can leave this page."
         : null;
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
   const reconnectUnavailable = requiresReconnect && !isAvailable;

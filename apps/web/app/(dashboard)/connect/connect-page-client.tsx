@@ -508,7 +508,7 @@ export function ConnectSourcesGrid({
           kind: "warning",
           title: "Retry requested",
           message:
-            "Fitbit remains active while the automatic switch continues. Murph will keep retrying, and you can leave this page.",
+            "Fitbit is still syncing while Murph retries the switch. You can leave this page.",
         });
         router.refresh();
         return;
@@ -766,7 +766,7 @@ function resolveDisconnectSuccessMessage(source: ConnectSource): string {
 
 function resolveDisconnectFailureMessage(source: ConnectSource): string {
   if (source.migrationState === "cutover_ready") {
-    return "We could not finish the Fitbit migration right now. The legacy Fitbit connection was not changed.";
+    return "We could not finish the switch right now. Your Fitbit connection has not changed.";
   }
 
   return source.disconnectScope === "junction_account"

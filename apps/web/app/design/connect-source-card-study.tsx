@@ -43,8 +43,7 @@ const APPLE_HEALTH_CONNECT_SOURCE: ConnectSource = {
 
 const FITBIT_CONNECT_SOURCE: ConnectSource = {
   connectTarget: "fitbit",
-  description:
-    "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+  description: "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
   id: "fitbit",
   logo: {
     className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
