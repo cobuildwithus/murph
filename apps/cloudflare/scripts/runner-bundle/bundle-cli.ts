@@ -98,12 +98,15 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // 9,165,765 B on 2026-08-16. The merged assistant execution graph, including
 // the session-routing SQLite projection, measured 9,209,386 B in the Linux
 // deploy lane on 2026-08-18; it extends existing graphs without adding a
-// package. The static startup closure still measured 24,950 B.
+// package. The bounded foreground outbox and pending-input projections measured
+// 9,272,172 B in the Linux deploy lane on 2026-08-19; they extend the same
+// Assistant Engine and hosted-runtime graphs without adding a package. The
+// static startup closure still measured 24,950 B.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
 // growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_242_200;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_305_000;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

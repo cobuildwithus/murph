@@ -285,9 +285,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // runtime and Web-control graph without adding a forbidden boot input. Exact
 // macOS production assembly measured an 8,266,461B static closure on
 // 2026-08-16; ratchet the integrated baseline and retain the same tolerance.
+// The bounded foreground outbox and pending-input projections extend the
+// existing Assistant Engine and hosted-runtime chunks without adding a
+// forbidden boot input. Exact macOS production assembly measured an 8,395,518B
+// static closure on 2026-08-19; ratchet that authored-code baseline and retain
+// the same cross-platform tolerance.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_393_617;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_266_461;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_395_518;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
