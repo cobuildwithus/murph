@@ -1,6 +1,6 @@
 # Account deletion farewell
 
-Status: active
+Status: completed
 Created: 2026-08-19
 Updated: 2026-08-19
 
@@ -90,9 +90,16 @@ Updated: 2026-08-19
 
 ## Verification
 
-- Commands to run: focused Vitest files for data-privacy settings and the
-  farewell page; Web typecheck; relevant changelog validation; phone and desktop
-  browser render; scoped diff/privacy inspection.
-- Expected outcomes: immediate `/farewell` replacement after logout, bounded
-  fallback, no dashboard error exposure, noindex metadata, responsive public
-  rendering, and no regression in deletion error or retry behavior.
+- Focused Vitest passed 74 tests across the farewell, privacy-settings, and
+  changelog suites.
+- Web typecheck passed. Scoped ESLint passed after removing its only warning.
+- Browser proof passed at 1440px, 390px, and 320px, plus 200% text scaling,
+  without horizontal overflow.
+- Impeccable audit scored 19/20 with no blocking, major, or minor findings. The
+  only polish note was the 24px-tall logo link, which still meets the WCAG AA
+  minimum target size.
+- Production read-only evidence confirmed the account row was removed and
+  Privy, billing, and runtime-log deletion completed. Cloudflare user-data
+  cleanup remains owned by the durable retry receipt and does not block the
+  farewell.
+Completed: 2026-08-19

@@ -60,8 +60,11 @@ vi.mock("react", async () => {
 });
 
 vi.mock("next/image", () => ({
-  default: ({ priority: _priority, ...props }: Record<string, unknown>) =>
-    createElement("img", props),
+  default: (props: Record<string, unknown>) => {
+    const imageProps = { ...props };
+    delete imageProps.priority;
+    return createElement("img", imageProps);
+  },
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
