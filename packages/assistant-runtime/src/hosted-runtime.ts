@@ -3140,7 +3140,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantInputId: string | null = null;
-        let acceptedForegroundPriorityAssistantInput = false;
+        const acceptedForegroundPriorityAssistantInputIds = new Set<string>();
+        const freshlyImportedForegroundAssistantInputIds = new Set(
+          passInput.initialMailboxImport?.importResult.assistantInputIds ?? [],
+        );
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
@@ -3249,8 +3252,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       acceptedInputContext.conversationActivity,
                     );
                   }
-                  acceptedForegroundPriorityAssistantInput ||=
-                    acceptedInputContext.foregroundPriorityInputAccepted;
+                  if (acceptedInputContext.foregroundPriorityInputAccepted) {
+                    for (const assistantInputId of assistantInputIds) {
+                      acceptedForegroundPriorityAssistantInputIds.add(
+                        assistantInputId,
+                      );
+                    }
+                  }
                   consumeReadyImageCompletionInputs(assistantInputIds);
                   return () => {
                     currentAssistantInputId = null;
@@ -3307,10 +3315,35 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             workspace: passInput.workspace,
           });
         recordBrowserVaultReplicaRefreshIntent(passResult);
+        let foregroundPriorityAssistantInputNeedsQuietWindow = false;
+        if (passResult.runtimeStateDirty) {
+          // A fresh input whose reply is already terminal must not lend its
+          // foreground quiet window to unrelated dirty state such as an
+          // outbox reconciliation. Retried inputs and uncertain evidence keep
+          // the conservative window.
+          for (const inputId of acceptedForegroundPriorityAssistantInputIds) {
+            if (!freshlyImportedForegroundAssistantInputIds.has(inputId)) {
+              foregroundPriorityAssistantInputNeedsQuietWindow = true;
+              break;
+            }
+            try {
+              if (!(await hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
+                inputId,
+                vault: restored.vaultRoot,
+              }))) {
+                foregroundPriorityAssistantInputNeedsQuietWindow = true;
+                break;
+              }
+            } catch {
+              foregroundPriorityAssistantInputNeedsQuietWindow = true;
+              break;
+            }
+          }
+        }
         if (
           passResult.runtimeStateDirty
           && (
-            acceptedForegroundPriorityAssistantInput
+            foregroundPriorityAssistantInputNeedsQuietWindow
             || passResult.assistantPhaseResult
               ?.foregroundPrioritySystemCompletionProcessed === true
           )
