@@ -2798,6 +2798,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await vi.waitFor(() => {
       expect(invoke).toHaveBeenCalledOnce();
+      expect(invoke.mock.calls[0]?.[0].job.request.assistantExecutionBlocked).toBe(true);
       expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
         "system_mailbox",
       );
@@ -2810,10 +2811,11 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("wakes a denied normalized invocation when foreground usage resumes", async () => {
+  it("starts a default invocation on the restored-policy owner recheck", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const restoredInvocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
     >(async () => "accepted");
@@ -2827,7 +2829,7 @@ describe("HostedUserRunner execution coordination", () => {
     const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       abortWorkspaceInvocation,
       ensureProcessing,
-      invocationResults: [firstInvocationResult.promise],
+      invocationResults: [firstInvocationResult.promise, restoredInvocationResult.promise],
       platformAiUsageAllowed: () => platformAiUsageAllowed,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -2879,14 +2881,19 @@ describe("HostedUserRunner execution coordination", () => {
     await flushWaitUntil();
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-restored-foreground-retry",
+      orchestrationAttemptId: "test-restored-owner-recheck",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(invoke.mock.calls[1]?.[0].job.request.processingMode).toBeUndefined();
+    const restoredRequest = invoke.mock.calls[1]?.[0].job.request;
+    expect(restoredRequest?.processingMode ?? "default").toBe("default");
+    expect(restoredRequest?.assistantExecutionBlocked).toBeUndefined();
+
+    restoredInvocationResult.resolve({ nextWakeAt: null, status: "idle" });
+    await flushWaitUntil();
   });
 
   it("returns timeout retry cadence and clears the fresh fence when startup readiness times out", async () => {

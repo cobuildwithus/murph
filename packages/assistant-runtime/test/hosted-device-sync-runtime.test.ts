@@ -63,6 +63,11 @@ import {
 } from "../src/hosted-runtime/platform.ts";
 import { recordHostedDeviceSyncDirtyPostCheckpointRecord } from "../src/hosted-runtime/system-mailbox.ts";
 import {
+  readHostedSystemMailboxState,
+  updateHostedSystemMailboxState,
+  type HostedSystemMailboxPendingItem,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
+import {
   createHostedRuntimeResolvedConfig,
   createHostedRuntimeWorkspace,
 } from "./hosted-runtime-test-helpers.ts";
@@ -10486,7 +10491,7 @@ describe("hosted device-sync runtime", () => {
     }), null);
   });
 
-  test("retains a Junction worker child with its changed cursor and dedupe authority", async () => {
+  test("retains a Junction summary cursor through mailbox persistence and cold reconstruction", async () => {
     const firstWorkspace = await createHostedRuntimeWorkspace(
       "hosted-device-sync-junction-child-first-",
     );
@@ -10524,7 +10529,7 @@ describe("hosted device-sync runtime", () => {
         jobs: [{
           availableAt: occurredAt,
           dedupeKey: "junction-seed-window",
-          kind: "backfill",
+          kind: "reconcile",
           payload: {
             windowEnd: "2026-04-04T00:00:00.000Z",
             windowStart: "2026-03-01T00:00:00.000Z",
@@ -10581,11 +10586,11 @@ describe("hosted device-sync runtime", () => {
         jobs: [{
           availableAt: retryAt,
           dedupeKey: "junction-child-window-cursor",
-          kind: "backfill",
+          kind: "reconcile",
           maxAttempts: 3,
           payload: {
             sourceProviderSlug: "garmin",
-            timeseriesCursor: "2026-02-15T00:00:00.000Z",
+            summaryResourceCursor: "sleep",
             windowEnd: "2026-03-15T00:00:00.000Z",
             windowStart: "2026-02-01T00:00:00.000Z",
           },
@@ -10606,11 +10611,11 @@ describe("hosted device-sync runtime", () => {
       assert.deepEqual(recovery.wake.hint?.jobs, [{
         availableAt: retryAt,
         dedupeKey: "junction-child-window-cursor",
-        kind: "backfill",
+        kind: "reconcile",
         maxAttempts: 3,
         payload: {
           sourceProviderSlug: "garmin",
-          timeseriesCursor: "2026-02-15T00:00:00.000Z",
+          summaryResourceCursor: "sleep",
           windowEnd: "2026-03-15T00:00:00.000Z",
           windowStart: "2026-02-01T00:00:00.000Z",
         },
@@ -10618,11 +10623,51 @@ describe("hosted device-sync runtime", () => {
       }]);
       assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
 
+      const retainedMailboxItem: HostedSystemMailboxPendingItem = {
+        attemptCount: 1,
+        itemId: "mailbox_item_junction_summary_cursor",
+        lastAttemptAt: occurredAt,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        mailboxDedupeKey: "device-sync.wake:junction-summary-cursor",
+        mailboxLaneSeq: "1",
+        nextAttemptAt: retryAt,
+        occurredAt,
+        postCheckpointRecord: {
+          kind: "device-sync.dirty-processed-batch",
+          nextWakeAt: retryAt,
+          records: [],
+          retainedWake: recovery.wake,
+        },
+        preferenceCausalSeq: null,
+        requestId: null,
+        routeAction: "run-device-sync-wake",
+        status: "recording",
+        wake,
+      };
+      await updateHostedSystemMailboxState(firstWorkspace.vaultRoot, () => ({
+        pending: [retainedMailboxItem],
+      }));
+      const [reloadedMailboxItem] = (
+        await readHostedSystemMailboxState(firstWorkspace.vaultRoot)
+      ).pending;
+      const reloadedRecord = reloadedMailboxItem?.postCheckpointRecord;
+      assert.equal(reloadedRecord?.kind, "device-sync.dirty-processed-batch");
+      if (reloadedRecord?.kind !== "device-sync.dirty-processed-batch") {
+        throw new Error("Expected the retained device-sync recovery record after reload.");
+      }
+      assert.ok(reloadedRecord.retainedWake);
+      assert.deepEqual(reloadedRecord.retainedWake, recovery.wake);
+      assert.equal(
+        reloadedRecord.retainedWake?.hint?.jobs?.[0]?.payload?.summaryResourceCursor,
+        "sleep",
+      );
+
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createPort(),
         secret: DEVICE_SYNC_SECRET,
         service: restoredService,
-        wake: recovery.wake,
+        wake: reloadedRecord.retainedWake,
       });
       const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
       assert.ok(restoredAccountId);
@@ -10632,7 +10677,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(restoredChild?.maxAttempts, 3);
       assert.deepEqual(JSON.parse(restoredChild?.payloadJson ?? "{}"), {
         sourceProviderSlug: "garmin",
-        timeseriesCursor: "2026-02-15T00:00:00.000Z",
+        summaryResourceCursor: "sleep",
         windowEnd: "2026-03-15T00:00:00.000Z",
         windowStart: "2026-02-01T00:00:00.000Z",
       });

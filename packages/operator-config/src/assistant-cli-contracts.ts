@@ -2,6 +2,7 @@ import { isIP } from 'node:net'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
+  automationContextReferencesSchema,
   automationRouteSchema,
   automationScheduleAtSchema,
   automationScheduleCronSchema,
@@ -1021,6 +1022,11 @@ export const assistantOutboxIntentSchema = z
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
     automationAuthority: assistantOutboxAutomationAuthoritySchema
+      .nullable()
+      .optional(),
+    // Persisted delivery context only. These exact canonical references grant
+    // no mutation authority; later turns must use ordinary domain tools.
+    automationContextReferences: automationContextReferencesSchema
       .nullable()
       .optional(),
     scheduledOccurrenceAt: isoTimestampSchema.nullable().optional(),
