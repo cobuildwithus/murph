@@ -387,10 +387,8 @@ strict queryless static-image route are specified by
 
 Hosted R2 uses one canonical ENAM production bucket and one isolated preview
 bucket. The Worker binding, presign target, lifecycle helper, cold restore, and
-runtime cleanup share that environment-selected owner. Account deletion remains
-Web-guarded during the no-OC Worker rollout and until both retired OC buckets
-are physically deleted and their API absence is verified; after that, deletion
-uses only the canonical ENAM binding. The contract is jointly specified by
+runtime cleanup share that environment-selected owner. Account deletion uses
+only the canonical ENAM binding. The contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `apps/cloudflare/README.md`.
 
