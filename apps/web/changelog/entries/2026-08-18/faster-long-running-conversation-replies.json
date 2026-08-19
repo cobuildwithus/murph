@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-18",
+  "order": 100,
+  "item": {
+    "id": "faster-long-running-conversation-replies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Faster replies in long-running conversations",
+    "summary": "Murph can now find the exact delivery context for a reply without rereading unrelated message history.",
+    "details": "Murph still verifies the canonical delivery record before using a lookup. If lookup data is missing or outdated, Murph safely reads canonical history and rebuilds the disposable lookup in the background.",
+    "relevanceTags": ["assistant", "messaging", "reliability", "performance"],
+    "sourcePullRequests": [1998]
+  }
+}
