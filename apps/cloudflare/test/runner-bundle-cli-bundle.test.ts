@@ -401,9 +401,41 @@ describe("runner bundle vault-cli esbuild step", () => {
     await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow();
   });
 
-  // Budget enforcement is unit-tested with injected budgets against synthetic
-  // metafiles; the production call site inside bundleInstalledVaultCliBinary
-  // uses the real constants against the real esbuild metafile.
+  // The production call site inside bundleInstalledVaultCliBinary uses the
+  // default budgets against the real esbuild metafile. Pin the exact default
+  // total ceiling here so a future ratchet cannot silently widen it.
+  it("accepts the default total budget exactly and rejects one byte over", () => {
+    const createMetafile = (totalBytes: number): Metafile => ({
+      inputs: {},
+      outputs: {
+        ".bundle/bin.js": {
+          bytes: 1,
+          entryPoint: "packages/cli/src/bin.ts",
+          exports: [],
+          imports: [{ kind: "dynamic-import", path: "./chunk-heavy.js" }],
+          inputs: {},
+        },
+        ".bundle/chunk-heavy.js": {
+          bytes: totalBytes - 1,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+      },
+    });
+
+    expect(assertVaultCliBundleWithinBudgets(createMetafile(9_305_000))).toEqual({
+      entryBytes: 1,
+      staticClosureBytes: 1,
+      totalBytes: 9_305_000,
+    });
+    expect(() =>
+      assertVaultCliBundleWithinBudgets(createMetafile(9_305_001))
+    ).toThrow(/total output 9305001B exceeds budget 9305000B/u);
+  });
+
+  // Cross-dimension budget enforcement is unit-tested with injected budgets
+  // against synthetic metafiles.
   it("fails the byte budgets with actual-vs-budget numbers and the largest inputs", () => {
     const metafile: Metafile = {
       inputs: {
