@@ -51,6 +51,7 @@ export type HostedConnectionSourceRecord =
 
 const hostedConnectionSourceAdmissionArgs = {
   select: {
+    firstSeenAt: true,
     id: true,
     lastErrorCode: true,
     lastErrorMessage: true,
@@ -329,6 +330,7 @@ export class PrismaHostedConnectionSourceStore {
     const [candidate] = await prisma.$queryRaw<HostedConnectionSourceAdmissionRecord[]>(
       Prisma.sql`
         SELECT
+          "first_seen_at" AS "firstSeenAt",
           "id",
           "last_error_code" AS "lastErrorCode",
           "last_error_message" AS "lastErrorMessage",

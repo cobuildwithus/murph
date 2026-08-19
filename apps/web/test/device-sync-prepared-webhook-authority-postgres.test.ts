@@ -18,6 +18,10 @@ import type { HostedDeviceSyncControlPlaneContext } from "@/src/lib/device-sync/
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { HostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { HostedDeviceSyncWebhookAdminService } from "@/src/lib/device-sync/webhook-admin-service";
+import {
+  beginHostedDeviceSyncConnectionSourceReconnect,
+  captureHostedDeviceSyncConnectionSourceReconnect,
+} from "@/src/lib/device-sync/wake-service";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { readHostedMailboxWakeByItemId } from "@/src/lib/hosted-mailbox/store";
@@ -322,16 +326,21 @@ async function prepareRegistration(input: {
 }
 
 async function prepareDailyData(input: {
+  eventAt?: Date;
   fixture: Fixture;
+  messageId?: string;
+  receivedAt?: Date;
   registry: DeviceSyncRegistry;
   sourceProviderSlug: string;
 }): Promise<PreparedDeviceSyncWebhookV1> {
+  const eventAt = input.eventAt ?? input.fixture.receivedAt;
+  const receivedAt = input.receivedAt ?? input.fixture.receivedAt;
   const signed = signJunctionWebhook({
     body: {
       data: {
         data: [{
-          end: input.fixture.receivedAt.toISOString(),
-          start: new Date(input.fixture.receivedAt.getTime() - 60_000).toISOString(),
+          end: eventAt.toISOString(),
+          start: new Date(eventAt.getTime() - 60_000).toISOString(),
           unit: "count",
           value: 321,
         }],
@@ -344,8 +353,9 @@ async function prepareDailyData(input: {
       event_type: "daily.data.steps.created",
       user_id: input.fixture.externalAccountId,
     },
-    messageId: `msg_prepared_daily_${randomUUID().replaceAll("-", "")}`,
-    receivedAt: input.fixture.receivedAt,
+    messageId: input.messageId
+      ?? `msg_prepared_daily_${randomUUID().replaceAll("-", "")}`,
+    receivedAt,
   });
   const service = createIngressService({
     headers: signed.headers,
@@ -355,7 +365,7 @@ async function prepareDailyData(input: {
   const prepared = await service.prepareWebhookForDurableEnqueue(
     "junction",
     signed.rawBody,
-    input.fixture.receivedAt,
+    receivedAt,
   );
   input.fixture.traceIds.push(prepared.traceId);
   return prepared;
@@ -856,6 +866,166 @@ describe.skipIf(!runPostgresProof)(
             },
           },
         })).resolves.toEqual({ status: "processed" });
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("does not let a redelivered pre-reauthorization Google daily trace certify the new source epoch", async () => {
+      const sourceProviderSlug = "google_health";
+      const fixture = await createFixture({
+        sourceLastErrorCode: null,
+        sourceProviderSlug,
+      });
+      const providerFetch = vi.fn(async () => {
+        throw new Error("An admitted exact source must not require a provider read.");
+      });
+      const registry = createJunctionRegistry(providerFetch);
+      const messageId = `msg_google_replay_${randomUUID().replaceAll("-", "")}`;
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug,
+      });
+      const fitbitInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "fitbit",
+      });
+      if (!sourceInstanceKey || !fitbitInstanceKey) {
+        throw new Error("Expected exact Google Health and Fitbit source keys.");
+      }
+
+      try {
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: fixture.receivedAt.toISOString(),
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+        });
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          firstSeenAt: new Date(fixture.receivedAt.getTime() - 120_000).toISOString(),
+          lastSeenAt: fixture.receivedAt.toISOString(),
+          sourceInstanceKey: fitbitInstanceKey,
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        });
+        const firstPrepared = await prepareDailyData({
+          eventAt: fixture.receivedAt,
+          fixture,
+          messageId,
+          receivedAt: fixture.receivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        const consumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(firstPrepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceWebhookTrace.findUnique({
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: firstPrepared.traceId,
+            },
+          },
+        })).resolves.toBeNull();
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual({ lastDataAt: fixture.receivedAt });
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: new Date(fixture.receivedAt.getTime() + 1).toISOString(),
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "disconnected",
+        });
+        const reconnectProof = await captureHostedDeviceSyncConnectionSourceReconnect({
+          connectionId: fixture.connectionId,
+          sourceProviderSlug,
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        await beginHostedDeviceSyncConnectionSourceReconnect({
+          proof: reconnectProof,
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        const reconnectingSource = await fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        });
+        expect(reconnectingSource.lastDataAt).toBeNull();
+        expect(reconnectingSource.firstSeenAt.getTime()).toBeGreaterThan(
+          fixture.receivedAt.getTime(),
+        );
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: reconnectingSource.firstSeenAt.toISOString(),
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+        });
+        const reauthorizedSource = await fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        });
+
+        const retryReceivedAt = new Date(reauthorizedSource.firstSeenAt.getTime() + 1_000);
+        const retryPrepared = await prepareDailyData({
+          eventAt: fixture.receivedAt,
+          fixture,
+          messageId,
+          receivedAt: retryReceivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        expect(retryPrepared.traceId).toBe(firstPrepared.traceId);
+        await expect(consumeService.handlePreparedWebhook(retryPrepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(reauthorizedSource);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+
+        const currentPrepared = await prepareDailyData({
+          eventAt: retryReceivedAt,
+          fixture,
+          receivedAt: new Date(retryReceivedAt.getTime() + 1_000),
+          registry,
+          sourceProviderSlug,
+        });
+        await expect(consumeService.handlePreparedWebhook(currentPrepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual({
+          firstSeenAt: reauthorizedSource.firstSeenAt,
+          lastDataAt: new Date(retryReceivedAt.getTime() + 1_000),
+        });
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(2);
+        expect(providerFetch).not.toHaveBeenCalled();
       } finally {
         await cleanupFixture(fixture);
       }

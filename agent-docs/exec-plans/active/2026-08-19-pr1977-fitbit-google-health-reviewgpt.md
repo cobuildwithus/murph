@@ -5,7 +5,7 @@
 Finish the replacement Fitbit-to-Google-Health migration PR with exact-source
 history preservation, no current-day visibility gap, focused proof, green
 required CI apart from the explicitly waived native iOS lane, and a final
-zero-finding ReviewGPT round. Keep the PR unmerged.
+zero-finding ReviewGPT round, and merge it.
 
 ## Success criteria
 
@@ -24,8 +24,8 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
 - In scope: Junction Fitbit/Google Health import admission, migration readiness,
   connect-time work scheduling, status projection, focused regression proof,
   owner documentation, PR evidence, and final review gates.
-- Out of scope: merging the PR, unrelated provider changes, and the native iOS
-  CI failure explicitly waived by the user.
+- Out of scope: unrelated provider changes and the native iOS CI failure
+  explicitly waived by the user.
 
 ## Plan
 
@@ -44,10 +44,11 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
    source epoch without adding a persisted owner, then push focused proof.
 10. [x] Run the explicitly authorized round 8 and resolve its provider-day
     timezone-authority finding without adding persisted state or provider work.
-11. [ ] Commit and push the round-8 remediation with exact-head evidence.
-12. [ ] Obtain explicit authorization for a round-9 zero-finding review, then
-    prove a clean current-base merge, mark the PR ready, and archive this plan
-    without merging.
+11. [x] Commit and push the round-8 remediation with exact-head evidence.
+12. [x] Run the explicitly authorized round 9 and resolve its webhook replay
+    finding through the existing trace-keyed mailbox identity and source epoch.
+13. [ ] Push the round-9 correction, obtain a zero-finding confirmation on the
+    exact head, prove a clean current-base merge, archive this plan, and merge.
 
 ## ReviewGPT ledger
 
@@ -95,6 +96,15 @@ zero-finding ReviewGPT round. Keep the PR unmerged.
   boundary. The sole substantive finding was accepted; none was rejected. The
   response's rendered-evidence observation was not a backend correctness
   finding. No state, schema, job, queue, provider call, or fanout was added.
+- Final round 9: accepted that an intentionally retried Google daily webhook
+  could be redelivered after same-source reauthorization and stamp the retry
+  attempt onto the new source epoch before discovering its trace-keyed wake was
+  a duplicate. The correction always resolves the dedicated migration trace
+  item in the existing admission transaction, advances freshness only for a
+  newly inserted trace whose original acceptance follows the exact source
+  epoch, and carries the already-read `firstSeenAt` in the minimal admission
+  projection. No finding was rejected and no persisted state, query, queue,
+  retry owner, or lifecycle process was added.
 
 The first round-8 invocation rejected a malformed PR-body hash token before
 review. Correcting the packaging metadata and retrying the same invocation was
@@ -147,6 +157,21 @@ a tooling retry, not an additional substantive ReviewGPT round.
   focused proof only; no persisted owner, schema, process, retry path, provider
   request, or database fanout was introduced.
 
+## Round-9 retrospective
+
+- Authority: the existing trace-keyed migration mailbox item is now the durable
+  first-admission fact. A retry-attempt clock cannot replace it as successor
+  freshness authority.
+- Ordering: the same health-data admission transaction resolves that identity
+  before stamping the exact Google source. A duplicate trace and a request
+  accepted before the current `firstSeenAt` leave `lastDataAt` unchanged.
+- Composition: the dedicated migration identity is resolved even when the same
+  delivery also appends the existing source-confirmation wake, so releasing the
+  public trace claim cannot erase first-admission history.
+- Complexity: the correction reorders existing operations, adds `firstSeenAt`
+  to an existing minimal projection, and adds focused proof. It introduces no
+  schema, state owner, query, job, queue, manager, or reconciliation process.
+
 ## Evidence so far
 
 - The user additionally required screenshot submission for every UI-touching
@@ -167,14 +192,19 @@ a tooling retry, not an additional substantive ReviewGPT round.
   passed.
 - Package-local scoped Web lint, documentation drift, documentation gardening,
   and diff whitespace checks passed.
+- Round-9 focused Web proof first reproduced three failures: a duplicate trace
+  and a pre-epoch first insertion both restored freshness, and a combined
+  source-confirmation delivery omitted its dedicated migration identity. The
+  corrected wake/source projection suite passes 191 tests; the real-PostgreSQL
+  ingress replay proof covers trace release, source reauthorization, mailbox
+  dedupe, and a distinct current-epoch trace.
 - Round-6 warm/cold hydration, local-store epoch replacement, delayed callback
   rejection, current-epoch arrival, same-epoch alias, and maintenance retry
   proofs pass. Round-8 provider-timezone proof covers IANA and offset precedence,
   DST, invalid and absent provenance, mixed same-day provenance, mutable vault
-  timezone changes, and the UTC-12 convergence boundary. The remediated head
-  still requires explicit authorization for round 9 before it can satisfy the
-  zero-finding ReviewGPT criterion. GitHub Actions currently cannot start
-  because of an account billing lock.
+  timezone changes, and the UTC-12 convergence boundary. The round-9 correction
+  still requires exact-head typecheck, PostgreSQL proof, CI, and ReviewGPT
+  confirmation before merge.
 
 ## Deployment concern
 

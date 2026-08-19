@@ -2988,41 +2988,45 @@ async function persistHostedDeviceSyncWebhookAccepted(
               if (!preparedMailbox) {
                 throw createHostedDeviceSyncDirtyPreparationMismatchError();
               }
-              await input.store.markConnectionSourceDataReceived({
-                connectionId: input.connectionId,
-                now: input.acceptedAt,
-                sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+              const mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+                envelope: buildHostedDeviceSyncWake({
+                  connectionId: input.connectionId,
+                  expectedConnectedAt: input.expectedConnectedAt,
+                  hint: {
+                    eventType: input.eventType,
+                    occurredAt: input.occurredAt,
+                    reason: "fitbit_migration_successor_arrival",
+                    resourceCategory: input.resourceCategory ?? null,
+                  },
+                  occurredAt: input.occurredAt,
+                  provider: input.provider,
+                  source: "webhook-hint",
+                  traceId: input.traceId,
+                  userId: input.userId,
+                }),
+                prepared: preparedMailbox,
                 tx,
               });
-              if (wakeMailboxItemIds.length === 0) {
-                const mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
-                  envelope: buildHostedDeviceSyncWake({
-                    connectionId: input.connectionId,
-                    expectedConnectedAt: input.expectedConnectedAt,
-                    hint: {
-                      eventType: input.eventType,
-                      occurredAt: input.occurredAt,
-                      reason: "fitbit_migration_successor_arrival",
-                      resourceCategory: input.resourceCategory ?? null,
-                    },
-                    occurredAt: input.occurredAt,
-                    provider: input.provider,
-                    source: "webhook-hint",
-                    traceId: input.traceId,
-                    userId: input.userId,
-                  }),
-                  prepared: preparedMailbox,
+              if (mailboxAppend.dedupeConflict) {
+                throw deviceSyncError({
+                  code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+                  httpStatus: 503,
+                  message: "Hosted device-sync migration wake conflicted with an existing wake identity.",
+                  retryable: true,
+                });
+              }
+              wakeMailboxItemIds.push(mailboxAppend.item.id);
+              if (
+                mailboxAppend.inserted
+                && Date.parse(input.acceptedAt)
+                  > finalAdmission.successorFirstSeenAt.getTime()
+              ) {
+                await input.store.markConnectionSourceDataReceived({
+                  connectionId: input.connectionId,
+                  now: input.acceptedAt,
+                  sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
                   tx,
                 });
-                if (mailboxAppend.dedupeConflict) {
-                  throw deviceSyncError({
-                    code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
-                    httpStatus: 503,
-                    message: "Hosted device-sync migration wake conflicted with an existing wake identity.",
-                    retryable: true,
-                  });
-                }
-                wakeMailboxItemIds.push(mailboxAppend.item.id);
               }
               return { retrySourceAfterCommit: true, wakeMailboxItemIds };
             }
@@ -3156,9 +3160,16 @@ type HostedDeviceSyncWebhookAdmissionStatus =
   | { kind: "completed" }
   | {
       connection: HostedDeviceSyncConnectionEstablishedAccount;
-      kind: "migration_pending" | "ready";
+      kind: "ready";
       setupPending: boolean;
       source: HostedConnectionSourceAdmissionCandidate | null;
+    }
+  | {
+      connection: HostedDeviceSyncConnectionEstablishedAccount;
+      kind: "migration_pending";
+      setupPending: boolean;
+      source: HostedConnectionSourceAdmissionCandidate | null;
+      successorFirstSeenAt: Date;
     };
 
 async function inspectHostedDeviceSyncWebhookAdmissionTx(
@@ -3418,7 +3429,11 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
         tx,
       });
     if (hasNonTerminalHostedGoogleHealthFitbitLegacySource(legacySources)) {
-      return { ...ready, kind: "migration_pending" };
+      return {
+        ...ready,
+        kind: "migration_pending",
+        successorFirstSeenAt: dataSource.firstSeenAt,
+      };
     }
   }
   return ready;
@@ -3459,6 +3474,7 @@ function hostedConnectionSourceAdmissionMatchesProof(
   current: HostedConnectionSourceAdmissionCandidate,
 ): boolean {
   return expected.id === current.id
+    && expected.firstSeenAt.getTime() === current.firstSeenAt.getTime()
     && expected.lastErrorCode === current.lastErrorCode
     && expected.lastErrorMessage === current.lastErrorMessage
     && expected.lastSeenAt.getTime() === current.lastSeenAt.getTime()

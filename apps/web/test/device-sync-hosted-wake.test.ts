@@ -452,6 +452,7 @@ function buildHostedConnectionSource(
   connectionId: string,
   sourceProviderSlug: string,
   overrides: Partial<{
+    firstSeenAt: string;
     id: string;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
@@ -492,6 +493,7 @@ function buildHostedConnectionSourceAdmissionCandidate(
   source: ReturnType<typeof buildHostedConnectionSource>,
 ) {
   return {
+    firstSeenAt: new Date(source.firstSeenAt),
     id: source.id,
     lastErrorCode: source.lastErrorCode,
     lastErrorMessage: source.lastErrorMessage,
@@ -664,12 +666,16 @@ function buildPublicConnectionId(connectionId: string): string {
 function mockFitbitMigrationAdmissionSources(input: {
   legacyLastErrorCode?: string | null;
   legacyStatus?: "connected" | "disconnected";
+  successorFirstSeenAt?: string;
 } = {}) {
   const legacy = buildHostedConnectionSource("dsc_123", "fitbit", {
     lastErrorCode: input.legacyLastErrorCode ?? null,
     status: input.legacyStatus ?? "connected",
   });
-  const successor = buildHostedConnectionSource("dsc_123", "google_health");
+  const successor = buildHostedConnectionSource("dsc_123", "google_health", {
+    firstSeenAt: input.successorFirstSeenAt
+      ?? "2026-03-26T12:00:00.000Z",
+  });
   mocks.listBoundedConnectionSourcesForConnections.mockResolvedValue([legacy]);
   mocks.resolveConnectionSourceAdmissionCandidate.mockImplementation(
     async (request: { sourceProviderSlug: string }) =>
@@ -8601,7 +8607,9 @@ describe("hosted device-sync wakes", () => {
         setupPhase: "source_confirmed",
       }),
     );
-    mockFitbitMigrationAdmissionSources();
+    mockFitbitMigrationAdmissionSources({
+      successorFirstSeenAt: "2026-03-26T11:59:00.000Z",
+    });
     const store = new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() });
 
     await expect(handleHostedDeviceSyncWebhookAccepted({
@@ -8673,6 +8681,173 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it.each([
+    {
+      label: "a duplicate trace",
+      mailboxAppend: {
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: {
+          id: "mailbox_existing",
+          userId: "user-123",
+        },
+      },
+      now: "2026-03-26T13:00:00.000Z",
+    },
+    {
+      label: "a first insert accepted before the current source epoch",
+      mailboxAppend: {
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: {
+          id: "mailbox_new",
+          userId: "user-123",
+        },
+      },
+      now: "2026-03-26T12:00:00.000Z",
+    },
+  ])("does not restore successor freshness from $label", async ({
+    mailboxAppend,
+    now,
+  }) => {
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+    );
+    mockFitbitMigrationAdmissionSources({
+      successorFirstSeenAt: "2026-03-26T12:30:00.000Z",
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce(mailboxAppend);
+    const store = new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() });
+
+    await expect(handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now,
+      ownerId: "user-123",
+      processingAttemptedAt: now,
+      store,
+      traceId: "trace_before_reauthorization",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        dataSourceProviderSlug: "google_health",
+        eventType: "daily.data.activity.updated",
+        jobs: [{
+          kind: "resource",
+          payload: {
+            resource: "activity",
+            sourceProviderSlug: "google_health",
+          },
+        }],
+        sourceProviderSlug: "google_health",
+      },
+    })).rejects.toMatchObject({
+      code: "WEBHOOK_SOURCE_NOT_READY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
+  });
+
+  it("keeps a dedicated migration trace identity when the same delivery confirms its source", async () => {
+    const source = buildHostedConnectionSource("dsc_123", "google_health", {
+      firstSeenAt: "2026-03-26T11:59:00.000Z",
+      lastSeenAt: "2026-03-26T11:59:00.000Z",
+      status: "disconnected",
+    });
+    const legacy = buildHostedConnectionSource("dsc_123", "fitbit");
+    const providerRead = vi.fn(async () => true);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive: providerRead,
+      },
+    });
+    mocks.getConnectionRecordForUser.mockResolvedValue(
+      buildWebhookAdmissionRecord({
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+    );
+    mocks.materializeStoredConnectionAccount.mockResolvedValue(
+      buildProviderConfigStoredConnection({ provider: "junction" }),
+    );
+    mocks.resolveConnectionSourceAdmissionCandidate.mockResolvedValue(
+      buildHostedConnectionSourceAdmissionCandidate(source),
+    );
+    mocks.listBoundedConnectionSourcesForConnections.mockResolvedValue([legacy]);
+
+    await expect(handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
+      registry: {
+        get: mocks.registryGet,
+        list: mocks.registryList,
+        register: vi.fn(),
+      },
+      sourceAdmissionDeferred: true,
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_source_and_migration",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        dataSourceProviderSlug: "google_health",
+        eventType: "daily.data.activity.updated",
+        jobs: [{
+          kind: "resource",
+          payload: {
+            resource: "activity",
+            sourceProviderSlug: "google_health",
+          },
+        }],
+        sourceProviderSlug: "google_health",
+      },
+    })).rejects.toMatchObject({
+      code: "WEBHOOK_SOURCE_NOT_READY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(providerRead).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        envelope: expect.objectContaining({ reason: "connected" }),
+        tx: mocks.prismaTx,
+      }),
+    );
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          hint: expect.objectContaining({
+            reason: "fitbit_migration_successor_arrival",
+          }),
+          reason: "webhook_hint",
+        }),
+        tx: mocks.prismaTx,
+      }),
+    );
+    expect(mocks.markConnectionSourceDataReceived).toHaveBeenCalledOnce();
   });
 
   it("accepts source lifecycle work while Fitbit still owns canonical admission", async () => {

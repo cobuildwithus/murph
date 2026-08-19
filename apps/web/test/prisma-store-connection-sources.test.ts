@@ -189,6 +189,7 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
 
     return candidate
       ? [{
+          firstSeenAt: new Date(candidate.firstSeenAt),
           id: candidate.id,
           lastErrorCode: candidate.lastErrorCode,
           lastErrorMessage: candidate.lastErrorMessage,
@@ -554,13 +555,15 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       connectionId: "dsc_parent",
       sourceProviderSlug: "oura",
     })).resolves.toEqual(expect.objectContaining({
+      firstSeenAt: new Date("2026-03-25T00:00:00.000Z"),
       id: "dcs_admitted",
       sourceProviderSlug: "oura",
       status: "connected",
     }));
     expect(queryRaw).toHaveBeenCalledOnce();
     const sql = queryRaw.mock.calls[0]?.[0]?.strings.join("?") ?? "";
-    expect(sql).toContain('SELECT\n          "id"');
+    expect(sql).toContain('SELECT\n          "first_seen_at"');
+    expect(sql).toContain('"first_seen_at" AS "firstSeenAt"');
     expect(sql).toContain('"last_error_code" AS "lastErrorCode"');
     expect(sql).toContain('ORDER BY');
     expect(sql).toContain("LIMIT 1");
