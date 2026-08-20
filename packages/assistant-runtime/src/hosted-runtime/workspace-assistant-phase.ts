@@ -210,8 +210,10 @@ import type {
 } from "./workspace-runner.ts";
 import {
   HOSTED_ASSISTANT_WAKE_REASON,
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
+  hostedRuntimeWakeReasonUsesAssistantPhase,
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
@@ -2570,6 +2572,8 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     let assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
       assistantNextWakeAt,
+      assistantOutboxOnlyNextWakeAt:
+        assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
     });
     const deferredPendingSystemMailboxMaintenance =
       await runBackgroundMaintenanceAfterDeferredPendingAssistantInput({
@@ -2631,6 +2635,8 @@ export async function runHostedWorkspaceAssistantPhase(
       });
       assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
         assistantNextWakeAt,
+        assistantOutboxOnlyNextWakeAt:
+          assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
       });
       backgroundMaintenanceYielded =
         backgroundMaintenanceYielded
@@ -2915,7 +2921,10 @@ export async function runHostedWorkspaceAssistantPhase(
       createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
       assistantCronWakeAfterPassCandidate,
       deviceSyncFollowUpWake,
-      createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
+      createHostedRuntimeWakeCandidate(
+        outboxWakeAt,
+        HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      ),
       systemMailboxWake,
       createHostedRuntimeWakeCandidate(
         providerCleanupScheduledWakeAt,
@@ -4563,11 +4572,14 @@ function createExistingHostedAssistantWorkspaceWakeCandidate(
 ): HostedRuntimeWakeCandidate | null {
   const wakeAt = phaseInput.workspace?.nextWakeAt ?? null;
   const wakeReason = phaseInput.workspace?.nextWakeReason ?? null;
-  if (wakeReason !== null && wakeReason !== HOSTED_ASSISTANT_WAKE_REASON) {
+  if (!hostedRuntimeWakeReasonUsesAssistantPhase(wakeReason)) {
     return null;
   }
 
-  return createHostedRuntimeWakeCandidate(wakeAt, HOSTED_ASSISTANT_WAKE_REASON);
+  return createHostedRuntimeWakeCandidate(
+    wakeAt,
+    wakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
+  );
 }
 
 function createFutureExistingHostedAssistantWorkspaceWakeCandidate(
@@ -4660,7 +4672,10 @@ async function resolveHostedBackgroundMaintenanceWakeCandidate(input: {
 
   return selectHostedRuntimeWakeCandidate([
     input.deviceSyncFollowUpWake,
-    createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
+    createHostedRuntimeWakeCandidate(
+      outboxWakeAt,
+      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+    ),
     systemMailboxWake,
     createHostedRuntimeWakeCandidate(input.pendingAssistantInputWakeAt ?? null, "assistant"),
     createHostedDeviceActivityAutomationWakeCandidate(input.deviceActivityAutomation ?? null),
@@ -6068,7 +6083,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     backgroundWake,
     createHostedRuntimeWakeCandidate(
       deferredSystemMailboxDeliveryWakeAt,
-      "assistant",
+      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
     ),
     createHostedRuntimeWakeCandidate(systemMailboxMetricsWakeAt, systemMailboxMetricsWakeReason),
     dirtyDeviceSyncWake,
@@ -6371,7 +6386,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       backgroundWake,
       createHostedRuntimeWakeCandidate(
         input.deferredSystemMailboxDeliveryWakeAt,
-        "assistant",
+        HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
       ),
       input.dirtyDeviceSyncWake,
       createHostedRuntimeWakeCandidate(
@@ -6637,6 +6652,8 @@ async function runForegroundAssistantReplyPhase(input: {
   });
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
+    assistantOutboxOnlyNextWakeAt:
+      input.assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
   });
   const selectedInputWakeAt = resolveHostedAssistantAutomationNextWakeAt({
     input: input.input,
@@ -6749,7 +6766,10 @@ async function runForegroundAssistantReplyPhase(input: {
     input.foregroundCronReconciliationWake,
     input.foregroundWorkspaceWake,
     input.skippedDeviceSyncWake,
-    createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
+    createHostedRuntimeWakeCandidate(
+      outboxWakeAt,
+      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+    ),
     input.systemMailboxWake,
     createHostedRuntimeWakeCandidate(
       providerCleanupScheduledWakeAt,
@@ -7123,7 +7143,10 @@ async function drainHostedPostCheckpointDelivery(input: {
     postBaseNextWake,
     dropConsumedWorkspaceAssistantWake(postDeliveryCronWake),
     input.postDeliveryReconciliationWake,
-    createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
+    createHostedRuntimeWakeCandidate(
+      postOutboxWakeAt,
+      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+    ),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(
       postDeliveryPendingAssistantInputWakeAt,
@@ -7219,9 +7242,12 @@ async function yieldHostedBackgroundPostCheckpointDrain(
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(
       new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
-      HOSTED_ASSISTANT_WAKE_REASON,
+      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
     ),
-    createHostedRuntimeWakeCandidate(postOutboxWakeAt, HOSTED_ASSISTANT_WAKE_REASON),
+    createHostedRuntimeWakeCandidate(
+      postOutboxWakeAt,
+      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+    ),
     input.baseNextWake,
   ]);
 
@@ -7255,7 +7281,7 @@ function resolveHostedPostDeliveryBaseNextWake(
   }
   if (
     baseNextWake.reason !== null
-    && baseNextWake.reason !== HOSTED_ASSISTANT_WAKE_REASON
+    && !hostedRuntimeWakeReasonUsesAssistantPhase(baseNextWake.reason)
   ) {
     return baseNextWake;
   }
@@ -7287,7 +7313,7 @@ function dropConsumedPostDeliveryWorkspaceAssistantWake(input: {
   if (!input.canConsumeWorkspaceAssistantWake) {
     return candidate;
   }
-  if (candidate.reason !== HOSTED_ASSISTANT_WAKE_REASON) {
+  if (!hostedRuntimeWakeReasonUsesAssistantPhase(candidate.reason)) {
     return candidate;
   }
   const workspaceWakeAt = input.phaseInput.workspace?.nextWakeAt ?? null;
@@ -7297,7 +7323,7 @@ function dropConsumedPostDeliveryWorkspaceAssistantWake(input: {
   const workspaceWakeReason = input.phaseInput.workspace?.nextWakeReason ?? null;
   if (
     workspaceWakeReason !== null
-    && workspaceWakeReason !== HOSTED_ASSISTANT_WAKE_REASON
+    && !hostedRuntimeWakeReasonUsesAssistantPhase(workspaceWakeReason)
   ) {
     return candidate;
   }
@@ -7888,7 +7914,7 @@ function isDueHostedAssistantWorkspaceWake(
 ): boolean {
   const wakeReason = input.workspace?.nextWakeReason ?? null;
   return (
-    (wakeReason === null || wakeReason === HOSTED_ASSISTANT_WAKE_REASON)
+    hostedRuntimeWakeReasonUsesAssistantPhase(wakeReason)
     && isDueHostedWorkspaceWakeAt(input)
   );
 }
@@ -9429,10 +9455,14 @@ function assistantMetricsProgressed(
   );
 }
 
-function resolveHostedAssistantAutomationNextWakeReason(_input: {
+function resolveHostedAssistantAutomationNextWakeReason(input: {
   assistantNextWakeAt: string | null;
+  assistantOutboxOnlyNextWakeAt: string | null;
 }): string | null {
-  return null;
+  return input.assistantNextWakeAt !== null
+    && input.assistantNextWakeAt === input.assistantOutboxOnlyNextWakeAt
+    ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+    : null;
 }
 
 function shouldResolveHostedAssistantCronWakeAfterAssistantPass(input: {
@@ -9454,7 +9484,8 @@ function shouldResolveHostedAssistantCronWakeAfterAssistantPass(input: {
 }
 
 function shouldExposeHostedAssistantPhaseNextWakeReason(reason: string | null | undefined): boolean {
-  return reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
+  return reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    || reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
 }
 
 function assistantMetricsCanonicalRuntimeProgressed(
@@ -9593,6 +9624,8 @@ function resolveHostedFastDispatchBaseNextWake(input: {
   });
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
+    assistantOutboxOnlyNextWakeAt:
+      input.assistantMetrics.assistantAutomationOutboxOnlyNextWakeAt ?? null,
   });
   return selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),

@@ -239,8 +239,10 @@ import {
 } from "./hosted-runtime/wake-time.ts";
 import {
   HOSTED_ASSISTANT_WAKE_REASON,
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
+  hostedRuntimeWakeReasonUsesAssistantPhase,
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
@@ -1017,7 +1019,9 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
   const assistantWake = selectEarliestHostedRuntimeWake([
     {
       at: outboxWakeAt,
-      reason: outboxWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+      reason: outboxWakeAt
+        ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+        : null,
     },
     {
       at: pendingAssistantInputWakeAt,
@@ -1454,6 +1458,57 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const mailboxBudgetExhausted = () => mailboxBudget.exhausted;
     let preCheckpointExternalCompletionImported = false;
     let foregroundPriorityWorkOrdinal = 0;
+    let latestOpaqueForegroundPriorityWorkOrdinal = 0;
+    const unresolvedForegroundConversationInputOrdinals = new Map<
+      string,
+      number
+    >();
+    const observedForegroundConversationInputIds = new Set<string>();
+    const acceptedForegroundConversationInputIds = new Set<string>();
+    const recordForegroundPriorityWork = (
+      assistantInputId?: string,
+    ): void => {
+      foregroundPriorityWorkOrdinal += 1;
+      if (assistantInputId) {
+        unresolvedForegroundConversationInputOrdinals.set(
+          assistantInputId,
+          foregroundPriorityWorkOrdinal,
+        );
+        return;
+      }
+      latestOpaqueForegroundPriorityWorkOrdinal =
+        foregroundPriorityWorkOrdinal;
+    };
+    const recordForegroundConversationInputsFromImport = (
+      mailboxImport:
+        | HostedWorkspaceRunnerInput["initialMailboxImport"]
+        | null
+        | undefined,
+    ): void => {
+      const importResult = mailboxImport?.importResult;
+      const conversationImportedCount =
+        importResult?.conversationImportedCount ?? 0;
+      if (conversationImportedCount <= 0) {
+        return;
+      }
+      const assistantInputIds = importResult?.assistantInputIds ?? [];
+      if (assistantInputIds.length !== conversationImportedCount) {
+        recordForegroundPriorityWork();
+        return;
+      }
+      for (const assistantInputId of assistantInputIds) {
+        if (observedForegroundConversationInputIds.has(assistantInputId)) {
+          continue;
+        }
+        observedForegroundConversationInputIds.add(assistantInputId);
+        recordForegroundPriorityWork(assistantInputId);
+      }
+    };
+    const hasForegroundPriorityWorkAfter = (ordinal: number): boolean =>
+      latestOpaqueForegroundPriorityWorkOrdinal > ordinal
+      || [...unresolvedForegroundConversationInputOrdinals.values()].some(
+        (inputOrdinal) => inputOrdinal > ordinal,
+      );
     let deviceSyncMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
     const createMailboxImportContext = (
@@ -1473,7 +1528,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         options.onConversationActivityObserved?.("observed");
       },
       onConversationInputStaged: (channel) => {
-        foregroundPriorityWorkOrdinal += 1;
         const notifyConversationInputStaged =
           context?.onConversationInputStaged
           ?? startCodexProcessPreparationForConversation;
@@ -2252,7 +2306,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const hostedVaultStartupPreparationRequiresCheckpoint =
         hostedVaultStartupPreparation.mutated;
       const activeWorkspaceAlreadyOwnsDueAssistantWake =
-        activeWorkspace?.nextWakeReason === HOSTED_ASSISTANT_WAKE_REASON
+        activeWorkspace !== null
+        && hostedRuntimeWakeReasonUsesAssistantPhase(
+          activeWorkspace?.nextWakeReason ?? null,
+        )
         && hostedRuntimeWakeIsDue(activeWorkspace.nextWakeAt ?? null);
       const dueAssistantHandoffRequiresCheckpoint =
         !assistantExecutionBlocked
@@ -3129,6 +3186,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const passOrdinal = runtimePassOrdinal + 1;
       runtimePassOrdinal = passOrdinal;
       const passStartedAtEpochMs = Date.now();
+      recordForegroundConversationInputsFromImport(
+        passInput.initialMailboxImport,
+      );
       const passForeground = hostedMailboxImportHasForegroundConversationWork(
         passInput.initialMailboxImport ?? null,
       ) || hostedAssistantInputBatchHasWork(passInput.initialAssistantInputBatch ?? null);
@@ -3148,7 +3208,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantInputId: string | null = null;
-        let acceptedForegroundPriorityAssistantInput = false;
+        let acceptedForegroundPriorityInputNeedsOpaqueQuietWindow = false;
+        const initialMailboxAssistantInputIds =
+          passInput.initialMailboxImport?.importResult.assistantInputIds ?? [];
+        const exactInitialConversationInputIds =
+          (passInput.initialMailboxImport?.importResult.conversationImportedCount ?? 0)
+            === initialMailboxAssistantInputIds.length
+          && initialMailboxAssistantInputIds.length > 0
+            ? new Set(initialMailboxAssistantInputIds)
+            : new Set<string>();
+        const hasExactForegroundConversationInputIdentity = (
+          inputId: string,
+        ): boolean =>
+          unresolvedForegroundConversationInputOrdinals.has(inputId)
+          || exactInitialConversationInputIds.has(inputId);
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
@@ -3169,6 +3242,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             startedAtEpochMs: passStartedAtEpochMs,
           },
           runAssistantPhase: async (phaseInput) => {
+            recordForegroundConversationInputsFromImport(
+              phaseInput.initialMailboxImport,
+            );
             currentAssistantInputId = null;
             const acceptedAssistantInputIds = new Set<string>();
             const releaseAcceptedImageGenerationInputs = async (
@@ -3257,8 +3333,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       acceptedInputContext.conversationActivity,
                     );
                   }
-                  acceptedForegroundPriorityAssistantInput ||=
-                    acceptedInputContext.foregroundPriorityInputAccepted;
+                  if (acceptedInputContext.foregroundPriorityInputAccepted) {
+                    for (const assistantInputId of assistantInputIds) {
+                      if (
+                        !hasExactForegroundConversationInputIdentity(
+                          assistantInputId,
+                        )
+                        || acceptedForegroundConversationInputIds.has(
+                          assistantInputId,
+                        )
+                      ) {
+                        acceptedForegroundPriorityInputNeedsOpaqueQuietWindow =
+                          true;
+                      }
+                      acceptedForegroundConversationInputIds.add(
+                        assistantInputId,
+                      );
+                    }
+                  }
                   consumeReadyImageCompletionInputs(assistantInputIds);
                   return () => {
                     currentAssistantInputId = null;
@@ -3313,17 +3405,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             current: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
             result: passResult,
             workspace: passInput.workspace,
-          });
+        });
         recordBrowserVaultReplicaRefreshIntent(passResult);
         if (
           passResult.runtimeStateDirty
           && (
-            acceptedForegroundPriorityAssistantInput
+            acceptedForegroundPriorityInputNeedsOpaqueQuietWindow
             || passResult.assistantPhaseResult
               ?.foregroundPrioritySystemCompletionProcessed === true
           )
         ) {
-          foregroundPriorityWorkOrdinal += 1;
+          recordForegroundPriorityWork();
         }
         return passResult;
       } catch (error) {
@@ -5807,8 +5899,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (
             dueAssistantWakeResult !== null
             && checkpointStartByAtBarrierRelease !== null
-            && foregroundPriorityWorkOrdinal
-              === foregroundPriorityWorkOrdinalAtBarrierRelease
+            && !hasForegroundPriorityWorkAfter(
+              foregroundPriorityWorkOrdinalAtBarrierRelease,
+            )
           ) {
             setIdleCheckpointStartBy(checkpointStartByAtBarrierRelease);
           }
@@ -6989,7 +7082,7 @@ function normalizeHostedRuntimeWakeReason(nextWakeReason: string | null): string
 }
 
 function hostedRuntimeWakeReasonIsAssistant(nextWakeReason: string | null): boolean {
-  return normalizeHostedRuntimeWakeReason(nextWakeReason) === HOSTED_ASSISTANT_WAKE_REASON;
+  return hostedRuntimeWakeReasonUsesAssistantPhase(nextWakeReason);
 }
 
 function buildHostedRuntimeIdleCheckpointPhaseLogDetails(input: {
