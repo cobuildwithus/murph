@@ -35,15 +35,16 @@ artifacts.
   historical pull, including later refresh, foreground, and relaunch reads.
 - Proof: focused protocol, retry-idempotency, store, and companion-status tests
   show successful imports advance the matching resource and overall timestamp,
-  while empty notification acceptance, failures, disconnect cutoffs, and push
+  while data-less notification acceptance, failures, disconnect cutoffs, and push
   stall state remain unchanged.
 
 ## Affected People And Recovery
 
 - A connected Apple Health member with new readable data sees freshness advance
   after canonical import succeeds, not when a data-less notification arrives.
-- A connected member whose pull is empty, still running, or fails keeps the
-  existing waiting or recovery state; no optimistic success is introduced.
+- A data-less provider notice never advances freshness by itself. A connected
+  member whose canonical import is still running or fails keeps the existing
+  waiting or recovery state; no optimistic success is introduced.
 - A disconnected source cannot revive old import evidence across its receipt
   cutoff.
 - Other Junction sources use the same source-scoped evidence rule without
