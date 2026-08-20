@@ -6,15 +6,22 @@ import {
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import type { ValidatedMealPhotoUpload } from "./meal-photo-capture";
+import {
+  runWithHostedDomainRootProviderCallsDisabled,
+} from "../hosted-crypto/domain-root-unwrap-cache";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import {
   appendHostedMealPhotoMailboxEnvelopeTx,
   readHostedMailboxWakeAfterDedupeLockTx,
+  runWithPreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
-import { readCurrentHostedMemberDirectRoute } from "../hosted-routing/member-direct-route";
+import {
+  assertPreparedHostedMemberDirectRouteTx,
+  prepareCurrentHostedMemberDirectRoute,
+} from "../hosted-routing/member-direct-route";
 
 export interface IngestCompanionMealPhotoResult {
   accepted: true;
@@ -29,11 +36,11 @@ export async function ingestCompanionMealPhoto(input: {
   prisma: PrismaClient;
   upload: ValidatedMealPhotoUpload;
 }): Promise<IngestCompanionMealPhotoResult> {
-  const directRoute = await readCurrentHostedMemberDirectRoute({
+  const preparedDirectRoute = await prepareCurrentHostedMemberDirectRoute({
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  if (!directRoute) {
+  if (!preparedDirectRoute) {
     throw hostedOnboardingError({
       code: "MEAL_PHOTO_CAPTURE_DIRECT_ROUTE_REQUIRED",
       httpStatus: 409,
@@ -62,7 +69,7 @@ export async function ingestCompanionMealPhoto(input: {
     byteLength: staged.byteLength,
     captureId: input.upload.captureId,
     capturedAt: input.upload.capturedAt,
-    directRoute,
+    directRoute: preparedDirectRoute.directRoute,
     eventId: input.eventId,
     mealPhotoKey: staged.mealPhotoKey,
     memberId: input.memberId,
@@ -72,13 +79,26 @@ export async function ingestCompanionMealPhoto(input: {
 
   let appended: Awaited<ReturnType<typeof appendHostedMealPhotoMailboxEnvelopeTx>>;
   try {
-    appended = await input.prisma.$transaction(async (tx) => {
-      await input.assertCurrentAuthorityTx(tx);
-      return await appendHostedMealPhotoMailboxEnvelopeTx({
-        envelope,
-        tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    appended = await runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => input.prisma.$transaction(
+        (tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
+          await input.assertCurrentAuthorityTx(tx);
+          await assertPreparedHostedMemberDirectRouteTx({
+            message: input.directRouteRequiredMessage,
+            prepared: preparedDirectRoute,
+            prisma: tx,
+          });
+          return await appendHostedMealPhotoMailboxEnvelopeTx({
+            envelope,
+            prepared,
+            tx,
+          });
+        }),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      ),
+      prisma: input.prisma,
+      userId: input.memberId,
+    });
     if (appended.dedupeConflict) {
       throw hostedOnboardingError({
         code: "MEAL_PHOTO_DEDUPE_CONFLICT",

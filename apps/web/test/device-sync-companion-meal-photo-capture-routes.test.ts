@@ -9,6 +9,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   activateMealPhotoCaptureEnrollmentForScopedToken: vi.fn(),
   appendHostedMealPhotoMailboxEnvelopeTx: vi.fn(),
+  assertPreparedHostedMemberDirectRouteTx: vi.fn(),
   assertCurrentManualMealPhotoUploadAuthorityTx: vi.fn(),
   assertCurrentMealPhotoCaptureEnrollmentTx: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   readAndValidateMealPhotoUpload: vi.fn(),
   readAndValidateManualMealPhotoUpload: vi.fn(),
   readCurrentHostedMemberDirectRoute: vi.fn(),
+  prepareCurrentHostedMemberDirectRoute: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
   requireActiveMealPhotoCaptureEnrollment: vi.fn(),
@@ -31,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   requirePrivyMemberAuthFromBearerToken: vi.fn(),
   revokeMealPhotoCaptureEnrollmentForMember: vi.fn(),
   revokeMealPhotoCaptureEnrollmentForScopedToken: vi.fn(),
+  runWithHostedDomainRootProviderCallsDisabled: vi.fn(),
+  runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   stageMealPhoto: vi.fn(),
   transaction: vi.fn(),
@@ -70,7 +74,12 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-routing/member-direct-route", () => ({
-  readCurrentHostedMemberDirectRoute: mocks.readCurrentHostedMemberDirectRoute,
+  assertPreparedHostedMemberDirectRouteTx:
+    mocks.assertPreparedHostedMemberDirectRouteTx,
+  prepareCurrentHostedMemberDirectRoute:
+    mocks.prepareCurrentHostedMemberDirectRoute,
+  readCurrentHostedMemberDirectRoute:
+    mocks.readCurrentHostedMemberDirectRoute,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -83,11 +92,18 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
     mocks.readHostedExecutionControlClientIfConfigured,
 }));
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
+  runWithHostedDomainRootProviderCallsDisabled:
+    mocks.runWithHostedDomainRootProviderCallsDisabled,
+}));
+
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMealPhotoMailboxEnvelopeTx:
     mocks.appendHostedMealPhotoMailboxEnvelopeTx,
   readHostedMailboxWakeAfterDedupeLockTx:
     mocks.readHostedMailboxWakeAfterDedupeLockTx,
+  runWithPreparedHostedMailboxItemAppendCrypto:
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -141,6 +157,13 @@ describe("meal photo companion routes", () => {
     mocks.transaction.mockImplementation(
       async (operation: (tx: { label: string }) => unknown) => operation({ label: "tx" }),
     );
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
+      async (input: { append: (prepared: { label: string }) => unknown }) =>
+        input.append({ label: "prepared-mailbox-crypto" }),
+    );
+    mocks.runWithHostedDomainRootProviderCallsDisabled.mockImplementation(
+      async (operation: () => unknown) => operation(),
+    );
     mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
       identity: { userId: "privy_member_1" },
       member: { id: MEMBER_ID },
@@ -153,6 +176,16 @@ describe("meal photo companion routes", () => {
       channel: "linq",
       threadId: "linq-thread-1",
     });
+    mocks.prepareCurrentHostedMemberDirectRoute.mockResolvedValue({
+      directRoute: {
+        channel: "linq",
+        threadId: "linq-thread-1",
+      },
+      memberId: MEMBER_ID,
+      routingRecord: { memberId: MEMBER_ID },
+      verifiedEmailRecord: null,
+    });
+    mocks.assertPreparedHostedMemberDirectRouteTx.mockResolvedValue(undefined);
     mocks.parseMealPhotoCaptureEnrollmentRequest.mockReturnValue(ENROLLMENT_REQUEST);
     mocks.parseMealPhotoCaptureRevocationRequest.mockReturnValue({
       appInstallationId: ENROLLMENT_REQUEST.appInstallationId,
@@ -480,8 +513,26 @@ describe("meal photo companion routes", () => {
     });
     expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: buildMealPhotoWake(),
+      prepared: { label: "prepared-mailbox-crypto" },
       tx: { label: "tx" },
     });
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).toHaveBeenCalledWith({
+      append: expect.any(Function),
+      prisma: { $transaction: mocks.transaction },
+      userId: MEMBER_ID,
+    });
+    expect(
+      mocks.runWithPreparedHostedMailboxItemAppendCrypto.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.transaction.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+    expect(mocks.runWithHostedDomainRootProviderCallsDisabled).toHaveBeenCalledOnce();
+    expect(
+      mocks.runWithHostedDomainRootProviderCallsDisabled.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.appendHostedMealPhotoMailboxEnvelopeTx.mock.invocationCallOrder[0]
+        ?? Number.MAX_SAFE_INTEGER,
+    );
     expect(
       mocks.assertCurrentMealPhotoCaptureEnrollmentTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -497,10 +548,21 @@ describe("meal photo companion routes", () => {
       request,
     });
     expect(mocks.deleteMealPhoto).not.toHaveBeenCalled();
-    expect(mocks.readCurrentHostedMemberDirectRoute).toHaveBeenCalledWith({
+    expect(mocks.prepareCurrentHostedMemberDirectRoute).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.anything(),
     });
+    expect(mocks.assertPreparedHostedMemberDirectRouteTx).toHaveBeenCalledWith({
+      message: "Connect iMessage, Telegram, or a verified email before retrying meal capture.",
+      prepared: expect.objectContaining({ memberId: MEMBER_ID }),
+      prisma: { label: "tx" },
+    });
+    expect(
+      mocks.assertPreparedHostedMemberDirectRouteTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.appendHostedMealPhotoMailboxEnvelopeTx.mock.invocationCallOrder[0]
+        ?? Number.MAX_SAFE_INTEGER,
+    );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_1",
@@ -590,8 +652,54 @@ describe("meal photo companion routes", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
+  it("cleans up staging when the prepared private route changes before append", async () => {
+    mocks.assertPreparedHostedMemberDirectRouteTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "MEAL_PHOTO_CAPTURE_DIRECT_ROUTE_REQUIRED",
+        httpStatus: 409,
+        message: "Connect a current private route before retrying meal capture.",
+      }),
+    );
+
+    const response = await manualPhotosRoute.POST(new Request(
+      "https://app.example.test/meal-photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(409);
+    expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.deleteMealPhoto).toHaveBeenCalledWith({
+      mealPhotoKey: "meal-photo-key",
+      userId: MEMBER_ID,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("retains an already-claimed duplicate object when final route authority changes", async () => {
+    mocks.assertPreparedHostedMemberDirectRouteTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "MEAL_PHOTO_CAPTURE_DIRECT_ROUTE_REQUIRED",
+        httpStatus: 409,
+        message: "Connect a current private route before retrying meal capture.",
+      }),
+    );
+    mocks.readHostedMailboxWakeAfterDedupeLockTx.mockResolvedValueOnce(
+      buildMealPhotoWake(),
+    );
+
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(409);
+    expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.deleteMealPhoto).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("requires a current private route again before accepting an upload", async () => {
-    mocks.readCurrentHostedMemberDirectRoute.mockResolvedValueOnce(null);
+    mocks.prepareCurrentHostedMemberDirectRoute.mockResolvedValueOnce(null);
 
     const response = await photosRoute.POST(new Request(
       "https://app.example.test/photos",

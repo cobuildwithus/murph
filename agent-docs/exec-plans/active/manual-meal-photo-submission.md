@@ -39,6 +39,10 @@ change to automatic-capture enrollment.
   Automatic upload retains its scoped enrollment recheck; manual upload locks
   the member and sponsored-access rows, rechecks the verified Privy binding,
   active access, and historical consent immediately before mailbox commit.
+  Both paths also compare the exact raw routing and verified-email state used
+  to build the envelope under the owning row locks immediately before append.
+  Privy ownership uses its blind-index core projection, and mailbox payload
+  crypto is prepared before the database-only final transaction begins.
 - Store no JPEG bytes or new manual-upload records in Postgres. Ambiguous append
   cleanup continues to reconcile the existing mailbox claim before deletion.
 
@@ -48,7 +52,8 @@ change to automatic-capture enrollment.
 2. Reuse the existing meal-photo ingestion owner from automatic and manual
    routes without weakening either authority boundary.
 3. Add focused validation, route, final-recheck, duplicate, and cleanup tests.
-4. Update architecture, security, native contract, and public changelog docs.
+4. Update architecture, security, and native contract docs. Publish the public
+   changelog only with the coordinated native release.
 5. Run focused local proof, push the exact candidate, and complete required
    preliminary and final ReviewGPT gates with green CI.
 

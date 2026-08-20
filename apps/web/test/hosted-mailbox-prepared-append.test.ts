@@ -1,6 +1,9 @@
 import { Buffer } from "node:buffer";
 
-import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionMealPhotoCapturedWake,
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -57,6 +60,7 @@ import { hashHostedMailboxStoredPayload } from "../src/lib/hosted-mailbox/finger
 import {
   appendHostedMailboxItem,
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+  appendHostedMealPhotoMailboxEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto,
   type HostedMailboxItemRow,
 } from "../src/lib/hosted-mailbox/store";
@@ -206,7 +210,13 @@ function createMailboxFixture(input: {
   const rootFindUnique = vi.fn(async () =>
     input.existingBeforePreparation ?? null
   );
-  const txFindUnique = vi.fn(async () => null);
+  const rows: HostedMailboxItemRow[] = [];
+  const txFindUnique = vi.fn(async (args: {
+    where: { userId_dedupeKey: { dedupeKey: string; userId: string } };
+  }) => rows.find((row) => (
+    row.dedupeKey === args.where.userId_dedupeKey.dedupeKey
+    && row.userId === args.where.userId_dedupeKey.userId
+  )) ?? null);
   const hostedMailboxPayloadCreate = vi.fn(async () => undefined);
   const executeRaw = vi.fn(async () => {
     events.push("mailbox-lock");
@@ -237,6 +247,7 @@ function createMailboxFixture(input: {
           sourceMessageLookupKey: values[3] as string | null,
           userId: String(values[1]),
         });
+        rows.push(row);
         return [row];
       }
       throw new Error(`Unexpected prepared mailbox query: ${sql}`);
@@ -336,6 +347,11 @@ beforeEach(() => {
   mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot.mockReset();
   mailboxEncryptionMocks.encryptHostedMailboxPayloadString.mockRejectedValue(
     new Error("Legacy mailbox encryption must not run from the prepared owner."),
+  );
+  mailboxEncryptionMocks.decryptHostedMailboxPayloadString.mockImplementation(
+    async (input: { value?: string | null }) => input.value?.startsWith("cipher:")
+      ? input.value.slice("cipher:".length)
+      : input.value ?? null,
   );
   mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot
     .mockImplementation(async (input: { payloadStorage: string }) =>
@@ -449,6 +465,126 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     expect(fixture.tx.$queryRaw.mock.calls.some(
       (call) => call[4] === "hbidx:linq-message:v2:prepared",
     )).toBe(true);
+  });
+
+  it("keeps the first staged object for an exact duplicate meal photo", async () => {
+    const fixture = createMailboxFixture();
+    mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot
+      .mockImplementation(async (input: { value?: string | null }) =>
+        input.value ? `cipher:${input.value}` : null
+      );
+    installPreparedRootSequence({ rootKeyIds: ["root-prepared-meal"] });
+    domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValue("root-prepared-meal");
+    const firstEnvelope = buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: 128,
+      captureId: "a".repeat(64),
+      capturedAt: FIXED_NOW.toISOString(),
+      directRoute: { channel: "linq", threadId: "linq_home_thread" },
+      eventId: "meal-photo:prepared-duplicate",
+      mealPhotoKey: "meal-photo-attempt-a",
+      memberId: USER_ID,
+      occurredAt: FIXED_NOW.toISOString(),
+      sha256: "b".repeat(64),
+    });
+
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const prepared = await prepareHostedMailboxItemAppendCrypto({
+        prisma: fixture.prisma as never,
+        userId: USER_ID,
+      });
+      const first = await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: firstEnvelope,
+        prepared,
+        tx: fixture.tx as never,
+      });
+      const duplicate = await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: {
+          ...firstEnvelope,
+          directRoute: {
+            channel: "telegram",
+            threadId: "telegram_home_thread",
+          },
+          mealPhoto: {
+            ...firstEnvelope.mealPhoto,
+            mealPhotoKey: "meal-photo-attempt-b",
+          },
+        },
+        prepared,
+        tx: fixture.tx as never,
+      });
+
+      expect(first).toMatchObject({
+        claimedMealPhotoKey: "meal-photo-attempt-a",
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+      });
+      expect(duplicate).toMatchObject({
+        claimedMealPhotoKey: "meal-photo-attempt-a",
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+      });
+    });
+
+    expect(mailboxEncryptionMocks.encryptHostedMailboxPayloadString)
+      .not.toHaveBeenCalled();
+    expect(mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot)
+      .toHaveBeenCalledOnce();
+  });
+
+  it("rejects conflicting reuse through the prepared meal-photo append", async () => {
+    const fixture = createMailboxFixture();
+    mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot
+      .mockImplementation(async (input: { value?: string | null }) =>
+        input.value ? `cipher:${input.value}` : null
+      );
+    installPreparedRootSequence({ rootKeyIds: ["root-prepared-meal-conflict"] });
+    domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValue("root-prepared-meal-conflict");
+    const firstEnvelope = buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: 128,
+      captureId: "a".repeat(64),
+      capturedAt: FIXED_NOW.toISOString(),
+      directRoute: { channel: "linq", threadId: "linq_home_thread" },
+      eventId: "meal-photo:prepared-conflict",
+      mealPhotoKey: "meal-photo-attempt-a",
+      memberId: USER_ID,
+      occurredAt: FIXED_NOW.toISOString(),
+      sha256: "b".repeat(64),
+    });
+
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const prepared = await prepareHostedMailboxItemAppendCrypto({
+        prisma: fixture.prisma as never,
+        userId: USER_ID,
+      });
+      await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: firstEnvelope,
+        prepared,
+        tx: fixture.tx as never,
+      });
+      const conflict = await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: {
+          ...firstEnvelope,
+          mealPhoto: {
+            ...firstEnvelope.mealPhoto,
+            mealPhotoKey: "meal-photo-attempt-b",
+            sha256: "c".repeat(64),
+          },
+        },
+        prepared,
+        tx: fixture.tx as never,
+      });
+
+      expect(conflict).toMatchObject({
+        claimedMealPhotoKey: "meal-photo-attempt-b",
+        dedupeConflict: true,
+        duplicate: true,
+        inserted: false,
+      });
+    });
   });
 
   it("rejects a same-key cache replacement before taking mailbox locks", async () => {

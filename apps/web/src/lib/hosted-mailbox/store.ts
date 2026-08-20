@@ -1134,6 +1134,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
 
 export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
   envelope: HostedExecutionMealPhotoCapturedWake;
+  prepared: PreparedHostedMailboxItemAppendCrypto;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult & { claimedMealPhotoKey: string }> {
   await acquireHostedMailboxDedupeAppendLockTx({
@@ -1150,8 +1151,9 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
     && hasSameMealPhotoCapture(existing, input.envelope)
     ? existing
     : input.envelope;
-  const appended = await appendHostedMailboxEnvelopeTx({
+  const appended = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
     envelope: canonicalEnvelope,
+    prepared: input.prepared,
     tx: input.tx,
   });
   return {
