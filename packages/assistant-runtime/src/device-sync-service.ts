@@ -29,7 +29,9 @@ import type {
   ProviderJobConnectionSource,
 } from "@murphai/device-syncd/types";
 import {
+  HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
+  HostedRuntimeCanonicalCheckpointError,
   type HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
 import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
@@ -99,16 +101,34 @@ function createHostedRuntimeDeviceSyncImporter(
 }
 
 function translateHostedRuntimeDeviceSyncImporterError(error: unknown): unknown {
-  if (!(error instanceof HostedRuntimeArtifactWriteError)) {
-    return error;
+  if (error instanceof HostedRuntimeArtifactReadError) {
+    return deviceSyncError({
+      cause: error,
+      code: "HOSTED_DEVICE_SYNC_ARTIFACT_READ_FAILED",
+      httpStatus: error.retryable ? 503 : 500,
+      message: "Hosted device-sync artifact read failed. Retry shortly.",
+      retryable: error.retryable,
+    });
   }
-  return deviceSyncError({
-    cause: error,
-    code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
-    httpStatus: error.retryable ? 503 : 500,
-    message: "Hosted device-sync artifact persistence failed. Retry shortly.",
-    retryable: error.retryable,
-  });
+  if (error instanceof HostedRuntimeArtifactWriteError) {
+    return deviceSyncError({
+      cause: error,
+      code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
+      httpStatus: error.retryable ? 503 : 500,
+      message: "Hosted device-sync artifact persistence failed. Retry shortly.",
+      retryable: error.retryable,
+    });
+  }
+  if (error instanceof HostedRuntimeCanonicalCheckpointError) {
+    return deviceSyncError({
+      cause: error,
+      code: "HOSTED_DEVICE_SYNC_CANONICAL_CHECKPOINT_FAILED",
+      httpStatus: 503,
+      message: "Hosted device-sync canonical checkpoint failed. Retry shortly.",
+      retryable: true,
+    });
+  }
+  return error;
 }
 
 async function listHostedJobConnectionSources(input: {
