@@ -60,11 +60,13 @@ narrow injected boundaries and prove acquisition ordering, success, relevant
 failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
 
-Native companion auth/control/device-sync PRs additionally require the protected
+Native companion auth/control/device-sync PRs additionally use the
 `Native iOS hosted E2E` status described in `agent-docs/references/testing-ci-map.md`.
-That status is production-shaped evidence: exact hosted PR Web deployment plus
-real Privy/Junction/HealthKit native flow. UI completion is not enough; trusted
-orchestration must also prove the exact candidate is anonymously reachable,
+A status description that records a real pass is production-shaped evidence:
+exact hosted PR Web deployment plus real Privy/Junction/HealthKit native flow.
+Path-filtered informational success explicitly records that no real journey ran
+and must not become a required-check substitute. UI completion is not enough;
+trusted orchestration must also prove the exact candidate is anonymously reachable,
 a freshly created fixed Privy principal exists, and a connected real Junction
 `apple_health_kit` provider exists before cleanup. Local mocked or hosted-local
 tests do not replace it. Runtime credentials stay in the dedicated Vercel
