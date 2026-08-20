@@ -112,122 +112,70 @@ describe('assistant tracked workout table skill', () => {
     expect(strengthSkill).toContain('instead of Markdown table syntax')
   })
 
-  it('uses targeted canonical commands for live workout mutations', async () => {
+  it('uses exact-record commands and durable exercise-owned repetitions', async () => {
     const skill = await readFile(
       path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
       'utf8',
     )
 
     expect(skill).toContain('vault-cli workout start')
-    expect(skill).toContain('vault-cli workout active')
+    expect(skill).toContain('vault-cli workout show <evt_id> --format json')
     expect(skill).toContain('vault-cli workout exercise add')
     expect(skill).toContain('[--sets <n>]')
+    expect(skill).toContain('vault-cli workout exercise set-reps')
     expect(skill).toContain('vault-cli workout set log')
     expect(skill).toContain('vault-cli workout set clear')
-    expect(skill).toContain('vault-cli workout finish')
+    expect(skill).toContain('vault-cli workout finish --workout-id <evt_id>')
+    expect(skill).not.toContain('vault-cli workout active')
+    expect(skill).toContain(
+      'There is no global active or focused workout selector. Never choose a workout by recency.',
+    )
+    expect(skill).toContain(
+      'Pass `--workout-id`, one explicit exercise selector, and `--set-order` on every set mutation.',
+    )
+    expect(skill).toContain(
+      'immediately persist that smallest exercise-owned fact with `workout exercise set-reps`',
+    )
+    expect(skill).toContain(
+      'The fact survives provider-thread loss and bounded transcript replay because it belongs to the workout exercise, not assistant memory.',
+    )
+    expect(skill).toContain(
+      "copies the stored member fact into that completed set's actual `reps` field",
+    )
+    expect(skill).toContain(
+      "The stored fact fills only an unlogged coordinate; a note, load, or other correction on an already logged set preserves that set's explicit repetitions unless the member supplies a new repetition result.",
+    )
+    expect(skill).toContain(
+      'never derived from a saved-plan target, prior workout, card target, assistant suggestion, range, AMRAP, or qualitative instruction',
+    )
+    expect(skill).toContain(
+      'Never carry forward weight, duration, distance, RPE, bodyweight, assistance, added weight, or any other actual field.',
+    )
+    expect(skill).toContain(
+      'Logging the last pending set of an explicitly finite workout closes that exact workout in the same canonical write.',
+    )
+    expect(skill).toContain(
+      'The accepted set completion time is the observed end boundary',
+    )
+    expect(skill).toContain(
+      'A later explicit extra set remains valid when it names that completed workout and exact exercise/set',
+    )
+    expect(skill).toContain(
+      'Starting a new workout is independent of every older unfinished workout',
+    )
+    expect(skill).toContain('Saved target values remain in the workout format')
+    expect(skill).toContain('no planned target value is copied into an actual set field')
     expect(skill).toContain(
       'Do not reconstruct and replace the complete nested exercise/set array',
-    )
-    expect(skill).toContain('pass `--workout-id`')
-    expect(skill).toContain(
-      'pass `--workout-id` on every live-workout mutation',
-    )
-    expect(skill).toContain('one explicit exercise selector, and `--set-order`')
-    expect(skill).toContain('correct the same set rather than append a duplicate')
-    expect(skill).toContain(
-      'The sole carry-forward exception is one exact repetition count the member explicitly applied to every set of one exercise',
-    )
-    expect(skill).toContain(
-      'while the same workout is active and its establishing message remains available in the current direct conversation',
-    )
-    expect(skill).toContain(
-      'pass only `--reps` with that count instead of asking again or writing a note-only completion',
-    )
-    expect(skill).toContain(
-      'Do not carry forward weight, duration, distance, RPE, bodyweight, assistance, added weight, or any other actual field',
-    )
-    expect(skill).toContain(
-      'A repetition count stated with the completion overrides the earlier count',
-    )
-    expect(skill).toContain(
-      'range, AMRAP or qualitative instruction, conflicts with another count',
-    )
-    expect(skill).toContain(
-      'Never treat a saved-plan target, prior workout, card target, or assistant-authored suggestion as this repetition prescription',
-    )
-    expect(skill).not.toContain('pass the prescribed actual field')
-    expect(skill).toContain('Saved target values remain in the workout format')
-    expect(skill).toContain('preserve every distinct exercise the member named')
-    expect(skill).toContain('including closely related variations')
-    expect(skill).toContain(
-      'one unlogged targetless placeholder as the next log slot',
-    )
-    expect(skill).toContain('not as a claimed plan or completed set')
-    expect(skill).toContain(
-      'every canonical event set with no matching format set',
-    )
-    expect(skill).toContain(
-      '`pending` while the workout is live and the slot is empty',
-    )
-    expect(skill).toContain(
-      '`skipped` after the workout ends and the slot remains empty',
-    )
-    expect(skill).toContain('not evidence of a planned set')
-    expect(skill).toContain('vault-cli workout format show')
-    expect(skill).toContain(
-      'Never copy planned targets into actual set fields',
     )
     expect(skill).toContain(
       'refuses a structured replacement that omits a saved exercise or set',
     )
-    expect(skill).toContain('Use `--clear-workout` only')
-    expect(skill).toContain('remove the entire record')
-    expect(skill).toContain('member explicitly or unmistakably closes that session')
-    expect(skill).toContain('already-completed return is convergence')
-    expect(skill).not.toContain('Complete workout exercise')
-    expect(skill).toContain('Never infer weight, repetitions, effort, assistance')
     expect(skill).toContain(
       'After every verified private workout mutation that changes the snapshot',
     )
     expect(skill).toContain(
-      'ordinary set log, correction, clear, exercise addition, start, resume, or finish',
-    )
-    expect(skill).toContain(
-      'Do not send a text-only acknowledgement or companion prose.',
-    )
-    expect(skill).toContain(
-      'After every verified ordinary free-form set log, correction, clear, or exercise addition',
-    )
-    expect(skill).toContain(
-      'When a request does not materially change canonical workout state',
-    )
-    expect(skill).not.toContain(
-      'Do not send a fresh table card after every ordinary set update.',
-    )
-    expect(skill).not.toContain(
-      'For ordinary free-form logging, prefer concise text',
-    )
-    expect(skill).toContain(
       'use one verified structured workout card as the complete response on a supported private card route',
-    )
-    expect(skill).toContain(
-      'Do not send a text-only start acknowledgement or wait for a separate card request.',
-    )
-    expect(skill).toContain('the canonical event cannot be verified')
-    expect(skill).toContain(
-      'any claimed planned targets cannot be verified from their matching format',
-    )
-    expect(skill).toContain(
-      "The card tool's validation of the actual encoded envelope is authoritative",
-    )
-    expect(skill).toContain(
-      'Never ask the member to delete, merge, or simplify canonical workout data merely to fit the presentation',
-    )
-    expect(skill).toContain(
-      "the complete card is rejected by the card tool's actual encoded-envelope validation",
-    )
-    expect(skill).toContain(
-      'Do not preempt that validation from an estimated exercise or set count',
     )
   })
 
@@ -238,42 +186,24 @@ describe('assistant tracked workout table skill', () => {
     )
 
     expect(skill).toContain(
-      'A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion',
+      'A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion.',
+    )
+    expect(skill).toContain('Keep the last exact coordinate the member identified.')
+    expect(skill).toContain('Never advance to another set from an acknowledgement.')
+    expect(skill).toContain(
+      'When the exact workout id or set coordinate is genuinely unavailable, ask which workout, exercise, or set the member means.',
     )
     expect(skill).toContain(
-      'never advance to another set from that acknowledgement',
+      'Do not block unrelated new work, demand closure metadata for another workout, or create a workout merely to make an earlier assistant claim appear true.',
     )
     expect(skill).toContain(
-      'Keep the last set coordinate the member explicitly identified',
+      'An isolated completion with no exact causal workout identity does not authorize choosing an unfinished workout or inventing one.',
     )
-    expect(skill).toContain(
-      'Do not start a workout to reconcile a prior assistant claim or confirmation',
-    )
-    expect(skill).toContain(
-      'do not claim that any set was saved',
-    )
-    expect(skill).not.toContain('or clearly began a workout')
-    expect(skill).toContain(
-      'the member accepts the exact bounded recovery offer below',
-    )
-    expect(skill).toContain(
-      'create only enough pending set coordinates through the named set',
-    )
-    expect(skill).toContain(
-      'the same response must then ask one bounded recovery question',
-    )
-    expect(skill).toContain(
-      'Do not stop after the no-active statement',
-    )
-    expect(skill).toContain(
-      'A contextual affirmative answer to that exact offer authorizes only the proposed start and exact set write',
-    )
-    expect(skill).toContain(
-      'If an active workout now exists, do not retarget the accepted recovery',
-    )
+    expect(skill).not.toContain('bounded recovery offer')
+    expect(skill).not.toContain('No active live workout was found')
   })
 
-  it('uses generic reminder references with the ordinary workout lifecycle', async () => {
+  it('uses reminder references without reviving a workout singleton', async () => {
     const skill = await readFile(
       path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
       'utf8',
@@ -282,51 +212,40 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('## Scheduled reminder relationship context')
     expect(skill).toContain('host-preserved `automationId`')
     expect(skill).toContain('exact `contextReferences`')
-    expect(skill).toContain('routing and interpretation context only')
-    expect(skill).toContain('do not require native iMessage Reply')
-    expect(skill).toContain('next ordinary direct message after the reminder')
-    expect(skill).toContain('one exact `workout_format` reference')
-    expect(skill).toContain('successful current `vault-cli workout format show <lookup> --format json` read or format-creation result')
-    expect(skill).toContain('If current evidence does not identify exactly one format, save no reference')
-    expect(skill).toContain('vault-cli workout format show <exact_format_id> --format json')
-    expect(skill).toContain('vault-cli workout active --format json')
-    expect(skill).toContain('the exact inspected reminder reference authorizes starting only that routine')
-    expect(skill).toContain('the reminder identifies the new set but does not establish when the earlier workout ended')
-    expect(skill).toContain('Never derive an end from active `durationMinutes`')
-    expect(skill).toContain("the earlier workout's exact end time or exact total duration")
-    expect(skill).toContain('make no workout mutation')
-    expect(skill).toContain('the new set was not saved yet')
-    expect(skill).toContain("ask one narrow question for the earlier workout's end time or total duration")
-    expect(skill).toContain('Make that question text-bearing even when voice is preferred')
-    expect(skill).toContain('`Routine reference: <exact_format_id>`')
+    expect(skill).toContain('not read or write authority')
+    expect(skill).toContain('native iMessage Reply is not required')
+    expect(skill).toContain('An exact `workout_format` reference')
     expect(skill).toContain(
-      '`Active workout reference: <exact_active_workout_id>`',
+      'successful current `vault-cli workout format show <lookup> --format json` read or format-creation result',
     )
-    expect(skill).toContain('committed transcript replay preserves the complete proposal')
-    expect(skill).toContain('Only the immediate answer to that question may continue it')
-    expect(skill).toContain('exact-read the recorded format id')
     expect(skill).toContain(
-      'vault-cli workout active --workout-id <exact_active_workout_id> --format json',
+      'Run `workout start --routine <exact_format_id>`, preserve the returned workout id, and apply only the stated set to that new exact record.',
     )
-    expect(skill).toContain('separately read the sole active workout before acting')
     expect(skill).toContain(
-      'that exact event remains active and is still the sole active workout',
+      'An older unfinished workout neither blocks this start nor needs to be closed first.',
     )
-    expect(skill).toContain('fails closed without mutation')
-    expect(skill).toContain('unrelated later message fails closed')
-    expect(skill).toContain('Missing or conflicting references')
-    expect(skill).toContain('multiple active workouts')
-    expect(skill).toContain('Explicit historical intent remains explicit targeting')
-    expect(skill).toContain('existing exact-id path')
-    expect(skill).toContain('one current message contains both a set result and unmistakable session-closure intent')
-    expect(skill).toContain('“Last set, 45 × 6; I’m done.”')
-    expect(skill).toContain('finish the same workout in the same turn')
-    expect(skill).toContain('no separate finish message is needed')
-    expect(skill).toContain('Filling every planned placeholder without independent closure language does not finish the workout')
-    expect(skill).toContain('targetless extra sets')
-    expect(skill).not.toContain('filled the final unlogged placeholder across the workout')
-    expect(skill).not.toContain('startedAt` plus stored elapsed `durationMinutes`')
-    expect(skill).not.toContain('exact recorded end time')
+    expect(skill).toContain(
+      "The reminder does not establish any older workout's end time",
+    )
+    expect(skill).toContain(
+      'When immediate causal context instead names an existing exact workout id, exact-read it with `vault-cli workout show <evt_id> --format json` and mutate only that record.',
+    )
+    expect(skill).toContain(
+      'If the message and relationship context do not identify one exact workout and coordinate, ask which one is intended.',
+    )
+    expect(skill).toContain(
+      'a completed exact workout may still accept a clearly requested extra set',
+    )
+    expect(skill).toContain('Explicit historical intent remains explicit targeting.')
+    expect(skill).not.toContain('sole active workout')
+    expect(skill).not.toContain('multiple active workouts')
+    expect(skill).not.toContain('ask one narrow question for the earlier workout')
+    expect(skill).toContain(
+      'The canonical set-log owner closes an explicitly finite workout when the accepted write completes its final pending planned set.',
+    )
+    expect(skill).toContain(
+      'Do not require independent “I am done” language',
+    )
   })
 
   it('keeps set annotations canonical and preserves a fourth set', async () => {
@@ -343,10 +262,10 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('Do not collapse or discard the fourth set')
     expect(skill).toContain('do not silently truncate it')
     expect(skill).toContain(
-      'single active tracked workout whose table was explicitly established earlier',
+      'durable tracking marker or immediate causal context identifies one exact workout',
     )
     expect(skill).toContain(
-      'With no active tracked table, do not invent one from an update-like message',
+      'do not choose a workout by recency or invent one from an update-like message',
     )
     expect(skill).toContain('ask one narrow disambiguating question')
     expect(skill).toContain('final 2 reps spotted')

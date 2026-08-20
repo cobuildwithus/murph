@@ -5,6 +5,10 @@ import {
   type WorkoutSet,
   workoutSessionSchema,
 } from '@murphai/contracts'
+import {
+  deriveWorkoutActionBinding,
+  hasAmbiguousWorkoutActionExerciseCoordinates,
+} from '@murphai/operator-config/workout-action-binding'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
@@ -24,20 +28,27 @@ import {
   type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
   elapsedDurationMinutes,
-  isActiveLiveWorkout,
+  isOpenLiveWorkout,
 } from './workout-live-model.js'
 import { toVaultCliError } from './vault-usecase-helpers.js'
 
 const EXERCISES_PATCH_PREFIX = 'workout.exercises='
-const LIVE_WORKOUT_RESOURCE_KEY = 'events/live-workout-session'
-const LIVE_WORKOUT_RESOURCE_LABEL = 'live workout session'
+const LIVE_WORKOUT_RESOURCE_PREFIX = 'events/live-workout-session'
 
 export type WorkoutShowResult = Awaited<ReturnType<typeof showWorkoutRecord>>
 
+export interface LiveWorkoutExerciseUpdateOptions {
+  endedAt?: string
+  lastMemberActionId?: string
+  observedAt: string
+}
+
 export async function withLiveWorkoutMutationLock<TResult>(
   vault: string,
+  workoutId: string,
   run: () => Promise<TResult>,
 ): Promise<TResult> {
+  const normalizedWorkoutId = normalizeLiveWorkoutId(workoutId)
   const core = await loadWorkoutCoreRuntime()
 
   try {
@@ -45,8 +56,8 @@ export async function withLiveWorkoutMutationLock<TResult>(
       vaultRoot: vault,
       resources: [
         core.canonicalLogicalResource(
-          LIVE_WORKOUT_RESOURCE_KEY,
-          LIVE_WORKOUT_RESOURCE_LABEL,
+          `${LIVE_WORKOUT_RESOURCE_PREFIX}/${normalizedWorkoutId}`,
+          `live workout ${normalizedWorkoutId}`,
         ),
       ],
       run,
@@ -63,79 +74,57 @@ export async function withLiveWorkoutMutationLock<TResult>(
 
 export async function resolveLiveWorkout(
   input: LiveWorkoutLookupInput,
-  options: { requireActive: boolean; allowCompleted?: boolean },
+  options: { requireOpen?: boolean } = {},
 ): Promise<WorkoutShowResult> {
   const workoutId = normalizeLiveWorkoutId(input.workoutId)
-  if (workoutId !== undefined) {
-    const shown = await showWorkoutRecord(input.vault, workoutId)
-    const workout = parseShownWorkout(shown)
-    assertLiveWorkout(workout, shown.entity.id)
-    if (options.requireActive && !isActiveLiveWorkout(workout)) {
-      throw new VaultCliError('invalid_operation', `Workout ${shown.entity.id} is not active.`)
-    }
-    if (!options.allowCompleted && workout.endedAt) {
-      throw new VaultCliError(
-        'invalid_operation',
-        `Workout ${shown.entity.id} is already completed.`,
-      )
-    }
-    return shown
-  }
-
-  const active = await findActiveLiveWorkouts(input.vault)
-  if (active.length === 0) {
-    throw new VaultCliError('not_found', 'No active live workout was found.')
-  }
-  if (active.length > 1) {
+  const shown = await showWorkoutRecord(input.vault, workoutId)
+  const workout = parseShownWorkout(shown)
+  assertLiveWorkout(workout, shown.entity.id)
+  if (options.requireOpen && !isOpenLiveWorkout(workout)) {
     throw new VaultCliError(
-      'command_failed',
-      'Multiple active live workouts were found. Pass --workout-id explicitly.',
-      { activeWorkoutIds: active.map((entry) => entry.entity.id) },
+      'invalid_operation',
+      `Workout ${shown.entity.id} is already completed.`,
     )
   }
-  return active[0]!
+  return shown
 }
 
-export async function findActiveLiveWorkouts(vault: string): Promise<WorkoutShowResult[]> {
-  const records = await findStructuredWorkoutRecords(vault)
-
-  return records
-    .filter(({ workout }) => isActiveLiveWorkout(workout))
-    .map(({ record }) => ({
-      vault,
-      entity: toCommandShowEntity(record),
-    }))
-}
-
-export async function findLiveWorkoutsForMemberAction(
+export async function findLiveWorkoutActionTargets(
   vault: string,
   actionId: string,
+  actionBinding: string,
 ): Promise<{
-  active: WorkoutShowResult[]
+  bindingMatches: WorkoutShowResult[]
   exactReplays: WorkoutShowResult[]
 }> {
   const records = await findStructuredWorkoutRecords(vault)
-  const active: WorkoutShowResult[] = []
+  const bindingMatches: WorkoutShowResult[] = []
   const exactReplays: WorkoutShowResult[] = []
 
   for (const { record, workout } of records) {
+    if (
+      workout.sourceApp !== LIVE_WORKOUT_SOURCE_APP
+      || typeof workout.startedAt !== 'string'
+    ) {
+      continue
+    }
     const shown = {
       vault,
       entity: toCommandShowEntity(record),
     }
-    if (isActiveLiveWorkout(workout)) {
-      active.push(shown)
+    if (workout.lastMemberActionId === actionId) {
+      exactReplays.push(shown)
     }
     if (
-      workout.sourceApp === LIVE_WORKOUT_SOURCE_APP
-      && typeof workout.startedAt === 'string'
-      && workout.lastMemberActionId === actionId
+      isOpenLiveWorkout(workout)
+      && !hasAmbiguousWorkoutActionExerciseCoordinates(workout)
+      && deriveWorkoutActionBinding(shown.entity.id, workout) === actionBinding
     ) {
-      exactReplays.push(shown)
+      bindingMatches.push(shown)
     }
   }
 
-  return { active, exactReplays }
+  return { bindingMatches, exactReplays }
 }
 
 async function findStructuredWorkoutRecords(vault: string) {
@@ -169,17 +158,25 @@ export async function updateLiveWorkoutExercises(
   shown: WorkoutShowResult,
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
-  lastMemberActionId?: string,
+  options: LiveWorkoutExerciseUpdateOptions,
 ) {
-  const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
+  const update = validateLiveWorkoutExerciseUpdate(
+    shown,
+    workout,
+    exercises,
+    options,
+  )
   const set = [
     `${EXERCISES_PATCH_PREFIX}${JSON.stringify(update.exercises)}`,
   ]
+  if (update.endedAt !== undefined) {
+    set.push(`workout.endedAt=${JSON.stringify(update.endedAt)}`)
+  }
   if (update.durationMinutes !== undefined) {
     set.push(`durationMinutes=${update.durationMinutes}`)
   }
-  if (lastMemberActionId !== undefined) {
-    set.push(`workout.lastMemberActionId=${lastMemberActionId}`)
+  if (options.lastMemberActionId !== undefined) {
+    set.push(`workout.lastMemberActionId=${options.lastMemberActionId}`)
   }
 
   return editWorkoutRecord({
@@ -193,13 +190,19 @@ export async function updateLiveWorkoutExercisesAfterValidatedSetRemoval(
   shown: WorkoutShowResult,
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
-  lastMemberActionId: string,
+  options: LiveWorkoutExerciseUpdateOptions & { lastMemberActionId: string },
 ) {
-  const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
+  const update = validateLiveWorkoutExerciseUpdate(
+    shown,
+    workout,
+    exercises,
+    options,
+  )
   return editWorkoutRecordAfterValidatedSetRemoval({
     durationMinutes: update.durationMinutes,
+    endedAt: update.endedAt,
     exercises: update.exercises,
-    lastMemberActionId,
+    lastMemberActionId: options.lastMemberActionId,
     lookup: shown.entity.id,
     vault: shown.vault,
   })
@@ -209,8 +212,28 @@ function validateLiveWorkoutExerciseUpdate(
   shown: WorkoutShowResult,
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
+  options: LiveWorkoutExerciseUpdateOptions,
 ) {
-  const parsed = workoutSessionSchema.safeParse({ ...workout, exercises })
+  const observedAt = normalizeWorkoutTimestamp(options.observedAt, 'observedAt')
+  const endedAt = options.endedAt === undefined
+    ? undefined
+    : normalizeWorkoutTimestamp(options.endedAt, 'endedAt')
+  if (
+    endedAt !== undefined
+    && workout.startedAt !== undefined
+    && Date.parse(endedAt) <= Date.parse(workout.startedAt)
+  ) {
+    throw new VaultCliError(
+      'invalid_timestamp',
+      'Workout endedAt must be later than startedAt.',
+    )
+  }
+
+  const parsed = workoutSessionSchema.safeParse({
+    ...workout,
+    ...(endedAt === undefined ? {} : { endedAt }),
+    exercises,
+  })
   if (!parsed.success) {
     throw new VaultCliError(
       'contract_invalid',
@@ -220,10 +243,14 @@ function validateLiveWorkoutExerciseUpdate(
   }
   assertTargetableLiveWorkout(parsed.data, `Workout ${shown.entity.id}`)
 
+  const durationBoundary = endedAt
+    ?? (workout.endedAt === undefined ? observedAt : undefined)
   return {
-    durationMinutes: workout.startedAt
-      ? elapsedDurationMinutes(workout.startedAt, new Date().toISOString())
-      : undefined,
+    durationMinutes:
+      durationBoundary !== undefined && workout.startedAt !== undefined
+        ? elapsedDurationMinutes(workout.startedAt, durationBoundary)
+        : undefined,
+    endedAt,
     exercises: parsed.data.exercises,
   }
 }
@@ -344,11 +371,12 @@ export function assertTargetableLiveWorkout(
   }
 }
 
-export function normalizeLiveWorkoutId(
-  value: string | undefined,
-): string | undefined {
-  if (value === undefined) {
-    return undefined
+export function normalizeLiveWorkoutId(value: string | undefined): string {
+  if (typeof value !== 'string') {
+    throw new VaultCliError(
+      'invalid_option',
+      'A canonical workout id is required.',
+    )
   }
 
   const parsed = workoutLookupSchema.safeParse(value.trim())

@@ -650,20 +650,20 @@ function findReplacementExerciseIndex(
 const WORKOUT_STRUCTURE_REPAIR =
   'Re-read the workout and include every saved exercise and set. Use --clear-workout only when the member explicitly wants to remove all structured workout details while preserving the event, or workout delete only when they want the entire record removed.'
 
-async function assertWorkoutExerciseReplacementPreservesExistingStructure(input: {
+async function normalizeWorkoutExerciseReplacement(input: {
   vault: string
   lookup: string
   set?: string[]
-}, preserveSavedSets: boolean): Promise<void> {
+}, preserveSavedSets: boolean): Promise<string[] | undefined> {
   const replacement = parseWorkoutExerciseReplacement(input.set)
   if (replacement === null) {
-    return
+    return input.set
   }
 
   const shown = await showWorkoutRecord(input.vault, input.lookup)
   const savedWorkout = shown.entity.data.workout
   if (savedWorkout === null || savedWorkout === undefined) {
-    return
+    return input.set
   }
 
   const current = workoutSessionSchema.safeParse(savedWorkout)
@@ -697,6 +697,19 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
       )
     }
 
+    if (
+      replacementExercise.memberRepsPerSet === undefined
+      && existingExercise.memberRepsPerSet !== undefined
+    ) {
+      replacementExercise.memberRepsPerSet = existingExercise.memberRepsPerSet
+    }
+    if (
+      replacementExercise.setPlanIsFinite === undefined
+      && existingExercise.setPlanIsFinite !== undefined
+    ) {
+      replacementExercise.setPlanIsFinite = existingExercise.setPlanIsFinite
+    }
+
     if (!preserveSavedSets) {
       continue
     }
@@ -712,6 +725,17 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
       }
     }
   }
+
+  const assignments = input.set?.slice() ?? []
+  for (let index = assignments.length - 1; index >= 0; index -= 1) {
+    if (assignments[index]?.startsWith(WORKOUT_EXERCISES_PATCH_PREFIX)) {
+      assignments[index] = `${WORKOUT_EXERCISES_PATCH_PREFIX}${
+        JSON.stringify(replacement)
+      }`
+      break
+    }
+  }
+  return assignments
 }
 
 interface EditWorkoutRecordInput {
@@ -727,16 +751,13 @@ async function editWorkoutRecordWithStructurePolicy(
   input: EditWorkoutRecordInput,
   preserveSavedSets: boolean,
 ) {
-  await assertWorkoutExerciseReplacementPreservesExistingStructure(
-    input,
-    preserveSavedSets,
-  )
+  const set = await normalizeWorkoutExerciseReplacement(input, preserveSavedSets)
   const result = await editEventRecord({
     vault: input.vault,
     lookup: input.lookup,
     entityLabel: 'workout',
     inputFile: input.inputFile,
-    set: input.set,
+    set,
     clear: input.clear,
     dayKeyPolicy: input.dayKeyPolicy,
     expectedKinds: ['activity_session'],
@@ -758,6 +779,7 @@ export function editWorkoutRecord(input: EditWorkoutRecordInput) {
 export function editWorkoutRecordAfterValidatedSetRemoval(
   input: {
     durationMinutes?: number
+    endedAt?: string
     exercises: WorkoutExercise[]
     lastMemberActionId: string
     lookup: string
@@ -767,6 +789,9 @@ export function editWorkoutRecordAfterValidatedSetRemoval(
   const set = [
     `${WORKOUT_EXERCISES_PATCH_PREFIX}${JSON.stringify(input.exercises)}`,
   ]
+  if (input.endedAt !== undefined) {
+    set.push(`workout.endedAt=${JSON.stringify(input.endedAt)}`)
+  }
   if (input.durationMinutes !== undefined) {
     set.push(`durationMinutes=${input.durationMinutes}`)
   }

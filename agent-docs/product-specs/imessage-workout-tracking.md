@@ -19,9 +19,10 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 - The Messages extension has no vault credential, Privy dependency, cache, or
   canonical persistence. It may read only the narrow Messages-scoped credential
   enrolled by the containing app.
-- An active workout editor submits a closed, bounded member action directly.
-  The existing hosted mailbox delivers it to the canonical workout owner with
-  no assistant turn; the immutable card remains presentation, not authority.
+- An editor for one exact workout submits a closed, bounded member action
+  directly. The existing hosted mailbox delivers it to the canonical workout
+  owner with no assistant turn; the immutable card remains presentation, not
+  authority.
 - A set edit owns only its explicit result family (`note`, `reps`, or
   `weight_reps`): optimistic comparison, canonical merge, and exact replay
   preserve unrelated annotations and metrics on the same set.
@@ -43,8 +44,9 @@ Workout state and progress summaries are derived from the structured exercise/se
 Tracked workout detail requires a canonical tracking marker in durable transcript context. The native URL strips the event id and snapshot time.
 
 The model never authors edit preconditions. At card attachment, runtime re-reads
-that exact active workout and may add one internal editor projection only when
-ordered exercise names, set counts, and logged states match the presentation.
+the exact canonical workout named by the tracking marker and may add one
+internal editor projection only while that workout is unfinished and its ordered
+exercise names, set counts, and logged states match the presentation.
 The projection preserves the closed result family, canonical zero values,
 nullable reps/weight, the raw optional set unit, and separate exercise unit
 context. A note is eligible only when its exact canonical value fits the
@@ -133,57 +135,54 @@ or application authority.
 
 ## Plan versus actual
 
-Targets and actual results must remain distinct:
+Targets, member prescriptions, and actual results are distinct authorities:
 
 - planned targets come from the verified workout format;
+- `memberRepsPerSet` is the smallest canonical exercise-owned fact for one exact
+  repetition count the member explicitly assigns to every set of that exercise;
 - completed actuals come from the verified canonical workout event;
-- a target is never evidence that a set was completed;
-- one exact repetition count the member explicitly assigns to every set of one
-  exercise in the current active workout is member-stated actual repetitions
-  for a later unqualified free-form completion in the same direct conversation;
-  only repetitions carry forward under this exception, while every other actual
-  field must be stated with that completion or already exist on that exact
-  canonical set; an explicit repetition result overrides the earlier count,
-  while a range, AMRAP, conflict, ambiguous exercise, or unavailable
-  establishing message requires clarification;
-- pending planned sets become skipped only when the workout is explicitly finished;
-- additional actual sets beyond the format are included with no target.
+- a target, prior workout value, card label, assistant suggestion, range, AMRAP,
+  or qualitative instruction is never evidence for `memberRepsPerSet` or for a
+  completed set;
+- when a terse completion omits repetitions and the exact exercise has
+  `memberRepsPerSet`, the canonical set-log use case copies that member-owned
+  fact into the completed set's actual `reps` field in the same write;
+- only an explicit statement that one exact repetition count applies to every
+  set updates the member prescription before logging the current completion; an
+  exact result for one set changes only that set's actual, while a conflict,
+  ambiguous exercise, range, or AMRAP asks one narrow question instead;
+- weight, duration, distance, RPE, bodyweight, assistance, added load, and every
+  other actual field never carry forward under this rule;
+- pending planned sets become skipped only when an early or targetless workout
+  is explicitly finished; additional actual sets beyond a finite plan have no
+  target.
 
-This narrow same-conversation repetition rule does not create a card-level
-“complete at target” shortcut and does not authorize copying a saved-format
-target, prior workout value, assistant suggestion, or non-repetition
-prescription into an actual set.
+The exercise-owned repetition fact survives provider-thread loss and bounded
+transcript replay without creating assistant memory, a focus owner, or a second
+workout record. It remains separate from both saved-plan targets and completed
+set actuals.
 
 A short acknowledgement after a set message or assistant reply is not another
-set completion. It cannot move the write target to the next set. The last set
-coordinate the member explicitly named remains the only candidate. If that set
-still needs a result, Murph asks one narrow question about it. If the canonical
-result already matches, the acknowledgement causes no workout mutation. The
-sole exception is a contextual affirmative that accepts the exact bounded
-missing-workout recovery offer below.
+set completion and cannot advance the coordinate. The last exact workout,
+exercise, and set the member identified remain the only candidate. If an exact
+coordinate is not available from a current command result, durable card marker,
+or immediate causal context, Murph asks which workout or set is intended. It
+does not select by recency, create a recovery workout, close another workout,
+or demand unrelated finish metadata.
 
-Every completion, correction, and acknowledgement follow-up first resolves the
-canonical active workout. A missing active workout fails closed. Murph does not
-start a workout to make an earlier assistant confirmation appear true, does not
-write a later set, and does not claim that any set was saved. It states that no
-active tracked workout was found. A completion or correction alone never
-authorizes a new workout. Murph may start one only when the current message
-explicitly requests it or the member accepts one exact recovery offer. That
-offer repeats the proposed workout, exercise, set coordinate, and stated result.
-Acceptance creates only enough pending coordinates through that set and writes
-only the named set. Murph rechecks active state before acting and never retargets
-the accepted recovery if another active workout has appeared. The missing-state
-response includes both the truthful no-save result and that exact recovery
-question. It does not stop after the failure statement or give generic retry
-advice.
+Starting or logging a new workout is independent of older unfinished workouts.
+Every mutation carries the exact canonical workout id and uses that workout's
+record-scoped lock. Multiple unfinished workouts are valid; there is no global
+active or focused singleton.
 
-An active workout may have zero pending planned sets and remain active so the
-member can add targetless extra sets. Plan exhaustion is not session closure.
-When one message contains both a set result and unmistakable closure language,
-Murph logs the set, finishes that same workout in the same turn, and returns the
-completed card. The member does not need to send a separate finish command.
-A reminder by itself, plan targets, elapsed time, or an earlier-day active record
-does not prove completion.
+Logging the last pending set of an explicitly finite workout writes the actual
+result and `endedAt` atomically. The accepted completion timestamp is the
+observed end boundary; no separate “I am done” language or finish command is
+required. Targetless sessions and explicit early closure still use the exact
+finish command. A later explicit extra set remains possible when it names that
+completed workout and exact exercise/set; its successful write advances that
+workout's observed end boundary. Murph never infers an old end from a reminder,
+midnight, planned duration, last-write time, or later conversation time.
 
 ## Generic scheduled-reminder relationship context
 
@@ -214,38 +213,30 @@ chat message after the reminder. Native iMessage Reply, a quoted reply target,
 card provenance, or provider reply attestation is neither required nor treated
 as authority.
 
-For a workout reminder, the relationship context identifies the exact saved
-workout-format id. On an ordinary set completion, Murph reads that format and
-the ordinary active-workout state. If no workout is active, the current
-completion plus that exact inspected reference authorizes starting only the
-referenced routine and logging only the stated set. If the active workout
-already references that routine, the exact active event is targeted normally.
+For a workout reminder, relationship context identifies the exact saved
+workout-format id. When the member's current message clearly starts or completes
+a set from that format, Murph reads the exact format, starts a new workout from
+it, preserves the returned workout event id, and logs only the stated coordinate
+on that new record. An older unfinished workout neither blocks this work nor
+needs to be closed first.
 
-A different active workout is not assumed to be the reminder target, but the
-reminder also does not establish when that earlier workout ended. Active
-`durationMinutes` is elapsed time at the latest mutation, not an end
-observation. Murph never derives an end from that value, a last-write time, a
-plan target, the reminder time, the later reply time, or local midnight. If the
-member supplies the earlier workout's exact end time or exact total duration,
-Murph may compose the existing finish, start-from-format, and targeted set-log
-commands. Otherwise it makes no workout mutation, says the new set was not
-saved yet, and asks one narrow question for that time or duration while
-preserving the exact proposed routine, workout-format id, active-workout event
-id, exercise, set, and result in text. That exact text remains available through
-committed transcript replay even when provider-thread continuity changes. Only
-the immediate answer may continue the proposal, after Murph exact-reads the
-recorded format and event ids and separately reads the sole active workout. It
-continues only when the recorded event remains active and is still the sole
-active workout. A completed, missing, replaced, or conflicting active event, an
-ambiguous answer, or an unrelated later message fails closed without mutation.
+When immediate causal context instead identifies an existing exact workout event
+id, Murph reads and mutates only that record. A reminder reference alone never
+selects an existing workout. Missing or conflicting record identity, exercise,
+or set coordinates ask one narrow disambiguating question; they do not trigger a
+recency scan or silent retarget. A completed exact workout may still accept a
+clearly requested extra set.
 
-Multiple active workouts, an unidentified routine or set, missing or
-conflicting relationship context, changed state, and insufficient finish timing
-all stop without silent retargeting. The existing one-active-workout invariant
-and mutation lock remain the write owners. Explicit historical intent,
-including a correction for yesterday or an explicit older workout id, continues
-through the ordinary exact historical targeting path and is not reinterpreted
-as a new-routine completion.
+Relationship context does not establish when any older workout ended.
+`durationMinutes` on an unfinished workout is elapsed time at its latest
+mutation, not an end observation. Murph never derives an end from that value, a
+last-write time, a plan target, the reminder time, the later reply time, or local
+midnight, and it never asks for that old end merely to permit unrelated new
+work.
+
+Explicit historical intent, including a correction for yesterday or an explicit
+older workout id, continues through the ordinary exact-record path and is not
+reinterpreted as a new-routine completion.
 
 ## Direct action loop
 
@@ -276,44 +267,49 @@ sequence because it would have no observable structural effect. The canonical
 workout write records the request action id atomically with the final exercises.
 Only that persisted id proves exact replay; a stale workout that merely matches
 the intended visible projection still fails the complete binding precondition.
-The same bounded activity-session read resolves an exact persisted id before
-revision and active-workout eligibility, because the original write necessarily
+The same bounded activity-session read resolves an exact persisted action id
+before first-application eligibility, because the original write necessarily
 changed the card's revision binding. Finishing that workout after its canonical
 write therefore cannot turn a crash-replayed success into a rejection or
-retarget a newer active workout. Only a first application without that exact
-marker must satisfy the revision and active-workout checks.
+retarget another workout. Only a first application without that exact marker
+must match one unfinished record's binding and revision.
 
 Positions are one-based presentation coordinates, and each coordinate within
 its original-edit, original-remove, or final-append namespace may appear at most
-once. The action carries no member id or canonical workout id. Its stable
-one-way workout-revision binding and destructive-state binding are stale-card
-preconditions, not authentication: the server derives the member from the scoped
-credential and requires exactly one active workout whose stable identity,
+once. The action carries no member id or plaintext canonical workout id. Its
+stable one-way workout-revision binding and destructive-state binding are
+stale-card preconditions, not authentication: after deriving the member from the
+scoped credential, the server scans the bounded workout records and admits a
+first application only when exactly one unfinished record derives the supplied
+binding. That matched record supplies the canonical id and owns the mutation;
+there is no active/focused singleton or recency fallback. Stable identity,
 positional identity, last applied action generation, ordered exercise names,
-set counts, logged states, and, for removal, complete canonical state still
-match. Each edit to an existing set also carries the
-bounded previous result from the typed card projection; the canonical owner
-rejects the batch when that target changed instead of overwriting a newer
-correction.
+set counts, logged states, the exercise-owned repetition prescription and finite
+plan marker, and, for removal, complete canonical state must still match. Each
+edit to an existing set also carries the bounded previous result from the typed
+card projection; the canonical owner rejects the batch when that target changed
+instead of overwriting a newer correction.
 
 Web validates the whole envelope, re-checks active access and historical launch
 consent under the existing member locks, and durably appends the action before
 returning `202 Accepted`. An ambiguous network retry reuses the exact action id,
-body, and client timestamp, so mailbox dedupe remains stable. Runtime applies the
-complete batch under the existing live-workout mutation lock with one canonical
-write and no model call. That write also stores the last applied member-action
-id on the workout, replacing visible-sequence replay inference with one exact
-effect marker. The serialized mailbox item cannot advance to another member
-action before its terminal outcome, so no receipt table or action ledger is
-needed. The generic workout editor continues to reject every
-saved exercise or set deletion; only the member-action owner, after exact removal
-binding and snapshot validation, uses the narrow set-removal replacement path.
-Runtime then records an `applied`, `unchanged`, or typed
-`rejected` receipt through the same mailbox checkpoint. The editor stays locked
-while polling that receipt and says the changes were saved only after an applied
-or converged result. A missing, completed, ambiguous, bound-to-another, or
-changed workout is rejected without retargeting on first application; an exact
-persisted replay remains converged after its workout completes.
+body, and client timestamp, so mailbox dedupe remains stable. Runtime resolves
+the exact bound record, locks that workout id, revalidates the binding, and
+applies the complete batch with one canonical write and no model call. That
+write also stores the last applied member-action id on the workout, replacing
+visible-sequence replay inference with one exact effect marker. If the action
+logs the final pending set of an explicitly finite plan, the same write records
+the accepted client timestamp as the observed `endedAt` boundary. The serialized
+mailbox item cannot advance to another member action before its terminal outcome,
+so no receipt table or action ledger is needed. The generic workout editor
+continues to reject every saved exercise or set deletion; only the member-action
+owner, after exact removal binding and snapshot validation, uses the narrow
+set-removal replacement path. Runtime then records an `applied`, `unchanged`, or
+typed `rejected` receipt through the same mailbox checkpoint. The editor stays
+locked while polling that receipt and says the changes were saved only after an
+applied or converged result. A missing, completed, non-unique, or changed binding
+is rejected without retargeting on first application; an exact persisted replay
+remains converged after its workout completes.
 
 This is the first family on the generic member-action delivery primitive. A
 future direct editor adds another explicit action variant and delegates to its
@@ -321,6 +317,16 @@ existing domain use case. It does not gain arbitrary JSON paths, database
 operations, assistant tools, or a new queue.
 
 ## Rollout
+
+`memberRepsPerSet` and `setPlanIsFinite` are optional canonical exercise fields,
+so existing workout records require no bulk migration. Deploy all strict event
+readers and writers together before the first new field is emitted; after that
+write, those compatible bundles are the rollback floor. Legacy saved-routine
+exercises with no finite marker retain finite-plan semantics, while new
+targetless exercises write `setPlanIsFinite: false` so they cannot inherit that
+legacy default. Legacy ad hoc workouts remain explicit-finish sessions. The
+workout action binding version changes, so already-sent editable cards fail
+closed and require a refreshed card rather than being reinterpreted.
 
 Backward compatibility is a permanent iMessage app-card contract, not a
 one-time V6 rollout step. Linq's app-capability result does not negotiate a
