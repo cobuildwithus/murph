@@ -189,17 +189,79 @@ test("commit status descriptions distinguish real-run proof from every non-run p
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
   );
-  for (const description of [
-    "This controller run has not executed real native iOS hosted E2E yet.",
-    "This controller run did not execute real native iOS hosted E2E: selection failed.",
-    "This controller run did not execute real native iOS hosted E2E: Repo Hygiene did not pass.",
-    "This controller run did not execute real native iOS hosted E2E: path filter did not select the commit.",
-    "This controller run did not execute real native iOS hosted E2E: trusted same-repository human head required.",
-    "This controller run passed real native iOS hosted E2E for the exact commit.",
-    "This status cannot determine whether real native iOS hosted E2E started; no passing proof was recorded.",
-  ]) {
-    assert.ok(workflow.includes(description), description);
+  const script = extractWorkflowStepScript(workflow, "Publish stable commit status");
+  const baseEnv = {
+    LIVE_RESULT: "skipped",
+    SELECT_RESULT: "success",
+    SELECTED: "true",
+    SOURCE_RESULT: "success",
+    TRUSTED: "true",
+  };
+  const scenarios = [
+    [
+      { SELECT_RESULT: "failure" },
+      "failure",
+      "This controller run did not execute real native iOS hosted E2E: selection failed.",
+    ],
+    [
+      { SOURCE_RESULT: "failure" },
+      "failure",
+      "This controller run did not execute real native iOS hosted E2E: Repo Hygiene did not pass.",
+    ],
+    [
+      { SELECTED: "false" },
+      "success",
+      "This controller run did not execute real native iOS hosted E2E: path filter did not select the commit.",
+    ],
+    [
+      { TRUSTED: "false" },
+      "failure",
+      "This controller run did not execute real native iOS hosted E2E: trusted same-repository human head required.",
+    ],
+    [
+      { LIVE_RESULT: "success" },
+      "success",
+      "This controller run passed real native iOS hosted E2E for the exact commit.",
+    ],
+    [
+      { LIVE_RESULT: "failure" },
+      "failure",
+      "This status cannot determine whether real native iOS hosted E2E started; no passing proof was recorded.",
+    ],
+  ];
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-status-proof-"));
+  try {
+    await writeFile(path.join(tempDir, "gh"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$GH_CAPTURE"
+`, { mode: 0o755 });
+    for (const [index, [overrides, expectedState, expectedDescription]] of scenarios.entries()) {
+      const capturePath = path.join(tempDir, `gh-${index}.args`);
+      const result = spawnSync("bash", ["-c", script], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...baseEnv,
+          ...overrides,
+          GH_CAPTURE: capturePath,
+          GITHUB_REPOSITORY: "cobuildwithus/murph",
+          GITHUB_RUN_ID: "987",
+          GITHUB_SERVER_URL: "https://github.example.test",
+          PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+          STATUS_SHA: SHA,
+        },
+      });
+      assert.equal(result.status, expectedState === "success" ? 0 : 1, result.stderr);
+      const ghArgs = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
+      assert.ok(ghArgs.includes(`state=${expectedState}`));
+      assert.ok(ghArgs.includes(`description=${expectedDescription}`));
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
   }
+
+  assert.ok(workflow.includes("This controller run has not executed real native iOS hosted E2E yet."));
   assert.doesNotMatch(workflow, /PR does not require the hosted Web native E2E lane/u);
 });
 
@@ -1143,6 +1205,21 @@ test("PR lifecycle retains secret-safe primary and finalization stage names", as
     return true;
   });
 });
+
+function extractWorkflowStepScript(workflow, stepName) {
+  const stepStart = workflow.indexOf(`      - name: ${stepName}\n`);
+  assert.ok(stepStart >= 0, `${stepName} step must exist`);
+  const runMarker = "        run: |\n";
+  const scriptStart = workflow.indexOf(runMarker, stepStart);
+  assert.ok(scriptStart >= 0, `${stepName} script must exist`);
+  const scriptLines = [];
+  for (const line of workflow.slice(scriptStart + runMarker.length).split("\n")) {
+    if (!line.startsWith("          ")) break;
+    scriptLines.push(line.slice(10));
+  }
+  assert.ok(scriptLines.length > 0, `${stepName} script must be readable`);
+  return scriptLines.join("\n");
+}
 
 function jsonResponse(value) {
   return new Response(JSON.stringify(value), {
