@@ -247,12 +247,19 @@ test("commit status descriptions distinguish real-run proof from every non-run p
   const script = extractWorkflowStepScript(workflow, "Publish stable commit status");
   const baseEnv = {
     LIVE_RESULT: "skipped",
+    PR_NUMBER: "42",
+    RUN_ATTEMPT: "1",
     SELECT_RESULT: "success",
     SELECTED: "true",
     SOURCE_RESULT: "success",
     TRUSTED: "true",
   };
   const scenarios = [
+    [
+      { RUN_ATTEMPT: "2" },
+      "failure",
+      "Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr 42; native reruns do not enter the live queue.",
+    ],
     [
       { SELECT_RESULT: "failure" },
       "failure",
