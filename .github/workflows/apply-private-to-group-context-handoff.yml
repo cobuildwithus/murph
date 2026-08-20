@@ -5,6 +5,7 @@ on:
     branches:
       - feat/private-to-group-context-handoff
     paths:
+      - .github/handoff-codemod-trigger
       - .github/workflows/apply-private-to-group-context-handoff.yml
       - scripts/apply-private-to-group-context-handoff.mjs
   pull_request:
@@ -15,6 +16,7 @@ on:
       - reopened
       - synchronize
     paths:
+      - .github/handoff-codemod-trigger
       - .github/workflows/apply-private-to-group-context-handoff.yml
       - scripts/apply-private-to-group-context-handoff.mjs
 
@@ -56,7 +58,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rm scripts/apply-private-to-group-context-handoff.mjs .github/workflows/apply-private-to-group-context-handoff.yml
+          git rm scripts/apply-private-to-group-context-handoff.mjs .github/workflows/apply-private-to-group-context-handoff.yml .github/handoff-codemod-trigger
           git add --all
           git diff --cached --check
           git config user.name "github-actions[bot]"
