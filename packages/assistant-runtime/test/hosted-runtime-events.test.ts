@@ -44,6 +44,35 @@ vi.mock("@murphai/assistant-engine", async () => {
   };
 });
 
+vi.mock("@murphai/assistant-engine/onboarding-followup-seed", async () => {
+  const assistantEngine = await vi.importActual<
+    typeof import("@murphai/assistant-engine")
+  >("@murphai/assistant-engine");
+  const definition = assistantEngine.MURPH_ONBOARDING_FOLLOWUP_AUTOMATION;
+
+  return {
+    seedMurphOnboardingFollowupAutomation: vi.fn(async (input: {
+      route: import("@murphai/contracts").AutomationRoute;
+      stableKey: string;
+      vault: string;
+    }) => await mocks.upsertAssistantCronAutomation({
+      firstOccurrenceActiveDayCount: definition.opportunityDays,
+      firstOccurrenceActiveUntilLocalTime: definition.activeUntilLocalTime,
+      firstOccurrencePolicy: "after-current-local-day",
+      instructions: definition.instructions,
+      route: input.route,
+      schedule: assistantEngine.resolveMurphOnboardingFollowupSchedule(
+        input.stableKey,
+      ),
+      slug: definition.slug,
+      summary: definition.summary,
+      tags: [...definition.tags],
+      title: definition.title,
+      vault: input.vault,
+    })),
+  };
+});
+
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
     "@murphai/hosted-execution",

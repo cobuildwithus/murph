@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-19
+Last verified: 2026-08-20
 
 ## Purpose
 
@@ -160,6 +160,14 @@ Telegram direct and authenticated-group Rich Message authority, optional
 catalog-position image provenance, single-message fallback ownership, and
 valid-envelope retry classification across all Telegram send operations are
 specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
+
+Direct Telegram onboarding preserves member-initiated first contact: activation
+stays silent, while the first accepted private onboarding reply seeds the same
+finite, idempotent next-local-day follow-up used by proactive signup channels.
+Replay, archive preservation, runtime event ownership, and hosted-local proof
+are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`,
+`packages/assistant-runtime/README.md`, and
+`agent-docs/references/testing-ci-map.md`.
 
 Linq signup-delivery failure suppression uses member-serialized, indexed
 existence reads for the exact five-attempt identity and the member/day live set.

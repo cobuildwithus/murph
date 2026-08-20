@@ -2133,9 +2133,12 @@ export async function sendAssistantMessageLocal(
         const finalResponse = finalResponseText ?? ''
 
         await finalizeDeliveredAssistantTurn({
+          audience: sharedPlan.conversationPolicy.audience,
           firstContactGuidanceInjected:
             providerResult.onboardingGuidanceInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
+          onEarlySessionOnboardingReplyAccepted:
+            currentInput.onEarlySessionOnboardingReplyAccepted ?? null,
           outcome: finalDeliveryOutcome,
           response: finalResponse,
           turnId: currentUserTurn.turnId,

@@ -15,6 +15,9 @@ import {
   runAssistantAutomationPass,
   stampAssistantProviderStartCriticalPath,
 } from "@murphai/assistant-engine";
+import {
+  seedMurphOnboardingFollowupAfterAcceptedTelegramReply,
+} from "@murphai/assistant-engine/onboarding-followup-seed";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
@@ -459,6 +462,32 @@ export async function runHostedAssistantAutomation(
       && selectedInputIds.inputIds.length === 0
         ? options?.buildBackgroundDynamicContextPrompt
         : undefined;
+    const onAutomationEvent = (event: AssistantRunEvent): void => {
+      automationEventCounts.set(
+        event.type,
+        (automationEventCounts.get(event.type) ?? 0) + 1,
+      );
+      const logEntry = emitHostedRuntimeRedactedLog({
+        component: "runtime",
+        details: buildHostedAssistantAutomationEventLogDetails(event, requestId),
+        wake,
+        message: `Hosted assistant automation event: ${event.type}.`,
+        phase: "wake.running",
+      });
+      if (
+        shouldPersistHostedAssistantAutomationEvent(event.type)
+        && (
+          shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)
+          || redactedAutomationEventLogCount
+            < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
+        )
+      ) {
+        redactedLogEntries.push(logEntry);
+        if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)) {
+          redactedAutomationEventLogCount += 1;
+        }
+      }
+    };
 
     const result = await runAssistantAutomationPass({
       ...(buildBackgroundDynamicContextPrompt
@@ -477,31 +506,29 @@ export async function runHostedAssistantAutomation(
       executionContext,
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
-      onEvent: (event) => {
-        automationEventCounts.set(
-          event.type,
-          (automationEventCounts.get(event.type) ?? 0) + 1,
-        );
-        const logEntry = emitHostedRuntimeRedactedLog({
-          component: "runtime",
-          details: buildHostedAssistantAutomationEventLogDetails(event, requestId),
-          wake,
-          message: `Hosted assistant automation event: ${event.type}.`,
-          phase: "wake.running",
-        });
-        if (
-          shouldPersistHostedAssistantAutomationEvent(event.type)
-          && (
-            shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)
-            || redactedAutomationEventLogCount < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
-          )
-        ) {
-          redactedLogEntries.push(logEntry);
-          if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)) {
-            redactedAutomationEventLogCount += 1;
+      onEarlySessionOnboardingReplyAccepted: async (event) => {
+        try {
+          const seeded =
+            await seedMurphOnboardingFollowupAfterAcceptedTelegramReply({
+              audience: event.audience,
+              executionContext,
+              vault: vaultRoot,
+            });
+          if (seeded.kind === "ready") {
+            onAutomationEvent({
+              safeDetails: "onboarding_followup_seeded",
+              type: "onboarding.followup.seeded",
+            });
           }
+        } catch {
+          onAutomationEvent({
+            errorCode: "ASSISTANT_ONBOARDING_FOLLOWUP_SEED_FAILED",
+            safeDetails: "onboarding_followup_seed_failed",
+            type: "onboarding.followup.seed_failed",
+          });
         }
       },
+      onEvent: onAutomationEvent,
       onProviderEvent: (event) => {
         const context = activeProviderMilestoneTraceContext;
         if (!context) {
@@ -1173,6 +1200,8 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
     "input.reply-skipped",
     "input.reply-started",
     "onboarding.followup.completed",
+    "onboarding.followup.seeded",
+    "onboarding.followup.seed_failed",
     "reply.scan.started",
     "scan.started",
   ]).has(type);
@@ -1180,7 +1209,8 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
 
 function shouldAlwaysPersistHostedAssistantAutomationEvent(type: string): boolean {
   return type === "input.reply-failed"
-    || type === "onboarding.followup.completed";
+    || type === "onboarding.followup.completed"
+    || type === "onboarding.followup.seed_failed";
 }
 
 export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {

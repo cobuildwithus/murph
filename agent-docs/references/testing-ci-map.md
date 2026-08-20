@@ -306,6 +306,17 @@ scheduled-reminder scenario adds the production-path proof: an ordinary group
 newsletter automation invokes `read_shared`, wakes from its alarm, and sends only to the
 exact admitted group thread.
 
+Direct Telegram onboarding continuation coverage is also production-shaped.
+The hosted-local first-contact scenario proves that activation produces neither
+a signup welcome nor a follow-up seed, the first accepted private reply creates
+one metadata-attested canonical finite seed, and replay of the same inbound wake
+creates neither another provider turn, another reply, nor another seed. Focused
+assistant-engine tests prove canonical route selection, stable scheduling,
+idempotent replay, and archived-record preservation; assistant-runtime tests
+prove post-acceptance hook ordering and metadata-only success/failure events.
+The existing hosted-local scheduled-reminder scenario remains the downstream
+proof for Telegram scheduler, outbox, and provider delivery.
+
 Private assistant-image coverage is also owner-split. Shared contract tests
 accept only bounded `vault_image` descriptors; assistant-engine tests prove
 canonical generated-image captures plus path, hash, byte-count, filename, MIME,

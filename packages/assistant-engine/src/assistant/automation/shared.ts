@@ -43,6 +43,8 @@ export interface AssistantRunEvent {
     | 'cron.job.completed'
     | 'cron.occurrence.expired'
     | 'onboarding.followup.completed'
+    | 'onboarding.followup.seeded'
+    | 'onboarding.followup.seed_failed'
     | 'cron.scan.job'
     | 'cron.scan.started'
     | 'reply.scan.started'

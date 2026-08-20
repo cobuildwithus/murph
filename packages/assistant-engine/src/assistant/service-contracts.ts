@@ -112,6 +112,10 @@ export type AssistantFinishWithoutReplyAcceptedHook = (event: {
   acceptedInputIds: readonly string[]
 } & AssistantProviderFinishWithoutReplyAcceptedEvent) => Promise<void> | void
 
+export type AssistantEarlySessionOnboardingReplyAcceptedHook = (event: {
+  audience: import('./conversation-policy.js').AssistantConversationAudience
+}) => Promise<void> | void
+
 export type AssistantProviderAcceptedInputsRelease = () => Promise<void> | void
 
 export type AssistantBeforeProviderAcceptedInputsHook = (event: {
@@ -168,6 +172,8 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   // Engine-owned silent-maintenance policy. It selects trusted prompt/evidence
   // boundaries and is never supplied by a model or persisted automation.
   maintenanceProfile?: AssistantMaintenanceProfile | null
+  onEarlySessionOnboardingReplyAccepted?:
+    AssistantEarlySessionOnboardingReplyAcceptedHook | null
   onFinishWithoutReplyAccepted?: AssistantFinishWithoutReplyAcceptedHook | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantProviderRequestStartHook | null

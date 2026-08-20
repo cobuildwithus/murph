@@ -26,6 +26,7 @@ import { resolveAssistantBindingDelivery } from './bindings.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
+  AssistantEarlySessionOnboardingReplyAcceptedHook,
   AssistantMessageInput,
   AssistantTurnDeliveryFinalizationPlan,
   AssistantTurnSharedPlan,
@@ -1046,8 +1047,11 @@ function stringifyHostedDeliveryIdempotencyKeyParts(
 }
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
+  audience?: AssistantTurnSharedPlan['conversationPolicy']['audience'] | null
   firstContactGuidanceInjected?: boolean
   firstContactStateDocIds?: readonly string[]
+  onEarlySessionOnboardingReplyAccepted?:
+    AssistantEarlySessionOnboardingReplyAcceptedHook | null
   outcome: AssistantDeliveryOutcome
   response: string
   turnId: string
@@ -1076,6 +1080,18 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
       seenAt: completedAt,
       vault: input.vault,
     })
+    if (input.audience && input.onEarlySessionOnboardingReplyAccepted) {
+      try {
+        await input.onEarlySessionOnboardingReplyAccepted({
+          audience: input.audience,
+        })
+      } catch (error) {
+        warnAssistantBestEffortFailure({
+          error,
+          operation: 'early-session onboarding reply continuation',
+        })
+      }
+    }
   }
   // The receipt finalization above is the commit; the terminal diagnostic is
   // observability only and must never fail an already-accepted delivery (a

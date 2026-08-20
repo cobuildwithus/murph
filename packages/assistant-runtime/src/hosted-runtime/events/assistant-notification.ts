@@ -5,13 +5,14 @@ import {
   buildHostedAssistantContextFingerprintDetails,
   initializeAssistantGroupRoomModel,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
-  resolveMurphOnboardingFollowupSchedule,
   sendAssistantNotification,
-  upsertAssistantCronAutomation,
   type AssistantExecutionContext,
   type AssistantNotificationResult,
   type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
+import {
+  seedMurphOnboardingFollowupAutomation,
+} from "@murphai/assistant-engine/onboarding-followup-seed";
 import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionAssistantNotificationRoute,
@@ -402,22 +403,11 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
   }
 
   try {
-    // Route deliverability (e.g. Linq participant routes without a Linq
-    // delivery source) is enforced by upsertAssistantCronAutomation's target
-    // validation; an undeliverable route lands in the catch below.
-    const job = await upsertAssistantCronAutomation({
-      firstOccurrenceActiveDayCount:
-        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
-      firstOccurrenceActiveUntilLocalTime:
-        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
-      firstOccurrencePolicy: "after-current-local-day",
-      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+    // The canonical seed helper enforces route deliverability (for example,
+    // Linq participant routes without a Linq delivery source).
+    const job = await seedMurphOnboardingFollowupAutomation({
       route: buildOnboardingFollowupAutomationRoute(input.route),
-      schedule: resolveMurphOnboardingFollowupSchedule(input.stableKey),
-      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
-      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
-      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
-      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      stableKey: input.stableKey,
       vault: input.vaultRoot,
     });
     try {
@@ -447,7 +437,7 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
 
 function emitHostedOnboardingFollowupSeededLog(input: {
   details: HostedExecutionStructuredLogDetails;
-  job: Awaited<ReturnType<typeof upsertAssistantCronAutomation>>;
+  job: Awaited<ReturnType<typeof seedMurphOnboardingFollowupAutomation>>;
   wake: HostedExecutionSystemWake;
 }): HostedExecutionRedactedLogEntry {
   const details = {

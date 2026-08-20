@@ -8,6 +8,7 @@ import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type {
   AssistantBeforeProviderAcceptedInputsHook,
+  AssistantEarlySessionOnboardingReplyAcceptedHook,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
 import {
@@ -62,6 +63,8 @@ export async function scanAssistantAutomationOnce(input: {
   operationScope?: AssistantAutomationOperationScope | null
   inboxServices: InboxServices
   maxPerScan?: number
+  onEarlySessionOnboardingReplyAccepted?:
+    AssistantEarlySessionOnboardingReplyAcceptedHook | null
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
@@ -225,6 +228,8 @@ export async function scanAssistantAutomationOnce(input: {
         enabledChannels: replyChannels,
         executionContext,
         inboxServices: input.inboxServices,
+        onEarlySessionOnboardingReplyAccepted:
+          input.onEarlySessionOnboardingReplyAccepted ?? null,
         onEvent: input.onEvent,
         onProviderEvent: input.onProviderEvent ?? null,
         onProviderRequestStarted:

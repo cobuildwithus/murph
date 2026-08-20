@@ -39,6 +39,9 @@ import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automati
 import { upsertAssistantCronAutomation } from '../src/assistant/cron/authoring.ts'
 import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
 import { resolveMurphOnboardingFollowupSchedule } from '../src/assistant/onboarding-followup-automation.ts'
+import {
+  seedMurphOnboardingFollowupAfterAcceptedTelegramReply,
+} from '../src/assistant/onboarding-followup-seed.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 import {
@@ -164,6 +167,118 @@ async function createVaultRoot(): Promise<string> {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
+  it('seeds one finite direct-Telegram onboarding follow-up and preserves archive', async () => {
+    const vaultRoot = await createVaultRoot()
+    const audience = {
+      actorId: null,
+      bindingDelivery: null,
+      channel: 'telegram',
+      deliveryPolicy: 'binding-target-only' as const,
+      effectiveThreadIsDirect: true,
+      explicitTarget: null,
+      identityId: 'telegram-bot-identity',
+      replyToMessageId: null,
+      threadId: 'telegram-direct-thread',
+      threadIsDirect: true,
+    }
+    const executionContext = {
+      hosted: {
+        memberId: 'member-telegram-followup',
+        userEnvKeys: [],
+      },
+    }
+
+    const first = await seedMurphOnboardingFollowupAfterAcceptedTelegramReply({
+      audience,
+      executionContext,
+      vault: vaultRoot,
+    })
+    const replay = await seedMurphOnboardingFollowupAfterAcceptedTelegramReply({
+      audience,
+      executionContext,
+      vault: vaultRoot,
+    })
+
+    expect(first).toMatchObject({ kind: 'ready' })
+    expect(replay).toMatchObject({ kind: 'ready' })
+    if (first.kind !== 'ready' || replay.kind !== 'ready') {
+      throw new Error('Expected the direct Telegram follow-up to be ready.')
+    }
+    expect(replay.job.jobId).toBe(first.job.jobId)
+
+    const automation = await showAutomation({
+      automationId: first.job.jobId,
+      vaultRoot,
+    })
+    expect(automation).toMatchObject({
+      automationId: first.job.jobId,
+      route: {
+        channel: 'telegram',
+        deliveryTarget: null,
+        identityId: 'telegram-bot-identity',
+        threadId: 'telegram-direct-thread',
+        threadIsDirect: true,
+      },
+      schedule: resolveMurphOnboardingFollowupSchedule(
+        executionContext.hosted.memberId,
+      ),
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'active',
+    })
+    expect(automation?.activeUntil).not.toBeNull()
+
+    await patchAutomation({
+      lookup: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'archived',
+      vaultRoot,
+    })
+    await expect(
+      seedMurphOnboardingFollowupAfterAcceptedTelegramReply({
+        audience,
+        executionContext,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({ kind: 'preserved-closed' })
+    await expect(showAutomation({
+      automationId: first.job.jobId,
+      vaultRoot,
+    })).resolves.toMatchObject({ status: 'archived' })
+  })
+
+  it.each([
+    ['a Telegram group', { channel: 'telegram', effectiveThreadIsDirect: false }],
+    ['a Linq direct chat', { channel: 'linq', effectiveThreadIsDirect: true }],
+  ])('does not seed the onboarding follow-up for %s', async (_label, override) => {
+    const vaultRoot = await createVaultRoot()
+    const result = await seedMurphOnboardingFollowupAfterAcceptedTelegramReply({
+      audience: {
+        actorId: null,
+        bindingDelivery: null,
+        channel: override.channel,
+        deliveryPolicy: 'binding-target-only',
+        effectiveThreadIsDirect: override.effectiveThreadIsDirect,
+        explicitTarget: null,
+        identityId: 'channel-identity',
+        replyToMessageId: null,
+        threadId: 'channel-thread',
+        threadIsDirect: override.effectiveThreadIsDirect,
+      },
+      executionContext: {
+        hosted: {
+          memberId: 'member-non-telegram-followup',
+          userEnvKeys: [],
+        },
+      },
+      vault: vaultRoot,
+    })
+
+    expect(result).toEqual({ kind: 'not-applicable' })
+    await expect(showAutomation({
+      automationId: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toBeNull()
+  })
+
   it('persists one automatic meal closeout through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 

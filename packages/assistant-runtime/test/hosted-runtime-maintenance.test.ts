@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedDeviceSyncWakeLocalAccountId: vi.fn(),
   resolveHostedDeviceSyncWakeRecovery: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
+  seedMurphOnboardingFollowupAfterAcceptedTelegramReply: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
   promoteHostedCompletedDirtyPayloadAcks: vi.fn(),
@@ -77,6 +78,11 @@ vi.mock("@murphai/assistant-engine", () => ({
     context: Record<string, number> | null | undefined,
     boundary: string,
   ) => context ? { ...context, [boundary]: 0 } : null,
+}));
+
+vi.mock("@murphai/assistant-engine/onboarding-followup-seed", () => ({
+  seedMurphOnboardingFollowupAfterAcceptedTelegramReply:
+    mocks.seedMurphOnboardingFollowupAfterAcceptedTelegramReply,
 }));
 
 vi.mock("@murphai/inbox-services", () => ({
@@ -4872,6 +4878,7 @@ describe("runHostedAssistantAutomationLane", () => {
       inboxServices: expect.anything(),
       inputSource: expect.any(Object),
       maxPerScan: 50,
+      onEarlySessionOnboardingReplyAccepted: expect.any(Function),
       onEvent: expect.any(Function),
       onProviderEvent: expect.any(Function),
       onProviderRequestStarted: expect.any(Function),
@@ -4899,6 +4906,76 @@ describe("runHostedAssistantAutomationLane", () => {
     });
     const automationPassInput =
       mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    mocks.seedMurphOnboardingFollowupAfterAcceptedTelegramReply
+      .mockResolvedValueOnce({ kind: "ready" });
+    await automationPassInput.onEarlySessionOnboardingReplyAccepted?.({
+      audience: {
+        actorId: null,
+        bindingDelivery: null,
+        channel: "telegram",
+        deliveryPolicy: "binding-target-only",
+        effectiveThreadIsDirect: true,
+        explicitTarget: null,
+        identityId: "telegram-identity",
+        replyToMessageId: null,
+        threadId: "telegram-thread",
+        threadIsDirect: true,
+      },
+    });
+    expect(
+      mocks.seedMurphOnboardingFollowupAfterAcceptedTelegramReply,
+    ).toHaveBeenCalledWith({
+      audience: expect.objectContaining({
+        channel: "telegram",
+        effectiveThreadIsDirect: true,
+        threadId: "telegram-thread",
+      }),
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      vault: "/tmp/vault-root",
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Hosted assistant automation event: onboarding.followup.seeded.",
+        details: expect.objectContaining({
+          safeDetails: "onboarding_followup_seeded",
+          type: "onboarding.followup.seeded",
+        }),
+      }),
+    );
+
+    mocks.seedMurphOnboardingFollowupAfterAcceptedTelegramReply
+      .mockRejectedValueOnce(new Error("seed unavailable"));
+    await automationPassInput.onEarlySessionOnboardingReplyAccepted?.({
+      audience: {
+        actorId: null,
+        bindingDelivery: null,
+        channel: "telegram",
+        deliveryPolicy: "binding-target-only",
+        effectiveThreadIsDirect: true,
+        explicitTarget: null,
+        identityId: "telegram-identity",
+        replyToMessageId: null,
+        threadId: "telegram-thread",
+        threadIsDirect: true,
+      },
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Hosted assistant automation event: onboarding.followup.seed_failed.",
+        details: expect.objectContaining({
+          errorCode: "ASSISTANT_ONBOARDING_FOLLOWUP_SEED_FAILED",
+          safeDetails: "onboarding_followup_seed_failed",
+          type: "onboarding.followup.seed_failed",
+        }),
+      }),
+    );
     automationPassInput.onProviderRequestStarted?.({
       autoReplyHistory: {
         outboxScanBytesRead: 8_192,
