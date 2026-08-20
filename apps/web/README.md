@@ -21,6 +21,16 @@ desktop when responsive behavior can change. The `Pull request evidence`
 workflow checks the direct evidence and coverage description. It does not
 require a catalog update or screenshot count.
 
+Render an OG metadata-image route directly for visual inspection with:
+
+```bash
+pnpm --dir apps/web og-assets:render -- apps/web/app/opengraph-image.tsx /tmp/murph-og.png
+```
+
+Pass a JSON object as the optional third argument for a dynamic route's params.
+The command accepts only `opengraph-image.tsx` modules under `apps/web/app` and
+requires the result to be a 1200x630 PNG.
+
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,
 `apps/web` owns hosted member identity, routing, billing, email authorization,

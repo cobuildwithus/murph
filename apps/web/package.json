@@ -17,6 +17,7 @@
     "health-commons:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-health-commons-traces.ts",
     "og-assets:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-og-asset-traces.ts",
     "og-assets:runtime-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-og-emitted-runtime.ts",
+    "og-assets:render": "pnpm --dir ../.. exec tsx apps/web/scripts/render-og-image.ts",
     "lint": "eslint .",
     "start": "next start",
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
