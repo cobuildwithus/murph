@@ -383,6 +383,11 @@ supported provider credential.
 
 ## Current CI Workflows
 
+- The root package-test umbrella keeps all non-Assistant Engine Vitest projects
+  on the ordinary caller heap and runs only the curated `assistant-engine`
+  project with `--max-old-space-size=6144`. Package-local focused commands are
+  unchanged, and release checks do not export a job-wide `NODE_OPTIONS` that
+  would hide unrelated memory regressions or override build-phase ownership.
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production
   `next build` step with `apps/web/scripts/build-memory-guard.sh`. The guard
   creates a root-level cgroup-v2 child for accounting only and moves the build
@@ -390,12 +395,15 @@ supported provider credential.
   environment, cwd, and stdio. It does not currently write `memory.max`,
   `memory.swap.max`, or `memory.oom.group`. The Vercel package build gives the
   parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
-  `NODE_OPTIONS`. Node applies the direct flag to the parent; Next 16.3.0
-  rebuilds non-isolated child options from the parent arguments followed by
-  `NODE_OPTIONS`, so the sequential Webpack compiler workers receive 3 GiB and
-  the later generated-contract TypeScript validation child inherits the same
-  limit, while isolated static workers have the flag removed. The same script
-  owns the Vercel package build and CI memory-observation invocation.
+  `NODE_OPTIONS` for the Webpack build worker. Before Webpack starts, the shared
+  production runner performs route type generation and an explicit app-local
+  generated-contract TypeScript check in a separate 3.5 GiB child, then marks
+  only that check prepared. Node applies the direct flag to the parent; Next
+  16.3.0 rebuilds non-isolated child options from the parent arguments followed
+  by `NODE_OPTIONS`, so the sequential Webpack compiler workers receive 3 GiB,
+  while the separate TypeScript CLI child receives 3.5 GiB and isolated static
+  workers have the flag removed. The same script owns the Vercel package build
+  and CI memory-observation invocation.
   `apps/web/README.md` § "Production build memory guard" is the single prose
   owner for the mutable production build cache, epoch, and deadline contract.
   The CI-relevant fact is that the verify lane's `VERCEL=1 VERCEL_ENV=preview`

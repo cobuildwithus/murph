@@ -945,7 +945,14 @@ run_repo_vitest() {
   # Keep worker selection centralized in the Vitest configs so local runs use
   # the faster 75% default while CI stays at 50%, with the same env override
   # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
-  pnpm exec vitest run --config "vitest.config.ts" "$@"
+  pnpm exec vitest run --config "vitest.config.ts" \
+    --project="!assistant-engine" "$@" || return $?
+
+  # The curated Assistant Engine project has a proven 6 GiB requirement. Keep
+  # that ceiling at this owner instead of lifting every repo test and build.
+  NODE_OPTIONS=--max-old-space-size=6144 \
+    pnpm exec vitest run --config "vitest.config.ts" \
+      --project="assistant-engine" "$@"
 }
 
 run_workspace_package_coverage() {
