@@ -83,63 +83,9 @@ describe("installed Google Cloud KMS SDK boundary", () => {
         );
       },
     );
-    installPrototypeStub(
-      requireConstructorPrototype(requireFromKms("google-gax"), "GrpcClient"),
-      "createStub",
-      async function(this: object) {
-        const googleAuth = Reflect.get(this, "auth");
-        if (!isRecord(googleAuth)) {
-          throw new TypeError("Expected the real Google KMS auth owner.");
-        }
-        const getClient = googleAuth.getClient;
-        if (typeof getClient !== "function") {
-          throw new TypeError("Expected the real Google KMS auth owner.");
-        }
-        const makeCall = () => (...args: unknown[]) => {
-          const callback = args.at(-1);
-          if (typeof callback !== "function") {
-            throw new TypeError("Expected a Google GAX unary callback.");
-          }
-          let canceled = false;
-          void Promise.resolve(Reflect.apply(getClient, googleAuth, []))
-            .then((authClient: unknown) => {
-              if (!isRecord(authClient)) {
-                throw new TypeError("Expected the configured Google auth client.");
-              }
-              const getRequestHeaders = authClient.getRequestHeaders;
-              if (typeof getRequestHeaders !== "function") {
-                throw new TypeError("Expected the configured Google auth client.");
-              }
-              const request = Reflect.apply(getRequestHeaders, authClient, []);
-              authHeaderRequests += 1;
-              return request;
-            })
-            .then(
-              () => {
-                if (!canceled) {
-                  Reflect.apply(callback, undefined, [null, {}]);
-                }
-              },
-              (error: unknown) => {
-                if (!canceled) {
-                  Reflect.apply(callback, undefined, [error]);
-                }
-              },
-            );
-          return {
-            cancel() {
-              canceled = true;
-            },
-          };
-        };
-        return {
-          asymmetricSign: makeCall(),
-          decrypt: makeCall(),
-          encrypt: makeCall(),
-          macSign: makeCall(),
-        };
-      },
-    );
+    installRealKmsClientStub(() => {
+      authHeaderRequests += 1;
+    });
 
     const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
     const caller = new AbortController();
@@ -189,6 +135,129 @@ describe("installed Google Cloud KMS SDK boundary", () => {
     expect(serializedLogs).not.toContain("synthetic-signature");
     expect(serializedLogs).not.toContain(KMS_KEY_NAME);
   });
+
+  it.each([
+    {
+      expectedAuthRequestCount: 1,
+      expectedElapsedField: "stsExchangeElapsedMs",
+      expectedFailureStage: "sts_exchange",
+      heldAuthRequestOrdinal: 1,
+      heldResponse: {
+        access_token: "federated-token",
+        expires_in: 3600,
+        token_type: "Bearer",
+      },
+    },
+    {
+      expectedAuthRequestCount: 2,
+      expectedElapsedField: "serviceAccountImpersonationElapsedMs",
+      expectedFailureStage: "service_account_impersonation",
+      heldAuthRequestOrdinal: 2,
+      heldResponse: {
+        accessToken: "impersonated-token",
+        expireTime: "2099-01-01T00:00:00Z",
+      },
+    },
+  ])(
+    "identifies a pending $expectedFailureStage request when the outer attempt deadline fires",
+    async ({
+      expectedAuthRequestCount,
+      expectedElapsedField,
+      expectedFailureStage,
+      heldAuthRequestOrdinal,
+      heldResponse,
+    }) => {
+      const authRequests: CapturedAuthRequest[] = [];
+      const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const heldAuth = createDeferred<unknown>();
+      const aggregateDeadline = new AbortController();
+      const attemptDeadline = new AbortController();
+      const authDeadline = new AbortController();
+      const subjectTokenDeadline = new AbortController();
+      const authHttpDeadline = new AbortController();
+      const deadlineSignals = [
+        aggregateDeadline.signal,
+        attemptDeadline.signal,
+        authDeadline.signal,
+        subjectTokenDeadline.signal,
+        authHttpDeadline.signal,
+      ];
+      vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+        const signal = deadlineSignals.shift();
+        if (!signal) {
+          throw new Error("Unexpected Google KMS deadline allocation.");
+        }
+        return signal;
+      });
+
+      installPrototypeStub(
+        requireConstructorPrototype(requireFromGoogleAuth("gaxios"), "Gaxios"),
+        "_defaultAdapter",
+        async (config: unknown) => {
+          if (!isRecord(config)) {
+            throw new TypeError("Expected a prepared Gaxios request.");
+          }
+          authRequests.push(config);
+          if (authRequests.length === heldAuthRequestOrdinal) {
+            await heldAuth.promise;
+            return createGaxiosResponse(config, heldResponse);
+          }
+          if (authRequests.length === 1) {
+            return createGaxiosResponse(config, {
+              access_token: "federated-token",
+              expires_in: 3600,
+              token_type: "Bearer",
+            });
+          }
+          throw new Error("Unexpected authentication request.");
+        },
+      );
+      installRealKmsClientStub();
+
+      const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+      const operation = client.encrypt({
+        additionalAuthenticatedData: "domain=control",
+        keyName: KMS_KEY_NAME,
+        plaintext: new Uint8Array([1]),
+      });
+      const operationError = operation.catch((error: unknown) => error);
+
+      await vi.waitFor(() => expect(authRequests).toHaveLength(expectedAuthRequestCount));
+      await delay(10);
+      attemptDeadline.abort(new Error("synthetic outer deadline"));
+
+      await expect(operationError).resolves.toMatchObject({ name: "TimeoutError" });
+      expect(authRequests).toHaveLength(expectedAuthRequestCount);
+      expect(authRequests[heldAuthRequestOrdinal - 1]).toMatchObject({
+        retry: false,
+        retryConfig: { retry: 0 },
+        signal: expect.any(AbortSignal),
+        timeout: expect.any(Number),
+      });
+      expect(failureLog).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS operation failed.",
+        expect.objectContaining({
+          failureStage: expectedFailureStage,
+          outcome: "failed",
+          providerReason: "DEADLINE_EXCEEDED",
+          workloadIdentityRefreshObserved: true,
+        }),
+      );
+      const details = failureLog.mock.calls[0]?.[1];
+      if (!isRecord(details)) {
+        throw new Error("Expected structured KMS failure details.");
+      }
+      expect(details[expectedElapsedField]).toEqual(expect.any(Number));
+      expect(Number(details[expectedElapsedField])).toBeGreaterThan(0);
+      expect(Number(details[expectedElapsedField])).toBeLessThanOrEqual(10_000);
+      const serializedLogs = JSON.stringify(failureLog.mock.calls);
+      expect(serializedLogs).not.toContain("federated-token");
+      expect(serializedLogs).not.toContain("impersonated-token");
+      expect(serializedLogs).not.toContain(SECRET_PROVIDER_DETAIL);
+      expect(serializedLogs).not.toContain("synthetic-signature");
+      expect(serializedLogs).not.toContain(KMS_KEY_NAME);
+    },
+  );
 });
 
 function installPrototypeStub(
@@ -207,6 +276,104 @@ function installPrototypeStub(
   Object.defineProperty(target, property, {
     ...descriptor,
     value: replacement,
+  });
+}
+
+function installRealKmsClientStub(onAuthHeaderRequest?: () => void): void {
+  installPrototypeStub(
+    requireConstructorPrototype(requireFromKms("google-gax"), "GrpcClient"),
+    "createStub",
+    async function(this: object) {
+      const googleAuth = Reflect.get(this, "auth");
+      if (!isRecord(googleAuth)) {
+        throw new TypeError("Expected the real Google KMS auth owner.");
+      }
+      const getClient = googleAuth.getClient;
+      if (typeof getClient !== "function") {
+        throw new TypeError("Expected the real Google KMS auth owner.");
+      }
+      const makeCall = () => (...args: unknown[]) => {
+        const callback = args.at(-1);
+        if (typeof callback !== "function") {
+          throw new TypeError("Expected a Google GAX unary callback.");
+        }
+        let canceled = false;
+        void Promise.resolve(Reflect.apply(getClient, googleAuth, []))
+          .then((authClient: unknown) => {
+            if (!isRecord(authClient)) {
+              throw new TypeError("Expected the configured Google auth client.");
+            }
+            const getRequestHeaders = authClient.getRequestHeaders;
+            if (typeof getRequestHeaders !== "function") {
+              throw new TypeError("Expected the configured Google auth client.");
+            }
+            onAuthHeaderRequest?.();
+            return Reflect.apply(getRequestHeaders, authClient, []);
+          })
+          .then(
+            () => {
+              if (!canceled) {
+                Reflect.apply(callback, undefined, [null, {}]);
+              }
+            },
+            (error: unknown) => {
+              if (!canceled) {
+                Reflect.apply(callback, undefined, [error]);
+              }
+            },
+          );
+        return {
+          cancel() {
+            canceled = true;
+          },
+        };
+      };
+      return {
+        asymmetricSign: makeCall(),
+        decrypt: makeCall(),
+        encrypt: makeCall(),
+        macSign: makeCall(),
+      };
+    },
+  );
+}
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  reject(reason?: unknown): void;
+  resolve(value: T | PromiseLike<T>): void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve: Deferred<T>["resolve"] | null = null;
+  let reject: Deferred<T>["reject"] | null = null;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  if (!resolve || !reject) {
+    throw new Error("Expected deferred controls to initialize synchronously.");
+  }
+  return { promise, reject, resolve };
+}
+
+function createGaxiosResponse(
+  config: unknown,
+  data: unknown,
+  status = 200,
+): Response {
+  return Object.assign(
+    new Response(JSON.stringify(data), {
+      headers: { "content-type": "application/json" },
+      status,
+    }),
+    { config, data },
+  );
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
   });
 }
 

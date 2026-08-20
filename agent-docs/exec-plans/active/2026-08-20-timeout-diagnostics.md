@@ -77,14 +77,22 @@ Updated: 2026-08-20
 
 ## Verification
 
-- Passed: `pnpm exec vitest run --config apps/web/vitest.config.ts
+- Passed: `pnpm exec tsx apps/web/scripts/run-hosted-web-vitest.mts
   apps/web/test/hosted-crypto-gcp-kms.test.ts
-  apps/web/test/hosted-crypto-gcp-kms-official.test.ts` (40 tests).
+  apps/web/test/hosted-crypto-gcp-kms-official.test.ts
+  apps/web/test/hosted-crypto-gcp-kms-real-sdk.test.ts` (43 tests).
 - Passed: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts
-  apps/cloudflare/test/runner-platform.test.ts` (194 tests).
+  apps/cloudflare/test/runner-platform.test.ts` (195 tests).
 - Passed: `pnpm exec vitest run
-  packages/assistant-runtime/test/hosted-invocation-bridge.test.ts` (51 tests).
+  packages/assistant-runtime/test/hosted-invocation-bridge.test.ts` (52 tests).
 - Passed: Web, Cloudflare runner, and assistant-runtime package typechecks;
   `git diff --check`; and repository secret/direct-identifier diff inspection.
-- Remaining: required ReviewGPT stages, exact-head GitHub checks, merge/deploy,
-  and bounded postdeploy Vercel/runtime-log queries.
+- Passed: preliminary ReviewGPT on immutable head `461eafa05a5e` returned three
+  accepted coverage findings; shared-refresh provenance, installed-SDK proof,
+  and post-publication checkpoint proof are resolved on the current head.
+- Fixed: final ReviewGPT round 2 on immutable head `1f377fc9c3` accepted one
+  installed-SDK auth-deadline failure-stage finding; active STS and service
+  account impersonation deadline regressions now pass.
+- Passed: an independent two-agent remediation review found no release blocker.
+- Remaining: final ReviewGPT rerun, exact-head GitHub checks, merge/deploy, and
+  bounded postdeploy Vercel/runtime-log queries.

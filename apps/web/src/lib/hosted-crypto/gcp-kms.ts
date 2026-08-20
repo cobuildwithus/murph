@@ -94,6 +94,11 @@ type HostedGcpKmsFailureStage =
   | "service_account_impersonation"
   | "sts_exchange"
   | "subject_token";
+const HOSTED_GCP_KMS_ACTIVE_AUTH_FAILURE_STAGES: readonly HostedGcpKmsFailureStage[] = [
+  "subject_token",
+  "sts_exchange",
+  "service_account_impersonation",
+];
 
 export interface HostedGcpKmsClient {
   asymmetricSign(input: GcpKmsAsymmetricSignInput): Promise<{
@@ -732,9 +737,14 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         if (context.callerSignal?.aborted) {
           throw createCallerAbortError();
         }
-        const failureStage = attemptContext.diagnostics.lastFailureStage
-          ?? readHostedGcpKmsSharedFailureStage(error)
-          ?? "kms_rpc";
+        const aggregateTimedOut = context.deadlineSignal.aborted;
+        const attemptTimedOut = attemptContext.deadlineSignal.aborted
+          || isTimeoutError(error);
+        const failureStage = readHostedGcpKmsFailureStage({
+          attemptContext,
+          error,
+          preferActiveAuthStage: aggregateTimedOut || attemptTimedOut,
+        });
         if (context.deadlineSignal.aborted) {
           console.error("Hosted Google Cloud KMS operation failed.", {
             ...buildHostedGcpKmsAttemptLogDetails({
@@ -751,7 +761,6 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
           });
           throw createOperationTimeoutError();
         }
-        const attemptTimedOut = attemptContext.deadlineSignal.aborted || isTimeoutError(error);
         const unavailable = isUnavailableError(error);
         const providerReason = attemptTimedOut
           ? "DEADLINE_EXCEEDED"
@@ -1592,6 +1601,40 @@ function readHostedGcpKmsSharedFailureStage(
     }
   }
   return sharedDiagnostics.failureStage;
+}
+
+function readHostedGcpKmsFailureStage(input: {
+  attemptContext: HostedGcpKmsAttemptContext;
+  error: unknown;
+  preferActiveAuthStage: boolean;
+}): HostedGcpKmsFailureStage {
+  if (input.preferActiveAuthStage) {
+    const activeAuthStage = readHostedGcpKmsActiveAuthFailureStage(
+      input.attemptContext.diagnostics,
+    );
+    if (activeAuthStage) {
+      return activeAuthStage;
+    }
+  }
+  return input.attemptContext.diagnostics.lastFailureStage
+    ?? readHostedGcpKmsSharedFailureStage(input.error)
+    ?? "kms_rpc";
+}
+
+function readHostedGcpKmsActiveAuthFailureStage(
+  diagnostics: HostedGcpKmsAttemptDiagnostics,
+): HostedGcpKmsFailureStage | null {
+  let latestStage: HostedGcpKmsFailureStage | null = null;
+  let latestStartedAtMs = -1;
+  for (const stage of HOSTED_GCP_KMS_ACTIVE_AUTH_FAILURE_STAGES) {
+    for (const startedAtMs of diagnostics.stageStartedAtMs[stage]) {
+      if (startedAtMs >= latestStartedAtMs) {
+        latestStartedAtMs = startedAtMs;
+        latestStage = stage;
+      }
+    }
+  }
+  return latestStage;
 }
 
 function startHostedGcpKmsStage(stage: HostedGcpKmsFailureStage): void {
