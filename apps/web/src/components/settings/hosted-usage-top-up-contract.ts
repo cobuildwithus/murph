@@ -298,7 +298,7 @@ function readStatusContent(input: {
       return input.scope === "group"
         ? content(
             "This group has more Murph",
-            "Your contribution landed. The group has more room to talk.",
+            "Your contribution is ready.",
           )
         : content(
             "Usage added",
