@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   hostedMemberFindUnique: vi.fn(),
   projectHostedAiUsageLimitNoticeForDelivery: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
+  readHostedMailboxFirstLiveSystemItemAfterSeq: vi.fn(),
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
@@ -42,6 +43,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   hasHostedMailboxMealPhotoCaptureSince:
     mocks.hasHostedMailboxMealPhotoCaptureSince,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
+  readHostedMailboxFirstLiveSystemItemAfterSeq:
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq,
   readHostedMailboxLatestPendingConversationItem:
     mocks.readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
@@ -161,6 +164,7 @@ describe("hosted orchestration reconciliation facts", () => {
         lane: "conversation",
       },
     ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue(null);
     mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(null);
     mocks.readHostedMailboxPayload.mockResolvedValue(null);
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
@@ -327,6 +331,7 @@ describe("hosted orchestration reconciliation facts", () => {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
         nextWakeReason: null,
+        systemMailboxFrontier: null,
         version: "4",
       },
     });
@@ -601,6 +606,68 @@ describe("hosted orchestration reconciliation facts", () => {
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
+    expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["device-sync.wake", "model_free"],
+    ["assistant.ask.completed", "default_owned"],
+  ] as const)(
+    "classifies the first live system mailbox item %s as %s",
+    async (kind, expectedFrontier) => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          conversationImportedSeq: "0",
+          hostedMailboxSystemHandledThroughSeq: "4",
+          systemImportedSeq: "4",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "0" },
+        { lane: "system", maxSeq: "7" },
+      ]);
+      mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+        kind,
+        laneSeq: "5",
+      });
+
+      const response = await reconciliationRoute.GET(
+        requestForFacts(),
+        routeContext(),
+      );
+      const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+      expect(response.status).toBe(200);
+      expect(facts.workspace?.systemMailboxFrontier).toBe(expectedFrontier);
+      expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenCalledWith({
+        afterSeq: "4",
+        at: new Date(FIXED_NOW),
+        prisma: expect.objectContaining({ kind: "prisma" }),
+        userId: MEMBER_ID,
+      });
+    },
+  );
+
+  it("uses zero as the system handled frontier when no checkpoint exists", async () => {
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "0" },
+      { lane: "system", maxSeq: "1" },
+    ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+      kind: "runtime.maintenance-requested",
+      laneSeq: "1",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.workspace?.systemMailboxFrontier).toBe("model_free");
+    expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenCalledWith(
+      expect.objectContaining({ afterSeq: "0" }),
+    );
   });
 
   it("authorizes fresh conversation work even while system import is pending", async () => {
@@ -1187,7 +1254,20 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T11:59:59.000Z",
       nextWakeReason: "assistant_due",
+      redactedStatusJson: {
+        conversationImportedSeq: "0",
+        hostedMailboxSystemHandledThroughSeq: "4",
+        systemImportedSeq: "4",
+      },
     }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "0" },
+      { lane: "system", maxSeq: "5" },
+    ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+      kind: "assistant.ask.completed",
+      laneSeq: "5",
+    });
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
     mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(true);
     mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
@@ -1203,6 +1283,7 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "automation_engagement_paused",
       retryAt: "2026-05-21T12:00:00.000Z",
     });
+    expect(facts.workspace?.systemMailboxFrontier).toBe("default_owned");
     expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.objectContaining({ kind: "prisma" }),
