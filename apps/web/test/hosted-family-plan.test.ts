@@ -51,6 +51,9 @@ const activationWakeMocks = vi.hoisted(() => ({
 const groupJoinConfirmationMocks = vi.hoisted(() => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
 }));
+const signupNotificationMocks = vi.hoisted(() => ({
+  scheduleHostedSignupNotificationEmails: vi.fn(),
+}));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
   decryptHostedWebNullableFields: encryptionMocks.decryptHostedWebNullableFields,
@@ -96,6 +99,10 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     groupJoinConfirmationMocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+}));
+vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
+  scheduleHostedSignupNotificationEmails:
+    signupNotificationMocks.scheduleHostedSignupNotificationEmails,
 }));
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: runtimeMocks.requireHostedOnboardingPublicBaseUrl,
@@ -4123,6 +4130,18 @@ describe("hosted Family plan", () => {
         source: "family-invite-web-accept",
         timeoutMs: 5_000,
       });
+    expect(signupNotificationMocks.scheduleHostedSignupNotificationEmails)
+      .toHaveBeenCalledWith({
+        memberIds: ["member_mom"],
+        prisma,
+      });
+    expect(
+      signupNotificationMocks.scheduleHostedSignupNotificationEmails.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
+        .mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
       prisma,
       userId: "member_mom",
@@ -4262,6 +4281,9 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
     expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(
+      signupNotificationMocks.scheduleHostedSignupNotificationEmails,
+    ).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -9470,6 +9492,7 @@ describe("hosted Family plan", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -9510,6 +9533,7 @@ describe("hosted Family plan", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
