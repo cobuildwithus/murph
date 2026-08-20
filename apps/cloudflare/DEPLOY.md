@@ -1206,10 +1206,9 @@ Core execution tuning:
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `45000` and must exceed
   `CF_WEB_CONTROL_TIMEOUT_MS` by at least 5 seconds
-- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `90000`. Runtime-control callers
-  keep their shorter response budgets; a caller timeout preserves a recent
-  platform cold start within this window so later retries can converge without
-  repeatedly destroying and restarting the same rollout start.
+- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`. A shorter caller deadline
+  does not cancel a recent platform cold start; later readiness checks rejoin
+  that same start until this container-owned window expires.
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.

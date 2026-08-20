@@ -765,7 +765,7 @@ describe("hosted deploy automation helpers", () => {
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
       "exa,hosted-email,linq,mapbox,telegram",
     );
-    expect(environment.runnerReadyTimeoutMs).toBe("90000");
+    expect(environment.runnerReadyTimeoutMs).toBe("20000");
   });
 
   it("accepts a custom JSON container instance type for generated deploy config", () => {

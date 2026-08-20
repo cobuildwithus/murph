@@ -1627,7 +1627,7 @@ describe("RunnerContainer", () => {
       status = "stopped";
     });
     const getState = vi.fn(async () => ({
-      lastChange: status === "running" ? Date.now() - 90_001 : Date.now(),
+      lastChange: status === "running" ? Date.now() - 20_001 : Date.now(),
       status,
     }));
     const { container } = createContainerDouble({
@@ -1660,7 +1660,7 @@ describe("RunnerContainer", () => {
     timeout.mockRestore();
   });
 
-  it("preserves a recent cold start across caller readiness budgets", async () => {
+  it("preserves an eight-second timeout when the same start is healthy at nine seconds", async () => {
     const timeoutControllers: AbortController[] = [];
     const timeout = vi.spyOn(AbortSignal, "timeout")
       .mockImplementation(() => {
@@ -1677,6 +1677,7 @@ describe("RunnerContainer", () => {
     const startAndWaitForPorts = vi.fn(async () => {
       status = "running";
       lastChange = Date.now();
+      nowMs = fixedNowMs + 8_000;
       timeoutControllers[0]?.abort(new DOMException("Timed out", "TimeoutError"));
       throw timeoutControllers[0]?.signal.reason;
     });
@@ -1688,14 +1689,6 @@ describe("RunnerContainer", () => {
         throw new Error(`Unexpected runner request URL: ${url}`);
       }
       healthChecks += 1;
-      if (healthChecks === 1) {
-        return new Response("Failed to connect to local container transport", {
-          headers: {
-            "content-type": "text/plain; charset=utf-8",
-          },
-          status: 503,
-        });
-      }
       return new Response(JSON.stringify(createRunnerHealthResult()), {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -1712,7 +1705,7 @@ describe("RunnerContainer", () => {
       containerFetch,
       destroy,
       env: {
-        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "90000",
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
       },
       getState,
       initialStatus: "stopped",
@@ -1728,18 +1721,7 @@ describe("RunnerContainer", () => {
       expect(destroy).not.toHaveBeenCalled();
 
       container.onStart();
-      nowMs += 10_000;
-      const second = container.ensureReadyForProcessing({
-        timeoutMs: 8_000,
-        userId: "member_123",
-      });
-      await expect(second).rejects.toMatchObject({
-        name: "HostedRunnerContainerMetadataResponseError",
-        statusCode: 503,
-      });
-      expect(timeoutControllers[2]?.signal.aborted).toBe(false);
-
-      nowMs = fixedNowMs + 58_000;
+      nowMs = fixedNowMs + 9_000;
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 8_000,
         userId: "member_123",
@@ -1749,7 +1731,7 @@ describe("RunnerContainer", () => {
       });
 
       expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-      expect(containerFetch).toHaveBeenCalledTimes(2);
+      expect(containerFetch).toHaveBeenCalledOnce();
       expect(destroy).not.toHaveBeenCalled();
       const pendingLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
         .map(([input]) => input)
@@ -1757,9 +1739,7 @@ describe("RunnerContainer", () => {
           input.message
             === "Hosted execution container cold start is still pending after the caller readiness budget."
         );
-      expect(pendingLogs).toHaveLength(2);
       expect(pendingLogs).toEqual([
-        expect.objectContaining({ level: "warn" }),
         expect.objectContaining({ level: "warn" }),
       ]);
       expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
@@ -1826,7 +1806,7 @@ describe("RunnerContainer", () => {
       containerFetch,
       destroy,
       env: {
-        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "90000",
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
       },
       getState: vi.fn(async () => ({ lastChange, status })),
       initialStatus: "running",
@@ -1850,7 +1830,7 @@ describe("RunnerContainer", () => {
       expect(destroy).toHaveBeenCalledOnce();
 
       container.onStop({ exitCode: 0, reason: "exit" });
-      nowMs += 10_000;
+      nowMs += 8_000;
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 8_000,
         userId: "member_123",
@@ -1860,7 +1840,7 @@ describe("RunnerContainer", () => {
       });
       expect(destroy).toHaveBeenCalledOnce();
 
-      nowMs = fixedNowMs + 64_000;
+      nowMs = fixedNowMs + 15_000;
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 8_000,
         userId: "member_123",
@@ -1919,7 +1899,7 @@ describe("RunnerContainer", () => {
         containerFetch,
         destroy,
         env: {
-          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "90000",
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
         },
         getState: vi.fn(async () => ({ lastChange, status })),
         initialStatus: "running",
@@ -1959,7 +1939,7 @@ describe("RunnerContainer", () => {
         await expect(staleReadiness).rejects.toBeDefined();
         expect(destroy).not.toHaveBeenCalled();
 
-        nowMs += 10_000;
+        nowMs = replacementStartedAtMs + 8_000;
         await expect(container.ensureReadyForProcessing({
           timeoutMs: 8_000,
           userId: "member_123",
@@ -1969,7 +1949,7 @@ describe("RunnerContainer", () => {
         });
         expect(destroy).not.toHaveBeenCalled();
 
-        nowMs = replacementStartedAtMs + 58_000;
+        nowMs = replacementStartedAtMs + 9_000;
         await expect(container.ensureReadyForProcessing({
           timeoutMs: 8_000,
           userId: "member_123",
@@ -2048,7 +2028,7 @@ describe("RunnerContainer", () => {
         containerFetch,
         destroy,
         env: {
-          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "90000",
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
         },
         getState,
         initialStatus: "running",
@@ -2087,7 +2067,7 @@ describe("RunnerContainer", () => {
         expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
         expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(false);
 
-        nowMs += 10_000;
+        nowMs = replacementStartedAtMs + 8_000;
         await expect(container.ensureReadyForProcessing({
           timeoutMs: 8_000,
           userId: "member_123",
@@ -2097,7 +2077,7 @@ describe("RunnerContainer", () => {
         });
         expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
 
-        nowMs = replacementStartedAtMs + 58_000;
+        nowMs = replacementStartedAtMs + 9_000;
         await expect(container.ensureReadyForProcessing({
           timeoutMs: 8_000,
           userId: "member_123",
@@ -2123,7 +2103,7 @@ describe("RunnerContainer", () => {
         timeoutControllers.push(controller);
         return controller.signal;
       });
-    const staleLastChangeMs = Date.now() - 90_001;
+    const staleLastChangeMs = Date.now() - 20_001;
     let status: "running" | "stopped" = "running";
     const destroy = vi.fn(async () => {
       status = "stopped";
@@ -2141,7 +2121,7 @@ describe("RunnerContainer", () => {
       }),
       destroy,
       env: {
-        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "90000",
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
       },
       getState: vi.fn(async () => ({
         lastChange: staleLastChangeMs,
@@ -2341,7 +2321,7 @@ describe("RunnerContainer", () => {
       );
 
       await vi.advanceTimersByTimeAsync(4_000);
-      runningLastChange = Date.now() - 90_001;
+      runningLastChange = Date.now() - 20_001;
       cleanupStatus.resolve({
         lastChange: runningLastChange,
         status: "running",
@@ -9303,7 +9283,7 @@ describe("RunnerContainer", () => {
 
   it("uses the canonical and configured readiness timeouts for cold starts", async () => {
     for (const [configuredTimeoutMs, expectedTimeoutMs] of [
-      [undefined, 90_000],
+      [undefined, 20_000],
       ["45000", 45_000],
     ] as const) {
       const { container, startAndWaitForPorts } = createContainerDouble({

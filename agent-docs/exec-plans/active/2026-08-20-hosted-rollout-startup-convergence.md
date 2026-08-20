@@ -2,194 +2,120 @@
 
 ## Goal
 
-Prevent a slow Cloudflare container cold start during an immediate image rollout
-from being destroyed and restarted on every short runtime-control readiness
-budget.
+Let a valid Cloudflare container cold start outlive a shorter runtime-control
+caller without weakening cleanup for genuinely unhealthy containers.
 
 Success criteria:
 
-- A caller timeout while a newly issued container start is still within the
-  configured readiness window leaves the platform start intact.
-- A later readiness retry can join that same start and proceed once healthy.
-- Truly failed, stale, or unhealthy warm containers keep the existing bounded
-  restart behavior.
-- Production's default readiness window covers the observed rollout cold-start
-  duration with bounded headroom.
-- Focused tests, Cloudflare typecheck, exact-head CI, and ReviewGPT all pass.
+- The ordinary caller exposes the existing 15-second readiness window.
+- Container startup remains bounded by the existing 20-second owner window.
+- A caller timeout does not destroy a recent, never-ready start.
+- A later readiness check can join the same start.
+- Fatal, stale, stopped, poisoned, architecture-mismatched, and
+  previously-ready unhealthy containers retain bounded cleanup.
+- Cleanup captured for an old start cannot invalidate a newer replacement.
+- Focused tests, typecheck, exact-head CI, and ReviewGPT pass.
 
 ## Constraints
 
-- Do not deploy, mutate production state, or activate automated remediation.
-- Keep the existing short runtime-control response budget and retry cadence.
-- Do not weaken fail-closed handling for crashed, stale, poisoned, or
-  architecture-mismatched containers.
-- Do not expose production rows, member identifiers, credentials, local account
-  names, or home paths in repository artifacts.
-- The older hosted-runner destroy-timeout plan owns bounded destroy settlement;
-  this plan changes only the pre-destroy classification of a still-progressing
-  cold start.
+- Do not deploy, mutate production state, merge, or activate remediation.
+- Keep retry responses and fail-closed behavior bounded.
+- Add no durable lifecycle state, queue, or second lifecycle owner.
+- Keep production evidence aggregate and free of member identifiers.
 
 ## Product UX
 
-This is a Product UX Patch. The affected people are hosted users whose runner
-cold-starts during a container rollout and ordinary hosted users whose container
-is genuinely unhealthy. The walkthrough is ready only if the first group
-converges without restart thrash while the second group retains bounded recovery.
+This is a Product UX Patch. A hosted user whose runner takes slightly longer
+than a caller budget should see one cold start converge, not a destroy/restart
+loop. A genuinely bad shell must still be recycled promptly.
+
+## Corrected production model
+
+The original diagnosis was wrong: the runner did not spend roughly one minute
+starting. In five comparable cases, the readiness caller stopped waiting at
+eight seconds, destroy was requested, and the lifecycle stop callback arrived
+at 60.04–60.10 seconds. Replacement starts became healthy in 3.8–6.4 seconds.
+Across seven days, successful cold starts had a 4.86-second median, 7.08-second
+p95, 7.77-second p99, and 9.0-second maximum.
+
+The two relevant clocks are therefore:
+
+1. Runtime-control caller: 15 seconds of readiness within a 20-second default
+   command budget.
+2. Container owner: 20 seconds for a recent, never-ready platform start.
+
+The 60-second observation belongs to delayed destroy/lifecycle reconciliation,
+not application startup. A 90-second readiness default is unsupported.
 
 ## Approach
 
-1. Add a focused regression that reproduces a cold start spanning multiple
-   caller readiness budgets.
-2. Preserve an aborted start wait when Cloudflare still reports a recent
-   running/healthy state, including when the lifecycle start hook has fired but
-   readiness has not yet completed and when startup transport returns before
-   the caller timeout.
-3. Rejoin that start on later readiness calls and retain the existing destroy
-   path after the configured readiness window or for fatal and previously-ready
-   unhealthy shells.
-4. Raise and document the canonical default readiness window to 90 seconds,
-   covering the observed roughly one-minute rollout start with bounded headroom.
-5. Run focused proof, commit and push the candidate, then resolve the required
-   ReviewGPT and exact-head CI gates without merging or deploying.
+1. Restore the canonical container readiness default to 20 seconds.
+2. Raise the shared default runtime-processing command budget from 10 to 20
+   seconds so ordinary calls reach the existing 15-second readiness cap rather
+   than arriving there with roughly eight seconds remaining.
+3. Represent the current start as one in-memory record owned by the existing
+   `RunnerContainer` lifecycle lock. Health proof, pending deadline, stop, and
+   cleanup all bind to that record.
+4. On caller timeout or non-fatal startup transport failure, retain only the
+   same recent start that has never passed readiness. Rejoin it on the next
+   check. Recycle it after the 20-second owner window or on explicit fatal or
+   previously-ready failure.
+5. Revalidate platform `lastChange` while old cleanup settles so a newer
+   running start supersedes that cleanup instead of inheriting invalidation.
 
-## Round 2 requirement-level retrospective
+## Review retrospective
 
-- Original requirement: let one slow replacement start survive several short
-  readiness callers, then become healthy, while preserving immediate cleanup
-  for stale, fatal, stopped, and previously ready unhealthy containers.
-- First-reviewed shape: `1288c1ee38d51dcf587fa52356c3b9f3ef3a2ce9`
-  changed 419 lines across nine files. It inferred a pending start from the
-  platform timestamp plus separate lifecycle-observation fields.
-- Current reviewed shape: `8e120fce89d67755152764873682e6eb29fbcf29`
-  changed 623 lines across eleven files. Review remediation added a separate
-  pending deadline, upgraded lifecycle observations after health, and expanded
-  the warm/cold classifiers and regressions. The repeated gap is that those
-  facts still describe a container without proving they belong to the current
-  replacement generation.
-- Decision: continue this PR, but collapse the three overlapping start-time,
-  observation, and deadline fields into one in-memory current-start record
-  owned by the existing `RunnerContainer` lifecycle lock. A stopped status,
-  status-settled destroy, or applicable `onStop` ends that record; a new start
-  creates a fresh record; readiness marks only that record ready. A delayed
-  stop callback is ignored when Cloudflare already reports a running
-  replacement. No durable state, lifecycle manager, queue, fence, or new owner
-  is added.
-- Required proof: begin with a previously ready warm shell, settle its destroy
-  by stopped status without `onStop`, keep the single replacement start alive
-  across short callers until health at roughly 58 seconds, and retain the
-  existing UserRunner retry-to-acceptance proof plus fatal/stale/ready-shell
-  cleanup coverage.
+The immutable first-reviewed head changed 419 lines across nine files. The
+latest published head changed 1,316 lines across eleven files because review
+iterations hardened generation ownership while the working premise still
+treated the 60-second callback as startup duration.
 
-## Round 3 renewed retrospective
+That premise is now invalidated. The corrective decision is:
 
-- Trigger: round three found the same generation-ownership mechanism when a
-  platform replacement's `onStart` precedes both the old callback and every
-  stopped-state read, and when an old warm-health request finishes after that
-  replacement is installed.
-- Shape comparison: the immutable first-reviewed head changed 419 lines across
-  nine files; the round-two head changed 623 across eleven; the round-three
-  head changed 919 lines in total. The round-three correction combined three
-  scalar facts into one record but left a policy Boolean and unqualified async
-  writes, so the intended owner boundary was not yet complete.
-- Decision: continue the indivisible rollout fix without another owner or
-  lifecycle concept. Make `onStart` replace a ready prior record, use a newer
-  platform `lastChange` to replace any older record, preserve a deadline only
-  for the same still-pending record, and bind every warm/cold health completion
-  and readiness proof to that record's object identity. Delete the replacement
-  policy Boolean and reject stale completions before they can authorize,
-  mutate, or destroy the current replacement.
-- Required proof: install a newer running replacement before any stopped read,
-  deliver the old delayed `onStop`, and exercise both success and failure of an
-  older deferred warm-health request. Neither completion may publish readiness,
-  clear the replacement window, or destroy it; the replacement's own 503 must
-  retain one start until health at roughly 58 seconds.
-
-## State
-
-Active. Initial exact-head CI passed. Preliminary and final ReviewGPT found two
-connected high gaps in lifecycle ordering and immediate startup-transport
-handling; both were remediated. Final round two required the retrospective
-above after finding stale readiness evidence across status-only replacement.
-That finding was remediated. Final round three found the replacement-first and
-stale async-completion variants described in the renewed retrospective; both
-were remediated. Final round four found that the captured start record was still
-dropped before the destructive call and its settlement loop, allowing old-shell
-cleanup to invalidate a running replacement. That finding is accepted,
-reproduced, and remediated locally. A fresh exact-head review and CI remain.
+- remove the 90-second configuration and all 58-second startup claims;
+- keep the single current-start identity because it is the smallest boundary
+  that prevents stale health, stop, or destroy completions from acting on a
+  replacement;
+- use the already-existing 15-second readiness cap and 20-second container
+  window rather than adding a new timeout layer;
+- prove the observed 8-to-9-second case directly, with delayed destroy
+  settlement covered as a separate lifecycle race.
 
 ## Evidence
 
-- The production error burst included real `RunnerContainer` failures after the
-  deploy smoke passed, dominated by port-not-listening and aborted-start errors.
-- The successful deploy smoke required roughly one minute to converge.
-- Runtime-control readiness is capped to about 8 seconds by default and 15
-  seconds at most; the existing 20-second runner readiness default cannot widen
-  that caller path.
-- The pinned Cloudflare containers SDK issues `container.start()` before its
-  abortable wait and cancellation stops the wait rather than the platform start.
-- A focused regression now proves one cold start survives two expired caller
-  budgets and an intervening lifecycle start observation, then becomes healthy
-  at 58 seconds without any destroy or second start.
-- A companion regression proves an unobserved start older than 90 seconds still
-  enters bounded cleanup.
-- ReviewGPT's preliminary specialist pass found that the original regression
-  did not fire the lifecycle start hook between caller budgets. The accepted
-  remediation retains an explicit pending-start deadline across that hook.
-- ReviewGPT's final first pass found that an immediate startup HTTP 503 still
-  bypassed the timeout-only grace. The accepted remediation treats recent
-  starts that have never passed health readiness as pending for non-fatal
-  startup failures, while previously ready, stale, stopped, poisoned, and
-  version-mismatched shells retain cleanup.
-- The container regression now keeps the same start across a caller timeout,
-  lifecycle start observation, and an immediate non-JSON HTTP 503 whose caller
-  signal remains active, then reaches health at 58 seconds with zero destroys.
-- A UserRunner owner regression proves an ordinary retry of the same accepted
-  orchestration reaches runtime acceptance after the container becomes ready.
-- ReviewGPT round two found that status-confirmed destroy settlement without an
-  `onStop` callback left the old shell's readiness observation attached to the
-  replacement. A production-shaped regression failed by observing a second
-  destroy before remediation.
-- The remediation combines the prior start timestamp, observation, and pending
-  deadline into one current-start record. Status-confirmed stop ends that
-  record; the replacement creates a fresh record; a delayed old `onStop` cannot
-  clear a replacement Cloudflare still reports running.
-- The replacement-boundary regression now starts from a previously ready warm
-  shell, settles destroy by status without `onStop`, ignores a delayed old stop
-  callback, survives timeout and fast HTTP 503 callers, and reaches health at
-  58 seconds with one replacement start and no second destroy.
-- ReviewGPT round three found that a replacement `onStart` arriving before any
-  stopped observation could retain the old ready record, while an older
-  in-flight health result could authorize, mutate, or destroy that replacement.
-  Both success and failure reproductions failed against the reviewed head.
-- The remediation makes a new `onStart` replace a ready record, accepts newer
-  platform `lastChange` evidence, removes the replacement-policy Boolean, and
-  binds readiness proof, ready marking, pending-window clearing, and cleanup to
-  the exact captured start object.
-- Deferred old-health success and failure regressions now leave the
-  platform-started replacement pending, preserve its own fast HTTP 503, and
-  reach health 58 seconds after its one start without a destroy.
-- ReviewGPT round four found that old-shell cleanup lost exact-start ownership
-  before the status-gated destroy and during destroy settlement. A replacement
-  could therefore inherit an unsettled-cleanup flag and be destroyed on the
-  next retry even though its own health had not failed.
-- The remediation carries the exact current-start record through readiness
-  cleanup, revalidates Cloudflare's platform `lastChange` before destroy, and
-  settles an issued old destroy as superseded when a newer running start is
-  observed. It neither clears nor invalidates the replacement record.
-- Parameterized production-order regressions prove both replacement arrival
-  during the pre-destroy status read and replacement arrival after destroy
-  issuance but before old-stop settlement. In both orderings the replacement's
-  startup 503 is retained and the same start reaches health at 58 seconds with
-  no replacement destroy.
-- Focused Cloudflare verification passes after remediation: 420 tests across
-  five files plus package typecheck.
+- Cloudflare documents `running` as a container that may still be starting and
+  not yet health checked, and `lastChange` as the state-change timestamp.
+- Cloudflare documents `destroy()` as immediate `SIGKILL` whose promise resolves
+  after runtime destruction and whose completion triggers `onStop`.
+- The pinned SDK issues `container.start()` before its abortable readiness wait;
+  aborting the wait does not prove that the platform start failed.
+- The focused regression reaches the caller boundary at eight seconds, then
+  observes the same start healthy at nine seconds with one start and no destroy.
+- Replacement-order regressions keep stale health and old destroy settlement
+  bound to the captured start rather than a newer platform start.
+- A stale never-ready start older than 20 seconds still enters bounded cleanup.
+
+## State
+
+Active. The corrected implementation is complete locally. Focused Cloudflare
+tests pass (420 tests across five files), the hosted-execution suite passes
+(544 tests across 49 files), and both package typechecks pass. Diff-aware
+verification also passed the hosted guards and every affected-package
+typecheck; its workspace-boundary step reported two unrelated existing
+Junction import violations, and its test phase was stopped while waiting for a
+shared host slot held by another verifier. Exact-head CI and a fresh ReviewGPT
+audit remain. The PR remains draft and no production action is authorized.
 
 ## Working Set
 
+- `packages/hosted-execution/src/contracts.ts`
+- `packages/hosted-execution/test/temporal-env.test.ts`
 - `apps/cloudflare/src/runner-container.ts`
 - `apps/cloudflare/src/hosted-execution-worker-env.ts`
 - `apps/cloudflare/scripts/deploy-automation/environment.ts`
 - `apps/cloudflare/test/runner-container.test.ts`
+- `apps/cloudflare/test/user-runner-alarm.test.ts`
 - `apps/cloudflare/test/env.test.ts`
+- `apps/cloudflare/test/deploy-automation.test.ts`
 - `apps/cloudflare/test/container-image-contract.test.ts`
 - `apps/cloudflare/DEPLOY.md`

@@ -149,7 +149,7 @@ export function readHostedDeployAutomationEnvironment(
     runnerCommitTimeoutMs: timeouts.runnerCommitTimeoutMs,
     runnerReadyTimeoutMs: normalizePositiveIntegerString(
       source.CF_RUNNER_READY_TIMEOUT_MS,
-      "90000",
+      "20000",
       "CF_RUNNER_READY_TIMEOUT_MS",
     ),
     traceHeadSamplingRate: normalizeSamplingRate(

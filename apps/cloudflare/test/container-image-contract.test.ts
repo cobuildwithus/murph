@@ -58,7 +58,7 @@ function createDeployEnvironment() {
     maxEventAttempts: "3",
     retryDelayMs: "30000",
     runnerCommitTimeoutMs: "45000",
-    runnerReadyTimeoutMs: "90000",
+    runnerReadyTimeoutMs: "20000",
     traceHeadSamplingRate: 0.1,
     webControlTimeoutMs: "30000",
     workerName: "murph-hosted",
