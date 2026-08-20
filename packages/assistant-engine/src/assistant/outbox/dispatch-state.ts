@@ -15,7 +15,6 @@ import {
 } from '../response-media.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
-import { writeJsonFileAtomic } from '../shared.js'
 import {
   sanitizeAssistantDeliveryErrorForPersistence,
   sanitizeAssistantOutboxIntentForPersistence,
@@ -32,7 +31,10 @@ import {
   normalizeAssistantDeliveryError,
   resolveAssistantOutboxRetryDelayMs,
 } from './retry-policy.js'
-import { readAssistantOutboxIntentAtPath } from './store.js'
+import {
+  persistAssistantOutboxIntentAtPath,
+  readAssistantOutboxIntentAtPath,
+} from './store.js'
 
 /**
  * Dispatch-state owns the persisted outbox intent transitions that happen once
@@ -116,6 +118,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   intentPath: string
+  terminalConfirmationRequired?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -123,7 +126,15 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.intent)) {
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.intent,
+        ['sending'],
+        false,
+      )
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -132,17 +143,32 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       return current
     }
     const baseIntent = current ?? input.intent
+    const terminalConfirmationRequired = input.terminalConfirmationRequired === true
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
-        deliveryConfirmationPending: input.deliveryTransportIdempotent,
+        ...(input.intent.messageVolumeReceiptRecordedAt === undefined
+          ? {}
+          : {
+              messageVolumeReceiptRecordedAt:
+                input.intent.messageVolumeReceiptRecordedAt,
+            }),
+        deliveryConfirmationPending:
+          terminalConfirmationRequired || input.deliveryTransportIdempotent,
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
         preparedDispatchToken: baseIntent.preparedDispatchToken,
         deliveryIdempotencyKey:
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: input.completedAt,
-        nextAttemptAt: null,
-        status: 'sending',
+        nextAttemptAt: terminalConfirmationRequired
+          ? buildAssistantOutboxRetryTimestamp(
+              new Date(input.completedAt),
+              baseIntent.attemptCount,
+            )
+          : input.intent.messageVolumeReceiptRecordedAt === null
+            ? input.completedAt
+            : null,
+        status: terminalConfirmationRequired ? 'retryable' : 'sending',
         delivery: input.delivery,
         lastError: createAssistantDeliveryConfirmationPendingError(),
       }),
@@ -150,9 +176,11 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(pendingIntent),
     )
-    const persistedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
-    await writeJsonFileAtomic(input.intentPath, persistedIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: persistedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     return persistedIntent
   })
 }
@@ -216,10 +244,11 @@ export async function persistAssistantOutboxIntentLinqAppCardTextFallback(input:
         updatedAt: input.persistedAt.toISOString(),
       }),
     )
-    await writeJsonFileAtomic(
-      input.intentPath,
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent),
-    )
+    await persistAssistantOutboxIntentAtPath({
+      intent: persistedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     return persistedIntent
   })
 }
@@ -295,7 +324,10 @@ export async function markAssistantOutboxIntentSent(input: {
         deliveryIdempotencyKey:
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: completedAt,
-        nextAttemptAt: null,
+        nextAttemptAt:
+          baseIntent.messageVolumeReceiptRecordedAt === null
+            ? baseIntent.nextAttemptAt ?? completedAt
+            : null,
         preparedDispatchToken: null,
         sentAt: completedAt,
         status: 'sent',
@@ -303,8 +335,11 @@ export async function markAssistantOutboxIntentSent(input: {
         lastError: null,
       }),
     )
-    const sentIntentValue = sanitizeAssistantOutboxIntentForPersistence(sentIntent)
-    await writeJsonFileAtomic(input.intentPath, sentIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: sentIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: completedAt,
       intent: sentIntent,
@@ -359,6 +394,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   failedAt: Date
   intentPath: string
   sending: AssistantOutboxIntent
+  terminalConfirmationRequired?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const linqPartialDelivery = readLinqPartialDeliveryFromError({
@@ -437,7 +473,16 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const retryExhausted = retryRequested &&
       !input.deliveryMayHaveSucceeded &&
       isAssistantOutboxRetryBudgetExhausted(baseIntent)
-    const retryable = retryRequested && !retryExhausted
+    const terminalConfirmationPending =
+      input.terminalConfirmationRequired === true &&
+      (
+        abandonedDelivery ||
+        retryExhausted ||
+        !retryRequested ||
+        (input.deliveryMayHaveSucceeded && input.sending.delivery !== null)
+      )
+    const retryable = (retryRequested && !retryExhausted) ||
+      terminalConfirmationPending
     const deliveryError = retryExhausted
       ? sanitizeAssistantDeliveryErrorForPersistence(
           createAssistantDeliveryRetryExhaustedError(input.error),
@@ -454,15 +499,16 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
           stableLinqPartialDelivery ??
           current?.delivery ??
           input.sending.delivery,
-        deliveryConfirmationPending:
-          recoverableLinqRichLinkPartial ||
-          preserveNonConfirmableLinqRichLinkCheckpoint
-          ? false
-          : abandonedDelivery || retryExhausted
-          ? false
-          : input.deliveryMayHaveSucceeded
-            ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
-            : false,
+        deliveryConfirmationPending: terminalConfirmationPending
+          ? true
+          : recoverableLinqRichLinkPartial ||
+              preserveNonConfirmableLinqRichLinkCheckpoint
+            ? false
+            : abandonedDelivery || retryExhausted
+              ? false
+              : input.deliveryMayHaveSucceeded
+                ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
+                : false,
         deliveryTransportIdempotent: abandonedDelivery
           ? false
           : input.deliveryMayHaveSucceeded
@@ -471,12 +517,21 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
                 input.sending.deliveryTransportIdempotent),
         updatedAt: failedAt,
         nextAttemptAt,
-        status: abandonedDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
+        status: terminalConfirmationPending
+          ? 'retryable'
+          : abandonedDelivery
+            ? 'abandoned'
+            : retryable
+              ? 'retryable'
+              : 'failed',
         lastError: deliveryError,
       }),
     )
-    const failedIntentValue = sanitizeAssistantOutboxIntentForPersistence(failedIntent)
-    await writeJsonFileAtomic(input.intentPath, failedIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: failedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: failedIntent.updatedAt,
       intent: failedIntent,
@@ -901,7 +956,6 @@ function readNonEmptyStringArray(value: unknown): string[] | null {
 export async function rescheduleAssistantOutboxConfirmationRetry(input: {
   error: AssistantDeliveryError
   intentPath: string
-  scheduledAt: Date
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
@@ -910,7 +964,14 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.sending,
+        ['sending', 'retryable'],
+      )
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -919,14 +980,16 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
       return current
     }
     const baseIntent = current ?? input.sending
-    const scheduledAt = input.scheduledAt.toISOString()
+    const scheduledAt = new Date()
     const retryIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
-        deliveryConfirmationPending: baseIntent.deliveryTransportIdempotent,
-        updatedAt: scheduledAt,
+        deliveryConfirmationPending:
+          baseIntent.deliveryConfirmationPending ||
+          baseIntent.deliveryTransportIdempotent,
+        updatedAt: scheduledAt.toISOString(),
         nextAttemptAt: buildAssistantOutboxRetryTimestamp(
-          input.scheduledAt,
+          scheduledAt,
           baseIntent.attemptCount,
         ),
         status: 'retryable',
@@ -936,9 +999,11 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(retryIntent),
     )
-    const persistedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
-    await writeJsonFileAtomic(input.intentPath, persistedIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: persistedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: persistedIntent.updatedAt,
       intent: persistedIntent,
@@ -1274,10 +1339,11 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
           lastError: deliveryError,
         }),
       )
-      await writeJsonFileAtomic(
-        input.intentPath,
-        sanitizeAssistantOutboxIntentForPersistence(failedIntent),
-      )
+      await persistAssistantOutboxIntentAtPath({
+        intent: failedIntent,
+        intentPath: input.intentPath,
+        paths,
+      })
       await repairAssistantOutboxReceiptForIntent({
         at: failedIntent.updatedAt,
         intent: failedIntent,
@@ -1328,9 +1394,11 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
         status: 'sending',
       }),
     )
-    const sendingIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(sendingIntent)
-    await writeJsonFileAtomic(input.intentPath, sendingIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: sendingIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: input.startedAt,
       intent: sendingIntent,
@@ -1472,9 +1540,11 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
         lastError: restoreDispatchState ? restoreDispatchState.lastError : null,
       }),
     )
-    const pendingIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(pendingIntent)
-    await writeJsonFileAtomic(input.intentPath, pendingIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: pendingIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: resetAt,
       intent: pendingIntent,
@@ -1643,9 +1713,11 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
         lastError: deliveryError,
       }),
     )
-    const updatedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(updatedIntent)
-    await writeJsonFileAtomic(input.intentPath, updatedIntentValue)
+    await persistAssistantOutboxIntentAtPath({
+      intent: updatedIntent,
+      intentPath: input.intentPath,
+      paths,
+    })
     await repairAssistantOutboxReceiptForIntent({
       at: updatedIntent.updatedAt,
       intent: updatedIntent,

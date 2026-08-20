@@ -1002,8 +1002,11 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     );
     const result = readCodexCommandExecResult(message.result);
     if (result.exitCode !== 0) {
+      const outputPreview = options.includeOutputPreviewOnFailure === false
+        ? ""
+        : ` stdoutPreview=${JSON.stringify(result.stdout.slice(0, 512))} stderrPreview=${JSON.stringify(result.stderr.slice(0, 512))}`;
       throw new Error(
-        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")} stdoutPreview=${JSON.stringify(result.stdout.slice(0, 512))} stderrPreview=${JSON.stringify(result.stderr.slice(0, 512))}`,
+        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}${outputPreview}`,
       );
     }
 
@@ -1977,6 +1980,7 @@ async function runCodexVaultCliProof(input: {
   execCommand: (
     label: string,
     command: readonly string[],
+    options?: CodexCommandExecOptions,
   ) => Promise<CodexCommandExecResult>;
   expectedVaultId: string;
   vaultRoot: string;
@@ -1990,8 +1994,9 @@ async function runCodexVaultCliProof(input: {
   const runVaultJson = async (
     label: string,
     args: readonly string[],
+    options: CodexCommandExecOptions = {},
   ): Promise<unknown> => {
-    const result = await input.execCommand(label, ["vault-cli", ...args]);
+    const result = await input.execCommand(label, ["vault-cli", ...args], options);
     vaultCommandProofCount += 1;
     return parseJsonFromCommandStdout(result.stdout, label);
   };
@@ -2012,6 +2017,18 @@ async function runCodexVaultCliProof(input: {
     await runVaultJson("vault-show-default", ["vault", "show", "--format", "json"]),
     "vault-show-default",
     input.expectedVaultId,
+  );
+  assertMemoryShowProof(
+    await runVaultJson(
+      "memory-show",
+      ["memory", "show", "--format", "json"],
+      {
+        cwd: input.vaultRoot,
+        includeOutputPreviewOnFailure: false,
+        permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      },
+    ),
+    input.vaultRoot,
   );
   assertVaultShow(
     await runVaultJson("vault-show-explicit", [
@@ -2208,6 +2225,23 @@ async function runCodexVaultCliProof(input: {
       "vault write",
     ),
   };
+}
+
+function assertMemoryShowProof(value: unknown, expectedVaultRoot: string): void {
+  const result = readObject(value, "memory-show");
+  const document = readObject(result.document, "memory-show.document");
+  const records = readArray(document.records, "memory-show.document.records");
+
+  if (
+    result.vault !== expectedVaultRoot ||
+    document.exists !== true ||
+    records.length === 0 ||
+    result.memory !== null
+  ) {
+    throw new Error(
+      "Codex app-server vault-cli memory proof returned an unexpected populated document.",
+    );
+  }
 }
 
 function assertMeasurementProof(record: Record<string, unknown>, label: string): void {
@@ -2456,6 +2490,7 @@ interface CodexCommandExecResult {
 
 interface CodexCommandExecOptions {
   cwd?: string;
+  includeOutputPreviewOnFailure?: boolean;
   permissionProfile?: string;
 }
 

@@ -909,6 +909,10 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
+    automationContextReferences:
+      input.input.outboxAutomationContextReferences ?? null,
+    plannedOccurrenceAt: input.input.outboxPlannedOccurrenceAt ?? null,
+    scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
     externalThreadRouteAuthority:
       input.input.outboxExternalThreadRouteAuthority ?? null,
     dedupeToken: input.dedupeToken,

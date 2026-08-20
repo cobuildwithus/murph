@@ -1,15 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import {
-  CheckIcon,
-  CircleAlertIcon,
-  MessageCircle,
-  XIcon,
-} from "lucide-react";
+import { CheckIcon, CircleAlertIcon, MessageCircle, XIcon } from "lucide-react";
 
-import { MurphContactChannelRows } from "@/src/components/murph/murph-contact-channel-rows";
-import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
@@ -169,12 +162,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     props.scope === "family" && props.targetLabel ? props.targetLabel : null;
   const triggerLabel =
     purchaseTriggerLabel ??
+    props.triggerLabel ??
     (props.scope === "group"
       ? groupPaymentMode === "one_time"
         ? "Make a one-time contribution"
         : "Sponsor this chat"
       : "Add usage");
-  const statusContent = purchase
+  const defaultStatusContent = purchase
     ? readStatusContent({
         canResumeCheckout: canResume,
         canRetryCheckout: canRetry,
@@ -187,18 +181,58 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         targetConflict: purchase.targetConflict,
       })
     : null;
-  const contactOptions = props.contactOptions ?? [];
   const fulfilledConfirmation =
     purchase !== null &&
     purchase.status === "fulfilled" &&
     !purchase.selectionConflict &&
     !purchase.targetConflict;
-  const showGroupMessagesAction =
-    fulfilledConfirmation && props.scope === "group";
-  const showContactAction =
+  const closeOwnedFulfilledConfirmation =
     fulfilledConfirmation &&
     props.scope !== "group" &&
-    contactOptions.length > 0;
+    props.deferTerminalRefreshUntilClose === true;
+  const statusContent = closeOwnedFulfilledConfirmation
+    ? {
+        message:
+          props.scope === "family" && props.targetLabel
+            ? `Usage credit was added for ${props.targetLabel}.`
+            : "Your usage credit was added to your account.",
+        title: "Usage added",
+      }
+    : defaultStatusContent;
+  const showGroupMessagesAction =
+    fulfilledConfirmation && props.scope === "group";
+  const quietSuccessfulReturn =
+    props.quietSuccessfulReturn === true &&
+    (returnedFromSuccessfulCheckout || fulfilledConfirmation);
+  const purchaseNeedsRecovery = Boolean(
+    purchase &&
+    (purchase.checkoutError ||
+      purchase.selectionConflict ||
+      purchase.targetConflict ||
+      purchase.status === "expired" ||
+      purchase.status === "payment_failed" ||
+      purchase.poll.kind === "failed" ||
+      (purchase.poll.kind === "exhausted" &&
+        (purchase.status === null || shouldPollPurchaseStatus(purchase.status)))),
+  );
+  const returnNeedsRecovery = quietSuccessfulReturn && purchaseNeedsRecovery;
+  const presentedOpen =
+    controller.state.open &&
+    (!quietSuccessfulReturn || returnNeedsRecovery);
+
+  useEffect(() => {
+    if (
+      props.quietSuccessfulReturn === true &&
+      controller.state.open &&
+      fulfilledConfirmation
+    ) {
+      controller.handleOpenChange(false);
+    }
+  }, [controller, fulfilledConfirmation, props.quietSuccessfulReturn]);
+
+  const compactStatusPresentation =
+    (props.scope !== "group" && purchaseNeedsRecovery) ||
+    closeOwnedFulfilledConfirmation;
   const capacityConflict = selection?.capacityConflict === true;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
@@ -222,7 +256,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             ? `Add usage for ${familyTarget}`
             : "Add usage";
   const headerDescription = purchase
-    ? showGroupMessagesAction && statusContent
+    ? compactStatusPresentation
+      ? null
+      : showGroupMessagesAction && statusContent
       ? statusContent.message
       : purchase.targetConflict
         ? "Manage the unfinished checkout before starting one for this usage destination."
@@ -269,7 +305,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         <div className="flex flex-col gap-5">
           {!showGroupMessagesAction ? (
             <div
-              className="rounded-2xl border border-border bg-muted/30 p-5"
+              className={
+                compactStatusPresentation
+                  ? undefined
+                  : "rounded-2xl border border-border bg-muted/30 p-5"
+              }
               role="status"
               aria-live="polite"
             >
@@ -278,7 +318,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               </p>
             </div>
           ) : null}
-          {showGroupMessagesAction ? null : props.renderPurchaseDetails}
+          {showGroupMessagesAction || compactStatusPresentation
+            ? null
+            : props.renderPurchaseDetails}
           <FieldError>{purchase.checkoutError}</FieldError>
           <div className="flex flex-col gap-2">
             {showGroupMessagesAction ? (
@@ -377,28 +419,6 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 >
                   Check again
                 </Button>
-              ) : null}
-              {showContactAction ? (
-                contactOptions.length === 1 ? (
-                  <MurphContactLink
-                    actionLabel="Text Murph"
-                    option={contactOptions[0]}
-                    className={cn(buttonVariants({ size: "lg" }), "w-full")}
-                  >
-                    <MessageCircle className="size-4 shrink-0" aria-hidden="true" />
-                    Text Murph
-                  </MurphContactLink>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    <p className="text-sm font-medium text-foreground">
-                      Text Murph
-                    </p>
-                    <MurphContactChannelRows
-                      actionLabel="Text Murph"
-                      options={contactOptions}
-                    />
-                  </div>
-                )
               ) : null}
               <Button
                 type="button"
@@ -615,7 +635,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         ) : null}
     </>
   );
-  const canShowTrigger = props.offers.length > 0 || purchaseTriggerLabel;
+  const canShowTrigger =
+    quietSuccessfulReturn && controller.state.open && !returnNeedsRecovery
+      ? false
+      : props.offers.length > 0 || purchaseTriggerLabel;
   const drawerTriggerButton = (
     <Button
       type="button"
@@ -703,77 +726,97 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   }
 
   return (
-    <Dialog
-      open={controller.state.open}
-      onOpenChange={controller.handleOpenChange}
-    >
-      {canShowTrigger ? (
-        <DialogTrigger
-          render={
-            <Button
-              type="button"
-              size={
-                props.triggerSize ?? (props.scope === "group" ? "xl" : "lg")
-              }
-              variant={
-                props.triggerVariant ??
-                (props.scope === "group" ? "default" : "outline")
-              }
-              className={cn(
-                props.scope === "group" ? "w-full" : undefined,
-                props.triggerClassName,
-              )}
-              aria-label={
-                familyTarget
-                  ? `${triggerLabel} for ${familyTarget}`
-                  : undefined
-              }
-            />
-          }
+    <>
+      {props.quietSuccessfulReturn ? (
+        <p
+          className="sr-only"
+          role="status"
+          aria-atomic="true"
+          aria-live="polite"
         >
-          {triggerLabel}
-        </DialogTrigger>
+          {quietSuccessfulReturn && fulfilledConfirmation && statusContent
+            ? `${statusContent.title}. ${statusContent.message}`
+            : ""}
+        </p>
       ) : null}
-      <DialogContent
-        ref={scrollContentRef}
-        data-inert={props.inert ? "true" : undefined}
-        inert={props.inert ? true : undefined}
-        className={cn(
-          "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
-          showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
-        )}
-        initialFocus={titleRef}
+      <Dialog
+        open={presentedOpen}
+        onOpenChange={controller.handleOpenChange}
       >
-        <DialogHeader className={cn("pr-10", showGroupMessagesAction && "gap-4")}>
-          {confirmationIndicator}
-          <DialogTitle
-            ref={titleRef}
-            tabIndex={-1}
-            className={cn(
-              "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
-              showGroupMessagesAction &&
-                "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em] sm:text-5xl",
-            )}
-          >
-            {headerTitle}
-          </DialogTitle>
-          <DialogDescription
-            className={
-              headerDescription
-                ? cn(
-                    "max-w-md text-base leading-6",
-                    showGroupMessagesAction &&
-                      "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
-                  )
-                : "sr-only"
+        {canShowTrigger ? (
+          <DialogTrigger
+            render={
+              <Button
+                type="button"
+                size={
+                  props.triggerSize ??
+                  (props.scope === "group" ? "xl" : "lg")
+                }
+                variant={
+                  props.triggerVariant ??
+                  (props.scope === "group" ? "default" : "outline")
+                }
+                className={cn(
+                  props.scope === "group" ? "w-full" : undefined,
+                  props.triggerClassName,
+                )}
+                aria-label={
+                  familyTarget
+                    ? `${triggerLabel} for ${familyTarget}`
+                    : undefined
+                }
+              />
             }
           >
-            {headerDescription ?? "Choose a usage amount."}
-          </DialogDescription>
-        </DialogHeader>
-        {screenContent}
-      </DialogContent>
-    </Dialog>
+            {triggerLabel}
+          </DialogTrigger>
+        ) : null}
+        <DialogContent
+          ref={scrollContentRef}
+          data-inert={props.inert ? "true" : undefined}
+          inert={props.inert ? true : undefined}
+          className={cn(
+            "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
+            showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
+            compactStatusPresentation && "sm:max-w-md",
+          )}
+          initialFocus={titleRef}
+        >
+          <DialogHeader
+            className={cn("pr-10", showGroupMessagesAction && "gap-4")}
+          >
+            {confirmationIndicator}
+            <DialogTitle
+              ref={titleRef}
+              tabIndex={-1}
+              className={cn(
+                "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
+                showGroupMessagesAction &&
+                  "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em] sm:text-5xl",
+              )}
+            >
+              {headerTitle}
+            </DialogTitle>
+            <DialogDescription
+              className={
+                headerDescription
+                  ? cn(
+                      "max-w-md text-base leading-6",
+                      showGroupMessagesAction &&
+                        "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
+                    )
+                  : "sr-only"
+              }
+            >
+              {headerDescription ??
+                statusContent?.message ??
+                "Choose a usage amount."}
+            </DialogDescription>
+          </DialogHeader>
+          {screenContent}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

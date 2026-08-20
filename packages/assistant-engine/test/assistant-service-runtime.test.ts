@@ -2429,6 +2429,7 @@ describe("assistant delivery orchestration seam", () => {
       actorId: "audience-actor",
       answeredMailboxItemIds: [],
       automationAuthority: null,
+      automationContextReferences: null,
       bindingDelivery: {
         kind: "participant",
         target: "audience-delivery",
@@ -2447,8 +2448,10 @@ describe("assistant delivery orchestration seam", () => {
       media: [],
       message: "reply body",
       nativeReplyRequested: undefined,
+      plannedOccurrenceAt: null,
       replyToMessageId: "reply-input",
       reviewedAssistantAskCompletionExpiresAt: null,
+      scheduledOccurrenceAt: null,
       sessionId: session.sessionId,
       subject: null,
       threadId: "audience-thread",

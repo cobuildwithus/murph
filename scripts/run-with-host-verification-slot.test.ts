@@ -24,7 +24,6 @@ const holderSource = `
   process.stdout.write("ready\\n");
   process.stdin.resume();
 `;
-
 afterEach(async () => {
   for (const child of children) {
     child.stdin?.end();
@@ -281,15 +280,15 @@ describe("shared-host verification slots", () => {
     expect(readdirSync(targetRoot)).toEqual(["marker.txt"]);
   });
 
-  it("preserves a child failure code and releases its slot", () => {
+  it("preserves a child failure code and releases the slot", () => {
     const stateRoot = makeTempRoot();
     const result = runSync(
-      "failing child",
+      "failing command",
       [process.execPath, "-e", "process.exit(7)"],
       stateRoot,
     );
 
-    expect(result.status).toBe(7);
+    expect(result.status, result.stderr).toBe(7);
     expect(readdirSync(stateRoot)).toEqual([]);
   });
 });

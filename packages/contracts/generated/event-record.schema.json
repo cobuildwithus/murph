@@ -4329,30 +4329,99 @@
           ]
         },
         "qualifiers": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          },
-          "additionalProperties": {
-            "anyOf": [
-              {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "derived": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "evidenceConfidence": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium"
+                  ]
+                },
+                "evidenceMethod": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "eveningSampleCount": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 5000
+                },
+                "maxAdjacentGapSeconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 86400
+                },
+                "morningSampleCount": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 5000
+                },
+                "qualifyingPairCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4999
+                },
+                "sampleCount": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 5000
+                },
+                "sampleIntervalSeconds": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 86400
+                },
+                "thresholdSampleCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 5000
+                }
+              },
+              "required": [
+                "derived",
+                "evidenceConfidence",
+                "evidenceMethod",
+                "maxAdjacentGapSeconds",
+                "qualifyingPairCount",
+                "sampleCount"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "propertyNames": {
                 "type": "string",
                 "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
               },
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
               }
-            ]
-          }
+            }
+          ]
         },
         "value": {
           "type": "number"
@@ -4377,7 +4446,7 @@
         },
         "unit": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9._/%-]+$"
+          "pattern": "^[A-Za-z0-9._/%^-]+$"
         }
       },
       "required": [
@@ -4946,7 +5015,7 @@
               },
               "unit": {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9._/%-]+$"
+                "pattern": "^[A-Za-z0-9._/%^-]+$"
               },
               "qualifiers": {
                 "type": "object",
@@ -7314,7 +7383,7 @@
         },
         "unit": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9._/%-]+$"
+          "pattern": "^[A-Za-z0-9._/%^-]+$"
         }
       },
       "required": [
@@ -8438,7 +8507,7 @@
         },
         "unit": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9._/%-]+$"
+          "pattern": "^[A-Za-z0-9._/%^-]+$"
         },
         "experimentId": {
           "type": "string",

@@ -89,14 +89,52 @@ describe("automation lifecycle contracts", () => {
     })).toThrow(/valid canonical support series id/u);
   });
 
+  it("keeps exact canonical context references bounded and unique", () => {
+    const references = [
+      { entityKind: "workout_format", entityId: "wfmt_01JQ8PWXP5A68SQM1W0GYM41WA" },
+      { entityKind: "experiment", entityId: "exp_01JQ8PWXP5A68SQM1W0GYM41WB" },
+    ];
+    const parsed = automationScaffoldPayloadSchema.parse({
+      ...automationPayload(),
+      contextReferences: references,
+    });
+
+    expect(parsed.contextReferences).toEqual(references);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      contextReferences: [references[0], references[0]],
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      contextReferences: [{ entityKind: "WorkoutFormat", entityId: "wfmt_1" }],
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      contextReferences: [{ entityKind: "workout_format", entityId: "contains whitespace" }],
+    }).success).toBe(false);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      contextReferences: Array.from({ length: 17 }, (_, index) => ({
+        entityKind: "experiment",
+        entityId: `exp_${index}`,
+      })),
+    }).success).toBe(false);
+  });
+
   it("persists only an exact typed support purpose", () => {
     const parsed = automationScaffoldPayloadSchema.parse({
       ...automationPayload(),
       supportKind: "check_in",
+      plannedOccurrenceOffsetMs: 900_000,
       tags: [buildAutomationSupportSeriesTag("habit:reg_sleep")],
     });
 
     expect(parsed.supportKind).toBe("check_in");
+    expect(parsed.plannedOccurrenceOffsetMs).toBe(900_000);
+    expect(automationScaffoldPayloadSchema.safeParse({
+      ...automationPayload(),
+      plannedOccurrenceOffsetMs: -1,
+    }).success).toBe(false);
     expect(automationScaffoldPayloadSchema.safeParse({
       ...automationPayload(),
       supportKind: "generic_support",

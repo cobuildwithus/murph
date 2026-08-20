@@ -804,6 +804,32 @@ function makeExactPhoneTransferStripeSubscription(
 
 
 describe("deleteHostedAccountData", () => {
+  it("stops before external cleanup when sponsorship cancellation cannot commit", async () => {
+    const sponsorshipError = new Error("sponsorship cancellation unavailable");
+    const onTransaction = vi.fn();
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction,
+      sponsorshipCancellationError: sponsorshipError,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toBe(sponsorshipError);
+
+    expect(onTransaction).toHaveBeenCalledTimes(2);
+    expect(
+      serviceMocks.deleteHostedPhoneCallsForAccountDeletion,
+    ).not.toHaveBeenCalled();
+    expect(
+      serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort,
+    ).not.toHaveBeenCalled();
+    expect(
+      serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
+    ).not.toHaveBeenCalled();
+  });
+
   it("starts all four ordinary target reads before waiting and holds the terminal transaction", async () => {
     const onTransaction = vi.fn();
     const gate = createHostedAccountDeletionConcurrentReadGate(4);
@@ -834,14 +860,14 @@ describe("deleteHostedAccountData", () => {
     try {
       expect(gate.peak).toBe(4);
       expect(gate.started).toBe(4);
-      expect(onTransaction).toHaveBeenCalledTimes(1);
+      expect(onTransaction).toHaveBeenCalledTimes(2);
       expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
     } finally {
       gate.release();
     }
 
     await expect(deletion).resolves.toMatchObject({ memberId: "member_123" });
-    expect(onTransaction).toHaveBeenCalledTimes(2);
+    expect(onTransaction).toHaveBeenCalledTimes(3);
   });
 
   it("starts all six phone-transfer fingerprint reads before waiting and holds the terminal transaction", async () => {
@@ -909,7 +935,7 @@ describe("deleteHostedAccountData", () => {
     try {
       expect(gate.peak).toBe(6);
       expect(gate.started).toBe(6);
-      expect(onTransaction).toHaveBeenCalledTimes(2);
+      expect(onTransaction).toHaveBeenCalledTimes(3);
       expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
     } finally {
       gate.release();
@@ -918,7 +944,7 @@ describe("deleteHostedAccountData", () => {
     await expect(deletion).resolves.toMatchObject({
       deletion: { memberId: "member_123" },
     });
-    expect(onTransaction).toHaveBeenCalledTimes(3);
+    expect(onTransaction).toHaveBeenCalledTimes(4);
   });
 
   it("atomically retires the transfer source after cleanup-owned billing changes", async () => {
@@ -1580,7 +1606,7 @@ describe("deleteHostedAccountData", () => {
       retryable: true,
     });
 
-    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(onTransaction).toHaveBeenCalledTimes(2);
     expect(hostedMemberUpdateCalls).toEqual([{
       data: {
         suspendedAt: expect.any(Date),
@@ -1590,6 +1616,82 @@ describe("deleteHostedAccountData", () => {
       },
     }]);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("does not suspend an owner while a future Family Stripe effect is pending", async () => {
+    const hostedMemberUpdateCalls: unknown[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      familyBillingRefRecords: [{
+        groupId: "hbag_family",
+        stripeEffectClaimId: "opaque-future-family-claim",
+      }],
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+  });
+
+  it("locks the Family claim owner before a beneficiary account-deletion fence", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      familyBillingRefRecords: [{
+        groupId: "hbag_family",
+        stripeEffectBeneficiaryMemberId: "member_123",
+        stripeEffectClaimId: "opaque-future-family-claim",
+      }],
+      familyClaimOwnerMemberIds: ["member_family_owner"],
+      onTransaction: () => undefined,
+      operationOrder,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(operationOrder.indexOf("queryRaw:member_family_owner")).toBeGreaterThanOrEqual(0);
+    expect(operationOrder.indexOf("queryRaw:member_123")).toBeGreaterThan(
+      operationOrder.indexOf("queryRaw:member_family_owner"),
+    );
+  });
+
+  it("rechecks future Family Stripe effects before the final local delete", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+      transactionFamilyBillingRefRecords: [{
+        groupId: "hbag_family",
+        stripeEffectClaimId: "opaque-raced-family-claim",
+      }],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledOnce();
+    expect(operationOrder).not.toContain("delete:hostedMember");
   });
 
   it("persists cleanup ownership in the canonical deletion transaction before member removal", async () => {
@@ -1843,7 +1945,15 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "temporal", "prisma", "temporal", "cloudflare", "temporal"]);
+    expect(order).toEqual([
+      "prisma",
+      "prisma",
+      "temporal",
+      "prisma",
+      "temporal",
+      "cloudflare",
+      "temporal",
+    ]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       1,
@@ -2282,7 +2392,7 @@ describe("deleteHostedAccountData", () => {
       retryable: true,
     });
 
-    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(onTransaction).toHaveBeenCalledTimes(2);
     expect(deleteCalls).toEqual([]);
     expect(
       serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
@@ -2312,7 +2422,7 @@ describe("deleteHostedAccountData", () => {
       retryable: true,
     });
 
-    expect(onTransaction).toHaveBeenCalledTimes(2);
+    expect(onTransaction).toHaveBeenCalledTimes(3);
     expect(deleteCalls).toEqual([]);
   });
 
@@ -2585,8 +2695,8 @@ describe("deleteHostedAccountData", () => {
       );
     };
 
-    expect(await countLockQueriesByTransaction(1)).toEqual([2, 5]);
-    expect(await countLockQueriesByTransaction(128)).toEqual([2, 5]);
+    expect(await countLockQueriesByTransaction(1)).toEqual([1, 1, 4]);
+    expect(await countLockQueriesByTransaction(128)).toEqual([1, 1, 4]);
   });
 
   it("aborts before the receipt when provider ownership changes after preparation", async () => {
@@ -2707,11 +2817,13 @@ describe("deleteHostedAccountData", () => {
 
   it("cancels subscriptions before local deletion and persists cleanup ownership before member deletion", async () => {
     const order: string[] = [];
+    const databaseOrder: string[] = [];
     const stripe = {
       customers: { del: vi.fn() },
       subscriptions: {
         cancel: vi.fn(async () => {
           order.push("stripe:subscription-cancel");
+          databaseOrder.push("stripe:subscription-cancel");
           return { id: "sub_delete_123", status: "canceled" };
         }),
         retrieve: vi.fn(async () => ({ id: "sub_delete_123", status: "active" })),
@@ -2734,6 +2846,7 @@ describe("deleteHostedAccountData", () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       ...vendorRows,
       onTransaction: () => order.push("prisma"),
+      operationOrder: databaseOrder,
     });
 
     const result = await deleteHostedAccountData({
@@ -2744,12 +2857,19 @@ describe("deleteHostedAccountData", () => {
 
     expect(order).toEqual([
       "prisma",
+      "prisma",
       "stripe:subscription-cancel",
       "usage-credit:close",
       "prisma",
       "receipt:persist",
       "external-cleanup",
     ]);
+    expect(databaseOrder.indexOf(
+      "update:hostedGroupSponsorshipAuthorization",
+    )).toBeGreaterThanOrEqual(0);
+    expect(databaseOrder.indexOf(
+      "update:hostedGroupSponsorshipAuthorization",
+    )).toBeLessThan(databaseOrder.indexOf("stripe:subscription-cancel"));
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
       now: expect.any(Date),
@@ -3027,7 +3147,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(error).toBeInstanceOf(HostedOnboardingError);
     expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED");
-    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(onTransaction).toHaveBeenCalledTimes(2);
     expect(
       serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
     ).not.toHaveBeenCalled();
@@ -3218,7 +3338,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(error).toBeInstanceOf(HostedOnboardingError);
     expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED");
-    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(onTransaction).toHaveBeenCalledTimes(2);
     expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
   });
 
@@ -3396,7 +3516,7 @@ describe("deleteHostedAccountData", () => {
       code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
       retryable: true,
     });
-    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(onTransaction).toHaveBeenCalledTimes(2);
   });
 
   it("fences computer-use creation before external cleanup and deletes rows in a short transaction", async () => {
@@ -3458,7 +3578,7 @@ describe("deleteHostedAccountData", () => {
     expect((error as HostedOnboardingError).code).toBe(
       "ACCOUNT_DELETION_COMPUTER_USE_CLEANUP_FAILED",
     );
-    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(onTransaction).toHaveBeenCalledTimes(2);
     expect(deleteCalls).toEqual([]);
   });
 
@@ -4225,7 +4345,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "prisma"]);
+    expect(order).toEqual(["prisma", "prisma", "prisma"]);
     expect(result.cloudflare.deleted).toBe(false);
     expect(result.cloudflare.r2SkippedUserScopedPrefixes).toBe(true);
     expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledWith({
@@ -4264,7 +4384,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "prisma"]);
+    expect(order).toEqual(["prisma", "prisma", "prisma"]);
     expect(result.cloudflare.configured).toBe(false);
     expect(result.cloudflare.deleted).toBe(false);
     expect(result.cleanupPending).toBe(true);
@@ -4567,7 +4687,7 @@ describe("deleteHostedAccountData", () => {
       externalAccountId: "junction-user-123",
       provider: "junction",
     }));
-    expect(order).toEqual(["prisma", "prisma"]);
+    expect(order).toEqual(["prisma", "prisma", "prisma"]);
     expect(result.providerRevocations).toEqual([
       {
         connectionId: "dsc_junction",
@@ -4816,7 +4936,7 @@ describe("deleteHostedAccountData", () => {
     });
     expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
     expect(serviceMocks.createHostedDeviceSyncRegistry).toHaveBeenCalledTimes(1);
-    expect(order).toEqual(["prisma"]);
+    expect(order).toEqual(["prisma", "prisma"]);
   });
 
   it("revokes connected apps before local account deletion removes ownership rows", async () => {
@@ -5339,7 +5459,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
     expect(revokeAccess).toHaveBeenCalledTimes(1);
-    expect(order).toEqual(["prisma"]);
+    expect(order).toEqual(["prisma", "prisma"]);
   });
 });
 
@@ -5584,6 +5704,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   hostedComputerRunRows?: Record<string, unknown>[];
   hostedMemberUpdateCalls?: unknown[];
   familyBillingRefRecords?: Record<string, unknown>[];
+  familyClaimOwnerMemberIds?: string[];
   familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
   identityRecord?: Record<string, unknown> | null;
@@ -5599,6 +5720,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   rawDeletionCounts?: Record<string, bigint | number>;
   rawDeletionOwnerCalls?: string[];
   rawDeletionQueries?: HostedAccountDeletionRawQuery[];
+  sponsorshipCancellationError?: Error;
   terminalStatementCalls?: string[];
   productFeedbackRows?: Array<{
     id: string;
@@ -5630,6 +5752,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   }>;
   updateCalls?: HostedAccountDeletionPrismaUpdateCall[];
   transactionFamilyBillingRefRecords?: Record<string, unknown>[];
+  transactionFamilyClaimOwnerMemberIds?: string[];
   transactionFamilyGroups?: Array<{ id: string }>;
   transactionIdentityRecord?: Record<string, unknown> | null;
   transactionOwnedThreadContainerMemberIds?: string[];
@@ -5644,7 +5767,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   const currentDeletionMemberIds = () => Array.from(new Set([
     "member_123",
     ...(
-      transactionCallCount >= 2
+      transactionCallCount >= 3
         ? input.transactionOwnedThreadContainerMemberIds
           ?? input.ownedThreadContainerMemberIds
           ?? []
@@ -5853,7 +5976,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     hostedThreadContainer: {
       ...makeDeleteDelegate("hostedThreadContainer"),
       findMany: async () => {
-        const memberIds = transactionCallCount >= 2
+        const memberIds = transactionCallCount >= 3
           ? input.transactionOwnedThreadContainerMemberIds
             ?? input.ownedThreadContainerMemberIds
             ?? []
@@ -5863,10 +5986,25 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedAccountGroup: {
       ...makeDeleteDelegate("hostedAccountGroup"),
-      findMany: async () => input.transactionFamilyGroups ?? input.familyGroups ?? [],
+      findMany: async (args?: { select?: unknown; where?: unknown }) =>
+        args?.select
+          && typeof args.select === "object"
+          && "ownerMemberId" in args.select
+          ? (
+              input.transactionFamilyClaimOwnerMemberIds
+                ?? input.familyClaimOwnerMemberIds
+                ?? []
+            ).map((ownerMemberId) => ({ ownerMemberId }))
+          : input.transactionFamilyGroups ?? input.familyGroups ?? [],
     },
     hostedAccountGroupBillingRef: {
       ...makeDeleteDelegate("hostedAccountGroupBillingRef"),
+      findFirst: async () =>
+        (transactionCallCount >= 3
+          ? input.transactionFamilyBillingRefRecords ?? input.familyBillingRefRecords
+          : input.familyBillingRefRecords)?.find(
+          (record) => record.stripeEffectClaimId != null,
+        ) ?? null,
       findMany: async () => {
         input.operationOrder?.push("tx:target:family-billing");
         return input.transactionFamilyBillingRefRecords === undefined
@@ -5877,6 +6015,15 @@ function createHostedAccountDeletionPrismaForTest(input: {
         (input.transactionFamilyBillingRefRecords ?? input.familyBillingRefRecords)?.find(
           (record) => record.groupId === args.where.groupId,
         ) ?? null,
+    },
+    hostedGroupSponsorshipAuthorization: {
+      ...makeDeleteDelegate("hostedGroupSponsorshipAuthorization"),
+      findMany: async () => {
+        if (input.sponsorshipCancellationError) {
+          throw input.sponsorshipCancellationError;
+        }
+        return [];
+      },
     },
     hostedMember: {
       ...makeDeleteDelegate("hostedMember"),
@@ -5904,6 +6051,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedMemberBillingRef: {
       ...makeDeleteDelegate("hostedMemberBillingRef"),
+      findFirst: async () => {
+        const record = transactionCallCount >= 3
+          ? input.transactionBillingRefRecord ?? input.billingRefRecord ?? null
+          : input.billingRefRecord ?? null;
+        return record?.stripeEffectClaimId != null ? record : null;
+      },
       findUnique: async () => {
         input.operationOrder?.push("tx:target:member-billing");
         return input.transactionBillingRefRecord === undefined
@@ -6376,17 +6529,25 @@ type HostedAccountDeletionPrismaTransactionFake = {
     findMany: () => Promise<Array<{ memberId: string }>>;
   };
   hostedAccountGroup: HostedAccountDeletionPrismaDeleteDelegate & {
-    findMany: () => Promise<Array<{ id: string }>>;
+    findMany: (args?: { select?: unknown; where?: unknown }) => Promise<Array<
+      { id: string } | { ownerMemberId: string }
+    >>;
   };
   hostedAccountGroupBillingRef: HostedAccountDeletionPrismaDeleteDelegate & {
+    findFirst: () => Promise<unknown>;
     findMany: () => Promise<readonly unknown[]>;
     findUnique: (args: { where: { groupId: string } }) => Promise<unknown>;
   };
+  hostedGroupSponsorshipAuthorization:
+    HostedAccountDeletionPrismaDeleteDelegate & {
+      findMany: () => Promise<readonly unknown[]>;
+    };
   hostedMember: HostedAccountDeletionPrismaDeleteDelegate & {
     findUnique: (args: { where: { id: string } }) => Promise<unknown>;
     updateMany: (args: unknown) => Promise<{ count: number }>;
   };
   hostedMemberBillingRef: HostedAccountDeletionPrismaDeleteDelegate & {
+    findFirst: () => Promise<unknown>;
     findUnique: () => Promise<unknown>;
   };
   hostedMemberEmailAuthorization: HostedAccountDeletionPrismaDeleteDelegate & {

@@ -256,6 +256,7 @@ type MutableWearableDataset = {
   provenanceDiagnostics: WearableDataset["provenanceDiagnostics"][number][];
   rawMetricCandidates: WearableMetricCandidate[];
   sleepWindows: WearableSleepWindowCandidate[];
+  workoutFeatures: WearableDataset["workoutFeatures"][number][];
 };
 
 function groupWearableDatasetByPublicProvider(dataset: WearableDataset): Map<string, WearableDataset> {
@@ -311,6 +312,9 @@ function groupWearableDatasetByPublicProvider(dataset: WearableDataset): Map<str
       provider: provider === "unknown" ? null : provider,
     });
   }
+  for (const candidate of dataset.workoutFeatures) {
+    ensureProviderDataset(candidate.feature.provider).workoutFeatures.push(candidate);
+  }
 
   for (const providerDataset of grouped.values()) {
     providerDataset.activitySessionDayRollups = buildActivitySessionDayRollups(
@@ -346,6 +350,7 @@ function emptyWearableDataset(): MutableWearableDataset {
     provenanceDiagnostics: [],
     rawMetricCandidates: [],
     sleepWindows: [],
+    workoutFeatures: [],
   };
 }
 

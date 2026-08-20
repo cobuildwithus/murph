@@ -368,6 +368,10 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Weekly health insight',
     })
     expectCronSchedule(insightRecord?.schedule)
+    expect(insightRecord?.assistantTargetOverride).toEqual({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'high',
+    })
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('specific to this user')
@@ -473,6 +477,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
+      model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
     })
     expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
@@ -617,16 +622,16 @@ describe('applyMurphManagedAutomations core integration', () => {
       'member-facing product update, not a dump of release notes',
     )
     expect(productUpdatesRecord?.instructions).toContain(
+      'introduces or materially changes a member-facing action, decision, or visible experience',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'Never pitch reliability work.',
+    )
+    expect(productUpdatesRecord?.instructions).toContain(
+      'only restores or hardens otherwise unchanged behavior or reports internal durability',
+    )
+    expect(productUpdatesRecord?.instructions).not.toContain(
       'member encountered the corresponding issue',
-    )
-    expect(productUpdatesRecord?.instructions).toContain(
-      'Do not infer relevance merely from a connected provider',
-    )
-    expect(productUpdatesRecord?.instructions).toContain(
-      'WHOOP sync should be more reliable now.',
-    )
-    expect(productUpdatesRecord?.instructions).toContain(
-      'Omit implementation details such as retries, transient writes, artifacts, workers, checkpoints, migrations, or data plumbing',
     )
     expect(productUpdatesRecord?.instructions).toContain(
       'lower priority than exciting capabilities',
@@ -2178,6 +2183,10 @@ describe('applyMurphManagedAutomations core integration', () => {
 
     expect(migrated).toMatchObject({
       automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'high',
+      },
       route: existingRoute,
       schedule: {
         kind: 'cron',

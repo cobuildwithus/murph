@@ -5,7 +5,10 @@ import {
   requiresHistoricalResetDeviceSyncSource,
   sanitizeStoredDeviceSyncMetadata,
 } from "@murphai/device-syncd/public-account";
-import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
+import type {
+  DeviceSyncJobFailureEventOrigin,
+  PublicDeviceSyncAccount,
+} from "@murphai/device-syncd/types";
 import type {
   SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
@@ -20,7 +23,6 @@ import {
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   readJunctionHistoricalBackfillProgress,
-  sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
   type HostedExecutionDeviceSyncRuntimeApplyEntry,
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -37,25 +39,21 @@ import {
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  buildJunctionProviderSourceInstanceKey,
+  canonicalizeJunctionProviderSlug,
+} from "@murphai/device-syncd/connect-config";
 import {
   resolveConfiguredDeviceSyncProviderCredentialPolicy,
 } from "@murphai/device-syncd/provider-credential-policy";
 import { resolveDeviceProviderMatchKeys } from "@murphai/device-syncd/provider-match";
-import {
-  HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
-  type HostedRuntimeLogEntry,
-  type HostedRuntimeRedactedJson,
-} from "@murphai/hosted-execution/runtime-control";
-
 import { lockAndReadActiveHostedDomainRootKeyIdTx } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
-import {
-  formatHostedExecutionSafeLogErrorDetails,
-} from "../hosted-execution/logging";
-import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
-import { isHostedSourceDisconnectFenced } from "./connection-source-lifecycle";
+import {
+  isHostedSourceDisconnectFenced,
+  resolveHostedJunctionConnectionSource,
+} from "./connection-source-lifecycle";
 import {
   buildHostedPublicDeviceSyncAccount,
   type HostedStaticDeviceSyncConnectionRecord,
@@ -64,6 +62,7 @@ import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import {
   hostedConnectionRecordArgs,
   hostedRuntimeRedactedConnectionRecordArgs,
+  expandCanonicalHostedSourceProviderSlugFilter,
   type HostedDeviceSyncDirtyConnectionRecord,
   type HostedDeviceConnectionSource,
   mapHostedConnectionRecord,
@@ -90,11 +89,10 @@ import {
 import { normalizeNullableString } from "./shared";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
-
-interface HostedRuntimeFailureApplyResult {
-  failureDiagnostic: HostedRuntimeLogEntry | null;
-  update: HostedExecutionDeviceSyncRuntimeApplyEntry;
-}
+type HostedRuntimeConnectionSourceWrite =
+  HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate & {
+    lifecycleEpoch?: number;
+  };
 
 interface HostedRuntimePreparedApplyConnection {
   record: HostedConnectionRecord;
@@ -118,9 +116,13 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     input.trustedUserId,
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
-  const providerKeys = resolveDeviceProviderMatchKeys(parsed.provider);
-  const sourceProviderKeys = resolveDeviceProviderMatchKeys(parsed.sourceProviderSlug);
-  const boundedSourceProviderKeys = sourceProviderKeys.length > 0 ? sourceProviderKeys : providerKeys;
+  const providerKeys = expandCanonicalHostedSourceProviderSlugFilter(
+    resolveDeviceProviderMatchKeys(parsed.provider),
+  );
+  const sourceProviderKeys = expandCanonicalHostedSourceProviderSlugFilter(
+    resolveDeviceProviderMatchKeys(parsed.sourceProviderSlug),
+  );
+  const boundedSourceProviderKeys = [...new Set([...providerKeys, ...sourceProviderKeys])];
   const explicitBlankFilter = (
     parsed.provider !== undefined && parsed.provider !== null && providerKeys.length === 0
   ) || (
@@ -163,9 +165,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
                 sources: {
                   some: {
                     sourceProviderSlug: { in: providerKeys },
-                    status: {
-                      not: "disconnected",
-                    },
                   },
                 },
               },
@@ -177,9 +176,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
             sources: {
               some: {
                 sourceProviderSlug: { in: sourceProviderKeys },
-                status: {
-                  not: "disconnected",
-                },
               },
             },
           }
@@ -198,19 +194,12 @@ export async function readHostedDeviceSyncRuntimeState(input: {
         ...hostedRuntimeRedactedConnectionRecordArgs,
       });
   const hasNextPage = !parsed.connectionId && collectedRecords.length > pageLimit;
-  const records = collectedRecords.slice(0, pageLimit);
-
-  const providerApplicationRuntime = await resolveHostedRuntimeProviderApplications({
-    includeCredentialMaterial: parsed.includeCredentialMaterial,
-    prisma: controlPlane.store.prisma,
-    records,
-    userId: input.trustedUserId,
-  });
+  const pageRecords = collectedRecords.slice(0, pageLimit);
 
   const sourceProjectionFiltered = boundedSourceProviderKeys.length > 0;
   const projectedSources = await controlPlane.store
     .listBoundedConnectionSourcesForConnections({
-      connectionIds: records.map((record) => record.id),
+      connectionIds: pageRecords.map((record) => record.id),
       excludeDisconnected: sourceProjectionFiltered,
       limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
       sourceProviderSlugs: sourceProjectionFiltered ? boundedSourceProviderKeys : null,
@@ -221,6 +210,26 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     sources.push(source);
     sourcesByConnectionId.set(source.connectionId, sources);
   }
+  const records = pageRecords.filter((record) => {
+    const sourceSlugs = new Set(
+      (sourcesByConnectionId.get(record.id) ?? []).map((source) => source.sourceProviderSlug),
+    );
+    return (
+      sourceProviderKeys.length === 0
+      || sourceProviderKeys.some((key) => sourceSlugs.has(key))
+    ) && (
+      providerKeys.length === 0
+      || providerKeys.includes(record.provider)
+      || providerKeys.some((key) => sourceSlugs.has(key))
+    );
+  });
+
+  const providerApplicationRuntime = await resolveHostedRuntimeProviderApplications({
+    includeCredentialMaterial: parsed.includeCredentialMaterial,
+    prisma: controlPlane.store.prisma,
+    records,
+    userId: input.trustedUserId,
+  });
 
   const tokenConnectionIds = new Set<string>();
   if (parsed.includeCredentialMaterial) {
@@ -262,12 +271,19 @@ export async function readHostedDeviceSyncRuntimeState(input: {
           record as HostedRuntimeRedactedConnectionRecord,
         );
     const material = secretMaterial.get(record.id) ?? null;
+    const visibleSourceProviderKeys = sourceProviderKeys.length > 0
+      ? sourceProviderKeys
+      : providerKeys;
+    const visibleSources = (sourcesByConnectionId.get(record.id) ?? []).filter((source) =>
+      visibleSourceProviderKeys.length === 0
+      || visibleSourceProviderKeys.includes(source.sourceProviderSlug)
+    );
     connections.push(buildHostedRuntimeProjectedConnectionSnapshot(
       record,
       mappedRecord,
       material?.externalAccountId ?? null,
       material?.tokenBundle ?? null,
-      sourcesByConnectionId.get(record.id)?.map(toHostedRuntimeConnectionSourceSnapshot) ?? [],
+      visibleSources.map(toHostedRuntimeConnectionSourceSnapshot),
       {
         forceReauthorizationRequired:
           providerApplicationRuntime.blockedConnectionIds.has(record.id),
@@ -284,8 +300,8 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     generatedAt: new Date().toISOString(),
     nextCursor: hasNextPage
       ? {
-          createdAt: records.at(-1)!.createdAt.toISOString(),
-          id: records.at(-1)!.id,
+          createdAt: pageRecords.at(-1)!.createdAt.toISOString(),
+          id: pageRecords.at(-1)!.id,
         }
       : null,
     ...(Object.keys(providerApplicationRuntime.providerConfigs).length > 0
@@ -325,7 +341,6 @@ function requireHostedRuntimeSnapshotExternalAccountPlaintexts(
 
 export async function applyHostedDeviceSyncRuntimeResult(input: {
   request: Request;
-  scheduleFailureDiagnostics?: (task: () => Promise<void>) => void;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
   const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest(
@@ -347,8 +362,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     userId: input.trustedUserId,
   });
   const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
-  const failureDiagnostics: HostedRuntimeLogEntry[] = [];
 
+  // Assistant-runtime maintenance owns per-attempt job failure telemetry. Web
+  // applies only the resulting canonical connection state.
   for (const update of parsed.updates) {
     const preparedConnection = preparedConnections.get(update.connectionId) ?? null;
     const applied = await controlPlane.store.withConnectionMutationLock(
@@ -364,15 +380,12 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
         if (!record || !preparedConnection) {
           return {
-            failureDiagnostic: null,
-            update: {
-              connection: null,
-              connectionId: update.connectionId,
-              status: "missing",
-              tokenUpdate: "missing",
-              writeUpdate: "missing",
-            },
-          } satisfies HostedRuntimeFailureApplyResult;
+            connection: null,
+            connectionId: update.connectionId,
+            status: "missing",
+            tokenUpdate: "missing",
+            writeUpdate: "missing",
+          } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
         }
 
         const secretAuthorityCurrent = isHostedRuntimeApplySecretAuthorityCurrent(
@@ -598,6 +611,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
                 ? { displayName: source.displayName ?? null }
                 : {}),
               status: source.status,
+              ...(source.lifecycleEpoch === undefined
+                ? {}
+                : { lifecycleEpoch: source.lifecycleEpoch }),
               ...(Object.prototype.hasOwnProperty.call(source, "resourceAvailabilitySummary")
                 ? { resourceAvailabilitySummary: source.resourceAvailabilitySummary ?? null }
                 : {}),
@@ -641,55 +657,27 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           });
         }
 
-        const failureDiagnostic =
-          !versionMismatch && (stateMutationRequested || credentialMutationRequested)
-            ? buildHostedRuntimeFailureApplyDiagnostic({
-                appliedAt,
-                baseline,
-                nextAccount,
-                update,
-              })
-            : null;
-
         return {
-          failureDiagnostic,
-          update: {
-            connection: buildHostedRuntimeConnectionSnapshot(
-              writtenRecord ?? record,
-              null,
-              durableExternalAccountId,
-              [],
-              {
-                forceReauthorizationRequired:
-                  !providerApplicationBindingCurrent,
-                includeCredentialMaterial: false,
-              },
-            ).connection,
-            connectionId: update.connectionId,
-            status: "updated",
-            tokenUpdate,
-            writeUpdate,
-          },
-        } satisfies HostedRuntimeFailureApplyResult;
+          connection: buildHostedRuntimeConnectionSnapshot(
+            writtenRecord ?? record,
+            null,
+            durableExternalAccountId,
+            [],
+            {
+              forceReauthorizationRequired:
+                !providerApplicationBindingCurrent,
+              includeCredentialMaterial: false,
+            },
+          ).connection,
+          connectionId: update.connectionId,
+          status: "updated",
+          tokenUpdate,
+          writeUpdate,
+        } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
       },
-    ).catch(async (error: unknown) => {
-      await flushHostedRuntimeFailureApplyDiagnostics({
-        entries: failureDiagnostics,
-        schedule: input.scheduleFailureDiagnostics,
-        userId: input.trustedUserId,
-      });
-      throw error;
-    });
-    updates.push(applied.update);
-    if (applied.failureDiagnostic) {
-      failureDiagnostics.push(applied.failureDiagnostic);
-    }
+    );
+    updates.push(applied);
   }
-  await flushHostedRuntimeFailureApplyDiagnostics({
-    entries: failureDiagnostics,
-    schedule: input.scheduleFailureDiagnostics,
-    userId: input.trustedUserId,
-  });
 
   return {
     appliedAt,
@@ -1345,6 +1333,7 @@ function toHostedRuntimeConnectionSourceSnapshot(
     firstSeenAt: source.firstSeenAt,
     lastErrorCode: source.lastErrorCode,
     lastErrorMessage: source.lastErrorMessage,
+    lifecycleEpoch: source.lifecycleEpoch,
     lastSeenAt: source.lastSeenAt,
     lastDataAt: source.lastDataAt,
     resourceCount: countHostedRuntimeConnectionSourceResources(
@@ -1429,10 +1418,16 @@ function isHostedRuntimeHistoricalResetStateInconsistent(input: {
     HostedDeviceConnectionSource | HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate
   >();
   for (const source of input.currentSources) {
-    sourcesByProvider.set(source.sourceProviderSlug.trim().toLowerCase(), source);
+    sourcesByProvider.set(
+      canonicalizeJunctionProviderSlug(source.sourceProviderSlug) ?? source.sourceProviderSlug,
+      source,
+    );
   }
   for (const source of input.sourceUpdates) {
-    sourcesByProvider.set(source.sourceProviderSlug.trim().toLowerCase(), source);
+    sourcesByProvider.set(
+      canonicalizeJunctionProviderSlug(source.sourceProviderSlug) ?? source.sourceProviderSlug,
+      source,
+    );
   }
 
   const historicalStatus = readJunctionHistoricalBackfillProgress(
@@ -1456,13 +1451,14 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
   updates: readonly HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
 }): {
   staleCount: number;
-  toApply: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
+  toApply: HostedRuntimeConnectionSourceWrite[];
 } {
   const currentByInstanceKey = new Map(
     input.currentSources.map((source) => [source.sourceInstanceKey, source]),
   );
-  const toApply: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[] = [];
+  const toApply: HostedRuntimeConnectionSourceWrite[] = [];
   let staleCount = 0;
+  const junction = input.provider.trim().toLowerCase() === "junction";
   const historicalProgressMutable =
     canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.historicalMetadata);
   const historicalResetRequired = historicalProgressMutable
@@ -1474,10 +1470,51 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       provider: input.provider,
       update: rawUpdate,
     });
-    const sourceInstanceKeyCanonicalized = normalized.sourceInstanceKeyCanonicalized;
+    let sourceInstanceKeyCanonicalized = normalized.sourceInstanceKeyCanonicalized;
     let update = normalized.update;
-    const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
+    const current = junction
+      ? resolveHostedJunctionConnectionSource(
+          input.currentSources,
+          update.sourceProviderSlug,
+        )
+      : currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
+    if (junction && current) {
+      update = {
+        ...update,
+        sourceInstanceKey: current.sourceInstanceKey,
+        sourceProviderSlug: current.sourceProviderSlug,
+      };
+      sourceInstanceKeyCanonicalized =
+        update.sourceInstanceKey !== rawUpdate.sourceInstanceKey
+        || update.sourceProviderSlug !== rawUpdate.sourceProviderSlug;
+    }
     const currentLastSeenAt = current?.lastSeenAt ?? null;
+
+    if (
+      current
+      && (
+        (
+          update.observedLifecycleEpoch !== undefined
+          && current.lifecycleEpoch !== update.observedLifecycleEpoch
+        )
+        || (
+          junction
+          && current.lifecycleEpoch > 1
+          && update.observedLifecycleEpoch === undefined
+        )
+      )
+    ) {
+      staleCount += 1;
+      continue;
+    }
+
+    if (
+      junction
+      && current?.status === "disconnected"
+    ) {
+      staleCount += 1;
+      continue;
+    }
 
     if (current && isHostedSourceDisconnectFenced(current)) {
       staleCount += 1;
@@ -1527,7 +1564,9 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       continue;
     }
 
-    toApply.push(update);
+    toApply.push(current
+      ? { ...update, lifecycleEpoch: current.lifecycleEpoch }
+      : update);
   }
 
   return { staleCount, toApply };
@@ -1548,23 +1587,32 @@ function normalizeHostedRuntimeSourceUpdateForProvider(input: {
     };
   }
 
-  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-    connectionId: input.connectionId,
-    sourceProviderSlug: input.update.sourceProviderSlug,
-  });
+  const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(
+    input.update.sourceProviderSlug,
+  );
+  const canonicalSourceInstanceKey = canonicalSourceProviderSlug
+    ? buildJunctionProviderSourceInstanceKey({
+        connectionId: input.connectionId,
+        sourceProviderSlug: canonicalSourceProviderSlug,
+      })
+    : null;
 
-  if (!canonicalSourceInstanceKey || canonicalSourceInstanceKey === input.update.sourceInstanceKey) {
+  if (!canonicalSourceInstanceKey || !canonicalSourceProviderSlug) {
     return {
       sourceInstanceKeyCanonicalized: false,
       update: input.update,
     };
   }
 
+  const identityCanonicalized = canonicalSourceInstanceKey !== input.update.sourceInstanceKey
+    || canonicalSourceProviderSlug !== input.update.sourceProviderSlug;
+
   return {
-    sourceInstanceKeyCanonicalized: true,
+    sourceInstanceKeyCanonicalized: identityCanonicalized,
     update: {
       ...input.update,
       sourceInstanceKey: canonicalSourceInstanceKey,
+      sourceProviderSlug: canonicalSourceProviderSlug,
     },
   };
 }
@@ -1736,305 +1784,6 @@ function hostedRuntimeCredentialMutationRequiresTokenFence(
   update: HostedExecutionDeviceSyncRuntimeConnectionUpdate,
 ): boolean {
   return update.credential !== undefined;
-}
-
-function buildHostedRuntimeFailureApplyDiagnostic(input: {
-  appliedAt: string;
-  baseline: HostedRuntimeConnectionSnapshot;
-  nextAccount: PublicDeviceSyncAccount;
-  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate;
-}): HostedRuntimeLogEntry | null {
-  if (!didHostedRuntimeFailureStateAdvance(
-    input.baseline.localState.lastSyncErrorAt,
-    input.nextAccount.lastSyncErrorAt,
-  )) {
-    return null;
-  }
-
-  return {
-    at: input.nextAccount.lastSyncErrorAt ?? input.appliedAt,
-    component: "device-sync",
-    errorCode: toHostedRuntimeApplyLogCode(
-      input.nextAccount.lastErrorCode ?? input.update.failureDiagnostic?.code ?? null,
-    ),
-    eventCode: "device-sync.job_failed",
-    level: "warn",
-    phase: "invoke",
-    redactedJson: buildHostedRuntimeFailureApplyRedactedJson(input),
-  };
-}
-
-async function writeHostedRuntimeFailureApplyDiagnosticsBestEffort(input: {
-  entries: readonly HostedRuntimeLogEntry[];
-  userId: string;
-}): Promise<void> {
-  for (
-    let offset = 0;
-    offset < input.entries.length;
-    offset += HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES
-  ) {
-    const entries = input.entries.slice(
-      offset,
-      offset + HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
-    );
-    try {
-      await writeHostedRuntimeLogs({
-        entries,
-        userId: input.userId,
-      });
-    } catch (error) {
-      const first = entries[0];
-      const provider = first?.redactedJson?.provider;
-      console.warn("Hosted device-sync failure diagnostic log write failed.", {
-        ...formatHostedExecutionSafeLogErrorDetails(error, {
-          code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_LOG_WRITE_FAILED",
-        }),
-        batchSize: entries.length,
-        provider: typeof provider === "string" ? provider : null,
-        runtimeFailureCode: first?.errorCode ?? null,
-      });
-    }
-  }
-}
-
-async function flushHostedRuntimeFailureApplyDiagnostics(input: {
-  entries: readonly HostedRuntimeLogEntry[];
-  schedule?: (task: () => Promise<void>) => void;
-  userId: string;
-}): Promise<void> {
-  if (input.entries.length === 0) {
-    return;
-  }
-
-  const entries = [...input.entries];
-  const task = async () => {
-    await writeHostedRuntimeFailureApplyDiagnosticsBestEffort({
-      entries,
-      userId: input.userId,
-    });
-  };
-  if (!input.schedule) {
-    await task();
-    return;
-  }
-
-  try {
-    input.schedule(task);
-  } catch (error) {
-    console.warn(
-      "Hosted device-sync failure diagnostic scheduling failed.",
-      formatHostedExecutionSafeLogErrorDetails(error, {
-        code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_SCHEDULING_FAILED",
-      }),
-    );
-  }
-}
-
-function buildHostedRuntimeFailureApplyRedactedJson(input: {
-  baseline: HostedRuntimeConnectionSnapshot;
-  nextAccount: PublicDeviceSyncAccount;
-  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate;
-}): HostedRuntimeRedactedJson {
-  const diagnostic = input.update.failureDiagnostic ?? null;
-  const summary = sanitizeHostedRuntimeDiagnosticText(
-    input.update.localState?.lastErrorMessage ?? input.nextAccount.lastErrorMessage ?? null,
-  );
-
-  return {
-    failureCode: toHostedRuntimeApplyLogCode(input.nextAccount.lastErrorCode ?? diagnostic?.code ?? null),
-    failureSummary: summary ?? "Hosted device-sync runtime failure state advanced.",
-    ...buildHostedRuntimeFailureDiagnosticRedactedJson(diagnostic),
-    hadPriorFailure: Boolean(input.baseline.localState.lastSyncErrorAt),
-    hadPriorSuccess: Boolean(input.baseline.localState.lastSyncCompletedAt),
-    nextReconcileAt: input.nextAccount.nextReconcileAt,
-    provider: toHostedRuntimeApplyLogCode(input.nextAccount.provider),
-    setupPhase: input.nextAccount.setupPhase ?? null,
-    status: toHostedRuntimeApplyLogCode(input.nextAccount.status),
-    syncCompletedAt: input.nextAccount.lastSyncCompletedAt,
-    syncFailedAt: input.nextAccount.lastSyncErrorAt,
-    syncStartedAt: input.nextAccount.lastSyncStartedAt,
-  };
-}
-
-function buildHostedRuntimeFailureDiagnosticRedactedJson(
-  diagnostic: HostedExecutionDeviceSyncRuntimeConnectionUpdate["failureDiagnostic"] | null,
-): HostedRuntimeRedactedJson {
-  if (!diagnostic) {
-    return {};
-  }
-
-  return {
-    failureRetryable: diagnostic.retryable,
-    ...(diagnostic.accountStatus
-      ? { providerAccountStatus: toHostedRuntimeApplyLogCode(diagnostic.accountStatus) }
-      : {}),
-    ...buildHostedRuntimeFailureDiagnosticDetailsRedactedJson(diagnostic.details),
-  };
-}
-
-type HostedRuntimeFailureDiagnosticDetails =
-  NonNullable<HostedExecutionDeviceSyncRuntimeConnectionUpdate["failureDiagnostic"]>["details"];
-type HostedRuntimeFailureDiagnosticStringField = {
-  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
-    string | undefined ? Key : never;
-}[keyof HostedRuntimeFailureDiagnosticDetails];
-type HostedRuntimeFailureDiagnosticNumberField = {
-  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
-    number | undefined ? Key : never;
-}[keyof HostedRuntimeFailureDiagnosticDetails];
-type HostedRuntimeFailureDiagnosticBooleanField = {
-  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
-    boolean | undefined ? Key : never;
-}[keyof HostedRuntimeFailureDiagnosticDetails];
-
-const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
-  "failureCauseCode",
-  "failureCauseName",
-  "failureErrorName",
-  "providerRequestAuthKind",
-  "providerRequestAuthPlacement",
-  "providerRequestBodyFieldNames",
-  "providerRequestBodyKind",
-  "providerRequestContentType",
-  "providerRequestEndpointKind",
-  "providerRequestMethod",
-  "providerRequestQueryParameterNames",
-  "providerResponseErrorCode",
-  "providerResponseShapeKind",
-  "providerOAuthErrorCode",
-  "providerOAuthGrantType",
-  "providerOAuthRequestBodyBuilderKind",
-  "providerOAuthRequestClientAuthPlacement",
-  "providerOAuthRequestContentType",
-  "providerOAuthRequestEncodingKind",
-  "providerOAuthRequestMethod",
-  "providerOAuthRequestParameterNames",
-  "providerOAuthRequestScopeValue",
-  "providerOAuthRequestTokenEndpointKind",
-  "providerOAuthResponseShapeKind",
-] as const satisfies readonly HostedRuntimeFailureDiagnosticStringField[];
-
-const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
-  "failureErrorCause",
-  "providerHttpStatusText",
-  "providerResponseErrorDescription",
-  "providerOAuthErrorDescription",
-] as const satisfies readonly HostedRuntimeFailureDiagnosticStringField[];
-
-const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
-  "providerHttpStatus",
-  "providerRequestBodyFieldCount",
-  "providerRequestQueryParameterCount",
-  "providerOAuthRequestDuplicateParameterCount",
-  "providerOAuthRequestParameterCount",
-  "providerOAuthRequestScopeCount",
-] as const satisfies readonly HostedRuntimeFailureDiagnosticNumberField[];
-
-const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
-  "providerRequestCredentialPresent",
-  "providerResponseErrorDescriptionFieldPresent",
-  "providerResponseErrorFieldPresent",
-  "providerOAuthRequestClientCredentialPresent",
-  "providerOAuthRequestClientIdPresent",
-  "providerOAuthRequestHasDuplicateParameters",
-  "providerOAuthRequestOfflineScopePresent",
-  "providerOAuthRequestRefreshCredentialPresent",
-  "providerOAuthRequestScopePresent",
-  "providerOAuthResponseErrorDescriptionFieldPresent",
-  "providerOAuthResponseErrorFieldPresent",
-] as const satisfies readonly HostedRuntimeFailureDiagnosticBooleanField[];
-
-function buildHostedRuntimeFailureDiagnosticDetailsRedactedJson(
-  details: HostedRuntimeFailureDiagnosticDetails,
-): HostedRuntimeRedactedJson {
-  const redacted: HostedRuntimeRedactedJson = {};
-
-  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_CODE_FIELDS) {
-    appendHostedRuntimeDiagnosticCode(redacted, field, details[field]);
-  }
-
-  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_REASON_FIELDS) {
-    appendHostedRuntimeDiagnosticReason(redacted, field, details[field]);
-  }
-
-  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_NUMBER_FIELDS) {
-    appendHostedRuntimeDiagnosticNumber(redacted, field, details[field]);
-  }
-
-  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS) {
-    appendHostedRuntimeDiagnosticBoolean(redacted, field, details[field]);
-  }
-
-  return redacted;
-}
-
-function appendHostedRuntimeDiagnosticBoolean(
-  redacted: HostedRuntimeRedactedJson,
-  key: string,
-  value: boolean | undefined,
-): void {
-  if (value !== undefined) {
-    redacted[key] = value;
-  }
-}
-
-function appendHostedRuntimeDiagnosticNumber(
-  redacted: HostedRuntimeRedactedJson,
-  key: string,
-  value: number | undefined,
-): void {
-  if (value !== undefined) {
-    redacted[key] = value;
-  }
-}
-
-function appendHostedRuntimeDiagnosticCode(
-  redacted: HostedRuntimeRedactedJson,
-  key: string,
-  value: string | undefined,
-): void {
-  if (value) {
-    redacted[key] = toHostedRuntimeApplyLogCode(value);
-  }
-}
-
-function appendHostedRuntimeDiagnosticReason(
-  redacted: HostedRuntimeRedactedJson,
-  key: string,
-  value: string | undefined,
-): void {
-  const sanitized = sanitizeHostedRuntimeDiagnosticText(value ?? null);
-  if (sanitized) {
-    redacted[key] = sanitized;
-  }
-}
-
-function didHostedRuntimeFailureStateAdvance(
-  previousValue: string | null,
-  nextValue: string | null,
-): boolean {
-  if (!nextValue || nextValue === previousValue) {
-    return false;
-  }
-
-  if (!previousValue) {
-    return true;
-  }
-
-  const previousMs = Date.parse(previousValue);
-  const nextMs = Date.parse(nextValue);
-
-  return !Number.isNaN(nextMs) && (Number.isNaN(previousMs) || nextMs > previousMs);
-}
-
-function toHostedRuntimeApplyLogCode(value: string | null | undefined): string {
-  const normalized = value?.trim();
-
-  return normalized
-    && normalized.length <= 96
-    && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(normalized)
-    ? normalized
-    : "unclassified";
 }
 
 function resolveHostedRuntimeCredentialUpdate(

@@ -214,10 +214,10 @@ function releaseHeldSlot() {
   }
 }
 
-function runCommand(commandArgs, env) {
+async function runCommand(commandArgs, env) {
   const [command, ...args] = commandArgs;
 
-  return new Promise((resolve, reject) => {
+  const exitState = await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: invocationCwd,
       detached: useDetachedChildProcessGroup,
@@ -237,17 +237,30 @@ function runCommand(commandArgs, env) {
     });
     child.on("exit", (code, signal) => {
       activeChild = null;
-      if (forcedExitCode !== null) {
-        resolve(forcedExitCode);
-        return;
-      }
-      if (signal) {
-        resolve(signalToExitCode(signal));
-        return;
-      }
-      resolve(code ?? 1);
+      resolve({ code, signal });
     });
   });
+
+  if (forcedExitCode !== null) {
+    return forcedExitCode;
+  }
+  if (exitState.signal) {
+    return signalToExitCode(exitState.signal);
+  }
+  return exitState.code ?? 1;
+}
+
+function signalProcessGroup(pid, signalName) {
+  if (!pid) {
+    return;
+  }
+  try {
+    process.kill(-pid, signalName);
+  } catch (error) {
+    if (!isMissingProcessError(error) && !isNotPermittedProcessError(error)) {
+      throw error;
+    }
+  }
 }
 
 function writeOwnerMetadata(slotPath, owner) {
@@ -344,17 +357,18 @@ function handleTerminationSignal(signalName, exitCode) {
     process.exit(exitCode);
   }
 
-  try {
-    if (useDetachedChildProcessGroup) {
-      process.kill(-activeChild.pid, signalName);
-    } else {
+  if (useDetachedChildProcessGroup) {
+    signalProcessGroup(activeChild.pid, signalName);
+  } else {
+    try {
       activeChild.kill(signalName);
-    }
-  } catch (error) {
-    if (!isMissingProcessError(error)) {
-      throw error;
+    } catch (error) {
+      if (!isMissingProcessError(error)) {
+        throw error;
+      }
     }
   }
+
 }
 
 function parseInvocation(argv) {
@@ -468,6 +482,10 @@ function isMissingPathError(error) {
 
 function isMissingProcessError(error) {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "ESRCH");
+}
+
+function isNotPermittedProcessError(error) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "EPERM");
 }
 
 function delay(delayMs) {

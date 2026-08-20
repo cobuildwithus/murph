@@ -163,12 +163,20 @@ afterEach(() => {
 });
 
 test("ConnectPage renders source search, source names, and logo marks", async () => {
-  const { default: ConnectPage, metadata } = await import(
+  const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
+  // Read metadata through the page module so the route-owner re-export is
+  // proven, not just the helper module.
+  const { metadata } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(metadata.title, "Connect Devices — Murph");
+  const ogImages = metadata.openGraph?.images;
+  assert.ok(Array.isArray(ogImages));
+  const [ogImage] = ogImages;
+  assert.ok(typeof ogImage === "object" && ogImage !== null && "url" in ogImage);
+  assert.equal(String(ogImage.url), "/connect/opengraph-image");
   assert.match(markup, /Sync your biomarkers/);
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
@@ -1085,8 +1093,14 @@ test("ConnectSourcesGrid requires account authentication before opening the Zepp
 
   assert.ok(
     rendered.container.querySelector(
-      'button[aria-label="Log in or sign up to set up Zepp / Amazfit"]',
+      'button[aria-label="Sign in to Murph"]',
     ),
+  );
+  assert.equal(
+    rendered.container.querySelector(
+      'button[aria-label="Sign in to Murph"]',
+    )?.textContent,
+    "Sign in",
   );
   assert.equal(
     rendered.container.querySelector(
@@ -2679,8 +2693,8 @@ test("SourceCard shows modern Dexcom as coming soon without hiding existing-acco
   );
 
   assert.match(signedOutMarkup, /Dexcom connections are coming soon\./u);
-  assert.match(signedOutMarkup, />Coming soon<\/button>/u);
-  assert.doesNotMatch(signedOutMarkup, />Sign in<\/button>/u);
+  assert.match(signedOutMarkup, />Sign in<\/button>/u);
+  assert.doesNotMatch(signedOutMarkup, />Coming soon<\/button>/u);
   assert.doesNotMatch(signedOutMarkup, /aria-label="Connect Dexcom"/u);
 
   const connectedMarkup = renderToStaticMarkup(
@@ -2859,6 +2873,74 @@ test("SourceCard stacks Apple Health app content vertically at the base breakpoi
   );
 });
 
+test("SourceCard uses one sign-in action for every signed-out source type", async () => {
+  const { SourceCard } = await import(
+    "../app/(dashboard)/connect/connect-source-card"
+  );
+  const logo = {
+    className: "size-11 object-contain",
+    height: 44,
+    src: "/logo.png",
+    width: 44,
+  };
+  const sources = [
+    {
+      connectTarget: "oura",
+      description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+      id: "oura",
+      logo,
+      name: "Oura",
+    },
+    {
+      connectionAvailable: false,
+      description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+      id: "zepp",
+      logo,
+      name: "Zepp / Amazfit",
+      setupGuideActionLabel: "Set up sync",
+      setupGuideId: "zepp-apple-health" as const,
+    },
+    {
+      description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+      id: "apple-health",
+      logo,
+      name: "Apple Health",
+      unavailableActionLabel: "Download app",
+      unavailableActionUrl:
+        "https://apps.apple.com/us/app/murph-ai/id6786145859",
+    },
+    {
+      connectionAvailable: false,
+      description: "CGM glucose readings and trends.",
+      id: "dexcom",
+      logo,
+      name: "Dexcom",
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
+    },
+  ];
+
+  for (const source of sources) {
+    const markup = renderToStaticMarkup(
+      createElement(SourceCard, {
+        authenticated: false,
+        errorMessage: null,
+        onDisconnectTargetChange: () => {},
+        onStartConnection: async () => {},
+        pending: false,
+        pendingDisconnect: false,
+        source,
+      }),
+    );
+
+    assert.match(markup, /aria-label="Sign in to Murph"/u);
+    assert.equal(markup.match(/>Sign in<\/button>/gu)?.length, 1);
+    assert.doesNotMatch(markup, />Log in or sign up<\/button>/u);
+    assert.doesNotMatch(markup, />Download app<\/a>/u);
+    assert.doesNotMatch(markup, />Set up sync<\/button>/u);
+  }
+});
+
 test("connect source card design study renders the production action states", async () => {
   const { ConnectSourceCardStudy } = await import(
     "../app/design/connect-source-card-study"
@@ -2866,13 +2948,12 @@ test("connect source card design study renders the production action states", as
   const markup = renderToStaticMarkup(createElement(ConnectSourceCardStudy));
 
   assert.match(markup, /id="connect-source-card-actions"/u);
+  assert.match(markup, /data-design-state="signed-out-source-actions"/u);
   assert.match(markup, /aria-label="Disconnect Garmin"/u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.match(markup, /aria-label="Connect Fitbit"/u);
-  assert.match(markup, /aria-label="Sign in to connect Oura"/u);
+  assert.equal(markup.match(/aria-label="Sign in to Murph"/gu)?.length, 4);
   assert.match(markup, /Dexcom connections are coming soon\./u);
-  assert.match(markup, /aria-label="Dexcom web setup is not available yet"/u);
-  assert.doesNotMatch(markup, /aria-label="Sign in to connect Dexcom"/u);
   assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);
   assert.match(markup, /Peloton could not open\. Please try again\./u);
@@ -3152,7 +3233,7 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, />Sign in<\/button>/);
-  assert.match(markup, /Sign in to connect Garmin/);
+  assert.match(markup, /aria-label="Sign in to Murph"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Garmin"/u);
   expectSettingResponseNotLoaded();
 });

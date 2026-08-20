@@ -19,7 +19,13 @@ import {
   type DeviceSyncCredentialIndependentImportJobClassifier,
 } from "../hosted-runtime.ts";
 import { isJunctionRetainedAcceptedWorkJob } from "../junction-resources.ts";
-import type { DeviceSyncJobInput, DeviceSyncJobRecord } from "../types.ts";
+import {
+  JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX,
+  type DeviceSyncJobFailureDisposition,
+  type DeviceSyncJobFailureTransition,
+  type DeviceSyncJobInput,
+  type DeviceSyncJobRecord,
+} from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
   provider: string;
@@ -50,6 +56,7 @@ interface StoredJobRow {
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
+export const DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT = 396;
 
 function requireJobRowString(
   row: Record<string, unknown>,
@@ -203,6 +210,51 @@ export function listPendingDeviceSyncJobsForAccount(input: {
     const job = mapJobRow(row);
     return job ? [job] : [];
   });
+}
+
+export function findActiveDeviceSyncJobDedupeKeys(input: {
+  accountId: string;
+  database: DatabaseSync;
+  dedupeKeys: readonly string[];
+  provider: string;
+}): ReadonlySet<string> {
+  const dedupeKeys = [...new Set(input.dedupeKeys)];
+  if (dedupeKeys.length > DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT) {
+    throw new TypeError(
+      `Active device-sync dedupe lookup exceeds ${DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT} keys.`,
+    );
+  }
+  if (dedupeKeys.length === 0) {
+    return new Set();
+  }
+  const now = toIsoTimestamp(new Date());
+  const placeholders = dedupeKeys.map(() => "?").join(", ");
+  const rows = input.database.prepare(`
+    select distinct dedupe_key
+    from device_job
+    where account_id = ?
+      and provider = ?
+      and dedupe_key in (${placeholders})
+      and status in ('queued', 'running')
+      and not (
+        status = 'running'
+        and lease_expires_at is not null
+        and lease_expires_at <= ?
+        and attempts >= max_attempts
+        and not (
+          provider = 'junction'
+          and kind = 'resource'
+          and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+        )
+      )
+  `).all(
+    input.accountId,
+    input.provider,
+    ...dedupeKeys,
+    now,
+    COMPANION_HRV_RMSSD_RESOURCE,
+  ) as { dedupe_key: string }[];
+  return new Set(rows.map((row) => row.dedupe_key));
 }
 
 export function readNextDeviceSyncJobWakeAt(database: DatabaseSync): string | null {
@@ -710,7 +762,7 @@ export function failDeviceSyncJobIfOwned(
     retainUntilSuccess?: boolean;
     workerId: string;
   },
-): boolean {
+): DeviceSyncJobFailureTransition | null {
   if (input.retryable) {
     const replacementPayloadJson = input.replacementPayload === undefined
       ? null
@@ -732,7 +784,8 @@ export function failDeviceSyncJobIfOwned(
         and lease_expires_at is not null
         and lease_expires_at > ?
         and (attempts < max_attempts or ? = 1)
-    `).run(
+      returning attempts, max_attempts
+    `).get(
       input.retryAt ?? input.now,
       input.retainUntilSuccess ? 1 : 0,
       replacementPayloadJson === null ? 0 : 1,
@@ -744,10 +797,10 @@ export function failDeviceSyncJobIfOwned(
       input.workerId,
       input.now,
       input.retainUntilSuccess ? 1 : 0,
-    ) as { changes: number };
+    ) as Record<string, unknown> | undefined;
 
-    if ((retryResult.changes ?? 0) > 0) {
-      return true;
+    if (retryResult) {
+      return decodeDeviceSyncJobFailureTransition(retryResult, "queued");
     }
   }
 
@@ -765,7 +818,8 @@ export function failDeviceSyncJobIfOwned(
       and lease_owner = ?
       and lease_expires_at is not null
       and lease_expires_at > ?
-  `).run(
+    returning attempts, max_attempts
+  `).get(
     input.code,
     input.message,
     input.now,
@@ -773,9 +827,33 @@ export function failDeviceSyncJobIfOwned(
     input.jobId,
     input.workerId,
     input.now,
-  ) as { changes: number };
+  ) as Record<string, unknown> | undefined;
 
-  return (deadResult.changes ?? 0) > 0;
+  return deadResult
+    ? decodeDeviceSyncJobFailureTransition(deadResult, "dead")
+    : null;
+}
+
+function decodeDeviceSyncJobFailureTransition(
+  row: Record<string, unknown>,
+  disposition: DeviceSyncJobFailureDisposition,
+): DeviceSyncJobFailureTransition {
+  const attempts = requireJobRowNumber(row, "attempts");
+  const maxAttempts = requireJobRowNumber(row, "max_attempts");
+
+  if (!Number.isSafeInteger(attempts) || attempts < 1) {
+    throw new TypeError("Expected device_job.attempts to be a positive safe integer.");
+  }
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < attempts) {
+    throw new TypeError("Expected device_job.max_attempts to cover the committed attempt count.");
+  }
+
+  return {
+    attempts,
+    disposition,
+    maxAttempts,
+    remainingAttempts: disposition === "queued" ? maxAttempts - attempts : 0,
+  };
 }
 
 export function markPendingDeviceSyncJobsDeadForAccount(
@@ -989,6 +1067,31 @@ export function enqueueDeviceSyncJobInTransaction(
         return getDeviceSyncJobById(database, existing.id) ?? existingJob;
       }
       return existingJob;
+    }
+
+    // Junction temporal resource/day children are re-enqueued on every
+    // scheduled reconcile cadence so widened sources or late provider history
+    // converge. Terminal rows are execution history, not authority. Sweep the
+    // whole temporal dedupe namespace, not just the incoming coordinate:
+    // coordinates that roll out of the horizon (or belong to a prior vault
+    // timezone) are never re-enqueued, so exact-key cleanup would strand their
+    // rows forever.
+    if (
+      input.provider === "junction"
+      && input.kind === "resource"
+      && input.dedupeKey.startsWith(JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX)
+    ) {
+      database.prepare(`
+        delete from device_job
+        where account_id = ?
+          and provider = ?
+          and dedupe_key like ?
+          and status not in ('queued', 'running')
+      `).run(
+        input.accountId,
+        input.provider,
+        `${JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX}%`,
+      );
     }
   }
 

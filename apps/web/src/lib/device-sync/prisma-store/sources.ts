@@ -6,9 +6,12 @@ import type {
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 import {
-  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
-  DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
-  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  buildJunctionProviderSourceInstanceKey,
+  canonicalizeJunctionProviderSlug,
+  listJunctionDeviceConnectRouteEntries,
+} from "@murphai/device-syncd/connect-config";
+import {
+  isDeviceSyncSourceDisconnectFenced,
 } from "@murphai/device-syncd/public-account";
 
 import {
@@ -17,6 +20,7 @@ import {
   normalizeNullableString,
   omitHostedSqlErrorText,
 } from "../shared";
+import { resolveHostedJunctionConnectionSource } from "../connection-source-lifecycle";
 import { toNullablePrismaJsonValue } from "./prisma-json";
 import type { HostedPrismaTransactionClient } from "./types";
 
@@ -29,6 +33,7 @@ export const hostedConnectionSourceRecordArgs = {
     id: true,
     lastErrorCode: true,
     lastErrorMessage: true,
+    lifecycleEpoch: true,
     lastSeenAt: true,
     lastDataAt: true,
     resourceAvailabilitySummaryJson: true,
@@ -42,20 +47,22 @@ export const hostedConnectionSourceRecordArgs = {
 export type HostedConnectionSourceRecord =
   Prisma.DeviceConnectionSourceGetPayload<typeof hostedConnectionSourceRecordArgs>;
 
-const hostedConnectionSourceAdmissionArgs = {
-  select: {
-    id: true,
-    lastErrorCode: true,
-    lastErrorMessage: true,
-    lastSeenAt: true,
-    sourceInstanceKey: true,
-    sourceProviderSlug: true,
-    status: true,
-  },
-} satisfies Prisma.DeviceConnectionSourceDefaultArgs;
-
-export type HostedConnectionSourceAdmissionCandidate =
-  Prisma.DeviceConnectionSourceGetPayload<typeof hostedConnectionSourceAdmissionArgs>;
+export type HostedConnectionSourceAdmissionCandidate = Omit<
+  Pick<
+    HostedConnectionSourceRecord,
+    | "lastErrorCode"
+    | "lastErrorMessage"
+    | "lifecycleEpoch"
+    | "lastSeenAt"
+    | "sourceInstanceKey"
+    | "sourceProviderSlug"
+    | "status"
+  >,
+  "lifecycleEpoch" | "status"
+> & {
+  lifecycleEpoch: number;
+  status: DeviceConnectionSourceStatus;
+};
 
 export interface HostedDeviceConnectionSource {
   id: string;
@@ -67,6 +74,7 @@ export interface HostedDeviceConnectionSource {
   resourceAvailabilitySummary: DeviceConnectionSourceResourceAvailabilitySummary | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lifecycleEpoch: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload carrying this source's data; null until one has. */
@@ -84,6 +92,7 @@ export interface UpsertHostedDeviceConnectionSourceInput {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary | null;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
+  lifecycleEpoch?: number;
   firstSeenAt?: string | null;
   lastSeenAt?: string | null;
   /** Omit to preserve the stored arrival signal; the reconcile projection must. */
@@ -122,6 +131,12 @@ const SAFE_SOURCE_PROVIDER_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
 const SAFE_ERROR_CODE_PATTERN = /^[A-Z0-9_][A-Z0-9_-]*$/u;
 const SAFE_SUMMARY_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/u;
 const SAFE_SUMMARY_STRING_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _-]*$/u;
+const HOSTED_CONNECTION_SOURCE_AVAILABILITY_KEY_LIMIT = 96;
+const HOSTED_CONNECTION_SOURCE_LEGACY_ALIAS_EXTRA_ROW_LIMIT =
+  listJunctionDeviceConnectRouteEntries().reduce(
+    (count, entry) => count + (entry.route.sourceProviderSlugAliases?.length ?? 0),
+    0,
+  );
 
 export class PrismaHostedConnectionSourceStore {
   readonly prisma: PrismaClient;
@@ -134,16 +149,28 @@ export class PrismaHostedConnectionSourceStore {
     input: UpsertHostedDeviceConnectionSourceInput,
   ): Promise<HostedDeviceConnectionSource> {
     const prisma = input.tx ?? this.prisma;
+    const connectionId = requireConnectionId(input.connectionId);
+    const normalizedInputSourceInstanceKey = normalizeSourceInstanceKey(input.sourceInstanceKey);
+    const normalizedInputSourceProviderSlug = normalizeSourceProviderSlug(input.sourceProviderSlug);
+    const canonicalIdentity = resolveCanonicalHostedJunctionSourceIdentity({
+      connectionId,
+      sourceInstanceKey: normalizedInputSourceInstanceKey,
+      sourceProviderSlug: normalizedInputSourceProviderSlug,
+    });
+    const sourceInstanceKey = canonicalIdentity?.sourceInstanceKey
+      ?? normalizedInputSourceInstanceKey;
+    const sourceProviderSlug = canonicalIdentity?.sourceProviderSlug
+      ?? normalizedInputSourceProviderSlug;
+
     const now = resolveSourceTimestamp(input.now, new Date());
     const lastSeenAt = resolveSourceTimestamp(input.lastSeenAt, now);
     const firstSeenAt = resolveSourceTimestamp(input.firstSeenAt, lastSeenAt);
-    const sourceInstanceKey = normalizeSourceInstanceKey(input.sourceInstanceKey);
-    const sourceProviderSlug = normalizeSourceProviderSlug(input.sourceProviderSlug);
     const status = normalizeSourceStatus(input.status);
     const hasDisplayName = hasOwnInputProperty(input, "displayName");
     const hasResourceAvailabilitySummary = hasOwnInputProperty(input, "resourceAvailabilitySummary");
     const hasLastErrorCode = hasOwnInputProperty(input, "lastErrorCode");
     const hasLastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage");
+    const hasLifecycleEpoch = hasOwnInputProperty(input, "lifecycleEpoch");
     const hasLastDataAt = hasOwnInputProperty(input, "lastDataAt");
     const lastDataAt = hasLastDataAt ? maybeDate(input.lastDataAt) ?? null : null;
     const displayName = hasDisplayName
@@ -182,6 +209,10 @@ export class PrismaHostedConnectionSourceStore {
       update.lastErrorMessage = lastErrorMessage;
     }
 
+    if (hasLifecycleEpoch) {
+      update.lifecycleEpoch = requireSourceLifecycleEpoch(input.lifecycleEpoch);
+    }
+
     // Only an explicit value moves the arrival signal. The reconcile projection
     // omits it, so a source the provider still lists but no longer feeds keeps
     // its real last-delivery instant.
@@ -192,17 +223,20 @@ export class PrismaHostedConnectionSourceStore {
     const record = await prisma.deviceConnectionSource.upsert({
       where: {
         connectionId_sourceInstanceKey: {
-          connectionId: requireConnectionId(input.connectionId),
+          connectionId,
           sourceInstanceKey,
         },
       },
       create: {
-        connectionId: requireConnectionId(input.connectionId),
+        connectionId,
         displayName,
         firstSeenAt,
         id: generateHostedRandomPrefixedId("dcs"),
         lastErrorCode,
         lastErrorMessage,
+        lifecycleEpoch: hasLifecycleEpoch
+          ? requireSourceLifecycleEpoch(input.lifecycleEpoch)
+          : 1,
         lastSeenAt,
         lastDataAt,
         resourceAvailabilitySummaryJson: toNullablePrismaJsonValue(resourceAvailabilitySummary),
@@ -279,9 +313,10 @@ export class PrismaHostedConnectionSourceStore {
     tx?: HostedPrismaTransactionClient,
   ): Promise<HostedDeviceConnectionSource[]> {
     const prisma = tx ?? this.prisma;
-    const records = await prisma.deviceConnectionSource.findMany({
+    const normalizedConnectionId = requireConnectionId(connectionId);
+    let records = await prisma.deviceConnectionSource.findMany({
       where: {
-        connectionId: requireConnectionId(connectionId),
+        connectionId: normalizedConnectionId,
       },
       orderBy: [
         { lastSeenAt: "desc" },
@@ -291,63 +326,96 @@ export class PrismaHostedConnectionSourceStore {
       ],
       ...hostedConnectionSourceRecordArgs,
     });
-
-    return records.map(mapHostedConnectionSourceRecord);
-  }
-
-  async listConnectionSourceAdmissionCandidates(input: {
-    connectionId: string;
-    sourceProviderSlug: string;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
-    const prisma = input.tx ?? this.prisma;
-    const connectionId = requireConnectionId(input.connectionId);
-    const sourceProviderSlug = normalizeSourceProviderSlug(input.sourceProviderSlug);
-    const admitted = await prisma.deviceConnectionSource.findMany({
-      where: {
-        connectionId,
-        sourceProviderSlug,
-        status: "connected",
-        OR: [
-          { lastErrorCode: null },
-          {
-            NOT: {
-              lastErrorCode: {
-                in: [
-                  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
-                  DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
-                  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
-                ],
-              },
-            },
-          },
-        ],
-      },
-      orderBy: [
-        { lastSeenAt: "desc" },
-        { sourceInstanceKey: "asc" },
-        { id: "asc" },
-      ],
-      take: 1,
-      ...hostedConnectionSourceAdmissionArgs,
-    });
-    if (admitted.length > 0) {
-      return admitted;
+    if (tx) {
+      const legacyIdentities = new Map<string, CanonicalHostedJunctionSourceIdentity>();
+      for (const record of records) {
+        const identity = resolveCanonicalHostedJunctionSourceIdentity(record);
+        if (
+          identity
+          && (
+            record.sourceInstanceKey !== identity.sourceInstanceKey
+            || record.sourceProviderSlug !== identity.sourceProviderSlug
+          )
+        ) {
+          legacyIdentities.set(identity.sourceInstanceKey, identity);
+        }
+      }
+      for (const identity of legacyIdentities.values()) {
+        await reconcileStoredCanonicalJunctionSourceIdentity({ identity, prisma, records });
+      }
+      if (legacyIdentities.size > 0) {
+        records = await prisma.deviceConnectionSource.findMany({
+          where: { connectionId: normalizedConnectionId },
+          orderBy: [
+            { lastSeenAt: "desc" },
+            { sourceProviderSlug: "asc" },
+            { sourceInstanceKey: "asc" },
+            { id: "asc" },
+          ],
+          ...hostedConnectionSourceRecordArgs,
+        });
+      }
     }
 
-    return prisma.deviceConnectionSource.findMany({
+    return collapseHostedConnectionSourceRecords(records)
+      .map(mapHostedConnectionSourceRecord);
+  }
+
+  async resolveConnectionSourceAdmissionCandidate(input: {
+    connectionId: string;
+    sourceInstanceKey?: string;
+    sourceProviderSlug: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionSourceAdmissionCandidate | null> {
+    const prisma = input.tx ?? this.prisma;
+    const connectionId = requireConnectionId(input.connectionId);
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug)
+      ?? normalizeSourceProviderSlug(input.sourceProviderSlug);
+    const sourceProviderSlugs = expandCanonicalHostedSourceProviderSlugFilter([
+      sourceProviderSlug,
+    ]);
+    // Admission supports one established opaque identity alongside one row for
+    // each current/legacy route spelling. Read one sentinel beyond that fixed
+    // set so ambiguous physical state fails closed instead of choosing a
+    // partial authority snapshot.
+    const physicalRowLimit = sourceProviderSlugs.length + 1;
+    const records = await prisma.deviceConnectionSource.findMany({
       where: {
         connectionId,
-        sourceProviderSlug,
+        sourceProviderSlug: { in: sourceProviderSlugs },
       },
       orderBy: [
         { lastSeenAt: "desc" },
+        { sourceProviderSlug: "asc" },
         { sourceInstanceKey: "asc" },
         { id: "asc" },
       ],
-      take: 1,
-      ...hostedConnectionSourceAdmissionArgs,
+      take: physicalRowLimit + 1,
+      ...hostedConnectionSourceRecordArgs,
     });
+    if (records.length > physicalRowLimit) {
+      throw sourceContractError(
+        "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+        "Hosted device connection source admission exceeded its bounded semantic authority.",
+      );
+    }
+    const semanticSources = collapseHostedConnectionSourceRecords(records)
+      .map(mapHostedConnectionSourceRecord);
+    const source = resolveHostedJunctionConnectionSource(
+      semanticSources,
+      sourceProviderSlug,
+    );
+    return source
+      ? {
+          lastErrorCode: source.lastErrorCode,
+          lastErrorMessage: source.lastErrorMessage,
+          lifecycleEpoch: source.lifecycleEpoch,
+          lastSeenAt: new Date(source.lastSeenAt),
+          sourceInstanceKey: source.sourceInstanceKey,
+          sourceProviderSlug: source.sourceProviderSlug,
+          status: source.status,
+        }
+      : null;
   }
 
   async listConnectionSourcesForConnections(
@@ -377,7 +445,8 @@ export class PrismaHostedConnectionSourceStore {
       ...hostedConnectionSourceRecordArgs,
     });
 
-    return records.map(mapHostedConnectionSourceRecord);
+    return collapseHostedConnectionSourceRecords(records)
+      .map(mapHostedConnectionSourceRecord);
   }
 
   async listBoundedConnectionSourcesForConnections(
@@ -396,16 +465,16 @@ export class PrismaHostedConnectionSourceStore {
     );
     const sourceProviderSlugs = input.sourceProviderSlugs == null
       ? null
-      : normalizeSourceProviderSlugList(input.sourceProviderSlugs);
+      : expandCanonicalHostedSourceProviderSlugFilter(input.sourceProviderSlugs);
     if (sourceProviderSlugs !== null && sourceProviderSlugs.length === 0) {
       return [];
     }
     const sourceFilter = sourceProviderSlugs === null
       ? Prisma.empty
       : Prisma.sql`AND source_provider_slug IN (${Prisma.join(sourceProviderSlugs)})`;
-    const statusFilter = input.excludeDisconnected === true
-      ? Prisma.sql`AND status <> 'disconnected'`
-      : Prisma.empty;
+    const physicalRowLimit = limitPerConnection
+      + HOSTED_CONNECTION_SOURCE_LEGACY_ALIAS_EXTRA_ROW_LIMIT
+      + 1;
     const records = await prisma.$queryRaw<HostedBoundedConnectionSourceRecord[]>(
       Prisma.sql`
         SELECT
@@ -421,6 +490,7 @@ export class PrismaHostedConnectionSourceStore {
           first_seen_at AS "firstSeenAt",
           last_seen_at AS "lastSeenAt",
           last_data_at AS "lastDataAt",
+          lifecycle_epoch AS "lifecycleEpoch",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           "projectionRowNumber"
@@ -438,9 +508,8 @@ export class PrismaHostedConnectionSourceStore {
           FROM device_connection_source AS source
           WHERE connection_id IN (${Prisma.join(connectionIds)})
             ${sourceFilter}
-            ${statusFilter}
         ) AS bounded_source
-        WHERE "projectionRowNumber" <= ${limitPerConnection + 1}
+        WHERE "projectionRowNumber" <= ${physicalRowLimit}
         ORDER BY
           connection_id ASC,
           last_seen_at DESC,
@@ -450,18 +519,288 @@ export class PrismaHostedConnectionSourceStore {
       `,
     );
 
-    const saturatedConnection = records.find(
-      (record) => Number(record.projectionRowNumber) > limitPerConnection,
+    const physicalSaturated = records.some(
+      (record) => Number(record.projectionRowNumber) >= physicalRowLimit,
     );
-    if (saturatedConnection) {
+    const projected = collapseHostedConnectionSourceRecords(records)
+      .filter((record) => input.excludeDisconnected !== true || record.status !== "disconnected");
+    const projectedCountsByConnection = new Map<string, number>();
+    for (const record of projected) {
+      projectedCountsByConnection.set(
+        record.connectionId,
+        (projectedCountsByConnection.get(record.connectionId) ?? 0) + 1,
+      );
+    }
+    if (
+      physicalSaturated
+      || [...projectedCountsByConnection.values()].some((count) => count > limitPerConnection)
+    ) {
       throw sourceContractError(
         "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
         `Hosted device connection source authority exceeds the ${limitPerConnection}-row per-connection snapshot bound.`,
       );
     }
 
-    return records.map(mapHostedConnectionSourceRecord);
+    return projected.map(mapHostedConnectionSourceRecord);
   }
+}
+
+interface CanonicalHostedJunctionSourceIdentity {
+  connectionId: string;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+}
+
+function resolveCanonicalHostedJunctionSourceIdentity(input: {
+  connectionId: string;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+}): CanonicalHostedJunctionSourceIdentity | null {
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    return null;
+  }
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: input.connectionId,
+    sourceProviderSlug,
+  });
+  if (
+    !sourceInstanceKey
+    || (
+      sourceProviderSlug === input.sourceProviderSlug
+      && sourceInstanceKey !== input.sourceInstanceKey
+    )
+  ) {
+    return null;
+  }
+  return {
+    connectionId: input.connectionId,
+    sourceInstanceKey,
+    sourceProviderSlug,
+  };
+}
+
+function collapseHostedConnectionSourceRecords(
+  records: readonly HostedConnectionSourceRecord[],
+): HostedConnectionSourceRecord[] {
+  const recordsByCanonicalKey = new Map<string, HostedConnectionSourceRecord[]>();
+  const collapsed: HostedConnectionSourceRecord[] = [];
+
+  for (const record of records) {
+    const identity = resolveCanonicalHostedJunctionSourceIdentity({
+      connectionId: record.connectionId,
+      sourceInstanceKey: normalizeSourceInstanceKey(record.sourceInstanceKey),
+      sourceProviderSlug: normalizeSourceProviderSlug(record.sourceProviderSlug),
+    });
+    if (!identity) {
+      collapsed.push(record);
+      continue;
+    }
+    const key = `${identity.connectionId}\u0000${identity.sourceInstanceKey}`;
+    const group = recordsByCanonicalKey.get(key) ?? [];
+    group.push(record);
+    recordsByCanonicalKey.set(key, group);
+  }
+
+  collapsed.push(
+    ...[...recordsByCanonicalKey.values()].map((groupedRecords) => {
+      const first = groupedRecords[0];
+      const identity = first && resolveCanonicalHostedJunctionSourceIdentity({
+        connectionId: first.connectionId,
+        sourceInstanceKey: first.sourceInstanceKey,
+        sourceProviderSlug: first.sourceProviderSlug,
+      });
+      if (!identity) {
+        throw new TypeError("Canonical hosted Junction source identity was lost.");
+      }
+      return mergeCanonicalHostedJunctionSourceRecords(identity, groupedRecords);
+    }),
+  );
+  return collapsed.sort((left, right) =>
+    left.connectionId.localeCompare(right.connectionId)
+    || right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
+    || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
+    || left.id.localeCompare(right.id)
+  );
+}
+
+function mergeCanonicalHostedJunctionSourceRecords(
+  identity: CanonicalHostedJunctionSourceIdentity,
+  records: readonly HostedConnectionSourceRecord[],
+): HostedConnectionSourceRecord {
+  if (records.length === 0) {
+    throw new TypeError("Canonical hosted Junction source reconciliation requires a stored row.");
+  }
+  const maxLifecycleEpoch = Math.max(
+    ...records.map((record) => readSourceLifecycleEpoch(record.lifecycleEpoch)),
+  );
+  const statusPrecedence: Record<DeviceConnectionSourceStatus, number> = {
+    connected: 1,
+    unavailable: 2,
+    error: 3,
+    disconnected: 4,
+  };
+  const maxEpochRecords = records
+    .filter((record) => readSourceLifecycleEpoch(record.lifecycleEpoch) === maxLifecycleEpoch)
+    .sort((left, right) =>
+      statusPrecedence[normalizeSourceStatus(right.status)]
+      - statusPrecedence[normalizeSourceStatus(left.status)]
+      || right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
+      || right.updatedAt.getTime() - left.updatedAt.getTime()
+      || left.id.localeCompare(right.id)
+    );
+  const authority = maxEpochRecords[0];
+  if (!authority) {
+    throw new TypeError("Canonical hosted Junction source reconciliation lost epoch authority.");
+  }
+  const fenceAuthority = [...maxEpochRecords]
+    .filter(isDeviceSyncSourceDisconnectFenced)
+    .sort((left, right) =>
+      right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
+      || right.updatedAt.getTime() - left.updatedAt.getTime()
+      || left.id.localeCompare(right.id)
+    )[0];
+  const errorAuthority = fenceAuthority ?? authority;
+  const canonicalRecord = records.find((record) =>
+    record.sourceInstanceKey === identity.sourceInstanceKey
+    && record.sourceProviderSlug === identity.sourceProviderSlug
+  );
+  const displayRecord = maxEpochRecords.find((record) => sanitizeSourceDisplayName(record.displayName));
+  const availability: DeviceConnectionSourceResourceAvailabilitySummary = {};
+  for (const record of [...records].sort((left, right) =>
+    readSourceLifecycleEpoch(right.lifecycleEpoch) - readSourceLifecycleEpoch(left.lifecycleEpoch)
+    || right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
+    || right.updatedAt.getTime() - left.updatedAt.getTime()
+    || left.id.localeCompare(right.id)
+  )) {
+    const summary = sanitizeResourceAvailabilitySummary(
+      readResourceAvailabilitySummary(record.resourceAvailabilitySummaryJson),
+    );
+    for (const key of Object.keys(summary ?? {}).sort()) {
+      if (Object.keys(availability).length >= HOSTED_CONNECTION_SOURCE_AVAILABILITY_KEY_LIMIT) {
+        break;
+      }
+      if (!Object.prototype.hasOwnProperty.call(availability, key)) {
+        availability[key] = summary?.[key] ?? null;
+      }
+    }
+  }
+  const firstSeenAt = new Date(Math.min(...records.map((record) => record.firstSeenAt.getTime())));
+  const lastSeenAt = new Date(Math.max(...records.map((record) => record.lastSeenAt.getTime())));
+  const lastDataMs = Math.max(
+    ...records.map((record) => record.lastDataAt?.getTime() ?? Number.NEGATIVE_INFINITY),
+  );
+
+  return {
+    ...authority,
+    id: canonicalRecord?.id ?? authority.id,
+    connectionId: identity.connectionId,
+    createdAt: new Date(Math.min(...records.map((record) => record.createdAt.getTime()))),
+    displayName: sanitizeSourceDisplayName(displayRecord?.displayName),
+    firstSeenAt,
+    lastDataAt: Number.isFinite(lastDataMs) ? new Date(lastDataMs) : null,
+    lastErrorCode: sanitizeSourceErrorCode(errorAuthority.lastErrorCode),
+    lastErrorMessage: omitHostedSqlErrorText(errorAuthority.lastErrorMessage),
+    lifecycleEpoch: maxLifecycleEpoch,
+    lastSeenAt,
+    resourceAvailabilitySummaryJson: Object.keys(availability).length > 0 ? availability : null,
+    sourceInstanceKey: identity.sourceInstanceKey,
+    sourceProviderSlug: identity.sourceProviderSlug,
+    status: normalizeSourceStatus(authority.status),
+    updatedAt: new Date(Math.max(...records.map((record) => record.updatedAt.getTime()))),
+  };
+}
+
+async function reconcileStoredCanonicalJunctionSourceIdentity(input: {
+  identity: CanonicalHostedJunctionSourceIdentity;
+  prisma: PrismaClient | HostedPrismaTransactionClient;
+  records?: readonly HostedConnectionSourceRecord[];
+}): Promise<void> {
+  const records = input.records ?? await input.prisma.deviceConnectionSource.findMany({
+    where: { connectionId: input.identity.connectionId },
+    ...hostedConnectionSourceRecordArgs,
+  });
+  const groupedRecords = records.filter((record) => {
+    const identity = resolveCanonicalHostedJunctionSourceIdentity({
+      connectionId: record.connectionId,
+      sourceInstanceKey: record.sourceInstanceKey,
+      sourceProviderSlug: record.sourceProviderSlug,
+    });
+    return identity?.sourceInstanceKey === input.identity.sourceInstanceKey;
+  });
+  if (
+    groupedRecords.length === 0
+    || (
+      groupedRecords.length === 1
+      && groupedRecords[0]?.sourceInstanceKey === input.identity.sourceInstanceKey
+      && groupedRecords[0]?.sourceProviderSlug === input.identity.sourceProviderSlug
+    )
+  ) {
+    return;
+  }
+  const merged = mergeCanonicalHostedJunctionSourceRecords(input.identity, groupedRecords);
+  const data = {
+    displayName: merged.displayName,
+    firstSeenAt: merged.firstSeenAt,
+    lastDataAt: merged.lastDataAt,
+    lastErrorCode: merged.lastErrorCode,
+    lastErrorMessage: merged.lastErrorMessage,
+    lifecycleEpoch: readSourceLifecycleEpoch(merged.lifecycleEpoch),
+    lastSeenAt: merged.lastSeenAt,
+    resourceAvailabilitySummaryJson: toNullablePrismaJsonValue(
+      readResourceAvailabilitySummary(merged.resourceAvailabilitySummaryJson),
+    ),
+    sourceProviderSlug: input.identity.sourceProviderSlug,
+    status: normalizeSourceStatus(merged.status),
+  } satisfies Prisma.DeviceConnectionSourceUncheckedUpdateInput;
+  const canonical = await input.prisma.deviceConnectionSource.upsert({
+    where: {
+      connectionId_sourceInstanceKey: {
+        connectionId: input.identity.connectionId,
+        sourceInstanceKey: input.identity.sourceInstanceKey,
+      },
+    },
+    create: {
+      ...data,
+      connectionId: input.identity.connectionId,
+      createdAt: merged.createdAt,
+      id: generateHostedRandomPrefixedId("dcs"),
+      sourceInstanceKey: input.identity.sourceInstanceKey,
+      updatedAt: merged.updatedAt,
+    },
+    update: data,
+    ...hostedConnectionSourceRecordArgs,
+  });
+  const loserIds = groupedRecords
+    .filter((record) => record.id !== canonical.id)
+    .map((record) => record.id);
+  if (loserIds.length > 0) {
+    await input.prisma.deviceConnectionSource.deleteMany({
+      where: {
+        connectionId: input.identity.connectionId,
+        id: { in: loserIds },
+      },
+    });
+  }
+}
+
+export function expandCanonicalHostedSourceProviderSlugFilter(values: readonly string[]): string[] {
+  const normalizedValues = normalizeSourceProviderSlugList(values);
+  const requestedCanonicalValues = new Set(
+    normalizedValues.map((value) => canonicalizeJunctionProviderSlug(value) ?? value),
+  );
+  const expanded = new Set(normalizedValues);
+  for (const entry of listJunctionDeviceConnectRouteEntries()) {
+    if (!requestedCanonicalValues.has(entry.route.sourceProviderSlug)) {
+      continue;
+    }
+    expanded.add(entry.route.sourceProviderSlug);
+    for (const alias of entry.route.sourceProviderSlugAliases ?? []) {
+      expanded.add(alias);
+    }
+  }
+  return [...expanded];
 }
 
 export function mapHostedConnectionSourceRecord(
@@ -475,6 +814,7 @@ export function mapHostedConnectionSourceRecord(
     id: record.id,
     lastErrorCode: sanitizeSourceErrorCode(record.lastErrorCode),
     lastErrorMessage: omitHostedSqlErrorText(record.lastErrorMessage),
+    lifecycleEpoch: readSourceLifecycleEpoch(record.lifecycleEpoch),
     lastSeenAt: record.lastSeenAt.toISOString(),
     lastDataAt: record.lastDataAt?.toISOString() ?? null,
     resourceAvailabilitySummary: sanitizeResourceAvailabilitySummary(
@@ -485,6 +825,23 @@ export function mapHostedConnectionSourceRecord(
     status: normalizeSourceStatus(record.status),
     updatedAt: record.updatedAt.toISOString(),
   };
+}
+
+function requireSourceLifecycleEpoch(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw sourceContractError(
+      "CONNECTION_SOURCE_LIFECYCLE_EPOCH_INVALID",
+      "Hosted device connection source lifecycle epochs must be positive integers.",
+    );
+  }
+  return value;
+}
+
+function readSourceLifecycleEpoch(value: unknown): number {
+  if (value === null || value === undefined || value === 0) {
+    return 1;
+  }
+  return requireSourceLifecycleEpoch(value);
 }
 
 function requireConnectionId(value: string): string {

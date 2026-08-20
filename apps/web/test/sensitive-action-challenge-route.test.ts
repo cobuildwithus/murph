@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -45,6 +45,10 @@ describe("settings sensitive-action challenge route", () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("derives the binding from the authenticated member and session", async () => {
     const response = await route.POST(new Request(
       "https://join.example.test/api/settings/sensitive-action-challenge",
@@ -74,6 +78,35 @@ describe("settings sensitive-action challenge route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("creates an account-delete challenge when the retired maintenance value is still present", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/settings/sensitive-action-challenge",
+      {
+        body: JSON.stringify({ kind: "account.delete" }),
+        headers: {
+          "content-type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.buildSettingsSensitiveActionBinding).toHaveBeenCalledWith({
+      kind: "account.delete",
+      memberId: "member_123",
+      sessionId: "session_123",
+    });
+    expect(mocks.createSensitiveActionChallenge).toHaveBeenCalledWith({
+      bindingHash: "a".repeat(64),
+      kind: "account.delete",
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+  });
+
   it("rejects action kinds outside the closed settings union", async () => {
     const response = await route.POST(new Request(
       "https://join.example.test/api/settings/sensitive-action-challenge",
@@ -86,68 +119,6 @@ describe("settings sensitive-action challenge route", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.createSensitiveActionChallenge).not.toHaveBeenCalled();
-  });
-
-  describe("bundles migration maintenance window", () => {
-    function challengeRequest(kind: string): Request {
-      return new Request(
-        "https://join.example.test/api/settings/sensitive-action-challenge",
-        {
-          body: JSON.stringify({ kind }),
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        },
-      );
-    }
-
-    it("declines an account-delete challenge before one is created", async () => {
-      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
-
-      const response = await route.POST(challengeRequest("account.delete"));
-
-      expect(response.status).toBe(503);
-      const body = await response.json();
-      expect(body.error.code).toBe("account_deletion_maintenance");
-      expect(body.error.message).toContain("your request was not started");
-      // Nothing is issued, so the member is never asked to approve anything.
-      expect(mocks.createSensitiveActionChallenge).not.toHaveBeenCalled();
-
-      vi.unstubAllEnvs();
-    });
-
-    it("leaves every other sensitive action untouched", async () => {
-      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
-
-      const response = await route.POST(challengeRequest("vault.export"));
-
-      expect(response.status).toBe(200);
-      expect(mocks.createSensitiveActionChallenge).toHaveBeenCalled();
-
-      vi.unstubAllEnvs();
-    });
-
-    it("makes no timing promise that could expire while the window is open", async () => {
-      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
-
-      const first = await route.POST(challengeRequest("account.delete"));
-      const firstBody = await first.json();
-
-      // Asserted verbatim: recovery guidance is a condition, not a duration or
-      // a calendar time, because the window can outlast either.
-      expect(first.status).toBe(503);
-      expect(firstBody.error.message).toBe(
-        "Murph is in scheduled maintenance, so we can't delete your account right now. "
-        + "Nothing has changed and your request was not started. Please try again after maintenance.",
-      );
-
-      // Still true on a later attempt inside the same window.
-      const second = await route.POST(challengeRequest("account.delete"));
-      const secondBody = await second.json();
-      expect(secondBody.error.message).toBe(firstBody.error.message);
-      expect(mocks.createSensitiveActionChallenge).not.toHaveBeenCalled();
-
-      vi.unstubAllEnvs();
-    });
   });
 
   it("rejects oversized bodies before creating a challenge", async () => {

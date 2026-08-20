@@ -7,7 +7,10 @@ import {
   resolveHealthCommonsExperimentShell,
 } from "@/src/lib/health-commons/experiment-projections";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphOgImageRef,
+  createMurphPageMetadata,
+} from "@/src/lib/site-metadata";
 import {
   ExperimentStartButtonFallback,
   HostedExperimentStartButton,
@@ -26,12 +29,22 @@ export async function generateMetadata({
     return {};
   }
 
+  // Pass the parent experiment card through explicitly: createMurphPageMetadata
+  // otherwise injects the site default, which overrides the parent segment's
+  // file-convention image and unfurls the homepage card here.
+  const ogImage = createMurphOgImageRef({
+    alt: `${shell.title}, a Murph experiment.`,
+    url: `/experiments/${encodeURIComponent(experimentId)}/opengraph-image`,
+  });
+
   return createMurphPageMetadata({
     title: `${shell.title} results | Murph Experiments`,
     description: shell.description,
     openGraph: {
       type: "article",
+      images: [ogImage],
     },
+    twitter: { images: [ogImage] },
   });
 }
 

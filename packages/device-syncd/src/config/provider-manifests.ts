@@ -190,6 +190,8 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   reconcile: {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      summaryPhaseComplete: booleanJobField({ includeInHostedHint: true }),
+      summaryResourceCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
@@ -222,9 +224,14 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       occurredAt: stringJobField({ includeInHostedHint: true }),
       resource: stringJobField({ includeInHostedHint: true }),
       resourceCategory: stringJobField({ includeInHostedHint: true }),
+      sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),
       sourceInstanceId: stringJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       sourceType: stringJobField({ includeInHostedHint: true }),
+      // Legacy field: retained so previously queued rows still validate; the
+      // day key is now derived from windowStart plus the authority timezone.
+      temporalAuthorityDayKey: stringJobField(),
+      temporalAuthorityTimeZone: stringJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
@@ -532,6 +539,7 @@ export function resolveConfiguredDeviceSyncProviderDescriptor(
 }
 
 export interface NormalizedJunctionDeviceSyncRuntimeConfig {
+  clientUserIdNamespace: string;
   clientUserIdSecret: string;
   providerFilter: string[];
   reconcileIntervalMs: number;
@@ -568,6 +576,9 @@ export function buildConfiguredDeviceSyncProviderRuntimeDescriptor<
 export function normalizeJunctionDeviceSyncRuntimeConfig(
   config: JunctionDeviceSyncProviderConfig,
 ): NormalizedJunctionDeviceSyncRuntimeConfig {
+  const clientUserIdNamespace = normalizeJunctionClientUserIdNamespace(
+    config.clientUserIdNamespace,
+  );
   const clientUserIdSecret = assertValidJunctionClientUserIdSecret(config.clientUserIdSecret);
   const summaryResources = normalizeRequiredJunctionResourceList(
     config.summaryResources,
@@ -577,7 +588,7 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
   );
   const timeseriesResources = normalizeOptionalJunctionResourceList(
     config.timeseriesResources,
-    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
     JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
     "timeseries",
   );
@@ -592,6 +603,7 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
   }
 
   return {
+    clientUserIdNamespace,
     clientUserIdSecret,
     providerFilter,
     reconcileIntervalMs,
@@ -625,6 +637,23 @@ export function assertValidJunctionClientUserIdSecret(secret: string): string {
   }
 
   return normalizedSecret;
+}
+
+export function normalizeJunctionClientUserIdNamespace(
+  namespace: string | undefined,
+): string {
+  const normalizedNamespace = normalizeString(namespace);
+
+  if (!normalizedNamespace) {
+    return "";
+  }
+  if (!/^[a-z][a-z0-9]{0,7}$/u.test(normalizedNamespace)) {
+    throw new TypeError(
+      "JUNCTION_CLIENT_USER_ID_NAMESPACE must be 1-8 lowercase letters or digits and start with a letter.",
+    );
+  }
+
+  return normalizedNamespace;
 }
 
 export function buildOuraDeviceSyncScopes(input: string[] | undefined): string[] {

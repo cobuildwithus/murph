@@ -35,6 +35,8 @@ const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY = "MURPH_TELEGRAM_USERNAME_OVERRI
 const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
 const WORKFLOW_LOCAL_DATA_DIR_ENV_KEY = "WORKFLOW_LOCAL_DATA_DIR";
 const WORKFLOW_TARGET_WORLD_ENV_KEY = "WORKFLOW_TARGET_WORLD";
+const HOSTED_WEB_PREPARED_TYPECHECK_ENV_KEY = "MURPH_HOSTED_WEB_PREPARED_TYPECHECK";
+const HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE = "complete";
 const WORKFLOW_NEXT_DEFAULT_LOCAL_DATA_DIR = ".next/workflow-data";
 const WORKFLOW_LOCAL_TARGET_WORLD = "local";
 const PRIVY_REQUIRED_CHILD_FRAME_SOURCES = [
@@ -311,10 +313,8 @@ export function buildHostedWebNextConfig(
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(environment),
       // Source-map emission is the largest proven build-memory cost.
       turbopackSourceMaps: false,
-      // Workflow contributes Webpack configuration, so select Next's isolated
-      // build worker explicitly and enable its memory-optimized compiler path.
-      // This is the repeatedly proven production path on Vercel's 8-GB builder.
-      webpackBuildWorker: true,
+      // Workflow contributes Webpack configuration, so Next keeps compilation
+      // in the CLI process unless webpackBuildWorker is explicitly forced.
       webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {
@@ -363,6 +363,9 @@ export function buildHostedWebNextConfig(
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
     typescript: {
+      ignoreBuildErrors:
+        environment[HOSTED_WEB_PREPARED_TYPECHECK_ENV_KEY]
+          === HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE,
       tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
     },
     headers: async () => [

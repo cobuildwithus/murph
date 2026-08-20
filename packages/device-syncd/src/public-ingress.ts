@@ -1,8 +1,9 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
+  isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
-  isDeviceSyncSourceAdmitted,
+  isDeviceSyncSourceDisconnectFenced,
   isEstablishedDeviceSyncConnection,
 } from "./public-account.ts";
 import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
@@ -657,14 +658,17 @@ export class DeviceSyncPublicIngress {
         && sourceProviderSlug
         && !(reusedEstablishedJunctionAccount && input.sourceLifecycleProof)
       ) {
-        await this.store.upsertConnectionSource({
-          connectionId: seededAccount.id,
-          sourceInstanceKey,
-          sourceProviderSlug,
-          status: "disconnected",
-          firstSeenAt: now,
-          lastSeenAt: now,
-        });
+        await this.store.upsertConnectionSource(
+          {
+            connectionId: seededAccount.id,
+            sourceInstanceKey,
+            sourceProviderSlug,
+            status: "disconnected",
+            firstSeenAt: now,
+            lastSeenAt: now,
+          },
+          { fenceActiveWorkOnReconnect: reusedEstablishedJunctionAccount },
+        );
       }
     }
 
@@ -1508,6 +1512,8 @@ export class DeviceSyncPublicIngress {
     const now = prepared.receivedAt;
     const traceId = prepared.traceId;
     const claimToken = generateStateCode();
+    // One delivery-attempt instant owns trace leasing and pending-setup lifetime
+    // checks. The frozen receipt below remains provider event semantics.
     const claimedAt = toIsoTimestamp(new Date());
     const webhook = toIngressWebhook({
       ...prepared,
@@ -1563,9 +1569,9 @@ export class DeviceSyncPublicIngress {
       };
     }
 
-    let account;
+    let webhookConnection;
     try {
-      account = await this.store.getConnectionByExternalAccount(
+      webhookConnection = await this.store.getWebhookConnectionByExternalAccount(
         provider.provider,
         prepared.externalAccountId,
       );
@@ -1574,7 +1580,7 @@ export class DeviceSyncPublicIngress {
       throw error;
     }
 
-    if (!account) {
+    if (!webhookConnection) {
       const unknownWebhookLogContext: Record<string, unknown> = {
         provider: provider.provider,
         externalAccountIdHash: hashExternalAccountIdForLogs(prepared.externalAccountId),
@@ -1640,18 +1646,51 @@ export class DeviceSyncPublicIngress {
         httpStatus: 503,
       });
     }
+    const { account, connectionOwnerId } = webhookConnection;
 
+    if (
+      account.status === "active"
+      && isDeviceSyncConnectionSetupPending(account)
+      && isDeviceSyncConnectionSetupExpiredAt(account, claimedAt)
+    ) {
+      this.logger.warn?.("Ignoring webhook side effects for expired incomplete device sync setup.", {
+        provider: provider.provider,
+        accountId: account.id,
+        eventType: webhook.eventType,
+        traceId,
+      });
+      await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: provider.provider,
+        eventType: webhook.eventType,
+        traceId,
+      };
+    }
+
+    let sourceAdmissionDeferred = false;
     try {
       // A dirty row proves only that import invalidation is queued. Await exact-
       // source lifecycle work before dirty coalescing can complete this trace.
       if (webhookSourceProviderSlug) {
-        const matchingSources = await this.store.listConnectionSources({
+        const sourceInstanceKey = provider.provider === "junction"
+          ? buildJunctionProviderSourceInstanceKey({
+              connectionId: account.id,
+              sourceProviderSlug: webhookSourceProviderSlug,
+            })
+          : null;
+        const source = await this.store.resolveConnectionSourceAdmissionCandidate({
           connectionId: account.id,
+          ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
           sourceProviderSlug: webhookSourceProviderSlug,
         });
         if (
-          matchingSources.length > 0
-          && !isDeviceSyncSourceAdmitted(matchingSources, webhookSourceProviderSlug)
+          source
+          && (
+            source.status !== "connected"
+            || isDeviceSyncSourceDisconnectFenced(source)
+          )
         ) {
           const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
             account,
@@ -1660,6 +1699,12 @@ export class DeviceSyncPublicIngress {
             provider,
             now,
           });
+          sourceAdmissionDeferred = Boolean(
+            sourceObservation
+            && "sourceAdmissionDeferred" in sourceObservation
+            && sourceObservation.sourceAdmissionDeferred === true
+            && this.hooks.onWebhookAccepted,
+          );
           if (
             sourceObservation
             && "sourceRegistrationRemoved" in sourceObservation
@@ -1729,6 +1774,7 @@ export class DeviceSyncPublicIngress {
     if (
       account.status === "active"
       && isDeviceSyncConnectionSetupPending(account)
+      && !sourceAdmissionDeferred
     ) {
       this.logger.warn?.("Delaying webhook side effects until device sync setup is confirmed.", {
         provider: provider.provider,
@@ -1789,6 +1835,9 @@ export class DeviceSyncPublicIngress {
       const acceptedResult = await onWebhookAccepted?.({
         account,
         claimToken,
+        connectionOwnerId,
+        processingAttemptedAt: claimedAt,
+        sourceAdmissionDeferred,
         traceId,
         webhook,
         provider,
@@ -2374,6 +2423,7 @@ export { createDeviceSyncRegistry } from "./registry.ts";
 export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
 export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
+export { createJunctionDeviceSyncProvider } from "./providers/junction.ts";
 export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";

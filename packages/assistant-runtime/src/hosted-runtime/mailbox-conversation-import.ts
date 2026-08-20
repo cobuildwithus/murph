@@ -1635,11 +1635,15 @@ function createHostedConversationAssistantInputSourceMetadata(
   const replyContext = normalizeHostedAssistantInputMetadataText(
     wake.message.telegramMessage.replyContextPreview ?? "",
   );
+  const replyToMessageId = normalizeHostedAssistantInputSourceMetadataToken(
+    wake.message.telegramMessage.replyToMessageId ?? null,
+  );
   const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
     && wake.message.routeAuthority !== null;
   if (
     !mediaGroupId
     && !replyContext
+    && !replyToMessageId
     && !externalThreadRouteAuthorityPresent
   ) {
     return null;
@@ -1658,6 +1662,7 @@ function createHostedConversationAssistantInputSourceMetadata(
     kind: "telegram",
     mediaGroupId,
     replyContext,
+    ...(replyToMessageId ? { replyToMessageId } : {}),
     ...(senderHandle
       ? {
           ...(senderDisplayName ? { senderDisplayName } : {}),

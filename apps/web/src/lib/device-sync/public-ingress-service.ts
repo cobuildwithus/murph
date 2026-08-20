@@ -3,7 +3,7 @@ import {
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
 import {
-  normalizeJunctionProviderSlug,
+  canonicalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -101,15 +101,12 @@ export class HostedDeviceSyncPublicIngressService {
       registry: input.registry,
       store: input.store,
       hooks: {
-        // Hosted source lifecycle is admitted under the same consent/app/
-        // connection transaction as receipt, dirty state, and trace completion.
-        onConnectionSourceObserved: ({ eventType, sourceProviderSlug }) =>
-          normalizeJunctionProviderSlug(sourceProviderSlug)
-            === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-            && (
-              eventType === "provider.connection.created"
-              || eventType === "provider.connection.updated"
-            )
+        // Provider-authored Junction events can trigger exact-source
+        // verification. Hosted admission still commits only after the provider
+        // confirms access under the consent/app/connection/source fences.
+        onConnectionSourceObserved: ({ account, sourceProviderSlug }) =>
+          account.provider === "junction"
+            && canonicalizeJunctionProviderSlug(sourceProviderSlug) !== null
             ? { sourceAdmissionDeferred: true }
             : undefined,
         onConnectionEstablished: async ({
@@ -161,18 +158,21 @@ export class HostedDeviceSyncPublicIngressService {
         onWebhookAccepted: async ({
           account,
           claimToken,
+          connectionOwnerId,
+          processingAttemptedAt,
+          sourceAdmissionDeferred,
           traceId,
           webhook,
-          provider,
           now,
         }) => {
-          const ownerId = await this.context.store.getConnectionOwnerId(account.id);
           await handleHostedDeviceSyncWebhookAccepted({
             account,
             claimToken,
             now,
-            ownerId,
+            ownerId: connectionOwnerId,
+            processingAttemptedAt,
             registry: input.registry,
+            sourceAdmissionDeferred,
             store: this.context.store,
             traceId,
             webhook,
@@ -837,7 +837,7 @@ function buildPreparedSourceLifecycleKey(
   provider: string,
   sourceProviderSlug: string | null,
 ): string | null {
-  const normalizedSourceProviderSlug = normalizeJunctionProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   return provider === "junction" && normalizedSourceProviderSlug
     ? `${userId}\u0000${normalizedSourceProviderSlug}`
     : null;

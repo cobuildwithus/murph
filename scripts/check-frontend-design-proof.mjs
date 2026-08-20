@@ -1,39 +1,41 @@
-import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const DESIGN_CATALOG_PATHS = new Set([
-  "apps/web/app/design/components-content.tsx",
-  "apps/web/app/design/consent-content.tsx",
-  "apps/web/app/design/sections-content.tsx",
-]);
+import {
+  findRenderedListItem,
+  readChangedPaths,
+  readRenderedSection,
+  renderPrBody,
+  renderedText,
+} from "./pr-body-markdown.mjs";
+
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
-const GITHUB_MARKDOWN_URL = "https://api.github.com/markdown";
 
 function isFrontendUiPath(filePath) {
-  if (filePath.startsWith("apps/web/app/design/")) {
-    return false;
-  }
-  if (filePath.startsWith("apps/web/app/api/")) {
+  if (
+    filePath.startsWith("apps/web/app/design/") ||
+    filePath.startsWith("apps/web/app/screenshots/") ||
+    filePath.startsWith("apps/web/app/api/")
+  ) {
     return false;
   }
   if (filePath === "apps/web/app/globals.css") {
     return true;
   }
   if (
-    filePath.startsWith("apps/web/public/")
-    && FRONTEND_ASSET_PATTERN.test(filePath)
+    filePath.startsWith("apps/web/public/") &&
+    FRONTEND_ASSET_PATTERN.test(filePath)
   ) {
     return true;
   }
   if (
-    filePath.startsWith("apps/web/app/")
-    && (filePath.endsWith(".tsx") || filePath.endsWith(".css"))
+    filePath.startsWith("apps/web/app/") &&
+    (filePath.endsWith(".tsx") || filePath.endsWith(".css"))
   ) {
     return true;
   }
   return (
-    filePath.startsWith("apps/web/src/components/")
-    && (filePath.endsWith(".tsx") || filePath.endsWith(".css"))
+    filePath.startsWith("apps/web/src/components/") &&
+    (filePath.endsWith(".tsx") || filePath.endsWith(".css"))
   );
 }
 
@@ -44,32 +46,23 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   }
 
   const errors = [];
-  const catalogUpdated = changedPaths.some((filePath) =>
-    DESIGN_CATALOG_PATHS.has(filePath)
-  );
-  if (!catalogUpdated) {
-    errors.push(
-      "Update the design page component catalog or sections catalog for this frontend UI change.",
-    );
-  }
-
   const designProof = readRenderedSection(prBodyHtml, "Design proof");
   if (!designProof) {
     errors.push("Add a `## Design proof` section to the pull request body.");
   } else {
-    if (!hasDesignPageItem(designProof)) {
+    if (!hasSupportedDesignProofLink(designProof)) {
       errors.push(
-        "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
+        "The Design proof section must include an absolute HTTP(S) link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.",
       );
     }
-    if (!hasScreenshotItem(designProof, "Desktop screenshot")) {
+    if (!hasMeaningfulListItem(designProof, "Evidence")) {
       errors.push(
-        "The Design proof section must include a hosted desktop screenshot from the design page.",
+        "The Design proof section must include evidence matched to the changed visual, state, interaction, or responsive risk.",
       );
     }
-    if (!hasScreenshotItem(designProof, "Mobile screenshot")) {
+    if (!hasMeaningfulListItem(designProof, "Coverage")) {
       errors.push(
-        "The Design proof section must include a hosted mobile screenshot from the design page.",
+        "The Design proof section must explain which states and viewports were checked and why that evidence is sufficient.",
       );
     }
   }
@@ -77,70 +70,41 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   return { errors, required: true, uiPaths };
 }
 
-function readRenderedSection(html, heading) {
-  const headingPattern = /<h2\b[^>]*>([\s\S]*?)<\/h2\s*>/giu;
-  let headingMatch;
-  while ((headingMatch = headingPattern.exec(html)) !== null) {
-    if (renderedText(headingMatch[1]) !== heading) {
-      continue;
-    }
-    const sectionStart = headingMatch.index + headingMatch[0].length;
-    const trailingHtml = html.slice(sectionStart);
-    const nextHeadingIndex = trailingHtml.search(/<h[12]\b/iu);
-    const section = nextHeadingIndex >= 0
-      ? trailingHtml.slice(0, nextHeadingIndex)
-      : trailingHtml;
-    return section.trim() || null;
-  }
-  return null;
-}
-
-function renderedText(html) {
-  return decodeHtmlEntities(html.replace(/<[^>]*>/gu, ""))
-    .replace(/\s+/gu, " ")
-    .trim();
-}
-
-function decodeHtmlEntities(value) {
-  return value
-    .replace(/&nbsp;/giu, " ")
-    .replace(/&amp;/giu, "&")
-    .replace(/&lt;/giu, "<")
-    .replace(/&gt;/giu, ">")
-    .replace(/&quot;/giu, '"')
-    .replace(/&#(?:0*39|x0*27);/giu, "'");
-}
-
-function findRenderedListItem(section, label) {
-  const listItemPattern = /<li\b[^>]*>([\s\S]*?)<\/li\s*>/giu;
-  let listItemMatch;
-  while ((listItemMatch = listItemPattern.exec(section)) !== null) {
-    if (renderedText(listItemMatch[1]).startsWith(`${label}:`)) {
-      return listItemMatch[1];
-    }
-  }
-  return null;
-}
-
-function hasDesignPageItem(section) {
+function hasSupportedDesignProofLink(section) {
   const item = findRenderedListItem(section, "Design page");
   if (!item) {
     return false;
-  }
-  const designRoute = /\/design\?tab=(?:components|consent|sections)(?:[#&\s"'<]|$)/iu;
-  if (designRoute.test(renderedText(item))) {
-    return true;
   }
 
   const anchorPattern = /<a\b([^>]*)>/giu;
   let anchorMatch;
   while ((anchorMatch = anchorPattern.exec(item)) !== null) {
     const href = readQuotedAttribute(anchorMatch[1], "href");
-    if (href && designRoute.test(decodeHtmlEntities(href))) {
+    if (href && isSupportedDesignProofDestination(decodeHtmlEntities(href))) {
       return true;
     }
   }
   return false;
+}
+
+function isSupportedDesignProofDestination(href) {
+  let destination;
+  try {
+    destination = new URL(href);
+  } catch {
+    return false;
+  }
+  if (destination.protocol !== "http:" && destination.protocol !== "https:") {
+    return false;
+  }
+  if (!destination.hash || destination.hash === "#") {
+    return false;
+  }
+  if (destination.pathname === "/design") {
+    const tab = destination.searchParams.get("tab");
+    return tab === "components" || tab === "consent";
+  }
+  return /^\/screenshots\/[a-z0-9-]+$/u.test(destination.pathname);
 }
 
 function readQuotedAttribute(attributes, name) {
@@ -152,55 +116,26 @@ function readQuotedAttribute(attributes, name) {
   return match?.[2] ?? null;
 }
 
-function hasScreenshotItem(section, label) {
+function decodeHtmlEntities(value) {
+  return value
+    .replace(/&amp;/giu, "&")
+    .replace(/&quot;/giu, '"')
+    .replace(/&#(?:0*39|x0*27);/giu, "'");
+}
+
+function hasMeaningfulListItem(section, label) {
   const item = findRenderedListItem(section, label);
   if (!item) {
     return false;
   }
-  return /<img\b[^>]*\b(?:src|data-canonical-src)\s*=\s*["']https?:\/\/[^"']+["'][^>]*>/iu.test(
-    item,
+  const value = renderedText(item).slice(`${label}:`.length).trim();
+  return value.length >= 8 && !isExplicitProofAbsence(value);
+}
+
+function isExplicitProofAbsence(value) {
+  return /(?:^(?:n\/?a|none|not applicable|pending|tbd|todo)\b|^(?:no|without)\s+(?:direct\s+)?(?:evidence|proof)\b|\b(?:evidence|proof)\s+(?:is\s+|was\s+|remains\s+)?(?:missing|pending|unavailable|uncaptured|not\s+(?:captured|collected|provided))\b|\b(?:not|never)\s+(?:checked|tested|inspected|verified)\b|\b(?:will be|to be)\s+(?:added|captured|collected|provided)\b)/iu.test(
+    value,
   );
-}
-
-async function renderPrBody(markdown) {
-  const endpoint = process.env.MURPH_GITHUB_MARKDOWN_URL?.trim()
-    || GITHUB_MARKDOWN_URL;
-  const headers = {
-    Accept: "application/vnd.github+json",
-    "Content-Type": "application/json",
-    "User-Agent": "murph-frontend-design-proof",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-  const token = process.env.MURPH_GITHUB_TOKEN?.trim();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  const payload = { mode: "gfm", text: markdown };
-  const context = process.env.GITHUB_REPOSITORY?.trim();
-  if (context) {
-    payload.context = context;
-  }
-
-  const response = await fetch(endpoint, {
-    body: JSON.stringify(payload),
-    headers,
-    method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub Markdown rendering failed (${response.status}).`);
-  }
-  return response.text();
-}
-
-function readChangedPaths(baseSha, headSha) {
-  return execFileSync(
-    "git",
-    ["diff", "--name-only", "--diff-filter=ACDMRT", `${baseSha}...${headSha}`],
-    { encoding: "utf8" },
-  )
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
 }
 
 async function main() {
@@ -236,23 +171,17 @@ async function main() {
 }
 
 const isDirectRun =
-  typeof process.argv[1] === "string"
-  && import.meta.url === pathToFileURL(process.argv[1]).href;
+  typeof process.argv[1] === "string" &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
   try {
     await main();
   } catch (error) {
-    console.error(error instanceof Error ? error.message : "Frontend design proof failed.");
+    console.error(
+      error instanceof Error ? error.message : "Frontend design proof failed.",
+    );
     process.exitCode = 1;
   }
 }
 
-export {
-  findRenderedListItem,
-  isFrontendUiPath,
-  readChangedPaths,
-  readRenderedSection,
-  renderPrBody,
-  renderedText,
-  validateFrontendDesignProof,
-};
+export { isFrontendUiPath, validateFrontendDesignProof };

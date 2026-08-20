@@ -4,7 +4,12 @@ import { readFile } from "node:fs/promises";
 import { HostedBillingStatus } from "@prisma/client";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+const MAX_PORTAL_CONFIGURATION_ENV =
+  "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MAX_MONTHLY";
+const originalMaxPortalConfiguration =
+  process.env[MAX_PORTAL_CONFIGURATION_ENV];
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
@@ -40,13 +45,6 @@ const mocks = vi.hoisted(() => ({
     } | null;
     message?: { body?: string | null } | null;
   }) => {
-    if (input?.message?.body === "Hey Murph, I just added more usage.") {
-      return [{
-        href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-        kind: "text",
-        label: "Messages",
-      }];
-    }
     if (
       input?.message?.body
         === "Hey Murph, what referral options can I choose from?"
@@ -99,12 +97,14 @@ const mocks = vi.hoisted(() => ({
       | { state: "not_abandonable" | "recovery_required" }
       | null;
     familyInviteReturnPath?: string | null;
+    familyRecurringUpgradeAvailable?: boolean;
     familyState?: "none" | "owner" | "sponsored";
     groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
     planChangePending?: boolean;
     showGroupPlan?: boolean;
     usageActivityDetail?: React.ReactNode;
+    usageRecoveryInitialOpen?: boolean;
     usageStatus?: unknown;
     usageTopUpActivePurchase?: unknown;
     usageTopUpCheckoutUrl?: string;
@@ -129,7 +129,14 @@ const mocks = vi.hoisted(() => ({
     initialStatus: unknown;
   }) =>
     React.createElement("div", null, `Hosted health data consent ${String(props.authenticated)}`)),
-  HostedFamilySettings: vi.fn(() => React.createElement("div", null, "Hosted family settings")),
+  HostedFamilySettings: vi.fn((props: {
+    usageRecoveryAvailable?: boolean;
+    usageRecoveryInitialOpen?: boolean;
+  }) => React.createElement(
+    "div",
+    null,
+    `Hosted family settings ${String(props.usageRecoveryInitialOpen ?? false)}`,
+  )),
   HostedPasskeySettings: vi.fn((props: {
     authenticated: boolean;
     secureApprovalStatus: { status: string };
@@ -351,8 +358,17 @@ const GRANTED_HEALTH_DATA_CONSENT_STATUS = {
   }],
 };
 
+afterEach(() => {
+  if (originalMaxPortalConfiguration === undefined) {
+    delete process.env[MAX_PORTAL_CONFIGURATION_ENV];
+  } else {
+    process.env[MAX_PORTAL_CONFIGURATION_ENV] = originalMaxPortalConfiguration;
+  }
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env[MAX_PORTAL_CONFIGURATION_ENV];
   mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
@@ -464,6 +480,7 @@ test("SettingsPage suppresses plan actions while a completed update awaits webho
 });
 
 test("SettingsPage completes a return only from an active paid exact projection", async () => {
+  process.env[MAX_PORTAL_CONFIGURATION_ENV] = "bpc_max_test";
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -499,6 +516,11 @@ test("SettingsPage completes a return only from an active paid exact projection"
     expect.objectContaining({ planChangePending: false }),
     undefined,
   );
+  expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma: mocks.prisma,
+    publicBaseUrl: null,
+  });
 });
 
 test("SettingsPage keeps an inactive same-plan return in recoverable pending state", async () => {
@@ -655,6 +677,67 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
 });
 
+
+test("SettingsPage keeps the signed-out usage recovery handoff in Settings", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ usageRecovery: "true" }),
+  }));
+
+  assert.match(markup, /Continue in Settings/);
+  assert.match(markup, /Sign in to review the recovery options available for your account\./);
+  assert.match(markup, /resolve plan eligibility and Family access after you sign in/);
+  expect(redirectMock).not.toHaveBeenCalled();
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps the exact signed-out Family recovery handoff in Settings", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ familyRecovery: "true" }),
+  }));
+
+  assert.match(markup, /Continue to Family Settings/);
+  assert.match(markup, /choose the Family member and review their available options/);
+  expect(redirectMock).not.toHaveBeenCalled();
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage rejects an augmented signed-out Family recovery handoff", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  await expect(SettingsPage({
+    searchParams: Promise.resolve({
+      familyRecovery: "true",
+      usageRecovery: "true",
+    }),
+  })).rejects.toThrow("NEXT_REDIRECT:/");
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
 
 test("SettingsPage keeps a signed-out Core payment return recoverable", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -1095,19 +1178,6 @@ test("SettingsPage reads the app session and persisted account settings into the
         text: true,
       },
       message: {
-        body: "Hey Murph, I just added more usage.",
-      },
-      murphEmailAddress: null,
-      murphPhoneNumber: "+15550100001",
-      userEmailAddress: "verified@example.com",
-    });
-    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(3, {
-      contactChannels: {
-        email: false,
-        telegram: true,
-        text: true,
-      },
-      message: {
         body: "Hey Murph, what referral options can I choose from?",
       },
       murphEmailAddress: null,
@@ -1123,15 +1193,8 @@ test("SettingsPage reads the app session and persisted account settings into the
         label: "Messages",
       },
     }, undefined);
-    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        usageTopUpContactOptions: [{
-          href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-          kind: "text",
-          label: "Messages",
-        }],
-      }),
-      undefined,
+    expect(mocks.HostedBillingSettings.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+      "usageTopUpContactOptions",
     );
     expect(mocks.HostedPasskeySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
@@ -1201,6 +1264,193 @@ test("SettingsPage rejects repeated or malformed usage top-up query state", asyn
     }),
     undefined,
   );
+});
+
+test("SettingsPage keeps an exact purchase return ahead of generic usage recovery", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: { privyUserId: "did:privy:user_123" },
+  });
+  mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
+    accessKind: "paid",
+    forecast: null,
+    generatedAt: "2026-08-18T12:00:00.000Z",
+    periodEnd: "2026-09-01T00:00:00.000Z",
+    periodKind: "monthly",
+    periodStart: "2026-08-01T00:00:00.000Z",
+    planCode: "launch_monthly",
+    planName: "Pulse",
+    recommendedAction: null,
+    remainingPercent: 0,
+    status: "exhausted",
+    usedPercent: 100,
+  });
+  mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue({
+    beneficiaryMemberId: "member_123",
+    kind: "personal",
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      usageCheckout: "success",
+      usagePurchase: "hucp_abcdefghijklmnop",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageRecoveryInitialOpen: false,
+      usageTopUpInitialOpen: false,
+      usageTopUpPurchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_abcdefghijklmnop",
+      },
+    }),
+    undefined,
+  );
+});
+
+test("SettingsPage resolves an eligible Family owner recovery from authenticated state", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: { privyUserId: "did:privy:user_123" },
+  });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [{
+      isOwner: true,
+      joinedAt: new Date("2026-07-01T12:00:00.000Z"),
+      label: null,
+      memberId: "member_123",
+      pendingPlanCode: null,
+      planCode: "pulse",
+      role: "owner",
+      status: "active",
+    }],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  });
+  const exhaustedUsageStatus = {
+    accessKind: "family_sponsored",
+    forecast: null,
+    generatedAt: "2026-08-18T12:00:00.000Z",
+    periodEnd: "2026-09-01T00:00:00.000Z",
+    periodKind: "monthly",
+    periodStart: "2026-08-01T00:00:00.000Z",
+    planCode: "launch_monthly",
+    planName: "Family",
+    recommendedAction: null,
+    remainingPercent: 0,
+    status: "exhausted",
+    usedPercent: 100,
+  } as const;
+  mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(exhaustedUsageStatus);
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ usageRecovery: "true" }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      familyRecurringUpgradeAvailable: true,
+      familyState: "owner",
+      usageRecoveryInitialOpen: true,
+      usageStatus: exhaustedUsageStatus,
+    }),
+    undefined,
+  );
+  expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageRecoveryAvailable: true,
+      usageRecoveryInitialOpen: true,
+    }),
+    undefined,
+  );
+
+  vi.clearAllMocks();
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({}),
+  }));
+
+  const ordinaryExhaustedFamilyProps =
+    mocks.HostedFamilySettings.mock.calls.at(-1)?.[0];
+  expect(ordinaryExhaustedFamilyProps).toEqual(
+    expect.objectContaining({ usageRecoveryAvailable: true }),
+  );
+  expect(ordinaryExhaustedFamilyProps).not.toHaveProperty(
+    "usageRecoveryInitialOpen",
+  );
+
+  vi.clearAllMocks();
+  mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
+    ...exhaustedUsageStatus,
+    remainingPercent: 64,
+    status: "active",
+    usedPercent: 36,
+  });
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ usageRecovery: "true" }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      familyState: "owner",
+      usageRecoveryInitialOpen: false,
+    }),
+    undefined,
+  );
+  expect(
+    mocks.HostedFamilySettings.mock.calls.at(-1)?.[0],
+  ).toEqual(expect.objectContaining({ usageRecoveryAvailable: false }));
+  expect(
+    mocks.HostedFamilySettings.mock.calls.at(-1)?.[0],
+  ).not.toHaveProperty("usageRecoveryInitialOpen");
+
+  vi.clearAllMocks();
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ familyRecovery: "true" }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      familyState: "owner",
+      usageRecoveryInitialOpen: false,
+    }),
+    undefined,
+  );
+  const familySettingsProps = mocks.HostedFamilySettings.mock.calls.at(-1)?.[0];
+  expect(familySettingsProps).toEqual(
+    expect.objectContaining({ usageRecoveryAvailable: false }),
+  );
+  expect(familySettingsProps).not.toHaveProperty("usageRecoveryInitialOpen");
 });
 
 test("SettingsPage surfaces and opens the authenticated active Family owner's own usage picker", async () => {
@@ -1805,6 +2055,73 @@ test("SettingsPage keeps a frozen personal purchase recoverable after Family act
   );
 });
 
+test("SettingsPage opens a sponsored member's frozen purchase before usage recovery", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedFamilyAccessForMember.mockResolvedValue({
+    groupId: "hbag_abcdefghijklmnop",
+  });
+  mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
+    accessKind: "family_sponsored",
+    forecast: null,
+    generatedAt: "2026-08-18T12:00:00.000Z",
+    periodEnd: "2026-09-01T00:00:00.000Z",
+    periodKind: "monthly",
+    periodStart: "2026-08-01T00:00:00.000Z",
+    planCode: "launch_monthly",
+    planName: "Family",
+    recommendedAction: null,
+    remainingPercent: 0,
+    status: "exhausted",
+    usedPercent: 100,
+  });
+  const activePurchase = {
+    cancelAllowed: true,
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_abcdefghijklmnop",
+    retryAllowed: true,
+    status: "checkout_open",
+    target: {
+      beneficiaryMemberId: "member_123",
+      kind: "personal",
+    },
+    url: "https://checkout.stripe.test/session",
+  } as const;
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
+    activePurchase,
+  );
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ usageRecovery: "true" }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      familyState: "sponsored",
+      usageRecoveryInitialOpen: false,
+      usageTopUpActivePurchase: activePurchase,
+      usageTopUpInitialOpen: true,
+      usageTopUpPurchaseReturn: null,
+    }),
+    undefined,
+  );
+});
+
 test.each([
   {
     label: "hosted-group",
@@ -1974,13 +2291,9 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith({
     ownerSnapshot: familyOwner,
     payerMemberId: "member_123",
+    usageRecoveryAvailable: false,
     usageTopUpActiveMemberId: "member_family",
     usageTopUpActivePurchase: activePurchase,
-    usageTopUpContactOptions: [{
-      href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-      kind: "text",
-      label: "Messages",
-    }],
     usageTopUpOffers: [],
     usageTopUpPurchaseReturn: {
       kind: "success",

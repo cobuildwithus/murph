@@ -6,8 +6,15 @@ import { test } from "vitest";
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
+import { buildJunctionProviderSourceInstanceKey } from "../src/connect-config.ts";
 import { DeviceSyncError } from "../src/errors.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
+} from "../src/junction-historical-backfill-progress.ts";
+import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { markCredentialScopedPendingDeviceSyncJobsDeadForAccount } from "../src/store/jobs.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { makeTempDirectory } from "./helpers.ts";
@@ -15,6 +22,7 @@ import {
   deleteConnectionForTesting,
   insertWebhookTraceRowForTesting,
   readCredentialStateForTesting,
+  readJobsForAccountForTesting,
   readObservationStateForTesting,
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceRowForTesting,
@@ -23,6 +31,14 @@ import {
   setConnectionUpdatedAtForTesting,
 } from "./store-test-helpers.ts";
 import type { StoredDeviceSyncAccount } from "../src/types.ts";
+
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
 
 const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
 const UNSUPPORTED_SCHEMA_VERSION = DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION + 1;
@@ -40,6 +56,15 @@ function downgradeDeviceSyncStoreToV8(databasePath: string): void {
   database.close();
 }
 
+function downgradeDeviceSyncStoreToV9(databasePath: string): void {
+  const database = openSqliteRuntimeDatabase(databasePath);
+  database.exec(`
+    alter table device_connection_source drop column lifecycle_epoch;
+    pragma user_version = 9;
+  `);
+  database.close();
+}
+
 function downgradeDeviceSyncStoreToV7(databasePath: string): void {
   const database = openSqliteRuntimeDatabase(databasePath);
   database.exec(`
@@ -48,6 +73,55 @@ function downgradeDeviceSyncStoreToV7(databasePath: string): void {
     pragma user_version = 7;
   `);
   database.close();
+}
+
+function insertConnectionSourceRowForTesting(
+  store: SqliteDeviceSyncStore,
+  input: {
+    connectionId: string;
+    displayName?: string | null;
+    firstSeenAt: string;
+    id: string;
+    lastDataAt?: string | null;
+    lastErrorCode?: string | null;
+    lastErrorMessage?: string | null;
+    lastSeenAt: string;
+    lifecycleEpoch: number;
+    resourceAvailabilitySummary?: Record<string, string | number | boolean | null>;
+    sourceInstanceKey: string;
+    sourceProviderSlug: string;
+    status: "connected" | "unavailable" | "error" | "disconnected";
+  },
+): void {
+  const database = openSqliteRuntimeDatabase(store.databasePath);
+  try {
+    database.prepare(`
+      insert into device_connection_source (
+        id, connection_id, source_instance_key, source_provider_slug,
+        display_name, status, resource_availability_summary_json,
+        last_error_code, last_error_message, lifecycle_epoch,
+        first_seen_at, last_seen_at, last_data_at, created_at, updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.connectionId,
+      input.sourceInstanceKey,
+      input.sourceProviderSlug,
+      input.displayName ?? null,
+      input.status,
+      JSON.stringify(input.resourceAvailabilitySummary ?? {}),
+      input.lastErrorCode ?? null,
+      input.lastErrorMessage ?? null,
+      input.lifecycleEpoch,
+      input.firstSeenAt,
+      input.lastSeenAt,
+      input.lastDataAt ?? null,
+      input.firstSeenAt,
+      input.lastSeenAt,
+    );
+  } finally {
+    database.close();
+  }
 }
 
 function requireStoredOAuthCredential(
@@ -360,7 +434,7 @@ test("device sync store preserves failed calendar work across a later correction
       60_000,
     );
     assert.equal(failedDayOne?.payload.calendarRefreshDay, "2026-04-01");
-    assert.equal(store.failJobIfOwned(
+    assert.deepEqual(store.failJobIfOwned(
       failedDayOne!.id,
       workerId,
       "2026-04-04T00:02:10.000Z",
@@ -368,7 +442,12 @@ test("device sync store preserves failed calendar work across a later correction
       "Calendar fetch failed.",
       "2026-04-05T00:00:00.000Z",
       true,
-    ), true);
+    ), {
+      attempts: 1,
+      disposition: "queued",
+      maxAttempts: 5,
+      remainingAttempts: 4,
+    });
     const afterV2 = store.getAccountById(account.id);
     assert.ok(afterV2);
 
@@ -454,12 +533,61 @@ test("device sync store commits source admission with initial jobs atomically", 
       lastSeenAt: "2026-07-28T10:00:00.000Z",
     };
     store.upsertConnectionSource(source);
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: account.metadata,
+      providerSlug: "garmin",
+      resource: "note",
+      version: historyCoverageVersion("note"),
+    });
+    assert.ok(coverage);
+    store.patchAccount(account.id, {
+      metadata: { ...account.metadata, [coverage.metadataKey]: coverage.value },
+    });
+    const revisionBeforeStaleAdmission = store.getAccountById(account.id)?.localConnectionRevision;
+
+    store.upsertConnectionSource({
+      ...source,
+      lastSeenAt: "2026-07-28T10:00:30.000Z",
+    });
+    const stale = store.commitConnectionEstablished({
+      accountId: account.id,
+      expectedSourceLastSeenAt: source.lastSeenAt,
+      provider: account.provider,
+      source: {
+        ...source,
+        status: "connected",
+        lastSeenAt: "2026-07-28T10:01:00.000Z",
+      },
+      jobs: [{
+        availableAt: "2026-07-28T10:01:00.000Z",
+        kind: "reconcile",
+        payload: {},
+      }],
+    });
+    assert.equal(stale, null);
+    assert.equal(store.listConnectionSources({ connectionId: account.id })[0]?.status, "disconnected");
+    assert.equal(store.listConnectionSources({ connectionId: account.id })[0]?.lifecycleEpoch, 1);
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      revisionBeforeStaleAdmission,
+    );
+    assert.equal(
+      hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        store.getAccountById(account.id)?.metadata ?? {},
+        "garmin",
+        "note",
+        historyCoverageVersion("note"),
+      ),
+      true,
+    );
+    assert.equal(store.claimDueJob("worker-a", "2026-07-28T10:02:00.000Z", 60_000), null);
 
     const circularPayload: Record<string, unknown> = {};
     circularPayload.self = circularPayload;
     assert.throws(() =>
       store.commitConnectionEstablished({
         accountId: account.id,
+        expectedSourceLastSeenAt: "2026-07-28T10:00:30.000Z",
         provider: account.provider,
         source: {
           ...source,
@@ -478,12 +606,21 @@ test("device sync store commits source admission with initial jobs atomically", 
       "disconnected",
     );
     assert.equal(
+      store.listConnectionSources({ connectionId: account.id })[0]?.lifecycleEpoch,
+      1,
+    );
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      revisionBeforeStaleAdmission,
+    );
+    assert.equal(
       store.claimDueJob("worker-a", "2026-07-28T10:02:00.000Z", 60_000),
       null,
     );
 
     const committed = store.commitConnectionEstablished({
       accountId: account.id,
+      expectedSourceLastSeenAt: "2026-07-28T10:00:30.000Z",
       provider: account.provider,
       source: {
         ...source,
@@ -496,10 +633,19 @@ test("device sync store commits source admission with initial jobs atomically", 
         payload: {},
       }],
     });
+    assert.ok(committed);
     assert.equal(committed.length, 1);
     assert.equal(
       store.listConnectionSources({ connectionId: account.id })[0]?.status,
       "connected",
+    );
+    assert.equal(
+      store.listConnectionSources({ connectionId: account.id })[0]?.lifecycleEpoch,
+      2,
+    );
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      (revisionBeforeStaleAdmission ?? 0) + 1,
     );
     assert.equal(
       store.claimDueJob("worker-a", "2026-07-28T10:04:00.000Z", 60_000)?.id,
@@ -507,6 +653,402 @@ test("device sync store commits source admission with initial jobs atomically", 
     );
   } finally {
     store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store preserves legacy Junction identity and reconnects one merged lifecycle", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-junction-canonical-source");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-canonical-source-account",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-07-28T09:00:00.000Z",
+    });
+    const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    });
+    assert.ok(canonicalSourceInstanceKey);
+
+    const sibling = store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "legacy-garmin-key",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      firstSeenAt: "2026-07-28T09:00:00.000Z",
+      lastSeenAt: "2026-07-28T09:30:00.000Z",
+      resourceAvailabilitySummary: { activity: true },
+    });
+    insertConnectionSourceRowForTesting(store, {
+      connectionId: account.id,
+      firstSeenAt: "2026-07-27T08:00:00.000Z",
+      id: "dcs_legacy_apple_health",
+      lastSeenAt: "2026-07-28T10:00:00.000Z",
+      lifecycleEpoch: 2,
+      resourceAvailabilitySummary: { activity: true },
+      sourceInstanceKey: "legacy-apple-health-key",
+      sourceProviderSlug: "apple_health",
+      status: "connected",
+    });
+    const legacyAuthority = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0];
+    assert.ok(legacyAuthority);
+    assert.equal(legacyAuthority?.id, "dcs_legacy_apple_health");
+    assert.equal(legacyAuthority?.sourceInstanceKey, "legacy-apple-health-key");
+    assert.equal(legacyAuthority?.sourceProviderSlug, "apple_health");
+    assert.equal(legacyAuthority?.lifecycleEpoch, 2);
+    assert.equal(
+      store.markConnectionSourceDataReceived({
+        connectionId: account.id,
+        now: "2026-07-28T10:00:30.000Z",
+        sourceProviderSlug: "apple_healthkit",
+      }),
+      1,
+    );
+    assert.equal(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health",
+    })[0]?.lastDataAt, "2026-07-28T10:00:30.000Z");
+    const aliasOnly = store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: legacyAuthority.sourceInstanceKey,
+      sourceProviderSlug: legacyAuthority.sourceProviderSlug,
+      status: "connected",
+      lastSeenAt: "2026-07-28T10:01:00.000Z",
+    });
+    assert.equal(aliasOnly.id, "dcs_legacy_apple_health");
+    assert.equal(aliasOnly.sourceInstanceKey, "legacy-apple-health-key");
+    assert.equal(aliasOnly.sourceProviderSlug, "apple_health");
+    assert.equal(aliasOnly.lifecycleEpoch, 2);
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      firstSeenAt: "2026-07-27T08:00:00.000Z",
+      lastDataAt: "2026-07-28T09:30:00.000Z",
+      lastSeenAt: "2026-07-28T10:02:00.000Z",
+      lifecycleEpoch: 3,
+      resourceAvailabilitySummary: { activity: true },
+      sourceInstanceKey: canonicalSourceInstanceKey,
+      sourceProviderSlug: "apple_health_kit",
+      status: "connected",
+    });
+    insertConnectionSourceRowForTesting(store, {
+      connectionId: account.id,
+      firstSeenAt: "2026-07-26T08:00:00.000Z",
+      id: "dcs_lower_epoch_apple_health",
+      lastDataAt: "2026-07-28T09:45:00.000Z",
+      lastSeenAt: "2026-07-28T10:04:00.000Z",
+      lifecycleEpoch: 2,
+      resourceAvailabilitySummary: { sleep: true },
+      sourceInstanceKey: "lower-epoch-apple-health-key",
+      sourceProviderSlug: "apple_health",
+      status: "error",
+    });
+    insertConnectionSourceRowForTesting(store, {
+      connectionId: account.id,
+      firstSeenAt: "2026-07-28T08:45:00.000Z",
+      id: "dcs_alias_apple_healthkit",
+      lastDataAt: "2026-07-28T09:40:00.000Z",
+      lastSeenAt: "2026-07-28T10:05:00.000Z",
+      lifecycleEpoch: 3,
+      resourceAvailabilitySummary: { workouts: true },
+      sourceInstanceKey: "legacy-apple-healthkit-key",
+      sourceProviderSlug: "apple_healthkit",
+      status: "disconnected",
+    });
+
+    const preCollapseAuthority = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health",
+    })[0];
+    assert.equal(preCollapseAuthority?.status, "disconnected");
+    assert.equal(preCollapseAuthority?.lifecycleEpoch, 3);
+    assert.equal(preCollapseAuthority?.firstSeenAt, "2026-07-26T08:00:00.000Z");
+    assert.equal(preCollapseAuthority?.lastSeenAt, "2026-07-28T10:05:00.000Z");
+    assert.deepEqual(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+      status: "connected",
+    }), []);
+    assert.equal(
+      store.markConnectionSourceDataReceived({
+        connectionId: account.id,
+        now: "2026-07-28T10:05:30.000Z",
+        sourceProviderSlug: "apple_health",
+      }),
+      3,
+    );
+    const authorityAfterArrival = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0];
+    assert.equal(authorityAfterArrival?.lastDataAt, "2026-07-28T10:05:30.000Z");
+    assert.equal(authorityAfterArrival?.updatedAt, "2026-07-28T10:05:30.000Z");
+
+    const collapsed = store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "ignored-alias-write-key",
+      sourceProviderSlug: "apple_health",
+      status: "connected",
+      lastSeenAt: "2026-07-28T10:06:00.000Z",
+    }, { preserveDisconnected: true });
+
+    assert.equal(collapsed.id, "dcs_lower_epoch_apple_health");
+    assert.equal(collapsed.sourceInstanceKey, "lower-epoch-apple-health-key");
+    assert.equal(collapsed.sourceProviderSlug, "apple_health");
+    assert.equal(collapsed.lifecycleEpoch, 3);
+    assert.equal(collapsed.status, "disconnected");
+    assert.equal(collapsed.firstSeenAt, "2026-07-26T08:00:00.000Z");
+    assert.equal(collapsed.lastSeenAt, "2026-07-28T10:05:00.000Z");
+    assert.equal(collapsed.lastDataAt, "2026-07-28T10:05:30.000Z");
+    assert.equal(collapsed.updatedAt, "2026-07-28T10:05:30.000Z");
+    assert.deepEqual(collapsed.resourceAvailabilitySummary, {
+      activity: true,
+      workouts: true,
+      sleep: true,
+    });
+    assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 4);
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "second-ignored-alias-key",
+      sourceProviderSlug: "apple_health",
+      status: "disconnected",
+      firstSeenAt: collapsed.firstSeenAt,
+      lastSeenAt: "2026-07-28T10:06:00.000Z",
+    });
+    const revisionBeforeCallbacks = store.getAccountById(account.id)?.localConnectionRevision;
+    const stale = store.commitConnectionEstablished({
+      accountId: account.id,
+      expectedSourceLastSeenAt: "2026-07-28T10:05:00.000Z",
+      provider: "junction",
+      source: {
+        connectionId: account.id,
+        sourceInstanceKey: "stale-alias-callback-key",
+        sourceProviderSlug: "apple_healthkit",
+        status: "connected",
+        firstSeenAt: collapsed.firstSeenAt,
+        lastSeenAt: "2026-07-28T10:07:00.000Z",
+      },
+      jobs: [{
+        availableAt: "2026-07-28T10:07:00.000Z",
+        kind: "reconcile",
+        payload: {},
+      }],
+    });
+    assert.equal(stale, null);
+    const afterStale = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0];
+    assert.equal(afterStale?.lastSeenAt, "2026-07-28T10:06:00.000Z");
+    assert.equal(afterStale?.lifecycleEpoch, 3);
+    assert.equal(store.getAccountById(account.id)?.localConnectionRevision, revisionBeforeCallbacks);
+    assert.equal(store.listPendingJobsForAccount(account.id, 20).length, 0);
+
+    const committed = store.commitConnectionEstablished({
+      accountId: account.id,
+      expectedSourceLastSeenAt: "2026-07-28T10:06:00.000Z",
+      provider: "junction",
+      source: {
+        connectionId: account.id,
+        sourceInstanceKey: "current-alias-callback-key",
+        sourceProviderSlug: "apple_health",
+        status: "connected",
+        firstSeenAt: collapsed.firstSeenAt,
+        lastSeenAt: "2026-07-28T10:08:00.000Z",
+      },
+      jobs: [{
+        availableAt: "2026-07-28T10:08:00.000Z",
+        kind: "reconcile",
+        payload: {},
+      }],
+    });
+    assert.equal(committed?.length, 1);
+    const reconnected = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "apple_health_kit",
+    })[0];
+    assert.equal(reconnected?.status, "connected");
+    assert.equal(reconnected?.lifecycleEpoch, 4);
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      (revisionBeforeCallbacks ?? 0) + 1,
+    );
+    assert.deepEqual(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    })[0], sibling);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store preserves current Junction disconnect fences independent of alias row order", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-junction-source-fence");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    for (const order of ["canonical-first", "alias-first"] as const) {
+      const account = store.upsertAccount({
+        provider: "junction",
+        externalAccountId: `junction-source-fence-${order}`,
+        displayName: "Junction",
+        scopes: [],
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        connectedAt: "2026-07-29T09:00:00.000Z",
+      });
+      const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: account.id,
+        sourceProviderSlug: "apple_health_kit",
+      });
+      assert.ok(canonicalSourceInstanceKey);
+      const canonical = {
+        connectionId: account.id,
+        firstSeenAt: "2026-07-29T09:00:00.000Z",
+        id: `dcs_${order}_canonical`,
+        lastSeenAt: "2026-07-29T10:01:00.000Z",
+        lifecycleEpoch: 4,
+        sourceInstanceKey: canonicalSourceInstanceKey,
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected" as const,
+      };
+      const fencedAlias = {
+        connectionId: account.id,
+        firstSeenAt: "2026-07-29T09:00:00.000Z",
+        id: `dcs_${order}_alias`,
+        lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+        lastErrorMessage: "Reconnect required.",
+        lastSeenAt: "2026-07-29T10:00:00.000Z",
+        lifecycleEpoch: 4,
+        sourceInstanceKey: `legacy-${order}-alias`,
+        sourceProviderSlug: "apple_health",
+        status: "connected" as const,
+      };
+
+      for (const row of order === "canonical-first"
+        ? [canonical, fencedAlias]
+        : [fencedAlias, canonical]) {
+        insertConnectionSourceRowForTesting(store, row);
+      }
+
+      const projected = store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: "apple_healthkit",
+      })[0];
+      assert.equal(projected?.status, "connected");
+      assert.equal(projected?.lastErrorCode, DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE);
+      assert.equal(projected?.lastErrorMessage, "Reconnect required.");
+
+      const collapsed = store.upsertConnectionSource({
+        connectionId: account.id,
+        lastSeenAt: "2026-07-29T10:02:00.000Z",
+        sourceInstanceKey: "ignored-provider-key",
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }, { preserveDisconnected: true });
+      assert.equal(collapsed.lastErrorCode, DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE);
+      assert.equal(collapsed.lastErrorMessage, "Reconnect required.");
+      assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 2);
+    }
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store migrates existing v9 sources to lifecycle epoch one", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-v9-migration");
+  const databasePath = path.join(tempDir, "state.sqlite");
+
+  try {
+    let store = new SqliteDeviceSyncStore(databasePath);
+    const connection = store.upsertAccount({
+      connectedAt: "2026-07-01T00:00:00.000Z",
+      credential: { kind: "none" },
+      displayName: "Aggregator",
+      externalAccountId: "aggregator-lifecycle-account",
+      metadata: {},
+      provider: "aggregator",
+      scopes: [],
+    });
+    store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-01T00:00:00.000Z",
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    store.close();
+
+    downgradeDeviceSyncStoreToV9(databasePath);
+
+    store = new SqliteDeviceSyncStore(databasePath);
+    const [migrated] = store.listConnectionSources({ connectionId: connection.id });
+    assert.equal(migrated?.lifecycleEpoch, 1);
+
+    const advanced = store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-02T00:00:00.000Z",
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    assert.equal(advanced.lifecycleEpoch, 2);
+    assert.equal(store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-03T00:00:00.000Z",
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }).lifecycleEpoch, 2);
+
+    const disconnected = store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-04T00:00:00.000Z",
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "disconnected",
+    });
+    const preserved = store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-05T00:00:00.000Z",
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "disconnected",
+    }, { preserveDisconnected: true });
+    assert.deepEqual(preserved, disconnected);
+    store.close();
+  } finally {
     await rm(tempDir, {
       force: true,
       recursive: true,
@@ -2847,7 +3389,7 @@ test("device sync store failure transitions requeue, replace only owned progress
       store.claimDueJob("worker-a", "2026-04-07T00:05:00.000Z", 60_000)?.id,
       retryableJob.id,
     );
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         retryableJob.id,
         "worker-b",
@@ -2859,11 +3401,11 @@ test("device sync store failure transitions requeue, replace only owned progress
         false,
         { phase: "foreign" },
       ),
-      false,
+      null,
     );
     assert.deepEqual(store.getJobById(retryableJob.id)?.payload, { phase: "original" });
 
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         retryableJob.id,
         "worker-a",
@@ -2875,7 +3417,12 @@ test("device sync store failure transitions requeue, replace only owned progress
         false,
         { phase: "bounded-progress" },
       ),
-      true,
+      {
+        attempts: 2,
+        disposition: "queued",
+        maxAttempts: 3,
+        remainingAttempts: 1,
+      },
     );
     const ownedRetry = store.getJobById(retryableJob.id);
     assert.equal(ownedRetry?.status, "queued");
@@ -2887,7 +3434,7 @@ test("device sync store failure transitions requeue, replace only owned progress
       store.claimDueJob("worker-b", "2026-04-07T00:05:20.000Z", 60_000)?.id,
       retryableJob.id,
     );
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         retryableJob.id,
         "worker-b",
@@ -2899,7 +3446,12 @@ test("device sync store failure transitions requeue, replace only owned progress
         false,
         { phase: "must-not-replace-on-dead" },
       ),
-      true,
+      {
+        attempts: 3,
+        disposition: "dead",
+        maxAttempts: 3,
+        remainingAttempts: 0,
+      },
     );
     const exhausted = store.getJobById(retryableJob.id);
     assert.equal(exhausted?.status, "dead");
@@ -2984,6 +3536,107 @@ test("device sync store disconnects only the expected connection generation", as
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("active dedupe membership matches enqueue ownership for queued and exhausted running jobs", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-active-dedupe-membership");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-active-dedupe-membership",
+      provider: "junction",
+      scopes: [],
+    });
+    const ordinaryKey = "junction-history-ordinary";
+    const companionKey = "junction-history-companion";
+    const ordinaryJob = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: ordinaryKey,
+      kind: "resource",
+      maxAttempts: 1,
+      payload: { resource: "caffeine" },
+      priority: 10,
+      provider: "junction",
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: companionKey,
+      kind: "resource",
+      maxAttempts: 1,
+      payload: { resource: COMPANION_HRV_RMSSD_RESOURCE },
+      priority: 5,
+      provider: "junction",
+    });
+    assert.deepEqual(
+      [...store.findActiveJobDedupeKeys({
+        accountId: account.id,
+        dedupeKeys: [ordinaryKey, companionKey, "missing"],
+        provider: "junction",
+      })].sort(),
+      [companionKey, ordinaryKey].sort(),
+    );
+    assert.throws(
+      () => store.findActiveJobDedupeKeys({
+        accountId: account.id,
+        dedupeKeys: Array.from({ length: 397 }, (_, index) => `candidate-${index}`),
+        provider: "junction",
+      }),
+      /exceeds 396 keys/u,
+    );
+
+    assert.equal(
+      store.claimDueJob("worker-ordinary", "2026-04-07T00:00:00.000Z", 60_000)?.dedupeKey,
+      ordinaryKey,
+    );
+    assert.deepEqual(
+      [...store.findActiveJobDedupeKeys({
+        accountId: account.id,
+        dedupeKeys: [ordinaryKey, companionKey],
+        provider: "junction",
+      })],
+      [companionKey],
+    );
+    store.failJob(
+      ordinaryJob.id,
+      "2026-04-07T00:01:02.000Z",
+      "TERMINAL_TEST_FAILURE",
+      "Terminal test failure.",
+      null,
+      false,
+    );
+    assert.equal(store.getJobById(ordinaryJob.id)?.status, "dead");
+    assert.equal(store.findActiveJobDedupeKeys({
+      accountId: account.id,
+      dedupeKeys: [ordinaryKey],
+      provider: "junction",
+    }).size, 0);
+
+    assert.equal(
+      store.claimDueJob("worker-companion", "2026-04-07T00:01:01.000Z", 60_000)?.dedupeKey,
+      companionKey,
+    );
+    assert.deepEqual(
+      [...store.findActiveJobDedupeKeys({
+        accountId: account.id,
+        dedupeKeys: [ordinaryKey, companionKey],
+        provider: "junction",
+      })],
+      [companionKey],
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
   }
 });
 
@@ -3216,7 +3869,7 @@ test("device sync store preserves retained calendar work across account cleanup 
       60_000,
     );
     assert.equal(claimedRetained?.id, retained.id);
-    assert.equal(store.failJobIfOwned(
+    assert.deepEqual(store.failJobIfOwned(
       retained.id,
       "worker-disconnected",
       "2026-04-09T00:00:01.000Z",
@@ -3225,12 +3878,17 @@ test("device sync store preserves retained calendar work across account cleanup 
       "2026-04-10T00:00:00.000Z",
       true,
       true,
-    ), true);
+    ), {
+      attempts: 1,
+      disposition: "queued",
+      maxAttempts: 5,
+      remainingAttempts: 4,
+    });
     assert.equal(
       store.claimDueJob("worker-unrelated-failure", "2026-04-09T00:00:01.000Z", 60_000)?.id,
       unrelatedFailure.id,
     );
-    assert.equal(store.failJobIfOwned(
+    assert.deepEqual(store.failJobIfOwned(
       unrelatedFailure.id,
       "worker-unrelated-failure",
       "2026-04-09T00:00:02.000Z",
@@ -3239,7 +3897,12 @@ test("device sync store preserves retained calendar work across account cleanup 
       "2026-04-10T00:00:00.000Z",
       true,
       true,
-    ), true);
+    ), {
+      attempts: 1,
+      disposition: "queued",
+      maxAttempts: 5,
+      remainingAttempts: 4,
+    });
 
     const database = openSqliteRuntimeDatabase(store.databasePath);
     try {
@@ -3388,6 +4051,327 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
     assert.deepEqual(duplicateJob.payload, {
       full: true,
     });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store requeues completed Junction temporal days after restart and drains newer backlog first", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-requeue");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  let store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-history",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const completed = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T00:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:completed",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob("worker-before-restart", "2026-04-06T00:00:00.000Z", 60_000)?.id,
+      completed.id,
+    );
+    store.completeJob(completed.id, "2026-04-06T00:00:01.000Z");
+    store.close();
+
+    store = new SqliteDeviceSyncStore(databasePath);
+    const enqueueRepeatedDay = () => store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:completed",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const repeated = enqueueRepeatedDay();
+    assert.notEqual(repeated.id, completed.id);
+    assert.equal(repeated.status, "queued");
+    assert.equal(enqueueRepeatedDay().id, repeated.id);
+    assert.equal(
+      store.claimDueJob("worker-repeated", "2026-04-06T01:00:00.000Z", 60_000)?.id,
+      repeated.id,
+    );
+    assert.equal(enqueueRepeatedDay().id, repeated.id);
+    store.completeJob(repeated.id, "2026-04-06T01:00:00.001Z");
+
+    const older = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.001Z",
+      dedupeKey: "junction-temporal-authority:older",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-01",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const newer = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:newer",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-02",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const urgent = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-webhook:urgent",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+
+    const first = store.claimDueJob("worker-after-restart", "2026-04-06T01:00:00.002Z", 60_000);
+    assert.equal(first?.id, urgent.id);
+    store.completeJob(urgent.id, "2026-04-06T01:00:01.000Z");
+    const second = store.claimDueJob("worker-after-restart", "2026-04-06T01:00:01.000Z", 60_000);
+    assert.equal(second?.id, newer.id);
+    store.completeJob(newer.id, "2026-04-06T01:00:02.000Z");
+    assert.equal(
+      store.claimDueJob("worker-after-restart", "2026-04-06T01:00:02.000Z", 60_000)?.id,
+      older.id,
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store sweeps Junction temporal terminal history across the rolling horizon", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-horizon-sweep");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  const horizonDays = 3;
+  const resources = ["blood_oxygen", "stress_level"] as const;
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-horizon-sweep",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-03-01T00:00:00.000Z",
+    });
+    const dayKeyFor = (cadence: number, offset: number) => {
+      const dayMs = Date.UTC(2026, 2, 1 + cadence + offset);
+      return new Date(dayMs).toISOString().slice(0, 10);
+    };
+    const enqueueCoordinate = (timeZone: string, resource: string, dayKey: string, availableAt: string) =>
+      store.enqueueJob({
+        accountId: account.id,
+        availableAt,
+        dedupeKey: `junction-temporal-authority:v1:${timeZone}:${resource}:${dayKey}`,
+        kind: "resource",
+        payload: {
+          resource,
+          resourceCategory: "timeseries",
+          temporalAuthorityDayKey: dayKey,
+          temporalAuthorityTimeZone: timeZone,
+          windowEnd: `${dayKey}T23:59:59.000Z`,
+          windowStart: `${dayKey}T00:00:00.000Z`,
+        },
+        priority: 45,
+        provider: "junction",
+      });
+    const temporalTerminalRowCount = () =>
+      readJobsForAccountForTesting(store, account.id).filter((job) =>
+        job.status !== "queued"
+        && job.status !== "running"
+        && store.getJobById(job.id)?.dedupeKey?.startsWith("junction-temporal-authority:")
+      ).length;
+
+    for (let cadence = 0; cadence < 16; cadence += 1) {
+      const timeZone = cadence < 12 ? "UTC" : "America/Chicago";
+      const availableAt = new Date(Date.UTC(2026, 2, 4 + cadence, 1)).toISOString();
+      const jobs = resources.flatMap((resource) =>
+        Array.from({ length: horizonDays }, (_, offset) =>
+          enqueueCoordinate(timeZone, resource, dayKeyFor(cadence, offset), availableAt)
+        ));
+      assert.equal(jobs.length, horizonDays * resources.length);
+      for (const job of jobs) {
+        assert.equal(enqueueCoordinate(
+          timeZone,
+          String(job.payload.resource),
+          String(job.payload.temporalAuthorityDayKey ?? job.payload.windowStart).slice(0, 10),
+          availableAt,
+        ).id, job.id);
+      }
+      for (
+        let claimed = store.claimDueJob(`worker-${cadence}`, availableAt, 60_000);
+        claimed;
+        claimed = store.claimDueJob(`worker-${cadence}`, availableAt, 60_000)
+      ) {
+        store.completeJob(claimed.id, availableAt);
+      }
+      assert.equal(
+        temporalTerminalRowCount() <= horizonDays * resources.length,
+        true,
+        `cadence ${cadence} exceeded the horizon terminal-row bound`,
+      );
+    }
+    assert.equal(temporalTerminalRowCount(), horizonDays * resources.length);
+
+    const queued = enqueueCoordinate("America/Chicago", "blood_oxygen", "2026-03-25", "2026-03-25T01:00:00.000Z");
+    assert.equal(queued.status, "queued");
+    const swept = enqueueCoordinate("America/Chicago", "stress_level", "2026-03-25", "2026-03-25T01:30:00.000Z");
+    assert.equal(store.getJobById(queued.id)?.status, "queued");
+    assert.equal(temporalTerminalRowCount(), 0);
+    assert.equal(
+      store.claimDueJob("worker-widening", "2026-03-25T01:00:00.000Z", 60_000)?.id,
+      queued.id,
+    );
+    assert.equal(store.getJobById(swept.id)?.status, "queued");
+    store.completeJob(queued.id, "2026-03-25T01:00:01.000Z");
+    const refetched = enqueueCoordinate(
+      "America/Chicago",
+      "blood_oxygen",
+      "2026-03-25",
+      "2026-03-25T02:00:00.000Z",
+    );
+    assert.notEqual(refetched.id, queued.id);
+    assert.equal(store.getJobById(queued.id), null);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store bounds Junction temporal terminal history to one row per coordinate", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-history-bound");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-history-bound",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const enqueueCoordinate = (availableAt: string) => store.enqueueJob({
+      accountId: account.id,
+      availableAt,
+      dedupeKey: "junction-temporal-authority:bounded-day",
+      kind: "resource",
+      payload: {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+
+    let previousTerminalId: string | undefined;
+    for (let cadence = 0; cadence < 5; cadence += 1) {
+      const availableAt = `2026-04-06T0${cadence}:00:00.000Z`;
+      const job = enqueueCoordinate(availableAt);
+      if (previousTerminalId !== undefined) {
+        assert.notEqual(job.id, previousTerminalId);
+        assert.equal(store.getJobById(previousTerminalId), null);
+      }
+      assert.equal(enqueueCoordinate(availableAt).id, job.id);
+      assert.equal(store.claimDueJob(`worker-${cadence}`, availableAt, 60_000)?.id, job.id);
+      assert.equal(enqueueCoordinate(availableAt).id, job.id);
+      store.completeJob(job.id, availableAt);
+      assert.equal(store.getJobById(job.id)?.status, "succeeded");
+      previousTerminalId = job.id;
+    }
+    assert.equal(
+      previousTerminalId !== undefined && store.getJobById(previousTerminalId)?.status,
+      "succeeded",
+    );
+
+    const ordinary = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T06:00:00.000Z",
+      dedupeKey: "junction-webhook:ordinary-history",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+    assert.equal(store.claimDueJob("worker-ordinary", "2026-04-06T06:00:00.000Z", 60_000)?.id, ordinary.id);
+    store.completeJob(ordinary.id, "2026-04-06T06:00:01.000Z");
+    const ordinaryRepeat = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T07:00:00.000Z",
+      dedupeKey: "junction-webhook:ordinary-history",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+    assert.notEqual(ordinaryRepeat.id, ordinary.id);
+    assert.equal(store.getJobById(ordinary.id)?.status, "succeeded");
   } finally {
     store.close();
     await rm(tempDir, {
@@ -3635,26 +4619,35 @@ test("device sync store consolidates a pre-v8 terminal identity fork", async () 
     payload: {},
     provider: "junction",
   });
-  legacyStore.upsertConnectionSource({
+  insertConnectionSourceRowForTesting(legacyStore, {
     connectionId: original.id,
     displayName: "Original Garmin",
+    firstSeenAt: "2026-07-13T01:01:00.000Z",
+    id: "dcs_original_garmin",
     lastSeenAt: "2026-07-13T01:01:00.000Z",
+    lifecycleEpoch: 1,
     sourceInstanceKey: "src_original_garmin",
     sourceProviderSlug: "garmin",
     status: "connected",
   });
-  legacyStore.upsertConnectionSource({
+  insertConnectionSourceRowForTesting(legacyStore, {
     connectionId: original.id,
     displayName: "Original WHOOP",
+    firstSeenAt: "2026-07-13T01:01:00.000Z",
+    id: "dcs_original_whoop",
     lastSeenAt: "2026-07-13T01:01:00.000Z",
+    lifecycleEpoch: 1,
     sourceInstanceKey: "src_shared_whoop",
     sourceProviderSlug: "whoop",
     status: "connected",
   });
-  legacyStore.upsertConnectionSource({
+  insertConnectionSourceRowForTesting(legacyStore, {
     connectionId: fork.id,
     displayName: "Canonical WHOOP",
+    firstSeenAt: "2026-07-13T01:01:30.000Z",
+    id: "dcs_canonical_whoop",
     lastSeenAt: "2026-07-13T01:01:30.000Z",
+    lifecycleEpoch: 1,
     sourceInstanceKey: "src_shared_whoop",
     sourceProviderSlug: "whoop",
     status: "disconnected",
@@ -4404,7 +5397,7 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
     assert.equal(claimed?.id, job.id);
     assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T01:00:30.000Z"), false);
     assert.equal(store.completeJobIfOwned(job.id, "worker-a", "2026-04-07T01:01:00.000Z"), false);
-    assert.equal(
+    assert.deepEqual(
       store.failJobIfOwned(
         job.id,
         "worker-a",
@@ -4416,7 +5409,7 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
         false,
         { windowStart: "2026-04-08T00:00:00.000Z" },
       ),
-      false,
+      null,
     );
     assert.equal(store.getJobById(job.id)?.status, "running");
     assert.deepEqual(store.getJobById(job.id)?.payload, {});

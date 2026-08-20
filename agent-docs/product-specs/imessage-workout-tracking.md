@@ -154,7 +154,98 @@ This narrow same-conversation repetition rule does not create a card-level
 target, prior workout value, assistant suggestion, or non-repetition
 prescription into an actual set.
 
-An active workout may have zero pending sets after the final result is logged; it remains active until the member explicitly finishes it.
+A short acknowledgement after a set message or assistant reply is not another
+set completion. It cannot move the write target to the next set. The last set
+coordinate the member explicitly named remains the only candidate. If that set
+still needs a result, Murph asks one narrow question about it. If the canonical
+result already matches, the acknowledgement causes no workout mutation. The
+sole exception is a contextual affirmative that accepts the exact bounded
+missing-workout recovery offer below.
+
+Every completion, correction, and acknowledgement follow-up first resolves the
+canonical active workout. A missing active workout fails closed. Murph does not
+start a workout to make an earlier assistant confirmation appear true, does not
+write a later set, and does not claim that any set was saved. It states that no
+active tracked workout was found. A completion or correction alone never
+authorizes a new workout. Murph may start one only when the current message
+explicitly requests it or the member accepts one exact recovery offer. That
+offer repeats the proposed workout, exercise, set coordinate, and stated result.
+Acceptance creates only enough pending coordinates through that set and writes
+only the named set. Murph rechecks active state before acting and never retargets
+the accepted recovery if another active workout has appeared. The missing-state
+response includes both the truthful no-save result and that exact recovery
+question. It does not stop after the failure statement or give generic retry
+advice.
+
+An active workout may have zero pending planned sets and remain active so the
+member can add targetless extra sets. Plan exhaustion is not session closure.
+When one message contains both a set result and unmistakable closure language,
+Murph logs the set, finishes that same workout in the same turn, and returns the
+completed card. The member does not need to send a separate finish command.
+A reminder by itself, plan targets, elapsed time, or an earlier-day active record
+does not prove completion.
+
+## Generic scheduled-reminder relationship context
+
+Every scheduled automation delivered into assistant context includes its exact
+`automationId` and occurrence timestamps. When it concerns canonical records,
+it also includes a bounded list of exact `contextReferences`; plan-owned support
+continues to include its `supportSeriesId`. Each reference names an entity kind
+and the canonical id it concerns, such as a workout format, experiment, habit,
+or regimen. The host keeps those exact ids visible to the model.
+That relationship metadata survives provider-accepted text, text-plus-media,
+and media-only reminder presentations; native reply is never required.
+
+A model-authored reference copies an id returned by a successful current
+canonical read or create result that identifies exactly one record. When that
+evidence is missing or ambiguous, the automation stores no reference. The host
+preserves stored ids with the delivery; preservation is not proof that a record
+still exists or is the right mutation target.
+
+The metadata is relationship context, not side-effect authority. It does not
+confer read permission, mutation permission, or consent, and it does not select a
+write surface. The assistant must inspect the referenced canonical record and
+use the ordinary domain tools, validation, and locks for any action. Missing or
+conflicting references fail closed rather than being guessed from reminder copy,
+titles, card state, or recency.
+
+The same prior-delivery context remains available for the next ordinary direct
+chat message after the reminder. Native iMessage Reply, a quoted reply target,
+card provenance, or provider reply attestation is neither required nor treated
+as authority.
+
+For a workout reminder, the relationship context identifies the exact saved
+workout-format id. On an ordinary set completion, Murph reads that format and
+the ordinary active-workout state. If no workout is active, the current
+completion plus that exact inspected reference authorizes starting only the
+referenced routine and logging only the stated set. If the active workout
+already references that routine, the exact active event is targeted normally.
+
+A different active workout is not assumed to be the reminder target, but the
+reminder also does not establish when that earlier workout ended. Active
+`durationMinutes` is elapsed time at the latest mutation, not an end
+observation. Murph never derives an end from that value, a last-write time, a
+plan target, the reminder time, the later reply time, or local midnight. If the
+member supplies the earlier workout's exact end time or exact total duration,
+Murph may compose the existing finish, start-from-format, and targeted set-log
+commands. Otherwise it makes no workout mutation, says the new set was not
+saved yet, and asks one narrow question for that time or duration while
+preserving the exact proposed routine, workout-format id, active-workout event
+id, exercise, set, and result in text. That exact text remains available through
+committed transcript replay even when provider-thread continuity changes. Only
+the immediate answer may continue the proposal, after Murph exact-reads the
+recorded format and event ids and separately reads the sole active workout. It
+continues only when the recorded event remains active and is still the sole
+active workout. A completed, missing, replaced, or conflicting active event, an
+ambiguous answer, or an unrelated later message fails closed without mutation.
+
+Multiple active workouts, an unidentified routine or set, missing or
+conflicting relationship context, changed state, and insufficient finish timing
+all stop without silent retargeting. The existing one-active-workout invariant
+and mutation lock remain the write owners. Explicit historical intent,
+including a correction for yesterday or an explicit older workout id, continues
+through the ordinary exact historical targeting path and is not reinterpreted
+as a new-routine completion.
 
 ## Direct action loop
 
@@ -231,12 +322,25 @@ operations, assistant tools, or a new queue.
 
 ## Rollout
 
-For a new V4 workout, an expansion of V4's strict bounds, or the V6 editor,
-deploy the native reader first, the shared Web action and image routes second,
-and the Worker and runner producer last. Older app versions retain
-truthful captions and the static image but do not provide the drill-down workout
-interface. Keep the Web route available while any sent image URL may still be
-fetched.
+Backward compatibility is a permanent iMessage app-card contract, not a
+one-time V6 rollout step. Linq's app-capability result does not negotiate a
+decoder version, so every production card must remain readable by every
+previously released Murph Messages extension that can claim it. A new schema,
+discriminator, required field, stricter bound, or changed meaning may emit only
+when unknown clients keep receiving the last readable envelope, an explicit
+capability selects a compatible envelope, or every earlier claiming extension
+already renders the unknown shape as a complete non-interactive recovery. A
+new reader becoming available in TestFlight or the App Store is necessary when
+applicable but is never sufficient by itself because older installed builds
+remain active. Until compatibility is proven, emit the prior readable schema
+(V4 for workouts) or deterministic ordinary text.
+
+Within that compatibility gate, deploy the native reader first, the shared Web
+action and image routes second, and the Worker and runner producer last. Keep
+the Web route available while any sent image URL may still be fetched.
+Provider acceptance, delivery receipts, the provider's static layout, and
+new-build device proof do not prove old-extension rendering: an installed
+extension can claim the card before rejecting its envelope.
 
 The backend also has a persisted-state compatibility floor. Deploy a Worker and
 runner bundle that accepts the current V4 bounds and V6 before a card using
@@ -250,6 +354,19 @@ explicit restoration of the quarantined intent after the compatible bundle is
 live, not rollback below the floor. Focused static-route, local-outbox, and
 hosted-side-effect round-trip tests pin all three strict readers with the same
 expanded fixture shape.
+
+Reminder context references follow the same persisted-outbox rollout rule.
+Intents without references omit the optional field, so ordinary replies remain
+readable by the preceding strict reader. Deploy the reference-aware Worker and
+runner together with immediate container rollout before any reminder carrying
+references can fire, then prove the exact runner-bundle fingerprint. The first
+canonical automation or outbox intent with a non-empty reference list
+establishes that bundle as the hard rollback floor. Hosted rollback below the
+floor is safe only after every such canonical reference is removed through the
+current writer and every affected intent and checkpoint has drained; otherwise
+recovery requires the compatible reader or a forward fix, never manual editing
+of canonical or assistant runtime state. A local CLI downgrade below the same
+reader floor is unsupported while canonical automations carry references.
 
 Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store

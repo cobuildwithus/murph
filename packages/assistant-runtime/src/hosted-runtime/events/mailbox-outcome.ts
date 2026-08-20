@@ -11,6 +11,7 @@ export type HostedMailboxOutcome = HostedMailboxEffect & {
 };
 
 export function createNoopMailboxEffect(input: {
+  backgroundMaintenanceYielded?: true;
   conversationMetrics: HostedConversationWakeMetrics | null;
   deliveryIntentIds?: readonly string[] | null;
   mailboxLane: HostedMailboxLane;
@@ -20,6 +21,9 @@ export function createNoopMailboxEffect(input: {
   redactedLogEntries?: HostedExecutionRedactedLogEntry[];
 }): HostedMailboxOutcome {
   return {
+    ...(input.backgroundMaintenanceYielded === true
+      ? { backgroundMaintenanceYielded: true as const }
+      : {}),
     conversationMetrics: input.conversationMetrics,
     ...(input.deliveryIntentIds === undefined
       ? {}

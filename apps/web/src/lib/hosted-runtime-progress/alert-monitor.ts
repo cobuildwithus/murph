@@ -19,6 +19,7 @@ import {
 import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS = 15 * 60_000;
+export const HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
 
 const HOSTED_RUNTIME_PROGRESS_MONITOR_ID = "hosted-runtime-progress-monitor:v1";
 const HOSTED_RUNTIME_PROGRESS_MONITOR_KIND = "hosted_runtime_progress_monitor";
@@ -100,6 +101,7 @@ const HOSTED_RUNTIME_PROGRESS_MONITOR_SPEC: HostedOperationalAlertMonitorSpec<
   idempotencyScope: "murph/runtime-progress",
   kind: HOSTED_RUNTIME_PROGRESS_MONITOR_KIND,
   readHealth: readHostedRuntimeProgressHealth,
+  reminderIntervalMs: HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS,
   status: MONITOR_STATUS,
   subject: HOSTED_RUNTIME_PROGRESS_MONITOR_SUBJECT,
 };
@@ -533,6 +535,7 @@ function buildHostedRuntimeProgressAlertDetails(input: {
 
 function buildHostedRuntimeProgressAlertMessage(input: {
   health: HostedRuntimeProgressHealth;
+  notificationKind: "alert" | "reminder";
   now: Date;
 }): string {
   const evidence = [
@@ -559,7 +562,9 @@ function buildHostedRuntimeProgressAlertMessage(input: {
   ].filter((value): value is string => value !== null);
 
   return [
-    "Murph runtime progress alert.",
+    input.notificationKind === "reminder"
+      ? "Murph runtime progress reminder."
+      : "Murph runtime progress alert.",
     `${evidence.join("; ")}.`,
     timing.length > 0 ? `${timing.join(". ")}.` : null,
     `Checked ${formatAlertTime(input.now)}.`,

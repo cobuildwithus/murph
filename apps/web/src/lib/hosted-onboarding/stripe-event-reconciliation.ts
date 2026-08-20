@@ -117,7 +117,10 @@ import {
   HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
-import { isHostedOnboardingError } from "./errors";
+import {
+  isHostedOnboardingError,
+  isHostedStripeEffectPendingError,
+} from "./errors";
 import {
   HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET,
   isHostedUsageCreditStripeRetryableError,
@@ -126,7 +129,6 @@ import {
 import { signalHostedRuntimeRecheckRuntime } from "../hosted-orchestration/signal-runtime";
 import {
   materializeHostedGroupSponsorshipIfApplicable,
-  materializeHostedGroupSponsorshipNearCapNotification,
 } from "../hosted-groups/group-sponsorship-notification";
 
 // Top-up reads use no SDK retries, hard per-request/KMS bounds, an aggregate
@@ -979,10 +981,6 @@ async function processClaimedHostedStripeEvent(
         prisma,
         purchaseId: usageCreditReconciliation.purchaseId,
       });
-      await materializeHostedGroupSponsorshipNearCapNotification({
-        prisma,
-        purchaseId: usageCreditReconciliation.purchaseId,
-      });
     }
     if (result.cleanupFamilySponsoredStripeSubscriptionId && processingMemberId) {
       await cleanupHostedFamilySponsoredDirectSubscription({
@@ -1105,6 +1103,7 @@ async function processClaimedHostedStripeEvent(
       !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
       !(error instanceof HostedStripeRuntimeRecheckPendingError) &&
+      !isHostedStripeEffectPendingError(error) &&
       !usageCreditEventHandled &&
       !isHostedUsageCreditStripeRetryableError(error) &&
       !isHostedStripeEventOperationallyRetryableError(error);

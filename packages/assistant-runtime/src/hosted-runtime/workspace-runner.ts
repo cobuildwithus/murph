@@ -280,6 +280,10 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   // ran the foreground assistant reply phase; selected-prefix repair uses it
   // to distinguish clean completion from retryable reply work.
   foregroundReplyFailed?: number | null;
+  // Ephemeral provenance for one successfully processed, foreground-priority
+  // system completion in this pass. The outer runtime combines this with the
+  // pass dirty bit before advancing its idle-checkpoint activity ordinal.
+  foregroundPrioritySystemCompletionProcessed?: true;
   // Ephemeral provenance for an assistant wake created by work selected in
   // this invocation. This is never persisted; the runner and outer hot-wake
   // gate use it instead of inferring ownership from a merged wake timestamp.
@@ -311,6 +315,7 @@ export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
 export interface HostedWorkspaceDurableCheckpointEffectResult {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
+  redactedStatus?: HostedRuntimeRedactedJson | null;
   requiresFollowUpCheckpoint?: boolean;
 }
 

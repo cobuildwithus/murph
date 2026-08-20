@@ -1,3 +1,4 @@
+import type { AutomationContextReference } from '@murphai/contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   readAssistantDeliveryFailureClass,
@@ -8,6 +9,9 @@ import {
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
+import {
+  readAssistantDeviceActivityDeliveryIdempotencyMetadata,
+} from '../device-activity-cron-tags.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import { conversationRefFromAssistantInputConversation } from '../conversation-ref.js'
@@ -19,6 +23,7 @@ import type {
 import { createHostedDeliveryId } from '../hosted-delivery-id.js'
 import {
   listAssistantOutboxIntents,
+  listAssistantOutboxIntentsForAutoReplyRoute,
   type AssistantOutboxDispatchMode,
   type AssistantOutboxInventoryScanMetrics,
 } from '../outbox.js'
@@ -176,6 +181,13 @@ type AssistantAutoReplyReceiptRecord =
 type AssistantAutoReplyOutboxIntent =
   Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]
 
+export interface AssistantAutoReplyOutboxHistoryQuery {
+  conversation: AssistantInputConversationRef
+  deliveryTarget: string
+  providerMessageIds?: readonly string[] | null
+  source: string
+}
+
 export interface AssistantAutoReplyHistoryMetrics {
   outboxScanBytesRead?: number
   outboxScanElapsedMs?: number
@@ -190,7 +202,9 @@ export interface AssistantAutoReplyHistoryMetrics {
 
 export interface AssistantAutoReplyHistoryReader {
   readMetrics(): AssistantAutoReplyHistoryMetrics
-  readOutboxIntents(): Promise<readonly AssistantAutoReplyOutboxIntent[]>
+  readOutboxIntents(
+    query?: AssistantAutoReplyOutboxHistoryQuery,
+  ): Promise<readonly AssistantAutoReplyOutboxIntent[]>
   readReceipts(): Promise<readonly AssistantAutoReplyReceiptRecord[]>
 }
 
@@ -1513,21 +1527,19 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (explicitReplyContext) {
     promptInputs = explicitReplyContext.inputs
   }
-  const outboxContext = explicitReplyContext?.hasExplicitReply
-    ? {
-        delivery: explicitReplyContext.crossSessionDelivery,
-        replyTargetDelivery: explicitReplyContext.primaryReplyTargetDelivery,
-      }
-    : await resolveAssistantAutoReplyLatestCrossSessionDelivery({
-        deliveryTarget: conversationDeliveryTarget,
-        historyReader: input.historyReader,
-        input: primaryReplyInput,
-        replyToMessageId: authenticatedGroupRoom
-          ? null
-          : readPromptInputsCrossSessionReplyToMessageId(promptInputs),
-        session: existingSession,
-        vault: input.vault,
-      })
+  const crossSessionReplyContext =
+    readPromptInputsCrossSessionReplyContext(promptInputs)
+  const outboxContext =
+    await resolveAssistantAutoReplyCrossSessionDeliveryContext({
+      deliveryTarget: conversationDeliveryTarget,
+      hasNativeReplyReference:
+        crossSessionReplyContext.hasNativeReplyReference,
+      historyReader: input.historyReader,
+      input: primaryReplyInput,
+      replyToMessageId: crossSessionReplyContext.replyToMessageId,
+      session: existingSession,
+      vault: input.vault,
+    })
   providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     providerStartCriticalPath,
     'automationCrossSessionContextDoneAtMonotonicMs',
@@ -1544,7 +1556,8 @@ async function evaluateAssistantAutoReplyGroup(input: {
       'affirmative Linq reaction target is not an attested assistant delivery',
     )
   }
-  const latestCrossSessionDelivery = outboxContext.delivery
+  const priorDeliveryContext =
+    buildAssistantAutoReplyCrossSessionTurnContext(outboxContext.deliveries)
   if (
     input.executionContext?.hosted &&
     primaryReplyInput.source === 'telegram' &&
@@ -1585,14 +1598,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
       inputs: promptInputs,
       context: input.group,
     }),
-    crossSessionContext: latestCrossSessionDelivery === null
-      ? null
-      : {
-          anchored: latestCrossSessionDelivery.anchored,
-          intentId: latestCrossSessionDelivery.intentId,
-          order: latestCrossSessionDelivery.order,
-          routeDigest: latestCrossSessionDelivery.routeDigest,
-        },
+    crossSessionContext: outboxContext.claim,
     kind: 'reply',
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
@@ -1602,14 +1608,13 @@ async function evaluateAssistantAutoReplyGroup(input: {
     sessionId: existingSession?.sessionId ?? null,
     turnContext: buildAssistantAutoReplyTurnContext({
       baseContext: affirmativeReaction
-      ? buildAssistantAutoReplyReactionTurnContext(
-          outboxContext.replyTargetDelivery?.message ?? null,
-        )
-      : explicitReplyContext?.hasExplicitReply === true
-      ? null
-      : buildAssistantAutoReplyCrossSessionTurnContext(
-          latestCrossSessionDelivery?.message ?? null,
-        ),
+      ? combineAssistantAutoReplyContextSections([
+          buildAssistantAutoReplyReactionTurnContext(
+            outboxContext.replyTargetDelivery?.message ?? null,
+          ),
+          priorDeliveryContext,
+        ])
+      : priorDeliveryContext,
       trustedHostedImageCompletionContext:
         buildTrustedHostedImageCompletionTurnContext(promptInputs),
       usageRunningLow: input.group.items.some(
@@ -1877,22 +1882,44 @@ function createAssistantAutoReplyPrimaryInput(
   }
 }
 
-function readPromptInputsCrossSessionReplyToMessageId(
+function readPromptInputsCrossSessionReplyContext(
   inputs: readonly AssistantAutoReplyPromptInput[],
-): string | null {
+): {
+  hasNativeReplyReference: boolean
+  replyToMessageId: string | null
+} {
+  let hasNativeReplyReference = false
   for (let index = inputs.length - 1; index >= 0; index -= 1) {
     const metadata = inputs[index]?.sourceMetadata
-    if (metadata?.kind === 'linq' && metadata.replyToMessageId) {
-      return metadata.replyToMessageId
+    if (
+      (metadata?.kind === 'linq' || metadata?.kind === 'telegram') &&
+      metadata.replyToMessageId
+    ) {
+      hasNativeReplyReference = true
+      const replyToMessageId = readAssistantTargetProviderScalar(
+        metadata.replyToMessageId,
+      )
+      if (replyToMessageId !== null) {
+        return {
+          hasNativeReplyReference,
+          replyToMessageId,
+        }
+      }
     }
   }
-  return null
+  return {
+    hasNativeReplyReference,
+    replyToMessageId: null,
+  }
 }
 
 function promptInputCarriesNativeReplyReference(
   candidate: AssistantInputCandidate,
 ): boolean {
   const metadata = candidate.event.sourceMetadata
+  if (metadata?.kind === 'telegram') {
+    return metadata.replyToMessageId !== undefined
+  }
   return metadata?.kind === 'linq' &&
     metadata.replyToMessageId !== null &&
     metadata.editedTextPartIndex === undefined
@@ -4303,9 +4330,13 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot(in
 export function createAssistantAutoReplyHistoryReader(input: {
   vault: string
 }): AssistantAutoReplyHistoryReader {
-  let outboxIntents:
+  let legacyOutboxIntents:
     | Promise<readonly AssistantAutoReplyOutboxIntent[]>
     | null = null
+  const projectedOutboxIntents = new Map<
+    string,
+    Promise<readonly AssistantAutoReplyOutboxIntent[]>
+  >()
   let outboxScanMetrics: AssistantOutboxInventoryScanMetrics | null = null
   let outboxScanElapsedMs: number | null = null
   let receiptScanMetrics: AssistantTurnReceiptScanMetrics | null = null
@@ -4335,8 +4366,35 @@ export function createAssistantAutoReplyHistoryReader(input: {
         receiptScanPerformed: receiptScanMetrics !== null,
       }
     },
-    readOutboxIntents() {
-      outboxIntents ??= (async () => {
+    readOutboxIntents(query) {
+      if (query) {
+        const conversation = conversationRefFromAssistantInputConversation(
+          query.conversation,
+        )
+        const key = JSON.stringify({
+          actorId: conversation.participantId,
+          channel: query.source,
+          deliveryTarget: query.deliveryTarget,
+          identityId: conversation.identityId,
+          providerMessageIds: query.providerMessageIds ?? null,
+          threadId: conversation.threadId,
+        })
+        let projected = projectedOutboxIntents.get(key)
+        if (!projected) {
+          projected = listAssistantOutboxIntentsForAutoReplyRoute({
+            actorId: conversation.participantId,
+            channel: query.source,
+            deliveryTarget: query.deliveryTarget,
+            identityId: conversation.identityId,
+            providerMessageIds: query.providerMessageIds,
+            threadId: conversation.threadId,
+            vault: input.vault,
+          })
+          projectedOutboxIntents.set(key, projected)
+        }
+        return projected
+      }
+      legacyOutboxIntents ??= (async () => {
         const startedAt = Date.now()
         try {
           return await listAssistantOutboxIntents(input.vault, (metrics) => {
@@ -4346,7 +4404,7 @@ export function createAssistantAutoReplyHistoryReader(input: {
           outboxScanElapsedMs = Math.max(0, Date.now() - startedAt)
         }
       })()
-      return outboxIntents
+      return legacyOutboxIntents
     },
     readReceipts() {
       receipts ??= listAssistantTurnReceipts(
@@ -4601,47 +4659,61 @@ function isAssistantAutoReplyNearestTextEchoMatch(input: {
     normalizeComparableText(nearest.message) === normalizeComparableText(input.inputText)
 }
 
-async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
+async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
   deliveryTarget: string | null
+  hasNativeReplyReference: boolean
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
   replyToMessageId: string | null
   session: AssistantSession | null
   vault: string
 }): Promise<{
-  delivery: AssistantAutoReplySelectedOutboxDelivery | null
+  claim: AssistantAutoReplySelectedCrossSessionContext | null
+  deliveries: AssistantAutoReplyPriorDeliveryContext[]
   replyTargetDelivery: AssistantAutoReplyMatchingOutboxDelivery | null
 }> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
   if (!channel || !deliveryTarget) {
     return {
-      delivery: null,
+      claim: null,
+      deliveries: [],
+      replyTargetDelivery: null,
+    }
+  }
+  if (input.hasNativeReplyReference && input.replyToMessageId === null) {
+    return {
+      claim: null,
+      deliveries: [],
       replyTargetDelivery: null,
     }
   }
 
-  // Every consumer of this resolver quotes delivery text (latest fallback,
-  // reaction context, cross-session context), so media-only records stay out
-  // and its behavior is unchanged by their attestation elsewhere.
   const replyToMessageId = input.replyToMessageId
   const matchingDeliveries =
-    (await listAssistantAutoReplyMatchingOutboxDeliveries({
+    await listAssistantAutoReplyMatchingOutboxDeliveries({
       allowAcceptedNonSentMedia: replyToMessageId !== null,
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
-    })).filter((delivery) => delivery.message !== null)
+      providerMessageIds: replyToMessageId === null
+        ? []
+        : [replyToMessageId],
+    })
   const replyTargetDelivery = replyToMessageId === null
     ? null
     : resolveAssistantAutoReplyExactOutboxDelivery(
         matchingDeliveries,
         replyToMessageId,
       )
-  const sessionEligible = matchingDeliveries
-    .filter((delivery) =>
-      input.session === null || delivery.sessionId !== input.session.sessionId,
-    )
+  const contextEligible = matchingDeliveries
+    .flatMap((delivery) => {
+      const projected = projectAssistantAutoReplyPriorDelivery({
+        delivery,
+        sessionId: input.session?.sessionId ?? null,
+      })
+      return projected === null ? [] : [projected]
+    })
     .sort((left, right) =>
       compareAssistantAutoReplyDeliveryOrders(left.order, right.order),
     )
@@ -4653,32 +4725,49 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   // Explicit native reply: the user-supplied provider message id is
   // authoritative, so this branch ignores both the local-clock causal cutoff
   // and the unanchored route watermark. It still installs the same pre-egress
-  // claim as an unanchored selection; a completed older anchor can never move
+  // claim as an unanchored selection; a completed older anchor cannot move
   // settledThrough backwards.
   if (replyToMessageId) {
     const selected = resolveAssistantAutoReplyExactOutboxDelivery(
-      sessionEligible,
+      contextEligible,
       replyToMessageId,
     )
     if (!selected) {
       return {
-        delivery: null,
+        claim: null,
+        deliveries: [],
         replyTargetDelivery,
       }
     }
     const routeDigest = selected.exactRouteDigest ?? inputRoute?.digest ?? null
     if (!routeDigest) {
       return {
-        delivery: null,
+        claim: null,
+        deliveries: [],
         replyTargetDelivery,
       }
     }
+    const causalUpperBoundMs =
+      resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input.input)
+    const deliveries = contextEligible.filter((candidate) =>
+      candidate.intentId === selected.intentId ||
+      (
+        causalUpperBoundMs !== null &&
+        candidate.sentAtMs <= causalUpperBoundMs &&
+        candidate.exactRouteDigest === routeDigest
+      )
+    )
     return {
-      delivery: {
-        ...selected,
+      claim: {
         anchored: true,
+        intentId: selected.intentId,
+        order: selected.order,
         routeDigest,
       },
+      deliveries: buildAssistantAutoReplyPriorDeliveryContexts({
+        deliveries,
+        exactReplyTargetIntentId: selected.intentId,
+      }),
       replyTargetDelivery,
     }
   }
@@ -4688,12 +4777,13 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   )
   if (causalUpperBoundMs === null || inputRoute === null) {
     return {
-      delivery: null,
+      claim: null,
+      deliveries: [],
       replyTargetDelivery,
     }
   }
 
-  const fresh = sessionEligible.filter(
+  const fresh = contextEligible.filter(
     (delivery) => delivery.sentAtMs <= causalUpperBoundMs,
   )
   if (
@@ -4704,7 +4794,8 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     // provider-id anchors above remain available, while optional context fails
     // closed rather than combining independent routes.
     return {
-      delivery: null,
+      claim: null,
+      deliveries: [],
       replyTargetDelivery,
     }
   }
@@ -4716,30 +4807,38 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     })
     if (routeState.kind === 'blocked') {
       return {
-        delivery: null,
+        claim: null,
+        deliveries: [],
         replyTargetDelivery,
       }
     }
-    const selected = fresh.filter((delivery) =>
+    const deliveries = fresh.filter((delivery) =>
       routeState.settledThrough === null ||
       compareAssistantAutoReplyDeliveryOrders(
         delivery.order,
         routeState.settledThrough,
       ) > 0,
-    ).at(-1) ?? null
+    )
+    const selected = deliveries.at(-1) ?? null
     return {
-      delivery: selected === null
+      claim: selected === null
         ? null
         : {
-            ...selected,
             anchored: false,
+            intentId: selected.intentId,
+            order: selected.order,
             routeDigest: inputRoute.digest,
           },
+      deliveries: buildAssistantAutoReplyPriorDeliveryContexts({
+        deliveries,
+        exactReplyTargetIntentId: null,
+      }),
       replyTargetDelivery,
     }
   } catch {
     return {
-      delivery: null,
+      claim: null,
+      deliveries: [],
       replyTargetDelivery,
     }
   }
@@ -4789,6 +4888,10 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
         deliveryTarget: input.deliveryTarget,
         historyReader: input.historyReader,
         input: input.input,
+        providerMessageIds: replyToMessageIds.filter(
+          (replyToMessageId): replyToMessageId is string =>
+            replyToMessageId !== null,
+        ),
       })
     : []
   const exactDeliveries = replyToMessageIds.map((replyToMessageId) =>
@@ -5023,7 +5126,12 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 }
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
+  automationContextReferences: readonly AutomationContextReference[]
+  automationId: string | null
   exactRouteDigest: string | null
+  plannedOccurrenceAt: string | null
+  supportSeriesId: string | null
+  scheduledOccurrenceAt: string | null
   intentId: string
   media: readonly AssistantResponseMedia[]
   message: string | null
@@ -5036,6 +5144,18 @@ interface AssistantAutoReplyMatchingOutboxDelivery {
   providerMessageIds: string[]
   sentAtMs: number
   sessionId: string
+}
+
+interface AssistantAutoReplyPriorDeliveryContext {
+  automationContextReferences: readonly AutomationContextReference[]
+  automationId: string | null
+  exactReplyTarget: boolean
+  intentId: string
+  message: string | null
+  providerAcceptedAt: string
+  plannedOccurrenceAt: string | null
+  scheduledOccurrenceAt: string | null
+  supportSeriesId: string | null
 }
 
 interface AssistantAutoReplySelectedOutboxDelivery
@@ -5058,6 +5178,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
+  providerMessageIds?: readonly string[] | null
 }): Promise<AssistantAutoReplyMatchingOutboxDelivery[]> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
@@ -5065,7 +5186,21 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     return []
   }
 
-  const intents = await input.historyReader.readOutboxIntents()
+  const intents = await input.historyReader.readOutboxIntents({
+    conversation: input.input.conversation,
+    deliveryTarget,
+    providerMessageIds: input.providerMessageIds === undefined
+      ? [readAssistantTargetProviderScalar(input.input.replyTarget?.messageId)]
+          .filter((providerMessageId): providerMessageId is string =>
+            providerMessageId !== null
+          )
+      : (input.providerMessageIds ?? [])
+          .map(readAssistantTargetProviderScalar)
+          .filter((providerMessageId): providerMessageId is string =>
+            providerMessageId !== null
+          ),
+    source: channel,
+  })
   return intents.flatMap((intent) => {
     if (intent.operation !== null) {
       return []
@@ -5108,9 +5243,29 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     ) {
       return []
     }
+    const deviceActivityMetadata =
+      readAssistantDeviceActivityDeliveryIdempotencyMetadata(
+        intent.deliveryIdempotencyKey,
+      )
     return [{
+      automationContextReferences:
+        intent.automationContextReferences?.map((reference) => ({
+          entityId: reference.entityId,
+          entityKind: reference.entityKind,
+        })) ?? [],
+      automationId:
+        normalizeNullableString(intent.automationAuthority?.automationId) ??
+        normalizeNullableString(deviceActivityMetadata?.parentAutomationId) ??
+        null,
       exactRouteDigest:
         resolveAssistantAutoReplyOutboxExactRoute(intent)?.digest ?? null,
+      supportSeriesId:
+        normalizeNullableString(intent.automationAuthority?.supportSeriesId) ??
+          null,
+      plannedOccurrenceAt:
+        normalizeNullableString(intent.plannedOccurrenceAt) ?? null,
+      scheduledOccurrenceAt:
+        normalizeNullableString(intent.scheduledOccurrenceAt) ?? null,
       intentId: intent.intentId,
       media: intent.media ?? [],
       message: message ?? null,
@@ -5164,6 +5319,102 @@ function resolveAssistantAutoReplyExactOutboxDelivery(
           message: null,
         }
       : null
+}
+
+function projectAssistantAutoReplyPriorDelivery(input: {
+  delivery: AssistantAutoReplyMatchingOutboxDelivery
+  sessionId: string | null
+}): AssistantAutoReplyMatchingOutboxDelivery | null {
+  const sameSession = input.sessionId !== null &&
+    input.delivery.sessionId === input.sessionId
+  const message = sameSession
+    ? null
+    : normalizeNullableString(input.delivery.message)
+  if (
+    message === null &&
+    input.delivery.automationContextReferences.length === 0
+  ) {
+    return null
+  }
+  return {
+    ...input.delivery,
+    message,
+  }
+}
+
+function buildAssistantAutoReplyPriorDeliveryContexts(input: {
+  deliveries: readonly AssistantAutoReplyMatchingOutboxDelivery[]
+  exactReplyTargetIntentId: string | null
+}): AssistantAutoReplyPriorDeliveryContext[] {
+  const candidates = input.deliveries
+  if (candidates.length === 0) {
+    return []
+  }
+
+  const pinnedIntentIds = new Set<string>()
+  if (input.exactReplyTargetIntentId !== null) {
+    pinnedIntentIds.add(input.exactReplyTargetIntentId)
+  }
+  pinnedIntentIds.add(candidates.at(-1)!.intentId)
+
+  const selected = new Map<string, AssistantAutoReplyPriorDeliveryContext>()
+  let remainingBudget = ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH
+  const pinnedBudget = Math.max(
+    1,
+    Math.floor(
+      ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH / pinnedIntentIds.size,
+    ),
+  )
+  const addDelivery = (
+    delivery: AssistantAutoReplyMatchingOutboxDelivery,
+    maxLength: number,
+  ) => {
+    if (selected.has(delivery.intentId) || maxLength <= 0) {
+      return
+    }
+    const message = delivery.message?.slice(0, maxLength) ?? null
+    remainingBudget -= message?.length ?? 1
+    selected.set(delivery.intentId, {
+      automationContextReferences: delivery.automationContextReferences,
+      automationId: delivery.automationId,
+      exactReplyTarget:
+        delivery.intentId === input.exactReplyTargetIntentId,
+      intentId: delivery.intentId,
+      message,
+      providerAcceptedAt: new Date(delivery.sentAtMs).toISOString(),
+      plannedOccurrenceAt: delivery.plannedOccurrenceAt,
+      scheduledOccurrenceAt: delivery.scheduledOccurrenceAt,
+      supportSeriesId: delivery.supportSeriesId,
+    })
+  }
+
+  for (const delivery of candidates) {
+    if (pinnedIntentIds.has(delivery.intentId)) {
+      addDelivery(delivery, pinnedBudget)
+    }
+  }
+
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    if (remainingBudget <= 0) {
+      break
+    }
+    addDelivery(candidates[index]!, remainingBudget)
+  }
+
+  return [...selected.values()].sort((left, right) => {
+    const leftDelivery = candidates.find((delivery) =>
+      delivery.intentId === left.intentId
+    )
+    const rightDelivery = candidates.find((delivery) =>
+      delivery.intentId === right.intentId
+    )
+    if (!leftDelivery || !rightDelivery) {
+      return left.intentId.localeCompare(right.intentId)
+    }
+    return leftDelivery.sentAtMs === rightDelivery.sentAtMs
+      ? left.intentId.localeCompare(right.intentId)
+      : leftDelivery.sentAtMs - rightDelivery.sentAtMs
+  })
 }
 
 async function resolveAssistantAutoReplyExistingSession(input: {
@@ -5302,20 +5553,49 @@ function assistantAutoReplyRouteValueMatches(input: {
 }
 
 function buildAssistantAutoReplyCrossSessionTurnContext(
-  message: string | null,
+  deliveries: readonly AssistantAutoReplyPriorDeliveryContext[],
 ): string | null {
-  const normalized = normalizeNullableString(message)
-  if (!normalized) {
+  if (deliveries.length === 0) {
     return null
   }
 
   return [
     'Conversation context:',
-    'The assistant previously sent this message in the same conversation from another assistant run:',
+    'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
     '',
-    normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
-    '',
-    'Use it only to interpret the current user message.',
+    ...deliveries.flatMap((delivery, index) => [
+      `Prior message ${index + 1}${delivery.exactReplyTarget ? ' (native reply target)' : ''}:`,
+      `- intentId: ${delivery.intentId}`,
+      `- providerAcceptedAt: ${delivery.providerAcceptedAt}`,
+      ...(delivery.automationId === null
+        ? []
+        : [`- automationId: ${delivery.automationId}`]),
+      ...(delivery.automationContextReferences.length === 0
+        ? delivery.automationId === null
+          ? []
+          : [
+              '- contextReferences: none supplied; do not guess a canonical record',
+            ]
+        : [
+            `- contextReferences (host-preserved routing and interpretation context; not mutation authority or proof that a record exists): ${JSON.stringify(delivery.automationContextReferences)}`,
+          ]),
+      ...(delivery.supportSeriesId === null
+        ? []
+        : [`- supportSeriesId: ${delivery.supportSeriesId}`]),
+      ...(delivery.scheduledOccurrenceAt === null
+        ? []
+        : [`- scheduledOccurrenceAt: ${delivery.scheduledOccurrenceAt}`]),
+      ...(delivery.plannedOccurrenceAt === null
+        ? [
+            '- plannedOccurrenceAt: unavailable; treat this reminder as context only and use ordinary session resolution',
+          ]
+        : [`- plannedOccurrenceAt: ${delivery.plannedOccurrenceAt}`]),
+      ...(delivery.message === null
+        ? ['Text: unavailable in this prior-delivery context.']
+        : ['Text:', delivery.message]),
+      '',
+    ]),
+    'Use this transcript and its delivery annotations only to interpret the current user message. Inspect exact contextReferences through ordinary canonical reads and use only ordinary domain mutations. Provider acceptance is not a delivered/read receipt, and no annotation is standalone write authority.',
   ].join('\n')
 }
 
@@ -5382,6 +5662,13 @@ function buildAssistantAutoReplyExplicitUnquotedReplyContext(
         'The exact reply target has no attested text or media.',
         'Do not infer adjacent content.',
       ].join('\n')
+}
+
+function combineAssistantAutoReplyContextSections(
+  sections: readonly (string | null)[],
+): string | null {
+  const present = sections.filter((section): section is string => section !== null)
+  return present.length > 0 ? present.join('\n\n') : null
 }
 
 function buildAssistantAutoReplyTurnContext(input: {

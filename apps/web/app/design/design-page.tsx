@@ -3,13 +3,11 @@ import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
 import { ConsentContent } from "./consent-content";
 import { ExperimentCadenceStudy } from "./experiment-cadence-study";
-import { SectionsContent } from "./sections-content";
 
 const TABS = [
   { id: "brand", label: "Brand" },
   { id: "components", label: "Components" },
   { id: "consent", label: "Consent" },
-  { id: "sections", label: "Sections" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -22,13 +20,7 @@ export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
     <main className="min-h-screen bg-[#f5f0e8] antialiased">
       {/* Tab nav */}
       <div className="sticky top-0 z-30 overflow-x-auto border-b border-[#e5e1d8] bg-[#f5f0e8]/95 backdrop-blur-sm">
-        <div
-          className={`mx-auto flex min-w-max items-center gap-1 py-3 ${
-            selectedTab === "sections"
-              ? "max-w-7xl px-5 sm:px-8 lg:px-12"
-              : "max-w-5xl px-6 sm:px-10 lg:px-16"
-          }`}
-        >
+        <div className="mx-auto flex min-w-max max-w-5xl items-center gap-1 px-6 py-3 sm:px-10 lg:px-16">
           {TABS.map((tab) => (
             <Link
               aria-current={selectedTab === tab.id ? "page" : undefined}
@@ -50,8 +42,6 @@ export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
 
       {selectedTab === "brand" ? (
         <BrandContent />
-      ) : selectedTab === "sections" ? (
-        <SectionsContent />
       ) : selectedTab === "consent" ? (
         <ConsentContent />
       ) : (

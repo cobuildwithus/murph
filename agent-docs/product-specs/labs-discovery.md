@@ -122,5 +122,6 @@ remove the runtime capability before removing the Web route.
 Direct proof covers strict contracts, provider normalization and failures,
 browser-session and signed-callback authorization, Cloudflare transport,
 assistant registration/audience policy/prompt guidance, runtime wiring, and UI
-states. Final UI proof includes authenticated desktop and mobile renders, then
-the required frontend, coverage, Fable-or-Opus UI, and ReviewGPT reviews.
+states. Final UI proof includes authenticated renders at each viewport where
+the result can differ, then the required frontend, coverage, Fable-or-Opus UI,
+and ReviewGPT reviews.

@@ -2,20 +2,18 @@ import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from '@murphai/hosted-execution/assistant-identifiers'
 import {
-  assistantOutboxIntentSchema,
   assistantTranscriptEntrySchema,
   type AssistantOutboxIntent,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
-import { listAssistantOutboxIntentsLocal } from './outbox/store.js'
-import { resolveAssistantOutboxIntentPath } from './outbox/intents.js'
-import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
-import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
-  normalizeNullableString,
-  writeJsonFileAtomic,
-} from './shared.js'
+  listAssistantOutboxIntentsForPrivateCompletionRoute,
+  persistAssistantOutboxIntentAtPath,
+} from './outbox/store.js'
+import { resolveAssistantOutboxIntentPath } from './outbox/intents.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
+import { normalizeNullableString } from './shared.js'
 import {
   appendTranscriptEntries,
   ensureAssistantState,
@@ -49,7 +47,18 @@ export async function reconcileAssistantPrivateCompletionContinuityForSession(
       throw new Error('Assistant private completion continuity session was not found.')
     }
 
-    const intents = await listAssistantOutboxIntentsLocal(input.vault)
+    const bindingDelivery = session.binding.delivery
+    const intents = bindingDelivery && session.binding.threadIsDirect === true
+      ? await listAssistantOutboxIntentsForPrivateCompletionRoute({
+          actorId: session.binding.actorId,
+          bindingDeliveryKind: bindingDelivery.kind,
+          bindingDeliveryTarget: bindingDelivery.target,
+          channel: session.binding.channel,
+          identityId: session.binding.identityId,
+          threadId: session.binding.threadId,
+          vault: input.vault,
+        })
+      : []
     const initialSession = session
     const boundIntents: AssistantOutboxIntent[] = []
     for (const intent of intents) {
@@ -246,17 +255,14 @@ async function writeAssistantPrivateCompletionIntent(input: {
   intent: AssistantOutboxIntent
   paths: Parameters<typeof writeAssistantSession>[0]
 }): Promise<AssistantOutboxIntent> {
-  const parsed = assistantOutboxIntentSchema.parse(
-    sanitizeAssistantOutboxIntentForPersistence(input.intent),
-  )
-  await writeJsonFileAtomic(
-    resolveAssistantOutboxIntentPath(
+  return await persistAssistantOutboxIntentAtPath({
+    intent: input.intent,
+    intentPath: resolveAssistantOutboxIntentPath(
       input.paths.outboxDirectory,
-      parsed.intentId,
+      input.intent.intentId,
     ),
-    sanitizeAssistantOutboxIntentForPersistence(parsed),
-  )
-  return parsed
+    paths: input.paths,
+  })
 }
 
 function assistantPrivateCompletionCanJoinSession(input: {

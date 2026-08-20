@@ -11,6 +11,7 @@ import {
 import {
   type ClearPublicDeviceSyncOAuthCredentialInput,
   type DeviceSyncAccount,
+  type DeviceSyncPublicIngressWebhookConnectionLookupResult,
   type GetPublicDeviceSyncOAuthCleanupAccountInput,
   type MarkPublicDeviceSyncConnectionSetupFailedInput,
   type MarkPublicDeviceSyncConnectionSetupFailedResult,
@@ -61,7 +62,9 @@ import type {
 } from "./types";
 import {
   hostedConnectionRecordArgs,
+  hostedRuntimeRedactedConnectionRecordArgs,
   mapHostedConnectionRecord,
+  mapHostedRuntimeRedactedConnectionRecord,
   normalizeHostedDeviceSyncCredentialKind,
   normalizeHostedDeviceSyncLifecycleStatus,
   normalizeHostedDeviceSyncSetupPhase,
@@ -516,13 +519,15 @@ export class PrismaHostedConnectionStore {
       throw originalError;
     }
 
-    const existing = await this.getConnectionByExternalAccount(input.provider, input.externalAccountId);
+    const existing = await this.getWebhookConnectionByExternalAccount(
+      input.provider,
+      input.externalAccountId,
+    );
     if (!existing) {
       throw originalError;
     }
 
-    const existingOwnerId = await this.getConnectionOwnerId(existing.id);
-    if (existingOwnerId !== ownerId) {
+    if (existing.connectionOwnerId !== ownerId) {
       throw deviceSyncError({
         code: "CONNECTION_OWNERSHIP_CONFLICT",
         message: "This provider account is already connected to a different Murph user.",
@@ -542,6 +547,13 @@ export class PrismaHostedConnectionStore {
     provider: string,
     externalAccountId: string,
   ): Promise<PublicDeviceSyncAccount | null> {
+    return (await this.getWebhookConnectionByExternalAccount(provider, externalAccountId))?.account ?? null;
+  }
+
+  async getWebhookConnectionByExternalAccount(
+    provider: string,
+    externalAccountId: string,
+  ): Promise<DeviceSyncPublicIngressWebhookConnectionLookupResult | null> {
     const record = await this.prisma.deviceConnection.findUnique({
       where: {
         provider_providerAccountBlindIndex: {
@@ -549,10 +561,23 @@ export class PrismaHostedConnectionStore {
           providerAccountBlindIndex: this.buildProviderAccountBlindIndex(provider, externalAccountId),
         },
       },
-      ...hostedConnectionRecordArgs,
+      ...hostedRuntimeRedactedConnectionRecordArgs,
     });
 
-    return record ? await this.buildDurableConnectionRecord(record, { externalAccountId }) : null;
+    if (!record) {
+      return null;
+    }
+
+    const mappedRecord = {
+      ...mapHostedRuntimeRedactedConnectionRecord(record),
+      externalAccountId,
+    };
+    return {
+      account: toRedactedPublicDeviceSyncAccount(
+        buildHostedPublicDeviceSyncAccount({ record: mappedRecord }),
+      ),
+      connectionOwnerId: record.userId,
+    };
   }
 
   async getConnectionById(connectionId: string): Promise<PublicDeviceSyncAccount | null> {
@@ -766,6 +791,36 @@ export class PrismaHostedConnectionStore {
         setupPhase: normalizeHostedDeviceSyncSetupPhase(account.setupPhase ?? null),
       },
       ...hostedConnectionRecordArgs,
+    });
+  }
+
+  async syncDurableConnectionMetadata(
+    connectionId: string,
+    metadata: Record<string, unknown>,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedConnectionRecord> {
+    const prisma = tx ?? this.prisma;
+
+    return prisma.deviceConnection.update({
+      where: { id: connectionId },
+      data: {
+        metadataJson: toPrismaJsonObject(
+          sanitizeHostedDeviceSyncConnectionMetadata(metadata),
+        ),
+      },
+      ...hostedConnectionRecordArgs,
+    });
+  }
+
+  async advanceConnectionSourceStartBoundary(input: {
+    connectionId: string;
+    updatedAt: string;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<void> {
+    await input.tx.deviceConnection.update({
+      where: { id: input.connectionId },
+      data: { updatedAt: new Date(input.updatedAt) },
+      select: { id: true },
     });
   }
 

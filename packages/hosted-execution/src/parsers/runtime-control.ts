@@ -6091,9 +6091,9 @@ function readOptionalHostedRuntimeLatencyPhaseBreakdown(
 
 // Secret-safety trust boundary: this parser is the only path through which a
 // phaseBreakdown reaches storage. It rejects unknown keys and all strings except
-// the two exact UUID-shaped direct-wake correlation leaves plus the bounded
-// runtime lease generation, so secrets/tokens/paths/URLs cannot ride this
-// channel into the trace JSON.
+// exact UUID-shaped direct-wake correlation leaves, bounded enums/opaque
+// runtime attempt ids, and the bounded runtime lease generation, so
+// secrets/tokens/paths/URLs cannot ride this channel into the trace JSON.
 function parseHostedRuntimeLatencyPhaseBreakdown(
   value: unknown,
 ): HostedRuntimeLatencyPhaseBreakdown {
@@ -6128,6 +6128,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureRequestStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureResponseReceivedAtEpochMs", orchestrationLabel),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "directEnsureOrchestrationAttemptId", orchestrationLabel),
+      ...requireOptionalDirectEnsureOutcome(orchestration, orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
@@ -6383,6 +6384,70 @@ function requireOptionalDirectEnsureOrchestrationAttemptId<
     throw new TypeError(`${label}.${key} must be a direct-wake orchestration attempt id.`);
   }
   return { [key]: value } as Record<Key, string>;
+}
+
+function requireOptionalDirectEnsureOutcome(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  directEnsureAction?: "started" | "replaced" | "woken" | "already_running";
+  directEnsureResultKind?:
+    | "legacy_accepted"
+    | "runtime_processing_accepted"
+    | "retry_later";
+  directEnsureRuntimeAttemptId?: string;
+} {
+  if (record.directEnsureResultKind === undefined) {
+    if (
+      record.directEnsureAction !== undefined
+      || record.directEnsureRuntimeAttemptId !== undefined
+    ) {
+      throw new TypeError(
+        `${label} accepted direct ensure metadata requires directEnsureResultKind.`,
+      );
+    }
+    return {};
+  }
+
+  const directEnsureResultKind = parseAllowedString(
+    record.directEnsureResultKind,
+    `${label}.directEnsureResultKind`,
+    ["legacy_accepted", "runtime_processing_accepted", "retry_later"] as const,
+  );
+  if (directEnsureResultKind !== "runtime_processing_accepted") {
+    if (
+      record.directEnsureAction !== undefined
+      || record.directEnsureRuntimeAttemptId !== undefined
+    ) {
+      throw new TypeError(
+        `${label} accepted direct ensure metadata is only allowed for runtime_processing_accepted.`,
+      );
+    }
+    return { directEnsureResultKind };
+  }
+
+  const directEnsureAction = parseAllowedString(
+    record.directEnsureAction,
+    `${label}.directEnsureAction`,
+    ["started", "replaced", "woken", "already_running"] as const,
+  );
+  const directEnsureRuntimeAttemptId = requireString(
+    record.directEnsureRuntimeAttemptId,
+    `${label}.directEnsureRuntimeAttemptId`,
+  );
+  if (
+    directEnsureRuntimeAttemptId.length > 192
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(directEnsureRuntimeAttemptId)
+  ) {
+    throw new TypeError(
+      `${label}.directEnsureRuntimeAttemptId must be a bounded opaque identifier.`,
+    );
+  }
+  return {
+    directEnsureAction,
+    directEnsureResultKind,
+    directEnsureRuntimeAttemptId,
+  };
 }
 
 function parseHostedRuntimeLatencyTraceProviderStartedEvent(
@@ -7173,6 +7238,14 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
   }
 
   return {
+    ...(record.assistantExecutionBlocked === undefined
+      ? {}
+      : {
+          assistantExecutionBlocked: requireExactTrue(
+            record.assistantExecutionBlocked,
+            "Hosted workspace invocation request assistantExecutionBlocked",
+          ),
+        }),
     attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),
     ...(record.budget === undefined || record.budget === null
       ? {}
@@ -7655,6 +7728,9 @@ function parseHostedRuntimeRedactedValue(
   if (key === "routePlanningSlowestStage") {
     return parseHostedRuntimeRedactedRoutePlanningStage(value, label);
   }
+  if (key === "reasoningEffort") {
+    return parseHostedRuntimeRedactedReasoningEffort(value, label);
+  }
 
   if (Array.isArray(value)) {
     if (value.length > HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH) {
@@ -7720,6 +7796,21 @@ function parseHostedRuntimeRedactedRoutePlanningStage(
   }
 
   throw new TypeError(`${label} must be a known route-planning stage or null.`);
+}
+
+function parseHostedRuntimeRedactedReasoningEffort(
+  value: unknown,
+  label: string,
+): HostedAssistantReasoningEffort | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (isHostedAssistantReasoningEffort(value)) {
+    return value;
+  }
+
+  throw new TypeError(`${label} must be a known reasoning effort or null.`);
 }
 
 function parseHostedRuntimeRedactedObject(
@@ -7803,7 +7894,10 @@ function isHostedRuntimeFailureLogEntry(entry: HostedRuntimeLogEntry): boolean {
     || entry.eventCode === "checkpoint.snapshot_failed"
     || entry.eventCode === "mailbox.parser_drain_failed"
     || entry.eventCode === "mailbox.parser_jobs_failed"
+    || entry.eventCode === "assistant.device_activity_automation_failed"
+    || entry.eventCode === "device-sync.dirty_ack_persistence_failed"
     || entry.eventCode === "device-sync.job_failed"
+    || entry.eventCode === "device-sync.maintenance_failed"
     || entry.eventCode === "device-sync.module_load_failed"
     || (entry.eventCode === "assistant.device_connect" && entry.level === "warn")
     || (entry.eventCode === "assistant.automation_detail"

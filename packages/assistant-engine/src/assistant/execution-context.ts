@@ -16,6 +16,7 @@ import type {
 } from '@murphai/hosted-execution/routes'
 import type {
   AutomationAssistantTargetOverride,
+  AutomationContextReference,
   AutomationContinuityPolicy,
   AutomationSchedule,
   AutomationStatus,
@@ -59,6 +60,10 @@ import type {
 import type {
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
+  HostedPhoneCallStatusRequest,
+  HostedPhoneCallStatusResponse,
+  HostedPhoneCallStopRequest,
+  HostedPhoneCallStopResponse,
 } from '@murphai/hosted-execution/phone-calls'
 import type {
   HostedPhysicalNoteSendRequest,
@@ -176,7 +181,9 @@ export type AssistantHostedAutomationToolRequest =
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       automationId?: string
       continuityPolicy?: AutomationContinuityPolicy
+      contextReferences?: readonly AutomationContextReference[]
       instructions: string
+      plannedOccurrenceOffsetMs?: number | null
       schedule: AutomationSchedule
       slug?: string
       status?: AutomationStatus
@@ -191,9 +198,11 @@ export type AssistantHostedAutomationToolRequest =
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
+      contextReferences?: readonly AutomationContextReference[]
       expectedUpdatedAt: string
       instructions?: string
       lookup: string
+      plannedOccurrenceOffsetMs?: number | null
       retargetToCurrentConversation?: boolean
       schedule?: AutomationSchedule
       slug?: string
@@ -220,6 +229,7 @@ export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
       automationId: string
+      contextReferences?: readonly AutomationContextReference[]
       effectiveTimeZone: string | null
       lookupId: string
       nextOccurrenceAt: string | null
@@ -233,6 +243,7 @@ export type AssistantHostedAutomationToolResponse =
   | {
       action: 'patch' | 'save'
       automationId: string
+      contextReferences?: readonly AutomationContextReference[]
       created: boolean
       effectiveTimeZone: string | null
       lookupId: string
@@ -396,6 +407,18 @@ export interface AssistantHostedGroupEmailEffect {
 }
 
 export interface AssistantPhoneCallPort {
+  stop?(
+    request: HostedPhoneCallStopRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhoneCallStopResponse>
+  status?(
+    request: HostedPhoneCallStatusRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhoneCallStatusResponse>
   start(
     request: HostedPhoneCallStartRequest,
     context?: {
@@ -815,6 +838,12 @@ function normalizeAssistantPhoneCallPort(
   }
 
   return {
+    ...(typeof input.stop === 'function'
+      ? { stop: input.stop.bind(input) }
+      : {}),
+    ...(typeof input.status === 'function'
+      ? { status: input.status.bind(input) }
+      : {}),
     start: input.start.bind(input),
   }
 }

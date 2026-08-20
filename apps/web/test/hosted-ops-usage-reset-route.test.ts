@@ -107,12 +107,14 @@ describe("hosted ops usage reset route", () => {
       Number(mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0]),
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "Hosted ops current usage period reset completed.",
+      "Hosted ops usage reset completed.",
       {
         noticeClaimReleased: true,
         outcome: "reset",
+        resetMode: "included_usage",
         runtimeRecheckStatus: "accepted",
         timestamp: NOW.toISOString(),
+        usageCreditGrantedUsdMicros: "0",
       },
     );
     expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain(
@@ -337,6 +339,8 @@ function makeResult() {
     periodStart: PERIOD_START,
     previousSpentUsdMicros: "4522964",
     resetAt: NOW.toISOString(),
+    resetMode: "included_usage",
     updatedAt: NOW.toISOString(),
+    usageCreditGrantedUsdMicros: "0",
   };
 }

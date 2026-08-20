@@ -39,6 +39,7 @@ import {
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
+  HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX,
   parseHostedStarterUsageSourceReferenceLookupKey,
   type HostedStarterUsageSource,
 } from "@/src/lib/hosted-onboarding/starter-usage";
@@ -77,6 +78,8 @@ const SNAPSHOT_COMPARE_MIN_DAYS = 6;
 const SNAPSHOT_COMPARE_MAX_DAYS = 8;
 export const HOSTED_GROWTH_CONVERSION_MATURITY_DAYS = 14;
 const TRIAL_ENDING_SOON_DAYS = 3;
+const HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX =
+  `${HOSTED_STARTER_USAGE_SEMANTIC_SOURCE_PREFIX}:`;
 
 const CHURN_STATUS_KEYS = [
   HostedBillingStatus.past_due,
@@ -1279,6 +1282,9 @@ export async function readHostedGrowthDashboard(
           lte: now,
         },
         kind: "starter_grant",
+        semanticSourceKey: {
+          startsWith: HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX,
+        },
       },
     }),
     // One snapshot read serves both the 30-day chart series and the
@@ -1318,6 +1324,9 @@ export async function readHostedGrowthDashboard(
           lt: getTrialMaturityCutoff(now),
         },
         kind: "starter_grant",
+        semanticSourceKey: {
+          startsWith: HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX,
+        },
       },
     }),
     prisma.hostedUsageCreditEntry.count({
@@ -1345,6 +1354,9 @@ export async function readHostedGrowthDashboard(
           lt: getTrialMaturityCutoff(now),
         },
         kind: "starter_grant",
+        semanticSourceKey: {
+          startsWith: HOSTED_STARTER_ENROLLMENT_SEMANTIC_SOURCE_PREFIX,
+        },
       },
     }),
     prisma.hostedGrowthAggregate.findUniqueOrThrow({
@@ -1649,8 +1661,9 @@ export async function readHostedGrowthDashboard(
  * Message counts cover the full UTC day before `snapshot_date`, so reruns on
  * the same date are deterministic. Inbound counts `conversation.message`
  * mailbox items across all channels; those rows expire, so the snapshot is
- * the durable record. Outbound counts sent rows in the Linq delivery ledger,
- * currently the only channel with a delivery ledger. Unique-sender counts use
+ * the durable record. Outbound counts successful Linq delivery-ledger rows plus
+ * anonymous post-cutover Telegram/email receipts by database receipt time.
+ * Unique-sender counts use
  * durable mailbox receipt time and cover that completed day and the seven
  * completed days ending at the snapshot date. Incomplete sender evidence is
  * stored as null.
@@ -1743,7 +1756,8 @@ export async function captureHostedGrowthDailySnapshot(
   const [
     current,
     inboundMessagesPriorDay,
-    outboundMessagesPriorDay,
+    outboundLinqMessagesPriorDay,
+    outboundTelegramEmailMessagesPriorDay,
     activityCounts,
   ] =
     await Promise.all([
@@ -1768,8 +1782,18 @@ export async function captureHostedGrowthDailySnapshot(
           },
         },
       }),
+      prisma.hostedOutboundMessageVolumeReceipt.count({
+        where: {
+          recordedAt: {
+            gte: priorDayStart,
+            lt: snapshotDate,
+          },
+        },
+      }),
       activityCountsPromise,
     ]);
+  const outboundMessagesPriorDay =
+    outboundLinqMessagesPriorDay + outboundTelegramEmailMessagesPriorDay;
   const activityCreateCounts = activityCounts.available
     ? activityCounts
     : {
@@ -1837,8 +1861,10 @@ export async function captureHostedGrowthDailySnapshot(
  * untracked history and the snapshot sums accrue on top of it. Snapshot
  * coverage ends at the latest snapshot date, so the live counts start
  * there and use the cron's own filters, keeping the two ranges disjoint
- * even when today's snapshot has not been captured yet. The base alone is
- * the fallback when the read fails.
+ * even when today's snapshot has not been captured yet. Telegram/email rows
+ * begin at their empty migration cutover and use database receipt time, so a
+ * late retry increases only the current live window and never rewrites a
+ * completed daily snapshot. The base alone is the fallback when the read fails.
  */
 export async function readHostedMessageVolumeTotal(
   now: Date,
@@ -1855,7 +1881,11 @@ export async function readHostedMessageVolumeTotal(
       },
     });
     const liveStart = snapshots._max.snapshotDate ?? startOfUtcDay(now);
-    const [liveInbound, liveOutbound] = await Promise.all([
+    const [
+      liveInbound,
+      liveOutboundLinq,
+      liveOutboundTelegramEmail,
+    ] = await Promise.all([
       prisma.hostedMailboxItem.count({
         where: {
           kind: INBOUND_MESSAGE_MAILBOX_KIND,
@@ -1874,13 +1904,21 @@ export async function readHostedMessageVolumeTotal(
           },
         },
       }),
+      prisma.hostedOutboundMessageVolumeReceipt.count({
+        where: {
+          recordedAt: {
+            gte: liveStart,
+          },
+        },
+      }),
     ]);
 
     return HOSTED_MESSAGE_VOLUME_BASE +
       (snapshots._sum.inboundMessagesPriorDay ?? 0) +
       (snapshots._sum.outboundMessagesPriorDay ?? 0) +
       liveInbound +
-      liveOutbound;
+      liveOutboundLinq +
+      liveOutboundTelegramEmail;
   } catch {
     return HOSTED_MESSAGE_VOLUME_BASE;
   }

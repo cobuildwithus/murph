@@ -5,6 +5,7 @@ import {
   MIN_AUTOMATION_EVERY_MS,
   assistantReasoningEffortValues,
   automationActiveUntilSchema,
+  automationContextReferencesSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
@@ -16,6 +17,7 @@ import {
   parseAutomationSupportSeriesTag,
   VAULT_LAYOUT,
   type AutomationAssistantTargetOverride,
+  type AutomationContextReference,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -45,6 +47,7 @@ type AutomationAssistantReasoningEffort = NonNullable<
 
 export type {
   AutomationAssistantTargetOverride,
+  AutomationContextReference,
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
@@ -65,6 +68,8 @@ export interface AutomationQueryRecord {
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
   supportKind: AutomationSupportKind | null;
+  plannedOccurrenceOffsetMs: number | null;
+  contextReferences: AutomationContextReference[];
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -158,6 +163,16 @@ function normalizeAutomationSupportKind(value: unknown): AutomationSupportKind |
     );
   }
   return value as AutomationSupportKind;
+}
+
+function normalizeAutomationPlannedOccurrenceOffsetMs(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error("plannedOccurrenceOffsetMs must be a nonnegative safe integer.");
+  }
+  return value as number;
 }
 
 function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
@@ -440,6 +455,12 @@ function normalizeAutomationRouteDeliverySource(
   };
 }
 
+function normalizeAutomationContextReferences(
+  value: unknown,
+): AutomationContextReference[] {
+  return automationContextReferencesSchema.parse(value ?? []);
+}
+
 function normalizeTags(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -512,6 +533,12 @@ function parseAutomationRecord(
       attributes.assistantTargetOverride,
     ),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
+    plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
+      attributes.plannedOccurrenceOffsetMs,
+    ),
+    contextReferences: normalizeAutomationContextReferences(
+      attributes.contextReferences,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),
     createdAt,

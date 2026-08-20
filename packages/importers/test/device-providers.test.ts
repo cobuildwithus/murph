@@ -27,6 +27,7 @@ import { normalizeWhoopSnapshot } from "../src/device-providers/whoop.ts";
 import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  reduceJunctionWorkoutStreamPayload,
 } from "../src/device-providers/junction-bounded-features.ts";
 import {
   makeNormalizedDeviceBatch,
@@ -176,6 +177,15 @@ function storedExternalRefVersion(record: StoredJsonlRecord | undefined): string
   }
 
   return typeof externalRef.version === "string" ? externalRef.version : undefined;
+}
+
+function storedExternalRefFacet(record: StoredJsonlRecord | undefined): string | undefined {
+  const externalRef = record?.externalRef;
+  if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
+    return undefined;
+  }
+
+  return typeof externalRef.facet === "string" ? externalRef.facet : undefined;
 }
 
 function assertWhoopScopedBodyDateResourceId(resourceId: string | undefined, dayKey: string): void {
@@ -1516,7 +1526,7 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
   }
   assert.match(rawArtifactText, /breakfast/u);
   assert.match(rawArtifactText, /Greek yogurt bowl/u);
-  assert.match(rawArtifactText, /cycleDay/u);
+  assert.match(rawArtifactText, /legacyCycleDay/u);
 });
 
 test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of dense retention", async () => {
@@ -1651,6 +1661,7 @@ const JUNCTION_COMPACT_IDENTITY_FIXTURES: readonly JunctionCompactIdentityFixtur
       sourceProviderSlug: "garmin",
       sourceType: "watch",
       sourceInstanceId: "garmin-1",
+      version: timestamp,
       startAt: timestamp,
       endAt: new Date(Date.parse(timestamp) + 30 * 60_000).toISOString(),
       durationSeconds: 1_800,
@@ -1658,6 +1669,7 @@ const JUNCTION_COMPACT_IDENTITY_FIXTURES: readonly JunctionCompactIdentityFixtur
       averageHeartRate: 130,
       maxHeartRate: 170,
       sampleCount: 1_000,
+      splits: [],
     }),
   },
 ];
@@ -1733,6 +1745,184 @@ for (const fixture of JUNCTION_COMPACT_IDENTITY_FIXTURES) {
     }
   });
 }
+
+test("importDeviceProviderSnapshot authoritatively retracts stale Junction workout split facets", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-split-retraction");
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-01T00:00:00.000Z",
+      vaultRoot,
+    });
+    const split = {
+      index: 1,
+      distanceMeters: 1_000,
+      durationSeconds: 300,
+      endedAt: "2026-07-01T12:05:00.000Z",
+      averageHeartRate: 130,
+      averageCadence: 174,
+      cadenceUnit: "steps-per-minute",
+      averagePower: 220,
+    };
+    const importWorkout = (input: {
+      importedAt: string;
+      splits: readonly Record<string, unknown>[];
+      version: string;
+    }) => importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-user-workout-split-retraction",
+          importedAt: input.importedAt,
+          timeseries: {
+            workout_stream: [{
+              schema: JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+              id: "workout-split-retraction",
+              workoutId: "workout-split-retraction",
+              sourceProviderSlug: "garmin",
+              sourceType: "watch",
+              sourceInstanceId: "garmin-1",
+              version: input.version,
+              startAt: "2026-07-01T12:00:00.000Z",
+              endAt: "2026-07-01T12:30:00.000Z",
+              durationSeconds: 1_800,
+              distanceMeters: 5_000,
+              averageHeartRate: 130,
+              maxHeartRate: 170,
+              sampleCount: 1_000,
+              splits: input.splits,
+            }],
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+
+    const first = await importWorkout({
+      importedAt: "2026-07-02T00:00:00.000Z",
+      splits: [split],
+      version: "2026-07-01T13:00:00.000Z",
+    });
+    const correction = await importWorkout({
+      importedAt: "2026-07-02T01:00:00.000Z",
+      splits: [],
+      version: "2026-07-01T14:00:00.000Z",
+    });
+
+    assert.equal(first.events.length, 2);
+    const shardPaths = [...new Set([
+      ...first.eventShardPaths,
+      ...correction.eventShardPaths,
+    ])];
+    const records = (
+      await Promise.all(
+        shardPaths.map((relativePath) => coreRuntime.readJsonlRecords({
+          vaultRoot,
+          relativePath,
+        })),
+      )
+    ).flat();
+    const splitRecords = records.filter(
+      (record) => storedExternalRefFacet(record) === "workout-stream-split-1",
+    );
+    assert.equal(splitRecords.length, 2);
+    assert.equal(
+      isDeletedEventLifecycle(splitRecords.at(-1)?.lifecycle),
+      true,
+    );
+    assert.equal(
+      latestLiveRecords(records).some(
+        (record) => storedExternalRefFacet(record) === "workout-stream-split-1",
+      ),
+      false,
+    );
+    const liveOverall = latestLiveRecords(records).find(
+      (record) => storedExternalRefFacet(record) === "workout-stream-feature",
+    );
+    assert.equal(
+      storedExternalRefVersion(liveOverall),
+      "2026-07-01T14:00:00.000Z",
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("malformed Junction workout metric cardinality cannot supersede a complete canonical measurement", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-stream-cardinality");
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-01T00:00:00.000Z",
+      vaultRoot,
+    });
+    const completeFeature = {
+      schema: JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+      id: "stable-1",
+      workoutId: "stable-1",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      sourceInstanceId: "garmin-1",
+      startAt: "2026-07-01T10:00:00.000Z",
+      endAt: "2026-07-01T10:30:00.000Z",
+      durationSeconds: 1_800,
+      distanceMeters: 5_000,
+      averageHeartRate: 130,
+      maxHeartRate: 170,
+      sampleCount: 1_000,
+      splits: [],
+      version: "2026-07-01T10:30:00.000Z",
+    };
+    const first = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-user-workout-cardinality",
+          importedAt: "2026-07-02T00:00:00.000Z",
+          timeseries: { workout_stream: [completeFeature] },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+    const malformedFeature = reduceJunctionWorkoutStreamPayload({
+      maxSamples: 3,
+      summary: completeFeature,
+      stream: {
+        time: [1_783_000_000, 1_783_000_001, 1_783_000_002],
+        heartrate: [100, 110, 120],
+        distance: [0, 10],
+      },
+    });
+    assert.equal(malformedFeature, undefined);
+
+    const skipped = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-user-workout-cardinality",
+          importedAt: "2026-07-02T01:00:00.000Z",
+          timeseries: { workout_stream: malformedFeature ? [malformedFeature] : [] },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+    const firstEvent = first.events[0];
+    assert.ok(firstEvent);
+    assert.equal(skipped.events.length, 0);
+
+    const stored = (
+      await Promise.all(first.eventShardPaths.map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ))
+    ).flat();
+    const current = latestLiveRecords(stored).filter((record) => record.id === firstEvent.id);
+    assert.equal(current.length, 1);
+    assert.equal(eventRevisionFromLifecycle(current[0]?.lifecycle), 1);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate legacy aliases", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-daily-aggregate-legacy-conflict");

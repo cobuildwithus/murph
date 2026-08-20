@@ -68,6 +68,9 @@ importers:
       '@babel/parser':
         specifier: ^7.29.3
         version: 7.29.3
+      '@babel/traverse':
+        specifier: ^7.29.0
+        version: 7.29.0
       '@babel/types':
         specifier: ^7.29.0
         version: 7.29.0
@@ -75,8 +78,8 @@ importers:
         specifier: ^0.1.17
         version: 0.1.17
       '@cobuild/review-gpt':
-        specifier: ^0.5.127
-        version: 0.5.127(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
+        specifier: ^0.5.134
+        version: 0.5.134(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
         specifier: 2.62.0
         version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -86,6 +89,9 @@ importers:
       '@murphai/hosted-local-harness':
         specifier: workspace:*
         version: link:packages/hosted-local-harness
+      '@types/babel__traverse':
+        specifier: ^7.28.0
+        version: 7.28.0
       '@types/node':
         specifier: ^25.6.2
         version: 25.6.2
@@ -95,6 +101,9 @@ importers:
       frog:
         specifier: 1.1.0
         version: 1.1.0
+      pg:
+        specifier: 8.20.0
+        version: 8.20.0
       tsx:
         specifier: ^4.20.6
         version: 4.21.0
@@ -165,6 +174,9 @@ importers:
       '@murphai/hosted-local-harness':
         specifier: workspace:*
         version: link:../../packages/hosted-local-harness
+      '@murphai/operator-config':
+        specifier: workspace:*
+        version: link:../../packages/operator-config
       '@types/node':
         specifier: ^25.6.2
         version: 25.6.2
@@ -1472,8 +1484,8 @@ packages:
     resolution: {integrity: sha512-cq+LzXoKNOn+KXLBm9+N9QMTEwbIXzki5AZXP/cHnAex3+3LnyhJ7zMxB5InZVgQgqI9hEs0dsXoJX/tNxlW3Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.127':
-    resolution: {integrity: sha512-8jauRUCLI+nrIMUrcRii/xXmtJUXxfsD2kizddq6vc7Z2mrOqLr9LU5fq9rIrBk62q12Y5o/nO3IM5SPC2fcbw==}
+  '@cobuild/review-gpt@0.5.134':
+    resolution: {integrity: sha512-sDupM7zWuLpfiSUXLAmJsqZYZ1vs3j26NeFdqNsNsQIKTCpSnvQNiUfOSNmtI4Ezwpy9sO0rjeCsSzj6uGeOFw==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -4254,6 +4266,9 @@ packages:
 
   '@tybys/wasm-util@0.10.2':
     resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
+
+  '@types/babel__traverse@7.28.0':
+    resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -10816,7 +10831,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.17': {}
 
-  '@cobuild/review-gpt@0.5.127(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.134(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.17
       incur: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
@@ -14246,6 +14261,10 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
+
+  '@types/babel__traverse@7.28.0':
+    dependencies:
+      '@babel/types': 7.29.0
 
   '@types/chai@5.2.3':
     dependencies:

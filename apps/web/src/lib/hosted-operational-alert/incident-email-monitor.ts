@@ -39,6 +39,8 @@ interface HostedOperationalAlertHealth {
   anomalous: boolean;
 }
 
+export type HostedOperationalAlertNotificationKind = "alert" | "reminder";
+
 export interface HostedOperationalAlertMonitorSpec<
   Health extends HostedOperationalAlertHealth,
   Client extends HostedOperationalAlertPrismaClient,
@@ -50,7 +52,11 @@ export interface HostedOperationalAlertMonitorSpec<
     now: Date;
     phase: "alert" | "healthy";
   }): Prisma.InputJsonObject;
-  buildMessage(input: { health: Health; now: Date }): string;
+  buildMessage(input: {
+    health: Health;
+    notificationKind: HostedOperationalAlertNotificationKind;
+    now: Date;
+  }): string;
   error: {
     incidentInvalidCode: string;
     incidentInvalidMessage: string;
@@ -66,6 +72,7 @@ export interface HostedOperationalAlertMonitorSpec<
   idempotencyScope: string;
   kind: string;
   readHealth(input: { now: Date; prisma: Client }): Promise<Health>;
+  reminderIntervalMs?: number;
   status: {
     alertFailed: string;
     alertSending: string;
@@ -237,7 +244,16 @@ async function prepareHostedOperationalAlertTransition<
 }> {
   if (input.health.anomalous) {
     if (input.state.status === input.spec.status.alerting) {
-      return { candidateState: null, outcome: "incident_active" };
+      const reminderDueAtMs = readHostedOperationalAlertReminderDueAtMs({
+        spec: input.spec,
+        state: input.state,
+      });
+      if (
+        reminderDueAtMs === null
+        || input.now.getTime() < reminderDueAtMs
+      ) {
+        return { candidateState: null, outcome: "incident_active" };
+      }
     }
     const deferred = readHostedOperationalAlertDeferral({
       now: input.now,
@@ -347,9 +363,11 @@ async function claimHostedOperationalAlertSend<
     };
   }
 
-  const incidentId = input.state.status === input.spec.status.healthy
-    ? randomUUID()
-    : readHostedOperationalAlertIncidentId(input.state);
+  const retrying = input.state.status === input.spec.status.alertSending
+    || input.state.status === input.spec.status.alertFailed;
+  const incidentId = retrying
+    ? readHostedOperationalAlertIncidentId(input.state)
+    : randomUUID();
   if (!incidentId) {
     throw hostedOnboardingError({
       code: input.spec.error.incidentInvalidCode,
@@ -358,11 +376,13 @@ async function claimHostedOperationalAlertSend<
     });
   }
 
-  const message = input.state.status === input.spec.status.alertSending
-    || input.state.status === input.spec.status.alertFailed
+  const notificationKind: HostedOperationalAlertNotificationKind =
+    input.state.status === input.spec.status.alerting ? "reminder" : "alert";
+  const message = retrying
     ? readHostedOperationalAlertMessage(input.state)
     : input.spec.buildMessage({
         health,
+        notificationKind,
         now: admissionCheckedAt,
       });
   if (!message) {
@@ -566,6 +586,34 @@ function readHostedOperationalAlertDeferral<
   return input.state.status === input.spec.status.alertSending
     ? "coalesced"
     : "deferred_rate_limit";
+}
+
+function readHostedOperationalAlertReminderDueAtMs<
+  Health extends HostedOperationalAlertHealth,
+  Client extends HostedOperationalAlertPrismaClient,
+>(input: {
+  spec: HostedOperationalAlertMonitorSpec<Health, Client>;
+  state: HostedLinqAlert;
+}): number | null {
+  const intervalMs = input.spec.reminderIntervalMs;
+  if (intervalMs === undefined) {
+    return null;
+  }
+  if (
+    !Number.isSafeInteger(intervalMs)
+    || intervalMs <= 0
+    || input.state.sentAt === null
+  ) {
+    throw hostedOnboardingError({
+      code: input.spec.error.stateInvalidCode,
+      httpStatus: 500,
+      message: input.spec.error.stateInvalidMessage,
+    });
+  }
+  const jitterMs = stableHostedOperationalAlertJitterMs(
+    `${input.spec.id}:reminder:${input.state.sentAt.toISOString()}`,
+  );
+  return input.state.sentAt.getTime() + intervalMs + jitterMs;
 }
 
 function isHostedOperationalAlertQuietTime<

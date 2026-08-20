@@ -4,6 +4,7 @@ import {
   act,
   createElement,
   type ButtonHTMLAttributes,
+  type HTMLAttributes,
   type ReactNode,
 } from "react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -26,23 +27,66 @@ vi.mock("@/src/components/ui/alert", () => ({
     createElement("h2", null, children),
 }));
 
-vi.mock("@/src/components/ui/card", () => ({
-  Card: ({ children }: { children?: ReactNode }) =>
-    createElement("section", null, children),
-  CardContent: ({ children }: { children?: ReactNode }) =>
-    createElement("div", null, children),
-  CardDescription: ({ children }: { children?: ReactNode }) =>
-    createElement("p", null, children),
-  CardFooter: ({ children }: { children?: ReactNode }) =>
-    createElement("footer", null, children),
-  CardHeader: ({ children }: { children?: ReactNode }) =>
-    createElement("header", null, children),
-  CardTitle: ({ children }: { children?: ReactNode }) =>
-    createElement("h2", null, children),
-}));
+vi.mock("@base-ui/react/alert-dialog", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  const AlertDialogContext = React.createContext<{
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
+  }>({
+    onOpenChange: () => {},
+    open: false,
+  });
+
+  return {
+    AlertDialog: {
+      Backdrop: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => {
+        const context = React.useContext(AlertDialogContext);
+        return context.open ? createElement("div", props, children) : null;
+      },
+      Close: ({
+        children,
+        render: _render,
+        ...props
+      }: ButtonHTMLAttributes<HTMLButtonElement> & { render?: ReactNode }) => {
+        const context = React.useContext(AlertDialogContext);
+        void _render;
+        return createElement("button", {
+          ...props,
+          onClick: () => context.onOpenChange(false),
+        }, children);
+      },
+      Description: ({ children, ...props }: HTMLAttributes<HTMLParagraphElement>) =>
+        createElement("p", props, children),
+      Popup: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => {
+        const context = React.useContext(AlertDialogContext);
+        return context.open ? createElement("div", props, children) : null;
+      },
+      Portal: ({ children }: { children?: ReactNode }) => children,
+      Root: ({
+        children,
+        onOpenChange = () => {},
+        open = false,
+      }: {
+        children?: ReactNode;
+        onOpenChange?: (open: boolean) => void;
+        open?: boolean;
+      }) => createElement(
+        AlertDialogContext.Provider,
+        { value: { onOpenChange, open } },
+        children,
+      ),
+      Title: ({ children, ...props }: HTMLAttributes<HTMLHeadingElement>) =>
+        createElement("h2", props, children),
+    },
+  };
+});
 
 vi.mock("@/src/components/ui/choice-card", () => ({
-  ChoiceCard: ({ title }: { title: string }) => createElement("span", null, title),
+  ChoiceCard: ({ title }: { title: ReactNode }) => createElement("span", null, title),
+}));
+
+vi.mock("@/src/components/ui/spinner", () => ({
+  Spinner: () => createElement("span", null, "Loading"),
 }));
 
 vi.mock("@/src/components/ui/radio-group", () => ({
@@ -73,6 +117,7 @@ const baseManagement = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -95,12 +140,6 @@ test.each([
     button: "Review payment",
     initialStatus: "recovery_required" as const,
     responseStatus: "recovery_required" as const,
-  },
-  {
-    action: "cancel",
-    button: "Cancel sponsorship",
-    initialStatus: "active" as const,
-    responseStatus: "active" as const,
   },
 ])("binds the $action mutation to the displayed authorization", async ({
   action,
@@ -129,11 +168,6 @@ test.each([
       management: { ...baseManagement, status: initialStatus },
     },
   ));
-  Object.defineProperty(rendered.window, "confirm", {
-    configurable: true,
-    value: vi.fn(() => true),
-  });
-
   try {
     const mutationButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === button);
@@ -148,6 +182,243 @@ test.each([
       action,
       authorizationId: AUTHORIZATION_ID,
     });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps payment recovery actionable when the server returns no Checkout URL", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({
+      checkout: {
+        purchaseId: "hucp_recovery_abcdefghijkl",
+        status: "reconciling",
+      },
+    }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  try {
+    const reviewButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review payment");
+    assert.ok(reviewButton);
+    await act(async () => {
+      reviewButton.click();
+    });
+
+    expect(rendered.reload).not.toHaveBeenCalled();
+    expect(rendered.container.textContent).toContain(
+      "Payment review couldn’t open. Try again.",
+    );
+    expect(reviewButton.disabled).toBe(false);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test.each([
+  {
+    checkoutStatus: "payment_pending",
+    expectedText: "Payment is processing",
+    managementStatus: "recovery_required" as const,
+  },
+  {
+    checkoutStatus: "fulfilled",
+    expectedText: "Payment confirmed",
+    managementStatus: "active" as const,
+  },
+])("converges a no-URL $checkoutStatus recovery without inviting another payment", async ({
+  checkoutStatus,
+  expectedText,
+  managementStatus,
+}) => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({
+      checkout: {
+        purchaseId: "hucp_recovery_abcdefghijkl",
+        status: checkoutStatus,
+      },
+      management: { ...baseManagement, status: managementStatus },
+    }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  try {
+    const reviewButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review payment");
+    assert.ok(reviewButton);
+    await act(async () => {
+      reviewButton.click();
+    });
+
+    expect(rendered.reload).not.toHaveBeenCalled();
+    expect(rendered.container.textContent).toContain(expectedText);
+    expect(rendered.container.textContent).not.toContain(
+      "Payment review couldn’t open. Try again.",
+    );
+    expect(rendered.container.textContent).not.toContain("Review payment");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("carries one no-navigation recovery from pending to an explicit focused completion", async () => {
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        json: async () => ({
+          checkout: {
+            purchaseId: "hucp_recovery_abcdefghijkl",
+            status: "payment_pending",
+          },
+          management: {
+            ...baseManagement,
+            status: "recovery_required",
+          },
+        }),
+        ok: true,
+      };
+    }
+    return {
+      json: async () => ({
+        management: { ...baseManagement, status: "active" },
+      }),
+      ok: true,
+    };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  vi.useFakeTimers();
+  try {
+    const reviewButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review payment");
+    assert.ok(reviewButton);
+    await act(async () => {
+      reviewButton.click();
+    });
+
+    const recoveryStatus = rendered.container.querySelector<HTMLElement>(
+      "[role='status']",
+    );
+    assert.ok(recoveryStatus);
+    expect(recoveryStatus.textContent).toContain("Payment is processing");
+    expect(recoveryStatus.tabIndex).toBe(-1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(recoveryStatus.textContent).toContain("Payment confirmed");
+    expect(rendered.container.textContent).toContain("Pause automatic refills");
+    expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual([
+      "POST",
+      "GET",
+    ]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("offers a read-only recheck after bounded pending polls without starting another payment", async () => {
+  let managementReadCount = 0;
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return {
+        json: async () => ({
+          checkout: {
+            purchaseId: "hucp_recovery_abcdefghijkl",
+            status: "payment_pending",
+          },
+          management: {
+            ...baseManagement,
+            status: "recovery_required",
+          },
+        }),
+        ok: true,
+      };
+    }
+    managementReadCount += 1;
+    return {
+      json: async () => ({
+        management: {
+          ...baseManagement,
+          status: managementReadCount >= 4 ? "active" : "recovery_required",
+        },
+      }),
+      ok: true,
+    };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status: "recovery_required" },
+    },
+  ));
+  vi.useFakeTimers();
+  try {
+    const reviewButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review payment");
+    assert.ok(reviewButton);
+    await act(async () => {
+      reviewButton.click();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_000);
+    });
+
+    expect(rendered.container.textContent).toContain("No new payment is needed");
+    const recheckButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Check payment status");
+    assert.ok(recheckButton);
+    await act(async () => {
+      recheckButton.click();
+    });
+
+    expect(rendered.container.textContent).toContain("Payment confirmed");
+    expect(fetchMock.mock.calls.filter(
+      (call) => call[1]?.method === "POST",
+    )).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(
+      (call) => call[1]?.method === "GET",
+    )).toHaveLength(4);
   } finally {
     await rendered.cleanup();
   }
@@ -173,11 +444,6 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       management: baseManagement,
     },
   ));
-  Object.defineProperty(rendered.window, "confirm", {
-    configurable: true,
-    value: vi.fn(() => true),
-  });
-
   try {
     const capButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === "Choose $20");
@@ -189,10 +455,29 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     assert.equal(fetchMock.mock.calls.length, 0);
 
     const applyButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Confirm $20 limit");
+      .find((candidate) => candidate.textContent === "Review $20 limit");
     assert.ok(applyButton);
     await act(async () => {
       applyButton.click();
+    });
+
+    expect(rendered.container.textContent).toContain("Increase your limit to $20?");
+    expect(rendered.container.textContent).toContain(
+      "Your monthly limit will change from $10 to $20",
+    );
+    expect(rendered.container.textContent).toContain(
+      "When automatic refills are on, Murph may charge $5 at a time",
+    );
+    expect(rendered.container.textContent).toContain("Keep $10 limit");
+    assert.equal(fetchMock.mock.calls.length, 0);
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    expect(confirmButton.textContent).toBe("Increase to $20");
+    await act(async () => {
+      confirmButton.click();
     });
 
     assert.equal(fetchMock.mock.calls.length, 1);
@@ -203,6 +488,143 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       confirmed: true,
       monthlyCapMinor: 2_000,
     });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test.each([
+  {
+    remainingCopy: "Resume automatic refills",
+    status: "paused" as const,
+  },
+  {
+    remainingCopy: "Automatic refills are paused until payment is fixed",
+    status: "recovery_required" as const,
+  },
+])("keeps a confirmed cap increase in the existing $status state", async ({
+  remainingCopy,
+  status,
+}) => {
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
+    json: async () => ({
+      management: { ...baseManagement, monthlyCapMinor: 2_000, status },
+    }),
+    ok: true,
+    init,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: { ...baseManagement, status },
+    },
+  ));
+  try {
+    const capButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Choose $20");
+    assert.ok(capButton);
+    await act(async () => {
+      capButton.click();
+    });
+
+    const applyButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review $20 limit");
+    assert.ok(applyButton);
+    await act(async () => {
+      applyButton.click();
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 0);
+    expect(rendered.container.textContent).toContain(
+      "When automatic refills are on, Murph may charge $5 at a time",
+    );
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    await act(async () => {
+      confirmButton.click();
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
+      action: "change_cap",
+      authorizationId: AUTHORIZATION_ID,
+      confirmed: true,
+      monthlyCapMinor: 2_000,
+    });
+    expect(rendered.container.textContent).toContain(remainingCopy);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps an uncertain cap increase actionable and reloads on dismissal", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({}),
+    ok: false,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: baseManagement,
+    },
+  ));
+  try {
+    const capButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Choose $20");
+    assert.ok(capButton);
+    await act(async () => {
+      capButton.click();
+    });
+
+    const applyButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Review $20 limit");
+    assert.ok(applyButton);
+    await act(async () => {
+      applyButton.click();
+    });
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    await act(async () => {
+      confirmButton.click();
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    expect(rendered.container.textContent).toContain("Increase your limit to $20?");
+    expect(rendered.container.textContent).toContain(
+      "We’re not sure whether your limit changed",
+    );
+    expect(confirmButton.textContent).toBe("Increase to $20");
+
+    await act(async () => {
+      confirmButton.click();
+    });
+    assert.equal(fetchMock.mock.calls.length, 2);
+
+    const checkButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Check current setup");
+    assert.ok(checkButton);
+    await act(async () => {
+      checkButton.click();
+    });
+    expect(rendered.reload).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }
@@ -255,17 +677,28 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
       management: baseManagement,
     },
   ));
-  Object.defineProperty(rendered.window, "confirm", {
-    configurable: true,
-    value: vi.fn(() => true),
-  });
-
   try {
     const cancelButton = [...rendered.container.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === "Cancel sponsorship");
     assert.ok(cancelButton);
     await act(async () => {
       cancelButton.click();
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 0);
+    expect(rendered.container.textContent).toContain(
+      "Cancel your monthly sponsorship?",
+    );
+    expect(rendered.container.textContent).toContain(
+      "Any usage credit already purchased will stay with the group",
+    );
+
+    const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+      "[data-slot='alert-dialog-action']",
+    );
+    assert.ok(confirmButton);
+    await act(async () => {
+      confirmButton.click();
     });
 
     expect(rendered.reload).not.toHaveBeenCalled();
@@ -283,3 +716,139 @@ test("keeps a terminal receipt visible after cancellation succeeds", async () =>
     await rendered.cleanup();
   }
 });
+
+test.each([false, true])(
+  "reaches the canceled receipt after an uncertain cancellation with cancelOnly=%s",
+  async (cancelOnly) => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw new Error("Connection lost after request");
+      }
+      return {
+        json: async () => ({ management: null }),
+        ok: true,
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { GroupSponsorshipManagementCard } = await import(
+      "@/src/components/hosted-groups/group-sponsorship-management-card"
+    );
+    const rendered = await renderClientComponent(createElement(
+      GroupSponsorshipManagementCard,
+      {
+        cancelOnly,
+        endpoint: "/api/groups/fund/example/sponsorship",
+        management: baseManagement,
+      },
+    ));
+    try {
+      const cancelButton = [...rendered.container.querySelectorAll("button")]
+        .find((candidate) => candidate.textContent === "Cancel sponsorship");
+      assert.ok(cancelButton);
+      await act(async () => {
+        cancelButton.click();
+      });
+
+      const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+        "[data-slot='alert-dialog-action']",
+      );
+      assert.ok(confirmButton);
+      await act(async () => {
+        confirmButton.click();
+      });
+
+      expect(rendered.container.textContent).toContain(
+        "We’re not sure whether your sponsorship was canceled",
+      );
+      expect(confirmButton.textContent).toBe("Check cancellation status");
+      expect(rendered.container.textContent).not.toContain("Check current setup");
+      await act(async () => {
+        confirmButton.click();
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(rendered.reload).not.toHaveBeenCalled();
+      expect(rendered.container.textContent).toContain(
+        "Monthly sponsorship canceled",
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  }
+);
+
+test.each([
+  {
+    message: "Sign in to continue.",
+    status: 401,
+  },
+  {
+    message: "This monthly sponsorship changed. Refresh and try again.",
+    status: 409,
+  },
+])(
+  "reloads current state after an authoritative $status cancellation rejection",
+  async ({ message, status }) => {
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({
+        error: {
+          code: status === 401
+            ? "AUTH_REQUIRED"
+            : "HOSTED_GROUP_SPONSORSHIP_STATE_CONFLICT",
+          message,
+        },
+      }),
+      ok: false,
+      status,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { GroupSponsorshipManagementCard } = await import(
+      "@/src/components/hosted-groups/group-sponsorship-management-card"
+    );
+    const rendered = await renderClientComponent(createElement(
+      GroupSponsorshipManagementCard,
+      {
+        cancelOnly: true,
+        endpoint: "/api/groups/fund/example/sponsorship",
+        management: baseManagement,
+      },
+    ));
+    try {
+      const cancelButton = [...rendered.container.querySelectorAll("button")]
+        .find((candidate) => candidate.textContent === "Cancel sponsorship");
+      assert.ok(cancelButton);
+      await act(async () => {
+        cancelButton.click();
+      });
+
+      const confirmButton = rendered.container.querySelector<HTMLButtonElement>(
+        "[data-slot='alert-dialog-action']",
+      );
+      assert.ok(confirmButton);
+      await act(async () => {
+        confirmButton.click();
+      });
+
+      expect(rendered.container.textContent).toContain(message);
+      expect(rendered.container.textContent).not.toContain(
+        "Check cancellation status",
+      );
+      expect(
+        rendered.container.querySelector("[data-slot='alert-dialog-action']"),
+      ).toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const refreshButton = [...rendered.container.querySelectorAll("button")]
+        .find((candidate) => candidate.textContent === "Refresh current setup");
+      assert.ok(refreshButton);
+      await act(async () => {
+        refreshButton.click();
+      });
+      expect(rendered.reload).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);

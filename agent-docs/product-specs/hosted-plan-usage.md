@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-08-12
+Last verified: 2026-08-18
 Status: Implemented current-state contract
 
 ## Goal
@@ -185,6 +185,30 @@ disclose current terms before seeking an explicit choice. The read-only
 `murph.plan_usage` tool cannot start checkout, upgrade a plan, grant credit, or
 claim that a billing change happened.
 
+When authenticated Settings opens the exact usage-recovery destination, its
+existing plan visibility and eligibility facts may promote the next eligible
+recurring tier as the primary recovery action. Starter chooses the first
+visible paid plan, direct Group, Pulse, and Edge choose the next eligible tier,
+and Max has no higher recurring action. A Family owner may likewise be offered
+the next eligible tier for their own seat. Settings derives these actions from
+its plan-card authority rather than from `subscriptionActionQuote`; the quote
+remains disclosure for an exact assistant-mediated choice, not a
+recommendation. An eligible one-time usage purchase remains secondary when a
+higher recurring tier exists and becomes primary only when none exists.
+The recovery query requests presentation; it is not proof that usage remains
+exhausted. Authenticated Settings auto-opens recovery only while the live usage
+projection is `exhausted`. An exact returned or nonterminal usage purchase owns
+presentation before plan or Family recovery, preserving its frozen-target
+resume, cancel, retry, polling, failure, and completion surfaces across later
+billing-relationship changes. While the live projection remains exhausted, an
+exact successful return keeps that purchase dialog visibly open through
+confirmation and completion; Settings may use quiet successful-return handling
+only beside a recovered, non-exhausted meter. Active, unavailable, reset, or
+otherwise recovered usage ignores a stale recovery query.
+An eligible Family-owner recovery banner follows that same current exhausted
+state during both ordinary and message-linked Settings visits; the exact query
+controls only whether its confirmation dialog opens initially.
+
 Family Settings may expose the same fixed-pack dialog beside each active member
 to the current active owner. That owner pays through the Family billing
 customer and the selected member alone receives the credit. This is account
@@ -339,17 +363,25 @@ rates for the canonical Luna/Terra/Sol tier. The immutable pricing snapshot
 records the provider source and matching provider model id. Historical rows
 are not repriced when provider pricing changes.
 
-A reset targets exactly one current allowance period. The table and reset both
-resolve that period through the canonical allowance gate, so Family-sponsored,
-trial, direct-billing, thread-container, inactive-access, plan-change, and
-no-persisted-row behavior cannot drift from runtime admission. The server locks
-the member and period in the same order as usage accounting, verifies the
-period timestamp and usage-credit ledger version shown to the operator, then
-clears current included spend and its blocked state. In the same serializable
-transaction it releases only the matching period-and-credit-version notice
-claim by clearing that delivery row's unique lookup key. The delivery row
-remains as history. A recent pre-provider dispatch makes the operation
-retryable instead of permitting a concurrent duplicate send.
+A reset resolves exactly one current allowance state through the canonical
+gate, so Family-sponsored, Starter, direct-billing, thread-container,
+inactive-access, plan-change, and no-persisted-row behavior cannot drift from
+runtime admission. For recurring included allowance, it targets the current
+period and clears included spend and its blocked state. For a fully exhausted
+direct Starter member with zero total credit, it appends one fresh policy-sized
+recovery grant keyed to the locked pre-grant ledger version, then clears the
+derived lifetime-period block. A later operator recovery is eligible only after
+that credit is consumed and the current canonical gate is fully exhausted
+again; this is discretionary support recovery, not an automatic or member-owned
+refill promise.
+
+The server locks the member and period in the same order as usage accounting
+and verifies the period timestamp and usage-credit ledger version shown to the
+operator. In the same serializable transaction it releases only the matching
+period-and-credit-version notice claim by clearing that delivery row's unique
+lookup key. The delivery row remains as history. A recent pre-provider dispatch
+makes the operation retryable instead of permitting a concurrent duplicate
+send.
 
 For each displayed row, the table reads the canonical gate decision and exact
 persisted-period concurrency timestamp inside one short repeatable-read
@@ -363,17 +395,23 @@ commit, the route signals the existing hosted runtime recheck so accepted
 mailbox work is reconsidered immediately. That signal uses the existing bounded
 handoff deadline and forwards its abort signal. A rejection or timeout reports
 the reset as committed and exposes a wake-only retry instead of replaying the
-reset or claiming complete recovery. Reusing the logical notice key still
+reset or claiming complete recovery. For Starter recovery, that affordance is
+reconstructed after close or reload from the active Ops recovery grant plus
+unconsumed mailbox work previously denied for AI usage; it is not owned only by
+component state. Reusing the logical notice key still
 permits only one active claim, while each explicitly re-released notice gets a
 fresh durable attempt ID and Linq provider idempotency key. Generic runtime and
 webhook delivery fences retain their deterministic durable IDs. This prevents a
 retained history row or provider deduplication from suppressing the next real
 limit crossing without changing unrelated delivery correlation.
 
-Reset never deletes or rewrites immutable usage rows, usage-credit entries, the
-usage-credit balance or version, billing state, mailbox rows, or delivery
-history. It creates no second usage ledger or message counter. A stale
-table row fails closed and must be refreshed before retrying.
+Reset never deletes or rewrites immutable usage rows, usage-credit entries,
+billing state, mailbox rows, or delivery history. The Starter branch is the
+only credit mutation: it appends one immutable recovery grant and advances the
+existing balance/version projection under the beneficiary lock. It never
+replenishes an old grant or changes purchased/referral credit. Reset creates no
+second usage ledger or message counter. A stale table row fails closed and must
+be refreshed before retrying.
 
 Every proactive billing action in Settings, Home, or `murph.plan_usage` comes
 only from the projection's thresholded `recommendedAction`. A notice code, plan

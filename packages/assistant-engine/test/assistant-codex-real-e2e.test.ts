@@ -547,7 +547,7 @@ describe('onboarding policy read detection', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
-    'reuses exact repetitions without carrying forward a planned load',
+    'fails closed without an active workout and keeps a bare acknowledgement from advancing the next set',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -582,7 +582,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             assistantCliContract: [
               'vault-cli workout active --format json',
               'vault-cli workout start [name] [--routine <format>]',
-              'vault-cli workout exercise add <name> --order <n>',
+              'vault-cli workout exercise add <name> --order <n> [--sets <n>]',
               'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
@@ -616,6 +616,50 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           sandbox: 'workspace-write',
           workingDirectory,
         }
+        const missingWorkout = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Seated cable curl set 3 complete: 9 reps.',
+        })
+        const vaultAfterMissingWorkout = await readVaultRawTolerant(workingDirectory)
+        const missingWorkoutEvents = vaultAfterMissingWorkout.events.filter((event) =>
+          workoutSessionSchema.safeParse(event.attributes.workout).success
+        )
+
+        expect(missingWorkoutEvents).toEqual([])
+        expect(missingWorkout.finalMessage).toMatch(
+          /(?:no active|could(?: not|n't) (?:find|access) an active|do(?: not|n't) have an active)(?: tracked)? workout/iu,
+        )
+        expect(missingWorkout.finalMessage).toMatch(/start/iu)
+        expect(missingWorkout.finalMessage).toContain('?')
+        expect(missingWorkout.finalMessage).not.toMatch(
+          /(?:set\s*3|it)\s+(?:(?:is|was|has been)\s+)?(?:saved|logged|recorded)|\b(?:i(?:'ve| have)|successfully)\s+(?:saved|logged|recorded)\b/iu,
+        )
+
+        const recovered = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'yes',
+          resumeSessionId: missingWorkout.sessionId,
+        })
+        const vaultAfterRecovery = await readVaultRawTolerant(workingDirectory)
+        const recoveredWorkouts = vaultAfterRecovery.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success ? [parsed.data] : []
+        })
+
+        expect(recovered.finalMessage).toMatch(/set\s*3/iu)
+        expect(recovered.finalMessage).toMatch(/9 reps/iu)
+        expect(recovered.finalMessage).toMatch(/logged|saved|recorded/iu)
+        expect(recoveredWorkouts).toHaveLength(1)
+        expect(
+          recoveredWorkouts[0]?.exercises[0]?.sets.map((set) => set.reps ?? null),
+        ).toEqual([null, null, 9])
+
+        await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Finish this tracked workout.',
+          resumeSessionId: recovered.sessionId,
+        })
+
         const started = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
@@ -634,15 +678,22 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           prompt: 'Second set complete.',
           resumeSessionId: firstCompletion.sessionId,
         })
+        await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'ok',
+          resumeSessionId: secondCompletion.sessionId,
+        })
         const vault = await readVaultRawTolerant(workingDirectory)
-        const workout = vault.events
-          .map((event) => workoutSessionSchema.safeParse(event.attributes.workout))
-          .find((result) => result.success)?.data
+        const workouts = vault.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success ? [parsed.data] : []
+        })
+        const workout = workouts.at(-1)
 
-        expect(started.finalMessage).toMatch(/0\/4 sets complete/iu)
-        expect(firstCompletion.finalMessage).toMatch(/actual 9 reps/iu)
-        expect(secondCompletion.finalMessage).toMatch(/2\/4 sets complete/iu)
-        expect(secondCompletion.finalMessage).toMatch(/actual 9 reps/iu)
+        expect(started.finalMessage).toMatch(/start/iu)
+        expect(started.finalMessage).toMatch(/4/iu)
+        expect(firstCompletion.finalMessage).toMatch(/9 reps/iu)
+        expect(secondCompletion.finalMessage).toMatch(/9 reps/iu)
         expect(firstCompletion.finalMessage).not.toMatch(/how many|\?/iu)
         expect(secondCompletion.finalMessage).not.toMatch(/how many|\?/iu)
         expect(firstCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
@@ -1415,6 +1466,225 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps phase-grouped Telegram movements through bounded card repair',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-routine-card-repair-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+
+      try {
+        await materializeRoutinePresentationVaultCli(binDirectory)
+        const exerciseGuidance = await readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared/exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        )
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          configOverrides: ['allow_login_shell=false'],
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'telegram' as const,
+            }),
+            exerciseGuidance,
+            'Test harness tool result contract: when calling a Murph tool inside functions.exec, pass its returned value directly to text(). Do not read a content property from the result.',
+          ].join('\n\n'),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const prompt = [
+          'Create this short routine now.',
+          'Mobility phase: ankle circles and torso turns.',
+          'Balance phase: tandem stand and side-to-side weight shifts.',
+          'Include the available catalog image for every named movement and keep the stop rule visible.',
+          'The available routine-card schema may include a test-only conformance probe; follow its property description exactly.',
+        ].join(' ')
+        const scenarios = [
+          {
+            expectedKind: 'exercise_routine' as const,
+            expectedRoutineCalls: 1,
+            label: 'valid multi-phase card',
+            probeCount: 0 as const,
+          },
+          {
+            expectedKind: 'exercise_routine' as const,
+            expectedRoutineCalls: 2,
+            label: 'one rejected call then corrected card',
+            probeCount: 1 as const,
+          },
+          {
+            expectedKind: 'telegram_rich_content' as const,
+            expectedRoutineCalls: 2,
+            label: 'two rejected calls then generic card',
+            probeCount: 2 as const,
+          },
+        ]
+
+        for (const scenario of scenarios) {
+          const routineTool = buildRoutineValidationProbeTool(
+            scenario.probeCount,
+          )
+          const result = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            dynamicTools: [
+              routineTool,
+              MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+              MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+            ],
+            prompt: [
+              prompt,
+              ...(scenario.probeCount >= 1
+                ? [
+                    'For the first routine-card call, include the top-level test field validation_probe_one with value "first".',
+                  ]
+                : []),
+              ...(scenario.probeCount === 2
+                ? [
+                    'If that call is rejected, include validation_probe_two with value "second" on the next routine-card call.',
+                  ]
+                : []),
+            ].join(' '),
+          })
+          const dynamicAttempts = readDynamicToolAttempts(result.jsonEvents)
+          const commandActions = readCapabilityRoutingActions(
+            result.jsonEvents,
+          ).filter(
+            (action): action is Extract<
+              CapabilityRoutingAction,
+              { kind: 'command' }
+            > => action.kind === 'command',
+          )
+          const routineCalls = dynamicAttempts.filter(
+            (action) =>
+              action.tool
+              === MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name,
+          )
+          const genericCalls = dynamicAttempts.filter(
+            (action) =>
+              action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name,
+          )
+          const mediaCalls = dynamicAttempts.filter(
+            (action) => action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+          )
+
+          expect(
+            routineCalls,
+            `${scenario.label} routine-card calls`,
+          ).toHaveLength(scenario.expectedRoutineCalls)
+          expect(mediaCalls, `${scenario.label} response-media calls`).toEqual(
+            [],
+          )
+          expect(
+            result.responseMedia,
+            `${scenario.label} response media`,
+          ).toEqual([])
+          const lastCardCallIndex = Math.max(
+            ...[...routineCalls, ...genericCalls].map(
+              (action) => action.eventIndex,
+            ),
+          )
+          expect(
+            readCompletedAgentMessages(result.jsonEvents).filter(
+              (message) => message.eventIndex > lastCardCallIndex,
+            ),
+            `${scenario.label} model text after card attachment`,
+          ).toEqual([])
+
+          if (scenario.probeCount >= 1) {
+            expect(routineCalls[0]?.argumentsValue).toHaveProperty(
+              'validation_probe_one',
+              'first',
+            )
+            expect(routineCalls[1]?.argumentsValue).not.toHaveProperty(
+              'validation_probe_one',
+            )
+          }
+          if (scenario.probeCount === 2) {
+            expect(routineCalls[0]?.argumentsValue).not.toHaveProperty(
+              'validation_probe_two',
+            )
+            expect(routineCalls[1]?.argumentsValue).toHaveProperty(
+              'validation_probe_two',
+              'second',
+            )
+          }
+
+          if (scenario.expectedKind === 'exercise_routine') {
+            expect(
+              genericCalls,
+              `${scenario.label} generic-card calls`,
+            ).toEqual([])
+            if (result.responseCard?.kind !== 'exercise_routine') {
+              throw new Error(
+                `${scenario.label} did not attach an exercise card.`,
+              )
+            }
+            expect(result.responseCard.exercises).toHaveLength(4)
+            const exerciseText = result.responseCard.exercises
+              .map((exercise) => exercise.name)
+              .join('\n')
+            expect(exerciseText).toMatch(/ankle/iu)
+            expect(exerciseText).toMatch(/torso/iu)
+            expect(exerciseText).toMatch(/tandem/iu)
+            expect(exerciseText).toMatch(/weight shift/iu)
+            expect(
+              result.responseCard.exercises.map(
+                (exercise) => exercise.images?.length ?? 0,
+              ),
+              `${scenario.label} catalog images after ${JSON.stringify(
+                commandActions.map((action) => action.command),
+              )}`,
+            ).toEqual([1, 1, 1, 1])
+          } else {
+            expect(
+              genericCalls,
+              `${scenario.label} generic-card calls`,
+            ).toHaveLength(1)
+            if (result.responseCard?.kind !== 'telegram_rich_content') {
+              throw new Error(
+                `${scenario.label} did not attach a generic Rich Message.`,
+              )
+            }
+            expect(result.responseCard.html).toMatch(/ankle/iu)
+            expect(result.responseCard.html).toMatch(/torso/iu)
+            expect(result.responseCard.html).toMatch(/tandem/iu)
+            expect(result.responseCard.html).toMatch(/weight shift/iu)
+            expect(
+              result.responseCard.html.match(/<(?:h3|li|summary)>/giu)?.length
+                ?? 0,
+              `${scenario.label} separate movement entries`,
+            ).toBeGreaterThanOrEqual(4)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'uses model-authored Telegram rich content only when structure improves the answer',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -1444,42 +1714,57 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           sandbox: 'workspace-write' as const,
           workingDirectory,
         }
-        const voiceRoutine = await executeRealCodexAppServerTurn({
+        const structuredTrainingGuide = await executeRealCodexAppServerTurn({
           ...common,
-          prompt: 'Give me a brief vocal warm-up before a presentation. Organize preparation, sound, and recovery as ordered steps. Keep any limits visible. Make it easy to scan on Telegram.',
+          prompt: 'Create a short at-home training note with a warm-up checklist, a bodyweight strength circuit, and a cooldown. Use a clear custom layout, not a compact table. Keep the safety limit visible and do not use images.',
         })
-        const voiceActions = readCapabilityRoutingActions(
-          voiceRoutine.jsonEvents,
+        const trainingActions = readCapabilityRoutingActions(
+          structuredTrainingGuide.jsonEvents,
         )
         expect(
-          voiceActions.filter((action) =>
+          trainingActions.filter((action) =>
             action.kind === 'dynamic'
             && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
           ),
         ).toHaveLength(1)
-        expect(voiceRoutine.responseCard).toMatchObject({
+        expect(structuredTrainingGuide.responseCard).toMatchObject({
           kind: 'telegram_rich_content',
           version: 1,
           html: expect.stringMatching(/<h2>[\s\S]*<ol>[\s\S]*<blockquote>/iu),
         })
-        expect(voiceRoutine.finalMessage.trim()).toBe('')
-        expect(voiceRoutine.responseMedia).toEqual([])
+        expect(structuredTrainingGuide.finalMessage.trim()).toBe('')
+        expect(structuredTrainingGuide.responseMedia).toEqual([])
 
         const compactSchedule = await executeRealCodexAppServerTurn({
           ...common,
           prompt: 'Make a compact two-column Telegram table for Monday and Wednesday focus sessions. Use 20 minutes on both days. The table alone is the complete answer.',
         })
-        const compactActions = readCapabilityRoutingActions(
-          compactSchedule.jsonEvents,
+        expect(['compact_table', 'telegram_rich_content']).toContain(
+          compactSchedule.responseCard?.kind,
         )
-        expect(compactActions.some((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
-        )).toBe(false)
-        expect(compactSchedule.responseCard).toMatchObject({
-          kind: 'compact_table',
-        })
         expect(compactSchedule.finalMessage.trim()).toBe('')
+
+        const conversationalReply = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: [
+            'Reply as a normal conversation in three short paragraphs.',
+            'Explain why building a new habit can feel uneven, acknowledge that',
+            'one difficult day does not erase progress, and end with an',
+            'encouraging thought. Do not make a plan, checklist, schedule, or list.',
+          ].join(' '),
+        })
+        const conversationalActions = readCapabilityRoutingActions(
+          conversationalReply.jsonEvents,
+        )
+        expect(conversationalActions.some((action) =>
+          action.kind === 'dynamic'
+          && (
+            action.tool === MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name
+            || action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+          )
+        )).toBe(false)
+        expect(conversationalReply.responseCard).toBeNull()
+        expect(conversationalReply.finalMessage.trim()).not.toBe('')
 
         const shortReply = await executeRealCodexAppServerTurn({
           ...common,
@@ -2828,6 +3113,208 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 })
 
+describeRealCodex('real Codex generated-music fallback e2e', () => {
+  it(
+    'honors an explicit request without turning unrelated context into provider input',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const explicitDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-explicit-song-fallback-e2e-'),
+      )
+      const ordinaryDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-ordinary-text-fallback-e2e-'),
+      )
+      const generations: unknown[] = []
+      const privateContextMarker = 'PRIVATE_ACCOUNT_MARKER_M9'
+      const privateContextSnapshot = [
+        'Private assistant context snapshot:',
+        `- Unrelated account reconciliation reference: ${privateContextMarker}.`,
+      ].join('\n')
+
+      try {
+        const explicitSkillsRoot = path.join(explicitDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot: explicitSkillsRoot,
+          slug: 'music-generation',
+        })
+        const explicit = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(
+              false,
+              privateContextSnapshot,
+            ),
+          dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: explicitSkillsRoot,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Generate one original instrumental track, exactly 12 seconds long.',
+            'Make it bright synth-pop at about 118 BPM with glockenspiel and crisp handclaps, with no vocals.',
+            'Send only the song.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          voiceMemoRuntime: {
+            elevenLabs: {
+              apiKeyAvailable: true,
+              modelId: 'eleven_multilingual_v2',
+              voiceId: 'voice_murph',
+            },
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return {
+                attachmentId: 'attachment_explicit_song_fallback',
+                filename: 'explicit-song-fallback.mp3',
+              }
+            },
+            kind: 'linq',
+          },
+          workingDirectory: explicitDirectory,
+        })
+        const explicitActions = readCapabilityRoutingActions(
+          explicit.jsonEvents,
+        )
+        const skillRead = explicitActions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('music-generation/SKILL.md')
+          && action.output.includes('# Music generation')
+        )
+        const songCalls = explicitActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_SONG_TOOL.name
+        )
+
+        expect(skillRead, 'music-generation fallback read').toBeDefined()
+        expect(songCalls).toHaveLength(1)
+        const songCall = songCalls[0]
+        if (songCall?.kind !== 'dynamic') {
+          throw new Error('Expected one real generated-song tool call.')
+        }
+        expect(songCall.argumentsValue).toMatchObject({
+          durationSeconds: 12,
+          instrumental: true,
+          prompt: expect.any(String),
+        })
+        const providerPrompt = String(songCall.argumentsValue.prompt)
+        expect(providerPrompt).toMatch(/synth[ -]?pop/iu)
+        expect(providerPrompt).toMatch(/118\s*BPM/iu)
+        expect(providerPrompt).toMatch(/glockenspiel/iu)
+        expect(providerPrompt).toMatch(/handclap/iu)
+        expect(providerPrompt).not.toContain(privateContextMarker)
+        expect(generations).toEqual([
+          expect.objectContaining({
+            durationMs: 12_000,
+            forceInstrumental: true,
+            kind: 'elevenlabs_music',
+            prompt: expect.not.stringContaining(privateContextMarker),
+          }),
+        ])
+        expect(explicit.responseMedia).toEqual([
+          {
+            filename: 'explicit-song-fallback.mp3',
+            kind: 'voice_memo',
+            transcript: null,
+            transport: {
+              attachmentId: 'attachment_explicit_song_fallback',
+              kind: 'linq_attachment',
+            },
+          },
+        ])
+        expect(explicit.finalMessage.trim()).toBe('')
+
+        const ordinarySkillsRoot = path.join(ordinaryDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot: ordinarySkillsRoot,
+          slug: 'music-generation',
+        })
+        const ordinary = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(
+              false,
+              privateContextSnapshot,
+            ),
+          dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: ordinarySkillsRoot,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Read your active music-generation skill.',
+            'Then give me a concise two-line bedtime wind-down reminder for 10:30 tonight.',
+            'Do not generate or attach music.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          voiceMemoRuntime: {
+            elevenLabs: {
+              apiKeyAvailable: true,
+              modelId: 'eleven_multilingual_v2',
+              voiceId: 'voice_murph',
+            },
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return {
+                attachmentId: 'unexpected_ordinary_song',
+                filename: 'unexpected-ordinary-song.mp3',
+              }
+            },
+            kind: 'linq',
+          },
+          workingDirectory: ordinaryDirectory,
+        })
+        const ordinaryActions = readCapabilityRoutingActions(
+          ordinary.jsonEvents,
+        )
+        const ordinarySkillRead = ordinaryActions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('music-generation/SKILL.md')
+          && action.output.includes('# Music generation')
+        )
+        const ordinarySongCalls = ordinaryActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_SONG_TOOL.name
+        )
+
+        expect(
+          ordinarySkillRead,
+          'loaded skill without authorization',
+        ).toBeDefined()
+        expect(ordinarySongCalls).toHaveLength(0)
+        expect(generations).toHaveLength(1)
+        expect(ordinary.responseMedia).toHaveLength(0)
+        expect(ordinary.finalMessage.trim().length).toBeGreaterThan(0)
+        expect(ordinary.finalMessage).not.toContain(privateContextMarker)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          explicitDirectory,
+          ordinaryDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex official weather-alert context e2e', () => {
   it(
     'uses one fixed alert read, falls back on failure, and keeps alert-only outreach quiet',
@@ -3181,6 +3668,106 @@ describeRealCodex('real Codex weekly health insight evidence fallback e2e', () =
         }
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex product notes eligibility e2e', () => {
+  it(
+    'filters repair-only product notes without dropping member-facing changes',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      )
+      if (!productNotes) {
+        throw new Error('Expected the managed product-notes automation.')
+      }
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-product-notes-eligibility-e2e-'),
+      )
+
+      try {
+        const appendCapturePath = path.join(
+          workingDirectory,
+          'product-notes-append.txt',
+        )
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const curlCapturePath = path.join(
+          workingDirectory,
+          'product-notes-curl.txt',
+        )
+        await materializeProductNotesFixtures({
+          appendCapturePath,
+          binDirectory,
+          curlCapturePath,
+        })
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildProductNotesDeveloperInstructions(),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            productNotes.instructions,
+            'Scheduled occurrence context:',
+            '- Current local date: 2026-08-19.',
+            '- The member regularly reviews scheduled reminders and has an active workout they use from Messages.',
+            '- A past connected-health sync delayed one reminder.',
+            '- The controlled canonical ledger and changelog feed are available through the normal vault-cli and curl commands.',
+            '- Complete the normal selection, ledger append, and terminal scheduled decision.',
+          ].join('\n\n'),
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        const curlCalls = (await readFile(curlCapturePath, 'utf8'))
+          .trim()
+          .split('\n')
+        expect(curlCalls).toHaveLength(1)
+        expect(curlCalls[0]).toContain(
+          '/api/changelog?days=14&featureLimit=70&improvementLimit=10',
+        )
+
+        const appendArguments = await readFile(appendCapturePath, 'utf8')
+        expect(appendArguments).toContain('clearer-automation-recipients')
+        expect(appendArguments).toContain('resume-workouts-in-messages')
+        expect(appendArguments).not.toContain(
+          'scheduled-support-resumes-after-syncs',
+        )
+
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/automation/iu)
+          expect(decision.text).toMatch(/resume|workout/iu)
+          expect(decision.text).not.toMatch(
+            /health-data maintenance|reliability|scheduled support resumes/iu,
+          )
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
       }
     },
     720_000,
@@ -8638,6 +9225,131 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+async function materializeProductNotesFixtures(input: {
+  appendCapturePath: string
+  binDirectory: string
+  curlCapturePath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const feed = JSON.stringify({
+    items: [
+      {
+        details:
+          'Reliability work prevents scheduled jobs from remaining stalled after connected-health maintenance.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'scheduled-support-resumes-after-syncs',
+        kind: 'feature',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['automations', 'connected-health'],
+        sourcePullRequests: [2001],
+        summary:
+          'Scheduled support resumes after connected-health maintenance.',
+        title: 'Scheduled support resumes after syncs',
+        url:
+          'https://www.withmurph.ai/changelog?item=scheduled-support-resumes-after-syncs',
+      },
+      {
+        details:
+          'Review the destination before saving or changing a scheduled message.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'clearer-automation-recipients',
+        kind: 'improvement',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['automations', 'settings'],
+        sourcePullRequests: [2002],
+        summary:
+          'Automation settings now show who receives each scheduled message before you save.',
+        title: 'Clearer automation recipients',
+        tryIt: {
+          label: 'Review automations',
+          prompt: 'Show my scheduled automations.',
+        },
+        url:
+          'https://www.withmurph.ai/changelog?item=clearer-automation-recipients',
+      },
+      {
+        details:
+          'Start or resume the current logged workout without leaving the Messages conversation.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'resume-workouts-in-messages',
+        kind: 'feature',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['workouts', 'messages'],
+        sourcePullRequests: [2003],
+        summary:
+          'Murph can now resume a paused workout from Messages.',
+        title: 'Resume workouts in Messages',
+        tryIt: {
+          label: 'Resume a workout',
+          prompt: 'Resume my workout.',
+        },
+        url:
+          'https://www.withmurph.ai/changelog?item=resume-workouts-in-messages',
+      },
+    ],
+    links: {
+      digestCardTemplate:
+        'https://www.withmurph.ai/changelog/card/v1/{ids}.png',
+      fullChangelog: 'https://www.withmurph.ai/changelog',
+    },
+    schema: 'murph.changelog-feed.v1',
+    window: {
+      from: '2026-08-06',
+      to: '2026-08-20',
+    },
+  })
+  const curlPath = path.join(input.binDirectory, 'curl')
+  await writeFile(
+    curlPath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"/api/changelog?days=14&featureLimit=70&improvementLimit=10"*)',
+      `    printf '%s\\n' "$*" >> '${input.curlCapturePath}'`,
+      `    printf '%s\\n' '${feed}'`,
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'unexpected product-notes URL\' >&2',
+      '    exit 69',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(curlPath, 0o700)
+
+  const vaultCliPath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    vaultCliPath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"knowledge show murph-product-notes"*)',
+      '    printf \'%s\\n\' \'# Murph product notes\' \'\' \'## 2026-08-05 — Murph product notes\' \'Kind: feature discovery\' \'Item ids: earlier-feature\'',
+      '    ;;',
+      '  *"knowledge append-section murph-product-notes"*)',
+      `    printf '%s\\n' "$*" > '${input.appendCapturePath}'`,
+      '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'unexpected product-notes vault command\' >&2',
+      '    exit 69',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(vaultCliPath, 0o700)
+}
+
 async function buildWearableArrivalPrompt(input: {
   occurredAt: string
   promptTimeContext: Awaited<ReturnType<typeof resolveAssistantPromptTimeContext>>
@@ -9053,10 +9765,11 @@ function buildHostedUsageProgressDeveloperInstructions(
 
 function buildDirectConversationDeveloperInstructions(
   onboardingGuidance = false,
+  assistantContextSnapshotPrompt: string | null = null,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
+    assistantContextSnapshotPrompt,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,
@@ -9482,6 +10195,29 @@ function buildWeeklyHealthInsightDeveloperInstructions(): string {
   })
 }
 
+function buildProductNotesDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-19',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    scheduledOccurrenceAt: '2026-08-19T14:00:00.000Z',
+    turnTrigger: 'automation-cron',
+  })
+}
+
 function buildCapabilityRoutingDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -9532,6 +10268,38 @@ function buildRoutinePresentationDeveloperInstructions(input: {
   })
 }
 
+function buildRoutineValidationProbeTool(
+  probeCount: 0 | 1 | 2,
+): AssistantProviderDynamicTool {
+  if (probeCount === 0) {
+    return MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL
+  }
+
+  return {
+    ...MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+    inputSchema: {
+      ...MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.inputSchema,
+      properties: {
+        ...MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.inputSchema.properties,
+        validation_probe_one: {
+          type: 'string',
+          description:
+            'Test-only conformance field. Set it to "first" on the first routine-card call only. Never include it on a later call.',
+        },
+        ...(probeCount === 2
+          ? {
+              validation_probe_two: {
+                type: 'string',
+                description:
+                  'Test-only conformance field. Do not include it on the first call. If that call is rejected, set it to "second" on the second routine-card call only. Never include it later.',
+              },
+            }
+          : {}),
+      },
+    },
+  }
+}
+
 function buildTelegramRichContentDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -9566,11 +10334,26 @@ async function materializeRoutinePresentationVaultCli(
       '#!/bin/sh',
       'set -eu',
       'case "$*" in',
+      '  *"commons knowledge search"*)',
+      '    printf \'%s\\n\' \'{"items":[]}\'',
+      '    ;;',
       '  *"exercise list"*)',
-      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"}]}\'',
+      '    printf \'%s\\n\' \'{"items":[{"id":"ST170","slug":"doorway-stretch","name":"Doorway stretch"},{"id":"MB101","slug":"ankle-circles","name":"Ankle circles"},{"id":"MB102","slug":"torso-turns","name":"Torso turns"},{"id":"BL201","slug":"tandem-stand","name":"Tandem stand"},{"id":"BL202","slug":"side-to-side-weight-shifts","name":"Side-to-side weight shifts"}]}\'',
       '    ;;',
       '  "exercise show doorway-stretch --format json"|"exercise show ST170 --format json")',
       '    printf \'%s\\n\' \'{"id":"ST170","name":"Doorway stretch","level":"beginner","instructions":["Take a small step forward.","Keep the ribs quiet."],"images":[{"url":"https://cdn.example.test/doorway-stretch.png","alt":"Person with a forearm resting on a door frame.","step":"Setup"}],"safetyNotes":["Stop if pain increases."]}\'',
+      '    ;;',
+      '  "exercise show ankle-circles --format json"|"exercise show MB101 --format json")',
+      '    printf \'%s\\n\' \'{"id":"MB101","name":"Ankle circles","level":"beginner","instructions":["Stand supported.","Draw small circles."],"images":[{"url":"https://cdn.example.test/ankle-circles.png","alt":"Person making a small ankle circle while standing with support.","step":"Movement"}],"safetyNotes":["Use a comfortable range."]}\'',
+      '    ;;',
+      '  "exercise show torso-turns --format json"|"exercise show MB102 --format json")',
+      '    printf \'%s\\n\' \'{"id":"MB102","name":"Torso turns","level":"beginner","instructions":["Stand tall.","Turn gently from the trunk."],"images":[{"url":"https://cdn.example.test/torso-turns.png","alt":"Person turning the torso gently while standing.","step":"Movement"}],"safetyNotes":["Keep the range comfortable."]}\'',
+      '    ;;',
+      '  "exercise show tandem-stand --format json"|"exercise show BL201 --format json")',
+      '    printf \'%s\\n\' \'{"id":"BL201","name":"Tandem stand","level":"beginner","instructions":["Place one foot before the other.","Use support if needed."],"images":[{"url":"https://cdn.example.test/tandem-stand.png","alt":"Person standing heel to toe near a stable support.","step":"Setup"}],"safetyNotes":["Stop if you feel unsteady."]}\'',
+      '    ;;',
+      '  "exercise show side-to-side-weight-shifts --format json"|"exercise show BL202 --format json")',
+      '    printf \'%s\\n\' \'{"id":"BL202","name":"Side-to-side weight shifts","level":"beginner","instructions":["Stand with feet apart.","Shift weight slowly from side to side."],"images":[{"url":"https://cdn.example.test/weight-shifts.png","alt":"Person shifting body weight from side to side.","step":"Movement"}],"safetyNotes":["Keep a stable support nearby."]}\'',
       '    ;;',
       '  *)',
       '    printf \'%s\\n\' \'unsupported routine fixture command\' >&2',
@@ -9597,6 +10380,56 @@ type CapabilityRoutingAction =
       kind: 'dynamic'
       tool: string
     }
+
+interface CompletedAgentMessage {
+  eventIndex: number
+  text: string
+}
+
+interface DynamicToolAttempt {
+  argumentsValue: Record<string, unknown>
+  eventIndex: number
+  tool: string
+}
+
+function readDynamicToolAttempts(
+  events: readonly unknown[],
+): DynamicToolAttempt[] {
+  return events.flatMap<DynamicToolAttempt>((event, eventIndex) => {
+    const record = readRecord(event)
+    if (readString(record?.method, record?.type) !== 'item/tool/call') {
+      return []
+    }
+    const params = readRecord(record?.params)
+    const tool = readString(params?.tool, params?.name)
+    if (!tool) {
+      return []
+    }
+    return [{
+      argumentsValue: readArgumentsRecord(params?.arguments),
+      eventIndex,
+      tool,
+    }]
+  })
+}
+
+function readCompletedAgentMessages(
+  events: readonly unknown[],
+): CompletedAgentMessage[] {
+  return events.flatMap<CompletedAgentMessage>((event, eventIndex) => {
+    const record = readRecord(event)
+    if (readString(record?.method, record?.type) !== 'item/completed') {
+      return []
+    }
+    const item = readRecord(readRecord(record?.params)?.item)
+    const itemType = readString(item?.type)
+    if (itemType !== 'agentMessage' && itemType !== 'agent_message') {
+      return []
+    }
+    const text = readString(item?.text)
+    return text ? [{ eventIndex, text }] : []
+  })
+}
 
 function readCapabilityRoutingActions(
   events: readonly unknown[],

@@ -13,6 +13,7 @@ type StoredAutomationRecord = {
     reasoningEffort?: string | null
   } | null
   continuityPolicy: 'fresh' | 'preserve'
+  contextReferences?: Array<{ entityId: string; entityKind: string }>
   instructions: string
   route: {
     channel: string
@@ -238,6 +239,7 @@ beforeEach(() => {
       automationId?: string
       assistantTargetOverride?: StoredAutomationRecord['assistantTargetOverride']
       continuityPolicy: 'fresh' | 'preserve'
+      contextReferences?: StoredAutomationRecord['contextReferences']
       instructions: string
       route: StoredAutomationRecord['route']
       schedule: StoredAutomationRecord['schedule']
@@ -260,6 +262,10 @@ beforeEach(() => {
             ? existing?.assistantTargetOverride ?? null
             : input.assistantTargetOverride,
         continuityPolicy: input.continuityPolicy,
+        contextReferences:
+          input.contextReferences === undefined
+            ? existing?.contextReferences ?? []
+            : [...input.contextReferences],
         instructions: input.instructions,
         route: input.route,
         schedule: input.schedule,
@@ -283,6 +289,7 @@ beforeEach(() => {
       activeUntil?: string | null
       assistantTargetOverride?: StoredAutomationRecord['assistantTargetOverride']
       continuityPolicy?: 'fresh' | 'preserve'
+      contextReferences?: StoredAutomationRecord['contextReferences']
       instructions?: string
       lookup: string
       route?: StoredAutomationRecord['route']
@@ -312,6 +319,10 @@ beforeEach(() => {
             ? existing.assistantTargetOverride
             : input.assistantTargetOverride,
         continuityPolicy: input.continuityPolicy ?? existing.continuityPolicy,
+        contextReferences:
+          input.contextReferences === undefined
+            ? existing.contextReferences
+            : [...input.contextReferences],
         instructions: input.instructions ?? existing.instructions,
         route: input.route ?? existing.route,
         schedule: input.schedule ?? existing.schedule,
@@ -500,6 +511,10 @@ describe('applyMurphManagedAutomations', () => {
     const progressSeed: MurphManagedAutomationSeed = {
       automationId: 'automation_desired_progress',
       continuityPolicy: 'fresh',
+      contextReferences: [{
+        entityId: 'exp_DESIRED_SUPPORT_SERIES',
+        entityKind: 'experiment',
+      }],
       instructions: 'Send the desired progress milestone.',
       schedule: { kind: 'at', at: '2026-06-09T13:00:00.000Z' },
       slug: 'experiment-progress-desired-day-4',
@@ -585,8 +600,13 @@ describe('applyMurphManagedAutomations', () => {
         shouldYield: null,
         vaultRoot,
       })
-    expect(managedAutomationMocks.records.get(progressSeed.automationId)?.status)
-      .toBe('active')
+    expect(managedAutomationMocks.records.get(progressSeed.automationId)).toMatchObject({
+      contextReferences: [{
+        entityId: 'exp_DESIRED_SUPPORT_SERIES',
+        entityKind: 'experiment',
+      }],
+      status: 'active',
+    })
     expect(managedAutomationMocks.records.get(finalSeed.automationId)?.tags)
       .toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(managedAutomationMocks.records.get(staleSameSeries.automationId)?.status)
@@ -854,6 +874,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightSeed.schedule.expression).toBe('0 12 * * 0')
     expect(insightSeed.instructions).toContain('On this scheduled weekly run')
     expect(insightSeed.assistantTargetOverride).toEqual({
+      model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
     })
     expect(insightSeed.instructions).not.toContain('Sunday at noon local time')
@@ -910,6 +931,7 @@ describe('applyMurphManagedAutomations', () => {
       'A monthly check for one user-relevant health friction worth offering help with.',
     )
     expect(seed.assistantTargetOverride).toEqual({
+      model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
     })
     expect(seed.tags).toContain('murph-managed:monthly-improvement-coach')
@@ -1055,10 +1077,10 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('2-3 things Murph can already do')
     expect(seed.instructions).toContain('Do not pad with weak matches')
     expect(seed.instructions).toContain('member-facing product update, not a dump of release notes')
-    expect(seed.instructions).toContain('member encountered the corresponding issue')
-    expect(seed.instructions).toContain('Do not infer relevance merely from a connected provider')
-    expect(seed.instructions).toContain('WHOOP sync should be more reliable now.')
-    expect(seed.instructions).toContain('Omit implementation details such as retries, transient writes, artifacts, workers, checkpoints, migrations, or data plumbing')
+    expect(seed.instructions).toContain('introduces or materially changes a member-facing action, decision, or visible experience')
+    expect(seed.instructions).toContain('Never pitch reliability work.')
+    expect(seed.instructions).toContain('only restores or hardens otherwise unchanged behavior or reports internal durability')
+    expect(seed.instructions).not.toContain('member encountered the corresponding issue')
     expect(seed.instructions).toContain('lower priority than exciting capabilities')
     expect(seed.instructions).toContain('if neither kind clears, skip')
     expect(seed.instructions).toContain('Drop items the user is already using')
@@ -1469,6 +1491,7 @@ describe('applyMurphManagedAutomations', () => {
       title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
+      model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
     })
     expect(improvementCoachRecord?.schedule).toEqual({
@@ -2024,6 +2047,10 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
       .toEqual(expect.objectContaining({
+        assistantTargetOverride: {
+          model: 'gpt-5.6-sol',
+          reasoningEffort: 'high',
+        },
         schedule: {
           kind: 'cron',
           expression: '30 14 * * 5',

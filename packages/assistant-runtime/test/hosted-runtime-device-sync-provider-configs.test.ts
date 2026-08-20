@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { JUNCTION_PRODUCTION_TIMESERIES_RESOURCES } from "@murphai/device-syncd/config";
 import { resolveHostedRuntimeDeviceSyncProviderConfigs } from "../src/hosted-runtime/device-sync-provider-configs.ts";
 
 const staticProviderConfigs = {
@@ -61,7 +60,7 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
     });
   });
 
-  it("preserves Junction's code-owned production resources through member overlays", () => {
+  it("keeps hosted Junction resources omitted until curated defaults are normalized", () => {
     const resolved = resolveHostedRuntimeDeviceSyncProviderConfigs(
       {
         junction: {
@@ -69,7 +68,7 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
           region: "us",
         },
       },
-      { junction: { environment: "sandbox", region: "us" } },
+      {},
       {
         JUNCTION_API_KEY: "sk_us_test_runtime",
         JUNCTION_CLIENT_USER_ID_SECRET: "runtime-client-user-secret",
@@ -78,7 +77,12 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
       },
     );
 
-    expect(resolved.junction?.timeseriesResources)
-      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
+    expect(resolved.junction).toMatchObject({
+      apiKey: "sk_us_test_runtime",
+      clientUserIdSecret: "runtime-client-user-secret",
+      environment: "sandbox",
+      region: "us",
+    });
+    expect(resolved.junction).not.toHaveProperty("timeseriesResources");
   });
 });

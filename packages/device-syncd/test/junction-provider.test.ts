@@ -29,14 +29,17 @@ import {
   resolveJunctionTimeseriesResourcePolicy,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { JUNCTION_PRODUCTION_TIMESERIES_RESOURCES } from "../src/config/junction-config.ts";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { JunctionTimeseriesProgressError } from "../src/junction-timeseries-progress.ts";
-import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
+import {
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
+} from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -59,6 +62,7 @@ import {
   areJunctionDeviceConnectProviderSlugsEquivalent,
   resolveDeviceConnectSourceIdForJunctionProviderSlug,
 } from "../src/config/connect-routes.ts";
+import { canonicalizeJunctionProviderSlug } from "../src/connect-config.ts";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
@@ -71,6 +75,8 @@ import {
 import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
+  JUNCTION_MAX_USER_PROVIDERS,
+  JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES,
   JunctionClient,
   parseJunctionHistoricalPullSnapshot,
 } from "../src/providers/junction-client.ts";
@@ -205,6 +211,8 @@ async function executeFullJobTimeseriesContinuations(input: {
   for (let index = 0; index < 2_000; index += 1) {
     const continuation = result.scheduledJobs?.find((job) =>
       job.payload?.timeseriesResourceCursor !== undefined
+      || job.payload?.summaryResourceCursor !== undefined
+      || job.payload?.summaryPhaseComplete === true
     );
     if (!continuation) {
       return {
@@ -235,12 +243,34 @@ async function executeFullJobTimeseriesContinuations(input: {
   throw new Error("Junction full-job timeseries continuation did not terminate.");
 }
 
+async function executeTemporalAuthorityChildren(input: {
+  context: ProviderJobContext;
+  initialResult: Awaited<ReturnType<typeof executeJunctionJob>>;
+  provider: ReturnType<typeof createJunctionProvider>;
+}): Promise<void> {
+  const temporalChildren = input.initialResult.scheduledJobs?.filter((job) =>
+    job.payload?.temporalAuthorityTimeZone !== undefined
+  ) ?? [];
+  for (const [index, child] of temporalChildren.entries()) {
+    await executeJunctionJob(
+      input.provider,
+      input.context,
+      createJobFromInput(child, index),
+    );
+  }
+}
+
 async function executeJunctionFullJob(
   provider: ReturnType<typeof createJunctionProvider>,
   context: ProviderJobContext,
   job: DeviceSyncJobRecord,
 ): Promise<Awaited<ReturnType<typeof executeJunctionJob>>> {
   const initialResult = await executeJunctionJob(provider, context, job);
+  await executeTemporalAuthorityChildren({
+    context,
+    initialResult,
+    provider,
+  });
   const terminalResult = await executeFullJobTimeseriesContinuations({
     context,
     initialResult,
@@ -392,6 +422,7 @@ function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): 
   return {
     account,
     now: "2026-04-03T00:00:00.000Z",
+    vaultTimeZone: "UTC",
     importSnapshot: async () => ({ imported: true }),
     upsertConnectionSource: (input) => ({
       id: "src-1",
@@ -675,7 +706,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
         return createJsonResponse({ groups: {} });
@@ -735,15 +766,28 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
       "water",
     ]),
   );
+  const narrowTimeseriesWindows = requests
+    .filter((url) => url.includes("/v2/timeseries/"))
+    .map((url) => {
+      const parsed = new URL(url);
+      return [parsed.searchParams.get("start_date"), parsed.searchParams.get("end_date")];
+    });
   assert.equal(
-    requests
-      .filter((url) => url.includes("/v2/timeseries/"))
-      .every((url) => new URL(url).searchParams.get("start_date") === "2026-04-02"),
+    narrowTimeseriesWindows
+      .filter(([start, end]) => start === end)
+      .every(([start]) => start === "2026-04-02"),
     true,
+  );
+  assert.deepEqual(
+    narrowTimeseriesWindows.filter(([start, end]) => start !== end),
+    [
+      ["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"],
+      ["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"],
+    ],
   );
   assert.equal(profileSearchParams.has("start_date"), false);
   assert.equal(profileSearchParams.has("end_date"), false);
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 3);
 
   requests.length = 0;
   importedSnapshots.length = 0;
@@ -767,7 +811,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
   const correctionSweepRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
   assert.equal(
     correctionSweepRequests.length,
-    (JUNCTION_KNOWN_TIMESERIES_RESOURCES.length - 1) * 7,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 7 + 14,
   );
   assert.deepEqual(
     new Set(correctionSweepRequests.map((url) =>
@@ -775,13 +819,11 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
         /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
       )?.[1])
     )),
-    new Set(JUNCTION_KNOWN_TIMESERIES_RESOURCES.filter(
-      (resource) => resource !== "workout_stream",
-    )),
+    new Set(JUNCTION_DEFAULT_TIMESERIES_RESOURCES),
   );
   assert.equal(
     requests.filter((url) => url.includes("/v2/summary/workouts/")).length,
-    8,
+    1,
   );
 });
 
@@ -833,7 +875,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
       );
       if (timeseriesResource) {
         assert.ok(
-          (JUNCTION_KNOWN_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
         return createJsonResponse({ groups: {} });
@@ -853,7 +895,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
       return { imported: true };
     },
   });
-  let result = await executeJunctionJob(
+  const initialResult = await executeJunctionJob(
     provider,
     context,
     createJob("backfill", {
@@ -861,14 +903,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
-  while (result.scheduledJobs?.[0]) {
-    const continuation = result.scheduledJobs[0];
-    result = await executeJunctionJob(
-      provider,
-      context,
-      createJob(continuation.kind, continuation.payload ?? {}),
-    );
-  }
+  await executeFullJobTimeseriesContinuations({ context, initialResult, provider });
 
   const requestedTimeseriesResources = requests
     .map((url) => normalizeJunctionResourceName(
@@ -883,9 +918,9 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_KNOWN_TIMESERIES_RESOURCES].sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
   );
-  assert.equal(importedSnapshots.length, 0);
+  assert.equal(importedSnapshots.length, 2);
 });
 
 test("Junction programmatic timeseries overrides fetch exactly the requested resources", async () => {
@@ -1243,14 +1278,14 @@ test("Junction cancellation retains the deterministic timeseries continuation", 
           id: "provider-garmin-1",
           slug: "garmin",
           status: "connected",
-          resource_availability: { activity: true, blood_oxygen: true },
+          resource_availability: { activity: true, hrv: true },
         }],
       });
     }
     if (url.includes("/v2/summary/activity/")) {
       return createJsonResponse({ data: [] });
     }
-    if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+    if (url.includes("/v2/timeseries/junction-user-1/hrv/grouped")) {
       if (cancelNextTimeseriesRequest) {
         cancelNextTimeseriesRequest = false;
         const signal = init?.signal;
@@ -1265,7 +1300,7 @@ test("Junction cancellation retains the deterministic timeseries continuation", 
     }
     throw new Error(`Unexpected request: ${url}`);
   }, {
-    timeseriesResources: ["blood_oxygen"],
+    timeseriesResources: ["hrv"],
   });
   const context = createJunctionJobContext();
   const initialResult = await executeJunctionJob(
@@ -1299,7 +1334,7 @@ test("Junction cancellation retains the deterministic timeseries continuation", 
   );
   assert.deepEqual(retryResult.scheduledJobs?.[0]?.payload, {
     timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "blood_oxygen",
+    timeseriesResourceCursor: "hrv",
     windowEnd: "2026-04-03T00:00:00.000Z",
     windowStart: "2026-04-01T00:00:00.000Z",
   });
@@ -1634,10 +1669,30 @@ test("Junction client_user_id is deterministic, bounded, and owner-blinded", () 
 
   assert.equal(clientUserId.length, 32);
   assert.ok(clientUserId.startsWith("murph_"));
+  assert.equal(clientUserId, "murph_jnqpm4zu2il556kgyffrxngz26");
   assert.doesNotMatch(clientUserId, /owner|internal|123/u);
   assert.equal(
     clientUserId,
     buildJunctionClientUserId("junction-client-user-id-secret", "owner-internal-id-123"),
+  );
+
+  const namespacedClientUserId = buildJunctionClientUserId(
+    "junction-client-user-id-secret",
+    "owner-internal-id-123",
+    "e2e",
+  );
+  assert.equal(namespacedClientUserId.length, 32);
+  assert.ok(namespacedClientUserId.startsWith("murph_e2e_"));
+  assert.equal(namespacedClientUserId, "murph_e2e_jnqpm4zu2il556kgyffrxn");
+  assert.doesNotMatch(namespacedClientUserId, /owner|internal|123/u);
+  assert.notEqual(namespacedClientUserId, clientUserId);
+  assert.throws(
+    () => buildJunctionClientUserId(
+      "junction-client-user-id-secret",
+      "owner-internal-id-123",
+      "Native-iOS",
+    ),
+    /JUNCTION_CLIENT_USER_ID_NAMESPACE/u,
   );
 });
 
@@ -1958,6 +2013,277 @@ test("Junction retrying historical backfill without attempts uses the first retr
   assert.equal(due?.nextReconcileAt, "2026-04-04T01:16:00.000Z");
 });
 
+test("Junction yieldable reconcile checkpoints one bounded normalization-safe summary unit per continuation", async () => {
+  const requestsByPass: string[][] = [];
+  const importedSnapshots: unknown[] = [];
+  let activePass = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    (requestsByPass[activePass] ??= []).push(url);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: {
+            activity: true,
+            body: true,
+            sleep: true,
+            sleep_cycle: true,
+          },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    const summaryResource = new URL(url).pathname.match(
+      /^\/v2\/summary\/([^/]+)\//u,
+    )?.[1];
+    if (summaryResource) {
+      return createJsonResponse({
+        data: [{
+          connectionId: "provider-garmin-1",
+          id: `${summaryResource}-1`,
+          observedAt: "2026-04-02T12:00:00.000Z",
+        }],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity", "sleep", "sleep_cycle", "body"],
+    timeseriesResources: [],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+    shouldYield: () => false,
+  });
+  let job = createJob("reconcile", {
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-03-27T00:00:00.000Z",
+  });
+  const continuationPayloads: Array<Record<string, unknown>> = [];
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    activePass = pass;
+    const result = await executeJunctionJob(provider, context, job);
+    const continuation = result.scheduledJobs?.find((candidate) =>
+      candidate.kind === "reconcile"
+      && (
+        candidate.payload?.summaryResourceCursor !== undefined
+        || candidate.payload?.summaryPhaseComplete === true
+      )
+    );
+    if (!continuation) {
+      assert.equal(pass, 3);
+      break;
+    }
+    continuationPayloads.push(continuation.payload ?? {});
+    job = createJobFromInput(continuation, pass);
+  }
+
+  assert.deepEqual(
+    requestsByPass.map((requests) => requests
+      .map((url) => new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1])
+      .filter((resource): resource is string => Boolean(resource))),
+    [["activity"], ["sleep", "sleep_cycle"], ["body"], []],
+  );
+  assert.deepEqual(
+    continuationPayloads.map((payload) => ({
+      summaryPhaseComplete: payload.summaryPhaseComplete,
+      summaryResourceCursor: payload.summaryResourceCursor,
+    })),
+    [
+      { summaryPhaseComplete: undefined, summaryResourceCursor: "sleep" },
+      { summaryPhaseComplete: undefined, summaryResourceCursor: "body" },
+      { summaryPhaseComplete: true, summaryResourceCursor: undefined },
+    ],
+  );
+  assert.equal(importedSnapshots.length, 4);
+  assert.deepEqual(
+    Object.keys((importedSnapshots[1] as { summaries: Record<string, unknown> }).summaries),
+    ["sleep", "sleep_cycle"],
+  );
+});
+
+test("Junction yieldable summary continuation fails within its inner provider-attempt bound", async () => {
+  let summaryAttempts = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { activity: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/")) {
+      summaryAttempts += 1;
+      return createJsonResponse({ error: "temporarily unavailable" }, 503);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({ shouldYield: () => false }),
+      createJob("reconcile", {
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-03-27T00:00:00.000Z",
+      }),
+    ),
+    { code: "JUNCTION_API_REQUEST_FAILED" },
+  );
+
+  assert.equal(summaryAttempts, 1);
+});
+
+test("Junction yieldable reconcile times out provider inventory once before the hosted deadline", async () => {
+  vi.useFakeTimers();
+  let inventoryAttempts = 0;
+  let summaryAttempts = 0;
+  try {
+    const provider = createJunctionProvider(async (input, init) => {
+      const url = readUrl(input);
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        inventoryAttempts += 1;
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) {
+            reject(new Error("Expected the bounded inventory request to carry an abort signal."));
+            return;
+          }
+          const rejectAborted = () => reject(signal.reason);
+          if (signal.aborted) {
+            rejectAborted();
+            return;
+          }
+          signal.addEventListener("abort", rejectAborted, { once: true });
+        });
+      }
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/")) {
+        summaryAttempts += 1;
+        return createJsonResponse({ data: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const execution = executeJunctionJob(
+      provider,
+      createJunctionJobContext({ shouldYield: () => false }),
+      createJob("reconcile", {
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-03-27T00:00:00.000Z",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    await assert.rejects(execution, { code: "JUNCTION_API_REQUEST_FAILED" });
+    assert.equal(inventoryAttempts, 1);
+    assert.equal(summaryAttempts, 0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Junction yieldable reconcile bounds maximum provider projection to fixed source reads", async () => {
+  const providers = Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+    id: `provider-${index}`,
+    name: `Provider ${index}`,
+    resource_availability: { activity: true },
+    slug: `provider-${index % JUNCTION_MAX_USER_PROVIDERS}`,
+    status: "connected",
+  }));
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/")) {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const baseContext = createJunctionJobContext({ shouldYield: () => false });
+  let sourceReads = 0;
+  let sourceUpserts = 0;
+  const result = await executeJunctionJob(
+    provider,
+    {
+      ...baseContext,
+      async listConnectionSources() {
+        sourceReads += 1;
+        return [];
+      },
+      async upsertConnectionSource(input) {
+        sourceUpserts += 1;
+        return baseContext.upsertConnectionSource!(input);
+      },
+    },
+    createJob("reconcile", {
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-03-27T00:00:00.000Z",
+    }),
+  );
+
+  // One read projects the inventory and one fixed read admits the imported
+  // summary; neither count grows with provider cardinality.
+  assert.equal(sourceReads, 2);
+  assert.equal(sourceUpserts, JUNCTION_MAX_USER_PROVIDERS);
+  assert.equal(result.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+});
+
+test("Junction rejects provider inventory above the projection bound before local source work", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+          id: `provider-${index}`,
+          name: `Provider ${index}`,
+          slug: `provider-${index}`,
+          status: "connected",
+        })),
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  let sourceReads = 0;
+  let sourceUpserts = 0;
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        async listConnectionSources() {
+          sourceReads += 1;
+          return [];
+        },
+        async upsertConnectionSource(input) {
+          sourceUpserts += 1;
+          return createJunctionJobContext().upsertConnectionSource!(input);
+        },
+        shouldYield: () => false,
+      }),
+      createJob("reconcile", {
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-03-27T00:00:00.000Z",
+      }),
+    ),
+    { code: "JUNCTION_USER_PROVIDER_LIMIT" },
+  );
+  assert.equal(sourceReads, 0);
+  assert.equal(sourceUpserts, 0);
+});
+
 test("Junction non-connect backfill window uses bounded job retry without historical metadata", async () => {
   let activityRecords: unknown[] = [];
   const importedSnapshots: unknown[] = [];
@@ -1966,18 +2292,16 @@ test("Junction non-connect backfill window uses bounded job retry without histor
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
-        providers: [
-          {
-            id: "provider-garmin-1",
-            slug: "garmin",
-            name: "Garmin",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-              sleep: true,
-            },
+        providers: Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+          id: `provider-garmin-${index}`,
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: {
+            activity: true,
+            sleep: true,
           },
-        ],
+        })),
       });
     }
 
@@ -2544,19 +2868,17 @@ test("Junction backfill diagnostic reports redacted provider call counts", async
 
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
-        providers: [
-          {
-            id: "provider-garmin-1",
-            slug: "garmin",
-            name: "Garmin",
-            status: "connected",
-            resource_availability: {
-              activity: true,
-              heartrate: true,
-              sleep: { status: "unavailable" },
-            },
+        providers: Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+          id: `provider-garmin-${index}`,
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: {
+            activity: true,
+            heartrate: true,
+            sleep: { status: "unavailable" },
           },
-        ],
+        })),
       });
     }
 
@@ -2676,7 +2998,7 @@ test("Junction REST diagnostic probes a compact resource without returning raw r
   const result = await probeRest({
     account: createAccount(),
     endpoint: "timeseries",
-    now: "2026-04-03T12:00:00.000Z",
+    now: "2026-04-03T00:00:00.000Z",
     resource: "blood_oxygen",
     sourceProviderSlug: "garmin",
     windowStart: "2026-04-02T10:15:30.000Z",
@@ -2814,13 +3136,16 @@ test("Junction REST diagnostics use date params for date-only summary resources"
   }
 });
 
-test("Junction maps the weight timeseries resource to the documented body_weight endpoint", async () => {
+test("Junction maps body timeseries resources to their documented endpoints", async () => {
   const seenUrls: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     seenUrls.push(url);
 
-    if (url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")) {
+    if (
+      url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")
+      || url.includes("/v2/timeseries/junction-user-1/body_fat/grouped")
+    ) {
       return createJsonResponse({ groups: {} });
     }
 
@@ -2831,23 +3156,31 @@ test("Junction maps the weight timeseries resource to the documented body_weight
   const probeRest = provider.diagnostics?.probeRest;
   assert.ok(probeRest);
 
-  await probeRest({
-    account: createAccount(),
-    endpoint: "timeseries",
-    now: "2026-04-03T12:00:00.000Z",
-    resource: "weight",
-    windowStart: "2026-04-02T00:00:00.000Z",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-  });
+  for (const resource of ["weight", "fat"]) {
+    await probeRest({
+      account: createAccount(),
+      endpoint: "timeseries",
+      now: "2026-04-03T12:00:00.000Z",
+      resource,
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    });
+  }
 
-  assert.equal(seenUrls.length, 1);
-  const seenUrl = requireValue(seenUrls[0], "Junction diagnostic should issue one read request.");
-  assert.equal(new URL(seenUrl).pathname, "/v2/timeseries/junction-user-1/body_weight/grouped");
-  assertJunctionWindowQuery(
-    seenUrl,
-    "2026-04-02T00:00:00.000Z",
-    "2026-04-03T00:00:00.000Z",
+  assert.deepEqual(
+    seenUrls.map((seenUrl) => new URL(seenUrl).pathname),
+    [
+      "/v2/timeseries/junction-user-1/body_weight/grouped",
+      "/v2/timeseries/junction-user-1/body_fat/grouped",
+    ],
   );
+  for (const seenUrl of seenUrls) {
+    assertJunctionWindowQuery(
+      seenUrl,
+      "2026-04-02T00:00:00.000Z",
+      "2026-04-03T00:00:00.000Z",
+    );
+  }
 });
 
 test("Junction REST diagnostic can force a bounded user data refresh", async () => {
@@ -3203,6 +3536,7 @@ test("Junction backfill diagnostic rejects malformed requested windows without p
       return true;
     },
   );
+
 });
 
 test("Junction sparse calendar refresh threads strict completeness before canonical import", async () => {
@@ -4811,15 +5145,18 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(initialResult.nextReconcileAt, "2026-04-04T00:15:00.000Z");
-  assert.equal(importedSnapshots.length, 0);
+  assert.equal(importedSnapshots.length, 1);
+  await executeTemporalAuthorityChildren({ context, initialResult, provider });
   const result = await executeFullJobTimeseriesContinuations({
     context,
     initialResult,
     provider,
   });
   assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
-  assert.equal(importedSnapshots.length, 1);
-  const timeseriesSnapshot = importedSnapshots[0] as { summaries?: Record<string, unknown[]>; timeseries?: Record<string, unknown[]> };
+  assert.equal(importedSnapshots.length, 8);
+  const timeseriesSnapshot = importedSnapshots.find((snapshot) =>
+    ((snapshot as { timeseries?: { blood_oxygen?: unknown[] } }).timeseries?.blood_oxygen?.length ?? 0) > 0
+  ) as { summaries?: Record<string, unknown[]>; timeseries?: Record<string, unknown[]> };
   assert.deepEqual(timeseriesSnapshot.summaries, {});
   assert.equal(timeseriesSnapshot.timeseries?.blood_oxygen?.length, 1);
 });
@@ -4842,7 +5179,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
               status: "connected",
               resource_availability: {
                 activity: true,
-                blood_oxygen: true,
+                hrv: true,
               },
             },
           ],
@@ -4855,7 +5192,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
         });
       }
 
-      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/hrv/grouped")) {
         return createJsonResponse({
           groups: {
             garmin: [{
@@ -4871,7 +5208,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
 
       throw new Error(`Unexpected request: ${url}`);
     }, {
-      timeseriesResources: ["blood_oxygen"],
+      timeseriesResources: ["hrv"],
     });
 
   const firstRequests: string[] = [];
@@ -4907,7 +5244,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
     windowStart: ownerWindowStart,
     windowEnd: ownerWindowEnd,
     timeseriesCursor: ownerWindowStart,
-    timeseriesResourceCursor: "blood_oxygen",
+    timeseriesResourceCursor: "hrv",
   });
   assert.equal(
     continuation.dedupeKey,
@@ -4959,7 +5296,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
     windowStart: ownerWindowStart,
     windowEnd: ownerWindowEnd,
     timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "blood_oxygen",
+    timeseriesResourceCursor: "hrv",
   });
   assert.equal(secondImportedSnapshots.length, 1);
 
@@ -5315,7 +5652,11 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
-      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+      const bloodOxygenStartDate = new URL(url).searchParams.get("start_date");
+      if (
+        bloodOxygenStartDate !== "2026-04-02"
+        && bloodOxygenStartDate !== "2026-04-02T00:00:00.000Z"
+      ) {
         return createJsonResponse({ groups: {} });
       }
       return createJsonResponse({
@@ -5366,6 +5707,7 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
   const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
 
   const context = createJunctionJobContext({
+      now: "2026-04-04T00:00:00.000Z",
       // Simulate a worker that loaded the established account before the target
       // start committed its disconnected source row.
       account: createAccount({
@@ -5381,7 +5723,6 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
           lastDataAt: garminSource.lastDataAt,
         }],
       }),
-      now: "2026-04-03T12:00:00.000Z",
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot as (typeof importedSnapshots)[number]);
         return { imported: true };
@@ -5435,9 +5776,14 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
       "legacy-rowless-activity-1",
     ],
   );
+  // The ordinary calendar-day pull and the temporal-authority window may each
+  // import the connected record; canonical import converges the duplicate.
+  // The fenced source must never appear.
   assert.deepEqual(
-    importedSnapshots.flatMap((snapshot) => snapshot.timeseries?.blood_oxygen ?? [])
-      .map((record) => record.id),
+    [...new Set(
+      importedSnapshots.flatMap((snapshot) => snapshot.timeseries?.blood_oxygen ?? [])
+        .map((record) => record.id),
+    )],
     ["garmin-blood-oxygen-1"],
   );
 });
@@ -6431,9 +6777,12 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     sourceProviderSlug: "garmin",
     status: "connected" as const,
   };
+  const bloodPressureHistoryVersion = requireValue(
+    resolveJunctionExtendedTimeseriesHistoryBackfillVersion("blood_pressure"),
+  );
   const schedulerAccount = createStoredAccount({
     metadata: {
-      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+      junctionBloodPressureHistoryBackfillCoverage: `v${bloodPressureHistoryVersion}|omron`,
     },
     nextReconcileAt: "2026-04-03T00:00:00.000Z",
     sources: [garminSource],
@@ -6452,17 +6801,29 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   const schedulerJob = findScheduledHistoryJob("2026-04-03T00:00:00.000Z");
   assert.deepEqual(schedulerJob.payload, {
     historicalBackfill: true,
-    historicalWindowStart: "2026-03-18T00:00:00.000Z",
+    historicalBackfillVersion: bloodPressureHistoryVersion,
+    historicalWindowStart: "2025-09-21T00:00:00.000Z",
     resource: "blood_pressure",
     resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
     sourceProviderSlug: "garmin",
     windowEnd: "2026-03-20T00:00:00.000Z",
-    windowStart: "2026-03-18T00:00:00.000Z",
+    windowStart: "2025-09-21T00:00:00.000Z",
   });
   assert.equal(
     findScheduledHistoryJob("2026-04-04T00:00:00.000Z").dedupeKey,
     schedulerJob.dedupeKey,
   );
+  // Keep this webhook/lifecycle execution proof intentionally small; the raw
+  // scheduler payload above independently proves the fixed 180-day horizon.
+  const twoDayExecutionJob = {
+    ...schedulerJob,
+    payload: {
+      ...schedulerJob.payload,
+      historicalWindowStart: "2026-03-18T00:00:00.000Z",
+      windowStart: "2026-03-18T00:00:00.000Z",
+    },
+  };
 
   const updateCases = [
     {
@@ -6499,7 +6860,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+          junctionBloodPressureHistoryBackfillCoverage: `v${bloodPressureHistoryVersion}|omron`,
         },
         sources: [garminSource],
       }),
@@ -6509,8 +6870,8 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       }),
     }),
     {
-      ...createJob("resource", schedulerJob.payload ?? {}),
-      dedupeKey: schedulerJob.dedupeKey ?? null,
+      ...createJob("resource", twoDayExecutionJob.payload ?? {}),
+      dedupeKey: twoDayExecutionJob.dedupeKey ?? null,
     },
   );
   const scheduledFollowUp = scheduledResult.scheduledJobs?.find((job) =>
@@ -6522,7 +6883,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       createJunctionJobContext({
         account: createAccount({
           metadata: {
-            junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+            junctionBloodPressureHistoryBackfillCoverage: `v${bloodPressureHistoryVersion}|omron`,
           },
           sources: [garminSource],
         }),
@@ -6549,7 +6910,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       scheduledResult.metadataPatch ?? {},
       "garmin",
       "blood_pressure",
-      1,
+      bloodPressureHistoryVersion,
     ),
     true,
   );
@@ -6558,7 +6919,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       scheduledResult.metadataPatch ?? {},
       "omron",
       "blood_pressure",
-      1,
+      bloodPressureHistoryVersion,
     ),
     true,
   );
@@ -7369,9 +7730,19 @@ test("Junction provider source keys are stable provider-level opaque ids", () =>
     connectionId: "acct-junction-1",
     sourceProviderSlug: "peloton",
   });
+  const appleHealthKeys = ["apple_health_kit", "apple_health", "apple-healthkit"].map(
+    (sourceProviderSlug) => buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug,
+    }),
+  );
 
   assert.equal(garminKey, garminKeyAgain);
   assert.notEqual(garminKey, pelotonKey);
+  assert.equal(new Set(appleHealthKeys).size, 1);
+  assert.equal(canonicalizeJunctionProviderSlug(" Apple Health "), "apple_health_kit");
+  assert.equal(canonicalizeJunctionProviderSlug("unknown-source"), "unknown_source");
+  assert.equal(canonicalizeJunctionProviderSlug(null), null);
   assert.match(garminKey ?? "", /^jxn_src_[a-f0-9]{32}$/u);
   assert.doesNotMatch(garminKey ?? "", /acct|junction|garmin/u);
 });
@@ -7388,8 +7759,11 @@ test("Junction provider revokes remote provider slugs unless Junction already re
     if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
         data: [
-          { slug: "garmin", status: "connected" },
-          { slug: "Garmin", status: "active" },
+          ...Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+            id: `garmin-${index}`,
+            slug: index % 2 === 0 ? "garmin" : "Garmin",
+            status: index % 2 === 0 ? "connected" : "active",
+          })),
           { slug: "apple_health_kit", status: "error" },
           { slug: "fitbit", status: "revoked" },
           { provider: "Oura", status: "unknown" },
@@ -7438,7 +7812,11 @@ test("Junction provider cleanup deregisters only the requested source", async ()
     if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
         data: [
-          { slug: "garmin", status: "connected" },
+          ...Array.from({ length: JUNCTION_MAX_USER_PROVIDERS + 1 }, (_, index) => ({
+            id: `garmin-${index}`,
+            slug: "garmin",
+            status: "disconnected",
+          })),
           { slug: "fitbit", status: "connected" },
         ],
       });
@@ -7477,6 +7855,55 @@ test("Junction provider cleanup deregisters only the requested source", async ()
       url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/fitbit",
     },
   ]);
+});
+
+test("Junction provider proves source access only from explicit active statuses", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    assert.equal(
+      readUrl(input),
+      "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    );
+    return createJsonResponse({
+      data: [
+        { slug: "source_connected", status: "connected" },
+        { slug: "source_active", status: "active" },
+        { slug: "source_available", status: "available" },
+        { slug: "source_ok", status: "ok" },
+        { slug: "source_unknown", status: "unknown" },
+        { slug: "source_missing" },
+        { slug: "source_unrecognized", status: "settling" },
+        { slug: "source_error", status: "error" },
+        { slug: "source_failed", status: "failed" },
+        { slug: "source_disconnected", status: "disconnected" },
+        { slug: "source_revoked", status: "revoked" },
+        { slug: "source_inactive", status: "inactive" },
+      ],
+    });
+  });
+  const isSourceAccessActive = requireValue(
+    provider.connectionHandler?.isSourceAccessActive,
+  );
+
+  for (const slug of [
+    "source_connected",
+    "source_active",
+    "source_available",
+    "source_ok",
+  ]) {
+    assert.equal(await isSourceAccessActive(createAccount(), slug), true);
+  }
+  for (const slug of [
+    "source_unknown",
+    "source_missing",
+    "source_unrecognized",
+    "source_error",
+    "source_failed",
+    "source_disconnected",
+    "source_revoked",
+    "source_inactive",
+  ]) {
+    assert.equal(await isSourceAccessActive(createAccount(), slug), false);
+  }
 });
 
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
@@ -8212,6 +8639,81 @@ test("Junction client errors and cancels a chunked response that crosses the tra
   assert.equal(bodyCancelled, true);
 });
 
+test("Junction workout streams enforce their narrower response cap before SDK parsing", async () => {
+  let bodyCancelled = false;
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(new ReadableStream<Uint8Array>({
+        cancel() {
+          bodyCancelled = true;
+        },
+      }), {
+        status: 200,
+        headers: {
+          "content-length": String(JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES + 1),
+          "content-type": "application/json",
+        },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.getWorkoutStream({ workoutId: "workout-over-limit" }),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_RESPONSE_TOO_LARGE"
+      && !error.retryable,
+  );
+  assert.equal(requests, 1);
+  assert.equal(bodyCancelled, true);
+});
+
+test("Junction workout streams enforce their narrower response cap for chunked bodies", async () => {
+  let bodyCancelled = false;
+  let requests = 0;
+  let chunkIndex = 0;
+  const chunks = [
+    new Uint8Array(JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES),
+    new Uint8Array([0x20]),
+  ];
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          const chunk = chunks[chunkIndex];
+          chunkIndex += 1;
+          if (chunk) {
+            controller.enqueue(chunk);
+          }
+        },
+        cancel() {
+          bodyCancelled = true;
+        },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.getWorkoutStream({ workoutId: "workout-chunked-over-limit" }),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_RESPONSE_TOO_LARGE"
+      && !error.retryable,
+  );
+  assert.equal(requests, 1);
+  assert.equal(bodyCancelled, true);
+});
+
 test("Junction optional user lookup cancels unread 404 response bodies", async () => {
   let bodyCancelled = false;
   const client = new JunctionClient({
@@ -8938,7 +9440,7 @@ test("Junction createLinkToken honors configured allowed Link hosts", async () =
   );
 });
 
-test("Junction beginConnection resolves or creates a user, returns Link URL, and seeds provider-config credentials", async () => {
+test("Junction beginConnection resolves or creates a namespaced user, returns Link URL, and seeds provider-config credentials", async () => {
   const requests: Array<{ body: unknown; headers: Headers; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const url = readUrl(input);
@@ -8959,7 +9461,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
     }
 
     throw new Error(`Unexpected request: ${url}`);
-  });
+  }, { clientUserIdNamespace: "e2e" });
 
   const started = await requireJunctionConnectionHandler(provider).beginConnection({
     state: "state-1",
@@ -8985,7 +9487,9 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.deepEqual(started.stateMetadata, undefined);
 
   const createUserBody = requests.find((request) => request.url.endsWith("/v2/user"))?.body;
-  assert.equal(typeof createUserBody === "object" && createUserBody !== null && "client_user_id" in createUserBody, true);
+  assert.deepEqual(createUserBody, {
+    client_user_id: "murph_e2e_jnqpm4zu2il556kgyffrxn",
+  });
   assert.doesNotMatch(JSON.stringify(createUserBody), /owner-internal-id-123/u);
 
   const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;
@@ -9145,6 +9649,15 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
     sourceConnection.initialJobs?.[0]?.dedupeKey,
     connection.initialJobs?.[0]?.dedupeKey,
   );
+  const sourceRecoveryWork = requireJunctionConnectionHandler(provider)
+    .buildSourceConnectionWork?.({
+      now: "2026-04-03T00:00:00.000Z",
+      sourceProviderSlug: "fitbit",
+    });
+  assert.deepEqual(sourceRecoveryWork, {
+    initialJobs: sourceConnection.initialJobs,
+    nextReconcileAt: sourceConnection.nextReconcileAt,
+  });
 
   // Every initial job crosses the configured-manifest boundary inside the OAuth
   // callback handler before the connection is persisted. An undeclared payload
@@ -9385,17 +9898,19 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
   });
   const importedSnapshots: unknown[] = [];
 
-  const context = createJunctionJobContext({
-    account: createAccount(),
-    now: "2026-04-03T12:00:00.000Z",
-    importSnapshot: async (snapshot) => {
-      importedSnapshots.push(snapshot);
-      return { imported: true };
-    },
-  });
-  await executeJunctionFullJob(
+  await executeJunctionJob(
     provider,
-    context,
+    {
+      account: createAccount(),
+      now: "2026-04-03T12:00:00.000Z",
+      vaultTimeZone: "UTC",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {},
+      refreshAccountTokens: async () => createAccount(),
+    },
     createJob("reconcile", {
       windowStart: "2026-03-27T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
@@ -9421,15 +9936,1172 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
         return [searchParams.get("start_date"), searchParams.get("end_date")];
       }),
     [
-      ["2026-03-27", "2026-03-27"],
-      ["2026-03-28", "2026-03-28"],
-      ["2026-03-29", "2026-03-29"],
-      ["2026-03-30", "2026-03-30"],
-      ["2026-03-31", "2026-03-31"],
-      ["2026-04-01", "2026-04-01"],
-      ["2026-04-02", "2026-04-02"],
+      ["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"],
     ],
   );
+});
+
+test("Junction one-day reconcile still imports the newest lag-complete temporal day", async () => {
+  const requestedWindows: Array<[string | null, string | null]> = [];
+  const authority: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped") {
+      requestedWindows.push([
+        url.searchParams.get("start_date"),
+        url.searchParams.get("end_date"),
+      ]);
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 1,
+    timeseriesResources: ["blood_oxygen"],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T00:00:00.000Z",
+      importSnapshot: async (_snapshot, options) => {
+        if (options) {
+          authority.push(options);
+        }
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedWindows, [[
+    "2026-04-01T00:00:00.000Z",
+    "2026-04-02T00:00:00.000Z",
+  ]]);
+  assert.deepEqual(
+    (authority[0] as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
+      dayKey: "2026-04-01",
+      resources: ["blood_oxygen"],
+      revisionAt: "2026-04-03T00:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+});
+
+test("Junction reconcile schedules the remaining temporal horizon newest-first as stable day jobs", async () => {
+  const requestedWindows: Array<[string, string | null, string | null]> = [];
+  const imports: Array<{ options: unknown; snapshot: unknown }> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    const resource = url.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/(blood_oxygen|stress_level)\/grouped$/u,
+    )?.[1];
+    if (resource) {
+      requestedWindows.push([
+        resource,
+        url.searchParams.get("start_date"),
+        url.searchParams.get("end_date"),
+      ]);
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 3,
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+  });
+  const context = createJunctionJobContext({
+    now: "2026-04-06T00:00:00.000Z",
+    importSnapshot: async (snapshot, options) => {
+      imports.push({ options, snapshot });
+      return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+    },
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      windowStart: "2026-04-03T00:00:00.000Z",
+      windowEnd: "2026-04-06T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedWindows, [
+    ["blood_oxygen", "2026-04-04T00:00:00.000Z", "2026-04-05T00:00:00.000Z"],
+    ["stress_level", "2026-04-04T00:00:00.000Z", "2026-04-05T00:00:00.000Z"],
+  ]);
+  const catchUpJobs = result.scheduledJobs ?? [];
+  assert.equal(catchUpJobs.length, 5);
+  const ordinaryContinuation = requireValue(
+    catchUpJobs.at(-1),
+    "Expected the ordinary timeseries continuation after temporal catch-up jobs.",
+  );
+  assert.equal(ordinaryContinuation.payload?.temporalAuthorityTimeZone, undefined);
+  assert.equal(ordinaryContinuation.payload?.timeseriesResourceCursor, "blood_oxygen");
+  assert.deepEqual(
+    catchUpJobs.slice(0, 4).map((job) => ({
+      availableAt: job.availableAt,
+      dayKey: String(job.payload?.windowStart ?? "").slice(0, 10),
+      priority: job.priority,
+      resource: job.payload?.resource,
+      windowEnd: job.payload?.windowEnd,
+      windowStart: job.payload?.windowStart,
+    })),
+    [
+      {
+        availableAt: "2026-04-06T00:00:00.000Z",
+        dayKey: "2026-04-03",
+        priority: 30,
+        resource: "blood_oxygen",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      {
+        availableAt: "2026-04-06T00:00:00.000Z",
+        dayKey: "2026-04-03",
+        priority: 30,
+        resource: "stress_level",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      {
+        availableAt: "2026-04-06T00:00:00.001Z",
+        dayKey: "2026-04-02",
+        priority: 30,
+        resource: "blood_oxygen",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+      {
+        availableAt: "2026-04-06T00:00:00.001Z",
+        dayKey: "2026-04-02",
+        priority: 30,
+        resource: "stress_level",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+    ],
+  );
+  assert.equal(new Set(catchUpJobs.map((job) => job.dedupeKey)).size, 5);
+
+  const firstCatchUp = requireValue(catchUpJobs[0], "Expected the newest blood-oxygen catch-up job.");
+  const firstCatchUpPayload = requireValue(
+    firstCatchUp.payload,
+    "Expected the temporal catch-up payload.",
+  );
+  await executeJunctionJob(
+    provider,
+    context,
+    {
+      ...createJob("resource", firstCatchUpPayload),
+      dedupeKey: firstCatchUp.dedupeKey ?? null,
+      priority: firstCatchUp.priority ?? 0,
+    },
+  );
+  assert.deepEqual(requestedWindows.at(-1), [
+    "blood_oxygen",
+    "2026-04-03T00:00:00.000Z",
+    "2026-04-04T00:00:00.000Z",
+  ]);
+  assert.deepEqual(
+    (imports.at(-1)?.options as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
+      dayKey: "2026-04-03",
+      resources: ["blood_oxygen"],
+      revisionAt: "2026-04-06T00:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+  assert.deepEqual(
+    (imports.at(-1)?.snapshot as { timeseries?: unknown }).timeseries,
+    { blood_oxygen: [] },
+  );
+});
+
+test("Junction reconcile preserves healthy temporal work and the older backlog when one newest fetch fails", async () => {
+  const requestedResources: string[] = [];
+  const importedAuthority: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    const resource = url.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/(blood_oxygen|stress_level)\/grouped$/u,
+    )?.[1];
+    if (resource) {
+      requestedResources.push(resource);
+      return resource === "blood_oxygen"
+        ? createJsonResponse({ code: "upstream_unavailable" }, 503)
+        : createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 3,
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-06T00:00:00.000Z",
+      importSnapshot: async (_snapshot, options) => {
+        if (options) {
+          importedAuthority.push(options);
+        }
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-03T00:00:00.000Z",
+      windowEnd: "2026-04-06T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requestedResources.filter((resource) => resource === "blood_oxygen").length, 3);
+  assert.equal(requestedResources.filter((resource) => resource === "stress_level").length, 1);
+  assert.deepEqual(
+    (importedAuthority[0] as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
+      dayKey: "2026-04-04",
+      resources: ["stress_level"],
+      revisionAt: "2026-04-06T00:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+  assert.deepEqual(
+    (result.scheduledJobs ?? []).map((job) => [
+      job.payload?.temporalAuthorityTimeZone === undefined
+        ? undefined
+        : String(job.payload?.windowStart ?? "").slice(0, 10),
+      job.payload?.temporalAuthorityTimeZone === undefined
+        ? undefined
+        : job.payload?.resource,
+    ]),
+    [
+      ["2026-04-04", "blood_oxygen"],
+      ["2026-04-03", "blood_oxygen"],
+      ["2026-04-03", "stress_level"],
+      ["2026-04-02", "blood_oxygen"],
+      ["2026-04-02", "stress_level"],
+      [undefined, undefined],
+    ],
+  );
+  assert.equal(new Set((result.scheduledJobs ?? []).map((job) => job.dedupeKey)).size, 6);
+});
+
+test("Junction reconcile durably schedules yielded temporal work and the older backlog", async () => {
+  const requestedResources: string[] = [];
+  let yieldChecks = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    const resource = url.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/(blood_oxygen|stress_level)\/grouped$/u,
+    )?.[1];
+    if (resource) {
+      requestedResources.push(resource);
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 3,
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-06T00:00:00.000Z",
+      shouldYield: () => {
+        yieldChecks += 1;
+        return yieldChecks > 1;
+      },
+    }),
+    createJob("reconcile", {
+      summaryPhaseComplete: true,
+      windowStart: "2026-04-03T00:00:00.000Z",
+      windowEnd: "2026-04-06T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedResources, ["blood_oxygen"]);
+  assert.deepEqual(
+    (result.scheduledJobs ?? [])
+      .filter((job) => job.payload?.temporalAuthorityTimeZone)
+      .map((job) => [String(job.payload?.windowStart ?? "").slice(0, 10), job.payload?.resource]),
+    [
+      ["2026-04-04", "stress_level"],
+      ["2026-04-03", "blood_oxygen"],
+      ["2026-04-03", "stress_level"],
+      ["2026-04-02", "blood_oxygen"],
+      ["2026-04-02", "stress_level"],
+    ],
+  );
+});
+
+test("Junction reconcile keeps provider-date and vault-local daily windows separate", async () => {
+  const dayMs = 24 * 60 * 60_000;
+  const windowEnd = "2026-04-20T00:00:00.000Z";
+  const temporalWindowByTimeZone = {
+    "America/Los_Angeles": [
+      "2026-04-18T07:00:00.000Z",
+      "2026-04-19T07:00:00.000Z",
+    ],
+    "Asia/Tokyo": [
+      "2026-04-17T15:00:00.000Z",
+      "2026-04-18T15:00:00.000Z",
+    ],
+    UTC: [
+      "2026-04-18T00:00:00.000Z",
+      "2026-04-19T00:00:00.000Z",
+    ],
+  } as const;
+
+  for (const [timeZone, expectedTemporalWindow] of Object.entries(
+    temporalWindowByTimeZone,
+  )) {
+    for (const horizonDays of [1, 7, 14]) {
+      const requestedWindows: Array<{
+        end: string | null;
+        resource: string;
+        start: string | null;
+      }> = [];
+      const provider = createJunctionProvider(async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-user-1") {
+          return createJsonResponse({ providers: [] });
+        }
+        if (url.pathname === "/v2/summary/activity/junction-user-1") {
+          return createJsonResponse({ data: [] });
+        }
+        const resource = url.pathname.match(
+          /^\/v2\/timeseries\/junction-user-1\/(hrv|stress_level)\/grouped$/u,
+        )?.[1];
+        if (resource) {
+          requestedWindows.push({
+            end: url.searchParams.get("end_date"),
+            resource,
+            start: url.searchParams.get("start_date"),
+          });
+          return createJsonResponse({ groups: {} });
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      }, {
+        reconcileDays: horizonDays,
+        timeseriesResources: ["hrv", "stress_level"],
+      });
+      const windowStart = new Date(Date.parse(windowEnd) - horizonDays * dayMs).toISOString();
+
+      const initialResult = await executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          now: "2026-04-20T12:00:00.000Z",
+          vaultTimeZone: timeZone,
+        }),
+        createJob("reconcile", { windowEnd, windowStart }),
+      );
+      await executeFullJobTimeseriesContinuations({
+        context: createJunctionJobContext({
+          now: "2026-04-20T12:00:00.000Z",
+          vaultTimeZone: timeZone,
+        }),
+        initialResult,
+        provider,
+      });
+
+      const expectedProviderDates = Array.from({ length: horizonDays }, (_, index) =>
+        new Date(Date.parse(windowStart) + index * dayMs).toISOString().slice(0, 10)
+      );
+      assert.deepEqual(
+        requestedWindows
+          .filter(({ resource }) => resource === "hrv")
+          .map(({ end, start }) => [start, end]),
+        expectedProviderDates.map((date) => [date, date]),
+      );
+      assert.deepEqual(
+        requestedWindows
+          .filter(({ resource }) => resource === "stress_level")
+          .map(({ end, start }) => [start, end]),
+        [expectedTemporalWindow, ...expectedProviderDates.map((date) => [date, date])],
+      );
+    }
+  }
+});
+
+test("Junction temporal recovery clamps its composed horizon to fourteen days", async () => {
+  let temporalRequests = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname.startsWith("/v2/timeseries/junction-user-1/")) {
+      temporalRequests += 1;
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 99,
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({ now: "2026-04-20T00:00:00.000Z" }),
+    createJob("reconcile", {
+      windowStart: "2026-01-01T00:00:00.000Z",
+      windowEnd: "2026-04-20T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(temporalRequests, 2);
+  assert.equal(result.scheduledJobs?.length, 27);
+  assert.deepEqual(
+    result.scheduledJobs?.slice(0, 2).map((job) => String(job.payload?.windowStart ?? "").slice(0, 10)),
+    ["2026-04-17", "2026-04-17"],
+  );
+  assert.deepEqual(
+    result.scheduledJobs?.slice(-3).map((job) =>
+      job.payload?.temporalAuthorityTimeZone === undefined
+        ? undefined
+        : String(job.payload?.windowStart ?? "").slice(0, 10)),
+    ["2026-04-05", "2026-04-05", undefined],
+  );
+});
+
+test("Junction yielded temporal recovery caps at twenty-eight children and one ordinary owner", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request after yield: ${url.toString()}`);
+  }, {
+    reconcileDays: 99,
+    timeseriesResources: ["blood_oxygen", "stress_level", "hrv"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-20T00:00:00.000Z",
+      shouldYield: () => true,
+    }),
+    createJob("reconcile", {
+      summaryPhaseComplete: true,
+      windowStart: "2026-04-06T00:00:00.000Z",
+      windowEnd: "2026-04-20T00:00:00.000Z",
+    }),
+  );
+  const scheduledJobs = result.scheduledJobs ?? [];
+
+  assert.equal(scheduledJobs.length, 29);
+  assert.equal(scheduledJobs.filter((job) => job.kind === "resource").length, 28);
+  assert.equal(scheduledJobs.filter((job) => job.kind === "reconcile").length, 1);
+});
+
+test("Junction temporal catch-up yields and upstream failures remain retryable", async () => {
+  const payload = {
+    resource: "stress_level",
+    resourceCategory: "timeseries",
+    temporalAuthorityDayKey: "2026-04-03",
+    temporalAuthorityTimeZone: "UTC",
+    windowEnd: "2026-04-04T00:00:00.000Z",
+    windowStart: "2026-04-03T00:00:00.000Z",
+  };
+  const yieldedProvider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    throw new Error(`Unexpected request after yield: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      yieldedProvider,
+      createJunctionJobContext({
+        now: "2026-04-06T00:00:00.000Z",
+        shouldYield: () => true,
+      }),
+      createJob("resource", payload),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_TEMPORAL_AUTHORITY_JOB_YIELDED");
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+
+  const failedProvider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({ code: "upstream_unavailable" }, 503);
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  await assert.rejects(
+    () => executeJunctionJob(
+      failedProvider,
+      createJunctionJobContext({ now: "2026-04-06T00:00:00.000Z" }),
+      createJob("resource", payload),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+
+  const completedProvider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  const completedResult = await executeJunctionJob(
+    completedProvider,
+    createJunctionJobContext({ now: "2026-04-06T00:00:00.000Z" }),
+    createJob("resource", payload),
+  );
+  assert.equal(completedResult.nextReconcileAt, "2026-04-06T01:00:00.000Z");
+
+  const staleTimeZoneResult = await executeJunctionJob(
+    completedProvider,
+    createJunctionJobContext({
+      now: "2026-04-06T00:00:00.000Z",
+      vaultTimeZone: "America/Los_Angeles",
+    }),
+    createJob("resource", payload),
+  );
+  assert.deepEqual(staleTimeZoneResult, {});
+});
+
+test("Junction closed daily timeseries imports carry the exclusive temporal source-day proof", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      assert.equal(url.searchParams.get("start_date"), "2026-04-22T00:00:00.000Z");
+      assert.equal(url.searchParams.get("end_date"), "2026-04-23T00:00:00.000Z");
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [
+              {
+                start: "2026-04-22T12:00:00.000Z",
+                timezone_offset: -18_000,
+                value: 20,
+              },
+              {
+                start: "2026-04-23T00:05:00.000Z",
+                timezone_offset: -18_000,
+                value: 30,
+              },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    timeseriesResources: ["stress_level"],
+  });
+  const importedSnapshots: unknown[] = [];
+  const importOptions: unknown[] = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-24T12:00:00.000Z",
+      importSnapshot: async (snapshot, options) => {
+        importedSnapshots.push(snapshot);
+        importOptions.push(options);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    }),
+  );
+
+  const dailySnapshotIndex = importedSnapshots.findIndex((snapshot) =>
+    Boolean((snapshot as { timeseries?: Record<string, unknown> }).timeseries?.stress_level)
+  );
+  assert.deepEqual(
+    (importOptions[dailySnapshotIndex] as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
+      dayKey: "2026-04-22",
+      resources: ["stress_level"],
+      revisionAt: "2026-04-24T12:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+  const dailySnapshot = importedSnapshots[dailySnapshotIndex] as {
+    timeseries?: { stress_level?: Array<{ start?: string }> };
+  };
+  assert.equal(dailySnapshot.timeseries?.stress_level?.length, 1);
+  assert.equal(dailySnapshot.timeseries?.stress_level?.[0]?.start, "2026-04-22T12:00:00.000Z");
+});
+
+test("Junction temporal authority fetches reject structurally incomplete responses", async () => {
+  const malformedPayloads: unknown[] = [
+    { groups: { garmin: null } },
+    { groups: { garmin: [null] } },
+    { groups: { garmin: [{ data: [null], source: { provider: "garmin", type: "watch" } }] } },
+    // Schema-drifted singletons: a source group or data value that is an
+    // object instead of an array cannot certify a complete collection.
+    { groups: { garmin: { data: [], source: { provider: "garmin", type: "watch" } } } },
+    {
+      groups: {
+        garmin: [{
+          data: { timestamp: "2026-04-22T07:00:00.000Z", value: 40 },
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    },
+    // Generic and legacy transport envelopes parse for ordinary ingestion but
+    // carry no grouped proof, so they can never certify a complete source day.
+    [],
+    { data: [] },
+    { results: [] },
+    { stress_level: [] },
+    // The SDK parse-error fallback returns the raw successful body text.
+    "[]",
+  ];
+  for (const malformedPayload of malformedPayloads) {
+    const importedSnapshots: unknown[] = [];
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+        return createJsonResponse(malformedPayload);
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, { timeseriesResources: ["stress_level"] });
+
+    await assert.rejects(
+      executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          now: "2026-04-24T12:00:00.000Z",
+          importSnapshot: async (snapshot) => {
+            importedSnapshots.push(snapshot);
+            return { imported: true };
+          },
+        }),
+        createJob("resource", {
+          resource: "stress_level",
+          resourceCategory: "timeseries",
+          temporalAuthorityDayKey: "2026-04-22",
+          temporalAuthorityTimeZone: "UTC",
+          windowStart: "2026-04-22T00:00:00.000Z",
+          windowEnd: "2026-04-23T00:00:00.000Z",
+        }),
+      ),
+      (error: unknown) =>
+        (error as { code?: string; retryable?: boolean }).code
+          === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
+        && (error as { retryable?: boolean }).retryable === true,
+    );
+    assert.equal(importedSnapshots.length, 0);
+  }
+
+  const emptyPayloads: unknown[] = [
+    { groups: {} },
+    { groups: { garmin: [] } },
+    { groups: { garmin: [{ data: [], source: { provider: "garmin", type: "watch" } }] } },
+  ];
+  for (const emptyPayload of emptyPayloads) {
+    const emptyImports: Array<{ options: unknown }> = [];
+    const emptyProvider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+        return createJsonResponse(emptyPayload);
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, { timeseriesResources: ["stress_level"] });
+    await executeJunctionJob(
+      emptyProvider,
+      createJunctionJobContext({
+        now: "2026-04-24T12:00:00.000Z",
+        importSnapshot: async (_snapshot, options) => {
+          emptyImports.push({ options });
+          return { imported: true };
+        },
+      }),
+      createJob("resource", {
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-22",
+        temporalAuthorityTimeZone: "UTC",
+        windowStart: "2026-04-22T00:00:00.000Z",
+        windowEnd: "2026-04-23T00:00:00.000Z",
+      }),
+    );
+    assert.equal(emptyImports.length, 1);
+    assert.deepEqual(
+      (emptyImports[0]?.options as { completeSourceDay?: { dayKey?: string } })
+        ?.completeSourceDay?.dayKey,
+      "2026-04-22",
+    );
+  }
+});
+
+test("Junction authorized-day filtering retains contradictory absolute-marked-floating rows for the importer", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [
+              // Semantically agreed adjacent-day overlap is still excluded.
+              { timestamp: "2026-04-21T23:30:00.000Z", value: 10 },
+              { timestamp: "2026-04-22T07:00:00.000Z", value: 40 },
+              // Parser-valid absolute raws explicitly marked floating are
+              // contradictory input the importer must see, never adjacent-day
+              // overlap the filter may discard: one dated on the previous
+              // day, one dated on the authorized day with an instant that
+              // maps outside it.
+              { timestamp: "2026-04-21T23:45:00Z", timestampSemantics: "floating", value: 50 },
+              { timestamp: "2026-04-22T23:30:00-05:00", timestampSemantics: "floating", value: 60 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-24T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      resource: "stress_level",
+      resourceCategory: "timeseries",
+      temporalAuthorityDayKey: "2026-04-22",
+      temporalAuthorityTimeZone: "UTC",
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const rows = (importedSnapshots[0] as {
+    timeseries?: { stress_level?: Array<{ timestamp?: string }> };
+  }).timeseries?.stress_level ?? [];
+  assert.deepEqual(
+    rows.map((row) => row.timestamp),
+    [
+      "2026-04-22T07:00:00.000Z",
+      "2026-04-21T23:45:00Z",
+      "2026-04-22T23:30:00-05:00",
+    ],
+  );
+});
+
+test("Junction successful-empty temporal days still carry authoritative replacement proof", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  const imports: Array<{ options: unknown; snapshot: unknown }> = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-24T12:00:00.000Z",
+      importSnapshot: async (snapshot, options) => {
+        imports.push({ options, snapshot });
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    }),
+  );
+
+  const authoritativeImport = imports.find(({ options }) =>
+    Boolean((options as { completeSourceDay?: unknown } | undefined)?.completeSourceDay)
+  );
+  assert.deepEqual(
+    (authoritativeImport?.options as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
+      dayKey: "2026-04-22",
+      resources: ["stress_level"],
+      revisionAt: "2026-04-24T12:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+  assert.deepEqual(
+    (authoritativeImport?.snapshot as { timeseries?: unknown })?.timeseries,
+    { stress_level: [] },
+  );
+});
+
+test.each([
+  {
+    timeZone: "America/Los_Angeles",
+    targetDay: "2026-04-22",
+    now: "2026-04-25T06:00:00.000Z",
+    jobWindowStart: "2026-04-22T00:00:00.000Z",
+    jobWindowEnd: "2026-04-24T00:00:00.000Z",
+    dayStart: "2026-04-22T07:00:00.000Z",
+    dayEnd: "2026-04-23T07:00:00.000Z",
+    beforeDay: "2026-04-22T06:59:59.000Z",
+    insideLate: "2026-04-23T06:59:59.000Z",
+  },
+  {
+    timeZone: "Asia/Tokyo",
+    targetDay: "2026-04-22",
+    now: "2026-04-24T14:00:00.000Z",
+    jobWindowStart: "2026-04-21T00:00:00.000Z",
+    jobWindowEnd: "2026-04-23T00:00:00.000Z",
+    dayStart: "2026-04-21T15:00:00.000Z",
+    dayEnd: "2026-04-22T15:00:00.000Z",
+    beforeDay: "2026-04-21T14:59:59.000Z",
+    insideLate: "2026-04-22T14:59:59.000Z",
+  },
+])("Junction complete $timeZone days filter absolute instants and floating raw days before import", async ({
+  beforeDay,
+  dayEnd,
+  dayStart,
+  insideLate,
+  jobWindowEnd,
+  jobWindowStart,
+  now,
+  targetDay,
+  timeZone,
+}) => {
+  const importedByProcessTimeZone: string[][] = [];
+  const originalProcessTimeZone = process.env.TZ;
+  try {
+    for (const processTimeZone of ["UTC", "Pacific/Auckland"]) {
+      process.env.TZ = processTimeZone;
+      const provider = createJunctionProvider(async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-user-1") {
+          return createJsonResponse({ providers: [{
+            id: "provider-garmin-temporal-boundary",
+            slug: "garmin",
+            status: "connected",
+          }] });
+        }
+        if (url.pathname === "/v2/summary/activity/junction-user-1") {
+          return createJsonResponse({ data: [] });
+        }
+        if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+          if (url.searchParams.get("next_cursor") === "page-2") {
+            return createJsonResponse({
+              groups: { garmin: [{
+                data: [
+                  { timestamp: `${targetDay}T23:59:00`, value: 60 },
+                  {
+                    timestamp: `${targetDay}T12:00:00Z`,
+                    timestampSemantics: "floating",
+                    value: 70,
+                  },
+                ],
+                source: { provider: "garmin", type: "watch" },
+              }] },
+            });
+          }
+          return createJsonResponse({
+            next_cursor: "page-2",
+            groups: { garmin: [{
+              data: [
+                { timestamp: beforeDay, value: 10 },
+                { timestamp: dayStart, value: 20 },
+                { timestamp: insideLate, value: 30 },
+                { timestamp: dayEnd, value: 40 },
+                { timestamp: `${targetDay}T00:01:00`, value: 50 },
+                { timestamp: "2026-04-21T23:59:00", value: 80 },
+                { timestamp: "2026-04-23T00:00:00", value: 90 },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }] },
+          });
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      }, { timeseriesResources: ["stress_level"] });
+      const imported: string[] = [];
+
+      await executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          now,
+          vaultTimeZone: timeZone,
+          importSnapshot: async (snapshot) => {
+            imported.push(
+              ...((snapshot as { timeseries?: { stress_level?: Array<{ timestamp?: string }> } })
+                .timeseries?.stress_level ?? []).flatMap((record) =>
+                  typeof record.timestamp === "string" ? [record.timestamp] : []
+                ),
+            );
+            return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+          },
+        }),
+        createJob("reconcile", {
+          windowStart: jobWindowStart,
+          windowEnd: jobWindowEnd,
+        }),
+      );
+      importedByProcessTimeZone.push(imported);
+    }
+  } finally {
+    if (originalProcessTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalProcessTimeZone;
+    }
+  }
+
+  const expected = [
+    dayStart,
+    insideLate,
+    `${targetDay}T00:01:00`,
+    `${targetDay}T23:59:00`,
+    `${targetDay}T12:00:00Z`,
+  ];
+  assert.deepEqual(importedByProcessTimeZone[0], expected);
+  assert.deepEqual(importedByProcessTimeZone[1], expected);
+});
+
+test("Junction temporal authority waits for a closed vault-local day plus the safety lag", async () => {
+  const requestedWindows: Array<[string | null, string | null]> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      const requestWindow: [string | null, string | null] = [
+        url.searchParams.get("start_date"),
+        url.searchParams.get("end_date"),
+      ];
+      requestedWindows.push(requestWindow);
+      return requestWindow[0] === "2026-04-22T07:00:00.000Z"
+        ? createJsonResponse({
+            groups: {
+              garmin: [{
+                data: [
+                  { start: "2026-04-23T01:00:00.000Z", value: 20 },
+                  { start: "2026-04-23T01:05:00.000Z", value: 80 },
+                ],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          })
+        : createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  const imports: Array<{ options: unknown; snapshot: unknown }> = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-25T06:00:00.000Z",
+      vaultTimeZone: "America/Los_Angeles",
+      importSnapshot: async (snapshot, options) => {
+        imports.push({ options, snapshot });
+        return { imported: true };
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-25T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requestedWindows.some(([start, end]) =>
+    start === "2026-04-22T07:00:00.000Z" && end === "2026-04-23T07:00:00.000Z"
+  ), true);
+  const target = imports.find(({ snapshot }) =>
+    (snapshot as { windowStart?: string }).windowStart === "2026-04-22T07:00:00.000Z"
+  );
+  assert.deepEqual(
+    (target?.options as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "jxn_acct_27cc43a25baa9a976e1d67c7cdc72208",
+      dayKey: "2026-04-22",
+      resources: ["stress_level"],
+      revisionAt: "2026-04-25T06:00:00.000Z",
+      timeZone: "America/Los_Angeles",
+    },
+  );
+  assert.equal(
+    ((target?.snapshot as { timeseries?: { stress_level?: unknown[] } })
+      .timeseries?.stress_level?.length ?? 0),
+    2,
+  );
+  const stillInsideLag = imports.find(({ snapshot }) =>
+    (snapshot as { windowStart?: string }).windowStart === "2026-04-23T07:00:00.000Z"
+  );
+  assert.equal(
+    (stillInsideLag?.options as { completeSourceDay?: unknown })?.completeSourceDay,
+    undefined,
+  );
+});
+
+test("Junction daily timeseries continues healthy peers and queues a failed temporal resource", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    const parsed = new URL(url);
+
+    if (parsed.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (parsed.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (parsed.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped") {
+      return createJsonResponse({ code: "upstream_unavailable" }, 503);
+    }
+    if (parsed.pathname === "/v2/timeseries/junction-user-1/water/grouped") {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{ start: "2026-04-02T08:00:00.000Z", value: 250 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    if (parsed.pathname === "/v2/timeseries/junction-user-1/hrv/grouped") {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{ start: "2026-04-02T08:00:00.000Z", value: 42 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["water", "hrv", "blood_oxygen"],
+  });
+
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+    },
+    now: "2026-04-04T12:00:00.000Z",
+  });
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+  await assert.rejects(
+    executeFullJobTimeseriesContinuations({
+      context,
+      initialResult: result,
+      provider,
+    }),
+    /junction_timeseries_collection/u,
+  );
+
+  assert.equal(requests.some((url) => url.includes("/blood_oxygen/grouped")), true);
+  assert.equal(requests.some((url) => url.includes("/water/grouped")), true);
+  assert.equal(requests.some((url) => url.includes("/hrv/grouped")), true);
+  const importedTimeseries = importedSnapshots.flatMap((snapshot) =>
+    Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
+  );
+  assert.deepEqual(importedTimeseries, ["water", "hrv"]);
+  assert.equal((result.scheduledJobs ?? []).some((job) =>
+    job.payload?.temporalAuthorityTimeZone !== undefined
+    && String(job.payload?.windowStart ?? "").startsWith("2026-04-02")
+    && job.payload?.resource === "blood_oxygen"
+  ), true);
 });
 
 test("Junction dense jobs retain complete offset days in either transport order", async () => {
@@ -10169,7 +11841,7 @@ test("Junction historical reconcile jobs preserve their summary window", async (
   });
   const importedSnapshots: unknown[] = [];
 
-  await executeJunctionJob(
+  await executeJunctionFullJob(
     provider,
     {
       account: createAccount(),
@@ -10196,7 +11868,7 @@ test("Junction historical reconcile jobs preserve their summary window", async (
   assertJunctionWindowQuery(summaryRequest, "2026-04-01", "2026-04-01");
 });
 
-test("Junction skips same closed-day timeseries after a completed reconcile", async () => {
+test("Junction ordinary timeseries correction resumes on the next closed day after generic completion", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -10208,23 +11880,27 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
       return createJsonResponse({ data: [] });
     }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/hrv/grouped")) {
+      return createJsonResponse({ groups: {} });
+    }
 
     throw new Error(`Unexpected request: ${url}`);
-  });
+  }, { timeseriesResources: ["hrv"] });
   const importedSnapshots: unknown[] = [];
-
-  await executeJunctionJob(
-    provider,
-    {
-      account: createAccount({ lastSyncCompletedAt: "2026-04-03T12:00:00.000Z" }),
-      now: "2026-04-03T12:00:00.000Z",
-      importSnapshot: async (snapshot) => {
-        importedSnapshots.push(snapshot);
-        return { imported: true };
-      },
-      logger: {},
-      refreshAccountTokens: async () => createAccount(),
+  const buildContext = (now: string) => ({
+    account: createAccount({ lastSyncCompletedAt: "2026-04-03T12:00:00.000Z" }),
+    now,
+    importSnapshot: async (snapshot: unknown) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
     },
+    logger: {},
+    refreshAccountTokens: async () => createAccount(),
+  });
+
+  await executeJunctionFullJob(
+    provider,
+    buildContext("2026-04-03T12:00:00.000Z"),
     createJob("reconcile", {
       windowStart: "2026-03-27T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
@@ -10232,7 +11908,117 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
   );
 
   assert.equal(importedSnapshots.length, 1);
-  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+  assert.equal(
+    requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/hrv/grouped")).length,
+    0,
+  );
+
+  requests.length = 0;
+  importedSnapshots.length = 0;
+  await executeJunctionFullJob(
+    provider,
+    buildContext("2026-04-04T12:00:00.000Z"),
+    createJob("reconcile", {
+      windowStart: "2026-03-28T00:00:00.000Z",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(
+    requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/hrv/grouped")).length,
+    7,
+  );
+});
+
+test("Junction temporal reconcile ignores generic job success and stays bounded to one day", async () => {
+  const requestedWindows: Array<{ resource: string; start: string | null; end: string | null }> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    const resource = /\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped/u.exec(
+      url.pathname,
+    )?.[1];
+    if (resource === "blood_oxygen" || resource === "stress_level") {
+      requestedWindows.push({
+        resource,
+        start: url.searchParams.get("start_date"),
+        end: url.searchParams.get("end_date"),
+      });
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["blood_oxygen", "stress_level"] });
+  const authorityProofs: unknown[] = [];
+  const executeAfterGenericSuccess = () => executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ lastSyncCompletedAt: "2026-04-04T11:59:00.000Z" }),
+      now: "2026-04-04T12:00:00.000Z",
+      importSnapshot: async (_snapshot, options) => {
+        if (options?.completeSourceDay) {
+          authorityProofs.push(options.completeSourceDay);
+        }
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-03-28T00:00:00.000Z",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+    }),
+  );
+
+  await executeAfterGenericSuccess();
+  await executeAfterGenericSuccess();
+
+  assert.deepEqual(requestedWindows, [
+    {
+      resource: "blood_oxygen",
+      start: "2026-04-03",
+      end: "2026-04-03",
+    },
+    {
+      resource: "stress_level",
+      start: "2026-04-03",
+      end: "2026-04-03",
+    },
+    {
+      resource: "blood_oxygen",
+      start: "2026-04-02T00:00:00.000Z",
+      end: "2026-04-03T00:00:00.000Z",
+    },
+    {
+      resource: "stress_level",
+      start: "2026-04-02T00:00:00.000Z",
+      end: "2026-04-03T00:00:00.000Z",
+    },
+    {
+      resource: "blood_oxygen",
+      start: "2026-04-03",
+      end: "2026-04-03",
+    },
+    {
+      resource: "stress_level",
+      start: "2026-04-03",
+      end: "2026-04-03",
+    },
+    {
+      resource: "blood_oxygen",
+      start: "2026-04-02T00:00:00.000Z",
+      end: "2026-04-03T00:00:00.000Z",
+    },
+    {
+      resource: "stress_level",
+      start: "2026-04-02T00:00:00.000Z",
+      end: "2026-04-03T00:00:00.000Z",
+    },
+  ]);
+  assert.equal(authorityProofs.length, 4);
 });
 
 test("Junction direct dense resource jobs reuse closed calendar-day ownership", async () => {
@@ -10268,14 +12054,16 @@ test("Junction direct dense resource jobs reuse closed calendar-day ownership", 
     },
   });
   const importedSnapshots: unknown[] = [];
+  const importOptions: unknown[] = [];
 
   await executeJunctionJob(
     provider,
     {
       account: createAccount(),
       now: "2026-04-03T12:00:00.000Z",
-      importSnapshot: async (snapshot) => {
+      importSnapshot: async (snapshot, options) => {
         importedSnapshots.push(snapshot);
+        importOptions.push(options);
         return { imported: true };
       },
       logger: {},
@@ -10305,6 +12093,7 @@ test("Junction direct dense resource jobs reuse closed calendar-day ownership", 
     timeseries?: Record<string, unknown[]>;
   };
   assert.deepEqual(snapshot.summaries, {});
+  assert.equal(importOptions[0], undefined);
   assert.equal(snapshot.timeseries?.blood_oxygen?.length, 1);
   const timeseriesRequest = requireValue(
     requests.find((url) => url.includes("/v2/timeseries/")),
@@ -10314,6 +12103,48 @@ test("Junction direct dense resource jobs reuse closed calendar-day ownership", 
     timeseriesRequest,
     "2026-04-02",
     "2026-04-02",
+  );
+});
+
+test("Junction dense resource windows retain floating values without manufacturing an instant", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({ groups: { garmin: [{
+        data: [{ timestamp: "2026-04-22T23:30:00", value: 45 }],
+        source: { provider: "garmin", type: "watch" },
+      }] } });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  const imports: Array<{ options: unknown; snapshot: unknown }> = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-24T12:00:00.000Z",
+      vaultTimeZone: "America/Los_Angeles",
+      importSnapshot: async (snapshot, options) => {
+        imports.push({ options, snapshot });
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("resource", {
+      resource: "stress_level",
+      resourceCategory: "timeseries",
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(imports[0]?.options, undefined);
+  assert.equal(
+    ((imports[0]?.snapshot as { timeseries?: { stress_level?: unknown[] } })
+      .timeseries?.stress_level?.length ?? 0),
+    1,
   );
 });
 
@@ -10356,8 +12187,6 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
     }
     throw new Error(`Unexpected request: ${url.toString()}`);
   }, {
-    summaryBackfillDays: 2,
-    timeseriesBackfillDays: 2,
     timeseriesResources: ["caffeine"],
   });
   const sourceRecord = createConnectionSource({
@@ -10389,6 +12218,17 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
     ),
     "Junction should schedule extended caffeine history.",
   );
+  // Keep this continuation proof intentionally small; the scheduler's fixed
+  // 180-day extended horizon is covered independently in the owner-policy test.
+  const twoDayInitialJob = {
+    ...initialJob,
+    payload: {
+      ...initialJob.payload,
+      historicalWindowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    },
+  };
   const acceptedDays: string[] = [];
   const context = createJunctionJobContext({
     account: createAccount({ sources: [source] }),
@@ -10416,7 +12256,7 @@ test("Junction yielded sparse history retains every accepted day as calendar wor
   const firstResult = await executeJunctionJob(
     provider,
     context,
-    createJobFromInput(initialJob),
+    createJobFromInput(twoDayInitialJob),
   );
   const preciseContinuation = requireValue(
     firstResult.scheduledJobs?.find((job) =>
@@ -11029,7 +12869,7 @@ test("Junction completeConnection falls back to the callback user_id when no see
       state: "success",
       user_id: "junction-user-ignored",
     }),
-    now: "2026-04-03T00:00:00.000Z",
+    now: "2026-04-04T00:00:00.000Z",
     grantedScopes: [],
   });
 
@@ -11942,6 +13782,65 @@ test("Junction webhook jobs dedupe by resource window instead of Svix trace", as
   assert.equal(first.jobs[0]?.dedupeKey, second.jobs[0]?.dedupeKey);
 });
 
+test.each([
+  {
+    data: {
+      end: "2026-04-03T00:10:00.000Z",
+      observedAt: "2026-04-01T12:00:00.000Z",
+      resource: "body_mass_index",
+      source: { provider: "withings" },
+      start: "2026-04-02T23:50:00.000Z",
+      timestamp: "2026-04-01T13:00:00.000Z",
+    },
+    eventType: "daily.data.body_mass_index.created",
+    label: "interval start",
+  },
+  {
+    data: {
+      observedAt: "2026-04-01T12:00:00.000Z",
+      resource: "weight",
+      source: { provider: "withings" },
+      timestamp: "2026-04-02T08:00:00.000Z",
+    },
+    eventType: "daily.data.weight.created",
+    label: "instant timestamp",
+  },
+])("Junction webhook body range uses canonical $label instead of aliases", async ({
+  data,
+  eventType,
+  label,
+}) => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: eventType,
+      user_id: "junction-user-1",
+      data,
+    },
+    messageId: `msg_body_range_${label.replaceAll(" ", "_")}`,
+    timestamp: "1775174400",
+  });
+
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.occurredAt, label === "interval start"
+    ? "2026-04-02T23:50:00.000Z"
+    : "2026-04-02T08:00:00.000Z");
+  assert.equal(parsed.jobs[0]?.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(parsed.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+});
+
 test("Junction webhook source-provider extraction covers documented payload shapes", async () => {
   const cases: Array<{
     label: string;
@@ -12498,7 +14397,11 @@ test("Junction polling updates source projection and imports bounded summary/tim
 
     const timeseriesResource = new URL(url).pathname.match(/\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
     if (timeseriesResource && timeseriesResource in groupedTimeseriesPayloads) {
-      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+      const bloodOxygenStartDate = new URL(url).searchParams.get("start_date");
+      if (
+        bloodOxygenStartDate !== "2026-04-02"
+        && bloodOxygenStartDate !== "2026-04-02T00:00:00.000Z"
+      ) {
         return createJsonResponse({ groups: {} });
       }
       return createJsonResponse(groupedTimeseriesPayloads[timeseriesResource]);
@@ -12524,14 +14427,19 @@ test("Junction polling updates source projection and imports bounded summary/tim
         status: "disconnected",
       }],
     }),
-    now: "2026-04-03T12:00:00.000Z",
+    now: "2026-04-04T00:00:00.000Z",
+    vaultTimeZone: "UTC",
     importSnapshot: async (snapshot) => {
       importedSnapshots.push(snapshot);
       return { imported: true };
     },
     upsertConnectionSource: (input) => {
+      const existingIndex = sources.findIndex((source) =>
+        source.sourceInstanceKey === input.sourceInstanceKey
+      );
+      const existing = existingIndex >= 0 ? sources[existingIndex] : undefined;
       const source: DeviceConnectionSourceRecord = {
-        id: `src-${sources.length + 1}`,
+        id: existing?.id ?? `src-${sources.length + 1}`,
         connectionId: "acct-junction-1",
         ...input,
         displayName: input.displayName ?? null,
@@ -12543,7 +14451,11 @@ test("Junction polling updates source projection and imports bounded summary/tim
         createdAt: input.lastSeenAt,
         updatedAt: input.lastSeenAt,
       };
-      sources.push(source);
+      if (existingIndex >= 0) {
+        sources[existingIndex] = source;
+      } else {
+        sources.push(source);
+      }
       return source;
     },
     refreshAccountTokens: async () => createAccount(),
@@ -12655,15 +14567,18 @@ test("Junction polling updates source projection and imports bounded summary/tim
     windowEnd?: string;
     windowStart?: string;
   }>;
+  const nonEmptyTimeseriesSnapshots = timeseriesSnapshots.filter((snapshot) =>
+    Object.values(snapshot.timeseries ?? {}).some((records) => records.length > 0)
+  );
   assert.equal(
-    timeseriesSnapshots.every((snapshot) =>
+    nonEmptyTimeseriesSnapshots.every((snapshot) =>
       snapshot.windowStart === "2026-04-02T00:00:00.000Z"
       && snapshot.windowEnd === "2026-04-03T00:00:00.000Z"
       && Object.keys(snapshot.timeseries ?? {}).length === 1
     ),
     true,
   );
-  const timeseries = timeseriesSnapshots.reduce<Record<string, Array<Record<string, unknown>>>>(
+  const timeseries = nonEmptyTimeseriesSnapshots.reduce<Record<string, Array<Record<string, unknown>>>>(
     (merged, snapshot) => {
       for (const [resource, records] of Object.entries(snapshot.timeseries ?? {})) {
         merged[resource] = [...(merged[resource] ?? []), ...records];
@@ -12674,8 +14589,8 @@ test("Junction polling updates source projection and imports bounded summary/tim
   );
 
   assert.deepEqual(Object.keys(timeseries).sort(), ["blood_oxygen", "stress_level"]);
-  assert.equal(timeseries.blood_oxygen?.length, 1);
-  assert.equal(timeseries.stress_level?.length, 1);
+  assert.equal(timeseries.blood_oxygen?.length, 2);
+  assert.equal(timeseries.stress_level?.length, 2);
   const bloodOxygenRecord = timeseries.blood_oxygen?.[0];
   assert.equal(bloodOxygenRecord?.accountId, undefined);
   assert.equal(bloodOxygenRecord?.account, undefined);
@@ -12728,7 +14643,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(requests.filter((url) => url.includes("/v2/summary/")).length, 2);
   assert.equal(requests.some((url) => url.includes("next_cursor=page-2")), true);
   const timeseriesRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
-  assert.equal(timeseriesRequests.length, 4);
+  assert.equal(timeseriesRequests.length, 18);
   assert.equal(timeseriesRequests.every((url) => url.includes("/grouped?")), true);
   assert.equal(timeseriesRequests.some((url) => url.includes("/heartrate?")), false);
   assert.equal(
@@ -12891,7 +14806,7 @@ test("Junction source projection persists provider error details for errored sou
   assert.equal(Object.hasOwn(connectedUpsert, "lastErrorMessage"), false);
 });
 
-test("Junction source projection drops error details when a sibling source entry is connected", async () => {
+test("Junction source projection keeps fail-closed error state when a sibling entry is connected", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -12958,9 +14873,9 @@ test("Junction source projection drops error details when a sibling source entry
 
   assert.equal(upserts.length, 1);
   assert.equal(upserts[0]?.sourceProviderSlug, "whoop_v2");
-  assert.equal(upserts[0]?.status, "connected");
-  assert.equal(Object.hasOwn(upserts[0] ?? {}, "lastErrorCode"), false);
-  assert.equal(Object.hasOwn(upserts[0] ?? {}, "lastErrorMessage"), false);
+  assert.equal(upserts[0]?.status, "error");
+  assert.equal(upserts[0]?.lastErrorCode, "token_refresh_failed");
+  assert.equal(upserts[0]?.lastErrorMessage, "WHOOP rejected the refresh token.");
 });
 
 test("Junction source projection tolerates malformed error details and reads camelCase fields", async () => {
@@ -13199,7 +15114,8 @@ test("Junction polling skips optional unavailable resource collections", async (
         junctionSkippedTimeseriesTotal: 6,
       },
     }),
-    now: "2026-04-03T12:00:00.000Z",
+    now: "2026-04-04T00:00:00.000Z",
+    vaultTimeZone: "UTC",
     importSnapshot: async (snapshot) => {
       importedSnapshots.push(snapshot);
       return { imported: true };
@@ -13270,7 +15186,7 @@ test("Junction polling skips optional unavailable resource collections", async (
     {},
   );
   assert.deepEqual(Object.keys(timeseries), ["blood_oxygen"]);
-  assert.equal(timeseries.blood_oxygen?.length, 1);
+  assert.equal(timeseries.blood_oxygen?.length, 2);
   assert.equal(timeseries.stress_level, undefined);
   assert.deepEqual(
     warnings.map((warning) => ({
@@ -13295,16 +15211,23 @@ test("Junction polling skips optional unavailable resource collections", async (
         resourceCategory: "timeseries",
         responseStatus: 422,
       },
+      {
+        accountId: undefined,
+        reason: "unsupported",
+        resource: "stress_level",
+        resourceCategory: "timeseries",
+        responseStatus: 422,
+      },
     ],
   );
   assert.deepEqual(result.metadataPatch, {
-    junctionProfileSummaryCheckedAt: "2026-04-03T12:00:00.000Z",
+    junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
     junctionProfileSummaryNormalizationRevision: 1,
-    junctionSkippedResourceTotal: 12,
+    junctionSkippedResourceTotal: 13,
     junctionSkippedSummaryTotal: 5,
-    junctionSkippedTimeseriesTotal: 7,
+    junctionSkippedTimeseriesTotal: 8,
     junctionSkippedResourceJobCount: 1,
-    junctionSkippedResourceLastAt: "2026-04-03T12:00:00.000Z",
+    junctionSkippedResourceLastAt: "2026-04-04T00:00:00.000Z",
     junctionSkippedResourceLast: "timeseries.stress_level.422.unsupported",
     junctionSkippedResourceLastDetail: null,
   });
@@ -17599,6 +19522,9 @@ test("Junction sparse fetch dedupe preserves stable importer identities and reje
     { timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 20 },
     { id: "fat-row-conflict", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 21 },
     { id: "fat-row-conflict", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 22 },
+    { id: "fat-row-date-only", timestamp: "2026-06-15", unit: "%", value: 23 },
+    { id: "fat-row-alias-only", observedAt: "2026-06-15T10:00:00.000Z", unit: "%", value: 24 },
+    { id: "fat-row-invalid-calendar", timestamp: "2026-06-31T10:00:00.000Z", unit: "%", value: 25 },
   ];
   const forward = await run(records);
   const reversed = await run([...records].reverse());
@@ -17613,13 +19539,17 @@ test("Junction sparse fetch dedupe preserves stable importer identities and reje
   const forwardSummary = summarize(forward.normalized);
 
   assert.deepEqual(forwardSummary, summarize(reversed.normalized));
-  assert.equal(forwardSummary.length, 4);
-  assert.equal(new Set(forwardSummary.map((event) => event.identity)).size, 4);
+  assert.equal(forwardSummary.length, 2);
+  assert.equal(new Set(forwardSummary.map((event) => event.identity)).size, 2);
   assert.deepEqual(forwardSummary.map((event) => event.value).sort((left, right) =>
     Number(left) - Number(right)
-  ), [18, 18, 19, 20]);
+  ), [18, 18]);
   assert.doesNotMatch(JSON.stringify(forward.snapshot), /fat-row-conflict/u);
   assert.doesNotMatch(JSON.stringify(reversed.snapshot), /fat-row-conflict/u);
+  assert.doesNotMatch(
+    JSON.stringify(forward.snapshot),
+    /fat-row-date-only|fat-row-alias-only|fat-row-invalid-calendar/u,
+  );
 });
 
 test("Junction full backfills keep configured sparse and dense resources in bounded daily units", async () => {
@@ -17667,6 +19597,7 @@ test("Junction full backfills keep configured sparse and dense resources in boun
 
     throw new Error(`Unexpected request: ${url}`);
   }, {
+    reconcileDays: 14,
     summaryBackfillDays: 180,
     timeseriesResources: ["blood_oxygen", ...sparseResources],
   });
@@ -17683,7 +19614,7 @@ test("Junction full backfills keep configured sparse and dense resources in boun
   const timeseriesRequests = requests
     .filter((url) => url.includes("/v2/timeseries/"))
     .map((url) => new URL(url));
-  assert.equal(timeseriesRequests.length, 182);
+  assert.equal(timeseriesRequests.length, 196);
 
   for (const resource of sparseResources) {
     const apiResource = resource === "fat" ? "body_fat" : resource;
@@ -17701,15 +19632,23 @@ test("Junction full backfills keep configured sparse and dense resources in boun
   const denseRequests = timeseriesRequests.filter((url) =>
     url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped"
   );
-  assert.equal(denseRequests.length, 14);
-  assert.ok(denseRequests.every((url) => {
+  assert.equal(denseRequests.length, 28);
+  const denseTemporalRequests = denseRequests.filter((url) => {
     const start = url.searchParams.get("start_date");
     const end = url.searchParams.get("end_date");
-    return start !== null && start === end;
-  }));
+    return start !== null
+      && end !== null
+      && Date.parse(end) - Date.parse(start) === 24 * 60 * 60_000;
+  });
+  assert.equal(denseTemporalRequests.length, 14);
+  const denseOrdinaryRequests = denseRequests.filter((url) => {
+    const start = url.searchParams.get("start_date");
+    return start !== null && start === url.searchParams.get("end_date");
+  });
+  assert.equal(denseOrdinaryRequests.length, 14);
 });
 
-test("Junction direct-Link bounded sparse data stays with the full backfill owner", async () => {
+test("Junction direct-Link body data stays in the bounded history owner", async () => {
   const connectedAt = "2026-04-03T00:00:00.000Z";
   const now = "2026-07-01T12:00:00.000Z";
   const vaultRoot = await makeTempDirectory("murph-junction-fat-activation");
@@ -17898,14 +19837,347 @@ test("Junction direct-Link bounded sparse data stays with the full backfill owne
       && job.payload?.resource === "fat"
       && job.payload?.sourceProviderSlug === "garmin"
     );
-    assert.deepEqual(activationJobs, []);
+    assert.equal(activationJobs.length, 0);
     assert.equal(requests.length, 0);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
 });
 
-test("Junction activity opt-ins keep fall on bounded sparse history while dense aggregates and features stay daily", async () => {
+test("Junction timeseries continuations fail retryably after a source reconnect", async () => {
+  let liveSource = createConnectionSource({ lifecycleEpoch: 1 });
+  let advanceLifecycleDuringFetch = true;
+  let sourceListReads = 0;
+  let requestCount = 0;
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname !== "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    requestCount += 1;
+    if (advanceLifecycleDuringFetch) {
+      liveSource = createConnectionSource({ lifecycleEpoch: 2 });
+      advanceLifecycleDuringFetch = false;
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            end: "2026-04-02T10:01:00.000Z",
+            id: "heart-alert-reconnect",
+            start: "2026-04-02T10:00:00.000Z",
+            type: "irregular_rhythm",
+            unit: "count",
+            value: 1,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heart_rate_alert"],
+  });
+  const currentSourceSummary = () => ({
+    displayName: liveSource.displayName,
+    firstSeenAt: liveSource.firstSeenAt,
+    lastDataAt: liveSource.lastDataAt,
+    lastErrorCode: liveSource.lastErrorCode,
+    lastErrorMessage: liveSource.lastErrorMessage,
+    lastSeenAt: liveSource.lastSeenAt,
+    lifecycleEpoch: liveSource.lifecycleEpoch,
+    resourceAvailabilitySummary: liveSource.resourceAvailabilitySummary,
+    resourceCount: Object.keys(liveSource.resourceAvailabilitySummary).length,
+    sourceProviderSlug: liveSource.sourceProviderSlug,
+    status: liveSource.status,
+  });
+  const accountSources = [currentSourceSummary()];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: accountSources }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: () => {
+      sourceListReads += 1;
+      return [liveSource];
+    },
+  });
+  const job = createJob("reconcile", {
+    timeseriesCursor: "2026-04-02T00:00:00.000Z",
+    timeseriesResourceCursor: "heart_rate_alert",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(provider, context, job),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED"
+      && error.retryable,
+  );
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(sourceListReads, 1);
+
+  accountSources[0] = currentSourceSummary();
+  await executeJunctionJob(provider, context, job);
+
+  assert.equal(requestCount, 2);
+  assert.equal(sourceListReads, 2);
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction clinical webhook pulls reuse the lifecycle-fenced resource owner", async () => {
+  let liveSource = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { heart_rate_alert: true },
+  });
+  let advanceLifecycleDuringFetch = true;
+  let sourceListReads = 0;
+  let requestCount = 0;
+  const sourceListReadsAtFetch: number[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { heart_rate_alert: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.pathname !== "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    requestCount += 1;
+    sourceListReadsAtFetch.push(sourceListReads);
+    if (advanceLifecycleDuringFetch) {
+      liveSource = createConnectionSource({
+        lifecycleEpoch: 2,
+        resourceAvailabilitySummary: { heart_rate_alert: true },
+      });
+      advanceLifecycleDuringFetch = false;
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            end: "2026-04-02T10:01:00.000Z",
+            id: "heart-alert-webhook-reconnect",
+            start: "2026-04-02T10:00:00.000Z",
+            type: "irregular_rhythm",
+            unit: "count",
+            value: 1,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heart_rate_alert"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.heart_rate_alert.created",
+      user_id: "junction-user-1",
+      data: {
+        data: [{
+          end: "2026-04-02T10:01:00.000Z",
+          start: "2026-04-02T10:00:00.000Z",
+        }],
+        source: { provider: "garmin", type: "watch" },
+      },
+    },
+    messageId: "msg_heart_alert_webhook_reconnect_1",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const parsedJob = requireValue(parsed.jobs[0]);
+  assert.equal(parsedJob.kind, "resource");
+  assert.equal(parsedJob.payload?.resource, "heart_rate_alert");
+
+  const currentSourceSummary = () => ({
+    displayName: liveSource.displayName,
+    firstSeenAt: liveSource.firstSeenAt,
+    lastDataAt: liveSource.lastDataAt,
+    lastErrorCode: liveSource.lastErrorCode,
+    lastErrorMessage: liveSource.lastErrorMessage,
+    lastSeenAt: liveSource.lastSeenAt,
+    lifecycleEpoch: liveSource.lifecycleEpoch,
+    resourceAvailabilitySummary: liveSource.resourceAvailabilitySummary,
+    resourceCount: Object.keys(liveSource.resourceAvailabilitySummary).length,
+    sourceProviderSlug: liveSource.sourceProviderSlug,
+    status: liveSource.status,
+  });
+  const accountSources = [currentSourceSummary()];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: accountSources }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: () => {
+      sourceListReads += 1;
+      return [liveSource];
+    },
+  });
+  const job = createJob(parsedJob.kind, parsedJob.payload ?? {});
+
+  await assert.rejects(
+    () => executeJunctionJob(provider, context, job),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED"
+      && error.retryable,
+  );
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(sourceListReads - (sourceListReadsAtFetch[0] ?? 0), 1);
+
+  accountSources[0] = currentSourceSummary();
+  await executeJunctionJob(provider, context, job);
+
+  assert.equal(requestCount, 2);
+  assert.equal(sourceListReads - (sourceListReadsAtFetch[1] ?? 0), 1);
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction historical clinical webhooks preserve one capped day per continuation", async () => {
+  const source = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { heart_rate_alert: true },
+  });
+  const sourceSummary = {
+    displayName: source.displayName,
+    firstSeenAt: source.firstSeenAt,
+    lastDataAt: source.lastDataAt,
+    lastErrorCode: source.lastErrorCode,
+    lastErrorMessage: source.lastErrorMessage,
+    lastSeenAt: source.lastSeenAt,
+    lifecycleEpoch: source.lifecycleEpoch,
+    resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+    resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
+  };
+  const requestedWindows: Array<{ windowEnd: string | null; windowStart: string | null }> = [];
+  const importedSnapshots: Array<{
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  }> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { heart_rate_alert: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.pathname !== "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    const windowStart = url.searchParams.get("start_date");
+    const windowEnd = url.searchParams.get("end_date");
+    requestedWindows.push({ windowEnd, windowStart });
+    const day = windowStart?.slice(0, 10) ?? "2026-04-01";
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: Array.from({ length: 80 }, (_value, index) => ({
+            end: `${day}T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:30.000Z`,
+            id: `heart-alert-${day}-${index}`,
+            start: `${day}T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00.000Z`,
+            type: "irregular_rhythm",
+            unit: "count",
+            value: 1,
+          })),
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heart_rate_alert"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "historical.data.heart_rate_alert.created",
+      user_id: "junction-user-1",
+      data: {
+        end_date: "2026-04-02",
+        source: { provider: "garmin", type: "watch" },
+        start_date: "2026-04-01",
+      },
+    },
+    messageId: "msg_heart_alert_historical_1",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const parsedJob = requireValue(parsed.jobs[0]);
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [sourceSummary] }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot as {
+        timeseries?: Record<string, Array<Record<string, unknown>>>;
+      });
+      return { canonicalEventCount: 80, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: () => [source],
+  });
+
+  const firstResult = await executeJunctionJob(
+    provider,
+    context,
+    createJob(parsedJob.kind, parsedJob.payload ?? {}),
+  );
+  const followUp = requireValue(firstResult.scheduledJobs?.[0]);
+  assert.deepEqual(requestedWindows, [{
+    windowEnd: "2026-04-02T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  }]);
+  assert.equal(importedSnapshots[0]?.timeseries?.heart_rate_alert?.length, 80);
+  assert.equal(followUp.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(followUp.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+
+  const secondResult = await executeJunctionJob(
+    provider,
+    context,
+    createJob(followUp.kind, followUp.payload ?? {}),
+  );
+  assert.equal(secondResult.scheduledJobs, undefined);
+  assert.deepEqual(requestedWindows[1], {
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  });
+  assert.equal(importedSnapshots[1]?.timeseries?.heart_rate_alert?.length, 80);
+  assert.equal(
+    importedSnapshots.reduce(
+      (total, snapshot) => total + (snapshot.timeseries?.heart_rate_alert?.length ?? 0),
+      0,
+    ),
+    160,
+  );
+});
+
+test("Junction activity resources keep fall sparse while dense aggregates and features stay daily", async () => {
   const denseResources = ["calories_basal", "handwashing", "workout_distance"];
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -17976,7 +20248,7 @@ test("Junction activity opt-ins keep fall on bounded sparse history while dense 
   }
 });
 
-test("Junction mixed sparse and dense backfills advance exact resource and day cursors", async () => {
+test("Junction mixed temporal and sparse backfills keep separate day owners", async () => {
   const ownerWindowStart = "2026-01-01T00:00:00.000Z";
   const ownerWindowEnd = "2026-03-02T00:00:00.000Z";
   const createProviderForRequests = (requests: string[]) => createJunctionProvider(async (input) => {
@@ -18035,7 +20307,16 @@ test("Junction mixed sparse and dense backfills advance exact resource and day c
     windowEnd: ownerWindowEnd,
     windowStart: ownerWindowStart,
   });
-  assert.equal(firstRequests.some((url) => url.includes("/v2/timeseries/")), false);
+  const temporalRequest = requireValue(
+    firstRequests.find((url) => url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")),
+    "Mixed Junction backfill should import the newest authoritative temporal day inline.",
+  );
+  assertJunctionWindowQuery(
+    temporalRequest,
+    "2026-03-01T00:00:00.000Z",
+    "2026-03-02T00:00:00.000Z",
+  );
+  firstRequests.length = 0;
 
   const secondResult = await executeJunctionJob(
     provider,
@@ -18066,17 +20347,12 @@ test("Junction mixed sparse and dense backfills advance exact resource and day c
     context,
     createJob("backfill", {
       timeseriesCursor: "2026-03-01T00:00:00.000Z",
-      timeseriesResourceCursor: "blood_oxygen",
+      timeseriesResourceCursor: "fat",
       windowEnd: ownerWindowEnd,
       windowStart: ownerWindowStart,
     }),
   );
-  assert.deepEqual(resourceBoundaryResult.scheduledJobs?.[0]?.payload, {
-    timeseriesCursor: ownerWindowStart,
-    timeseriesResourceCursor: "fat",
-    windowEnd: ownerWindowEnd,
-    windowStart: ownerWindowStart,
-  });
+  assert.equal(resourceBoundaryResult.scheduledJobs, undefined);
 });
 
 test("Junction opt-in dense webhooks wait for a closed UTC day before importing", async () => {
@@ -18315,6 +20591,69 @@ test("Junction workout_stream diagnostics use one bounded index read and serial 
   assert.equal(maximumActiveStreams, 1);
 });
 
+test("Junction workout_stream skips malformed metric cardinality without blocking valid workouts", async () => {
+  const importedSnapshots: unknown[] = [];
+  const warningCodes: string[] = [];
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2", "workout-3"],
+    streamResponse: (workoutId) => createJsonResponse(
+      workoutId === "workout-1"
+        ? {
+            time: [1_775_131_200, 1_775_133_000],
+            heartrate: [100, 160],
+            distance: [0],
+          }
+        : workoutId === "workout-2"
+          ? {
+              time: [1_775_131_200, 1_775_133_000],
+              heartrate: [105],
+              distance: [0, 5_100],
+            }
+          : {
+              time: [1_775_131_200, 1_775_133_000],
+              heartrate: [105, 165],
+              distance: [0, 5_100],
+            },
+    ),
+  });
+
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn: (_message, metadata) => {
+          if (typeof metadata?.errorCode === "string") warningCodes.push(metadata.errorCode);
+        },
+      },
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2", "workout-3"]);
+  const workoutIds = importedSnapshots.flatMap((snapshot) => {
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return [];
+    const timeseries = Reflect.get(snapshot, "timeseries");
+    if (!timeseries || typeof timeseries !== "object" || Array.isArray(timeseries)) return [];
+    const features = Reflect.get(timeseries, "workout_stream");
+    if (!Array.isArray(features)) return [];
+    return features.map((feature) => {
+      assert.ok(feature && typeof feature === "object" && !Array.isArray(feature));
+      const workoutId = Reflect.get(feature, "workoutId");
+      assert.equal(typeof workoutId, "string");
+      return workoutId;
+    });
+  });
+  assert.deepEqual(workoutIds, ["workout-3"]);
+  assert.deepEqual(warningCodes, [
+    "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+    "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+  ]);
+});
+
 test("Junction workout_stream hard call bound is 100 index pages plus 32 serial streams", async () => {
   let indexPages = 0;
   let streamCalls = 0;
@@ -18372,15 +20711,15 @@ test("Junction production timeseries resources and direct provider bound match d
   const wideResources = productionResources.filter(
     (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) > 1,
   );
-  const denseResources = productionResources.filter(
+  const oneDayResources = productionResources.filter(
     (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) === 1,
   );
-  const ordinaryDenseResources = denseResources.filter(
+  const ordinaryOneDayResources = oneDayResources.filter(
     (resource) => resource !== "workout_stream",
   );
   assert.deepEqual(
-    [productionResources.length, wideResources.length, denseResources.length, ordinaryDenseResources.length],
-    [48, 13, 35, 34],
+    [productionResources.length, wideResources.length, oneDayResources.length, ordinaryOneDayResources.length],
+    [48, 6, 42, 41],
   );
 
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
@@ -18390,7 +20729,7 @@ test("Junction production timeseries resources and direct provider bound match d
   );
   for (const documentation of [readme, compatibilityMatrix]) {
     assert.match(documentation, /48 production timeseries resources/u);
-    assert.match(documentation, /13 wide and 35 dense/u);
+    assert.match(documentation, /6 wide and 42 one-day/u);
     assert.match(documentation, /three\s+sequential\s+pages/u);
     assert.match(documentation, /one attempt/u);
     assert.match(documentation, /24 seconds/u);
@@ -18513,6 +20852,61 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
   );
   assert.equal(continuation.payload?.windowStart, "2026-04-02T00:00:00.000Z");
   assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+});
+
+test("Junction known opt-in continuation restarts a narrowed default-only window", async () => {
+  const requests: URL[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    requests.push(url);
+    if (url.pathname.startsWith("/v2/timeseries/junction-user-1/")) {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES],
+  });
+  const context = createJunctionJobContext({ now: "2026-04-05T00:00:00.000Z" });
+  let result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-03T00:00:00.000Z",
+      timeseriesResourceCursor: "fat",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+  let continuationCount = 0;
+  while (result.scheduledJobs?.[0]) {
+    continuationCount += 1;
+    assert.ok(continuationCount < 100, "Narrowed continuation should terminate.");
+    result = await executeJunctionJob(
+      provider,
+      context,
+      createJobFromInput(result.scheduledJobs[0]),
+    );
+  }
+
+  const groupedRequests = requests.filter((url) => url.pathname.includes("/v2/timeseries/"));
+  assert.equal(
+    groupedRequests[0]?.searchParams.get("start_date"),
+    "2026-04-02",
+  );
+  assert.deepEqual(
+    new Set(groupedRequests.map((url) =>
+      normalizeJunctionResourceName(
+        url.pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1],
+      )
+    )),
+    new Set(JUNCTION_DEFAULT_TIMESERIES_RESOURCES),
+  );
+  assert.equal(
+    groupedRequests.length,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 2,
+  );
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
 });
 
 test("Junction scalar timeseries resource continuation fails closed before provider egress", async () => {
@@ -18928,13 +21322,17 @@ test("Junction workout_stream carries the owning day when retryable failure prec
   assert.deepEqual(harness.streamRequests, ["workout-1"]);
 });
 
-test("Junction workout_stream carries exact progress with its retryable provider failure", async () => {
+test("Junction workout_stream carries exact progress and bounded context with its retryable provider failure", async () => {
   const importedWorkoutIds: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1", "workout-2"],
     streamResponse: (workoutId) => workoutId === "workout-2"
-      ? new Response(JSON.stringify({ error: "temporary provider failure" }), {
-          status: 503,
+      ? new Response(JSON.stringify({
+          error: "temporary provider failure",
+          privatePayloadMarker: "raw-workout-payload-must-not-escape",
+          workoutId,
+        }), {
+          status: 500,
           headers: {
             "Content-Type": "application/json",
             "Retry-After": "0",
@@ -18965,6 +21363,13 @@ test("Junction workout_stream carries exact progress with its retryable provider
       assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.ok(error.failure instanceof DeviceSyncError);
       assert.equal(error.failure.retryable, true);
+      assert.equal(error.failure.details?.status, 500);
+      assert.equal(error.failure.details?.requestCandidateAliasSource, "id");
+      assert.equal(error.failure.details?.requestCandidateCount, 2);
+      assert.equal(error.failure.details?.requestCandidateOrdinal, 2);
+      const serializedDetails = JSON.stringify(error.failure.details);
+      assert.equal(serializedDetails.includes("workout-2"), false);
+      assert.equal(serializedDetails.includes("raw-workout-payload-must-not-escape"), false);
       assert.deepEqual(readJunctionWorkoutProgressIdentities({
         workoutStreamCursor: error.workoutStreamCursor,
       }), [junctionWorkoutCandidateIdentity("workout-1")]);

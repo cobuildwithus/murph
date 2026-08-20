@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-14
+Last verified: 2026-08-15
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -493,6 +493,46 @@ Stop and reconsider the architecture if the spike shows: backfill too
 shallow for credible baselines; background latency incompatible with daily
 challenge mechanics; overlapping-writer dedupe intractable server-side; or
 licensing unresolved.
+
+## Automated hosted/native E2E acceptance
+
+The required automated acceptance lane for companion auth/control/device-sync
+changes is documented in `agent-docs/references/testing-ci-map.md`. It supersedes
+any plan language that treats mocked or hermetic native/client flow as acceptance
+proof; lower-level route, SDK-wrapper, hosted-local, and fixture tests cannot
+satisfy this gate.
+
+For a selected PR, trusted default-branch Actions code deploys the exact PR SHA
+as a normal minified build into Vercel custom environment `native-ios-e2e`, using
+an isolated real database, the dedicated real non-production Privy app/test
+credential, and a real Junction sandbox API key/team dedicated exclusively to
+this lane. Trusted orchestration proves the exact candidate origin is publicly
+reachable without a Vercel bypass or login before native dispatch. The private
+lane runs the normally compiled app on an Apple simulator through fresh Privy OTP signup,
+companion onboarding/legal consent/sign-in-token persistence, real Junction/Vital
+Health SDK connection and the real iOS HealthKit permission UI, sign-out, and
+returning sign-in. No synthetic token, fake provider, fixture transport, local
+hosted substitute, or product test bypass is allowed. Native completion alone is
+not acceptance: before cleanup, trusted orchestration must re-read the fixed
+Privy principal and prove it was created inside this run, then resolve the
+corresponding real Junction sandbox user and require a connected
+`apple_health_kit` provider.
+
+Fresh-signup reset is `orchestrator_owned_reset` and fail-closed: before and
+after the PR lane it retires only lane-owned E2E deployments, enumerates the
+lane-exclusive Junction sandbox team, rejects more than one or any unexpected
+user, deletes the production-derived user when the isolated member exists or the
+sole orphan when that member is already absent, proves the team empty, resets
+only the explicitly E2E-named isolated database through the real Prisma
+migration toolchain, and deletes only the fixed Privy test user. This does not
+add or restore an internal/admin member-reset route. Production canary mode keeps an existing
+identity and performs no destructive cleanup.
+
+The main repo consumes only the exact private workflow run status/conclusion.
+Auth, OTP, legal/HealthKit consent, and provider-token stages must not export
+screenshots, video, raw xcresult bundles, traces, response bodies, or log tails;
+only privacy-safe structured stage name/status results may cross the artifact
+boundary.
 
 ## TestFlight MVP Acceptance
 

@@ -137,6 +137,7 @@ describe("hosted orchestration control contracts", () => {
       workspace: {
         ...workspace,
         hostedMailboxSystemHandledThroughSeq: "11",
+        systemMailboxFrontier: "model_free",
       },
     })).toEqual({
       blocked: null,
@@ -144,6 +145,7 @@ describe("hosted orchestration control contracts", () => {
       workspace: {
         ...workspace,
         hostedMailboxSystemHandledThroughSeq: "11",
+        systemMailboxFrontier: "model_free",
       },
     });
     expect(() => parseHostedRuntimeReconciliationFacts({
@@ -155,6 +157,16 @@ describe("hosted orchestration control contracts", () => {
       },
     })).toThrow(
       "Hosted runtime reconciliation facts workspace hostedMailboxSystemHandledThroughSeq must be a non-negative base-10 integer string.",
+    );
+    expect(() => parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        systemMailboxFrontier: "device-sync.wake",
+      },
+    })).toThrow(
+      "Hosted runtime reconciliation facts workspace systemMailboxFrontier is not supported.",
     );
     expect(parseHostedRuntimeReconciliationFacts({
       blocked: null,
@@ -283,12 +295,34 @@ describe("hosted orchestration control contracts", () => {
       processingMode: "inbox_media_retention",
     });
     expect(parseHostedRuntimeEnsureProcessingRequest({
+      assistantExecutionBlocked: true,
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "system_mailbox",
     })).toEqual({
+      assistantExecutionBlocked: true,
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "system_mailbox",
     });
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      assistantExecutionBlocked: false,
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "system_mailbox",
+    })).toThrow(
+      "Hosted runtime ensure-processing request assistantExecutionBlocked must be true.",
+    );
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      assistantExecutionBlocked: true,
+      orchestrationAttemptId: "orchestration_attempt_test",
+    })).toThrow(
+      "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
+    );
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      assistantExecutionBlocked: true,
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "default",
+    })).toThrow(
+      "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
+    );
     expect(() => parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "assistant",

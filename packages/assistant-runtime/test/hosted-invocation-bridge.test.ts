@@ -77,6 +77,9 @@ import {
   type HostedWorkspaceSnapshotArchiveBuilder,
 } from "../src/hosted-runtime/snapshot-bridge.ts";
 import {
+  drainHostedRuntimeLogWritesBestEffort,
+} from "../src/hosted-runtime/runtime-logs.ts";
+import {
   enqueueHostedPendingAssistantInputId,
 } from "../src/hosted-runtime/pending-input-index.ts";
 
@@ -93,6 +96,7 @@ const WRITE_OPERATION_SCHEMA_VERSION = "murph.write-operation.v1";
 const cleanupPaths: string[] = [];
 
 afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
   vi.restoreAllMocks();
   await Promise.all(cleanupPaths.splice(0).map(async (target) => {
     await rm(target, { force: true, recursive: true });
@@ -182,6 +186,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.startSnapshotSession).not.toHaveBeenCalled();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.logWrite).not.toHaveBeenCalled();
   });
 
   it("retains background work across checkpoint interruption before publishing the retry", async () => {
@@ -281,6 +286,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.logWrite).not.toHaveBeenCalled();
   });
 
   const staleLeaseMutations = [
@@ -394,6 +400,160 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }
   }
 
+  it("emits one bounded failure record at each fixed snapshot lifecycle stage", async () => {
+    const failureStages = [
+      "plan",
+      "session",
+      "archive",
+      "upload",
+      "checkpoint",
+    ] as const;
+
+    for (const expectedStage of failureStages) {
+      const vaultRoot = await createVaultRoot();
+      const { calls, platform } = createRuntimePlatform();
+      const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+      const failure = new Error(
+        expectedStage === "plan"
+          ? "Hosted bundle archive is invalid."
+          : `Synthetic ${expectedStage} failure.`,
+      );
+
+      if (expectedStage === "plan") {
+        platform.workspacePort = {
+          checkpoint: async () => {
+            throw new Error("Unexpected workspace checkpoint call.");
+          },
+          read: async () => {
+            throw failure;
+          },
+        };
+      } else if (expectedStage === "session") {
+        calls.startSnapshotSession.mockRejectedValueOnce(failure);
+      } else if (expectedStage === "archive") {
+        vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot)
+          .mockRejectedValueOnce(failure);
+      } else if (expectedStage === "upload") {
+        calls.putSnapshotObjectDirect.mockRejectedValueOnce(failure);
+      } else {
+        calls.completeSnapshotSession.mockRejectedValueOnce(failure);
+      }
+
+      const options = createBridgeOptions({
+        platform,
+        snapshotArchiveBuilder,
+        vaultRoot,
+      });
+
+      await expect(options.createCheckpointSnapshot(
+        createCheckpointInput("idle_shutdown"),
+      )).rejects.toBe(failure);
+
+      const lifecycleEntries = calls.logWrite.mock.calls
+        .flatMap(([request]) => request.entries)
+        .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+      expect(lifecycleEntries).toEqual([
+        expect.objectContaining({
+          eventCode: "checkpoint.snapshot_failed",
+          redactedJson: expect.objectContaining({
+            snapshotMode: "workspace_snapshot_v2",
+            snapshotStage: expectedStage,
+          }),
+        }),
+      ]);
+      expect(lifecycleEntries.some((entry) =>
+        entry.eventCode === "checkpoint.snapshot_plan"
+        || entry.eventCode === "checkpoint.snapshot_started"
+      )).toBe(false);
+    }
+  });
+
+  it("does not wait for the queued finished record before returning a checkpoint", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    let releaseFinishedLog!: () => void;
+    const finishedLogGate = new Promise<void>((resolve) => {
+      releaseFinishedLog = resolve;
+    });
+    let finishedLogSettled = false;
+    calls.logWrite.mockImplementationOnce(async (request) => {
+      await finishedLogGate;
+      finishedLogSettled = true;
+      return { loggedCount: request.entries.length };
+    });
+    const options = createBridgeOptions({
+      platform,
+      vaultRoot,
+    });
+    let checkpointSettled = false;
+    const checkpoint = Promise.resolve(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).then((result) => {
+      checkpointSettled = true;
+      return result;
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(calls.logWrite).toHaveBeenCalledOnce();
+      });
+      await vi.waitFor(() => {
+        expect(checkpointSettled).toBe(true);
+      }, { timeout: 250 });
+      expect(finishedLogSettled).toBe(false);
+      await expect(checkpoint).resolves.toMatchObject({
+        snapshotRef: {
+          snapshotId: "snapshot_bridge",
+        },
+      });
+    } finally {
+      releaseFinishedLog();
+      await checkpoint;
+    }
+
+    await vi.waitFor(() => {
+      expect(finishedLogSettled).toBe(true);
+    });
+  });
+
+  it("keeps snapshot outcomes independent from an unavailable log port", async () => {
+    const successfulVaultRoot = await createVaultRoot();
+    const successfulRuntime = createRuntimePlatform();
+    successfulRuntime.platform.logPort = null;
+    const successfulOptions = createBridgeOptions({
+      platform: successfulRuntime.platform,
+      vaultRoot: successfulVaultRoot,
+    });
+
+    await expect(successfulOptions.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).resolves.toMatchObject({
+      snapshotRef: {
+        snapshotId: "snapshot_bridge",
+      },
+    });
+    expect(successfulRuntime.calls.logWrite).not.toHaveBeenCalled();
+
+    const failedVaultRoot = await createVaultRoot();
+    const failedRuntime = createRuntimePlatform();
+    failedRuntime.platform.logPort = null;
+    const failure = new Error("Synthetic archive failure without logging.");
+    const failedOptions = createBridgeOptions({
+      platform: failedRuntime.platform,
+      snapshotArchiveBuilder: {
+        buildEncryptedSnapshot: vi.fn(async () => {
+          throw failure;
+        }),
+      },
+      vaultRoot: failedVaultRoot,
+    });
+
+    await expect(failedOptions.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBeInstanceOf(Error);
+    expect(failedRuntime.calls.logWrite).not.toHaveBeenCalled();
+  });
+
   it("aborts the snapshot session when archive construction fails before checkpoint", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -498,9 +658,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         .toBe(true);
     });
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
-    const preemptionEntry = entries.find(
-      (entry) => entry.eventCode === "checkpoint.snapshot_preempted",
-    );
+    const lifecycleEntries = entries.filter((entry) =>
+      entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toHaveLength(1);
+    const [preemptionEntry] = lifecycleEntries;
     expect(preemptionEntry).toMatchObject({
       errorCode: "runtime_wake_during_checkpoint",
       eventCode: "checkpoint.snapshot_preempted",
@@ -510,10 +671,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         snapshotInterruptedBeforeCommit: true,
         snapshotOutcomeKind: "expected_preemption",
         snapshotPreemptionKind: "runtime_wake",
+        snapshotStage: "archive",
       }),
     });
-    expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_failed"))
-      .toBe(false);
     expect(JSON.stringify(preemptionEntry)).not.toContain(
       "private checkpoint wake detail",
     );
@@ -1062,7 +1222,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(canonicalWriterEntered).toBe(true);
   });
 
-  it("carries idle checkpoint trigger metadata through the production bridge snapshot path", async () => {
+  it("retains one finished lifecycle record with checkpoint and plan metadata", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const options = createBridgeOptions({
@@ -1070,13 +1230,28 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await options.createCheckpointSnapshot({
+    const result = await options.createCheckpointSnapshot({
       ...createCheckpointInput("idle_shutdown"),
       handledConversationFrontierSelected: true,
       handledConversationMailboxItemIds: ["item_terminal_7"],
       idleCheckpointTrigger: "shutdown_signal",
       runtimeWakePendingAtCheckpoint: false,
     });
+
+    expect(result).toMatchObject({
+      checkpoint: {
+        checkpointed: true,
+      },
+      localWorkspaceCleanForWarmReuse: true,
+      snapshotRef: {
+        snapshotId: "snapshot_bridge",
+      },
+    });
+    expect(result.checkpoint).toEqual(createCheckpointResponse({
+      snapshotRef: result.snapshotRef,
+      userId: TEST_REQUEST.userId,
+      version: TEST_REQUEST.workspaceVersion,
+    }));
 
     const checkpointRequest =
       calls.completeSnapshotSession.mock.calls[0]?.[0].checkpointRequest;
@@ -1091,26 +1266,86 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(JSON.stringify(entries)).not.toContain("item_terminal_7");
-    for (const eventCode of [
-      "checkpoint.snapshot_plan",
-      "checkpoint.snapshot_started",
-      "checkpoint.snapshot_finished",
-    ]) {
-      const entry = entries.find((candidate) => candidate.eventCode === eventCode);
-      expect(entry?.redactedJson).toMatchObject({
-        handledConversationFrontierSelected: true,
-        handledConversationMailboxItemCount: 1,
-        idleCheckpointTrigger: "shutdown_signal",
-        runtimeWakePendingAtCheckpoint: false,
-      });
-      if (eventCode === "checkpoint.snapshot_finished") {
-        expect(entry?.redactedJson).toMatchObject({
+    const lifecycleEntries = entries.filter((entry) =>
+      entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toEqual([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_finished",
+        redactedJson: expect.objectContaining({
+          currentSnapshotRefPresent: false,
+          handledConversationFrontierSelected: true,
+          handledConversationMailboxItemCount: 1,
+          idleCheckpointTrigger: "shutdown_signal",
+          legacyBundleRefPresent: false,
+          nextWakeAtPresent: false,
+          nextWakeReasonPresent: false,
+          preservedInlineFileCount: 0,
+          redactedStatusPresent: true,
+          runtimeWakePendingAtCheckpoint: false,
+          skippedInlineFileCount: 0,
+          snapshotArchiveBuildElapsedMs: expect.any(Number),
+          snapshotDirectR2PresignElapsedMs: 1,
+          snapshotDirectR2PutElapsedMs: 2,
+          snapshotDirectR2UploadElapsedMs: expect.any(Number),
+          snapshotElapsedMs: expect.any(Number),
+          snapshotMode: "workspace_snapshot_v2",
           webCheckpointAccepted: true,
-        });
-      } else {
-        expect(entry?.redactedJson).not.toHaveProperty("webCheckpointAccepted");
-      }
-    }
+          workspaceSnapshotEncryptedBytes: 18,
+          workspaceSnapshotFileCount: expect.any(Number),
+          workspaceSnapshotPlainBytes: 9,
+        }),
+      }),
+    ]);
+    expect(entries.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_plan"
+      || entry.eventCode === "checkpoint.snapshot_started"
+    )).toBe(false);
+  });
+
+  it("keeps snapshot elapsed time scoped after legacy planning", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const realDateNow = Date.now.bind(Date);
+    let clockOffsetMs = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => realDateNow() + clockOffsetMs);
+    platform.workspacePort = {
+      checkpoint: async () => {
+        throw new Error("Unexpected workspace checkpoint call.");
+      },
+      read: async () => {
+        clockOffsetMs += 60_000;
+        return {
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: null,
+        };
+      },
+    };
+    let postPlanTimeAdvanced = false;
+    const options = createBridgeOptions({
+      platform,
+      readCurrentLease: () => {
+        if (!postPlanTimeAdvanced) {
+          clockOffsetMs += 5_000;
+          postPlanTimeAdvanced = true;
+        }
+        return createLease();
+      },
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const lifecycleEntries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toHaveLength(1);
+    expect(lifecycleEntries[0]).toMatchObject({
+      eventCode: "checkpoint.snapshot_finished",
+    });
+    const snapshotElapsedMs = lifecycleEntries[0]?.redactedJson?.snapshotElapsedMs;
+    expect(snapshotElapsedMs).toEqual(expect.any(Number));
+    expect(snapshotElapsedMs).toBeGreaterThanOrEqual(5_000);
+    expect(snapshotElapsedMs).toBeLessThan(60_000);
   });
 
   it("uses the current checkpoint expected workspace version for bridge snapshots", async () => {
@@ -1401,6 +1636,43 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }))).resolves.toEqual({
       reasonCode: "cloudflare_bridge.unhandled_mailbox_route",
       status: "deferred",
+    });
+  });
+
+  it("matches mailbox occurred-at identity by instant across ISO precision", async () => {
+    const equivalentVaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const equivalentOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: createMemberChannelsWake({
+          occurredAt: "2026-05-01T00:00:00Z",
+        }),
+      }),
+      platform,
+      vaultRoot: equivalentVaultRoot,
+    });
+
+    await expect(equivalentOptions.importItem(
+      createSystemMailboxImportItem(),
+    )).resolves.toMatchObject({ status: "imported" });
+
+    const mismatchedOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: createMemberChannelsWake({
+          occurredAt: "2026-05-01T00:00:01Z",
+        }),
+      }),
+      platform,
+      vaultRoot: await createVaultRoot(),
+    });
+    await expect(mismatchedOptions.importItem(
+      createSystemMailboxImportItem(),
+    )).resolves.toEqual({
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
     });
   });
 

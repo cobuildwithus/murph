@@ -2,7 +2,6 @@ import type { VariantProps } from "class-variance-authority";
 import type { ReactNode } from "react";
 
 import type { buttonVariants } from "@/src/components/ui/button";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type {
   HostedUsageCreditCapacityConflictCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
@@ -47,7 +46,6 @@ interface HostedUsageTopUpDialogProps {
     offerCode: string;
   }) => Record<string, unknown>;
   checkoutUrl?: string;
-  contactOptions?: readonly MurphContactOption[];
   deferTerminalRefreshUntilClose?: boolean;
   groupPaymentMode?: "monthly" | "one_time";
   initialCheckoutErrorCode?: HostedUsageCreditCapacityConflictCode;
@@ -56,6 +54,7 @@ interface HostedUsageTopUpDialogProps {
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
+  quietSuccessfulReturn?: boolean;
   renderPurchaseDetails?: ReactNode;
   renderSelectionDetails?: (input: {
     disabled: boolean;
@@ -65,6 +64,7 @@ interface HostedUsageTopUpDialogProps {
   scope?: "family" | "group" | "personal";
   targetLabel?: string;
   triggerClassName?: string;
+  triggerLabel?: string;
   triggerSize?: VariantProps<typeof buttonVariants>["size"];
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
 }

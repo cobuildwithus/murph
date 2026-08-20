@@ -108,6 +108,12 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'trim introductions, repetition, reassurance, optional background, and unrelated wellness advice first',
     )
+    expect(prompt).toContain(
+      'separate occurrence, runtime decision, provider acceptance, and delivery receipt',
+    )
+    expect(prompt).toContain(
+      'never call delivery "unconfirmed."',
+    )
     expect(prompt).not.toContain('Final replies should briefly state')
     expect(prompt).not.toContain('extra nudges')
   })
@@ -1334,7 +1340,7 @@ describe('assistant execution prompt contract', () => {
     expect(linqPrompt).toContain(
       'For Linq/iMessage and Telegram, native text styles are supported by the delivery layer',
     )
-    expect(linqPrompt).toContain('Prefer plain text')
+    expect(linqPrompt).toContain('For ordinary text messages, prefer plain text')
     expect(linqPrompt).toContain(
       'Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability',
     )
@@ -1794,13 +1800,13 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.',
+      'Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
     )
     expect(prompt).toContain(
       'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
     )
     expect(prompt).toContain(
-      'Live workout/card: read strength-training and tracked-table.',
+      'Live workout/card: read strength-training and tracked-table, including on a short follow-up in a conversation about a live workout.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
@@ -3263,6 +3269,12 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
+    )
+    expect(prompt).toContain(
+      'Only save `contextReferences` by copying ids from successful current canonical reads or create results that identify exactly one record.',
+    )
+    expect(prompt).toContain(
+      'does not prove that a referenced record exists or is the correct mutation target',
     )
     expect(prompt).toContain(
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',

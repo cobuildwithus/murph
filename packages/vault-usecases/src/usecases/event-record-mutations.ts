@@ -61,6 +61,7 @@ interface EventMutationCoreRuntime {
   importEventBatch(input: {
     vaultRoot: string
     payloads: JsonObject[]
+    rejectIfSourceRawRefAlreadyImported?: string
     apply?: boolean
   }): Promise<{
     applied: boolean
@@ -425,12 +426,18 @@ export async function editEventRecord(input: EditEventRecordInput) {
       dayKeyPolicy: input.dayKeyPolicy,
     }),
   )
+  // The public edit action is member-authored. Preserve provider attribution,
+  // but never let an inherited or caller-supplied device source reclaim the
+  // provider-owned reconciliation lane.
+  const memberOwnedPayload = payload.source === 'device' || patchedPayload.source === 'device'
+    ? { ...patchedPayload, source: 'manual' }
+    : patchedPayload
   const core = await loadEventMutationCoreRuntime()
 
   try {
     const result = await core.upsertEvent({
       vaultRoot: input.vault,
-      payload: patchedPayload,
+      payload: memberOwnedPayload,
       allowSpecializedKindRewrite: true,
     })
 
@@ -536,6 +543,7 @@ function toJsonlLineFailure(failure: unknown, lineNumbers: readonly number[]) {
 export async function importEventRecordsFromJsonl(input: {
   vault: string
   inputFile: string
+  rejectIfSourceRawRefAlreadyImported?: string
   apply?: boolean
 }) {
   const raw = await loadTextInput(input.inputFile, 'events JSONL', {
@@ -601,6 +609,7 @@ export async function importEventRecordsFromJsonl(input: {
     const result = await core.importEventBatch({
       vaultRoot: input.vault,
       payloads,
+      rejectIfSourceRawRefAlreadyImported: input.rejectIfSourceRawRefAlreadyImported,
       apply: input.apply === true,
     })
 
@@ -618,6 +627,27 @@ export async function importEventRecordsFromJsonl(input: {
             ? details.failures.map((failure) => toJsonlLineFailure(failure, lineNumbers))
             : details.failures,
         }),
+      },
+      EVENT_BATCH_SOURCE_ALREADY_IMPORTED: {
+        code: 'conflict',
+      },
+      EVENT_BATCH_SOURCE_PARTIAL_CONFLICT: {
+        code: 'conflict',
+      },
+      EVENT_BATCH_SOURCE_ROW_INVALID: {
+        code: 'contract_invalid',
+      },
+      EVENT_BATCH_SOURCE_RAW_REF_MISSING: {
+        code: 'not_found',
+      },
+      EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE: {
+        code: 'conflict',
+      },
+      RAW_MANIFEST_INVALID: {
+        code: 'conflict',
+      },
+      RAW_REFERENCE_MISSING: {
+        code: 'conflict',
       },
     })
 
