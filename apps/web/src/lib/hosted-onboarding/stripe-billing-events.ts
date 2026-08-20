@@ -135,6 +135,7 @@ type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
+  newlyActivatedMemberIds: string[];
   runtimeRecheckMemberIds?: string[];
   welcomeEmailMemberId: string | null;
 };
@@ -307,6 +308,7 @@ export async function applyStripeCheckoutCompleted(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -350,6 +352,7 @@ export async function applyStripeCheckoutCompleted(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -475,6 +478,7 @@ export async function applyStripeCheckoutCompleted(
   return {
     activatedMemberId: null,
     hostedExecutionEventId: null,
+    newlyActivatedMemberIds: [],
     welcomeEmailMemberId: memberSnapshot.core.id,
   };
 }
@@ -879,6 +883,7 @@ async function convertHostedLegacyPulseTrialToStarterTx(input: {
     cleanupPulseTrialStripeSubscriptionId,
     hostedExecutionEventId: activation.hostedExecutionEventId,
     hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
+    newlyActivatedMemberIds: activation.activated ? [input.member.id] : [],
     runtimeRecheckMemberIds: [input.member.id],
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
       ? input.member.id
@@ -1353,6 +1358,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -1386,6 +1392,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -1401,6 +1408,7 @@ export async function applyStripeInvoicePaid(
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     };
   }
@@ -1485,6 +1493,7 @@ export async function applyStripeInvoicePaid(
       : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
     hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
+    newlyActivatedMemberIds: activation.activated ? [updatedMember.core.id] : [],
     runtimeRecheckMemberIds: runtimeRecheckMemberId
       ? [runtimeRecheckMemberId]
       : [],
@@ -1586,6 +1595,9 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
     activatedMemberId: firstActivation?.activatedMemberId ?? null,
     activatedMembers,
     hostedExecutionEventId: firstActivation?.hostedExecutionEventId ?? null,
+    newlyActivatedMemberIds: familySubscription.activations
+      .filter((activation) => activation.activated)
+      .map((activation) => activation.memberId),
     runtimeRecheckMemberIds: familySubscription.runtimeRecheckMemberIds ?? [],
     welcomeEmailMemberId: null,
   };
@@ -1614,6 +1626,7 @@ function buildEmptyHostedStripeActivationOutcome(): HostedStripeActivationOutcom
     activatedMemberId: null,
     activatedMembers: [],
     hostedExecutionEventId: null,
+    newlyActivatedMemberIds: [],
     runtimeRecheckMemberIds: [],
     welcomeEmailMemberId: null,
   };

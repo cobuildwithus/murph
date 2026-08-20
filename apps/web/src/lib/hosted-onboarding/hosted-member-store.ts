@@ -15,6 +15,7 @@ import {
   createHostedEmailLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { activeHostedMemberAccessWhere } from "./member-access";
 import {
   decryptHostedWebNullableString,
   decryptHostedWebNullableStrings,
@@ -377,10 +378,9 @@ export async function claimHostedMemberSignupNotificationEmailAttempt(input: {
       signupNotificationEmailAttemptedAt: input.attemptedAt,
     },
     where: {
-      billingStatus: HostedBillingStatus.active,
+      ...activeHostedMemberAccessWhere(),
       id: input.memberId,
       signupNotificationEmailAttemptedAt: null,
-      suspendedAt: null,
     },
   });
 
