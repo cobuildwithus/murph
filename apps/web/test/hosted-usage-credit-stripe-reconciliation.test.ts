@@ -434,6 +434,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     "hosted-usage-credit-checkout-v2",
     "hosted-usage-credit-checkout-v3",
     "hosted-usage-credit-checkout-v4",
+    "hosted-usage-credit-checkout-v5",
   ])("grants once from an owned %s saved-card PaymentIntent without Checkout", async (
     policyVersion,
   ) => {

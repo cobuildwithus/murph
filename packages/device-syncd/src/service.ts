@@ -2,7 +2,9 @@ import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 import {
   createImporters,
   JunctionSparseCalendarRepairNormalizationError,
+  normalizeKnownJunctionSourceProviderSlug,
 } from "@murphai/importers";
+import { normalizeJunctionCanonicalCoverageBoundary } from "@murphai/importers/device-providers/junction-resources";
 
 import {
   normalizeConfiguredDeviceSyncJobInput,
@@ -218,7 +220,9 @@ export interface DeviceSyncService {
   handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult>;
   handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
-  queueManualReconcile(accountId: string): QueueManualReconcileResult;
+  queueManualReconcile(
+    accountId: string,
+  ): QueueManualReconcileResult;
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
@@ -407,7 +411,8 @@ class DeviceSyncServiceController {
               }
             : null;
         },
-        upsertConnectionSource: (input) => this.store.upsertConnectionSource(input),
+        upsertConnectionSource: (input, options) =>
+          this.store.upsertConnectionSource(input, options),
         listConnectionSources: (input) => this.store.listConnectionSources(input),
         resolveConnectionSourceAdmissionCandidate: (input) =>
           this.store.listConnectionSources(input)
@@ -441,6 +446,7 @@ class DeviceSyncServiceController {
         onConnectionEstablished: async ({
           account,
           connection,
+          connectionStartedAt,
           now,
           provider,
           sourceProviderSlug,
@@ -451,8 +457,9 @@ class DeviceSyncServiceController {
                 sourceProviderSlug,
               })
             : null;
-          this.store.commitConnectionEstablished({
+          const committed = this.store.commitConnectionEstablished({
             accountId: account.id,
+            expectedSourceLastSeenAt: connectionStartedAt,
             jobs: this.normalizeJobsForEnqueue(account, connection.initialJobs ?? []),
             provider: account.provider,
             source: sourceInstanceKey && sourceProviderSlug
@@ -466,6 +473,14 @@ class DeviceSyncServiceController {
                 }
               : null,
           });
+          if (sourceInstanceKey && committed === null) {
+            throw deviceSyncError({
+              code: "CONNECTION_SOURCE_START_STALE",
+              message: "Device source state changed while its connection link was starting. Start again.",
+              retryable: false,
+              httpStatus: 409,
+            });
+          }
           await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
           return {
             sourceAdmissionCommitted: true,
@@ -626,7 +641,9 @@ class DeviceSyncServiceController {
     return this.publicIngress.handleWebhook(providerName, headers, rawBody);
   }
 
-  queueManualReconcile(accountId: string): QueueManualReconcileResult {
+  queueManualReconcile(
+    accountId: string,
+  ): QueueManualReconcileResult {
     const account = this.requireStoredAccount(accountId);
 
     if (
@@ -661,7 +678,17 @@ class DeviceSyncServiceController {
 
     const provider = this.requireProvider(account.provider);
     const now = this.nowIso();
-    const scheduledJobs = resolveProviderJobExecutor(provider)?.createScheduledJobs?.(account, now).jobs ?? [];
+    const scheduledJobs = resolveProviderJobExecutor(provider)?.createScheduledJobs?.(
+      account,
+      now,
+      {
+        findActiveDedupeKeys: (dedupeKeys) => this.store.findActiveJobDedupeKeys({
+          accountId: account.id,
+          dedupeKeys,
+          provider: account.provider,
+        }),
+      },
+    ).jobs ?? [];
     const jobs = scheduledJobs.length > 0 ? scheduledJobs : [{ kind: "reconcile", priority: 80 }];
     const queuedJobs = this.enqueueJobs(
       account,
@@ -791,7 +818,13 @@ class DeviceSyncServiceController {
             continue;
           }
 
-          const schedule = jobExecutor.createScheduledJobs(account, now);
+          const schedule = jobExecutor.createScheduledJobs(account, now, {
+            findActiveDedupeKeys: (dedupeKeys) => this.store.findActiveJobDedupeKeys({
+              accountId: account.id,
+              dedupeKeys,
+              provider: account.provider,
+            }),
+          });
           queuedJobs.push(...this.enqueueJobs(account, schedule.jobs));
           this.store.patchAccount(account.id, {
             nextReconcileAt: schedule.nextReconcileAt ?? null,
@@ -1143,9 +1176,26 @@ class DeviceSyncServiceController {
           ? normalizedJob
           : normalizeConfiguredDeviceSyncJobRecord(provider.provider, activeJob, "execution")
       );
+      let vaultTimeZone: string | undefined;
+      if (
+        provider.provider === "junction"
+        && this.importer.resolveDeviceProviderSnapshotDefaultTimeZone
+      ) {
+        try {
+          vaultTimeZone = await this.importer.resolveDeviceProviderSnapshotDefaultTimeZone({
+            vaultRoot: this.vaultRoot,
+          });
+        } catch {
+          // Timezone-dependent authority fails closed; ordinary provider
+          // ingestion remains available when vault metadata cannot be read.
+          vaultTimeZone = undefined;
+        }
+      }
+      ensureExecutionActive();
       const jobContext: ProviderJobContext = {
         account: currentAccount,
         now,
+        ...(vaultTimeZone ? { vaultTimeZone } : {}),
         signal: jobAbortController.signal,
         connectionSourceAdmissionMode: this.listConnectionSourcesForJob
           ? "listed_only"
@@ -1154,13 +1204,16 @@ class DeviceSyncServiceController {
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),
         throwIfAborted: assertJobExecutionNotYielded,
-        importSnapshot: async (snapshot: unknown) => {
+        importSnapshot: async (snapshot: unknown, options) => {
           ensureExecutionActive();
           const importResult = await this.importer.importDeviceProviderSnapshot({
             provider: provider.provider,
             snapshot,
             vaultRoot: this.vaultRoot,
+            ...options,
           });
+          const junctionCanonicalCoverage =
+            readCanonicalDeviceImportJunctionCoverage(importResult);
           const canonicalSparseCalendarTargets =
             readCanonicalDeviceImportSparseCalendarTargets(importResult);
           const receipt: ProviderSnapshotImportReceipt = {
@@ -1172,15 +1225,18 @@ class DeviceSyncServiceController {
               ? { canonicalSparseCalendarTargets }
               : {}),
             durableDeliveryAccepted: true,
+            ...(junctionCanonicalCoverage === undefined
+              ? {}
+              : { junctionCanonicalCoverage }),
           };
           return receipt;
         },
         upsertConnectionSource: (input) => {
           ensureExecutionActive();
-          return this.store.upsertConnectionSource({
-            ...input,
-            connectionId: currentAccount.id,
-          });
+          return this.store.upsertConnectionSource(
+            { ...input, connectionId: currentAccount.id },
+            { preserveDisconnected: provider.provider === "junction" },
+          );
         },
         listConnectionSources: async (input = {}) => {
           ensureExecutionActive();
@@ -1861,6 +1917,9 @@ export function createDefaultImporterPort(): DeviceSyncImporterPort {
     importDeviceProviderSnapshot(input) {
       return importers.importDeviceProviderSnapshot(input);
     },
+    resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+      return importers.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+    },
   };
 }
 
@@ -2042,7 +2101,17 @@ function normalizeExecutionError(error: unknown): {
   if (error instanceof JunctionSparseCalendarRepairNormalizationError) {
     return {
       code: error.code,
-      details: {},
+      details: compactFailureDiagnostics({
+        normalizationFailureReason: readSafeDiagnosticToken(error.diagnostic.reason),
+        normalizationRowOrdinal: error.diagnostic.rowOrdinal,
+        normalizationSourceProvider: readSafeDiagnosticToken(
+          normalizeKnownJunctionSourceProviderSlug(error.diagnostic.sourceProvider),
+        ),
+        normalizationTimestampKind: readSafeDiagnosticToken(error.diagnostic.timestampKind),
+        normalizationTimestampSemantics: readSafeDiagnosticToken(
+          error.diagnostic.timestampSemantics,
+        ),
+      }),
       message: error.message,
       retryable: true,
     };
@@ -2484,6 +2553,46 @@ function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): s
     return typeof externalRef?.resourceId === "string"
       ? [externalRef.resourceId]
       : [];
+  });
+}
+
+function readCanonicalDeviceImportJunctionCoverage(
+  value: unknown,
+): ProviderSnapshotImportReceipt["junctionCanonicalCoverage"] {
+  const result = toPlainRecord(value);
+  if (!result || !Array.isArray(result.junctionCanonicalCoverage)) {
+    return undefined;
+  }
+
+  return result.junctionCanonicalCoverage.flatMap((entry) => {
+    const evidence = toPlainRecord(entry);
+    const resource = typeof evidence?.resource === "string" ? evidence.resource : "";
+    const coverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+      resource,
+      evidence?.coverageBoundary,
+    );
+    if (
+      !evidence
+      || !coverageBoundary
+      || !resource
+      || typeof evidence.sourceProviderSlug !== "string"
+    ) {
+      return [];
+    }
+    const coverageFinalizedAt = typeof evidence.coverageFinalizedAt === "string"
+      && Number.isFinite(Date.parse(evidence.coverageFinalizedAt))
+      && new Date(Date.parse(evidence.coverageFinalizedAt)).toISOString()
+        === evidence.coverageFinalizedAt
+      ? evidence.coverageFinalizedAt
+      : null;
+    return [{
+      coverageBoundary,
+      ...(coverageFinalizedAt
+        ? { coverageFinalizedAt }
+        : {}),
+      resource,
+      sourceProviderSlug: evidence.sourceProviderSlug,
+    }];
   });
 }
 

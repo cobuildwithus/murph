@@ -67,6 +67,7 @@ model DeviceConnectionSource {
   resourceAvailabilitySummaryJson Json?            @map("resource_availability_summary_json")
   lastErrorCode                   String?          @map("last_error_code")
   lastErrorMessage                String?          @map("last_error_message")
+  lifecycleEpoch                  Int?             @default(1) @map("lifecycle_epoch")
   firstSeenAt                     DateTime         @map("first_seen_at")
   lastSeenAt                      DateTime         @map("last_seen_at")
   lastDataAt                      DateTime?        @map("last_data_at")
