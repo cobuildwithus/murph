@@ -1,0 +1,29 @@
+name: Temporary Codex Source Export
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    if: github.head_ref == 'codex/gemini-video-analysis'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Archive tracked source
+        run: git archive --format=zip --output=murph-source.zip HEAD
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: codex-murph-source
+          path: murph-source.zip
+          retention-days: 1
+          if-no-files-found: error
