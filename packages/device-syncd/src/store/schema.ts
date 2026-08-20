@@ -5,8 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v10: device_connection_source.lifecycle_epoch (exact-source reconnect fence).
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 10;
+// v11: canonical import receipts and durable scheduled-job continuation links.
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 11;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -48,6 +48,10 @@ function readConnectionSourceColumns(database: DatabaseSync): SqliteTableColumn[
 
 function readWebhookTraceColumns(database: DatabaseSync): SqliteTableColumn[] {
   return database.prepare("pragma table_info(webhook_trace)").all() as SqliteTableColumn[];
+}
+
+function readDeviceJobColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(device_job)").all() as SqliteTableColumn[];
 }
 
 function columnNames(columns: readonly SqliteTableColumn[]): Set<string> {
@@ -182,6 +186,14 @@ function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
 
   if (!names.has(DEVICE_CONNECTION_SETUP_COLUMNS.setupExpiresAt)) {
     database.exec("alter table device_connection add column setup_expires_at text");
+  }
+}
+
+function ensureDeviceJobCanonicalImportCompletedAtColumn(database: DatabaseSync): void {
+  const names = columnNames(readDeviceJobColumns(database));
+
+  if (!names.has("canonical_import_completed_at")) {
+    database.exec("alter table device_job add column canonical_import_completed_at text");
   }
 }
 
@@ -381,7 +393,8 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         created_at text not null,
         updated_at text not null,
         started_at text,
-        finished_at text
+        finished_at text,
+        canonical_import_completed_at text
       );
 
       create index if not exists device_job_claim_idx
@@ -392,6 +405,15 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
 
       create index if not exists device_job_account_running_idx
       on device_job (account_id, status, lease_expires_at);
+
+      create table if not exists device_job_continuation (
+        parent_job_id text not null references device_job(id) on delete cascade,
+        child_job_id text not null references device_job(id) on delete cascade,
+        primary key (parent_job_id, child_job_id)
+      );
+
+      create index if not exists device_job_continuation_child_idx
+      on device_job_continuation (child_job_id, parent_job_id);
 
       create table if not exists webhook_trace (
         provider text not null,
@@ -417,5 +439,6 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   ensureWebhookTraceClaimTokenColumn(database);
   ensureConnectionSourceLastDataColumn(database);
   ensureConnectionSourceLifecycleEpochColumn(database);
+  ensureDeviceJobCanonicalImportCompletedAtColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

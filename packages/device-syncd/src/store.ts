@@ -52,7 +52,9 @@ import {
   failDeviceSyncJobIfOwned,
   findActiveDeviceSyncJobDedupeKeys,
   getDeviceSyncJobById,
+  linkDeviceSyncJobContinuationInTransaction,
   listDueDeviceSyncJobBatchCandidates,
+  listDeviceSyncJobContinuations,
   listPendingDeviceSyncJobsForAccount,
   markPendingDeviceSyncJobsDeadForAccount,
   markPendingDeviceSyncJobsDeadForAccountIfCurrent,
@@ -721,6 +723,7 @@ export class SqliteDeviceSyncStore {
 
   completeJobsMarkSyncSucceededAndEnqueueJobs(input: {
     accountId: string;
+    canonicalImportCompletedAt?: string | null;
     completedAt: string;
     disconnectGeneration: number | null;
     jobIds: readonly string[];
@@ -738,6 +741,7 @@ export class SqliteDeviceSyncStore {
     try {
       return withImmediateTransaction(this.database, () => {
         const completed = completeDeviceSyncJobsIfOwnedInTransaction(this.database, {
+          canonicalImportCompletedAt: input.canonicalImportCompletedAt ?? null,
           jobIds: input.jobIds,
           now: input.completedAt,
           workerId: input.workerId,
@@ -760,7 +764,7 @@ export class SqliteDeviceSyncStore {
         }
 
         for (const job of input.jobs) {
-          enqueueDeviceSyncJobInTransaction(this.database, {
+          const scheduled = enqueueDeviceSyncJobInTransaction(this.database, {
             provider: input.provider,
             accountId: input.accountId,
             kind: job.kind,
@@ -769,6 +773,10 @@ export class SqliteDeviceSyncStore {
             availableAt: job.availableAt,
             maxAttempts: job.maxAttempts,
             dedupeKey: job.dedupeKey,
+          });
+          linkDeviceSyncJobContinuationInTransaction(this.database, {
+            childJobId: scheduled.id,
+            parentJobIds: input.jobIds,
           });
         }
 
@@ -781,6 +789,10 @@ export class SqliteDeviceSyncStore {
 
       throw error;
     }
+  }
+
+  listJobContinuations(parentJobId: string): DeviceSyncJobRecord[] {
+    return listDeviceSyncJobContinuations(this.database, parentJobId);
   }
 
   releaseJobIfOwned(jobId: string, workerId: string, now: string): boolean {

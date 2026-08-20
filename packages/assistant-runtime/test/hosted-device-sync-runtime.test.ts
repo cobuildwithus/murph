@@ -6001,7 +6001,7 @@ describe("hosted device-sync runtime", () => {
       const restoredJobs = readJobsForAccount(restoredService, restoredAccountId);
       assert.equal(restoredJobs.length, 100);
       assert.equal(restoredState.pendingDirtyPayloadJobs.length, 100);
-      assert.equal(listPendingJobsForAccount.mock.calls.length, 1);
+      assert.equal(listPendingJobsForAccount.mock.calls.length, 0);
       assert.equal(enqueueJob.mock.calls.length, 100);
       assert.equal(
         new Set(enqueueJob.mock.calls.map(([input]) => input.dedupeKey)).size,
@@ -6599,16 +6599,7 @@ describe("hosted device-sync runtime", () => {
         service: restoredService,
         state: restoredState,
       });
-      const restoredImportCompletedAt = restoredState.pendingDirtyAcks[0]
-        ?.completedImports?.[0]?.importCompletedAt;
-      assert.ok(restoredImportCompletedAt);
       assert.deepEqual(restoredState.pendingDirtyAcks, [{
-        completedImports: [{
-          dirtyPayloadId,
-          importCompletedAt: restoredImportCompletedAt,
-          resource: "activity",
-          sourceProviderSlug: "strava",
-        }],
         connectionId,
         nextWakeAt: null,
         processedDirtyPayloadIds: [dirtyPayloadId],
@@ -6752,6 +6743,102 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("companion freshness receipt uses the durable canonical import boundary", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-import-boundary-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const store = getStore(service);
+      const account = store.upsertAccount({
+        connectedAt: "2026-08-20T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        displayName: "Demo",
+        externalAccountId: "demo-canonical-import-boundary",
+        provider: "demo",
+        scopes: [],
+        status: "active",
+      });
+      const job = store.enqueueJob({
+        accountId: account.id,
+        availableAt: "2026-08-20T09:00:00.000Z",
+        kind: "resource",
+        payload: { resource: "steps" },
+        provider: "demo",
+      });
+      const workerId = "worker-import-boundary";
+      assert.equal(
+        store.claimDueJob(
+          workerId,
+          "2026-08-20T09:01:00.000Z",
+          600_000,
+          account.id,
+        )?.id,
+        job.id,
+      );
+      assert.equal(store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+        accountId: account.id,
+        canonicalImportCompletedAt: "2026-08-20T09:01:30.000Z",
+        completedAt: "2026-08-20T09:05:00.000Z",
+        disconnectGeneration: account.disconnectGeneration,
+        jobIds: [job.id],
+        jobs: [],
+        provider: "demo",
+        syncSucceededAt: "2026-08-20T09:05:00.000Z",
+        syncSuccessOptions: {
+          localConnectionRevision: account.localConnectionRevision,
+        },
+        workerId,
+      }), true);
+      const state = {
+        hostedToLocalAccountIds: new Map([["hosted_import_boundary", account.id]]),
+        localToHostedAccountIds: new Map([[account.id, "hosted_import_boundary"]]),
+        observedTokenVersions: new Map<string, number | null>(),
+        pendingDirtyAcks: [{
+          connectionId: "hosted_import_boundary",
+          nextWakeAt: null,
+          processedRevision: "3",
+        }],
+        pendingDirtyPayloadJobs: [{
+          connectionId: "hosted_import_boundary",
+          dirtyPayloadId: "dsp_import_boundary",
+          jobId: job.id,
+          processedRevision: "3",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
+        snapshot: null,
+      } satisfies HostedDeviceSyncRuntimeSyncState;
+
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        completedImports: [{
+          dirtyPayloadId: "dsp_import_boundary",
+          importCompletedAt: "2026-08-20T09:01:30.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
+        connectionId: "hosted_import_boundary",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_import_boundary"],
+        processedRevision: "3",
+      }]);
+      assert.equal(
+        store.getJobById(job.id)?.finishedAt,
+        "2026-08-20T09:05:00.000Z",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("dirty payload ownership transfers to a worker-created child at checkpoint", async () => {
     const firstWorkspace = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-dirty-child-first-",
@@ -6862,22 +6949,22 @@ describe("hosted device-sync runtime", () => {
       assert.ok(firstAccountId);
       assert.equal(await firstService.drainWorker(1, firstAccountId), 1);
       promoteHostedCompletedDirtyPayloadAcks({ service: firstService, state: firstState });
-      const childImportCompletedAt = firstState.pendingDirtyAcks[0]
-        ?.completedImports?.[0]?.importCompletedAt;
-      assert.ok(childImportCompletedAt);
       assert.deepEqual(firstState.pendingDirtyAcks, [{
-        completedImports: [{
-          dirtyPayloadId: "dsp_dirty_child",
-          importCompletedAt: childImportCompletedAt,
-          resource: "activity",
-          sourceProviderSlug: "strava",
-        }],
         connectionId,
         nextWakeAt: null,
-        processedDirtyPayloadIds: ["dsp_dirty_child"],
         processedRevision: "12",
       }]);
-      assert.deepEqual(firstState.pendingDirtyPayloadJobs, []);
+      const firstChild = readJobsForAccount(firstService, firstAccountId)
+        .find((job) => job.dedupeKey === "worker-created-child");
+      assert.ok(firstChild);
+      assert.deepEqual(firstState.pendingDirtyPayloadJobs, [{
+        connectionId,
+        dirtyPayloadId: "dsp_dirty_child",
+        jobId: firstChild.id,
+        processedRevision: "12",
+        resource: "activity",
+        sourceProviderSlug: "strava",
+      }]);
 
       const recovery = resolveHostedDeviceSyncWakeRecovery({
         service: firstService,
@@ -6888,6 +6975,13 @@ describe("hosted device-sync runtime", () => {
       assert.deepEqual(recovery.wake.hint?.jobs, [{
         availableAt: "2026-04-04T10:05:00.000Z",
         dedupeKey: "worker-created-child",
+        dirtyPayloads: [{
+          connectionId,
+          dirtyPayloadId: "dsp_dirty_child",
+          processedRevision: "12",
+          resource: "activity",
+          sourceProviderSlug: "strava",
+        }],
         kind: "resource",
         maxAttempts: 7,
         payload: childPayload,
@@ -6915,6 +7009,63 @@ describe("hosted device-sync runtime", () => {
       assert.equal(restoredChild.maxAttempts, 7);
       assert.deepEqual(JSON.parse(restoredChild.payloadJson), childPayload);
       assert.equal(restoredChild.priority, 77);
+      assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedRevision: "12",
+      }]);
+      assert.deepEqual(restoredState.pendingDirtyPayloadJobs, [{
+        connectionId,
+        dirtyPayloadId: "dsp_dirty_child",
+        jobId: restoredChild.id,
+        processedRevision: "12",
+        resource: "activity",
+        sourceProviderSlug: "strava",
+      }]);
+
+      const restoredStore = getStore(restoredService);
+      assert.equal(
+        restoredStore.claimDueJob(
+          "worker-restored-child",
+          "2026-04-04T10:06:00.000Z",
+          600_000,
+          restoredAccountId,
+        )?.id,
+        restoredChild.id,
+      );
+      const restoredAccount = restoredStore.getAccountById(restoredAccountId);
+      assert.ok(restoredAccount);
+      assert.equal(restoredStore.completeJobsMarkSyncSucceededAndEnqueueJobs({
+        accountId: restoredAccountId,
+        canonicalImportCompletedAt: "2026-04-04T10:06:30.000Z",
+        completedAt: "2026-04-04T10:07:00.000Z",
+        disconnectGeneration: restoredAccount.disconnectGeneration,
+        jobIds: [restoredChild.id],
+        jobs: [],
+        provider: "strava",
+        syncSucceededAt: "2026-04-04T10:07:00.000Z",
+        syncSuccessOptions: {
+          localConnectionRevision: restoredAccount.localConnectionRevision,
+        },
+        workerId: "worker-restored-child",
+      }), true);
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: restoredState,
+      });
+      assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        completedImports: [{
+          dirtyPayloadId: "dsp_dirty_child",
+          importCompletedAt: "2026-04-04T10:06:30.000Z",
+          resource: "activity",
+          sourceProviderSlug: "strava",
+        }],
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_dirty_child"],
+        processedRevision: "12",
+      }]);
+      assert.deepEqual(restoredState.pendingDirtyPayloadJobs, []);
     } finally {
       if (!firstClosed) {
         closeHostedRuntimeDeviceSyncService(firstService);
@@ -7222,16 +7373,7 @@ describe("hosted device-sync runtime", () => {
         service: restoredService,
         state: restoredState,
       });
-      const restoredImportCompletedAt = restoredState.pendingDirtyAcks[0]
-        ?.completedImports?.[0]?.importCompletedAt;
-      assert.ok(restoredImportCompletedAt);
       assert.deepEqual(restoredState.pendingDirtyAcks, [{
-        completedImports: [{
-          dirtyPayloadId: "dsp_cold_restore",
-          importCompletedAt: restoredImportCompletedAt,
-          resource: COMPANION_HRV_RMSSD_RESOURCE,
-          sourceProviderSlug: "whoop",
-        }],
         connectionId,
         nextWakeAt: null,
         processedDirtyPayloadIds: ["dsp_cold_restore"],
@@ -7361,16 +7503,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(recoveredState.pendingDirtyPayloadJobs.length, 1);
       assert.equal(await service.drainWorker(1), 1);
       promoteHostedCompletedDirtyPayloadAcks({ service, state: recoveredState });
-      const recoveredImportCompletedAt = recoveredState.pendingDirtyAcks[0]
-        ?.completedImports?.[0]?.importCompletedAt;
-      assert.ok(recoveredImportCompletedAt);
       assert.deepEqual(recoveredState.pendingDirtyAcks, [{
-        completedImports: [{
-          dirtyPayloadId: "dsp_skipped",
-          importCompletedAt: recoveredImportCompletedAt,
-          resource: "steps",
-          sourceProviderSlug: "demo",
-        }],
         connectionId: "hosted_skipped",
         nextWakeAt: null,
         processedDirtyPayloadIds: ["dsp_skipped"],

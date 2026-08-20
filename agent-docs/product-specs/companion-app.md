@@ -207,8 +207,8 @@ legacy rows keep that field null. When a historical completion instead leads
 to a successful canonical import, the exact dirty-payload acknowledgement adds
 a source- and resource-scoped import receipt after checkpoint. Source-scoped
 status filters connected-source availability and both receipt kinds, so
-null-source rows never satisfy Android status and failed or merely accepted
-pulls never look synced.
+null-source rows never satisfy Android status and failed, zero-record,
+source-fenced, or merely accepted pulls never look synced.
 
 The client keeps its Junction resource request centralized and starts with four
 minimum-necessary groups: sleep, workouts, steps, and active calories. The

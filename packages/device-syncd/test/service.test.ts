@@ -693,6 +693,97 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   close();
 });
 
+test("device sync service persists the canonical import boundary separately from job completion", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-boundary");
+  let now = new Date("2026-08-20T10:00:00.000Z");
+  let finishAt = new Date("2026-08-20T10:01:00.000Z");
+  let importedEvents: readonly unknown[] = [{ dayKey: "2026-08-20" }];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider({
+      async executeJob(context, job) {
+        if (job.payload.value === 1) {
+          await context.importSnapshot({ importedAt: context.now });
+        }
+        now = finishAt;
+        return {};
+      },
+    })],
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { events: importedEvents };
+      },
+    },
+  });
+
+  try {
+    const account = store.upsertAccount({
+      connectedAt: "2026-08-20T09:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "none",
+      },
+      displayName: "Demo",
+      externalAccountId: "demo-canonical-boundary",
+      provider: "demo",
+      scopes: [],
+      status: "active",
+    });
+    const imported = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-08-20T10:00:00.000Z",
+      kind: "backfill",
+      payload: { value: 1 },
+      provider: "demo",
+    });
+
+    const importedJob = await service.runWorkerOnce();
+    assert.equal(importedJob?.id, imported.id);
+    assert.deepEqual(
+      {
+        canonicalImportCompletedAt:
+          store.getJobById(importedJob.id)?.canonicalImportCompletedAt,
+        finishedAt: store.getJobById(importedJob.id)?.finishedAt,
+      },
+      {
+        canonicalImportCompletedAt: "2026-08-20T10:00:00.000Z",
+        finishedAt: "2026-08-20T10:01:00.000Z",
+      },
+    );
+
+    now = new Date("2026-08-20T10:02:00.000Z");
+    finishAt = new Date("2026-08-20T10:03:00.000Z");
+    importedEvents = [];
+    const zeroRecordJob = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-08-20T10:02:00.000Z",
+      kind: "resource",
+      payload: { value: 1 },
+      provider: "demo",
+    });
+    assert.equal((await service.runWorkerOnce())?.id, zeroRecordJob.id);
+    assert.deepEqual(
+      {
+        canonicalImportCompletedAt:
+          store.getJobById(zeroRecordJob.id)?.canonicalImportCompletedAt,
+        finishedAt: store.getJobById(zeroRecordJob.id)?.finishedAt,
+      },
+      {
+        canonicalImportCompletedAt: null,
+        finishedAt: "2026-08-20T10:03:00.000Z",
+      },
+    );
+  } finally {
+    close();
+  }
+});
+
 test("local shared-Junction target starts preserve established siblings through SQLite", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-07-28T10:00:00.000Z"));
@@ -12976,6 +13067,32 @@ test("sqlite store splits connection, credential, and observation state into exp
     "credential_metadata_json",
     "created_at",
     "updated_at",
+  ]);
+  assert.deepEqual(readTableColumnsForTesting(store, "device_job"), [
+    "id",
+    "provider",
+    "account_id",
+    "kind",
+    "payload_json",
+    "priority",
+    "available_at",
+    "attempts",
+    "max_attempts",
+    "dedupe_key",
+    "status",
+    "lease_owner",
+    "lease_expires_at",
+    "last_error_code",
+    "last_error_message",
+    "created_at",
+    "updated_at",
+    "started_at",
+    "finished_at",
+    "canonical_import_completed_at",
+  ]);
+  assert.deepEqual(readTableColumnsForTesting(store, "device_job_continuation"), [
+    "parent_job_id",
+    "child_job_id",
   ]);
   assert.deepEqual(readTableColumnsForTesting(store, "device_observation_state"), [
     "account_id",

@@ -52,6 +52,7 @@ interface StoredJobRow {
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
+  canonical_import_completed_at: string | null;
 }
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
@@ -109,6 +110,10 @@ function decodeStoredJobRow(row: Record<string, unknown>): StoredJobRow {
     created_at: requireJobRowString(row, "created_at"),
     dedupe_key: readJobRowNullableString(row, "dedupe_key"),
     finished_at: readJobRowNullableString(row, "finished_at"),
+    canonical_import_completed_at: readJobRowNullableString(
+      row,
+      "canonical_import_completed_at",
+    ),
     id: requireJobRowString(row, "id"),
     kind: requireJobRowString(row, "kind"),
     last_error_code: readJobRowNullableString(row, "last_error_code"),
@@ -182,6 +187,7 @@ function mapJobRow(row: StoredJobRow | undefined): DeviceSyncJobRecord | null {
     updatedAt: row.updated_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    canonicalImportCompletedAt: row.canonical_import_completed_at,
   };
 }
 
@@ -578,6 +584,7 @@ export function completeDeviceSyncJobIfOwned(
 export function completeDeviceSyncJobsIfOwnedInTransaction(
   database: DatabaseSync,
   input: {
+    canonicalImportCompletedAt?: string | null;
     jobIds: readonly string[];
     now: string;
     workerId: string;
@@ -612,6 +619,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
     set status = 'succeeded',
         lease_owner = null,
         lease_expires_at = null,
+        canonical_import_completed_at = ?,
         finished_at = ?,
         updated_at = ?
     where id in (${placeholders})
@@ -620,6 +628,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
       and lease_expires_at is not null
       and lease_expires_at > ?
   `).run(
+    input.canonicalImportCompletedAt ?? null,
     input.now,
     input.now,
     ...jobIds,
@@ -633,6 +642,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
 export function completeDeviceSyncJobsIfOwned(
   database: DatabaseSync,
   input: {
+    canonicalImportCompletedAt?: string | null;
     jobIds: readonly string[];
     now: string;
     workerId: string;
@@ -640,6 +650,34 @@ export function completeDeviceSyncJobsIfOwned(
 ): boolean {
   return withImmediateTransaction(database, () =>
     completeDeviceSyncJobsIfOwnedInTransaction(database, input)
+  );
+}
+
+export function linkDeviceSyncJobContinuationInTransaction(
+  database: DatabaseSync,
+  input: { childJobId: string; parentJobIds: readonly string[] },
+): void {
+  const statement = database.prepare(`
+    insert or ignore into device_job_continuation (parent_job_id, child_job_id)
+    values (?, ?)
+  `);
+  for (const parentJobId of new Set(input.parentJobIds)) {
+    statement.run(parentJobId, input.childJobId);
+  }
+}
+
+export function listDeviceSyncJobContinuations(
+  database: DatabaseSync,
+  parentJobId: string,
+): DeviceSyncJobRecord[] {
+  return (database.prepare(`
+    select child.*
+    from device_job_continuation
+    join device_job as child on child.id = device_job_continuation.child_job_id
+    where device_job_continuation.parent_job_id = ?
+    order by child.created_at asc, child.id asc
+  `).all(parentJobId) as Record<string, unknown>[]).map((row) =>
+    mapJobRow(decodeStoredJobRow(row))!
   );
 }
 

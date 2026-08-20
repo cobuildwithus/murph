@@ -43,8 +43,9 @@ artifacts.
 - A connected Apple Health member with new readable data sees freshness advance
   after canonical import succeeds, not when a data-less notification arrives.
 - A data-less provider notice never advances freshness by itself. A connected
-  member whose canonical import is still running or fails keeps the existing
-  waiting or recovery state; no optimistic success is introduced.
+  member whose pull has no canonical records, is source-fenced, is still
+  running, or fails keeps the existing waiting or recovery state; no optimistic
+  success is introduced.
 - A disconnected source cannot revive old import evidence across its receipt
   cutoff.
 - Other Junction sources use the same source-scoped evidence rule without
@@ -53,8 +54,12 @@ artifacts.
 ## Constraints
 
 - Web/Postgres remains the durable control-plane and companion-status owner.
-- Record import evidence only after canonical success and the existing
-  checkpoint boundary.
+- Persist import evidence on the exact local job only after the canonical
+  importer returns at least one event, then expose it only after job success
+  and the existing checkpoint boundary.
+- Preserve exact dirty-payload ownership through one-at-a-time scheduled
+  continuations and cold-restored wake hints until the owning job reaches a
+  terminal decision.
 - Make callback replay idempotent by coupling receipt creation to deletion of
   the exact acknowledged dirty payload in one short database transaction.
 - Keep callback fields bounded, closed, member-bound, and free of health values
@@ -64,11 +69,14 @@ artifacts.
 
 ## Plan
 
-1. Extend the shared dirty-ack contract with bounded per-payload canonical
-   import receipts carrying only payload id, normalized resource/source, and
+1. Persist the true data-bearing canonical importer completion time on the exact
+   local job, then extend the shared dirty-ack contract with bounded per-payload
+   receipts carrying only payload id, normalized resource/source, and
    completion time.
 2. Preserve those receipts through hosted runtime checkpoint state and the
-   signed Cloudflare callback.
+   signed Cloudflare callback; when a no-import job schedules one continuation,
+   transfer its exact payload ownership to that child and retain the transfer
+   in cold-restore hints.
 3. In the Web dirty-ack transaction, create canonical-import signal rows only
    for exact payload rows that still exist, then delete those rows. Exact retry
    therefore cannot create a second receipt.
@@ -94,4 +102,12 @@ artifacts.
 - Cloudflare callback forwarding: one focused test passed with 191 unrelated
   cases skipped; Cloudflare typecheck passed.
 - Changelog generation and archive/feed/page coverage: 57 focused tests passed.
-- ReviewGPT, required CI, and deployment compatibility proof: pending.
+- Preliminary specialist review found that generic job success also includes
+  zero-record and source-fenced no-ops. The correction now records a nullable
+  SQLite v11 job receipt only when `importSnapshot` returns at least one
+  canonical event, leaves no-op job acknowledgement independent, carries exact
+  ownership through a single scheduled continuation and cold restore, and uses
+  that receipt's timestamp downstream.
+- Corrected device-syncd coverage: 1,255 tests passed. Corrected
+  assistant-runtime coverage: 2,420 passed with five expected skips. ReviewGPT
+  round 2, required CI, and final deployment compatibility proof: pending.

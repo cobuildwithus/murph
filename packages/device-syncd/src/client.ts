@@ -173,6 +173,8 @@ export interface DeviceSyncJobRecord {
   updatedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /** Durable proof that this job imported at least one canonical event. */
+  canonicalImportCompletedAt?: string | null;
 }
 
 export interface DeviceSyncErrorPayload {

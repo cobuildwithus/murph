@@ -1192,6 +1192,7 @@ class DeviceSyncServiceController {
         }
       }
       ensureExecutionActive();
+      let canonicalImportCompletedAt: string | null = null;
       const jobContext: ProviderJobContext = {
         account: currentAccount,
         now,
@@ -1212,12 +1213,16 @@ class DeviceSyncServiceController {
             vaultRoot: this.vaultRoot,
             ...options,
           });
+          const canonicalEventCount = readCanonicalDeviceImportEventCount(importResult);
+          if (canonicalEventCount > 0) {
+            canonicalImportCompletedAt = currentNow();
+          }
           const junctionCanonicalCoverage =
             readCanonicalDeviceImportJunctionCoverage(importResult);
           const canonicalSparseCalendarTargets =
             readCanonicalDeviceImportSparseCalendarTargets(importResult);
           const receipt: ProviderSnapshotImportReceipt = {
-            canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
+            canonicalEventCount,
             canonicalEventDayKeys: readCanonicalDeviceImportEventDayKeys(importResult),
             canonicalEventExternalRefResourceIds:
               readCanonicalDeviceImportEventExternalRefResourceIds(importResult),
@@ -1358,6 +1363,7 @@ class DeviceSyncServiceController {
       const scheduledJobs = this.normalizeJobsForEnqueue(storedAccount, result.scheduledJobs ?? []);
       const completed = this.store.completeJobsMarkSyncSucceededAndEnqueueJobs({
         accountId: storedAccount.id,
+        canonicalImportCompletedAt,
         completedAt: currentNow(),
         disconnectGeneration,
         jobIds: activeJobs.map((activeJob) => activeJob.id),
