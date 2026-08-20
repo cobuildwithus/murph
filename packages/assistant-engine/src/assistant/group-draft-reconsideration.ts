@@ -56,10 +56,7 @@ export function isAssistantGroupDraftCandidate(
     normalizeNullableString(result.response) !== null &&
     result.responseCard == null &&
     (result.responseMedia?.length ?? 0) === 0 &&
-    (result.reactions?.length ?? 0) === 0 &&
-    (result.precedingResponseSegments ?? []).every(
-      (segment) => (segment.media?.length ?? 0) === 0,
-    )
+    canDiscardAssistantGroupDraftPrecedingResponses(result)
   )
 }
 
@@ -67,7 +64,7 @@ export function discardAssistantGroupDraftPrecedingResponses<
   Result extends AssistantGroupDraftCandidate,
 >(result: Result): Result {
   if (
-    !isAssistantGroupDraftCandidate(result) ||
+    !canDiscardAssistantGroupDraftPrecedingResponses(result) ||
     (result.precedingResponseSegments?.length ?? 0) === 0
   ) {
     return result
@@ -76,6 +73,17 @@ export function discardAssistantGroupDraftPrecedingResponses<
     ...result,
     precedingResponseSegments: [],
   }
+}
+
+function canDiscardAssistantGroupDraftPrecedingResponses(
+  result: AssistantGroupDraftCandidate,
+): boolean {
+  return (
+    (result.reactions?.length ?? 0) === 0 &&
+    (result.precedingResponseSegments ?? []).every(
+      (segment) => (segment.media?.length ?? 0) === 0,
+    )
+  )
 }
 
 export function buildAssistantGroupDraftReconsiderationInput(input: {
