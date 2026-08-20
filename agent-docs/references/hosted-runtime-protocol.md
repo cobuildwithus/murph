@@ -1592,16 +1592,18 @@ workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
 avoid harmless post-delivery no-op ensures. There is no direct
 Web-to-Cloudflare message path and no second durable wake authority. Temporal
 remains the sole durable retry and reconciliation owner. The existing
-Temporal scheduled-reconcile
-command also runs one bounded preference-handoff sweep. Web selects live
-`member.preferences.updated` rows above the authoritative system-lane
-`consumed_seq` for active person runtimes or synthetic room runtimes with an
-active owner or current participant, then rechecks canonical runtime access and
-reissues their pointer-only `signalWithStart`; the mailbox row remains the only
-work record and repeated sweeps are idempotent. This is a narrow backstop for
-already-committed hosted style writes from personal Settings or runtime-bound
-conversation controls, not a second queue or a generic mailbox-lag scheduler.
-Other missed post-commit signals still have no web cron backstop.
+Temporal scheduled-reconcile command also runs one bounded preference-handoff
+sweep. Web selects supported system-lane handoff rows above the workspace's
+authoritative imported frontier for active person runtimes or synthetic room
+runtimes with an active owner or current participant, then rechecks canonical
+runtime access and reissues their pointer-only `signalWithStart`. The supported
+rows include preferences, due device-sync work, daily metrics, browser-vault
+refresh, maintenance, and queued Clinical Records retrieval. Import transfers
+retry ownership to the runtime, so the sweep never uses the later
+handled-through frontier as signal authority. The mailbox row remains the only
+work record and repeated sweeps are idempotent. This is a narrow backstop for a
+missed first post-commit handoff, not a second queue or a generic mailbox-lag
+scheduler. Other missed post-commit signals still have no Web cron backstop.
 
 Hosted reply-latency telemetry records only boundaries observed by their owning
 process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL

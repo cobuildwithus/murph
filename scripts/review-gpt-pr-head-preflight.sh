@@ -14,11 +14,81 @@ EOF
   exit 64
 }
 
+review_gpt_validate_pr_base() {
+  local base_ref="${1:-}"
+  local base_oid="${2:-}"
+
+  if [[ -z "$base_ref" ]] || [[ ! "$base_oid" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Error: ReviewGPT PR base preflight requires a branch and full base SHA." >&2
+    return 64
+  fi
+}
+
+review_gpt_fetch_pr_base_under_lock() {
+  local base_ref="$1"
+  local base_oid="$2"
+
+  review_gpt_validate_pr_base "$base_ref" "$base_oid"
+  if git cat-file -e "$base_oid^{commit}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! git fetch --quiet origin "$base_ref"; then
+    echo "Error: could not fetch PR base branch '$base_ref' for ReviewGPT." >&2
+    return 1
+  fi
+}
+
+review_gpt_refresh_pr_base_if_missing() {
+  local base_ref="${1:-}"
+  local base_oid="${2:-}"
+  local common_dir
+  local lock_dir
+  local lock_file
+  local lock_status=0
+  local lock_wait_seconds=120
+  local script_path="$ROOT_DIR/scripts/review-gpt-pr-head-preflight.sh"
+
+  review_gpt_validate_pr_base "$base_ref" "$base_oid"
+  if git cat-file -e "$base_oid^{commit}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! common_dir="$(git rev-parse --path-format=absolute --git-common-dir)" \
+    || [[ -z "$common_dir" ]]; then
+    echo "Error: could not resolve the shared Git directory for ReviewGPT base preflight." >&2
+    return 1
+  fi
+
+  lock_dir="$common_dir/murph-locks"
+  lock_file="$lock_dir/review-gpt-base-fetch.lock"
+  mkdir -p "$lock_dir"
+
+  if command -v flock >/dev/null 2>&1; then
+    flock -w "$lock_wait_seconds" "$lock_file" \
+      bash "$script_path" --fetch-pr-base-under-lock "$base_ref" "$base_oid" \
+      || lock_status=$?
+  elif command -v lockf >/dev/null 2>&1; then
+    lockf -t "$lock_wait_seconds" "$lock_file" \
+      bash "$script_path" --fetch-pr-base-under-lock "$base_ref" "$base_oid" \
+      || lock_status=$?
+  else
+    echo "Error: flock or lockf is required for ReviewGPT base-fetch serialization." >&2
+    return 1
+  fi
+
+  if (( lock_status != 0 )); then
+    echo "Error: serialized ReviewGPT PR-base fetch failed or timed out." >&2
+    return "$lock_status"
+  fi
+}
+
 review_gpt_require_pr_head() {
   local pr_ref="$1"
+  local base_ref
+  local base_oid
   local dirty_status
   local local_head
   local pr_head
+  local pr_shape
 
   if ! command -v gh >/dev/null 2>&1; then
     echo "Error: gh is required to verify the pushed PR head before packaging ReviewGPT artifacts." >&2
@@ -41,10 +111,20 @@ review_gpt_require_pr_head() {
   fi
 
   local_head="$(git rev-parse --verify HEAD)"
-  pr_head="$(gh pr view "$pr_ref" --json headRefOid --jq '.headRefOid')"
+  if ! pr_shape="$(
+    gh pr view "$pr_ref" \
+      --json baseRefName,baseRefOid,headRefOid \
+      --jq '[.baseRefName, .baseRefOid, .headRefOid] | @tsv'
+  )"; then
+    echo "Error: could not resolve pushed PR base/head metadata for $pr_ref." >&2
+    exit 1
+  fi
+  IFS=$'\t' read -r base_ref base_oid pr_head <<< "$pr_shape"
 
-  if [[ ! "$pr_head" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "Error: could not resolve pushed PR head SHA for $pr_ref." >&2
+  if [[ -z "$base_ref" ]] \
+    || [[ ! "$base_oid" =~ ^[0-9a-f]{40}$ ]] \
+    || [[ ! "$pr_head" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Error: could not resolve pushed PR base/head metadata for $pr_ref." >&2
     exit 1
   fi
 
@@ -55,6 +135,7 @@ review_gpt_require_pr_head() {
     exit 1
   fi
 
+  review_gpt_refresh_pr_base_if_missing "$base_ref" "$base_oid"
   echo "ReviewGPT PR attachment preflight passed for $pr_ref at $local_head."
 }
 
@@ -309,10 +390,30 @@ review_gpt_run() {
 }
 
 review_gpt_main() {
-  if [[ "${1:-}" == "--run" ]]; then
-    shift
-    review_gpt_run "$@"
-  fi
+  case "${1:-}" in
+    --run)
+      shift
+      review_gpt_run "$@"
+      ;;
+    --refresh-pr-base-if-missing)
+      if [[ "$#" -ne 3 ]]; then
+        echo "Error: --refresh-pr-base-if-missing requires a branch and full base SHA." >&2
+        exit 64
+      fi
+      shift
+      review_gpt_refresh_pr_base_if_missing "$@"
+      return
+      ;;
+    --fetch-pr-base-under-lock)
+      if [[ "$#" -ne 3 ]]; then
+        echo "Error: --fetch-pr-base-under-lock requires a branch and full base SHA." >&2
+        exit 64
+      fi
+      shift
+      review_gpt_fetch_pr_base_under_lock "$@"
+      return
+      ;;
+  esac
 
   if [[ "$#" -ne 1 ]]; then
     usage
