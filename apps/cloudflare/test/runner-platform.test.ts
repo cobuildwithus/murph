@@ -7833,6 +7833,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
+        completedImports: [{
+          dirtyPayloadId: "dsp_current",
+          importCompletedAt: "2026-08-20T09:00:00.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
         connectionId: "dsc_current",
         processedDirtyPayloadIds: ["dsp_current"],
         processedRevision: "21",
@@ -7872,6 +7878,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const ack = await platform.deviceSyncPort!.ackDirtyStateProcessed({
+      completedImports: [{
+        dirtyPayloadId: "dsp_current",
+        importCompletedAt: "2026-08-20T09:00:00.000Z",
+        resource: "steps",
+        sourceProviderSlug: "apple_health_kit",
+      }],
       connectionId: "dsc_current",
       processedDirtyPayloadIds: ["dsp_current"],
       processedRevision: "21",

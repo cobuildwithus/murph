@@ -7018,6 +7018,10 @@ function mergeHostedDeviceSyncStagedDirtyAckRecords(
   records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[],
 ): HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] {
   const byConnection = new Map<string, {
+    completedImports: Map<
+      string,
+      NonNullable<HostedDeviceSyncDirtyProcessedPostCheckpointRecord["completedImports"]>[number]
+    >;
     connectionId: string;
     processedDirtyPayloadIds: Set<string>;
     processedRevision: bigint;
@@ -7027,6 +7031,7 @@ function mergeHostedDeviceSyncStagedDirtyAckRecords(
     const previous = byConnection.get(record.connectionId);
     const processedRevision = BigInt(record.processedRevision);
     const entry = previous ?? {
+      completedImports: new Map(),
       connectionId: record.connectionId,
       processedDirtyPayloadIds: new Set<string>(),
       processedRevision,
@@ -7037,10 +7042,16 @@ function mergeHostedDeviceSyncStagedDirtyAckRecords(
     for (const payloadId of record.processedDirtyPayloadIds ?? []) {
       entry.processedDirtyPayloadIds.add(payloadId);
     }
+    for (const completedImport of record.completedImports ?? []) {
+      entry.completedImports.set(completedImport.dirtyPayloadId, completedImport);
+    }
     byConnection.set(record.connectionId, entry);
   }
 
   return [...byConnection.values()].map((entry) => ({
+    ...(entry.completedImports.size > 0
+      ? { completedImports: [...entry.completedImports.values()] }
+      : {}),
     connectionId: entry.connectionId,
     ...(entry.processedDirtyPayloadIds.size > 0
       ? { processedDirtyPayloadIds: [...entry.processedDirtyPayloadIds] }

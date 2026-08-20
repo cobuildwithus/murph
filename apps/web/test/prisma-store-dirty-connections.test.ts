@@ -2491,6 +2491,69 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     expect(prisma.deviceSyncDirtyPayload.findMany).not.toHaveBeenCalled();
   });
 
+  it("records canonical import freshness once for an exact acknowledged payload", async () => {
+    const dirtyAt = new Date("2026-08-20T08:30:00.000Z");
+    let payloadExists = true;
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      $queryRaw: vi.fn(async () => [{ pending: false }]),
+      deviceSyncDirtyConnection: {
+        findFirst: vi.fn(async () => ({
+          connectionId: "dsc_junction_123",
+          dirtyRevision: 3n,
+          latestDirtyAt: dirtyAt,
+          processedRevision: 1n,
+          provider: "junction",
+          userId: "member_123",
+        })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      deviceSyncDirtyPayload: {
+        deleteMany: vi.fn(async () => {
+          const count = payloadExists ? 1 : 0;
+          payloadExists = false;
+          return { count };
+        }),
+        findMany: vi.fn(async () => payloadExists ? [{ id: "dsp_payload_done" }] : []),
+      },
+      deviceSyncSignal: {
+        createMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+    const acknowledgement = {
+      completedImports: [{
+        dirtyPayloadId: "dsp_payload_done",
+        importCompletedAt: "2026-08-20T09:00:00.000Z",
+        resource: "steps",
+        sourceProviderSlug: "apple_health_kit",
+      }],
+      connectionId: "dsc_junction_123",
+      processedDirtyPayloadIds: ["dsp_payload_done"],
+      processedRevision: 3n,
+      userId: "member_123",
+    };
+
+    await store.markDirtyConnectionProcessed(acknowledgement);
+    await store.markDirtyConnectionProcessed(acknowledgement);
+
+    expect(prisma.deviceSyncSignal.createMany).toHaveBeenCalledOnce();
+    expect(prisma.deviceSyncSignal.createMany).toHaveBeenCalledWith({
+      data: [{
+        connectionId: "dsc_junction_123",
+        createdAt: expect.any(Date),
+        eventType: "canonical.data.steps.imported",
+        kind: "canonical_import",
+        occurredAt: new Date("2026-08-20T09:00:00.000Z"),
+        provider: "junction",
+        sourceProviderSlug: "apple_health_kit",
+        userId: "member_123",
+      }],
+    });
+    expect(prisma.deviceSyncDirtyPayload.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.deviceSyncDirtyPayload.deleteMany).toHaveBeenCalledTimes(2);
+  });
+
   it("leaves durable payload rows pending when ack omits explicit payload ids", async () => {
     const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
     const prisma = {
