@@ -3701,7 +3701,11 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
           workingDirectory,
           'product-notes-curl.txt',
         )
-        await materializeProductNotesFixtures({ binDirectory })
+        await materializeProductNotesFixtures({
+          appendCapturePath,
+          binDirectory,
+          curlCapturePath,
+        })
 
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -3714,8 +3718,6 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
           dynamicTools: [],
           env: {
             ...config.env,
-            MURPH_PRODUCT_NOTES_E2E_APPEND_PATH: appendCapturePath,
-            MURPH_PRODUCT_NOTES_E2E_CURL_PATH: curlCapturePath,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
           excludeResumeTurns: true,
@@ -9224,7 +9226,9 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
 }
 
 async function materializeProductNotesFixtures(input: {
+  appendCapturePath: string
   binDirectory: string
+  curlCapturePath: string
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const feed = JSON.stringify({
@@ -9307,7 +9311,7 @@ async function materializeProductNotesFixtures(input: {
       '#!/bin/sh',
       'case "$*" in',
       '  *"/api/changelog?days=14&featureLimit=70&improvementLimit=10"*)',
-      '    printf \'%s\\n\' "$*" >> "$MURPH_PRODUCT_NOTES_E2E_CURL_PATH"',
+      `    printf '%s\\n' "$*" >> '${input.curlCapturePath}'`,
       `    printf '%s\\n' '${feed}'`,
       '    ;;',
       '  *)',
@@ -9331,7 +9335,7 @@ async function materializeProductNotesFixtures(input: {
       '    printf \'%s\\n\' \'# Murph product notes\' \'\' \'## 2026-08-05 — Murph product notes\' \'Kind: feature discovery\' \'Item ids: earlier-feature\'',
       '    ;;',
       '  *"knowledge append-section murph-product-notes"*)',
-      '    printf \'%s\\n\' "$*" > "$MURPH_PRODUCT_NOTES_E2E_APPEND_PATH"',
+      `    printf '%s\\n' "$*" > '${input.appendCapturePath}'`,
       '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
       '    ;;',
       '  *)',
@@ -10209,6 +10213,7 @@ function buildProductNotesDeveloperInstructions(): string {
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
+    scheduledOccurrenceAt: '2026-08-19T14:00:00.000Z',
     turnTrigger: 'automation-cron',
   })
 }
