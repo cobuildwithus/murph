@@ -4,6 +4,13 @@ import type {
   DeviceConnectionSourceStatus,
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX,
+  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX,
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+  readDeviceSyncSourceCanonicalCoverageBoundary,
+  readDeviceSyncSourceCanonicalCoverageFinalizedAt,
+} from "@murphai/device-syncd/fitbit-migration";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 import {
   buildJunctionProviderSourceInstanceKey,
@@ -50,6 +57,8 @@ export type HostedConnectionSourceRecord =
 export type HostedConnectionSourceAdmissionCandidate = Omit<
   Pick<
     HostedConnectionSourceRecord,
+    | "firstSeenAt"
+    | "id"
     | "lastErrorCode"
     | "lastErrorMessage"
     | "lifecycleEpoch"
@@ -172,6 +181,7 @@ export class PrismaHostedConnectionSourceStore {
     const hasLastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage");
     const hasLifecycleEpoch = hasOwnInputProperty(input, "lifecycleEpoch");
     const hasLastDataAt = hasOwnInputProperty(input, "lastDataAt");
+    const hasFirstSeenAt = hasOwnInputProperty(input, "firstSeenAt");
     const lastDataAt = hasLastDataAt ? maybeDate(input.lastDataAt) ?? null : null;
     const displayName = hasDisplayName
       ? sanitizeSourceDisplayName(input.displayName)
@@ -193,6 +203,10 @@ export class PrismaHostedConnectionSourceStore {
 
     if (hasDisplayName) {
       update.displayName = displayName;
+    }
+
+    if (hasFirstSeenAt) {
+      update.firstSeenAt = firstSeenAt;
     }
 
     if (hasResourceAvailabilitySummary) {
@@ -253,8 +267,8 @@ export class PrismaHostedConnectionSourceStore {
 
   /**
    * Records that an inbound payload carried this source's data. Matching is by
-   * provider slug because that is what the webhook envelope names, and the
-   * update is forward-only so an out-of-order redelivery cannot rewind the
+   * provider slug after ingress has resolved complete webhook provenance, and
+   * the update is forward-only so an out-of-order redelivery cannot rewind the
    * signal a stall is measured against.
    *
    * This never creates a source row: a payload that arrives before the connect
@@ -327,23 +341,56 @@ export class PrismaHostedConnectionSourceStore {
       ...hostedConnectionSourceRecordArgs,
     });
     if (tx) {
-      const legacyIdentities = new Map<string, CanonicalHostedJunctionSourceIdentity>();
+      const identitiesToReconcileByKey = new Map<
+        string,
+        CanonicalHostedJunctionSourceIdentity
+      >();
+      const recordsBySemanticKey = new Map<
+        string,
+        { identity: CanonicalHostedJunctionSourceIdentity; records: HostedConnectionSourceRecord[] }
+      >();
       for (const record of records) {
-        const identity = resolveCanonicalHostedJunctionSourceIdentity(record);
+        const legacyIdentity = resolveCanonicalHostedJunctionSourceIdentity(record);
         if (
-          identity
+          legacyIdentity
           && (
+            record.sourceInstanceKey !== legacyIdentity.sourceInstanceKey
+            || record.sourceProviderSlug !== legacyIdentity.sourceProviderSlug
+          )
+        ) {
+          identitiesToReconcileByKey.set(
+            legacyIdentity.sourceInstanceKey,
+            legacyIdentity,
+          );
+        }
+        const identity = resolveSemanticHostedJunctionSourceIdentity(record);
+        if (!identity) {
+          continue;
+        }
+        const grouped = recordsBySemanticKey.get(identity.sourceInstanceKey)
+          ?? { identity, records: [] };
+        grouped.records.push(record);
+        recordsBySemanticKey.set(identity.sourceInstanceKey, grouped);
+      }
+      for (const { identity, records: groupedRecords } of recordsBySemanticKey.values()) {
+        if (
+          groupedRecords.some((record) =>
+            record.sourceInstanceKey === identity.sourceInstanceKey
+            && record.sourceProviderSlug === identity.sourceProviderSlug
+          )
+          && groupedRecords.some((record) =>
             record.sourceInstanceKey !== identity.sourceInstanceKey
             || record.sourceProviderSlug !== identity.sourceProviderSlug
           )
         ) {
-          legacyIdentities.set(identity.sourceInstanceKey, identity);
+          identitiesToReconcileByKey.set(identity.sourceInstanceKey, identity);
         }
       }
-      for (const identity of legacyIdentities.values()) {
+      const identitiesToReconcile = [...identitiesToReconcileByKey.values()];
+      for (const identity of identitiesToReconcile) {
         await reconcileStoredCanonicalJunctionSourceIdentity({ identity, prisma, records });
       }
-      if (legacyIdentities.size > 0) {
+      if (identitiesToReconcile.length > 0) {
         records = await prisma.deviceConnectionSource.findMany({
           where: { connectionId: normalizedConnectionId },
           orderBy: [
@@ -407,6 +454,8 @@ export class PrismaHostedConnectionSourceStore {
     );
     return source
       ? {
+          firstSeenAt: new Date(source.firstSeenAt),
+          id: source.id,
           lastErrorCode: source.lastErrorCode,
           lastErrorMessage: source.lastErrorMessage,
           lifecycleEpoch: source.lifecycleEpoch,
@@ -556,6 +605,24 @@ function resolveCanonicalHostedJunctionSourceIdentity(input: {
   sourceInstanceKey: string;
   sourceProviderSlug: string;
 }): CanonicalHostedJunctionSourceIdentity | null {
+  const identity = resolveSemanticHostedJunctionSourceIdentity(input);
+  if (!identity) {
+    return null;
+  }
+  if (
+    identity.sourceProviderSlug === input.sourceProviderSlug
+    && identity.sourceInstanceKey !== input.sourceInstanceKey
+  ) {
+    return null;
+  }
+  return identity;
+}
+
+function resolveSemanticHostedJunctionSourceIdentity(input: {
+  connectionId: string;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+}): CanonicalHostedJunctionSourceIdentity | null {
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     return null;
@@ -564,13 +631,7 @@ function resolveCanonicalHostedJunctionSourceIdentity(input: {
     connectionId: input.connectionId,
     sourceProviderSlug,
   });
-  if (
-    !sourceInstanceKey
-    || (
-      sourceProviderSlug === input.sourceProviderSlug
-      && sourceInstanceKey !== input.sourceInstanceKey
-    )
-  ) {
+  if (!sourceInstanceKey) {
     return null;
   }
   return {
@@ -722,7 +783,7 @@ async function reconcileStoredCanonicalJunctionSourceIdentity(input: {
     ...hostedConnectionSourceRecordArgs,
   });
   const groupedRecords = records.filter((record) => {
-    const identity = resolveCanonicalHostedJunctionSourceIdentity({
+    const identity = resolveSemanticHostedJunctionSourceIdentity({
       connectionId: record.connectionId,
       sourceInstanceKey: record.sourceInstanceKey,
       sourceProviderSlug: record.sourceProviderSlug,
@@ -981,7 +1042,7 @@ function sanitizeResourceAvailabilitySummary(
       continue;
     }
 
-    const scalar = sanitizeSummaryScalar(rawValue);
+    const scalar = sanitizeSummaryScalar(key, rawValue);
 
     if (scalar !== undefined) {
       summary[key] = scalar;
@@ -1006,7 +1067,10 @@ function sanitizeSummaryKey(value: string): string | null {
   return key;
 }
 
-function sanitizeSummaryScalar(value: unknown): boolean | number | string | null | undefined {
+function sanitizeSummaryScalar(
+  key: string,
+  value: unknown,
+): boolean | number | string | null | undefined {
   if (value === null) {
     return null;
   }
@@ -1024,6 +1088,43 @@ function sanitizeSummaryScalar(value: unknown): boolean | number | string | null
   }
 
   const normalized = normalizeNullableString(value);
+
+  if (
+    key === DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
+  ) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const timestampMs = Date.parse(normalized);
+    return Number.isFinite(timestampMs)
+      && new Date(timestampMs).toISOString() === normalized
+      ? normalized
+      : undefined;
+  }
+
+  if (key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX)) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const resource = key.slice(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX.length);
+    return readDeviceSyncSourceCanonicalCoverageBoundary(
+      { [key]: normalized },
+      resource,
+    ) ?? undefined;
+  }
+
+  if (key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX)) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const resource = key.slice(
+      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX.length,
+    );
+    return readDeviceSyncSourceCanonicalCoverageFinalizedAt(
+      { [key]: normalized },
+      resource,
+    ) ?? undefined;
+  }
 
   if (
     !normalized

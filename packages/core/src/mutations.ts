@@ -1341,7 +1341,8 @@ function normalizeDeviceEventInputs(
       inputDayKey &&
         !inputTimeZone &&
         (
-          isJunctionSleepStageExternalRefInput(eventInput.externalRef)
+          context.provider === "junction"
+          || isJunctionSleepStageExternalRefInput(eventInput.externalRef)
           || isDateOnlyFloatingProviderDayInput(inputDayKey, eventInput.dataOrigin)
         ),
     );
@@ -3665,6 +3666,20 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
         retainedPreparedIds.add(entry.record.id);
       }
+      records.push(latest);
+      continue;
+    }
+
+    const replaysProviderOwnedRetractionWithoutSetAuthority = Boolean(
+      isDeletedEventSpineRecord(latest)
+      && latest.source === "device"
+      && latest.externalRef?.version !== undefined
+      && externalRef.version === undefined
+      && !authoritativeSet,
+    );
+    if (replaysProviderOwnedRetractionWithoutSetAuthority) {
+      skippedDuplicateCount += 1;
+      retainedPreparedIds.add(entry.record.id);
       records.push(latest);
       continue;
     }

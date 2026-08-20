@@ -5,8 +5,11 @@ import {
   requiresHistoricalResetDeviceSyncSource,
   sanitizeStoredDeviceSyncMetadata,
 } from "@murphai/device-syncd/public-account";
+import {
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
+  isGoogleHealthFitbitMigrationLegacyTerminal,
+} from "@murphai/device-syncd/fitbit-migration";
 import type {
-  DeviceSyncJobFailureEventOrigin,
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import type {
@@ -42,6 +45,9 @@ import {
 import {
   buildJunctionProviderSourceInstanceKey,
   canonicalizeJunctionProviderSlug,
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+  normalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import {
   resolveConfiguredDeviceSyncProviderCredentialPolicy,
@@ -434,7 +440,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           candidateMetadata: update.connection?.metadata,
           provider: record.provider,
         });
-        const sourceUpdates = resolveHostedRuntimeSourceUpdatesToApply({
+        const resolvedSourceUpdates = resolveHostedRuntimeSourceUpdatesToApply({
           connectionId: record.id,
           currentSources: sources,
           historicalMetadata: historicalMetadataResolution?.metadata
@@ -442,6 +448,29 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           provider: record.provider,
           updates: update.sources ?? [],
         });
+        const pendingDirtyBlocksFitbitTerminalProjection =
+          resolvedSourceUpdates.toApply.some((source) =>
+            isHostedRuntimeFitbitMigrationTerminalSourceUpdate({
+              currentSources: sources,
+              pendingSourceUpdates: resolvedSourceUpdates.toApply,
+              provider: record.provider,
+              source,
+            })
+          )
+          && await controlPlane.store.hasPendingDirtyConnection(record.id, tx);
+        const sourceUpdates = pendingDirtyBlocksFitbitTerminalProjection
+          ? {
+              ...resolvedSourceUpdates,
+              toApply: resolvedSourceUpdates.toApply.filter((source) =>
+                !isHostedRuntimeFitbitMigrationTerminalSourceUpdate({
+                  currentSources: sources,
+                  pendingSourceUpdates: resolvedSourceUpdates.toApply,
+                  provider: record.provider,
+                  source,
+                })
+              ),
+            }
+          : resolvedSourceUpdates;
         const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
         const credentialMutationRequested = update.credential !== undefined;
         const sourceMutationRequested = sourceUpdates.toApply.length > 0;
@@ -1321,10 +1350,6 @@ function buildPublicConnectionFromRuntimeSnapshot(
   };
 }
 
-const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
-  "sourceInstanceKeyFallback",
-]);
-
 function toHostedRuntimeConnectionSourceSnapshot(
   source: HostedDeviceConnectionSource,
 ): HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
@@ -1521,6 +1546,17 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       continue;
     }
 
+    if (
+      current
+      && input.provider.trim().toLowerCase() === "junction"
+      && normalizeJunctionProviderSlug(update.sourceProviderSlug)
+        === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+      && update.firstSeenAt !== current.firstSeenAt
+    ) {
+      staleCount += 1;
+      continue;
+    }
+
     // The runner's snapshot can predate an arrival Web already recorded, so an
     // otherwise valid update must not carry the older value back. Forward-only
     // is the whole basis of the stall signal: a rewind reopens a silence window
@@ -1565,11 +1601,38 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
     }
 
     toApply.push(current
-      ? { ...update, lifecycleEpoch: current.lifecycleEpoch }
+      ? omitHostedRuntimeSourceFirstSeenAt({
+          ...update,
+          lifecycleEpoch: current.lifecycleEpoch,
+        })
       : update);
   }
 
   return { staleCount, toApply };
+}
+
+function omitHostedRuntimeSourceFirstSeenAt(
+  update: HostedRuntimeConnectionSourceWrite,
+): HostedRuntimeConnectionSourceWrite {
+  const next = { ...update };
+  delete next.firstSeenAt;
+  return next;
+}
+
+function isHostedRuntimeFitbitMigrationTerminalSourceUpdate(input: {
+  currentSources: readonly HostedDeviceConnectionSource[];
+  pendingSourceUpdates: readonly HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
+  provider: string;
+  source: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate;
+}): boolean {
+  return input.provider.trim().toLowerCase() === "junction"
+    && normalizeJunctionProviderSlug(input.source.sourceProviderSlug)
+      === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    && isGoogleHealthFitbitMigrationLegacyTerminal(input.source)
+    && [...input.currentSources, ...input.pendingSourceUpdates].some((source) =>
+      normalizeJunctionProviderSlug(source.sourceProviderSlug)
+        === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    );
 }
 
 function normalizeHostedRuntimeSourceUpdateForProvider(input: {
@@ -1690,7 +1753,7 @@ function countHostedRuntimeConnectionSourceResources(
   }
 
   return Object.entries(summary).filter(([key, value]) =>
-    !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
+    !isDeviceSyncSourceResourceAvailabilityMetadataKey(key)
     && value !== false
     && value !== null
     && value !== undefined

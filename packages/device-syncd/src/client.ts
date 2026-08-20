@@ -135,6 +135,8 @@ export interface UpsertDeviceConnectionSourceInput {
   /** Omit to preserve the stored lifecycle; reconnect owners advance it explicitly. */
   lifecycleEpoch?: number;
   firstSeenAt?: string | null;
+  /** Hosted hydration only: replace an exact source after Web advances its epoch. */
+  replaceFirstSeenAt?: boolean;
   lastSeenAt: string;
   /** Omit to preserve the stored arrival signal; only hosted hydration sets it. */
   lastDataAt?: string | null;

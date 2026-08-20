@@ -897,6 +897,14 @@ export interface ProviderSnapshotImportReceipt {
   canonicalEventExternalRefResourceIds?: readonly string[];
   canonicalSparseCalendarTargets?: readonly ProviderSparseCalendarTarget[];
   durableDeliveryAccepted: boolean;
+  junctionCanonicalCoverage?: readonly ProviderSnapshotCanonicalCoverageEvidence[];
+}
+
+export interface ProviderSnapshotCanonicalCoverageEvidence {
+  coverageBoundary: string;
+  coverageFinalizedAt?: string;
+  resource: string;
+  sourceProviderSlug: string;
 }
 
 export interface ProviderSparseCalendarTarget {
@@ -938,7 +946,10 @@ export interface ProviderJobContext {
     options?: { completeSourceDay?: CompleteDeviceProviderSourceDay },
   ): Promise<unknown>;
   upsertConnectionSource?(
-    input: Omit<UpsertDeviceConnectionSourceInput, "connectionId">,
+    input: Omit<
+      UpsertDeviceConnectionSourceInput,
+      "connectionId" | "replaceFirstSeenAt"
+    >,
   ): DeviceConnectionSourceRecord | Promise<DeviceConnectionSourceRecord>;
   listConnectionSources?(
     input?: Omit<ListDeviceConnectionSourcesInput, "connectionId">,
@@ -1017,13 +1028,25 @@ export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
   buildSourceConnectionWork?(input: {
+    historicalProofAuthorization?: {
+      firstSeenAt: string;
+      sourceProviderSlug: string;
+    };
     now: string;
     sourceProviderSlug: string;
   }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
-  revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;
-  isSourceAccessActive?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<boolean>;
+  revokeSourceAccess?(
+    account: DeviceSyncAccount,
+    sourceProviderSlug: string,
+    options?: { requiredActiveSourceProviderSlug?: string },
+  ): Promise<void>;
+  isSourceAccessActive?(
+    account: DeviceSyncAccount,
+    sourceProviderSlug: string,
+    options?: { requireDefinitive?: boolean },
+  ): Promise<boolean>;
 }
 
 export interface DeviceSdkSignInToken {

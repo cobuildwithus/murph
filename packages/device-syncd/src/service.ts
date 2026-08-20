@@ -3,6 +3,7 @@ import {
   createImporters,
   JunctionSparseCalendarRepairNormalizationError,
 } from "@murphai/importers";
+import { normalizeJunctionCanonicalCoverageBoundary } from "@murphai/importers/device-providers/junction-resources";
 
 import {
   normalizeConfiguredDeviceSyncJobInput,
@@ -1210,6 +1211,8 @@ class DeviceSyncServiceController {
             vaultRoot: this.vaultRoot,
             ...options,
           });
+          const junctionCanonicalCoverage =
+            readCanonicalDeviceImportJunctionCoverage(importResult);
           const canonicalSparseCalendarTargets =
             readCanonicalDeviceImportSparseCalendarTargets(importResult);
           const receipt: ProviderSnapshotImportReceipt = {
@@ -1221,6 +1224,9 @@ class DeviceSyncServiceController {
               ? { canonicalSparseCalendarTargets }
               : {}),
             durableDeliveryAccepted: true,
+            ...(junctionCanonicalCoverage === undefined
+              ? {}
+              : { junctionCanonicalCoverage }),
           };
           return receipt;
         },
@@ -2536,6 +2542,46 @@ function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): s
     return typeof externalRef?.resourceId === "string"
       ? [externalRef.resourceId]
       : [];
+  });
+}
+
+function readCanonicalDeviceImportJunctionCoverage(
+  value: unknown,
+): ProviderSnapshotImportReceipt["junctionCanonicalCoverage"] {
+  const result = toPlainRecord(value);
+  if (!result || !Array.isArray(result.junctionCanonicalCoverage)) {
+    return undefined;
+  }
+
+  return result.junctionCanonicalCoverage.flatMap((entry) => {
+    const evidence = toPlainRecord(entry);
+    const resource = typeof evidence?.resource === "string" ? evidence.resource : "";
+    const coverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+      resource,
+      evidence?.coverageBoundary,
+    );
+    if (
+      !evidence
+      || !coverageBoundary
+      || !resource
+      || typeof evidence.sourceProviderSlug !== "string"
+    ) {
+      return [];
+    }
+    const coverageFinalizedAt = typeof evidence.coverageFinalizedAt === "string"
+      && Number.isFinite(Date.parse(evidence.coverageFinalizedAt))
+      && new Date(Date.parse(evidence.coverageFinalizedAt)).toISOString()
+        === evidence.coverageFinalizedAt
+      ? evidence.coverageFinalizedAt
+      : null;
+    return [{
+      coverageBoundary,
+      ...(coverageFinalizedAt
+        ? { coverageFinalizedAt }
+        : {}),
+      resource,
+      sourceProviderSlug: evidence.sourceProviderSlug,
+    }];
   });
 }
 

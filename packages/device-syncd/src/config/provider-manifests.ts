@@ -178,6 +178,10 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   backfill: {
     payload: {
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
+      historicalProofFirstSeenAt: stringJobField({ includeInHostedHint: true }),
+      historicalProofSourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
+      historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),

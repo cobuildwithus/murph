@@ -276,6 +276,9 @@
       "@murphai/device-syncd/errors": [
         "../../packages/device-syncd/src/errors.ts"
       ],
+      "@murphai/device-syncd/fitbit-migration": [
+        "../../packages/device-syncd/src/fitbit-migration.ts"
+      ],
       "@murphai/device-syncd/hosted-hints": [
         "../../packages/device-syncd/src/hosted-hints.ts"
       ],
