@@ -3674,6 +3674,104 @@ describeRealCodex('real Codex weekly health insight evidence fallback e2e', () =
   )
 })
 
+describeRealCodex('real Codex product notes eligibility e2e', () => {
+  it(
+    'filters repair-only product notes without dropping member-facing changes',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      )
+      if (!productNotes) {
+        throw new Error('Expected the managed product-notes automation.')
+      }
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-product-notes-eligibility-e2e-'),
+      )
+
+      try {
+        const appendCapturePath = path.join(
+          workingDirectory,
+          'product-notes-append.txt',
+        )
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const curlCapturePath = path.join(
+          workingDirectory,
+          'product-notes-curl.txt',
+        )
+        await materializeProductNotesFixtures({ binDirectory })
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildProductNotesDeveloperInstructions(),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            MURPH_PRODUCT_NOTES_E2E_APPEND_PATH: appendCapturePath,
+            MURPH_PRODUCT_NOTES_E2E_CURL_PATH: curlCapturePath,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            productNotes.instructions,
+            'Scheduled occurrence context:',
+            '- Current local date: 2026-08-19.',
+            '- The member regularly reviews scheduled reminders and has an active workout they use from Messages.',
+            '- A past connected-health sync delayed one reminder.',
+            '- The controlled canonical ledger and changelog feed are available through the normal vault-cli and curl commands.',
+            '- Complete the normal selection, ledger append, and terminal scheduled decision.',
+          ].join('\n\n'),
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        const curlCalls = (await readFile(curlCapturePath, 'utf8'))
+          .trim()
+          .split('\n')
+        expect(curlCalls).toHaveLength(1)
+        expect(curlCalls[0]).toContain(
+          '/api/changelog?days=14&featureLimit=70&improvementLimit=10',
+        )
+
+        const appendArguments = await readFile(appendCapturePath, 'utf8')
+        expect(appendArguments).toContain('clearer-automation-recipients')
+        expect(appendArguments).toContain('resume-workouts-in-messages')
+        expect(appendArguments).not.toContain(
+          'scheduled-support-resumes-after-syncs',
+        )
+
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/automation/iu)
+          expect(decision.text).toMatch(/resume|workout/iu)
+          expect(decision.text).not.toMatch(
+            /health-data maintenance|reliability|scheduled support resumes/iu,
+          )
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () => {
   it(
     'rechecks a later import in the same conversation without relabeling UTC as local time',
@@ -9125,6 +9223,129 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+async function materializeProductNotesFixtures(input: {
+  binDirectory: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const feed = JSON.stringify({
+    items: [
+      {
+        details:
+          'Reliability work prevents scheduled jobs from remaining stalled after connected-health maintenance.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'scheduled-support-resumes-after-syncs',
+        kind: 'feature',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['automations', 'connected-health'],
+        sourcePullRequests: [2001],
+        summary:
+          'Scheduled support resumes after connected-health maintenance.',
+        title: 'Scheduled support resumes after syncs',
+        url:
+          'https://www.withmurph.ai/changelog?item=scheduled-support-resumes-after-syncs',
+      },
+      {
+        details:
+          'Review the destination before saving or changing a scheduled message.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'clearer-automation-recipients',
+        kind: 'improvement',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['automations', 'settings'],
+        sourcePullRequests: [2002],
+        summary:
+          'Automation settings now show who receives each scheduled message before you save.',
+        title: 'Clearer automation recipients',
+        tryIt: {
+          label: 'Review automations',
+          prompt: 'Show my scheduled automations.',
+        },
+        url:
+          'https://www.withmurph.ai/changelog?item=clearer-automation-recipients',
+      },
+      {
+        details:
+          'Start or resume the current logged workout without leaving the Messages conversation.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'resume-workouts-in-messages',
+        kind: 'feature',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['workouts', 'messages'],
+        sourcePullRequests: [2003],
+        summary:
+          'Murph can now resume a paused workout from Messages.',
+        title: 'Resume workouts in Messages',
+        tryIt: {
+          label: 'Resume a workout',
+          prompt: 'Resume my workout.',
+        },
+        url:
+          'https://www.withmurph.ai/changelog?item=resume-workouts-in-messages',
+      },
+    ],
+    links: {
+      digestCardTemplate:
+        'https://www.withmurph.ai/changelog/card/v1/{ids}.png',
+      fullChangelog: 'https://www.withmurph.ai/changelog',
+    },
+    schema: 'murph.changelog-feed.v1',
+    window: {
+      from: '2026-08-06',
+      to: '2026-08-20',
+    },
+  })
+  const curlPath = path.join(input.binDirectory, 'curl')
+  await writeFile(
+    curlPath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"/api/changelog?days=14&featureLimit=70&improvementLimit=10"*)',
+      '    printf \'%s\\n\' "$*" >> "$MURPH_PRODUCT_NOTES_E2E_CURL_PATH"',
+      `    printf '%s\\n' '${feed}'`,
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'unexpected product-notes URL\' >&2',
+      '    exit 69',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(curlPath, 0o700)
+
+  const vaultCliPath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    vaultCliPath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"knowledge show murph-product-notes"*)',
+      '    printf \'%s\\n\' \'# Murph product notes\' \'\' \'## 2026-08-05 — Murph product notes\' \'Kind: feature discovery\' \'Item ids: earlier-feature\'',
+      '    ;;',
+      '  *"knowledge append-section murph-product-notes"*)',
+      '    printf \'%s\\n\' "$*" > "$MURPH_PRODUCT_NOTES_E2E_APPEND_PATH"',
+      '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'unexpected product-notes vault command\' >&2',
+      '    exit 69',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(vaultCliPath, 0o700)
+}
+
 async function buildWearableArrivalPrompt(input: {
   occurredAt: string
   promptTimeContext: Awaited<ReturnType<typeof resolveAssistantPromptTimeContext>>
@@ -9962,6 +10183,28 @@ function buildWeeklyHealthInsightDeveloperInstructions(): string {
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-08-09',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: 'automation-cron',
+  })
+}
+
+function buildProductNotesDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-19',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',

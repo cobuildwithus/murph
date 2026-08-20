@@ -1058,7 +1058,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.title).toBe('Murph product notes')
     expect(seed.summary).toBe('A biweekly personalized note alternating what is new in Murph with things Murph can do for you.')
     expect(seed.instructions).toContain('Goal: every two weeks')
-    expect(seed.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=0')
+    expect(seed.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
     expect(seed.instructions).toContain('/api/feature-catalog')
     expect(seed.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
     expect(seed.instructions).toContain('choose the feature discovery kind')
@@ -1077,8 +1077,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('2-3 things Murph can already do')
     expect(seed.instructions).toContain('Do not pad with weak matches')
     expect(seed.instructions).toContain('member-facing product update, not a dump of release notes')
+    expect(seed.instructions).toContain('introduces or materially changes a member-facing action, decision, or visible experience')
     expect(seed.instructions).toContain('Never pitch reliability work.')
-    expect(seed.instructions).toContain('drop it even if the feed lists it as a feature and even if this member hit that issue')
+    expect(seed.instructions).toContain('only restores or hardens otherwise unchanged behavior or reports internal durability')
     expect(seed.instructions).not.toContain('member encountered the corresponding issue')
     expect(seed.instructions).toContain('lower priority than exciting capabilities')
     expect(seed.instructions).toContain('if neither kind clears, skip')
@@ -1653,7 +1654,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(productUpdatesRecord?.tags).not.toContain(
       ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
     )
-    expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=0')
+    expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
     expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
     expect(productUpdatesRecord?.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
     expect(productUpdatesRecord?.instructions).toContain('choose the feature discovery kind')
