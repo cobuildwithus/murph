@@ -55,6 +55,7 @@ describe("group-read Codex permissions", () => {
       "# Silent member maintenance may read the vault and write only canonical memory infrastructure.",
       "[permissions.murph-member-memory-maintenance.filesystem]",
       '":minimal" = "read"',
+      '"/app" = "read"',
       "glob_scan_max_depth = 64",
       "",
       '[permissions.murph-member-memory-maintenance.filesystem.":workspace_roots"]',

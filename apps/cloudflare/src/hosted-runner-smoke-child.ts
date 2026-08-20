@@ -27,8 +27,10 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberWorkspacePermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
@@ -786,6 +788,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "",
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+    ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
     "[skills]",
     "include_instructions = false",
@@ -2025,7 +2028,7 @@ async function runCodexVaultCliProof(input: {
       {
         cwd: input.vaultRoot,
         includeOutputPreviewOnFailure: false,
-        permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+        permissionProfile: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
       },
     ),
     input.vaultRoot,

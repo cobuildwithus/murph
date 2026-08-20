@@ -907,7 +907,14 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 132000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");
     expect(hostedRunnerSmokeChild).toContain('"memory-show"');
-    expect(hostedRunnerSmokeChild).toContain(
+    const vaultCliProofSource = hostedRunnerSmokeChild.slice(
+      hostedRunnerSmokeChild.indexOf("async function runCodexVaultCliProof"),
+      hostedRunnerSmokeChild.indexOf("function assertMemoryShowProof"),
+    );
+    expect(vaultCliProofSource).toContain(
+      "permissionProfile: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE",
+    );
+    expect(vaultCliProofSource).not.toContain(
       "permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE",
     );
     expect(hostedRunnerSmokeChild).toContain(
