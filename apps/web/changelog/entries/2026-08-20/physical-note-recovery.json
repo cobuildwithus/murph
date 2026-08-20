@@ -9,6 +9,6 @@
     "summary": "When an earlier physical-note attempt has an uncertain printer outcome, you can now ask Murph to check it without trying to send another note.",
     "details": "Murph clears the blocker only when the printer evidence makes that safe, reports accepted notes without pretending to cancel them, and never retries or sends a new note during the check.",
     "relevanceTags": ["assistant", "physical-notes", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2099]
   }
 }

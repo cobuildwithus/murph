@@ -136,6 +136,8 @@ not Web presentation.
   it.
 - Repository-wide typecheck reports two pre-existing Junction workspace-boundary
   violations outside this change; all workspace package/app typechecks pass.
+- Candidate is published as PR #2099 for the required specialist, final
+  ReviewGPT, and exact-head CI gates.
 
 Status: active
 Updated: 2026-08-20
