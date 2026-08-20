@@ -1,6 +1,6 @@
 # Project Canonical Imports Into Companion Freshness
 
-Status: active
+Status: completed
 Updated: 2026-08-20
 
 ## Goal
@@ -114,5 +114,18 @@ artifacts.
   after deletion. The full device-syncd suite passed 1,255 tests, including the
   exact-identity and scheduled-child regression, and both production-shaped
   Junction late-sleep recovery paths passed. Device-syncd typecheck passed.
-  ReviewGPT round 3, required CI, and final deployment compatibility proof:
-  pending.
+- Final ReviewGPT round three found review-induced dirty-payload retention
+  plumbing whose only producer had already been deleted by the exact-receipt
+  redesign. That unreachable cross-fetch channel was deleted instead of
+  retained as speculative complexity. The production pass now has one explicit
+  authoritative dirty-state fetch owner, while a cold retry refetches the Web
+  source of truth.
+- The focused runtime and production-pass tests passed 212 tests on current
+  main. The full assistant-runtime suite passed 2,422 tests with five skipped,
+  and assistant-runtime typecheck passed.
+- The clean follow-up PR full-snapshot ReviewGPT audit returned PASS with no
+  findings. It independently confirmed the single authoritative fetch, cold
+  refetch and relinking, exact receipt gate, staged acknowledgements, retries,
+  and checkpoint promotion. Required CI and production rollout remain release
+  gates outside this completed implementation plan.
+Completed: 2026-08-20
