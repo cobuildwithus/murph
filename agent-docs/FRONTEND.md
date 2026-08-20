@@ -11,13 +11,13 @@ Design context lives in two files at the repo root. Read both before any UI work
 - **`PRODUCT.md`** — strategic: register (brand vs product), target users, brand personality, anti-references, design principles. The "who / what / why".
 - **`DESIGN.md`** — visual: color tokens, typography, elevation, components, do's and don'ts. Follows the [Google Stitch DESIGN.md format](https://stitch.withgoogle.com/docs/design-md/format/) — YAML frontmatter (machine-readable tokens) + six fixed sections (Overview, Colors, Typography, Elevation, Components, Do's and Don'ts). The "how it looks".
 
-Both files are managed by the `impeccable` skill (`.agents/skills/impeccable/`). They are the single source of truth for product strategy and visual design. Don't duplicate their values into other docs or code comments.
+Both files are managed through the installed `impeccable` skill. They are the single source of truth for product strategy and visual design. Don't duplicate their values into other docs or code comments.
 
 Colors and fonts are mapped to standard shadcn CSS variables in `apps/web/app/globals.css`. Brand guidelines and reusable components live at [localhost:3000/design](http://localhost:3000/design) when running the dev server (`?tab=brand`, `?tab=components`, and `?tab=consent`). Unlinked, noindex presentation studies live under [localhost:3000/screenshots](http://localhost:3000/screenshots).
 
 ### Impeccable skill
 
-Installed in repo (`.agents/skills/impeccable/`). Available after pull — no extra install needed.
+Invoke the installed `impeccable` skill by name. Skill installation is environment-owned; do not assume a checkout-local skill directory exists.
 
 Run via `$impeccable <command>` (or pinned shortcuts if created). Useful commands for this project:
 - `$impeccable craft [feature]` — shape, then build a feature end-to-end.
@@ -61,7 +61,7 @@ const badgeVariants = cva("rounded-full px-2 py-0.5 text-xs font-medium", {
 - **Imports**: `@/*` → `apps/web/*`, e.g. `@/src/components/ui/button`, `@/src/lib/utils`
 - **Icons**: `lucide-react` is the default import (matches existing usage). Reserve Lucide Animated (`pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`) for icons that specifically need motion — loaders, hover affordances, etc.
 - **Transitions**: View Transitions API (`<ViewTransition>` from `next/navigation`), not Framer Motion
-- **shadcn skill**: `.agents/skills/shadcn/` — **invoke this skill (`Skill(shadcn)` or `/shadcn`) before any shadcn work.** It loads project registry config, current style (`base-nova` = base UI), installed components, and the correct docs endpoint (`components/base/[name]`). Do not rely on general shadcn knowledge — the project is on base UI, and components have evolved past what a model may remember.
+- **shadcn skill**: **invoke the installed `shadcn` skill by name before any shadcn work.** It loads project registry config, current style (`base-nova` = base UI), installed components, and the correct docs endpoint (`components/base/[name]`). Do not rely on general shadcn knowledge — the project is on base UI, and components have evolved past what a model may remember.
 
 ### Commands
 
