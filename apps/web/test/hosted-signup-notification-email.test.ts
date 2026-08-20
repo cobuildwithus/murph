@@ -1,15 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  scheduleHostedSignupNotificationEmails,
   sendHostedSignupNotificationEmailForMember,
   sendHostedSignupNotificationEmailForMemberBestEffort,
 } from "@/src/lib/hosted-onboarding/signup-notification-email";
+
+const nextServerMocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
+}));
+
+vi.mock("next/server", () => ({
+  after: nextServerMocks.after,
+}));
 
 const mocks = vi.hoisted(() => ({
   claimHostedMemberSignupNotificationEmailAttempt: vi.fn(),
   getPrisma: vi.fn(),
   prisma: {
-    readonly: true,
+    hostedMember: {
+      findUnique: vi.fn(),
+    },
   },
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
@@ -45,6 +56,12 @@ describe("hosted signup notification email", () => {
     vi.clearAllMocks();
     mocks.claimHostedMemberSignupNotificationEmailAttempt.mockResolvedValue(true);
     mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: "active",
+      suspendedAt: null,
+      threadContainer: null,
+    });
     mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: "active",
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -58,6 +75,11 @@ describe("hosted signup notification email", () => {
       stripeCheckoutEmail: null,
       verifiedEmail: null,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("skips when HOSTED_SIGNUP_NOTIFICATION_EMAILS is unset", async () => {
@@ -78,6 +100,7 @@ describe("hosted signup notification email", () => {
     });
 
     expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.prisma.hostedMember.findUnique).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
@@ -99,7 +122,6 @@ describe("hosted signup notification email", () => {
           "New Murph signup.",
           "",
           "Member ID: member_123",
-          "Billing status: active",
           "Stripe event: invoice.paid",
           "Stripe event ID: evt_123",
         ].join("\n"),
@@ -160,24 +182,29 @@ describe("hosted signup notification email", () => {
 
   it.each([
     {
+      accountGroupMemberships: [],
       billingStatus: "past_due",
       suspendedAt: null,
+      threadContainer: null,
     },
     {
+      accountGroupMemberships: [],
       billingStatus: "active",
       suspendedAt: new Date("2026-05-03T00:00:00.000Z"),
+      threadContainer: null,
     },
   ])(
-    "skips members without active unsuspended billing access (%s)",
-    async ({ billingStatus, suspendedAt }) => {
+    "skips members without canonical active access (%s)",
+    async (memberAccess) => {
       const fetchMock: typeof fetch = async () => {
         throw new Error("fetch should not be called");
       };
+      mocks.prisma.hostedMember.findUnique.mockResolvedValue(memberAccess);
       mocks.readHostedMemberCoreState.mockResolvedValue({
-        billingStatus,
+        billingStatus: memberAccess.billingStatus,
         createdAt: new Date("2026-05-01T00:00:00.000Z"),
         id: "member_123",
-        suspendedAt,
+        suspendedAt: memberAccess.suspendedAt,
         updatedAt: new Date("2026-05-01T00:00:00.000Z"),
       });
 
@@ -198,6 +225,42 @@ describe("hosted signup notification email", () => {
       expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).not.toHaveBeenCalled();
     },
   );
+
+  it("sends for active Family access without presenting direct billing as access state", async () => {
+    mocks.prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [{
+        group: {
+          billingStatus: "active",
+          suspendedAt: null,
+        },
+        status: "active",
+      }],
+      billingStatus: "canceled",
+      suspendedAt: null,
+      threadContainer: null,
+    });
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toContain("Member ID: member_123");
+      expect(payload.text).not.toContain("Billing status:");
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    await expect(sendHostedSignupNotificationEmailForMember({
+      env: {
+        HOSTED_SIGNUP_NOTIFICATION_EMAILS: "founder@example.com",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toMatchObject({ status: "sent" });
+
+    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
+  });
 
   it("skips when the notification attempt was already claimed", async () => {
     const fetchMock: typeof fetch = async () => {
@@ -344,5 +407,51 @@ describe("hosted signup notification email", () => {
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("founder@example.com");
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("re_sensitive_test");
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("delivery failed");
+  });
+
+  it("registers one post-response task and sends distinct members serially", async () => {
+    vi.stubEnv("HOSTED_SIGNUP_NOTIFICATION_EMAILS", "founder@example.com");
+    vi.stubEnv(
+      "HOSTED_SIGNUP_WELCOME_EMAIL_FROM",
+      "Murph <welcome@example.com>",
+    );
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    let requestsInFlight = 0;
+    let peakRequestsInFlight = 0;
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      requestsInFlight += 1;
+      peakRequestsInFlight = Math.max(
+        peakRequestsInFlight,
+        requestsInFlight,
+      );
+      await Promise.resolve();
+      requestsInFlight -= 1;
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    scheduleHostedSignupNotificationEmails({
+      memberIds: ["member_1", "member_2", "member_1"],
+      prisma: mocks.prisma as never,
+      sourceEventId: "evt_123",
+      sourceEventType: "invoice.paid",
+    });
+
+    expect(nextServerMocks.after).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const task = nextServerMocks.after.mock.calls[0]?.[0];
+    if (!task) {
+      throw new Error("Expected one scheduled signup-notification task.");
+    }
+    await task();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(peakRequestsInFlight).toBe(1);
+    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt)
+      .toHaveBeenNthCalledWith(1, expect.objectContaining({ memberId: "member_1" }));
+    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt)
+      .toHaveBeenNthCalledWith(2, expect.objectContaining({ memberId: "member_2" }));
   });
 });

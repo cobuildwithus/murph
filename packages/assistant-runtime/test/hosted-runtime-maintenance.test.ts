@@ -1739,8 +1739,9 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
-  it("passes staged dirty ack overlays into control-plane sync", async () => {
+  it("fetches authoritative dirty state once after hydration and preserves staged acks", async () => {
     const close = vi.fn();
+    const deviceSyncPort = createMaintenanceDeviceSyncPortStub();
     const service = {
       close,
       drainWorker: vi.fn(async () => 0),
@@ -1762,7 +1763,7 @@ describe("runHostedDeviceSyncPass", () => {
       },
       "/tmp/vault-root",
       DEVICE_SYNC_CONFIG,
-      createMaintenanceDeviceSyncPortStub(),
+      deviceSyncPort,
       45_000,
       {
         stagedDirtyAcks: [
@@ -1778,6 +1779,20 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
       expect.objectContaining({
         skipDirtyPendingFetch: true,
+        stagedDirtyAcks: [
+          {
+            connectionId: "dsc_123",
+            processedDirtyPayloadIds: ["dsp_1"],
+            processedRevision: "7",
+          },
+        ],
+      }),
+    );
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(mocks.applyHostedPendingDirtyDeviceSyncStateForWake).toHaveBeenCalledTimes(1);
+    expect(mocks.applyHostedPendingDirtyDeviceSyncStateForWake).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceSyncPort,
         stagedDirtyAcks: [
           {
             connectionId: "dsc_123",
@@ -3176,6 +3191,12 @@ describe("runHostedDeviceSyncPass", () => {
       observedTokenVersions: new Map(),
       pendingDirtyAcks: [
         {
+          completedImports: [{
+            dirtyPayloadId: "dsp_1",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "steps",
+            sourceProviderSlug: "apple_health_kit",
+          }],
           connectionId: "dsc_dirty_batch_1",
           nextWakeAt: "2026-04-08T00:05:00.000Z",
           processedDirtyPayloadIds: ["dsp_1"],
@@ -3214,6 +3235,12 @@ describe("runHostedDeviceSyncPass", () => {
       nextWakeAt: "2026-04-08T00:03:00.000Z",
       records: [
         {
+          completedImports: [{
+            dirtyPayloadId: "dsp_1",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "steps",
+            sourceProviderSlug: "apple_health_kit",
+          }],
           connectionId: "dsc_dirty_batch_1",
           nextWakeAt: "2026-04-08T00:05:00.000Z",
           processedDirtyPayloadIds: ["dsp_1"],
@@ -3229,6 +3256,12 @@ describe("runHostedDeviceSyncPass", () => {
     });
     assert.deepEqual(result.stagedDirtyAcks, [
       {
+        completedImports: [{
+          dirtyPayloadId: "dsp_1",
+          importCompletedAt: "2026-08-20T09:00:00.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
         connectionId: "dsc_dirty_batch_1",
         nextWakeAt: "2026-04-08T00:05:00.000Z",
         processedDirtyPayloadIds: ["dsp_1"],

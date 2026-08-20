@@ -297,14 +297,14 @@ function createSourceStore(
     take: number;
     where: {
       connectionId: { in: string[] };
-      kind: string;
+      kind: { in: string[] };
       sourceProviderSlug?: string;
       userId: string;
     };
   }) =>
     signals
       .filter((signal) => signal.userId === input.where.userId)
-      .filter((signal) => signal.kind === input.where.kind)
+      .filter((signal) => input.where.kind.in.includes(signal.kind))
       .filter((signal) =>
         signal.connectionId !== null
         && input.where.connectionId.in.includes(signal.connectionId)

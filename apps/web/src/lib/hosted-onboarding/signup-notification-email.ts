@@ -1,4 +1,7 @@
-import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
+import "server-only";
+
+import { type PrismaClient } from "@prisma/client";
+import { after } from "next/server";
 
 import { getPrisma } from "../prisma";
 import { parseCommaSeparatedList } from "../primitives";
@@ -7,6 +10,7 @@ import {
   readHostedMemberCoreState,
   readHostedMemberEmailAuthorization,
 } from "./hosted-member-store";
+import { readActiveHostedMemberAccess } from "./member-access";
 import {
   HostedResendPlainTextEmailError,
   readHostedResendPlainTextEmailConfig,
@@ -34,6 +38,35 @@ export type HostedSignupNotificationEmailResult =
 
 export const HostedSignupNotificationEmailError = HostedResendPlainTextEmailError;
 export type HostedSignupNotificationEmailError = HostedResendPlainTextEmailError;
+
+export function scheduleHostedSignupNotificationEmails(input: {
+  memberIds: readonly string[];
+  prisma: PrismaClient;
+  sourceEventId?: string | null;
+  sourceEventType?: string | null;
+}): void {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return;
+  }
+
+  const task = async () => {
+    for (const memberId of memberIds) {
+      await sendHostedSignupNotificationEmailForMemberBestEffort({
+        memberId,
+        prisma: input.prisma,
+        sourceEventId: input.sourceEventId,
+        sourceEventType: input.sourceEventType,
+      });
+    }
+  };
+
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}
 
 export async function sendHostedSignupNotificationEmailForMemberBestEffort(input: {
   env?: HostedSignupNotificationEmailEnv;
@@ -79,21 +112,18 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
   }
 
   const prisma = input.prisma ?? getPrisma();
-  const member = await readHostedMemberCoreState({
+  const hasActiveAccess = await readActiveHostedMemberAccess({
     memberId: input.memberId,
     prisma,
   });
 
-  if (!member) {
+  if (!hasActiveAccess) {
+    const member = await readHostedMemberCoreState({
+      memberId: input.memberId,
+      prisma,
+    });
     return {
-      reason: "member_not_found",
-      status: "skipped",
-    };
-  }
-
-  if (member.billingStatus !== HostedBillingStatus.active || member.suspendedAt) {
-    return {
-      reason: "member_not_active",
+      reason: member ? "member_not_active" : "member_not_found",
       status: "skipped",
     };
   }
@@ -125,7 +155,6 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     idempotencyKey: buildHostedSignupNotificationEmailIdempotencyKey(input.memberId),
     subject: HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT,
     text: buildHostedSignupNotificationEmailText({
-      billingStatus: member.billingStatus,
       customerEmail,
       memberId: input.memberId,
       sourceEventId: input.sourceEventId,
@@ -182,7 +211,6 @@ function readHostedSignupNotificationEmailRecipients(value: string | undefined):
 }
 
 function buildHostedSignupNotificationEmailText(input: {
-  billingStatus: string;
   customerEmail?: string | null;
   memberId: string;
   sourceEventId?: string | null;
@@ -193,7 +221,6 @@ function buildHostedSignupNotificationEmailText(input: {
     "",
     `Member ID: ${input.memberId}`,
     input.customerEmail ? `Email: ${input.customerEmail}` : null,
-    `Billing status: ${input.billingStatus}`,
     input.sourceEventType ? `Stripe event: ${input.sourceEventType}` : null,
     input.sourceEventId ? `Stripe event ID: ${input.sourceEventId}` : null,
   ].filter((line): line is string => line !== null).join("\n");

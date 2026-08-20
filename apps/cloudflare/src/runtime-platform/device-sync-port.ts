@@ -12,6 +12,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  type HostedExecutionDeviceSyncCompletedImport,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
@@ -202,6 +203,7 @@ export function createHostedWebDeviceSyncPort(input: {
       return parseHostedExecutionDeviceSyncDirtyPendingResponse(payload);
     },
     async ackDirtyStateProcessed(runtimeInput: {
+      completedImports?: HostedExecutionDeviceSyncCompletedImport[];
       connectionId: string;
       processedDirtyPayloadIds?: string[];
       processedRevision: string;
@@ -214,6 +216,9 @@ export function createHostedWebDeviceSyncPort(input: {
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
+          ...(runtimeInput.completedImports
+            ? { completedImports: runtimeInput.completedImports }
+            : {}),
           connectionId: runtimeInput.connectionId,
           ...(runtimeInput.processedDirtyPayloadIds
             ? { processedDirtyPayloadIds: runtimeInput.processedDirtyPayloadIds }

@@ -2433,6 +2433,8 @@ const JUNCTION_SLEEP_STAGE_METRIC_FACETS = new Set([
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
 const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
 const JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION = "junction-no-id-profile.v1";
+const JUNCTION_STABLE_PROFILE_CREATED_AT_NORMALIZER_VERSION =
+  "junction-stable-profile-created-at.v1";
 
 function deviceDataOriginSourceMatches(
   existing: DeviceDataOrigin | undefined,
@@ -2484,44 +2486,62 @@ function junctionNoIdProfileScopeKey(
   });
 }
 
-function junctionNoIdProfilePredecessorRevision(
-  match: IndexedEventExternalRefMatch,
-): string | null {
-  const externalRef = match.indexedExternalRef;
-  const providerRecord = match.indexedRecord;
-  const origin = providerRecord.dataOrigin;
-  const persistedRevision = externalRef.version ?? providerRecord.occurredAt;
-  if (
-    !junctionNoIdProfileScopeKey(externalRef, origin)
-    || !isWritableIsoDateTime(persistedRevision)
-    || providerRecord.occurredAt !== persistedRevision
-    || origin?.observedAtRaw !== persistedRevision
-    || (
-      externalRef.version === undefined
-      && origin.normalizerVersion !== "junction-normalizer.v1"
-    )
-    || isDeletedEventSpineRecord(match.record)
-  ) {
-    return null;
-  }
-
-  const expectedResourceId = `profile-${createHash("sha256")
+function junctionNoIdProfileResourceId(
+  origin: DeviceDataOrigin,
+  occurredAt: string,
+): string {
+  return `profile-${createHash("sha256")
     .update(JSON.stringify([
       "profile",
       origin.sourceProviderSlug,
       origin.sourceType,
       origin.sourceInstanceId,
-      providerRecord.occurredAt,
+      occurredAt,
     ]))
     .digest("hex")
     .slice(0, 16)}`;
+}
+
+function junctionNoIdProfileProviderBaselineRevision(
+  match: IndexedEventExternalRefMatch,
+): string | null {
+  const externalRef = match.indexedExternalRef;
+  const providerRecord = match.indexedRecord;
+  const origin = providerRecord.dataOrigin;
+  const isCurrentNoIdProfile = origin?.normalizerVersion
+    === JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION;
+  const isLegacyNoIdProfile = origin?.normalizerVersion === "junction-normalizer.v1";
+  const persistedRevision = isCurrentNoIdProfile
+    ? externalRef.version
+    : externalRef.version ?? providerRecord.occurredAt;
+  if (
+    (!isCurrentNoIdProfile && !isLegacyNoIdProfile)
+    || !junctionNoIdProfileScopeKey(externalRef, origin)
+    || persistedRevision === undefined
+    || !isWritableIsoDateTime(persistedRevision)
+    || !isWritableIsoDateTime(providerRecord.occurredAt)
+    || origin?.observedAtRaw !== providerRecord.occurredAt
+    || (isLegacyNoIdProfile && providerRecord.occurredAt !== persistedRevision)
+  ) {
+    return null;
+  }
+
+  const expectedResourceId = junctionNoIdProfileResourceId(origin, providerRecord.occurredAt);
   return externalRef.resourceId === expectedResourceId ? persistedRevision : null;
+}
+
+function junctionNoIdProfilePredecessorRevision(
+  match: IndexedEventExternalRefMatch,
+): string | null {
+  return isDeletedEventSpineRecord(match.record)
+    ? null
+    : junctionNoIdProfileProviderBaselineRevision(match);
 }
 
 function isJunctionNoIdProfilePredecessor(
   match: IndexedEventExternalRefMatch,
 ): boolean {
-  return junctionNoIdProfilePredecessorRevision(match) !== null;
+  return junctionNoIdProfileProviderBaselineRevision(match) !== null;
 }
 
 function indexJunctionNoIdProfilePredecessors(
@@ -2551,6 +2571,143 @@ function indexJunctionNoIdProfilePredecessors(
 function isIncomingJunctionNoIdProfile(record: EventRecord): boolean {
   return record.dataOrigin?.normalizerVersion === JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION
     && junctionNoIdProfileScopeKey(record.externalRef, record.dataOrigin) !== null;
+}
+
+function isIncomingJunctionStableProfileCreatedAt(record: EventRecord): boolean {
+  return record.dataOrigin?.normalizerVersion === JUNCTION_STABLE_PROFILE_CREATED_AT_NORMALIZER_VERSION
+    && junctionNoIdProfileScopeKey(record.externalRef, record.dataOrigin) !== null;
+}
+
+function isExactJunctionProfileCreatedAtTimestampReplay(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  const existingRef = existing.externalRef;
+  const incomingRef = incoming.externalRef;
+  const existingOrigin = existing.dataOrigin;
+  const incomingOrigin = incoming.dataOrigin;
+  const existingRevision = existingRef?.version ?? existing.occurredAt;
+  const existingScopeKey = junctionNoIdProfileScopeKey(existingRef, existingOrigin);
+  const incomingScopeKey = junctionNoIdProfileScopeKey(incomingRef, incomingOrigin);
+  if (
+    !existingOrigin
+    || !incomingOrigin
+    || existingScopeKey === null
+    || existingScopeKey !== incomingScopeKey
+    || !existingRef
+    || !incomingRef?.version
+    || !isWritableIsoDateTime(existingRevision)
+    || !isWritableIsoDateTime(incomingRef.version)
+    || !isWritableIsoDateTime(existing.occurredAt)
+    || !isWritableIsoDateTime(existing.recordedAt)
+    || !isWritableIsoDateTime(incoming.occurredAt)
+    || !isWritableIsoDateTime(incoming.recordedAt)
+    || compareIsoTimestampsAscending(incomingRef.version, existingRevision) !== 0
+    || (
+      !isDeletedEventSpineRecord(existing)
+      && compareIsoTimestampsAscending(existing.recordedAt, existing.occurredAt) !== 0
+    )
+    || (
+      isDeletedEventSpineRecord(existing)
+      && compareIsoTimestampsAscending(existing.recordedAt, existing.occurredAt) < 0
+    )
+    || existing.dayKey !== toIsoTimestamp(existing.occurredAt, "existing.occurredAt").slice(0, 10)
+    || compareIsoTimestampsAscending(incoming.occurredAt, existing.occurredAt) >= 0
+    || compareIsoTimestampsAscending(incoming.recordedAt, incoming.occurredAt) !== 0
+    || incoming.dayKey !== toIsoTimestamp(incoming.occurredAt, "incoming.occurredAt").slice(0, 10)
+    || existingOrigin.observedAtRaw !== existing.occurredAt
+    || incomingOrigin.observedAtRaw !== incoming.occurredAt
+    || !deviceDataOriginSourceMatches(existingOrigin, incomingOrigin)
+    || existingOrigin.timeZoneOffsetMinutes !== incomingOrigin.timeZoneOffsetMinutes
+    || existingOrigin.timestampSemantics !== incomingOrigin.timestampSemantics
+    || existingOrigin.originConfidence !== incomingOrigin.originConfidence
+  ) {
+    return false;
+  }
+
+  return deviceEventContentKey({
+    ...existing,
+    occurredAt: incoming.occurredAt,
+    recordedAt: incoming.recordedAt,
+    dayKey: incoming.dayKey,
+    externalRef: incomingRef,
+    dataOrigin: incomingOrigin,
+  }) === deviceEventContentKey(incoming);
+}
+
+// One released Junction normalizer pinned stable-profile occurrence to the
+// mutable updated-at revision. The successor pins occurrence to created-at but
+// deliberately keeps updated-at as source ordering. Admit only that exact,
+// one-way timestamp-only replay so the generic equal-revision guard remains
+// fail-closed for health-data changes.
+function isJunctionStableProfileCreatedAtTimestampMigration(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  const existingRef = existing.externalRef;
+  const incomingRef = incoming.externalRef;
+  return isIncomingJunctionStableProfileCreatedAt(incoming)
+    && existing.dataOrigin?.normalizerVersion === "junction-normalizer.v1"
+    && existingRef?.version !== undefined
+    && incomingRef !== undefined
+    && eventExternalRefKey(existingRef) === eventExternalRefKey(incomingRef)
+    && isExactJunctionProfileCreatedAtTimestampReplay(existing, incoming);
+}
+
+// Revision-2 admission is account-wide, so a released no-ID profile can be
+// replayed after created_at becomes available while updated_at (the provider
+// revision) is unchanged. Its timestamp-derived resource identity changes,
+// but the replay must not split a member edit or bypass a deletion. Retain the
+// old identity only for this exact timestamp-only transition; changed health
+// data at the same source revision remains a conflict.
+function isJunctionNoIdProfileEqualRevisionTimestampReplay(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  const existingRef = existing.externalRef;
+  const incomingRef = incoming.externalRef;
+  const existingOrigin = existing.dataOrigin;
+  const incomingOrigin = incoming.dataOrigin;
+  if (
+    !isIncomingJunctionNoIdProfile(incoming)
+    || !existingRef
+    || !incomingRef
+    || !existingOrigin
+    || !incomingOrigin
+    || eventExternalRefKey(existingRef) === eventExternalRefKey(incomingRef)
+    || junctionNoIdProfileResourceId(existingOrigin, existing.occurredAt)
+      !== existingRef.resourceId
+    || junctionNoIdProfileResourceId(incomingOrigin, incoming.occurredAt)
+      !== incomingRef.resourceId
+    || !(
+      existingOrigin.normalizerVersion === "junction-normalizer.v1"
+      || existingOrigin.normalizerVersion === JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION
+    )
+  ) {
+    return false;
+  }
+
+  return isExactJunctionProfileCreatedAtTimestampReplay(existing, incoming);
+}
+
+function isMemberDeletedJunctionStableProfile(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  const existingRef = existing.externalRef;
+  const incomingRef = incoming.externalRef;
+  if (!existingRef || !incomingRef) {
+    return false;
+  }
+  return isDeletedEventSpineRecord(existing)
+    && isIncomingJunctionStableProfileCreatedAt(incoming)
+    && junctionNoIdProfileScopeKey(existingRef, existing.dataOrigin) !== null
+    && eventExternalRefKey(existingRef) === eventExternalRefKey(incomingRef)
+    && deviceDataOriginSourceMatches(existing.dataOrigin, incoming.dataOrigin)
+    && existingRef?.version !== undefined
+    && isWritableIsoDateTime(existingRef.version)
+    && isWritableIsoDateTime(existing.recordedAt)
+    && compareIsoTimestampsAscending(existing.recordedAt, existingRef.version) > 0;
 }
 
 function isDateLikeWhoopBodyMeasurementResourceId(resourceId: string): boolean {
@@ -3027,18 +3184,51 @@ function buildLegacyExternalRefReservations(
     }
 
     const scopeKey = junctionNoIdProfileScopeKey(externalRef, entry.record.dataOrigin);
-    const predecessorMatches = scopeKey
-      ? (index.junctionNoIdProfilePredecessorsByScope.get(scopeKey) ?? []).filter((match) => {
-          const predecessorRefKey = eventExternalRefKey(match.indexedExternalRef);
-          const predecessorRevision = junctionNoIdProfilePredecessorRevision(match);
-          const incomingRevision = externalRef.version;
-          return predecessorRefKey !== primaryRefKey
-            && predecessorRevision !== null
-            && incomingRevision !== undefined
-            && isWritableIsoDateTime(incomingRevision)
-            && compareIsoTimestampsAscending(incomingRevision, predecessorRevision) > 0;
-        })
-      : [];
+    const incomingRevision = externalRef.version;
+    if (!scopeKey || !incomingRevision || !isWritableIsoDateTime(incomingRevision)) {
+      continue;
+    }
+    const scopedMatches = (index.junctionNoIdProfilePredecessorsByScope.get(scopeKey) ?? [])
+      .filter((match) => eventExternalRefKey(match.indexedExternalRef) !== primaryRefKey);
+    const equalRevisionMatches = scopedMatches.filter((match) => {
+      const predecessorRevision = junctionNoIdProfileProviderBaselineRevision(match);
+      return predecessorRevision !== null
+        && compareIsoTimestampsAscending(incomingRevision, predecessorRevision) === 0;
+    });
+    if (equalRevisionMatches.length > 1) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Junction profile externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+          `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+          "matched multiple persisted identities at the same provider revision; nothing was imported.",
+      );
+    }
+    const equalRevisionMatch = equalRevisionMatches[0];
+    if (equalRevisionMatch) {
+      if (!isJunctionNoIdProfileEqualRevisionTimestampReplay(
+        equalRevisionMatch.indexedRecord,
+        entry.record,
+      )) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Junction profile externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+            `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+            `has conflicting content for source revision "${incomingRevision}"; nothing was imported.`,
+        );
+      }
+      reserve(
+        entry,
+        eventExternalRefKey(equalRevisionMatch.indexedExternalRef),
+        equalRevisionMatch,
+      );
+      continue;
+    }
+
+    const predecessorMatches = scopedMatches.filter((match) => {
+      const predecessorRevision = junctionNoIdProfilePredecessorRevision(match);
+      return predecessorRevision !== null
+        && compareIsoTimestampsAscending(incomingRevision, predecessorRevision) > 0;
+    });
     if (predecessorMatches.length > 1) {
       throw new VaultError(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
@@ -4289,6 +4479,17 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const indexedProviderMatch = matchedEntries.find(
       (match) => match.indexedMatch.record.id === latest.id,
     )?.indexedMatch ?? matchedEntries[0]?.indexedMatch;
+    const replaysJunctionNoIdProfileTimestamp = indexedProviderMatch !== undefined
+      && isJunctionNoIdProfileEqualRevisionTimestampReplay(
+        indexedProviderMatch.indexedRecord,
+        entry.record,
+      );
+    if (replaysJunctionNoIdProfileTimestamp) {
+      skippedDuplicateCount += 1;
+      retainedPreparedIds.add(entry.record.id);
+      records.push(latest);
+      continue;
+    }
     const matchesIndexedProviderContent = indexedProviderMatch !== undefined
       && deviceEventContentKey(indexedProviderMatch.indexedRecord)
         === deviceEventContentKey(entry.record);
@@ -4298,6 +4499,24 @@ async function reconcileDeviceEventEntriesByExternalRef(
           externalRef,
         )
       : null;
+    const migratesJunctionStableProfileTimestamp = indexedProviderMatch !== undefined
+      && isJunctionStableProfileCreatedAtTimestampMigration(
+        indexedProviderMatch.indexedRecord,
+        entry.record,
+      );
+    const retainsDeletedJunctionStableProfile = isMemberDeletedJunctionStableProfile(
+      latest,
+      entry.record,
+    );
+    if (
+      isDeletedEventSpineRecord(latest)
+      && (migratesJunctionStableProfileTimestamp || retainsDeletedJunctionStableProfile)
+    ) {
+      skippedDuplicateCount += 1;
+      retainedPreparedIds.add(entry.record.id);
+      records.push(latest);
+      continue;
+    }
 
     const authoritativeSet = authoritativeEventSets.find((set) =>
       externalRef.system === set.system
@@ -4326,6 +4545,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
           || deviceEventContentKey(latest) !== deviceEventContentKey(entry.record)
         )
         && !matchesIndexedProviderContent
+        && !migratesJunctionStableProfileTimestamp
       ) {
         throw new VaultError(
           "EVENT_SOURCE_REVISION_CONFLICT",
@@ -4608,17 +4828,31 @@ async function reconcileDeviceEventEntriesByExternalRef(
       id: latest.id,
       lifecycle: buildEventSpineLifecycle(revision),
     };
+    const migratesRetainedMemberOccurrence = migratesJunctionStableProfileTimestamp
+      && indexedProviderMatch !== undefined
+      && latest.occurredAt === indexedProviderMatch.indexedRecord.occurredAt
+      && latest.dayKey === indexedProviderMatch.indexedRecord.dayKey;
     const retainedMemberRevision = historicalUserEditMatch
       ? {
           ...latest,
-          ...(migratesJunctionNoIdProfileIdentity
-            ? { externalRef, dataOrigin: entry.record.dataOrigin }
-            : {}),
+          ...(migratesJunctionStableProfileTimestamp
+            ? {
+                ...(migratesRetainedMemberOccurrence
+                  ? { occurredAt: entry.record.occurredAt, dayKey: entry.record.dayKey }
+                  : {}),
+                externalRef,
+                dataOrigin: entry.record.dataOrigin,
+              }
+            : migratesJunctionNoIdProfileIdentity
+              ? { externalRef, dataOrigin: entry.record.dataOrigin }
+              : {}),
           lifecycle: buildEventSpineLifecycle(revision + 1),
         }
       : null;
-    const retainedMemberPath = historicalUserEditMatch?.indexedMatch.relativePath
-      || toEventLedgerFile(latest.occurredAt);
+    const retainedMemberPath = migratesRetainedMemberOccurrence
+      ? entry.relativePath
+      : historicalUserEditMatch?.indexedMatch.relativePath
+        || toEventLedgerFile(latest.occurredAt);
 
     forceAppendIds.add(latest.id);
     index.latestByRefKey.set(refKey, retainedMemberRevision
