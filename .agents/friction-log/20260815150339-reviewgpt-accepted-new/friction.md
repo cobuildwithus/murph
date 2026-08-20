@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT accepted new conversation is not bound after send'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1907'
 ---
 
 ## Expected Behavior
