@@ -3043,7 +3043,9 @@ describe("cloudflare worker routes", () => {
         await signWebCallbackControlRequest(
           new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
             body: JSON.stringify({
+              assistantExecutionBlocked: true,
               orchestrationAttemptId: "orchestration-attempt-test",
+              processingMode: "system_mailbox",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -3068,6 +3070,7 @@ describe("cloudflare worker routes", () => {
         runtimeAttemptId: "runtime-attempt-test",
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
+        assistantExecutionBlocked: true,
         orchestrationAttemptId: "orchestration-attempt-test",
         commandStartedAtEpochMs: expect.any(Number),
         commandTimeoutMs: 10_000,
@@ -3078,6 +3081,7 @@ describe("cloudflare worker routes", () => {
           runtimeControlAuthStartedAtEpochMs: expect.any(Number),
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),
         },
+        processingMode: "system_mailbox",
         userId: "test-user",
       });
     });

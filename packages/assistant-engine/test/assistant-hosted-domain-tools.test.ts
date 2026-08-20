@@ -1235,6 +1235,11 @@ describe('hosted domain dynamic tools', () => {
       },
     })
     expect(readToolRequest('device', {
+      accountId: 'device-account-1',
+      action: 'reconcile',
+      token: 'not-allowed',
+    })).toMatchObject({ kind: 'invalid-device-arguments' })
+    expect(readToolRequest('device', {
       action: 'connect',
       password: 'not-allowed',
       provider: 'whoop',

@@ -11,13 +11,13 @@ Design context lives in two files at the repo root. Read both before any UI work
 - **`PRODUCT.md`** — strategic: register (brand vs product), target users, brand personality, anti-references, design principles. The "who / what / why".
 - **`DESIGN.md`** — visual: color tokens, typography, elevation, components, do's and don'ts. Follows the [Google Stitch DESIGN.md format](https://stitch.withgoogle.com/docs/design-md/format/) — YAML frontmatter (machine-readable tokens) + six fixed sections (Overview, Colors, Typography, Elevation, Components, Do's and Don'ts). The "how it looks".
 
-Both files are managed by the `impeccable` skill (`.agents/skills/impeccable/`). They are the single source of truth for product strategy and visual design. Don't duplicate their values into other docs or code comments.
+Both files are managed through the installed `impeccable` skill. They are the single source of truth for product strategy and visual design. Don't duplicate their values into other docs or code comments.
 
 Colors and fonts are mapped to standard shadcn CSS variables in `apps/web/app/globals.css`. Brand guidelines and reusable components live at [localhost:3000/design](http://localhost:3000/design) when running the dev server (`?tab=brand`, `?tab=components`, and `?tab=consent`). Unlinked, noindex presentation studies live under [localhost:3000/screenshots](http://localhost:3000/screenshots).
 
 ### Impeccable skill
 
-Installed in repo (`.agents/skills/impeccable/`). Available after pull — no extra install needed.
+Invoke the installed `impeccable` skill by name. Skill installation is environment-owned; do not assume a checkout-local skill directory exists.
 
 Run via `$impeccable <command>` (or pinned shortcuts if created). Useful commands for this project:
 - `$impeccable craft [feature]` — shape, then build a feature end-to-end.
@@ -61,7 +61,7 @@ const badgeVariants = cva("rounded-full px-2 py-0.5 text-xs font-medium", {
 - **Imports**: `@/*` → `apps/web/*`, e.g. `@/src/components/ui/button`, `@/src/lib/utils`
 - **Icons**: `lucide-react` is the default import (matches existing usage). Reserve Lucide Animated (`pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`) for icons that specifically need motion — loaders, hover affordances, etc.
 - **Transitions**: View Transitions API (`<ViewTransition>` from `next/navigation`), not Framer Motion
-- **shadcn skill**: `.agents/skills/shadcn/` — **invoke this skill (`Skill(shadcn)` or `/shadcn`) before any shadcn work.** It loads project registry config, current style (`base-nova` = base UI), installed components, and the correct docs endpoint (`components/base/[name]`). Do not rely on general shadcn knowledge — the project is on base UI, and components have evolved past what a model may remember.
+- **shadcn skill**: **invoke the installed `shadcn` skill by name before any shadcn work.** It loads project registry config, current style (`base-nova` = base UI), installed components, and the correct docs endpoint (`components/base/[name]`). Do not rely on general shadcn knowledge — the project is on base UI, and components have evolved past what a model may remember.
 
 ### Commands
 
@@ -91,7 +91,7 @@ cd apps/web && pnpm typecheck
 - Verify UI changes in the browser at every viewport where the result can
   materially differ. Check phone and desktop when responsive behavior can
   change.
-- Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate, and add each new shared component there. Do not update the catalog for every UI diff.
+- Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate. Every user-facing hosted Web UI diff needs a repository-owned, reviewer-openable representation: the real production component or consent surface on the matching `/design` tab, or the composed section under `/screenshots/<category>`. Add or update a catalog/study state only when no existing route and anchor render the changed state.
 - Add a `/screenshots` study only when a difficult or reusable state benefits from stable presentation proof. Render the real production component with synthetic props, no live data, no live requests, and all interactive controls `inert`. A screenshot study proves presentation only, not the complete product journey.
 - Treat the unlinked and noindex route as a discovery control, not security. Never put private member data or credentials there.
 - Match rendered evidence to the changed visual, state, interaction, and
@@ -99,10 +99,18 @@ cd apps/web && pnpm typecheck
   Do not capture another viewport only to meet a quota. When a screenshot is
   useful, crop it to the changed component or section and inspect it at native
   resolution so ordinary body copy is legible.
-- The `Pull request evidence` check requires direct evidence and a coverage
-  explanation for user-facing UI diffs. It does not require a catalog update or
-  screenshot count. Design and screenshot-study changes are exempt so those
-  references can be maintained independently.
+- The `Pull request evidence` check requires a dedicated `Design proof` section
+  with an absolute anchored `Design page` link plus risk-matched `Evidence` and
+  `Coverage` for user-facing UI diffs. It validates structure only. The
+  preliminary frontend review owns repository origin, reachability, currentness,
+  and representation quality; refresh an expired or inaccessible preview. The
+  check does not impose a screenshot count. Design and screenshot-study-only
+  changes are exempt so those references can be maintained independently.
+  Existing `page.tsx` and `layout.tsx` files also receive a narrow metadata-only
+  exemption when the checker can prove that the only runtime source change is
+  an unreferenced static object-literal `metadata` export. Dynamic metadata,
+  viewport or theme metadata, route additions/deletions, and any rendered-source
+  change still require design proof.
 
 ## Docs to update
 

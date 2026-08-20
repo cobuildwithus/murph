@@ -768,15 +768,15 @@ selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
 work arrives, the runner wakes that exact child and leaves its fence intact.
-System-mailbox mode may import and run one bounded model-free device-sync item;
+System-mailbox mode may import and run one bounded model-free device-sync,
+operator-maintenance, or browser-vault refresh item;
 it checkpoints any successfully applied unit, then observes the wake. When that
 wake contains a conversation while immutable projection delivery remains
 owned, the same invocation reuses the conversation prefetch and enters the
 ordinary foreground path without waiting for publication. Other wakes return
 before assistant admission, and the foreground request retries through the
-ordinary controller path after the system child releases its fence. Operator
-maintenance receipts are not system-mode recovery
-work and remain pending for their existing owner. A system-mailbox request
+ordinary controller path after the system child releases its fence. Other
+system items remain pending for their default owner. A system-mailbox request
 behind an active default runtime remains deferred and cannot broaden that
 child's admission authority.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
@@ -1297,6 +1297,19 @@ Because the Temporal worker can deploy automatically before the manual
 Cloudflare worker rollout, new Temporal-to-Cloudflare `ensure-processing` fields
 must either be accepted by the currently deployed worker or keep processing
 pending with `retry_later` until the consumer deployment catches up.
+The positive-only `assistantExecutionBlocked` field is therefore deployed to
+Cloudflare before Temporal begins sending it. It is valid only with an explicit
+`system_mailbox` mode and exists for one invocation: Web remains the policy
+owner, Temporal derives the field from the current blocked reconciliation fact,
+and the runtime skips assistant admission while still draining model-free
+system work and retaining the canonical assistant wake. It is not durable
+Cloudflare state and cannot attach to default foreground processing.
+The optional workspace `systemMailboxFrontier` fact is a separate rollout seam.
+An omitted field means an older Web producer, `model_free` means the first live
+system item beyond the runtime's handled-through frontier is eligible for the
+bounded system-mailbox executor, `default_owned` leaves that item with ordinary
+default processing, and `null` proves no live retained frontier. Deploy the
+tolerant Temporal consumer before Web begins emitting the classification.
 Web-to-Temporal signal kinds have the same compatibility constraint: add
 workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and
@@ -1579,16 +1592,18 @@ workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
 avoid harmless post-delivery no-op ensures. There is no direct
 Web-to-Cloudflare message path and no second durable wake authority. Temporal
 remains the sole durable retry and reconciliation owner. The existing
-Temporal scheduled-reconcile
-command also runs one bounded preference-handoff sweep. Web selects live
-`member.preferences.updated` rows above the authoritative system-lane
-`consumed_seq` for active person runtimes or synthetic room runtimes with an
-active owner or current participant, then rechecks canonical runtime access and
-reissues their pointer-only `signalWithStart`; the mailbox row remains the only
-work record and repeated sweeps are idempotent. This is a narrow backstop for
-already-committed hosted style writes from personal Settings or runtime-bound
-conversation controls, not a second queue or a generic mailbox-lag scheduler.
-Other missed post-commit signals still have no web cron backstop.
+Temporal scheduled-reconcile command also runs one bounded preference-handoff
+sweep. Web selects supported system-lane handoff rows above the workspace's
+authoritative imported frontier for active person runtimes or synthetic room
+runtimes with an active owner or current participant, then rechecks canonical
+runtime access and reissues their pointer-only `signalWithStart`. The supported
+rows include preferences, due device-sync work, daily metrics, browser-vault
+refresh, maintenance, and queued Clinical Records retrieval. Import transfers
+retry ownership to the runtime, so the sweep never uses the later
+handled-through frontier as signal authority. The mailbox row remains the only
+work record and repeated sweeps are idempotent. This is a narrow backstop for a
+missed first post-commit handoff, not a second queue or a generic mailbox-lag
+scheduler. Other missed post-commit signals still have no Web cron backstop.
 
 Hosted reply-latency telemetry records only boundaries observed by their owning
 process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL
@@ -2359,9 +2374,9 @@ An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
 `system_mailbox` path, which imports system work, may run one bounded
-model-free deterministic device-sync item, and exits before foreground
-assistant admission. Operator maintenance receipts retain their existing owner
-and are not consumed by this recovery mode.
+model-free deterministic device-sync, operator-maintenance, or browser-vault
+refresh item, and exits before foreground assistant admission. Other system
+items retain their default owner and are not consumed by this recovery mode.
 It binds that effective processing mode into the same fence so controller
 priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime

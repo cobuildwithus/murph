@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, Trash2 } from "lucide-react";
 import Link from "next/link";
 
@@ -37,6 +37,10 @@ import {
   type HostedAccountExitReasonCode,
 } from "@/src/lib/hosted-privacy/account-data-shared";
 
+import {
+  AccountDeletionFarewell,
+  buildAccountDeletionFarewellPath,
+} from "./account-deletion-farewell";
 import { AccountExitReasonStep } from "./account-exit-reason-step";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
@@ -63,7 +67,6 @@ interface HostedAccountDeleteResponse {
 }
 
 const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
-const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 
 export function HostedDataPrivacySettings(props: {
@@ -103,8 +106,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
   const [providerAccessRemovalConfirmationToken, setProviderAccessRemovalConfirmationToken] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
-  const [privyLogoutDone, setPrivyLogoutDone] = useState(false);
-  const deletedAlertRef = useRef<HTMLDivElement | null>(null);
+  const deletedPageRef = useRef<HTMLDivElement | null>(null);
 
   const exportReady = acknowledgedSensitiveDownload && !exportPending;
   const phraseMatches = confirmationPhrase === HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
@@ -118,31 +120,25 @@ function HostedDataPrivacySettingsAuthorized(props: {
     )
     && !deletePending;
 
+  const redirectToFarewell = useCallback(() => {
+    window.location.replace(buildAccountDeletionFarewellPath(cleanupPending));
+  }, [cleanupPending]);
+
   useEffect(() => {
     if (!deleted) {
       return;
     }
 
-    // Anchor focus so keyboard and screen-reader users land on the
-    // confirmation after the dialog unmounts, and keep a hard redirect
-    // fallback in case the best-effort Privy client logout never settles.
-    deletedAlertRef.current?.focus();
-    const fallbackTimer = window.setTimeout(() => {
-      window.location.assign("/");
-    }, POST_DELETE_REDIRECT_FALLBACK_MS);
+    // Replace the invalidated dashboard with the farewell immediately, then
+    // keep a hard navigation fallback in case Privy's best-effort browser
+    // logout never settles.
+    deletedPageRef.current?.focus();
+    const fallbackTimer = window.setTimeout(
+      redirectToFarewell,
+      POST_DELETE_REDIRECT_FALLBACK_MS,
+    );
     return () => window.clearTimeout(fallbackTimer);
-  }, [deleted]);
-
-  useEffect(() => {
-    if (!deleted || !privyLogoutDone) {
-      return;
-    }
-
-    const redirectTimer = window.setTimeout(() => {
-      window.location.assign("/");
-    }, POST_DELETE_REDIRECT_DELAY_MS);
-    return () => window.clearTimeout(redirectTimer);
-  }, [deleted, privyLogoutDone]);
+  }, [deleted, redirectToFarewell]);
 
   async function handleExportConfirmed() {
     if (!exportReady) {
@@ -322,11 +318,12 @@ function HostedDataPrivacySettingsAuthorized(props: {
   if (deleted) {
     return (
       <>
-        <HostedAccountDeletionStatus
+        <AccountDeletionFarewell
           cleanupPending={cleanupPending}
-          ref={deletedAlertRef}
+          ref={deletedPageRef}
+          takeover
         />
-        <HostedPrivyLogout onDone={() => setPrivyLogoutDone(true)} />
+        <HostedPrivyLogout onDone={redirectToFarewell} />
       </>
     );
   }
@@ -397,6 +394,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
             <HostedAccountDeletionErrorAlert
               deviceReconnectRequired={deviceReconnectRequired}
               message={dialogError}
+              providerAccessRemovalRequired={providerAccessRemovalRequired}
             />
           ) : null}
           {dialogStep === "reason" ? (
@@ -416,17 +414,19 @@ function HostedDataPrivacySettingsAuthorized(props: {
                   htmlFor="hosted-account-delete-phrase"
                 >
                   Type{" "}
-                  <span className="font-mono text-xs tracking-wide">
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.9em] tracking-wide text-foreground">
                     {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                   </span>{" "}
                   to confirm
                 </Label>
                 <Input
                   autoComplete="off"
+                  autoCorrect="off"
                   className="h-12 font-mono text-sm tracking-wide md:text-sm"
                   disabled={deletePending}
                   id="hosted-account-delete-phrase"
                   inputMode="text"
+                  spellCheck={false}
                   value={confirmationPhrase}
                   onChange={(event) => setConfirmationPhrase(event.target.value)}
                   onKeyDown={(event) => {
@@ -436,7 +436,6 @@ function HostedDataPrivacySettingsAuthorized(props: {
                     }
                   }}
                   aria-invalid={confirmationPhrase.length > 0 && !phraseMatches}
-                  placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                 />
               </div>
               {providerAccessRemovalRequired ? (
@@ -465,16 +464,22 @@ function HostedDataPrivacySettingsAuthorized(props: {
 export function HostedAccountDeletionErrorAlert({
   deviceReconnectRequired = false,
   message,
+  providerAccessRemovalRequired = false,
 }: {
   deviceReconnectRequired?: boolean;
   message: string;
+  providerAccessRemovalRequired?: boolean;
 }) {
   return (
     <div
       role="alert"
       className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive [overflow-wrap:anywhere]"
     >
-      <p>{message}</p>
+      <p>
+        {providerAccessRemovalRequired
+          ? linkProviderAccessSites(message)
+          : message}
+      </p>
       {deviceReconnectRequired ? (
         <Link
           className="self-start font-medium underline underline-offset-4"
@@ -485,6 +490,48 @@ export function HostedAccountDeletionErrorAlert({
       ) : null}
     </div>
   );
+}
+
+// A deletion fenced on an ambiguous OAuth callback can only be cleared where the
+// grant lives, which is the provider's own account and never a Murph page. That
+// state alone gets provider-site links; the credential-refresh recovery names
+// the same providers but is owned by Murph's own reconnect surface, so its
+// message stays unlinked. Only direct-OAuth providers can leave the session
+// behind that raises the provider-removal message.
+// `hosted-data-privacy-settings.test.ts` pins these labels to the canonical
+// device-sync provider labels so a rename cannot silently unlink them.
+const PROVIDER_ACCESS_SITES: readonly { label: string; url: string }[] = [
+  { label: "Oura", url: "https://ouraring.com" },
+  { label: "Strava", url: "https://www.strava.com" },
+  { label: "WHOOP", url: "https://www.whoop.com" },
+];
+
+function linkProviderAccessSites(message: string): ReactNode {
+  const pattern = new RegExp(
+    `\\b(${PROVIDER_ACCESS_SITES.map((site) => site.label).join("|")})\\b`,
+    "gu",
+  );
+  const segments = message.split(pattern);
+  if (segments.length === 1) {
+    return message;
+  }
+
+  return segments.map((segment, index) => {
+    const site = PROVIDER_ACCESS_SITES.find((entry) => entry.label === segment);
+    return site ? (
+      <a
+        key={`${index}-${segment}`}
+        className="font-medium underline-offset-4 hover:underline"
+        href={site.url}
+        rel="noreferrer"
+        target="_blank"
+      >
+        {segment}
+      </a>
+    ) : (
+      segment
+    );
+  });
 }
 
 export function HostedAccountProviderAccessRemovalConfirmation({
@@ -636,26 +683,6 @@ function HostedDataPrivacyUnavailable(props: { authenticated: boolean }) {
     </div>
   );
 }
-
-export const HostedAccountDeletionStatus = forwardRef<HTMLDivElement, {
-  cleanupPending: boolean;
-}>(function HostedAccountDeletionStatus(props, ref) {
-  return (
-    <Alert
-      ref={ref}
-      role="status"
-      aria-live="polite"
-      tabIndex={-1}
-    >
-      <AlertTitle>Account deleted</AlertTitle>
-      <AlertDescription>
-        {props.cleanupPending
-          ? "Your account was deleted. We're finishing some cleanup on our side, no action needed. Redirecting to the home page."
-          : "Your account and live Murph data have been deleted. Redirecting to the home page."}
-      </AlertDescription>
-    </Alert>
-  );
-});
 
 export function hasIncompleteHostedAccountDeletionCleanup(
   result: HostedAccountDeleteResponse["result"],

@@ -3,13 +3,15 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: retire-worktree [--dry-run] [--inactive-no-pr] <target-worktree>
+Usage: retire-worktree [--dry-run] [--inactive-no-pr] [--contained-detached] <target-worktree>
 
 Retires one clean, inactive task worktree after its exact PR head is confirmed
 merged or closed, or its HEAD is already contained in origin/main. Run this
 command from a different checkout of the same repo. The task branch is preserved.
 Use --inactive-no-pr only when the current user explicitly authorizes retiring
 clean inactive branches that have no open PR; all other safety gates still apply.
+Use --contained-detached only for a clean detached checkout whose exact HEAD is
+already contained in origin/main. No branch is deleted.
 EOF
   exit 2
 }
@@ -21,10 +23,12 @@ refuse() {
 
 dry_run=false
 allow_inactive_no_pr=false
+allow_contained_detached=false
 while [[ "${1:-}" == --* ]]; do
   case "$1" in
     --dry-run) dry_run=true ;;
     --inactive-no-pr) allow_inactive_no_pr=true ;;
+    --contained-detached) allow_contained_detached=true ;;
     *) usage ;;
   esac
   shift
@@ -129,7 +133,10 @@ verify_registry_state() {
   [[ "$target_locked" == false ]] || refuse 'target worktree is locked'
   [[ "$target_prunable" == false ]] || refuse 'target worktree is marked prunable'
   [[ "$nested_worktree" == false ]] || refuse 'target contains another registered worktree'
-  [[ "$target_branch_ref" == refs/heads/* ]] || refuse 'target is not backed by a local branch'
+  if [[ "$target_branch_ref" != refs/heads/* ]]; then
+    [[ "$allow_contained_detached" == true && -z "$target_branch_ref" ]] \
+      || refuse 'target is not backed by a local branch; use --contained-detached only for an exact origin/main-contained checkout'
+  fi
 
   local current_head
   current_head="$(git -C "$target_worktree" rev-parse HEAD 2>/dev/null)" \
@@ -152,13 +159,13 @@ verify_no_active_task_reference() {
     "$target_worktree/agent-docs/exec-plans/active"
   )
   local branch_name="${target_branch_ref#refs/heads/}"
-  local inspection_status
+  local inspection_output inspection_status
 
   command -v node >/dev/null 2>&1 || refuse 'Node.js is unavailable'
 
   for active_dir in "${active_dirs[@]}"; do
     [[ -d "$active_dir" ]] || refuse 'active-plan registry is missing'
-    if ACTIVE_DIR="$active_dir" TARGET_BRANCH="$branch_name" TARGET_LABEL="$target_label" \
+    if inspection_output="$(ACTIVE_DIR="$active_dir" TARGET_BRANCH="$branch_name" TARGET_LABEL="$target_label" \
       node <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
@@ -166,7 +173,7 @@ const path = require('node:path');
 const activeDir = process.env.ACTIVE_DIR;
 const branch = process.env.TARGET_BRANCH ?? '';
 const label = process.env.TARGET_LABEL ?? '';
-if (!activeDir || !branch || !label) process.exit(12);
+if (!activeDir || !label) process.exit(12);
 
 const normalize = (value) => value
   .toLowerCase()
@@ -205,18 +212,21 @@ while (pending.length > 0) {
     } catch {
       process.exit(12);
     }
-    if ([...needles].some((needle) => contents.includes(needle))) process.exit(10);
+    if ([...needles].some((needle) => contents.includes(needle))) {
+      process.stdout.write(path.relative(activeDir, entryPath));
+      process.exit(10);
+    }
   }
 }
 NODE
-    then
+)"; then
       inspection_status=0
     else
       inspection_status=$?
     fi
     case "$inspection_status" in
       0) ;;
-      10) refuse 'target is still referenced by active task coordination' ;;
+      10) refuse "target is still referenced by active task coordination: ${inspection_output:-unknown record}" ;;
       *) refuse 'active task coordination could not be inspected' ;;
     esac
   done
@@ -225,6 +235,14 @@ NODE
 verify_terminal_history() {
   local branch_name="${target_branch_ref#refs/heads/}"
   local pr_json parser_status
+
+  if [[ -z "$target_branch_ref" ]]; then
+    git show-ref --verify --quiet refs/remotes/origin/main \
+      || refuse 'origin/main is unavailable for detached contained-history proof'
+    git merge-base --is-ancestor "$target_head" refs/remotes/origin/main 2>/dev/null \
+      || refuse 'detached target HEAD is not contained in origin/main'
+    return
+  fi
 
   command -v gh >/dev/null 2>&1 || refuse 'GitHub CLI is unavailable'
   command -v node >/dev/null 2>&1 || refuse 'Node.js is unavailable'
@@ -324,12 +342,66 @@ verify_no_process_cwd() {
   (( accessible > 0 )) || refuse 'process working directories could not be inspected'
 }
 
+verify_primary_package_links() {
+  local inspection_output inspection_status
+  if inspection_output="$(PRIMARY_WORKTREE="$primary_worktree" TARGET_WORKTREE="$target_worktree" node <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const primary = process.env.PRIMARY_WORKTREE;
+const target = process.env.TARGET_WORKTREE;
+if (!primary || !target) process.exit(12);
+const nodeModules = path.join(primary, 'node_modules');
+if (!fs.existsSync(nodeModules)) process.exit(0);
+
+const insideTarget = (candidate) => candidate === target || candidate.startsWith(target + path.sep);
+const pending = [nodeModules];
+try {
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+        continue;
+      }
+      if (!entry.isSymbolicLink()) continue;
+      const lexicalTarget = path.resolve(path.dirname(entryPath), fs.readlinkSync(entryPath));
+      let resolvedTarget = lexicalTarget;
+      try {
+        resolvedTarget = fs.realpathSync(entryPath);
+      } catch {
+        // A dangling link still carries enough lexical evidence to block.
+      }
+      if (insideTarget(lexicalTarget) || insideTarget(resolvedTarget)) {
+        process.stdout.write(path.relative(primary, entryPath));
+        process.exit(10);
+      }
+    }
+  }
+} catch {
+  process.exit(12);
+}
+NODE
+)"; then
+    inspection_status=0
+  else
+    inspection_status=$?
+  fi
+  case "$inspection_status" in
+    0) ;;
+    10) refuse "primary dependency link resolves through the target: ${inspection_output:-unknown link}; reinstall the primary checkout before retirement" ;;
+    *) refuse 'primary dependency links could not be inspected' ;;
+  esac
+}
+
 verify_all_gates() {
   verify_registry_state
   verify_clean
   verify_no_active_task_reference
   verify_terminal_history
   verify_no_process_cwd
+  verify_primary_package_links
 }
 
 verify_all_gates
@@ -339,15 +411,25 @@ if [[ "$dry_run" == true ]]; then
   exit 0
 fi
 
-# Revalidate immediately before the non-force removal to narrow race windows.
+# Revalidate immediately before the destructive phase to narrow race windows.
 verify_all_gates
+quarantine_worktree="${target_worktree}.retiring-${target_head:0:12}"
+[[ ! -e "$quarantine_worktree" && ! -L "$quarantine_worktree" ]] \
+  || refuse 'worktree quarantine path already exists'
+if ! git worktree move -- "$target_worktree" "$quarantine_worktree" >/dev/null 2>&1; then
+  refuse 'worktree could not be moved into retirement quarantine'
+fi
+target_worktree="$quarantine_worktree"
 if ! git worktree remove -- "$target_worktree" >/dev/null 2>&1; then
-  refuse 'non-force Git worktree removal failed'
+  refuse "non-force Git worktree removal did not finish; the registered checkout remains visibly quarantined as $(basename "$target_worktree")"
 fi
 
-target_branch_ref="${target_branch_ref#refs/heads/}"
-if ! git show-ref --verify --quiet "refs/heads/$target_branch_ref"; then
-  refuse 'worktree was removed but branch preservation could not be proved'
+if [[ "$target_branch_ref" == refs/heads/* ]]; then
+  target_branch_ref="${target_branch_ref#refs/heads/}"
+  if ! git show-ref --verify --quiet "refs/heads/$target_branch_ref"; then
+    refuse 'worktree was removed but branch preservation could not be proved'
+  fi
+  printf 'retire-worktree: retired one task worktree; branch preserved\n'
+else
+  printf 'retire-worktree: retired one contained detached worktree; no branch changed\n'
 fi
-
-printf 'retire-worktree: retired one task worktree; branch preserved\n'

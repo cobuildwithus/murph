@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-17",
+  "order": 100,
+  "item": {
+    "id": "google-health-fitbit-migration",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Fitbit and Pixel Watch move to Google Health safely",
+    "summary": "Fitbit and Pixel Watch now share one connection card that asks for explicit Google authorization before Murph switches data sources.",
+    "details": "The existing Fitbit connection keeps syncing until Google Health history and fresh supported data are verified. If the provider cannot finish the switch, Fitbit stays active and Murph retries without losing history.",
+    "relevanceTags": ["connected-health", "fitbit", "pixel-watch", "reliability"],
+    "sourcePullRequests": []
+  }
+}

@@ -37,6 +37,40 @@ export function buildDispatchInputs({ correlationId, mode, webBaseUrl, webSha })
   };
 }
 
+export function inspectExactPrHead(raw, { expectedSha, prNumber }) {
+  assertRecord(raw, "Web PR");
+  if (raw.number !== prNumber || !isRecord(raw.head)) {
+    throw new Error("Web PR head revalidation returned an unexpected pull request.");
+  }
+  const currentSha = requiredString(raw.head.sha, "Web PR head SHA");
+  assertSha(currentSha, "Web PR head SHA");
+  assertSha(expectedSha, "expected Web PR head SHA");
+  if (currentSha !== expectedSha) {
+    throw new Error("PR head changed before private iOS dispatch.");
+  }
+  return true;
+}
+
+export async function revalidateExactPrHead({ expectedSha, prNumber, repository, token }) {
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
+    throw new Error("PR number must be a positive integer.");
+  }
+  assertSafeId(
+    repository,
+    "GitHub repository",
+    200,
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u,
+  );
+  requiredString(token, "Web GitHub token");
+  const encodedRepository = repository.split("/").map(encodeURIComponent).join("/");
+  inspectExactPrHead(await fetchJson(
+    `https://api.github.com/repos/${encodedRepository}/pulls/${prNumber}`,
+    { headers: githubHeaders(token) },
+    "Web PR head revalidation",
+  ), { expectedSha, prNumber });
+  console.log("::notice::native-ios-e2e stage=pr_head_revalidate result=success");
+}
+
 export function inspectPrivateDispatchTag(raw, { expectedSha, ref }) {
   assertRecord(raw, "private iOS tag");
   if (!isRecord(raw.object) || raw.ref !== `refs/tags/${ref}` || raw.object.type !== "commit") {
@@ -67,7 +101,7 @@ export function inspectPrivateRun(raw, { runId, sha }) {
   };
 }
 
-export async function dispatchAndWait({ correlationId, mode, webBaseUrl, webSha }) {
+export async function dispatchAndWait({ correlationId, mode, prHead = null, webBaseUrl, webSha }) {
   const token = requiredEnv("NATIVE_IOS_E2E_GITHUB_TOKEN");
   const repository = requiredEnv("NATIVE_IOS_E2E_IOS_REPOSITORY");
   const workflow = requiredEnv("NATIVE_IOS_E2E_IOS_WORKFLOW");
@@ -83,6 +117,10 @@ export async function dispatchAndWait({ correlationId, mode, webBaseUrl, webSha 
     ref,
   });
   if (mode === "production_canary") await proveCurrentProductionAlias(webSha);
+  if (mode === "pr") {
+    if (!isRecord(prHead)) throw new Error("PR head revalidation inputs are required.");
+    await revalidateExactPrHead({ ...prHead, expectedSha: webSha });
+  }
 
   const receipt = await fetchJson(
     `https://api.github.com/repos/${repository}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`,

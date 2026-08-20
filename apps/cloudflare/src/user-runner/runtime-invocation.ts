@@ -159,6 +159,7 @@ const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 
 export type RuntimeInvocationInput = {
+  assistantExecutionBlocked?: true;
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   orchestrationAttemptId: string;
   processingMode?: HostedWorkspaceInvocationProcessingMode | null;
@@ -256,7 +257,7 @@ export class RuntimeInvocationService {
         })
       : null;
     let platformAiUsageAllowed: boolean | null = null;
-    let assistantExecutionBlocked = false;
+    let assistantExecutionBlocked = input.input.assistantExecutionBlocked === true;
     let invocationProcessingMode = input.input.processingMode ?? null;
     if (hostedAssistantCustomInferenceOverride) {
       if (typeof workspaceRead.platformAiUsageAllowed !== "boolean") {

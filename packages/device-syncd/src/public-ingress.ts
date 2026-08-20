@@ -3,7 +3,7 @@ import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import {
   isDeviceSyncConnectionSetupExpiredAt,
   isDeviceSyncConnectionSetupPending,
-  isDeviceSyncSourceAdmitted,
+  isDeviceSyncSourceDisconnectFenced,
   isEstablishedDeviceSyncConnection,
 } from "./public-account.ts";
 import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
@@ -658,14 +658,17 @@ export class DeviceSyncPublicIngress {
         && sourceProviderSlug
         && !(reusedEstablishedJunctionAccount && input.sourceLifecycleProof)
       ) {
-        await this.store.upsertConnectionSource({
-          connectionId: seededAccount.id,
-          sourceInstanceKey,
-          sourceProviderSlug,
-          status: "disconnected",
-          firstSeenAt: now,
-          lastSeenAt: now,
-        });
+        await this.store.upsertConnectionSource(
+          {
+            connectionId: seededAccount.id,
+            sourceInstanceKey,
+            sourceProviderSlug,
+            status: "disconnected",
+            firstSeenAt: now,
+            lastSeenAt: now,
+          },
+          { fenceActiveWorkOnReconnect: reusedEstablishedJunctionAccount },
+        );
       }
     }
 
@@ -1684,7 +1687,10 @@ export class DeviceSyncPublicIngress {
         });
         if (
           source
-          && !isDeviceSyncSourceAdmitted([source], webhookSourceProviderSlug)
+          && (
+            source.status !== "connected"
+            || isDeviceSyncSourceDisconnectFenced(source)
+          )
         ) {
           const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
             account,
@@ -2417,6 +2423,7 @@ export { createDeviceSyncRegistry } from "./registry.ts";
 export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
 export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
+export { createJunctionDeviceSyncProvider } from "./providers/junction.ts";
 export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";

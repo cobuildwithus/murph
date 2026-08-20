@@ -4,15 +4,24 @@ import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberChannelsUpdatedWake,
 } from "@murphai/hosted-execution";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  buildLinqHomePhoneNumber,
+  buildLinqRecipientPhoneNumber,
+} from "./helpers/hosted-local-linq-support.js";
+import {
+  appendHostedExecutionWakeForTest,
   queryHostedRuntimeWorkflowForTest,
+  readHostedMailboxItemForTest,
   seedHostedWorkspaceInboxMediaRetentionWakeForTest,
+  seedHostedWorkspaceWakeForTest,
   signalHostedMailboxAppendRuntimeForTest,
   signalHostedManualRunRuntimeForTest,
   signalHostedRetentionRuntimeRecheckForTest,
@@ -26,6 +35,10 @@ const mailboxWorkspaceUserId =
   `member_local_temporal_mailbox_workspace_${Date.now()}`;
 const pausedRetentionUserId =
   `member_local_temporal_paused_retention_${Date.now()}`;
+const modelFreeFrontierUserId =
+  `member_local_temporal_model_free_frontier_${Date.now()}`;
+const defaultOwnedFrontierUserId =
+  `member_local_temporal_default_owned_frontier_${Date.now()}`;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -168,7 +181,154 @@ describe("hosted local Temporal orchestration e2e", () => {
       providerRequestBaseline,
     );
   }, 300_000);
+
+  it("routes engagement-blocked system frontiers to their declared owners", async () => {
+    const activeScenario = requireScenario();
+
+    await seedEngagementPausedFrontierMember(
+      activeScenario,
+      modelFreeFrontierUserId,
+      "model-free-frontier",
+    );
+    const modelFreeProviderBaseline =
+      activeScenario.assistantProviderRequests.length;
+    const modelFreeAppend = await appendHostedExecutionWakeForTest({
+      environment: activeScenario.runtimeEnv,
+      wake: buildHostedExecutionDeviceSyncWake({
+        eventId: `device-sync.wake:temporal-frontier:${Date.now()}`,
+        occurredAt: new Date().toISOString(),
+        reason: "webhook_hint",
+        userId: modelFreeFrontierUserId,
+      }),
+    });
+    const modelFreeSignalStartedAt = new Date();
+    const modelFreeSignal = await signalHostedMailboxAppendRuntimeForTest({
+      environment: activeScenario.runtimeEnv,
+      expectedUserId: modelFreeFrontierUserId,
+      mailboxItemId: modelFreeAppend.wake.id,
+    });
+    const modelFreeState = await waitForWorkflowExecutionState({
+      env: activeScenario.runtimeEnv,
+      executionNotBefore: modelFreeSignalStartedAt,
+      workflowId: modelFreeSignal.workflowId,
+    });
+    expect(modelFreeState.lastExecutionErrorCode).toBeNull();
+    await waitForSystemMailboxHandledThrough({
+      expectedSeq: modelFreeAppend.wake.seq,
+      userId: modelFreeFrontierUserId,
+    });
+    expect(activeScenario.assistantProviderRequests).toHaveLength(
+      modelFreeProviderBaseline,
+    );
+
+    await seedEngagementPausedFrontierMember(
+      activeScenario,
+      defaultOwnedFrontierUserId,
+      "default-owned-frontier",
+    );
+    const defaultOwnedProviderBaseline =
+      activeScenario.assistantProviderRequests.length;
+    const defaultOwnedEventId =
+      `member.channels.updated:temporal-frontier:${Date.now()}`;
+    const defaultOwnedAppend = await appendHostedExecutionWakeForTest({
+      environment: activeScenario.runtimeEnv,
+      wake: buildHostedExecutionMemberChannelsUpdatedWake({
+        eventId: defaultOwnedEventId,
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
+        memberId: defaultOwnedFrontierUserId,
+        occurredAt: new Date().toISOString(),
+      }),
+    });
+    const defaultOwnedSignal = await signalHostedMailboxAppendRuntimeForTest({
+      environment: activeScenario.runtimeEnv,
+      expectedUserId: defaultOwnedFrontierUserId,
+      mailboxItemId: defaultOwnedAppend.wake.id,
+    });
+    const defaultOwnedState = await waitForWorkflowBlockedState({
+      env: activeScenario.runtimeEnv,
+      workflowId: defaultOwnedSignal.workflowId,
+    });
+    expect(defaultOwnedState.lastExecutionAt).toBeNull();
+    expect(defaultOwnedState.lastExecutionErrorCode).toBeNull();
+    expect(defaultOwnedState.lastExecutionKind).toBeNull();
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: defaultOwnedEventId,
+      environment: activeScenario.runtimeEnv,
+      userId: defaultOwnedFrontierUserId,
+    })).resolves.toMatchObject({
+      consumedAt: null,
+      kind: "member.channels.updated",
+      lane: "system",
+    });
+    const defaultOwnedStatus = await activeScenario.harness.readUserStatus(
+      defaultOwnedFrontierUserId,
+    );
+    expect(readSystemMailboxHandledThroughSeq(defaultOwnedStatus)).toBeLessThan(
+      BigInt(defaultOwnedAppend.wake.seq),
+    );
+    expect(activeScenario.assistantProviderRequests).toHaveLength(
+      defaultOwnedProviderBaseline,
+    );
+  }, 300_000);
 });
+
+async function seedEngagementPausedFrontierMember(
+  activeScenario: HostedLocalFullStackScenario,
+  userId: string,
+  eventLabel: string,
+): Promise<void> {
+  const memberPhone = buildLinqRecipientPhoneNumber(userId);
+  await activeScenario.seedActiveHostedLinqMember({
+    homePhone: buildLinqHomePhoneNumber(userId),
+    memberId: userId,
+    memberPhone,
+    recentInboundAt: null,
+  });
+  await activeScenario.bindActiveHostedLinqHomeChat({
+    chatId: `chat_local_temporal_frontier_${eventLabel}`,
+    memberId: userId,
+    recentInboundAt: null,
+    recipientPhone: memberPhone,
+  });
+  await activeScenario.runWake(
+    buildActivationWake(userId, eventLabel, true),
+    userId,
+  );
+  await activeScenario.waitForHostedCompletion(userId);
+  await seedHostedWorkspaceWakeForTest({
+    environment: activeScenario.runtimeEnv,
+    userId,
+    wakeAt: new Date(Date.now() - 60_000),
+    wakeReason: "assistant",
+  });
+}
+
+async function waitForSystemMailboxHandledThrough(input: {
+  expectedSeq: string;
+  userId: string;
+}): Promise<void> {
+  await expect.poll(async () => {
+    const status = await requireScenario().harness.readUserStatus(input.userId);
+    return readSystemMailboxHandledThroughSeq(status);
+  }, {
+    interval: 250,
+    timeout: 120_000,
+  }).toBeGreaterThanOrEqual(BigInt(input.expectedSeq));
+}
+
+function readSystemMailboxHandledThroughSeq(
+  status: Awaited<ReturnType<
+    HostedLocalFullStackScenario["harness"]["readUserStatus"]
+  >>,
+): bigint {
+  const value =
+    status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq;
+  return typeof value === "string" ? BigInt(value) : 0n;
+}
 
 async function waitForWorkflowExecutionState(input: {
   env: NodeJS.ProcessEnv;
@@ -204,6 +364,47 @@ async function waitForWorkflowExecutionState(input: {
   throw new Error(
     [
       "Timed out waiting for Temporal workflow execution state.",
+      latestState ? `last state: ${JSON.stringify(latestState)}` : null,
+      latestError ? `last query error: ${latestError}` : null,
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join("\n"),
+  );
+}
+
+async function waitForWorkflowBlockedState(input: {
+  env: NodeJS.ProcessEnv;
+  workflowId: string;
+}): Promise<ObservedHostedRuntimeWorkflowState> {
+  const deadline = Date.now() + 180_000;
+  let latestState: ObservedHostedRuntimeWorkflowState | null = null;
+  let latestError: string | null = null;
+
+  while (Date.now() < deadline) {
+    try {
+      latestState = readObservedHostedRuntimeWorkflowState(
+        await queryHostedRuntimeWorkflowForTest({
+          environment: input.env,
+          queryName: HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+          workflowId: input.workflowId,
+        }),
+      );
+      if (
+        latestState.lastReconciliationBlockedReason
+          === "automation_engagement_paused"
+      ) {
+        return latestState;
+      }
+    } catch (error) {
+      latestError = error instanceof Error ? error.message : String(error);
+    }
+
+    await sleep(1_000);
+  }
+
+  throw new Error(
+    [
+      "Timed out waiting for Temporal workflow engagement block.",
       latestState ? `last state: ${JSON.stringify(latestState)}` : null,
       latestError ? `last query error: ${latestError}` : null,
     ]
@@ -286,12 +487,16 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
-function buildActivationWake(memberId: string, eventLabel: string) {
+function buildActivationWake(
+  memberId: string,
+  eventLabel: string,
+  linq = false,
+) {
   return buildHostedExecutionMemberActivatedWake({
     eventId: `member.activated:local:${memberId}:evt_temporal_${eventLabel}`,
     memberChannels: {
       email: false,
-      linq: false,
+      linq,
       telegram: false,
     },
     memberId,

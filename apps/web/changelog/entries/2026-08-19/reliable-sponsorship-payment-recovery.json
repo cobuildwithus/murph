@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-19",
+  "order": 100,
+  "item": {
+    "id": "reliable-sponsorship-payment-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Reliable sponsorship payment recovery",
+    "summary": "Review payment now opens a fresh checkout for an interrupted monthly group sponsorship instead of leaving the funding page without progress.",
+    "details": "Automatic refills stay tied to the payment choice verified for that monthly sponsorship. If confirmation is interrupted before Stripe attempts the payment, Murph retries the same refill automatically. A separate one-time contribution does not silently replace it.",
+    "relevanceTags": ["groups", "billing", "reliability"],
+    "sourcePullRequests": [2010, 2035]
+  }
+}

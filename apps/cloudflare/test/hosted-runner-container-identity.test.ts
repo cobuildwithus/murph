@@ -513,6 +513,76 @@ describe("hosted runner container identity", () => {
     })).resolves.toEqual(runtimeTarget);
   });
 
+  it("preserves an orchestration-owned assistant block with custom inference", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const override: HostedAssistantCustomInferenceOverride = {
+      contextWindowTokens: 131_072,
+      modelAlias: "murph-custom-r7",
+      protocol: "responses",
+      revision: 7,
+      supportsImages: false,
+      verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
+    };
+    const runtimeTarget = {
+      auth: {
+        kind: "bearer" as const,
+        secret: "synthetic-upstream-secret",
+      },
+      contextWindowTokens: override.contextWindowTokens,
+      endpointUrl: "https://inference.example.com/v1/responses",
+      model: "synthetic-upstream-model",
+      protocol: override.protocol,
+      revision: override.revision,
+      schema: "murph.hosted-inference-runtime-target.v1" as const,
+      supportsImages: override.supportsImages,
+      verificationProfile: override.verificationProfile,
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () =>
+      Response.json(runtimeTarget)
+    ));
+    const service = createRuntimeInvocationService({
+      hostedAssistantCustomInferenceOverride: override,
+      invokedContainerNames: [],
+      platformAiUsageAllowed: true,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        assistantExecutionBlocked: true,
+        orchestrationAttemptId: "orchestration_attempt_blocked_custom_inference",
+        processingMode: "system_mailbox",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+
+    expect(prepared.job.request).toMatchObject({
+      assistantExecutionBlocked: true,
+      processingMode: "system_mailbox",
+    });
+    expect(prepared.job.runtime?.forwardedEnv).toMatchObject({
+      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+    });
+  });
+
   it("narrows a denied managed default wake to model-free system mailbox work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

@@ -1,5 +1,7 @@
 import {
   DEVICE_CONNECT_SOURCES,
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
   normalizeDeviceConnectSourceId,
@@ -7,7 +9,11 @@ import {
   readConfiguredDeviceSyncConnectTargetConfigs,
   resolveDeviceConnectSourceIdForJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
-
+import {
+  DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
+  isGoogleHealthFitbitMigrationLegacyTerminal,
+  isGoogleHealthFitbitMigrationSuccessorReady,
+} from "@murphai/device-syncd/fitbit-migration";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
   resolveHostedMurphContactOption,
@@ -60,12 +66,15 @@ type ConnectSourceConnectionState = {
   connectTarget: string | null;
   disconnectScope?: ConnectSourceDisconnectScope;
   disconnectSourceProviderSlug?: string;
+  migrationState?: ConnectSourceMigrationState;
+  migrationRetryRequired?: boolean;
   recoveryKind?: ConnectSourceRecoveryKind;
   requiresReconnect: boolean;
   sourceId: string;
   state: "active" | "reauthorization_required";
 };
 type ConnectSourceRecoveryKind = NonNullable<ConnectSource["recoveryKind"]>;
+type ConnectSourceMigrationState = NonNullable<ConnectSource["migrationState"]>;
 type ConnectSourceDisconnectScope = NonNullable<
   ConnectSource["disconnectScope"]
 >;
@@ -198,7 +207,7 @@ const CONNECT_SOURCE_UI = {
     name: "Eight Sleep",
   },
   fitbit: {
-    description: "Sleep, activity, heart rate, and daily readiness.",
+    description: "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
     logo: logoAsset("fitbit.svg"),
     name: "Fitbit",
   },
@@ -332,6 +341,8 @@ export default async function ConnectPage({
     ConnectSourceDisconnectScope
   >();
   const disconnectSourceProviderSlugBySourceId = new Map<string, string>();
+  const migrationStateBySourceId = new Map<string, ConnectSourceMigrationState>();
+  const migrationRetrySourceIds = new Set<string>();
   let historicalResetIncompleteSourceIds = new Set<string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const [
@@ -369,6 +380,13 @@ export default async function ConnectPage({
         } else if (connection.state === "active") {
           connectedSourceIds.add(sourceId);
         }
+        if (connection.migrationState) {
+          migrationStateBySourceId.set(sourceId, connection.migrationState);
+          connectedSourceIds.delete(sourceId);
+        }
+        if (connection.migrationRetryRequired) {
+          migrationRetrySourceIds.add(sourceId);
+        }
         if (connection.connectionId) {
           disconnectConnectionIdBySourceId.set(
             sourceId,
@@ -384,7 +402,10 @@ export default async function ConnectPage({
             connection.disconnectSourceProviderSlug,
           );
         }
-        if (connection.requiresReconnect) {
+        if (
+          connection.requiresReconnect ||
+          connection.migrationState === "authorization_required"
+        ) {
           if (connection.connectProvider) {
             reconnectProviderBySourceId.set(
               sourceId,
@@ -419,6 +440,8 @@ export default async function ConnectPage({
       disconnectScopeBySourceId,
       disconnectSourceProviderSlugBySourceId,
       historicalResetIncompleteSourceIds,
+      migrationStateBySourceId,
+      migrationRetrySourceIds,
       reconnectProviderBySourceId,
       reconnectSourceIds,
       reconnectTargetBySourceId,
@@ -615,6 +638,8 @@ export function resolveConfiguredConnectSources(
     >;
     disconnectSourceProviderSlugBySourceId?: ReadonlyMap<string, string>;
     historicalResetIncompleteSourceIds?: ReadonlySet<string>;
+    migrationStateBySourceId?: ReadonlyMap<string, ConnectSourceMigrationState>;
+    migrationRetrySourceIds?: ReadonlySet<string>;
     reconnectProviderBySourceId?: ReadonlyMap<string, string>;
     reconnectSourceIds?: ReadonlySet<string>;
     reconnectTargetBySourceId?: ReadonlyMap<string, string>;
@@ -633,7 +658,9 @@ export function resolveConfiguredConnectSources(
         source.id,
       );
       const connectConfig = connectConfigBySourceId.get(source.id);
-      const connected = options.connectedSourceIds?.has(source.id) === true;
+      const migrationState = options.migrationStateBySourceId?.get(source.id);
+      const connected =
+        !migrationState && options.connectedSourceIds?.has(source.id) === true;
       const recoveryKind = !connected
         ? options.recoveryKindBySourceId?.get(source.id)
         : undefined;
@@ -660,7 +687,8 @@ export function resolveConfiguredConnectSources(
         : undefined;
       const requiresVitalDisclosure =
         connectionAvailable &&
-        connectConfig?.provider === "junction";
+        connectConfig?.provider === "junction" &&
+        source.id !== "fitbit";
 
       return {
         ...source,
@@ -675,6 +703,10 @@ export function resolveConfiguredConnectSources(
           ? { disconnectSourceProviderSlug }
           : {}),
         ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
+        ...(migrationState ? { migrationState } : {}),
+        ...(options.migrationRetrySourceIds?.has(source.id)
+          ? { migrationRetryRequired: true }
+          : {}),
         ...(recoveryKind ? { recoveryKind } : {}),
         ...(requiresReconnect ? { requiresReconnect } : {}),
         ...(requiresVitalDisclosure ? { requiresVitalDisclosure } : {}),
@@ -689,6 +721,7 @@ export function resolveConfiguredConnectSources(
       source.connected === true ||
       source.requiresReconnect === true ||
       Boolean(source.recoveryKind) ||
+      Boolean(source.migrationState) ||
       source.historicalResetIncomplete === true,
   );
 }
@@ -870,6 +903,16 @@ function resolveConnectSourceConnectionMatches(
       continue;
     }
 
+    const fitbitMigration = resolveFitbitMigrationConnectionState({
+      connectionId,
+      source,
+      sourceState,
+      visibleSourceIds,
+    });
+    if (fitbitMigration) {
+      upsertConnectSourceConnection(connectedConnections, fitbitMigration);
+    }
+
     for (const upstreamSource of source.upstreamSources) {
       if (!isDisconnectableJunctionUpstreamSource(upstreamSource)) {
         continue;
@@ -911,6 +954,13 @@ function resolveConnectSourceConnectionMatches(
       const sourceProviderSlug = normalizeDeviceSyncConnectTargetKey(
         upstreamSource.sourceProviderSlug,
       );
+      if (
+        fitbitMigration &&
+        (sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+          || sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG)
+      ) {
+        continue;
+      }
       const sourceId = sourceProviderSlug
         ? resolveDeviceConnectSourceIdForJunctionProviderSlug(
             sourceProviderSlug,
@@ -947,6 +997,69 @@ function resolveConnectSourceConnectionMatches(
   return [...connectedConnections.values()];
 }
 
+function resolveFitbitMigrationConnectionState(input: {
+  connectionId: string | null;
+  source: ConnectSettingsSourceMatch;
+  sourceState: ConnectSourceConnectionState["state"];
+  visibleSourceIds: ReadonlySet<string>;
+}): ConnectSourceConnectionState | null {
+  if (!input.visibleSourceIds.has("fitbit")) {
+    return null;
+  }
+
+  const legacy = input.source.upstreamSources.find(
+    (source) =>
+      normalizeDeviceSyncConnectTargetKey(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG &&
+      isUnfinishedFitbitLegacySource(source),
+  );
+  if (!legacy) {
+    return null;
+  }
+
+  const successor = input.source.upstreamSources.find(
+    (source) =>
+      normalizeDeviceSyncConnectTargetKey(source.sourceProviderSlug) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG &&
+      isLiveJunctionUpstreamSource(source),
+  );
+  const successorReady = successor
+    && successor.fitbitMigrationCoverageReady === true
+    ? isGoogleHealthFitbitMigrationSuccessorReady({
+        firstSeenAt: successor.firstSeenAt,
+        historicalBackfillComplete: successor.historicalBackfillComplete === true,
+        lastDataAt: successor.lastDataAt,
+        resourceCount: successor.resourceCount,
+        status: successor.status,
+      })
+    : false;
+  const successorNeedsAuthorization =
+    !successor ||
+    successor.status === "error" ||
+    successor.requiresReconnect === true;
+
+  return {
+    connectionId: input.connectionId,
+    connectProvider: successorNeedsAuthorization
+      ? normalizeDeviceSyncConnectTargetKey(legacy.connectProvider ?? "junction")
+      : null,
+    connectTarget: successorNeedsAuthorization
+      ? legacy.connectTarget ?? "fitbit"
+      : null,
+    ...(successorReady ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } : {}),
+    ...(successorReady &&
+      legacy.lastErrorCode === DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE
+      ? { migrationRetryRequired: true }
+      : {}),
+    migrationState: successorReady
+      ? "cutover_ready"
+      : successorNeedsAuthorization
+        ? "authorization_required"
+        : "verifying_successor",
+    requiresReconnect: false,
+    sourceId: "fitbit",
+    state: input.sourceState,
+  };
+}
+
 function countLiveJunctionUpstreamSources(
   upstreamSources: ConnectSettingsSourceMatch["upstreamSources"],
 ): number {
@@ -961,6 +1074,18 @@ function isLiveJunctionUpstreamSource(
     source.status === "error" ||
     source.requiresReconnect === true
   );
+}
+
+function isUnfinishedFitbitLegacySource(
+  source: ConnectSettingsSourceMatch["upstreamSources"][number],
+): boolean {
+  if (isLiveJunctionUpstreamSource(source)) {
+    return true;
+  }
+  if (source.status !== "disconnected") {
+    return false;
+  }
+  return !isGoogleHealthFitbitMigrationLegacyTerminal(source);
 }
 
 function isDisconnectableJunctionUpstreamSource(
@@ -991,9 +1116,9 @@ function connectSourceStatePriority(
 ): number {
   if (
     connection.state === "active" &&
-    (connection.requiresReconnect || connection.recoveryKind)
+    (connection.migrationState || connection.requiresReconnect || connection.recoveryKind)
   ) {
-    return 5;
+    return connection.migrationState ? 6 : 5;
   }
 
   if (connection.state === "active") {
@@ -1047,7 +1172,11 @@ function resolveVerifiedInitialConnectCallback(
   });
   const confirmed = callbackSourceId
     ? sources.some(
-        (source) => source.id === callbackSourceId && source.connected === true,
+        (source) =>
+          source.id === callbackSourceId &&
+          (source.connected === true ||
+            source.migrationState === "verifying_successor" ||
+            source.migrationState === "cutover_ready"),
       )
     : false;
 
