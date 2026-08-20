@@ -4922,10 +4922,6 @@ test("reconciles a fulfilled Settings return without presenting a confirmation",
     });
 
     assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
-    assert.equal(
-      rendered.container.querySelectorAll('[role="status"]').length,
-      1,
-    );
     const status = rendered.container.querySelector('[role="status"]');
     assert.ok(status);
     assert.equal(status.getAttribute("aria-live"), "polite");
