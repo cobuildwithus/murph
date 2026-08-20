@@ -195,8 +195,9 @@ describe('applyMurphManagedAutomations core integration', () => {
       vault: vaultRoot,
     })
 
+    // A later managed retry wake has no fresh inbound route. It must recover
+    // the exact member route from the canonical managed records created above.
     const first = await applyMurphManagedAutomations({
-      defaultRoute: route,
       now: new Date('2026-08-20T12:02:00.000Z'),
       vaultRoot,
     })
@@ -215,7 +216,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(automation?.activeUntil).not.toBeNull()
 
     const replay = await applyMurphManagedAutomations({
-      defaultRoute: route,
       now: new Date('2026-08-20T12:03:00.000Z'),
       vaultRoot,
     })
@@ -231,7 +231,6 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })
     const afterArchive = await applyMurphManagedAutomations({
-      defaultRoute: route,
       now: new Date('2026-08-20T12:04:00.000Z'),
       vaultRoot,
     })
