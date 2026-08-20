@@ -88,6 +88,8 @@ Updated: 2026-08-20
 5. [pending] Resolve findings, close the plan, and prove current-base
    mergeability.
 
+Pull request: #2083
+
 ## Decisions
 
 - Do not use Cloudflare `message.reply()` for the first public message. It
