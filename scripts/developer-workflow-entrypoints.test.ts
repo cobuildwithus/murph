@@ -130,7 +130,11 @@ fi
   runGit(repository, ["init", "-b", "main"]);
   runGit(repository, ["config", "core.hooksPath", ".no-hooks"]);
   runGit(repository, ["config", "user.name", "Workflow Test"]);
-  runGit(repository, ["config", "user.email", "workflow-test@invalid"]);
+  runGit(repository, [
+    "config",
+    "user.email",
+    "workflow-test@users.noreply.github.com",
+  ]);
   runGit(repository, ["add", "."]);
   runGit(repository, ["commit", "-m", "baseline"]);
 
@@ -240,6 +244,24 @@ describe("open execution plan wrapper", () => {
         "utf8",
       ),
     ).toBe("created\n");
+  });
+});
+
+describe("pre-commit fixture identity", () => {
+  it("accepts the public-safe identity used by hermetic Git fixtures", () => {
+    const harness = createPreCommitHarness();
+    writeFileSync(path.join(harness.repository, "feature.txt"), "fixture change\n");
+    runGit(harness.repository, ["add", "feature.txt"]);
+
+    const result = runPreCommit(harness);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(runGit(harness.repository, ["config", "user.name"])).toBe(
+      "Workflow Test",
+    );
+    expect(runGit(harness.repository, ["config", "user.email"])).toBe(
+      "workflow-test@users.noreply.github.com",
+    );
   });
 });
 

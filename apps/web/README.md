@@ -1362,10 +1362,16 @@ Generate the client and apply migrations with Prisma:
 
 ```bash
 pnpm --dir apps/web prisma:generate
+pnpm --dir apps/web prisma:validate
 pnpm --dir apps/web prisma:migrate:deploy
 pnpm --dir apps/web release:production:migrate
 pnpm --dir apps/web release:production:contract-migrate
 ```
+
+Use `prisma:validate` for focused schema verification. It checks the schema
+without rewriting it. Run `prisma format` only when a repository-wide schema
+layout change is intentional, and review that mechanical diff separately from
+the migration change.
 
 The checked-in Vercel build command runs the guarded production migration
 wrapper before building. That wrapper generates the Prisma client because the

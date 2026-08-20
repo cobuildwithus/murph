@@ -40,6 +40,7 @@
     "test:viewport-overflow": "playwright test e2e/viewport-overflow.spec.ts e2e/group-sponsorship-management-alert-dialog.spec.ts",
     "prisma:generate": "prisma generate && pnpm --dir ../.. exec tsx apps/web/scripts/ensure-prisma-client-link.ts",
     "prisma:generate:build": "pnpm --dir ../.. exec tsx apps/web/scripts/prepare-prisma-client-for-build.ts",
+    "prisma:validate": "prisma validate --config prisma.config.ts",
     "prisma:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
     "prisma:migrate:dev": "prisma migrate dev",
     "runtime-logs:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-runtime-log-migrate-deploy.ts",
