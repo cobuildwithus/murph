@@ -2564,66 +2564,42 @@ export async function executeMurphDynamicToolRequest(input: {
         })
         switch (result.status) {
           case 'accepted':
-            return toolTextResult(
+            return physicalNoteRecoveryToolResult(
               true,
-              JSON.stringify({
-                note:
-                  'Provider records show the earlier physical-note submission was accepted for printing. It cannot be treated as canceled. This recovery sent nothing new. Say accepted for printing, not delivered.',
-                retryAfter: null,
-                status: result.status,
-              }),
+              result.status,
+              'The earlier note was accepted for printing, not delivered, and cannot be treated as canceled. This recovery sent nothing new.',
             )
           case 'clear':
-            return toolTextResult(
+            return physicalNoteRecoveryToolResult(
               true,
-              JSON.stringify({
-                note:
-                  'No unresolved physical-note submission remains. This recovery sent nothing. A future note still requires a separate explicit send request.',
-                retryAfter: null,
-                status: result.status,
-              }),
+              result.status,
+              'No unresolved physical-note submission remains. This recovery sent nothing; a future note needs a separate request.',
             )
           case 'pending':
-            return toolTextResult(
+            return physicalNoteRecoveryToolResult(
               true,
-              JSON.stringify({
-                note: result.retryAfter
-                  ? 'The earlier provider outcome is still unresolved and cannot yet be safely cleared. No automatic retry or follow-up is running, and this recovery sent nothing.'
-                  : 'The provider check is still indeterminate, so the earlier submission cannot be safely cleared. No automatic retry or follow-up is running, and this recovery sent nothing.',
-                retryAfter: result.retryAfter,
-                status: result.status,
-              }),
+              result.status,
+              'The earlier outcome is unresolved and cannot be safely cleared. No automatic retry or follow-up is running; this recovery sent nothing.',
+              result.retryAfter,
             )
           case 'permission_denied':
-            return toolTextResult(
+            return physicalNoteRecoveryToolResult(
               false,
-              JSON.stringify({
-                note:
-                  'The earlier physical-note submission was not changed because this recovery action is not available to the current participant.',
-                retryAfter: null,
-                status: result.status,
-              }),
+              result.status,
+              'The earlier submission was not changed because recovery is not available to the current participant.',
             )
           case 'unavailable':
-            return toolTextResult(
+            return physicalNoteRecoveryToolResult(
               false,
-              JSON.stringify({
-                note:
-                  'Physical-note recovery is currently unavailable. The earlier submission was not cleared, nothing new was sent, and no automatic retry is running.',
-                retryAfter: null,
-                status: result.status,
-              }),
+              result.status,
+              'Physical-note recovery is currently unavailable. The earlier submission was not cleared; nothing new was sent and no automatic retry is running.',
             )
         }
       } catch {
-        return toolTextResult(
+        return physicalNoteRecoveryToolResult(
           false,
-          JSON.stringify({
-            note:
-              'Murph could not confirm the provider-check response, so the earlier submission\'s final state is unconfirmed. Do not claim any clearing or acceptance outcome. Nothing new was sent, and no automatic retry is running.',
-            retryAfter: null,
-            status: 'unavailable',
-          }),
+          'unavailable',
+          'The recovery response was lost, so the earlier submission\'s final state is unconfirmed. Do not claim it cleared or was accepted. Nothing new was sent and no automatic retry is running.',
         )
       }
     }
@@ -6609,6 +6585,18 @@ function toolTextResult(
       contentItems: [{ type: 'inputText', text }],
     },
   }
+}
+
+function physicalNoteRecoveryToolResult(
+  success: boolean,
+  status: 'accepted' | 'clear' | 'pending' | 'permission_denied' | 'unavailable',
+  note: string,
+  retryAfter: string | null = null,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(
+    success,
+    JSON.stringify({ note, retryAfter, status }),
+  )
 }
 
 function invalidDynamicToolArgumentsResult(
