@@ -69,6 +69,32 @@ Updated: 2026-08-20
 - Treat the member experience as a Patch: scheduled private context maintenance
   works again without changing its timing, destination, or silent behavior.
 
+## Product UX Patch
+
+- Outcome: Murph can again keep relevant private saved context current during
+  the existing scheduled maintenance pass.
+- Reaches: an established hosted member whose silent maintenance occurrence
+  needs to read or update the canonical memory document; sparse or unchanged
+  memory continues to complete silently with no member delivery.
+- Proof: the populated final-image memory command now runs through Codex App
+  Server under the exact production maintenance profile, while focused profile
+  coverage preserves its narrow writes and network denial.
+
+## Product UX Walkthrough
+
+- Established history: the scheduled occurrence receives its existing bounded
+  conversation evidence, reads the populated canonical memory document through
+  the bundled CLI, and may update only that document. No audience or delivery
+  is introduced.
+- Sparse or unchanged history: the existing no-op/skip path remains unchanged
+  and sends no message.
+- Failure and recovery: a missing or unreadable CLI remains a visible failed
+  tool result; the corrected immutable-tree read makes the normal command
+  reachable without widening workspace writes or network authority.
+- Result: Ready. This narrow Patch changes only CLI reachability, and the exact
+  production-shaped final-image proof is enforced by the existing release
+  smoke before deployment.
+
 ## Verification
 
 - Commands to run: focused hosted-execution and Cloudflare contract tests,
@@ -78,3 +104,6 @@ Updated: 2026-08-20
   memory proof selects `murph-member-memory-maintenance`, the populated command
   succeeds in the bundled runner, and the deployed smoke reports the expected
   bundle fingerprint.
+- Local results: hosted-execution profile tests passed 4/4; Cloudflare container
+  contract tests passed 11/11; changelog tests passed 57/57; hosted-execution,
+  Cloudflare, and Web typechecks passed; `git diff --check` passed.
