@@ -4740,6 +4740,11 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
     return await runHostedDeviceSyncWakeLane({
       deviceSyncPort: input.phaseInput.runtime.platform.deviceSyncPort ?? null,
       platformEnv: input.phaseInput.runtime.platformEnv,
+      runtimeLogContext: {
+        attemptId: input.phaseInput.request.attemptId,
+        leaseGeneration: input.phaseInput.request.leaseGeneration,
+        workspaceVersion: input.phaseInput.request.workspaceVersion,
+      },
       runtimeLogPlatform: input.phaseInput.runtime.platform,
       resolvedConfig: input.phaseInput.runtime.resolvedConfig,
       ...(input.phaseInput.shouldYieldBackgroundMaintenance
@@ -5741,6 +5746,11 @@ async function runSystemMailboxMaintenancePhase(input: {
         : {}),
       executionContext: input.executionContext,
       operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+      runtimeLogContext: {
+        attemptId: phaseInput.request.attemptId,
+        leaseGeneration: phaseInput.request.leaseGeneration,
+        workspaceVersion: phaseInput.request.workspaceVersion,
+      },
       runtime: phaseInput.runtime,
       runtimeEnv: phaseInput.runtimeEnv,
       signal: phaseInput.signal ?? null,

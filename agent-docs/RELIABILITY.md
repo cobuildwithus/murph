@@ -1116,6 +1116,23 @@ Last verified: 2026-08-20
   `device-sync.maintenance_failed`, and activity scheduling uses
   `assistant.device_activity_automation_failed`; none increments the
   failed-attempt metric.
+  Every hosted device-sync lane also enqueues a best-effort
+  `device-sync.pass_started` marker before snapshot/provider work and a paired
+  `device-sync.pass_finished` marker before returning or rethrowing. Both use
+  the existing ordered runtime-log buffer and bounded invocation-end drain, so
+  diagnostic transport never blocks provider start, foreground recovery, lane
+  return, or checkpoint/retry handoff. Both carry the invocation attempt, lease
+  generation, and workspace version in typed log columns. The terminal marker
+  contains only bounded metadata: the last pass stage, outcome, elapsed time,
+  processed-job count, checkpoint/retry presence, and a typed yield reason
+  (`foreground`, `timeout`, `invocation_preempted`, `container_destroyed`,
+  `outer_signal`, or `unknown`). A persisted start without a matching finish is
+  the queryable abrupt-loss signal and must be correlated with runner,
+  container, and checkpoint events for that attempt. The pair remains
+  best-effort: abrupt loss before the background writer flushes can omit either
+  marker. These entries
+  never include member/account/job identifiers, provider payloads, resource
+  values, or raw abort/error messages.
   This event taxonomy is a strict Web parser boundary. Shared workspace packages
   are build inputs, not separately deployed planes. Deploy the Web artifact that
   contains its parser first, then deploy and fully recycle the Cloudflare

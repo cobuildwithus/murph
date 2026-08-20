@@ -37,6 +37,9 @@ import {
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import type {
+  HostedRuntimeLogContext,
+} from "./runtime-logs.ts";
 
 export { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 
@@ -53,6 +56,7 @@ export async function executeHostedMailboxEvent(input: {
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -99,6 +103,7 @@ export async function executeHostedMailboxEvent(input: {
     preferenceAppliedAt: input.preferenceAppliedAt,
     preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
+    runtimeLogContext: input.runtimeLogContext ?? null,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal ?? null,
     ...(input.shouldYieldClinicalRecords
@@ -150,6 +155,7 @@ async function handleHostedMailboxEvent(input: {
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
+  runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
@@ -164,6 +170,7 @@ async function handleHostedMailboxEvent(input: {
     preferenceAppliedAt: input.preferenceAppliedAt,
     preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
+    runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
     ...(input.shouldYieldClinicalRecords
@@ -197,6 +204,7 @@ async function executeHostedSystemWake(input: {
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
+  runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.kind) {
@@ -321,6 +329,9 @@ async function executeHostedSystemWake(input: {
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
         retainFollowUpWakeUntilCheckpoint: true,
+        ...(input.runtimeLogContext
+          ? { runtimeLogContext: input.runtimeLogContext }
+          : {}),
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         ...(input.shouldYieldDeviceSync

@@ -11800,6 +11800,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const imported: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceSyncPort = createEmptyDeviceSyncPort();
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:new-import",
@@ -11824,6 +11825,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_new_device",
+            leaseGeneration: "19",
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
@@ -11855,6 +11857,7 @@ describe("hosted workspace runtime entrypoint", () => {
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort,
+            logRequests,
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
@@ -11891,6 +11894,28 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "idle");
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      const lifecycleEntries = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode.startsWith("device-sync.pass_"));
+      assert.deepEqual(lifecycleEntries.map((entry) => ({
+        attemptId: entry.attemptId,
+        eventCode: entry.eventCode,
+        leaseGeneration: entry.leaseGeneration,
+        workspaceVersion: entry.workspaceVersion,
+      })), [
+        {
+          attemptId: "attempt_synthetic_system_mailbox_new_device",
+          eventCode: "device-sync.pass_started",
+          leaseGeneration: "19",
+          workspaceVersion: "0",
+        },
+        {
+          attemptId: "attempt_synthetic_system_mailbox_new_device",
+          eventCode: "device-sync.pass_finished",
+          leaseGeneration: "19",
+          workspaceVersion: "0",
+        },
+      ]);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
