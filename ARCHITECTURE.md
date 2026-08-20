@@ -2756,7 +2756,8 @@ one opaque SHA-256 workout-revision binding derived from the canonical workout
 identity and its last applied member-action marker. It contains neither value
 and grants no authority, but preserves exact nullable prior fields while letting
 the workout owner prove under its existing lock that an old card still names
-the exact active workout and predates no direct action. Note-shaped results enter V6 only when the exact canonical note
+the exact unfinished workout and predates no direct action. Note-shaped results
+enter V6 only when the exact canonical note
 fits the visible card result; longer hidden notes cannot enter persisted or
 provider payloads and leave the card V4/read-only. Every other completed set
 must fit exactly one complete note, reps, or weight/reps family; duration,
@@ -2773,11 +2774,12 @@ finishes that reply first and then selects at most one due
 `member.action.requested` item before another provider pass or unrelated system
 work; the terminal `member.action.completed` receipt receives no such priority.
 The workout
-owner takes the existing live-workout mutation lock, resolves an exact persisted
-action-id replay first, then requires exactly one active workout matching both
-the current revision binding and the authority-free visible shape, applies
+owner resolves an exact persisted action-id replay first, then derives exactly
+one unfinished record from the opaque revision binding, locks that canonical
+workout id, revalidates the binding and authority-free visible shape, applies
 the complete batch in one canonical write, converges exact retries, and rejects
-stale or ambiguous state. Runtime appends a typed terminal outcome through the
+stale or ambiguous state. No global active or focused workout owns targeting.
+Runtime appends a typed terminal outcome through the
 same mailbox owner before the original request checkpoint is released. The
 scoped client reads that action-id-keyed receipt and reports success only for an
 applied or already-converged result. A future data

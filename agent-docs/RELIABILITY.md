@@ -2359,10 +2359,11 @@ equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
 never success for a stale destructive action. Replay lookup checks that marker
-across the bounded canonical workout collection before revision and active-only
-eligibility, so the generation change caused by the original write, workout
-completion, or a newer active workout cannot replace a committed success with a
-terminal rejection. Every different action must match the current revision
+across the bounded canonical workout collection before revision and
+unfinished-record eligibility, so the generation change caused by the original
+write or workout completion cannot replace a committed success with a terminal
+rejection, and another unfinished workout cannot receive the action. Every
+different action must match the current revision
 before positional mutation. The serialized mailbox lane means
 one last-applied id is sufficient until its terminal outcome commits, without a
 second receipt store. Validated set removal uses one narrow canonical replacement

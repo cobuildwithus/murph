@@ -511,6 +511,26 @@ an attended member turn, an exact-session scheduled occurrence, or an
 exact-session Assistant Ask continuation, and before a direct exact notification
 can append newer ordinary-session history.
 
+## Record-Scoped Workout Tracking Rollout
+
+The record-scoped workout release adds optional `memberRepsPerSet` and
+`setPlanIsFinite` fields to the strict workout record and changes the bundled
+assistant CLI and prompt contract. Deploy the Cloudflare Worker and runner
+together with `container_rollout=immediate`; Web has no ordering dependency.
+Require managed-container smoke to report the exact new runner-bundle
+fingerprint before accepting workout traffic, and confirm that the bundled CLI
+exposes `workout exercise set-reps` and requires an exact workout id for every
+workout mutation.
+
+Existing workout records need no migration. Before the first new-field write,
+the preceding runner bundle is a safe rollback. After that write, the compatible
+runner is the rollback floor for the affected workspace because the preceding
+strict parser rejects the new fields. Forward-fix on that bundle or newer rather
+than rolling back below the floor. After convergence, exercise a controlled
+finite workout through stored repetitions, terse final-set completion, automatic
+closure, and a subsequent workout start. Monitor bounded hosted-runtime error
+aggregates for strict workout parse failures and rejected workout CLI commands.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an

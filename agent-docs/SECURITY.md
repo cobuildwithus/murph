@@ -996,14 +996,16 @@ Last verified: 2026-08-20
   append rather than accepting a meaningless destructive command. Canonical
   persistence atomically records the bounded action id with the workout change,
   and only that exact marker—not visible-state coincidence—proves replay before
-  revision, active-only, and destructive preconditions. Every different action
+  revision, unfinished-record, and destructive preconditions. Every different
+  action
   must match the current revision before positional mutation, so a card that
   predates either another direct action or a generic structural reorder fails
   closed even when repeated visible values would make the wrong target appear
   unchanged; indistinguishable duplicate coordinates fail closed before this
   comparison rather than being treated as equal authority. The same bounded
   canonical workout read resolves that marker after the target completes and
-  before considering a newer active workout, so replay cannot retarget. This
+  before first-application binding resolution, so replay cannot retarget another
+  unfinished workout. This
   adds no client-visible set id or second receipt store. Canonical persistence
   keeps the generic no-deletion guard and exposes set removal only to the
   live-workout member-action owner after the exact binding and snapshot checks

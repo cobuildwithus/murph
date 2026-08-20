@@ -157,7 +157,7 @@ async function seedWorkoutCheckpoint(): Promise<{
     timezone: "UTC",
     vault: vaultRoot,
   });
-  await startLiveWorkout({
+  const started = await startLiveWorkout({
     name: "Card action fixture",
     startedAt: new Date().toISOString(),
     vault: vaultRoot,
@@ -168,6 +168,7 @@ async function seedWorkoutCheckpoint(): Promise<{
     order: 1,
     setCount: 1,
     vault: vaultRoot,
+    workoutId: started.eventId,
   });
   const workout = findWorkoutShowResult(shown);
   if (!workout) {
