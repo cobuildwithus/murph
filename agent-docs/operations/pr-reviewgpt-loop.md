@@ -440,11 +440,16 @@ the current user explicitly asks for it.
    `codebase.zip`; Repomix is disabled by default and is not part of this flow.
    Each lane's user-data directory and CDP port preserve its authentication and
    process isolation; ignored copied app bundles are not browser-version
-   authority.
+   authority. When the installed Brave binary is unavailable, a named lane may
+   use only its exact app path in the current checkout or the shared primary
+   checkout derived from Git's common directory. The wrapper never searches
+   Spotlight or scans unrelated filesystem roots for an app bundle.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
-   through six lanes and defaults to four. A host with provisioned Vonneumann
-   and Apollo profiles opts into all six by setting it in the local
+   through six lanes and defaults to four. A value supplied on the current
+   command is authoritative; the local config is only a fallback preference and
+   cannot widen or replace that per-run pool cap. A host with provisioned
+   Vonneumann and Apollo profiles opts into all six by setting it in the local
    `$XDG_CONFIG_HOME/murph/review-gpt.conf`, without committing machine-specific
    preferences or account details.
 
