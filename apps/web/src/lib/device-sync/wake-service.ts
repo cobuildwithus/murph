@@ -1856,14 +1856,16 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     webhookReceivedAt: input.now,
   });
-  const fitbitMigrationSuccessorEventId =
-    buildHostedFitbitMigrationSuccessorEventId({
-      connectionId: input.account.id,
-      expectedConnectedAt: input.account.connectedAt,
-      jobs: input.webhook.jobs ?? [],
-      provider: input.account.provider,
-      userId: ownerId,
-    });
+  const fitbitMigrationSuccessorOccurredAt = input.webhook.occurredAt ?? null;
+  const fitbitMigrationSuccessorEventId = fitbitMigrationSuccessorOccurredAt
+    ? buildHostedFitbitMigrationSuccessorEventId({
+        connectionId: input.account.id,
+        expectedConnectedAt: input.account.connectedAt,
+        jobs: input.webhook.jobs ?? [],
+        provider: input.account.provider,
+        userId: ownerId,
+      })
+    : null;
   const sourceObservation = input.sourceAdmissionDeferred === true
     ? await prepareHostedWebhookSourceObservation({
         ...input,
@@ -1893,6 +1895,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     dirtyResources,
     eventType: input.webhook.eventType,
     fitbitMigrationSuccessorEventId,
+    fitbitMigrationSuccessorOccurredAt,
     occurredAt: input.webhook.occurredAt ?? input.now,
     processingAttemptedAt: input.processingAttemptedAt,
     provider: input.account.provider,
@@ -2668,6 +2671,7 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   eventType: string;
   expectedConnectedAt: string;
   fitbitMigrationSuccessorEventId: string | null;
+  fitbitMigrationSuccessorOccurredAt: string | null;
   occurredAt: string;
   processingAttemptedAt: string;
   provider: string;
@@ -2708,7 +2712,8 @@ async function persistHostedDeviceSyncWebhookAccepted(
         hasHostedDeviceSyncDirtyResourcePayload,
       );
       const advancesFitbitMigrationSuccessor =
-        isHostedJunctionDailyDataWebhookEvent(input.eventType);
+        isHostedJunctionDailyDataWebhookEvent(input.eventType)
+        && input.fitbitMigrationSuccessorOccurredAt !== null;
       const requiresFitbitMigrationAdmission = input.provider === "junction"
         && isHostedJunctionDataWebhookEvent(input.eventType)
         && (
@@ -2892,23 +2897,25 @@ async function persistHostedDeviceSyncWebhookAccepted(
             }
 
             if (finalAdmission.kind === "migration_pending") {
-              if (!preparedMailbox || !input.fitbitMigrationSuccessorEventId) {
+              const successorEventId = input.fitbitMigrationSuccessorEventId;
+              const successorOccurredAt = input.fitbitMigrationSuccessorOccurredAt;
+              if (!preparedMailbox || !successorEventId || !successorOccurredAt) {
                 throw webhookSourceNotReadyError(
-                  "Google Health webhook logical identity is not available yet. Retry shortly.",
+                  "Google Health webhook occurrence identity is not available yet. Retry shortly.",
                 );
               }
               const mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
                 envelope: buildHostedDeviceSyncWake({
                   connectionId: input.connectionId,
-                  eventId: input.fitbitMigrationSuccessorEventId,
+                  eventId: successorEventId,
                   expectedConnectedAt: input.expectedConnectedAt,
                   hint: {
                     eventType: input.eventType,
-                    occurredAt: input.occurredAt,
+                    occurredAt: successorOccurredAt,
                     reason: "fitbit_migration_successor_arrival",
                     resourceCategory: input.resourceCategory ?? null,
                   },
-                  occurredAt: input.occurredAt,
+                  occurredAt: successorOccurredAt,
                   provider: input.provider,
                   source: "webhook-hint",
                   userId: input.userId,
@@ -2929,12 +2936,12 @@ async function persistHostedDeviceSyncWebhookAccepted(
                 mailboxAppend.inserted
                 && Date.parse(input.acceptedAt)
                   > finalAdmission.successorFirstSeenAt.getTime()
-                && Date.parse(input.occurredAt)
+                && Date.parse(successorOccurredAt)
                   > finalAdmission.successorFirstSeenAt.getTime()
               ) {
                 await input.store.markConnectionSourceDataReceived({
                   connectionId: input.connectionId,
-                  now: input.occurredAt,
+                  now: successorOccurredAt,
                   sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
                   tx,
                 });

@@ -9133,6 +9133,7 @@ describe("hosted device-sync wakes", () => {
         acceptanceMode: "durable_webhook_work",
         dataSourceProviderSlug: "google_health",
         eventType: "daily.data.activity.updated",
+        occurredAt: "2026-03-26T12:00:00.000Z",
         jobs: [{
           dedupeKey: "google-health-activity-fact",
           kind: "resource",
@@ -9248,6 +9249,7 @@ describe("hosted device-sync wakes", () => {
         acceptanceMode: "durable_webhook_work",
         dataSourceProviderSlug: "google_health",
         eventType: "daily.data.activity.updated",
+        occurredAt: now,
         jobs: [{
           dedupeKey: "google-health-activity-fact",
           kind: "resource",
@@ -9318,6 +9320,7 @@ describe("hosted device-sync wakes", () => {
         acceptanceMode: "durable_webhook_work",
         dataSourceProviderSlug: "google_health",
         eventType: "daily.data.activity.updated",
+        occurredAt: "2026-03-26T12:00:00.000Z",
         jobs: [{
           dedupeKey: "google-health-activity-fact",
           kind: "resource",

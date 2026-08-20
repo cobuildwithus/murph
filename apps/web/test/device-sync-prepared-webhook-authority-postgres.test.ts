@@ -383,6 +383,45 @@ async function prepareDailyData(input: {
   return prepared;
 }
 
+async function prepareTimestampLessDailyHint(input: {
+  fixture: Fixture;
+  messageId?: string;
+  objectId?: string;
+  receivedAt: Date;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+}): Promise<PreparedDeviceSyncWebhookV1> {
+  const signed = signJunctionWebhook({
+    body: {
+      data: {
+        id: input.objectId ?? `sleep-hint-${randomUUID().replaceAll("-", "")}`,
+        source: {
+          provider: input.sourceProviderSlug,
+          type: "watch",
+        },
+        user_id: input.fixture.externalAccountId,
+      },
+      event_type: "daily.data.sleep.created",
+      user_id: input.fixture.externalAccountId,
+    },
+    messageId: input.messageId
+      ?? `msg_prepared_daily_hint_${randomUUID().replaceAll("-", "")}`,
+    receivedAt: input.receivedAt,
+  });
+  const service = createIngressService({
+    headers: signed.headers,
+    registry: input.registry,
+    store: input.fixture.store,
+  });
+  const prepared = await service.prepareWebhookForDurableEnqueue(
+    "junction",
+    signed.rawBody,
+    input.receivedAt,
+  );
+  input.fixture.traceIds.push(prepared.traceId);
+  return prepared;
+}
+
 async function expectNoWebhookEffects(
   fixture: Fixture,
   input: {
@@ -1312,6 +1351,84 @@ describe.skipIf(!runPostgresProof)(
           select: { firstSeenAt: true, lastDataAt: true },
           where: { id: fixture.sourceId },
         });
+
+        const timestampLessReceivedAt = new Date(
+          reauthorizedSource.firstSeenAt.getTime() + 500,
+        );
+        const timestampLessObjectId = `sleep-hint-${randomUUID().replaceAll("-", "")}`;
+        const timestampLessPrepared = await prepareTimestampLessDailyHint({
+          fixture,
+          objectId: timestampLessObjectId,
+          receivedAt: timestampLessReceivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        expect(timestampLessPrepared.occurredAt).toBeUndefined();
+        expect(timestampLessPrepared.jobs).toHaveLength(1);
+        expect(timestampLessPrepared.jobs[0]).toMatchObject({
+          kind: "resource",
+          payload: {
+            eventType: "daily.data.sleep.created",
+            resource: "sleep",
+            sourceProviderSlug,
+          },
+        });
+        await expect(
+          consumeService.handlePreparedWebhook(timestampLessPrepared),
+        ).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(reauthorizedSource);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+
+        const migrationMailboxItemBeforeRestart =
+          await fixture.prisma.hostedMailboxItem.findFirstOrThrow({
+            select: { id: true },
+            where: { userId: fixture.memberId },
+          });
+        await fixture.prisma.hostedMailboxItem.update({
+          data: { consumedAt: timestampLessReceivedAt },
+          where: { id: migrationMailboxItemBeforeRestart.id },
+        });
+        const restartedTimestampLessConsumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+        const repeatedTimestampLessPrepared = await prepareTimestampLessDailyHint({
+          fixture,
+          objectId: timestampLessObjectId,
+          receivedAt: new Date(timestampLessReceivedAt.getTime() + 1_000),
+          registry,
+          sourceProviderSlug,
+        });
+        expect(repeatedTimestampLessPrepared.traceId).not.toBe(
+          timestampLessPrepared.traceId,
+        );
+        expect(
+          repeatedTimestampLessPrepared.jobs.map((job) => job.dedupeKey),
+        ).not.toEqual(timestampLessPrepared.jobs.map((job) => job.dedupeKey));
+        await expect(
+          restartedTimestampLessConsumeService.handlePreparedWebhook(
+            repeatedTimestampLessPrepared,
+          ),
+        ).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(reauthorizedSource);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
 
         const retryReceivedAt = new Date(reauthorizedSource.firstSeenAt.getTime() + 1_000);
         const retryPrepared = await prepareDailyData({
