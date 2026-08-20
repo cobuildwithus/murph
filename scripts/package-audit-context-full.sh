@@ -479,7 +479,10 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
   fi
 
   if ! git cat-file -e "$review_gpt_base_oid^{commit}" >/dev/null 2>&1; then
-    git fetch --quiet origin "$review_gpt_base_ref"
+    scripts/review-gpt-pr-head-preflight.sh \
+      --refresh-pr-base-if-missing \
+      "$review_gpt_base_ref" \
+      "$review_gpt_base_oid"
   fi
   if git cat-file -e "$review_gpt_base_oid^{commit}" >/dev/null 2>&1 \
     && git cat-file -e "$review_gpt_head_oid^{commit}" >/dev/null 2>&1; then
