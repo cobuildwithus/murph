@@ -163,6 +163,25 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       isAllowedNativeIosHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
         workflow.replace(
+          '      pull-requests: read\n',
+          '      pull-requests: read\n      statuses: write\n',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow.replace('      contents: read\n', '      contents: write\n'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow.replace(
           'ref: ${{ github.event.repository.default_branch }}',
           () => 'ref: ${{ needs.select-pr.outputs.head_ref }}',
         ),
@@ -291,6 +310,7 @@ function isAllowedNativeIosHostedE2eHandoff(
   if (
     !isRecord(prLive)
     || !hasTrustedPrLiveAdmission(prLive)
+    || !hasExactReadOnlyPrLivePermissions(prLive.permissions)
     || !hasEarlyExactPrHeadRevalidation(prLive.steps)
     || !hasTrustedControlPlaneCheckout(prLive.steps)
   ) {
@@ -304,6 +324,16 @@ function isAllowedNativeIosHostedE2eHandoff(
     && workflow.includes('PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}')
     && workflow.includes('NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}')
   )
+}
+
+function hasExactReadOnlyPrLivePermissions(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return Object.keys(value).sort().join(',') === 'contents,pull-requests'
+    && value.contents === 'read'
+    && value['pull-requests'] === 'read'
 }
 
 function hasTrustedPrLiveAdmission(prLive: Record<string, unknown>): boolean {
