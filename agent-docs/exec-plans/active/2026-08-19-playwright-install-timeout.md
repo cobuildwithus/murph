@@ -2,9 +2,9 @@
 
 ## Goal
 
-Make browser-driving CI recover from one stalled operating-system dependency
-install without allowing an old installer process tree to overlap the retry or
-letting the wrapper consume the workflow step's entire timeout budget.
+Make browser-driving CI recover from one stalled APT mirror acquisition by
+placing the retry and inactivity bounds at APT's native ownership boundary,
+without restarting or supervising Playwright's privileged process tree.
 
 ## Evidence
 
@@ -16,26 +16,32 @@ letting the wrapper consume the workflow step's entire timeout budget.
 - The preliminary specialist review found that the first retry wrapper could
   leave descendants alive and had no headroom between its internal worst case
   and the GitHub Actions step timeout.
+- Final ReviewGPT round 1 found that even a process-group-aware wrapper cannot
+  prove ownership after Playwright crosses the `sudo` boundary, while APT
+  already owns per-file retries and HTTP/HTTPS inactivity timeouts.
 
 ## Constraints
 
-- One wrapper owns each exact `pnpm` process group from launch through cleanup.
-- No retry may start until the prior group is proven absent.
-- The wrapper must preserve a real install failure and report a timeout with a
-  distinct status after the final bounded attempt.
-- The declared worst case must remain at least two minutes below every calling
-  workflow step timeout.
+- Use APT's existing configuration surface for the demonstrated mirror retry;
+  do not add another process or retry owner.
+- Verify the ephemeral runner loaded the intended policy before Playwright
+  starts.
+- Invoke Playwright exactly once and preserve its final status.
+- Keep every caller's existing 14-minute step ceiling as the final bound on the
+  one-shot Playwright install.
 - Keep the change internal to CI; add no runtime dependency or member-facing
   behavior.
 
 ## Plan
 
-1. Correct the wrapper's process-group signaling and bounded TERM/KILL cleanup.
-2. Add focused tests for success, timeout recovery, terminal timeout, ordinary
-   failure, descendant cleanup, retry count, and timeout-budget headroom.
-3. Keep the three Chromium-install workflows on the shared wrapper and document
+1. Configure one APT acquisition retry plus bounded HTTP/HTTPS inactivity
+   timeouts on the ephemeral Ubuntu runner.
+2. Verify the loaded policy, then execute the existing Playwright install once.
+3. Add focused tests for policy shape/loading, one-shot status propagation,
+   caller inventory, Ubuntu ownership, and the overall timeout ceiling.
+4. Keep the three Chromium-install workflows on the shared wrapper and document
    the verification contract.
-4. Run focused proof, complete the final ReviewGPT and exact-head CI gates,
+5. Run focused proof, complete the final ReviewGPT and exact-head CI gates,
    merge the PR, and retire the task worktree.
 
 ## Verification
@@ -44,10 +50,10 @@ letting the wrapper consume the workflow step's entire timeout budget.
   scripts/install-playwright-chromium.test.ts
   scripts/check-hosted-stripe-billing-ci.test.ts
   scripts/frog-workflow-guards.test.ts scripts/verification-dispatch.test.ts`
-  passes 57 tests.
-- `bash -n scripts/install-playwright-chromium.sh`, `shellcheck`, and
-  `git diff --check` pass.
-- Pending final ReviewGPT PASS, exact-head required CI, and current-base
+  passes 54 tests.
+- `bash -n scripts/install-playwright-chromium.sh`, `shellcheck`,
+  `git diff --check`, and the added-line privacy scan pass.
+- Pending final ReviewGPT round 2, exact-head required CI, and current-base
   merge-tree proof.
 
 ## State

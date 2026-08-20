@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -16,10 +17,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scriptPath = path.join(repoRoot, "scripts", "install-playwright-chromium.sh");
+const workflowDirectory = path.join(repoRoot, ".github", "workflows");
 const WORKFLOWS_CALLING_SCRIPT = [
-  "web-viewport-overflow.yml",
   "hosted-stripe-billing.yml",
   "pr-1498-design-proof-capture.yml",
+  "web-viewport-overflow.yml",
 ] as const;
 
 const tempRoots: string[] = [];
@@ -27,56 +29,66 @@ const tempRoots: string[] = [];
 afterEach(() => {
   while (tempRoots.length > 0) {
     const root = tempRoots.pop();
-    if (root) {
-      rmSync(root, { force: true, recursive: true });
-    }
+    if (root) rmSync(root, { force: true, recursive: true });
   }
 });
 
-/**
- * Runs the real wrapper with a fake `pnpm` first on PATH, so every assertion is
- * about the shipped script rather than a re-implementation of it.
- */
-function runWrapper(input: {
-  attempts?: string;
-  fakePnpm: string;
-  graceSeconds?: string;
-  timeoutSeconds?: string;
-}) {
+function writeExecutable(filePath: string, contents: string): void {
+  writeFileSync(filePath, contents);
+  chmodSync(filePath, 0o755);
+}
+
+/** Executes the shipped wrapper while replacing only its external commands. */
+function runWrapper(input: { aptConfig?: string; pnpmExit?: number } = {}) {
   const sharedTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
   if (!sharedTempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
   const root = mkdtempSync(path.join(sharedTempRoot, "playwright-install-"));
   tempRoots.push(root);
-  const binDir = path.join(root, "bin");
-  mkdirSync(binDir, { recursive: true });
-  const pnpmPath = path.join(binDir, "pnpm");
-  writeFileSync(pnpmPath, input.fakePnpm);
-  chmodSync(pnpmPath, 0o755);
+  const binDirectory = path.join(root, "bin");
+  mkdirSync(binDirectory, { recursive: true });
+
+  writeExecutable(
+    path.join(binDirectory, "sudo"),
+    [
+      "#!/usr/bin/env bash",
+      'printf \'%s\\n\' "$*" >> "$MURPH_TEST_STATE_DIR/sudo-calls"',
+      'if [[ "$1" != "tee" ]]; then exit 2; fi',
+      'cat > "$MURPH_TEST_STATE_DIR/apt-policy"',
+    ].join("\n"),
+  );
+  writeExecutable(
+    path.join(binDirectory, "apt-config"),
+    [
+      "#!/usr/bin/env bash",
+      'printf \'%s\\n\' "$*" >> "$MURPH_TEST_STATE_DIR/apt-config-calls"',
+      'if [[ -n "${MURPH_TEST_APT_CONFIG:-}" ]]; then',
+      '  printf \'%s\\n\' "$MURPH_TEST_APT_CONFIG"',
+      "else",
+      '  cat "$MURPH_TEST_STATE_DIR/apt-policy"',
+      "fi",
+    ].join("\n"),
+  );
+  writeExecutable(
+    path.join(binDirectory, "pnpm"),
+    [
+      "#!/usr/bin/env bash",
+      'printf \'%s\\n\' "$*" >> "$MURPH_TEST_STATE_DIR/pnpm-calls"',
+      'exit "${MURPH_TEST_PNPM_EXIT:-0}"',
+    ].join("\n"),
+  );
 
   const result = spawnSync("bash", [scriptPath], {
     encoding: "utf8",
     env: {
       ...process.env,
-      MURPH_PLAYWRIGHT_INSTALL_ATTEMPTS: input.attempts ?? "2",
-      MURPH_PLAYWRIGHT_INSTALL_BACKOFF_SECONDS: "0",
-      MURPH_PLAYWRIGHT_INSTALL_KILL_GRACE_SECONDS: input.graceSeconds ?? "3",
-      MURPH_PLAYWRIGHT_INSTALL_KILL_POLL_SECONDS: "2",
-      MURPH_PLAYWRIGHT_INSTALL_TIMEOUT_SECONDS: input.timeoutSeconds ?? "2",
+      MURPH_TEST_APT_CONFIG: input.aptConfig ?? "",
+      MURPH_TEST_PNPM_EXIT: String(input.pnpmExit ?? 0),
       MURPH_TEST_STATE_DIR: root,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
     },
   });
 
   return { result, root };
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 describe("install-playwright-chromium.sh", () => {
@@ -85,175 +97,72 @@ describe("install-playwright-chromium.sh", () => {
     expect(spawnSync("bash", ["-n", scriptPath]).status).toBe(0);
   });
 
-  it("returns success without retrying when the install succeeds", () => {
-    const { result, root } = runWrapper({
-      fakePnpm: [
-        "#!/usr/bin/env bash",
-        'echo "$@" >> "$MURPH_TEST_STATE_DIR/attempts"',
-        "exit 0",
-      ].join("\n"),
-    });
+  it("loads the bounded apt policy before invoking Playwright once", () => {
+    const { result, root } = runWrapper();
 
     expect(result.status).toBe(0);
-    const attempts = readFileSync(path.join(root, "attempts"), "utf8")
-      .trim()
-      .split("\n");
-    expect(attempts).toHaveLength(1);
-    expect(attempts[0]).toBe(
+    expect(readFileSync(path.join(root, "apt-policy"), "utf8")).toBe(
+      [
+        'Acquire::Retries "1";',
+        'Acquire::http::Timeout "180";',
+        'Acquire::https::Timeout "180";',
+        "",
+      ].join("\n"),
+    );
+    expect(readFileSync(path.join(root, "sudo-calls"), "utf8").trim()).toBe(
+      "tee /etc/apt/apt.conf.d/99murph-playwright",
+    );
+    expect(readFileSync(path.join(root, "apt-config-calls"), "utf8").trim()).toBe(
+      "dump",
+    );
+    expect(readFileSync(path.join(root, "pnpm-calls"), "utf8").trim()).toBe(
       "--dir apps/web exec playwright install --with-deps chromium",
     );
   });
 
-  it("recovers when only the first attempt stalls", () => {
+  it("fails before Playwright when apt did not load the checked policy", () => {
     const { result, root } = runWrapper({
-      fakePnpm: [
-        "#!/usr/bin/env bash",
-        'echo attempt >> "$MURPH_TEST_STATE_DIR/attempts"',
-        'if [[ -f "$MURPH_TEST_STATE_DIR/stalled-once" ]]; then',
-        "  exit 0",
-        "fi",
-        'touch "$MURPH_TEST_STATE_DIR/stalled-once"',
-        "sleep 120",
+      aptConfig: [
+        'Acquire::Retries "1";',
+        'Acquire::http::Timeout "180";',
       ].join("\n"),
     });
 
-    expect(result.status).toBe(0);
-    expect(result.stderr).toContain("stalled for 2s on attempt 1/2; retrying");
-    expect(
-      readFileSync(path.join(root, "attempts"), "utf8").trim().split("\n"),
-    ).toHaveLength(2);
-    expect(result.stderr.match(/retrying/gu)).toHaveLength(1);
-  });
-
-  it("stops after the configured attempts when every install stalls", () => {
-    const { result, root } = runWrapper({
-      attempts: "3",
-      fakePnpm: [
-        "#!/usr/bin/env bash",
-        'echo attempt >> "$MURPH_TEST_STATE_DIR/attempts"',
-        "sleep 120",
-      ].join("\n"),
-    });
-
-    // 124 is the coreutils convention for a deadline, kept so a reader of the
-    // CI log can tell a stall from a genuine install failure.
-    expect(result.status).toBe(124);
-    expect(result.stderr).toContain("on attempt 3/3; giving up");
-    expect(
-      readFileSync(path.join(root, "attempts"), "utf8").trim().split("\n"),
-    ).toHaveLength(3);
-    expect(result.stderr.match(/retrying/gu)).toHaveLength(2);
-  });
-
-  it("leaves no install descendant after a terminal timeout", () => {
-    const { result, root } = runWrapper({
-      attempts: "1",
-      graceSeconds: "2",
-      fakePnpm: [
-        "#!/usr/bin/env bash",
-        "# Keep both the leader and nested installer alive through TERM so the",
-        "# wrapper must use its owned process-group KILL escalation.",
-        'bash -c \'trap "" TERM; echo $$ > "$MURPH_TEST_STATE_DIR/terminal-descendant.pid"; while true; do sleep 1; done\' &',
-        'trap "" TERM',
-        "sleep 120",
-      ].join("\n"),
-    });
-
-    expect(result.status).toBe(124);
-    const descendantPid = Number.parseInt(
-      readFileSync(path.join(root, "terminal-descendant.pid"), "utf8").trim(),
-      10,
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'Playwright apt policy was not loaded: Acquire::https::Timeout "180";',
     );
-    expect(isAlive(descendantPid)).toBe(false);
+    expect(existsSync(path.join(root, "pnpm-calls"))).toBe(false);
   });
 
-  it("preserves a real install failure instead of retrying it away forever", () => {
-    const { result, root } = runWrapper({
-      fakePnpm: [
-        "#!/usr/bin/env bash",
-        'echo attempt >> "$MURPH_TEST_STATE_DIR/attempts"',
-        "exit 7",
-      ].join("\n"),
-    });
+  it("propagates the one Playwright invocation's final status", () => {
+    const { result, root } = runWrapper({ pnpmExit: 7 });
 
     expect(result.status).toBe(7);
-    expect(result.stderr).toContain("failed with exit 7");
-    expect(
-      readFileSync(path.join(root, "attempts"), "utf8").trim().split("\n"),
-    ).toHaveLength(2);
-    expect(result.stderr.match(/retrying/gu)).toHaveLength(1);
+    expect(readFileSync(path.join(root, "pnpm-calls"), "utf8").trim().split("\n"))
+      .toHaveLength(1);
   });
 
-  it("kills a stalled install's descendants before the next attempt starts", () => {
-    // The real attempt is a process tree (pnpm -> Playwright -> apt-get). A
-    // descendant that outlives its attempt would still hold the package-manager
-    // lock the retry needs, so the wrapper must reap the whole group.
-    const { result, root } = runWrapper({
-      graceSeconds: "5",
-      fakePnpm: [
-        "#!/usr/bin/env bash",
-        'echo attempt >> "$MURPH_TEST_STATE_DIR/attempts"',
-        'if [[ -f "$MURPH_TEST_STATE_DIR/descendant.pid" ]]; then',
-        '  descendant_pid="$(cat "$MURPH_TEST_STATE_DIR/descendant.pid")"',
-        '  if kill -0 "$descendant_pid" 2>/dev/null; then',
-        '    touch "$MURPH_TEST_STATE_DIR/overlap"',
-        "    exit 9",
-        "  fi",
-        "  exit 0",
-        "fi",
-        "# A nested installer that ignores TERM, like apt mid-transaction.",
-        'bash -c \'trap "" TERM; echo $$ > "$MURPH_TEST_STATE_DIR/descendant.pid"; while true; do sleep 1; done\' &',
-        'trap "" TERM',
-        "sleep 120",
-      ].join("\n"),
-    });
+  it("keeps an overall timeout ceiling on every Ubuntu caller", () => {
+    const actualCallers = readdirSync(workflowDirectory)
+      .filter((name) => name.endsWith(".yml"))
+      .filter((name) =>
+        readFileSync(path.join(workflowDirectory, name), "utf8").includes(
+          "scripts/install-playwright-chromium.sh",
+        ),
+      )
+      .sort();
 
-    expect(result.status).toBe(0);
-    expect(existsSync(path.join(root, "overlap"))).toBe(false);
-    expect(
-      readFileSync(path.join(root, "attempts"), "utf8").trim().split("\n"),
-    ).toHaveLength(2);
-
-    const descendantPid = Number.parseInt(
-      readFileSync(path.join(root, "descendant.pid"), "utf8").trim(),
-      10,
-    );
-    expect(Number.isInteger(descendantPid)).toBe(true);
-    expect(isAlive(descendantPid)).toBe(false);
-  });
-
-  it("keeps its worst case below every calling workflow's step ceiling", () => {
-    const script = readFileSync(scriptPath, "utf8");
-    const readDefault = (name: string): number => {
-      const match = new RegExp(`${name}:-(\\d+)`, "u").exec(script);
-      expect(match?.[1], `${name} default`).toBeDefined();
-      return Number.parseInt(match?.[1] ?? "0", 10);
-    };
-
-    const attempts = readDefault("MURPH_PLAYWRIGHT_INSTALL_ATTEMPTS");
-    const attemptTimeout = readDefault("MURPH_PLAYWRIGHT_INSTALL_TIMEOUT_SECONDS");
-    const killGrace = readDefault("MURPH_PLAYWRIGHT_INSTALL_KILL_GRACE_SECONDS");
-    const killPoll = readDefault("MURPH_PLAYWRIGHT_INSTALL_KILL_POLL_SECONDS");
-    const backoff = readDefault("MURPH_PLAYWRIGHT_INSTALL_BACKOFF_SECONDS");
-    const worstCaseSeconds =
-      attempts * (attemptTimeout + killGrace + killPoll) +
-      (attempts - 1) * backoff;
-
-    for (const workflow of WORKFLOWS_CALLING_SCRIPT) {
-      const contents = readFileSync(
-        path.join(repoRoot, ".github", "workflows", workflow),
-        "utf8",
-      );
+    expect(actualCallers).toEqual([...WORKFLOWS_CALLING_SCRIPT]);
+    for (const workflow of actualCallers) {
+      const contents = readFileSync(path.join(workflowDirectory, workflow), "utf8");
+      expect(contents).toContain("runs-on: ubuntu-24.04");
       const step =
         /- name: Install Playwright Chromium\n\s+timeout-minutes: (\d+)\n\s+run: scripts\/install-playwright-chromium\.sh/u.exec(
           contents,
-        );
+      );
       expect(step?.[1], `${workflow} install step`).toBeDefined();
-      const ceilingSeconds = Number.parseInt(step?.[1] ?? "0", 10) * 60;
-
-      // Headroom, not just inequality: the script must always outlive its own
-      // last attempt long enough to report a terminal status.
-      expect(ceilingSeconds - worstCaseSeconds).toBeGreaterThanOrEqual(120);
+      expect(step?.[1]).toBe("14");
     }
   });
 });
