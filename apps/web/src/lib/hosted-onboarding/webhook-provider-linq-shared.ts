@@ -329,6 +329,7 @@ export function buildFamilyInviteAcceptedResponse(input: {
   message: string;
   messageId: string;
   occurredAt: string;
+  signupNotificationMemberId?: string;
   sourceEventId: string;
   wakeHandoff?: HostedWebhookWakeHandoff;
 }): HostedOnboardingLinqDirectPlan {
@@ -349,6 +350,13 @@ export function buildFamilyInviteAcceptedResponse(input: {
       reason: "family-invite-accepted",
     },
     postCommitGroupJoinConfirmationMemberIds: [input.memberId],
+    ...(input.signupNotificationMemberId
+      ? {
+          postCommitSignupNotificationMemberIds: [
+            input.signupNotificationMemberId,
+          ],
+        }
+      : {}),
     ...(input.wakeHandoff ? { wakeHandoffs: [input.wakeHandoff] } : {}),
   });
 }

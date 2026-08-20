@@ -1065,11 +1065,14 @@ Last verified: 2026-08-20
   permission/authentication, quota, input, and integrity failures remain
   single-attempt and fail closed; the official SDK's broad default retry budget
   stays disabled.
-- Hosted artifact uploads are content-addressed and replay-safe. Transport failures
-  plus HTTP 408, 429, and 5xx responses carry typed retryability into the existing
-  device-sync job owner, which requeues with its normal bounded backoff. Write-fence
-  and authority failures, other HTTP responses, malformed data, and unclassified
-  errors remain terminal; the runtime must not create a second artifact retry queue.
+- Hosted artifact reads and uploads are content-addressed and replay-safe. Transport
+  failures plus HTTP 408, 429, and 5xx responses carry typed retryability into the
+  existing device-sync job owner, which requeues with its normal bounded backoff.
+  A canonical device-sync checkpoint becomes retryable only after its existing
+  exact-successor reconciliation also fails for a proven timeout or transient
+  transport/status reason. Write-fence, lease, authority, deterministic 4xx,
+  malformed-data, parser, and unclassified failures remain terminal; the runtime
+  must not create a second artifact or checkpoint retry queue.
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
   schedule consumed by the global due-reconcile sweep. The first durable

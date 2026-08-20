@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-08-14
+Last verified: 2026-08-20
 
 ## Purpose
 
@@ -140,6 +140,42 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    what makes invariants 2 and 3 safe, and it is why an import-vs-skip
    optimization is unnecessary: re-fetching is cheap and correct, not a
    correctness risk.
+
+   Junction profile admission and canonical replay stay coupled. Whenever the
+   stable profile representation changes, advance the existing device-syncd
+   profile normalization revision so a previously checked account receives one
+   bounded refresh before returning to one-shot behavior; never rely on the
+   importer migration alone to make an already-admitted profile reachable.
+
+   Junction profile timestamp evolution has one closed replay-compatibility
+   case inside this same canonical owner. A stable-profile event marked by the
+   current created-at normalizer may supersede its generic-normalizer
+   predecessor at an equal provider revision only when the persisted provider
+   baseline used that revision as `occurredAt`, `recordedAt`, and raw observed
+   time, its `dayKey` was the revision's UTC day, the incoming created time is
+   earlier, source scope and external reference are unchanged, and replacing
+   only the predecessor timestamp makes the canonical content identical. Core
+   appends that migration once. A retained live member
+   revision adopts created-at only when its occurrence still matches the
+   provider predecessor; member-edited occurrence/day placement and member
+   revision time remain unchanged. A later stable-profile replay also retains
+   a member deletion whose delete time is strictly later than its provider
+   revision, while provider-owned tombstones remain eligible for ordinary
+   authoritative reassertion. A height, demographic, facet, source, identity,
+   or other semantic change at the same revision still fails closed as a
+   source-revision conflict.
+
+   The revision bump also re-admits profiles without a stable provider ID, but
+   it does not migrate their timestamp-derived identity at an equal provider
+   revision. If an earlier `created_at` changes that identity while
+   `updated_at` is unchanged, Core associates the exact same-source,
+   same-facet, timestamp-only replay with its stored provider baseline and
+   keeps the existing event spine as a canonical no-op. This preserves its
+   current member revision or deletion and appends no event revision. Multiple
+   possible predecessors fail as an alias conflict, and any height,
+   demographics, source, or other semantic difference fails atomically as a
+   source-revision conflict. The existing strictly newer no-ID migration
+   remains the only path that adopts a new timestamp-derived identity.
 
    Compact Junction timeseries retain that same single-owner rule. Dense
    `glucose`, `blood_oxygen`, and `stress_level` reconcile and direct-resource

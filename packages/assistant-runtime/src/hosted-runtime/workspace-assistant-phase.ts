@@ -4729,7 +4729,10 @@ function shouldRunIdleDeviceSyncMaintenance(input: {
   }
 
   const preparation = input.systemMailboxPreparation;
-  if (preparation?.status === "retryable_failed") {
+  if (
+    preparation?.status === "retryable_failed"
+    || (preparation && isCausalPendingEffectsReconciliation(preparation))
+  ) {
     return false;
   }
 

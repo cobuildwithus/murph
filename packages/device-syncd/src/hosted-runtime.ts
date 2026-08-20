@@ -65,6 +65,7 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT =
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
+export const HOSTED_EXECUTION_DEVICE_SYNC_COMPLETED_IMPORT_LIMIT = 500;
 
 export const HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS = [
   "under_5_minutes",
@@ -673,11 +674,19 @@ export interface HostedExecutionDeviceSyncDirtyPendingResponse {
 }
 
 export interface HostedExecutionDeviceSyncDirtyAckRequest {
+  completedImports?: HostedExecutionDeviceSyncCompletedImport[];
   connectionId: string;
   processedDirtyPayloadIds?: string[];
   processedRevision: string;
   stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
+}
+
+export interface HostedExecutionDeviceSyncCompletedImport {
+  dirtyPayloadId: string;
+  importCompletedAt: string;
+  resource: string;
+  sourceProviderSlug: string;
 }
 
 export interface HostedExecutionDeviceSyncDirtyAckResponse {
@@ -1231,6 +1240,47 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
   trustedUserId: string | null = null,
 ): HostedExecutionDeviceSyncDirtyAckRequest {
   const record = requireObject(value, "Hosted device-sync dirty ack request");
+  const processedDirtyPayloadIds = record.processedDirtyPayloadIds === undefined
+    ? undefined
+    : requireBoundedArray(
+      record.processedDirtyPayloadIds,
+      "Hosted device-sync dirty ack request processedDirtyPayloadIds",
+      HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT,
+    ).map((entry, index) =>
+      requireString(
+        entry,
+        `Hosted device-sync dirty ack request processedDirtyPayloadIds[${index}]`,
+      )
+    );
+  const completedImports = record.completedImports === undefined
+    ? undefined
+    : requireBoundedArray(
+      record.completedImports,
+      "Hosted device-sync dirty ack request completedImports",
+      HOSTED_EXECUTION_DEVICE_SYNC_COMPLETED_IMPORT_LIMIT,
+    ).map((entry, index) =>
+      parseHostedExecutionDeviceSyncCompletedImport(
+        entry,
+        `Hosted device-sync dirty ack request completedImports[${index}]`,
+      )
+    );
+  if (completedImports) {
+    const processedIds = new Set(processedDirtyPayloadIds ?? []);
+    const completedIds = new Set<string>();
+    for (const completedImport of completedImports) {
+      if (!processedIds.has(completedImport.dirtyPayloadId)) {
+        throw new TypeError(
+          "Hosted device-sync dirty ack request completedImports must reference processed dirty payload ids.",
+        );
+      }
+      if (completedIds.has(completedImport.dirtyPayloadId)) {
+        throw new TypeError(
+          "Hosted device-sync dirty ack request completedImports must not repeat a dirty payload id.",
+        );
+      }
+      completedIds.add(completedImport.dirtyPayloadId);
+    }
+  }
   const stagedDirtyAcks = record.stagedDirtyAcks === undefined
     ? undefined
     : parseHostedExecutionDeviceSyncStagedDirtyAcks(
@@ -1239,20 +1289,9 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
     );
 
   return {
+    ...(completedImports === undefined ? {} : { completedImports }),
     connectionId: requireString(record.connectionId, "Hosted device-sync dirty ack request connectionId"),
-    ...(record.processedDirtyPayloadIds === undefined
-      ? {}
-      : {
-          processedDirtyPayloadIds: requireArray(
-            record.processedDirtyPayloadIds,
-            "Hosted device-sync dirty ack request processedDirtyPayloadIds",
-          ).map((entry, index) =>
-            requireString(
-              entry,
-              `Hosted device-sync dirty ack request processedDirtyPayloadIds[${index}]`,
-            )
-          ),
-        }),
+    ...(processedDirtyPayloadIds === undefined ? {} : { processedDirtyPayloadIds }),
     processedRevision: requireBigIntString(
       record.processedRevision,
       "Hosted device-sync dirty ack request processedRevision",
@@ -1260,6 +1299,33 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
     ...(stagedDirtyAcks === undefined ? {} : { stagedDirtyAcks }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
   };
+}
+
+export function parseHostedExecutionDeviceSyncCompletedImport(
+  value: unknown,
+  label = "Hosted device-sync completed import",
+): HostedExecutionDeviceSyncCompletedImport {
+  const record = requireObject(value, label);
+  return {
+    dirtyPayloadId: requireString(record.dirtyPayloadId, `${label}.dirtyPayloadId`),
+    importCompletedAt: requireIsoTimestamp(
+      record.importCompletedAt,
+      `${label}.importCompletedAt`,
+    ),
+    resource: requireDeviceSyncImportReceiptKey(record.resource, `${label}.resource`),
+    sourceProviderSlug: requireDeviceSyncImportReceiptKey(
+      record.sourceProviderSlug,
+      `${label}.sourceProviderSlug`,
+    ),
+  };
+}
+
+function requireDeviceSyncImportReceiptKey(value: unknown, label: string): string {
+  const key = requireString(value, label);
+  if (!/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(key)) {
+    throw new TypeError(`${label} must be a normalized device-sync key.`);
+  }
+  return key;
 }
 
 export function parseHostedExecutionDeviceSyncDirtyAckResponse(

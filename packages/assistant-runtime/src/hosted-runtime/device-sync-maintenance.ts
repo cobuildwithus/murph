@@ -1431,6 +1431,9 @@ function toHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
   ack: HostedDeviceSyncRuntimeSyncState["pendingDirtyAcks"][number],
 ): HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
   return {
+    ...(ack.completedImports
+      ? { completedImports: ack.completedImports }
+      : {}),
     connectionId: ack.connectionId,
     nextWakeAt: ack.nextWakeAt,
     ...(ack.processedDirtyPayloadIds

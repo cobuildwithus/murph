@@ -21,6 +21,7 @@ import {
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 
 import {
+  claimHostedMemberSignupNotificationEmailAttempt,
   composeHostedMemberSnapshot,
   createHostedMember as createHostedMemberStore,
   lookupHostedMemberByVerifiedEmailAddress,
@@ -31,6 +32,9 @@ import {
   readHostedMemberVerifiedEmailSnapshots,
   type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
+  activeHostedMemberAccessWhere,
+} from "@/src/lib/hosted-onboarding/member-access";
 import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
@@ -101,6 +105,30 @@ describe("hosted-member-store", () => {
       },
     });
     vi.clearAllMocks();
+  });
+
+  it("claims signup notification attempts through canonical active access", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const attemptedAt = new Date("2026-08-20T12:00:00.000Z");
+
+    await expect(claimHostedMemberSignupNotificationEmailAttempt({
+      attemptedAt,
+      memberId: "member_123",
+      prisma: {
+        hostedMember: { updateMany },
+      } as never,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        signupNotificationEmailAttemptedAt: attemptedAt,
+      },
+      where: {
+        ...activeHostedMemberAccessWhere(),
+        id: "member_123",
+        signupNotificationEmailAttemptedAt: null,
+      },
+    });
   });
 
   afterEach(() => {

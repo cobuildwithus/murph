@@ -14,6 +14,9 @@ import {
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
 import {
+  parseHostedExecutionDeviceSyncCompletedImport,
+} from "@murphai/device-syncd/hosted-runtime";
+import {
   parseVersionedJsonStateEnvelope,
   readVersionedJsonStateFile,
 } from "@murphai/runtime-state/node";
@@ -332,6 +335,22 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
     allowedRouteActions: input.allowedRouteActions ?? null,
     state: selectionState,
   });
+  const readyItem = findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: input.allowedRouteActions ?? null,
+    now,
+    state: selectionState,
+  });
+  if (
+    input.allowedRouteActions == null
+    && input.allowedWakeKinds == null
+    && readyItem !== null
+    && isHostedApprovedContinuationSystemMailboxItem(readyItem)
+  ) {
+    return createHostedRuntimeWakeCandidate(
+      resolveSystemMailboxItemNextWakeAt(readyItem, now),
+      "assistant",
+    );
+  }
   return selectHostedRuntimeWakeCandidate(
     items.map((item) =>
       createHostedRuntimeWakeCandidate(
@@ -348,21 +367,38 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
   const blockedSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
+  let oldestDueItem: HostedSystemMailboxPendingItem | null = null;
   for (const item of input.state.pending) {
     if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
       continue;
+    }
+    const isDue = systemMailboxItemIsDue(item, input.now);
+    if (
+      input.allowedRouteActions == null
+      && isDue
+      && isHostedApprovedContinuationSystemMailboxItem(item)
+    ) {
+      return item;
     }
     const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
     if (blockedSerializationKeys.has(serializationKey)) {
       continue;
     }
-    if (systemMailboxItemIsDue(item, input.now)) {
-      return item;
+    if (isDue) {
+      oldestDueItem ??= item;
+      continue;
     }
     blockedSerializationKeys.add(serializationKey);
   }
 
-  return null;
+  return oldestDueItem;
+}
+
+export function isHostedApprovedContinuationSystemMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.routeAction === "apply-runtime-control-request"
+    && item.wake.kind === "runtime.pending-effects-reconcile-requested";
 }
 
 export function mergeHostedSystemMailboxRollbackItems(input: {
@@ -707,8 +743,23 @@ function parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
     throw new TypeError(`${label} must be an object.`);
   }
   const record = value as Record<string, unknown>;
+  const processedDirtyPayloadIds = readOptionalStringArray(
+    record.processedDirtyPayloadIds,
+    `${label} processedDirtyPayloadIds`,
+  );
+  const completedImports = readHostedDeviceSyncCompletedImports(
+    record.completedImports,
+    `${label} completedImports`,
+  );
+  if (completedImports) {
+    const processedIds = new Set(processedDirtyPayloadIds ?? []);
+    if (completedImports.some((receipt) => !processedIds.has(receipt.dirtyPayloadId))) {
+      throw new TypeError(`${label} completedImports must reference processed dirty payload ids.`);
+    }
+  }
 
   return {
+    ...(completedImports === undefined ? {} : { completedImports }),
     connectionId: readRequiredString(record.connectionId, `${label} connectionId`),
     ...(record.nextWakeAt === undefined
       ? {}
@@ -718,16 +769,43 @@ function parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
             `${label} nextWakeAt`,
           ),
         }),
-    ...(record.processedDirtyPayloadIds === undefined
-      ? {}
-      : {
-          processedDirtyPayloadIds: readOptionalStringArray(
-            record.processedDirtyPayloadIds,
-            `${label} processedDirtyPayloadIds`,
-          ),
-        }),
+    ...(processedDirtyPayloadIds === undefined ? {} : { processedDirtyPayloadIds }),
     processedRevision: readRequiredString(record.processedRevision, `${label} processedRevision`),
   };
+}
+
+function readHostedDeviceSyncCompletedImports(
+  value: unknown,
+  label: string,
+): NonNullable<HostedDeviceSyncDirtyProcessedPostCheckpointRecord["completedImports"]> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array when present.`);
+  }
+  if (value.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS} entries.`,
+    );
+  }
+
+  const seenPayloadIds = new Set<string>();
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new TypeError(`${label}[${index}] must be an object.`);
+    }
+    const completedImport = parseHostedExecutionDeviceSyncCompletedImport(
+      entry,
+      `${label}[${index}]`,
+    );
+    const dirtyPayloadId = completedImport.dirtyPayloadId;
+    if (seenPayloadIds.has(dirtyPayloadId)) {
+      throw new TypeError(`${label} must not repeat a dirty payload id.`);
+    }
+    seenPayloadIds.add(dirtyPayloadId);
+    return completedImport;
+  });
 }
 
 function findNextHostedSystemMailboxQueueItemsForWake(input: {
