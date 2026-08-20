@@ -93,6 +93,14 @@ Updated: 2026-08-20
   or repairing an invariant. Regression coverage now proves the no-op preserves
   member edits and tombstones while a real same-revision semantic change still
   rejects atomically.
+- The old-head preliminary specialist pass identified a real proof gap in the
+  positive migration scenario: every live facet had a member revision and both
+  timestamps landed in the same month shard. The accepted test-only patch moves
+  `created_at` into the prior month, adds an untouched provider-owned gender
+  facet, and proves old-shard predecessor storage plus new-shard migration.
+- Its changelog finding was an evidence-packaging gap, not a product defect. The
+  already-verified mobile and desktop artifacts will be named in the corrected
+  head's fresh full-snapshot review packet; no UI or copy rewrite is required.
 
 ## Verification
 
@@ -102,6 +110,8 @@ Updated: 2026-08-20
   deletion retention), 242 skipped.
 - `pnpm --filter @murphai/importers test` passed after rollout remediation: 19
   files, 552 tests.
+- The focused five-test run and the full 552-test importer suite passed again
+  after adding cross-month and untouched-provider-facet proof.
 - `pnpm --filter @murphai/core test` passed: 46 files, 810 tests.
 - `pnpm --filter @murphai/core typecheck` passed.
 - `pnpm --filter @murphai/importers typecheck` passed.

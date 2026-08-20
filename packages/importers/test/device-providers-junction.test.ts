@@ -9848,9 +9848,9 @@ test("Junction no-id profile facets declare their persisted-predecessor migratio
   ), true);
 });
 
-test("Junction explicit profile replays migrate the updated-at predecessor timestamp once", async () => {
+test("Junction explicit profile replays migrate across month shards once", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-explicit-profile-time-migration");
-  const createdAt = "2026-05-01T09:00:00.000Z";
+  const createdAt = "2026-04-01T09:00:00.000Z";
   const updatedAt = "2026-05-20T09:00:00.000Z";
   const snapshot = {
     importedAt: "2026-05-20T10:00:00.000Z",
@@ -9860,6 +9860,7 @@ test("Junction explicit profile replays migrate the updated-at predecessor times
         created_at: createdAt,
         updated_at: updatedAt,
         birth_date: "1980-01-01",
+        gender: "other",
         height: 180,
         source: { provider: "oura", type: "ring" },
       },
@@ -9869,7 +9870,7 @@ test("Junction explicit profile replays migrate the updated-at predecessor times
   try {
     await coreRuntime.initializeVault({
       vaultRoot,
-      createdAt: "2026-05-01T00:00:00.000Z",
+      createdAt: "2026-04-01T00:00:00.000Z",
       timezone: "UTC",
     });
     const currentPayload = normalizeJunctionSnapshot(snapshot);
@@ -9896,10 +9897,15 @@ test("Junction explicit profile replays migrate the updated-at predecessor times
     const predecessorHeight = predecessor.events.find((event) =>
       event.kind === "observation" && event.metric === "height"
     );
+    const predecessorGender = predecessor.events.find((event) =>
+      event.kind === "measurement"
+      && event.measurements?.some((measurement) => measurement.metric === "gender")
+    );
     const predecessorDemographics = predecessor.events.find((event) =>
       event.kind === "note" && event.title === "Junction profile"
     );
     assert.ok(predecessorHeight);
+    assert.ok(predecessorGender);
     assert.ok(predecessorDemographics);
     const memberHeightRecordedAt = "2026-05-20T10:30:00.000Z";
     await coreRuntime.upsertEvent({
@@ -9956,13 +9962,19 @@ test("Junction explicit profile replays migrate the updated-at predecessor times
     const liveHeight = latestLiveRecords(records).find((event) =>
       event.kind === "observation" && event.metric === "height"
     );
+    const liveGender = latestLiveRecords(records).find((event) =>
+      event.kind === "measurement"
+      && storedMeasurements(event).some((measurement) => measurement.metric === "gender")
+    );
     const liveDemographics = latestLiveRecords(records).find((event) =>
       event.kind === "note" && event.title === "Junction profile"
     );
 
     assert.equal(migration.applied, true);
     assert.equal(replay.applied, false);
-    assert.equal(latestLiveRecords(records).length, 2);
+    assert.ok(predecessor.eventShardPaths.includes("ledger/events/2026/2026-05.jsonl"));
+    assert.ok(migration.eventShardPaths.includes("ledger/events/2026/2026-04.jsonl"));
+    assert.equal(latestLiveRecords(records).length, 3);
     assert.equal(liveHeight?.id, predecessorHeight.id);
     assert.equal(liveHeight?.source, "manual");
     assert.equal(liveHeight?.occurredAt, createdAt);
@@ -9976,6 +9988,14 @@ test("Junction explicit profile replays migrate the updated-at predecessor times
       && storedObservationValue(event) === 180
       && event.occurredAt === createdAt
     ));
+    assert.ok(liveGender);
+    assert.equal(liveGender.id, predecessorGender.id);
+    assert.equal(liveGender.source, "device");
+    assert.equal(liveGender.occurredAt, createdAt);
+    assert.equal(liveGender.recordedAt, createdAt);
+    assert.equal(storedMeasurements(liveGender)[0]?.qualifiers?.gender, "other");
+    assert.equal(storedExternalRefField(liveGender, "version"), updatedAt);
+    assert.equal(storedDataOriginObservedAtRaw(liveGender), createdAt);
     assert.equal(liveDemographics?.source, "manual");
     assert.equal(liveDemographics?.occurredAt, memberDemographicsOccurredAt);
     assert.equal(liveDemographics?.recordedAt, memberDemographicsRecordedAt);
