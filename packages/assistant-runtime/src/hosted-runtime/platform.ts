@@ -96,6 +96,8 @@ import type {
   HostedPhoneCallStopResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedPhysicalNoteRecoveryRequest,
+  HostedPhysicalNoteRecoveryResponse,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
@@ -606,6 +608,12 @@ export interface HostedRuntimePhoneCallPort {
 }
 
 export interface HostedRuntimePhysicalNotePort {
+  resolve?(
+    request: HostedPhysicalNoteRecoveryRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhysicalNoteRecoveryResponse>;
   send(
     request: HostedPhysicalNoteSendRequest,
     context?: {

@@ -10,6 +10,7 @@ import {
 } from '@murphai/hosted-execution/physical-notes'
 
 import {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
@@ -81,6 +82,120 @@ describe('assistant physical notes', () => {
     ).toEqual({ type: 'string', pattern: '^[A-Za-z]{2}$' })
   })
 
+  it('exposes standalone recovery only with current hosted recovery authority', () => {
+    expect(resolveMurphDynamicTools({
+      physicalNoteRecoveryAvailable: true,
+    })).toContain(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL)
+    expect(resolveMurphDynamicTools({
+      physicalNoteRecoveryAvailable: false,
+    })).not.toContain(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL)
+    expect(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.description).toContain(
+      'never sends a new note or recalls an accepted one',
+    )
+  })
+
+  it('parses recovery only with an exact accepted-input-shaped message ref', () => {
+    expect(readPhysicalNoteDynamicToolRequest({
+      arguments: { message_ref: APPROVAL_INPUT_ID },
+      tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
+    })).toEqual({
+      kind: 'resolve-physical-note',
+      messageRef: APPROVAL_INPUT_ID,
+    })
+    expect(readPhysicalNoteDynamicToolRequest({
+      arguments: { message_ref: 'not-an-accepted-input' },
+      tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
+    })).toMatchObject({ kind: 'invalid-physical-note-arguments' })
+  })
+
+  it('requires the exact current accepted message before recovery', async () => {
+    const resolve = vi.fn()
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { resolve, send: vi.fn() },
+        privateImageUrlPublisher: unavailablePrivateImagePublisher(),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        kind: 'resolve-physical-note',
+        messageRef: OTHER_INPUT_ID,
+      },
+    })
+
+    expect(resolve).not.toHaveBeenCalled()
+    expect(result.rpcResult).toMatchObject({ success: false })
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      'exact current authorizing Message ref',
+    )
+  })
+
+  it.each([
+    {
+      expected: 'cannot be treated as canceled',
+      response: { retryAfter: null, status: 'accepted' as const },
+      success: true,
+    },
+    {
+      expected: 'No unresolved physical-note submission remains',
+      response: { retryAfter: null, status: 'clear' as const },
+      success: true,
+    },
+    {
+      expected: 'No automatic retry or follow-up is running',
+      response: {
+        retryAfter: '2026-08-21T18:00:00.000Z',
+        status: 'pending' as const,
+      },
+      success: true,
+    },
+    {
+      expected: 'not available to the current participant',
+      response: { retryAfter: null, status: 'permission_denied' as const },
+      success: false,
+    },
+    {
+      expected: 'recovery is currently unavailable',
+      response: { retryAfter: null, status: 'unavailable' as const },
+      success: false,
+    },
+  ])('reports recovery status $response.status literally', async ({
+    expected,
+    response,
+    success,
+  }) => {
+    const resolve = vi.fn(async () => response)
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { resolve, send: vi.fn() },
+        privateImageUrlPublisher: unavailablePrivateImagePublisher(),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        kind: 'resolve-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+      },
+    })
+
+    expect(resolve).toHaveBeenCalledWith({
+      originAssistantInputId: APPROVAL_INPUT_ID,
+    }, { signal: null })
+    expect(result.rpcResult).toMatchObject({ success })
+    expect(result.rpcResult.contentItems[0]?.text).toContain(expected)
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      `\"status\":\"${response.status}\"`,
+    )
+  })
+
   it('keeps rejection recovery separate from feedback eligibility', async () => {
     const skill = await readFile(
       new URL('../skills/physical-notes/SKILL.md', import.meta.url),
@@ -93,6 +208,10 @@ describe('assistant physical notes', () => {
     expect(skill).toMatch(
       /independently establishes eligible frustration or repeated\s+Murph-owned friction/u,
     )
+    expect(skill).toMatch(
+      /call `murph\.resolve_physical_note` exactly\s+once with the exact current authorizing `message_ref`/u,
+    )
+    expect(skill).toContain('never sends a new note or recalls an accepted one')
   })
 
   it('normalizes the bounded US recipient', () => {
@@ -688,5 +807,15 @@ function createHostedToolContext(input: {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: false,
+  }
+}
+
+function unavailablePrivateImagePublisher(): NonNullable<
+  AssistantHostedToolContext['privateImageUrlPublisher']
+> {
+  return {
+    publishPrivateImageUrl: vi.fn(async () => {
+      throw new Error('private image publishing is not used by recovery')
+    }),
   }
 }

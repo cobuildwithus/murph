@@ -66,6 +66,8 @@ import type {
   HostedPhoneCallStopResponse,
 } from '@murphai/hosted-execution/phone-calls'
 import type {
+  HostedPhysicalNoteRecoveryRequest,
+  HostedPhysicalNoteRecoveryResponse,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from '@murphai/hosted-execution/physical-notes'
@@ -428,6 +430,12 @@ export interface AssistantPhoneCallPort {
 }
 
 export interface AssistantPhysicalNotePort {
+  resolve?(
+    request: HostedPhysicalNoteRecoveryRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhysicalNoteRecoveryResponse>
   send(
     request: HostedPhysicalNoteSendRequest,
     context?: {
@@ -856,6 +864,9 @@ function normalizeAssistantPhysicalNotePort(
   }
 
   return {
+    ...(typeof input.resolve === 'function'
+      ? { resolve: input.resolve.bind(input) }
+      : {}),
     send: input.send.bind(input),
   }
 }

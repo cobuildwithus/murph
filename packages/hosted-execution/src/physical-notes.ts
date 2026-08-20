@@ -1,6 +1,8 @@
 import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_PHYSICAL_NOTES_PATH = "/api/internal/physical-notes" as const;
+export const HOSTED_PHYSICAL_NOTE_RECOVERY_PATH =
+  "/api/internal/physical-notes/recovery" as const;
 export const HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS = 45_000;
 
 export const hostedPhysicalNoteRecipientSchema = z
@@ -58,6 +60,25 @@ export const hostedPhysicalNoteSendResponseSchema = z
   })
   .strict();
 
+export const hostedPhysicalNoteRecoveryRequestSchema = z
+  .object({
+    originAssistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
+  })
+  .strict();
+
+export const hostedPhysicalNoteRecoveryResponseSchema = z
+  .object({
+    retryAfter: z.string().datetime({ offset: true }).nullable(),
+    status: z.enum([
+      "accepted",
+      "clear",
+      "pending",
+      "permission_denied",
+      "unavailable",
+    ]),
+  })
+  .strict();
+
 export type HostedPhysicalNoteRecipient = z.infer<
   typeof hostedPhysicalNoteRecipientSchema
 >;
@@ -73,6 +94,12 @@ export type HostedPhysicalNoteSendRequest = z.infer<
 export type HostedPhysicalNoteSendResponse = z.infer<
   typeof hostedPhysicalNoteSendResponseSchema
 >;
+export type HostedPhysicalNoteRecoveryRequest = z.infer<
+  typeof hostedPhysicalNoteRecoveryRequestSchema
+>;
+export type HostedPhysicalNoteRecoveryResponse = z.infer<
+  typeof hostedPhysicalNoteRecoveryResponseSchema
+>;
 
 export function parseHostedPhysicalNoteSendRequest(
   value: unknown,
@@ -84,6 +111,18 @@ export function parseHostedPhysicalNoteSendResponse(
   value: unknown,
 ): HostedPhysicalNoteSendResponse {
   return hostedPhysicalNoteSendResponseSchema.parse(value);
+}
+
+export function parseHostedPhysicalNoteRecoveryRequest(
+  value: unknown,
+): HostedPhysicalNoteRecoveryRequest {
+  return hostedPhysicalNoteRecoveryRequestSchema.parse(value);
+}
+
+export function parseHostedPhysicalNoteRecoveryResponse(
+  value: unknown,
+): HostedPhysicalNoteRecoveryResponse {
+  return hostedPhysicalNoteRecoveryResponseSchema.parse(value);
 }
 
 export function normalizeHostedPhysicalNoteRecipient(

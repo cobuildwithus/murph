@@ -41,6 +41,13 @@ The assistant composes two existing-style primitives:
 3. `murph.send_physical_note` materializes and hashes the exact saved image,
    publishes a short-lived private capability, and asks Web to submit it to Lob.
 
+An independent `murph.resolve_physical_note` action handles a current accepted
+message that explicitly asks to check, clear, resolve, or cancel an earlier
+uncertain submission. It performs one foreground reconciliation through Web and
+returns in the same turn. It does not generate artwork, publish an image, create
+a provider effect, recall accepted mail, schedule work, or authorize a later
+send.
+
 On the immediate completion turn the send tool infers the trusted image only
 when its completion carries that exact accepted origin. When Murph showed the
 artwork first, a later user-authored send turn provides the exact trusted vault
@@ -89,6 +96,17 @@ provider-neutral failure reason, and timestamps. The failure reason is limited
 to recipient address, artwork, service availability, invalid Murph request,
 prior-note unresolved or accepted state, or unknown. It never stores the postal
 address, image URL, artwork, prompt, note text, or Lob's freeform error message.
+
+Standalone recovery reuses that same row and the same oldest-first guard
+transitions; it adds no recovery row or alternate state owner. The current
+accepted direct or authenticated-group message authorizes one provider metadata
+lookup. Provider acceptance settles the guarded row as accepted. Proven absence
+clears it only after the existing 23-hour safety window. A recent absence or an
+indeterminate lookup leaves the guard unchanged and returns `pending`, with the
+end of the safety window when it is still in the future. An already-clear member
+returns `clear` without a provider read. Recovery never calls provider create,
+and there is no transport replay, model retry, notification, or automatic
+follow-up.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
@@ -224,6 +242,13 @@ participant-aware thread-container access derivation, so an inactive owner does
 not block an otherwise authorized active participant. It does not add a
 physical-note-specific entitlement path.
 
+A standalone recovery request has separate, narrower authority. It requires the
+exact current accepted message from a direct member or current authenticated
+group participant, and Web reasserts group participant and route authority
+immediately before the provider read. That message authorizes only one
+reconciliation. It does not authorize another note or cancellation of a
+provider-accepted mailpiece.
+
 The tool remains bounded to one domestic recipient and rejects bulk,
 international, threatening, harassing, fraudulent, impersonating, doxxing, or
 illegal mail through product policy and the constrained tool shape.
@@ -234,6 +259,16 @@ Murph account. Local operational rows delete with the hosted member, while Lob
 and postal-service retention remain governed by those providers.
 
 ## Deployment
+
+For standalone recovery, deploy Web's additive recovery route and response
+producer first. Then deploy the Cloudflare Web-control allowlist and port plus
+the runner bundle, and require immediate container convergence and fingerprint
+proof. The recovery request is not replayed after transport loss: provider
+metadata reads are safe, but a lost response may hide a durable reconciliation,
+so the assistant reports recovery as unavailable instead of converting transport
+failure into a claim about the old note. An older runner does not expose the
+action; a new runner against old Web receives a route failure and leaves the
+guard unchanged.
 
 The proactive address-completion change ships in the runner bundle and reuses an
 existing CLI command family plus the unchanged Worker-owned Mapbox provider-egress

@@ -13,6 +13,7 @@ import {
   HOSTED_PHONE_CALL_STOP_PATH,
 } from "@murphai/hosted-execution/phone-calls";
 import {
+  HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
   HOSTED_PHYSICAL_NOTES_PATH,
 } from "@murphai/hosted-execution/physical-notes";
 import {
@@ -119,6 +120,7 @@ export type HostedRunnerWebControlOperation =
   | "phone_call_start"
   | "phone_call_status"
   | "phone_call_stop"
+  | "physical_note_recovery"
   | "physical_note_send"
   | "phone_call_result_delivery"
   | "runtime_latency_trace"
@@ -183,6 +185,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_PHONE_CALLS_PATH, "phone_call_start"],
   [HOSTED_PHONE_CALL_STATUS_PATH, "phone_call_status"],
   [HOSTED_PHONE_CALL_STOP_PATH, "phone_call_stop"],
+  [HOSTED_PHYSICAL_NOTE_RECOVERY_PATH, "physical_note_recovery"],
   [HOSTED_PHYSICAL_NOTES_PATH, "physical_note_send"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);

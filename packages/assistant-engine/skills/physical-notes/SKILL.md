@@ -8,6 +8,31 @@ description: Generate and mail one expressive full-page Murph note through the e
 Use this flow only when a person explicitly wants Murph to send a real note in
 the mail. The product is one US-only, one-artwork-page, color First Class note.
 
+## Resolve an earlier uncertain submission
+
+When a person explicitly asks to cancel, clear, check, or resolve an earlier
+unresolved physical-note submission, call `murph.resolve_physical_note` exactly
+once with the exact current authorizing `message_ref`. This is a foreground
+reconciliation, not a send request: do not generate artwork, collect an address,
+or call `murph.send_physical_note` as part of recovery.
+
+Treat its result literally:
+
+- `accepted` means provider records prove the earlier submission was accepted
+  for printing. It cannot be treated as canceled or recalled. Say accepted for
+  printing, not delivered, and say this recovery sent nothing new.
+- `clear` means no unresolved submission remains. Say the blocker is clear and
+  this recovery sent nothing; a future note still needs a separate explicit
+  send request.
+- `pending` means the outcome still cannot be safely resolved. If
+  `retryAfter` is present, state that Murph can check again after that time only
+  if the person explicitly asks. Never promise or schedule an automatic check.
+- `permission_denied` or `unavailable` means nothing changed. State the bounded
+  reason and do not retry automatically.
+
+The recovery tool never sends a new note or recalls an accepted one. Never say
+“canceled” unless a future provider contract explicitly adds that outcome.
+
 ## Resolve before asking
 
 Identify one recipient name, the US street address the person supplied, and

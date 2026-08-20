@@ -106,6 +106,7 @@ import {
   MURPH_STOP_PHONE_CALL_TOOL,
 } from './dynamic-tools/phone-calls.js'
 import {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
 } from './dynamic-tools/physical-notes.js'
 import {
@@ -133,7 +134,10 @@ export {
 export {
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
 } from './dynamic-tools/clinical-records.js'
-export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
+export {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+  MURPH_SEND_PHYSICAL_NOTE_TOOL,
+} from './dynamic-tools/physical-notes.js'
 export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
@@ -1517,6 +1521,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_CREATE_PHONE_CALL_TOOL,
   MURPH_GET_PHONE_CALL_STATUS_TOOL,
   MURPH_STOP_PHONE_CALL_TOOL,
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
   MURPH_LABS_TOOL,
 ] as const
@@ -1575,6 +1580,7 @@ export interface MurphDynamicToolAvailability {
   groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
+  physicalNoteRecoveryAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   phoneCallStatusAvailable?: boolean | null
   phoneCallStopAvailable?: boolean | null
@@ -1634,6 +1640,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GET_PHONE_CALL_STATUS_TOOL, defaultOff((a) =>
       a.phoneCallStatusAvailable)],
     [MURPH_STOP_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallStopAvailable)],
+    [MURPH_RESOLVE_PHYSICAL_NOTE_TOOL, defaultOff((a) =>
+      a.physicalNoteRecoveryAvailable)],
     [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>

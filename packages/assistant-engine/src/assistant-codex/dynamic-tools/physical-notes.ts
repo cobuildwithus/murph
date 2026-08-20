@@ -22,6 +22,7 @@ const PHYSICAL_NOTE_ARGUMENT_ROOT_KEYS = [
   'message_ref',
   'to',
 ] as const
+const PHYSICAL_NOTE_RECOVERY_ARGUMENT_ROOT_KEYS = ['message_ref'] as const
 const ACCEPTED_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
 
 const physicalNoteArgumentsSchema = z.object({
@@ -59,6 +60,35 @@ const physicalNoteArgumentsSchema = z.object({
     })
   }
 })
+
+const physicalNoteRecoveryArgumentsSchema = z.object({
+  message_ref: z.string().trim().regex(ACCEPTED_INPUT_ID_PATTERN),
+}).strict()
+
+export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
+  namespace: 'murph',
+  name: 'resolve_physical_note',
+  description: [
+    'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md before using this tool.',
+    'Call exactly once only when a person explicitly asks to check, clear, resolve, or cancel an earlier unresolved physical-note submission.',
+    'Supply the exact current Message ref that authorizes the check.',
+    'This checks provider records and may safely clear a blocker; it never sends a new note or recalls an accepted one.',
+    'Report accepted, clear, pending, permission_denied, or unavailable literally. Never retry automatically.',
+  ].join(' '),
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      message_ref: {
+        type: 'string',
+        pattern: '^ain_[0-9a-f]{32}$',
+        description:
+          'Exact current Message ref explicitly authorizing this recovery check.',
+      },
+    },
+    required: ['message_ref'],
+  },
+} as const
 
 export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
   namespace: 'murph',
@@ -121,6 +151,10 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
 
 export type PhysicalNoteDynamicToolRequest =
   | {
+      kind: 'resolve-physical-note'
+      messageRef: string
+    }
+  | {
       imageRef?: string
       imageSha256?: string
       kind: 'send-physical-note'
@@ -136,6 +170,23 @@ export function readPhysicalNoteDynamicToolRequest(input: {
   arguments: unknown
   tool: string | null
 }): PhysicalNoteDynamicToolRequest | null {
+  if (input.tool === MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name) {
+    const parsed = parseDynamicToolArguments({
+      schema: physicalNoteRecoveryArgumentsSchema,
+      schemaRootKeys: PHYSICAL_NOTE_RECOVERY_ARGUMENT_ROOT_KEYS,
+      toolName: 'murph.resolve_physical_note',
+      value: input.arguments,
+    })
+    return parsed.ok
+      ? {
+          kind: 'resolve-physical-note',
+          messageRef: parsed.args.message_ref,
+        }
+      : {
+          kind: 'invalid-physical-note-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+  }
   if (input.tool !== MURPH_SEND_PHYSICAL_NOTE_TOOL.name) {
     return null
   }

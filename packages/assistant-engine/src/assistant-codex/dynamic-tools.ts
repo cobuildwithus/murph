@@ -2529,6 +2529,104 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
     }
+    case 'resolve-physical-note': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const resolvePhysicalNote = hostedToolContext?.physicalNotes?.resolve
+      const userActionScope =
+        hostedToolContext?.currentUserActionScope?.() ?? null
+      const explicitOriginCandidate = userActionScope
+        ? resolvePhysicalNoteExplicitOriginInputId({
+            acceptedInputIds: userActionScope.acceptedInputIds,
+            conversationScope: userActionScope.conversationScope,
+            messageRef: input.request.messageRef,
+          })
+        : null
+      const originAssistantInputId = explicitOriginCandidate && userActionScope
+        ? await authorizeDynamicToolEffectOrigin({
+            authorizer: input.authorizeAcceptedMessageTarget ?? null,
+            conversationScope: userActionScope.conversationScope,
+            deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+            messageRef: explicitOriginCandidate,
+          })
+        : null
+      if (!resolvePhysicalNote || !originAssistantInputId) {
+        return toolTextResult(
+          false,
+          'physical-note recovery requires the exact current authorizing Message ref and hosted recovery transport',
+        )
+      }
+
+      try {
+        const result = await resolvePhysicalNote({
+          originAssistantInputId,
+        }, {
+          signal: input.abortSignal ?? null,
+        })
+        switch (result.status) {
+          case 'accepted':
+            return toolTextResult(
+              true,
+              JSON.stringify({
+                note:
+                  'Provider records show the earlier physical-note submission was accepted for printing. It cannot be treated as canceled. This recovery sent nothing new. Say accepted for printing, not delivered.',
+                retryAfter: null,
+                status: result.status,
+              }),
+            )
+          case 'clear':
+            return toolTextResult(
+              true,
+              JSON.stringify({
+                note:
+                  'No unresolved physical-note submission remains. This recovery sent nothing. A future note still requires a separate explicit send request.',
+                retryAfter: null,
+                status: result.status,
+              }),
+            )
+          case 'pending':
+            return toolTextResult(
+              true,
+              JSON.stringify({
+                note: result.retryAfter
+                  ? 'The earlier provider outcome is still unresolved and cannot yet be safely cleared. No automatic retry or follow-up is running, and this recovery sent nothing.'
+                  : 'The provider check is still indeterminate, so the earlier submission cannot be safely cleared. No automatic retry or follow-up is running, and this recovery sent nothing.',
+                retryAfter: result.retryAfter,
+                status: result.status,
+              }),
+            )
+          case 'permission_denied':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                note:
+                  'The earlier physical-note submission was not changed because this recovery action is not available to the current participant.',
+                retryAfter: null,
+                status: result.status,
+              }),
+            )
+          case 'unavailable':
+            return toolTextResult(
+              false,
+              JSON.stringify({
+                note:
+                  'Physical-note recovery is currently unavailable. The earlier submission was not cleared, nothing new was sent, and no automatic retry is running.',
+                retryAfter: null,
+                status: result.status,
+              }),
+            )
+        }
+      } catch {
+        return toolTextResult(
+          false,
+          JSON.stringify({
+            note:
+              'Murph could not complete the provider check. The earlier submission was not cleared, nothing new was sent, and no automatic retry is running.',
+            retryAfter: null,
+            status: 'unavailable',
+          }),
+        )
+      }
+    }
     case 'send-physical-note': {
       const hostedToolContext = input.hostedToolContext ?? null
       const physicalNotes = hostedToolContext?.physicalNotes ?? null

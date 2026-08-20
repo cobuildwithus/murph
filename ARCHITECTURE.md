@@ -3710,6 +3710,12 @@ the frozen batch also contains later same-route conversation input; compound bat
 does not erase generated-image provenance. That later input may use the retained
 `raw/captures/**` ref through an independently authorized action such as the existing
 group-avatar path.
+A separately exposed physical-note recovery action is accepted-message-only and
+does not depend on image completion. It authorizes one Web-owned provider metadata
+reconciliation for the oldest unresolved guard, never a provider create or recall.
+Direct and authenticated-group authority is rechecked at the Web boundary; recent
+absence and indeterminate evidence remain pending, while only aged proven absence
+can clear the guard.
 Native provider resume is only the fast path: the transcript owner also commits a
 bounded runtime-authored provenance marker for every trusted ready generated-image
 completion. An attached image retains its actual response ordinal; a completion

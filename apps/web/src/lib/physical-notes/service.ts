@@ -9,6 +9,8 @@ import type {
 } from "@prisma/client";
 import type {
   HostedPhysicalNoteFailureReason,
+  HostedPhysicalNoteRecoveryRequest,
+  HostedPhysicalNoteRecoveryResponse,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
@@ -52,29 +54,12 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   const prisma = input.prisma ?? getPrisma();
   const config = readPhysicalNoteConfig();
   const recipient = normalizeHostedPhysicalNoteRecipient(input.recipient);
-
-  const destination = await requireHostedAssistantNotificationDestination({
+  const reassertActionOrigin = await requireHostedPhysicalNoteActionAuthority({
     memberId: input.memberId,
+    originAssistantInputId: input.originAssistantInputId,
     prisma,
     signal: input.signal,
   });
-  let reassertGroupOrigin: (() => Promise<void>) | null = null;
-  if (isHostedThreadContainerNotificationDestination(destination)) {
-    const routeAuthority = destination.externalThreadRouteAuthority;
-    if (!routeAuthority) {
-      throw new Error("Hosted physical-note group route authority is missing.");
-    }
-    const authorityInput = {
-      originAssistantInputId: input.originAssistantInputId,
-      prisma,
-      routeAuthority,
-      signal: input.signal,
-    };
-    await assertHostedGroupParticipantActionOriginHasOwnMurph(authorityInput);
-    reassertGroupOrigin = async () => {
-      await assertHostedGroupParticipantActionOriginHasOwnMurph(authorityInput);
-    };
-  }
   input.signal?.throwIfAborted();
 
   const requestFingerprint = buildPhysicalNoteFingerprint({
@@ -155,7 +140,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
     throw new TypeError("Physical-note artwork URL expires too soon.");
   }
-  await reassertGroupOrigin?.();
+  await reassertActionOrigin();
   input.signal?.throwIfAborted();
 
   const reservation = await prisma.$transaction(async (tx) => {
@@ -319,6 +304,101 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     providerLetterId: providerResult.providerLetterId,
   });
   return toResponse(accepted, "accepted");
+}
+
+export async function recoverHostedPhysicalNote(
+  input: HostedPhysicalNoteRecoveryRequest & {
+    memberId: string;
+    prisma?: PrismaClient;
+    runtime?: LobPhysicalNoteRuntime;
+    signal?: AbortSignal;
+  },
+): Promise<HostedPhysicalNoteRecoveryResponse> {
+  const prisma = input.prisma ?? getPrisma();
+  const reassertActionOrigin = await requireHostedPhysicalNoteActionAuthority({
+    memberId: input.memberId,
+    originAssistantInputId: input.originAssistantInputId,
+    prisma,
+    signal: input.signal,
+  });
+  input.signal?.throwIfAborted();
+
+  const guard = await findPhysicalNoteEffectGuard({
+    memberId: input.memberId,
+    prisma,
+  });
+  if (!guard) {
+    return physicalNoteRecoveryResponse("clear");
+  }
+
+  const config = readPhysicalNoteConfig();
+  if (!config) {
+    return physicalNoteRecoveryResponse("unavailable");
+  }
+  await reassertActionOrigin();
+  input.signal?.throwIfAborted();
+
+  await resolveGuardedPhysicalNote({
+    allowRecentLookup: true,
+    memberId: input.memberId,
+    prior: guard,
+    prisma,
+    runtime: input.runtime ?? createLobPhysicalNoteRuntime({
+      apiKey: config.apiKey,
+      fromAddressId: config.fromAddressId,
+    }),
+    signal: input.signal,
+  });
+  const reconciled = await prisma.hostedPhysicalNote.findUnique({
+    where: { id: guard.id },
+  });
+  if (reconciled?.status === "accepted") {
+    return physicalNoteRecoveryResponse("accepted");
+  }
+  const remainingGuard = await findPhysicalNoteEffectGuard({
+    memberId: input.memberId,
+    prisma,
+  });
+  if (!remainingGuard) {
+    return physicalNoteRecoveryResponse("clear");
+  }
+  const retryAfterMs = remainingGuard.createdAt.getTime() + REPLAY_WINDOW_MS;
+  return {
+    retryAfter: retryAfterMs > Date.now()
+      ? new Date(retryAfterMs).toISOString()
+      : null,
+    status: "pending",
+  };
+}
+
+async function requireHostedPhysicalNoteActionAuthority(input: {
+  memberId: string;
+  originAssistantInputId: string;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<() => Promise<void>> {
+  const destination = await requireHostedAssistantNotificationDestination({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    signal: input.signal,
+  });
+  if (!isHostedThreadContainerNotificationDestination(destination)) {
+    return async () => undefined;
+  }
+  const routeAuthority = destination.externalThreadRouteAuthority;
+  if (!routeAuthority) {
+    throw new Error("Hosted physical-note group route authority is missing.");
+  }
+  const authorityInput = {
+    originAssistantInputId: input.originAssistantInputId,
+    prisma: input.prisma,
+    routeAuthority,
+    signal: input.signal,
+  };
+  await assertHostedGroupParticipantActionOriginHasOwnMurph(authorityInput);
+  return async () => {
+    await assertHostedGroupParticipantActionOriginHasOwnMurph(authorityInput);
+  };
 }
 
 async function resolveHostedPhysicalNoteReplay(input: {
@@ -874,4 +954,10 @@ function unavailableResponse(): HostedPhysicalNoteSendResponse {
     physicalNoteId: null,
     status: "unavailable",
   };
+}
+
+function physicalNoteRecoveryResponse(
+  status: HostedPhysicalNoteRecoveryResponse["status"],
+): HostedPhysicalNoteRecoveryResponse {
+  return { retryAfter: null, status };
 }

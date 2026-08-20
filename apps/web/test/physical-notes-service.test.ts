@@ -1257,11 +1257,250 @@ describe("createHostedPhysicalNote", () => {
   });
 });
 
+describe("recoverHostedPhysicalNote", () => {
+  it("returns clear without a provider read when no unresolved guard exists", async () => {
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const provider = createPhysicalNoteRuntime([]);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(1).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({ retryAfter: null, status: "clear" });
+    expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("restores accepted provider evidence without sending another note", async () => {
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(201);
+    const provider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_recovered",
+    }]);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(201).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({ retryAfter: null, status: "accepted" });
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: "prior_note_accepted",
+      providerLetterId: "ltr_recovered",
+      status: "accepted",
+    });
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps recent absence pending until the existing safety window ends", async () => {
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(202);
+    const provider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
+
+    const response = await recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(202).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(response).toEqual({
+      retryAfter: expect.stringMatching(/Z$/u),
+      status: "pending",
+    });
+    expect(new Date(response.retryAfter!).getTime()).toBeGreaterThan(Date.now());
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: null,
+      status: "failed",
+    });
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("clears an aged proven absence and its unsent blocker", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(203);
+    const blockedProvider = createPhysicalNoteRuntime([]);
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(204),
+      prisma: store.prisma,
+      runtime: blockedProvider.runtime,
+    });
+    store.setCreatedAt(
+      guardId,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const provider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(203).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({ retryAfter: null, status: "clear" });
+    expect(blocked).toMatchObject({
+      failureReason: "prior_note_unresolved",
+      status: "failed",
+    });
+    expect(store.allRows()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        failureReason: "unknown",
+        id: guardId,
+        status: "failed",
+      }),
+      expect.objectContaining({
+        failureReason: "unknown",
+        id: blocked.physicalNoteId,
+        status: "failed",
+      }),
+    ]));
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("does not claim clear when another legacy unresolved guard remains", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(208);
+    const blockedProvider = createPhysicalNoteRuntime([]);
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(209),
+      prisma: store.prisma,
+      runtime: blockedProvider.runtime,
+    });
+    store.setFailureReason(blocked.physicalNoteId!, null);
+    store.setCreatedAt(
+      guardId,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const provider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
+
+    const response = await recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(208).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(response).toEqual({
+      retryAfter: expect.stringMatching(/Z$/u),
+      status: "pending",
+    });
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: "unknown",
+      status: "failed",
+    });
+    expect(store.allRows().find(
+      (row) => row.id === blocked.physicalNoteId,
+    )).toMatchObject({
+      failureReason: null,
+      status: "failed",
+    });
+  });
+
+  it("keeps an aged indeterminate lookup pending without a false retry time", async () => {
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(205);
+    store.setCreatedAt(
+      guardId,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const provider = createPhysicalNoteRuntime([], [{ kind: "indeterminate" }]);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(205).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({ retryAfter: null, status: "pending" });
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("reasserts current group authority before checking the provider", async () => {
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { store } = await createLegacyPhysicalNoteGuard(206);
+    const provider = createPhysicalNoteRuntime([], [{ kind: "indeterminate" }]);
+    mocks.isThreadContainerDestination.mockReturnValue(true);
+    mocks.requireDestination.mockResolvedValue({
+      conversationShape: "thread-container",
+      externalThreadRouteAuthority: {
+        accountLookupKey: "group_account",
+        channel: "linq",
+        containerMemberId: MEMBER_ID,
+        threadId: "thread_physical_note",
+      },
+    });
+    mocks.assertGroupOrigin.mockResolvedValue(MEMBER_ID);
+
+    await recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(206).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(mocks.assertGroupOrigin).toHaveBeenCalledTimes(2);
+    expect(mocks.assertGroupOrigin).toHaveBeenCalledWith(expect.objectContaining({
+      originAssistantInputId: buildRequest(206).originAssistantInputId,
+    }));
+    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed without provider configuration and leaves the guard intact", async () => {
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(207);
+    const provider = createPhysicalNoteRuntime([]);
+    vi.stubEnv("LOB_API_KEY", "");
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(207).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({ retryAfter: null, status: "unavailable" });
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: null,
+      status: "failed",
+    });
+    expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
+  });
+});
+
 async function loadCreateHostedPhysicalNote() {
   const { createHostedPhysicalNote } = await import(
     "@/src/lib/physical-notes/service"
   );
   return createHostedPhysicalNote;
+}
+
+async function loadRecoverHostedPhysicalNote() {
+  const { recoverHostedPhysicalNote } = await import(
+    "@/src/lib/physical-notes/service"
+  );
+  return recoverHostedPhysicalNote;
+}
+
+async function createLegacyPhysicalNoteGuard(sequence: number): Promise<{
+  guardId: string;
+  store: PhysicalNoteStore;
+}> {
+  const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+  const store = createPhysicalNoteStore();
+  const provider = createPhysicalNoteRuntime([{
+    kind: "definite_failure",
+    reason: "unknown",
+    status: 422,
+  }]);
+  const failed = await createHostedPhysicalNote({
+    ...buildRequest(sequence),
+    prisma: store.prisma,
+    runtime: provider.runtime,
+  });
+  const guardId = failed.physicalNoteId!;
+  store.setFailureReason(guardId, null);
+  return { guardId, store };
 }
 
 function buildRequest(sequence: number): HostedPhysicalNoteSendRequest & {

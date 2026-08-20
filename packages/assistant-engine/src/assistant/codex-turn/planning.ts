@@ -997,6 +997,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
           input.hostedToolContext?.physicalNotes != null &&
           input.hostedToolContext?.privateImageUrlPublisher != null,
+        physicalNoteRecoveryAvailable:
+          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
+          userActionAcceptedInputIds.length > 0 &&
+          typeof input.hostedToolContext?.physicalNotes?.resolve === 'function',
         phoneCallsAvailable:
           input.hostedToolContext?.phoneCalls != null &&
           (
