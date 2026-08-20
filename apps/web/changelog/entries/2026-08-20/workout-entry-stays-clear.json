@@ -9,6 +9,6 @@
     "summary": "Pull-up and push-up workout cards now treat a typed number as reps, keep Send to Murph visible, and show clearer saving and saved states.",
     "details": "The editor keeps entries while the same card remains selected. Custom targetless exercises still use notes, and ending the Messages extension process still clears its transient draft.",
     "relevanceTags": ["imessage", "workouts", "companion", "reliability"],
-    "sourcePullRequests": [101]
+    "sourcePullRequests": [2075, 101]
   }
 }
