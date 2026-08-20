@@ -104,6 +104,7 @@ All evidence is aggregate and contains no production identifiers.
 - Residual root cause: proven from current production aggregates, the exact
   minute-sweep query, persisted workspace frontiers, and repeated no-op runtime
   logs.
-- Follow-up focused regression and Web typecheck: passed.
+- Follow-up focused regressions, real-PostgreSQL imported-frontier proof, Web
+  typecheck, and focused lint: passed.
 - Follow-up exact-head ReviewGPT gates, CI, deploy, and production convergence:
   pending.
