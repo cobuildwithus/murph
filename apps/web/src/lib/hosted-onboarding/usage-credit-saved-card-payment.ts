@@ -6,7 +6,10 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { coerceStripeObjectId } from "./billing";
+import {
+  coerceStripeObjectId,
+  readStripeShouldRetryDirective,
+} from "./billing";
 import {
   hasHostedAccountGroupAccess,
   readHostedAccountGroupStripeBillingRef,
@@ -831,8 +834,9 @@ async function confirmOrRecoverHostedUsageCreditPaymentIntent(input: {
         "saved_card_confirmation_identity_changed",
       );
     }
+    let recovered: Stripe.PaymentIntent;
     try {
-      return await input.stripe.paymentIntents.retrieve(
+      recovered = await input.stripe.paymentIntents.retrieve(
         input.paymentIntent.id,
         { expand: ["latest_charge"] },
       );
@@ -842,7 +846,54 @@ async function confirmOrRecoverHostedUsageCreditPaymentIntent(input: {
         "paymentIntents.retrieve.saved-card-confirm-recovery",
       );
     }
+    if (
+      recovered.status === "requires_confirmation" &&
+      !isDefinitiveSavedCardConfirmationRejection(error)
+    ) {
+      throw buildHostedUsageCreditStripeUnavailableError(
+        error,
+        "paymentIntents.confirm.saved-card",
+      );
+    }
+    return recovered;
   }
+}
+
+function isDefinitiveSavedCardConfirmationRejection(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const shouldRetry = readStripeShouldRetryDirective(error);
+  if (shouldRetry !== null) {
+    return !shouldRetry;
+  }
+  const statusCode = "statusCode" in error &&
+      typeof error.statusCode === "number"
+    ? error.statusCode
+    : null;
+  if (statusCode !== null) {
+    return statusCode >= 400 &&
+      statusCode < 500 &&
+      statusCode !== 408 &&
+      statusCode !== 409 &&
+      statusCode !== 429;
+  }
+  const type = "type" in error && typeof error.type === "string"
+    ? error.type
+    : null;
+  const rawType = "rawType" in error && typeof error.rawType === "string"
+    ? error.rawType
+    : null;
+  return type === "StripeInvalidRequestError" ||
+    type === "StripeAuthenticationError" ||
+    type === "StripePermissionError" ||
+    type === "StripeCardError" ||
+    rawType === "invalid_request_error" ||
+    rawType === "authentication_error" ||
+    rawType === "permission_error" ||
+    rawType === "card_error";
 }
 
 async function cancelHostedUsageCreditDirectPaymentIntent(input: {
