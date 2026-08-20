@@ -19,8 +19,9 @@ Updated: 2026-08-20
 - Hosted checkpoint failure records identify session-start and completion
   elapsed time and distinguish write-fence, request, response-decode,
   payload-validation, and checkpoint-recording failures.
-- Focused tests prove classification, bounded values, retry recovery, and
-  redaction-safe output; affected package typechecks pass.
+- Focused tests prove classification, bounded values, retry transport response,
+  integrity-gated completion, and redaction-safe output; affected package
+  typechecks pass.
 - Required ReviewGPT stages and exact-head CI pass before merge and deployment.
 
 ## Scope
@@ -78,13 +79,16 @@ Updated: 2026-08-20
   refresh. The identity-pool client owns one bounded, transient stage record;
   attempts retain only a reference to that record, never credentials, URLs, or
   provider payloads. Caller cancellation does not clear shared auth work.
+- Treat a successful second KMS RPC only as a provider response in diagnostics.
+  Decrypt recovery is not established until the existing plaintext and CRC
+  integrity checks pass, so the transport-boundary log must not claim recovery.
 
 ## Verification
 
-- Passed: `pnpm exec tsx apps/web/scripts/run-hosted-web-vitest.mts
+- Passed: `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage
   apps/web/test/hosted-crypto-gcp-kms.test.ts
   apps/web/test/hosted-crypto-gcp-kms-official.test.ts
-  apps/web/test/hosted-crypto-gcp-kms-real-sdk.test.ts` (47 tests).
+  apps/web/test/hosted-crypto-gcp-kms-real-sdk.test.ts` (49 tests).
 - Passed: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts
   apps/cloudflare/test/runner-platform.test.ts` (195 tests).
 - Passed: `pnpm exec vitest run
@@ -111,5 +115,17 @@ Updated: 2026-08-20
   terminal STS provenance instead of consulting active deadline state.
 - Passed: Web typecheck, focused ESLint, `git diff --check`, and an independent
   subagent ownership/concurrency review of the shared refresh design.
+- Fixed: final ReviewGPT round 4 found that the retry info event claimed
+  recovery before decrypt integrity checks and that inner-auth provenance had
+  three transient owners. The event now records only provider-response receipt.
+  One per-client auth-refresh context now solely owns the three inner-stage
+  timings and terminal stage; error-object provenance and attempt-local inner
+  timers are deleted.
+- Passed: a bad-CRC second-response regression proves no recovery claim;
+  installed-SDK shared refresh success followed by caller cancellation and a
+  surviving KMS failure preserves bounded STS timing and `kms_rpc` attribution
+  without an auth or KMS retry. Full KMS coverage passes 49/49, the installed
+  SDK suite passes repeatedly, and Web typecheck, focused ESLint, and
+  `git diff --check` pass on the remediation.
 - Remaining: final ReviewGPT rerun, exact-head GitHub checks, merge/deploy, and
   bounded postdeploy Vercel/runtime-log queries.
