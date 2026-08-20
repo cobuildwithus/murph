@@ -1,6 +1,6 @@
 # Restore production runner bundle budget margin
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -101,5 +101,15 @@ Updated: 2026-08-20
 - `MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY=4 pnpm --dir apps/cloudflare
   runner:bundle`: passed the lowered total cap, both startup caps, and all eight
   bundled/unbundled CLI parity probes.
+- Exact private materialization on reviewed head
+  `4f8f19bf45460fac569d8fa2af3b6bfd0b522e7f` measured 9,345,345 bytes,
+  with a 671-byte entry and 24,950-byte static closure. All eight parity probes
+  and the private runner verifier passed, resolving the preliminary coverage
+  specialist finding with 36,238 bytes of real production margin.
+- Final ReviewGPT round 1 passed with no findings. The preliminary specialist
+  pass marked only the private execution proof above; no patch was returned.
+- Canonical Ubuntu production runner bundle-budget CI passed on the reviewed
+  head.
 - `pnpm exec prettier --check ...` could not run because Prettier is not a
   repository dependency; `git diff --check` passed.
+Completed: 2026-08-20
