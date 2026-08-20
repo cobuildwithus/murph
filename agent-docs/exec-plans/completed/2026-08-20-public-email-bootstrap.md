@@ -1,6 +1,6 @@
 # Public email bootstrap
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -86,9 +86,9 @@ Updated: 2026-08-20
    changed trust boundary.
 3. [completed] Run focused tests, typechecks, migration checks, and Product UX
    walkthrough; resolve failures.
-4. [in_progress] Create the candidate commit/PR and run the required specialist and
+4. [completed] Create the candidate commit/PR and run the required specialist and
    final ReviewGPT gates with exact-head CI.
-5. [pending] Resolve findings, close the plan, and prove current-base
+5. [completed] Resolve findings, close the plan, and prove current-base
    mergeability.
 
 Pull request: #2083
@@ -124,6 +124,10 @@ Pull request: #2083
   suppressed before the member lock or attempt read, preventing public bursts
   from filling the shared Web pool while the admitted winner waits on a member
   row.
+- The one post-review base update had one conflict in
+  `apps/web/src/lib/hosted-onboarding/hosted-member-store.ts`. The mechanical
+  resolution retained the reviewed alias-rotation imports and `main`'s
+  centralized active-member predicate; it authored no new behavior.
 
 ## Product UX walkthrough
 
@@ -183,4 +187,21 @@ Result: Ready.
   shapes, attributes all review-driven growth, inventories every concept and
   owner, and selects explicitly justified continuation without expanding raw
   public-mail authority.
-- Required exact-head CI and current-base merge-tree proof.
+- ReviewGPT round 4 returned `ROUND_OUTCOME: PASS` and `REVIEW_COMPLETE` for
+  exact head `389cabb58c10c6fdeb5df8f79514f911468ab9cb`, with no accepted security,
+  reliability, purpose, complexity, or UX findings. It explicitly accepted the
+  guided private-alias first-message path and the raw-public two-step boundary.
+- After the permitted base-only update, five affected Web suites passed 174
+  tests; Web typecheck, scoped ESLint, docs drift, diff checks, and the privacy
+  scan passed.
+- An isolated real-PostgreSQL database applied all 195 migrations, then passed
+  the live-authority alias rotation/stability proof and the eight-collider
+  nonblocking global-lock proof. The first replay used an incomplete local
+  connection authority and failed before schema creation; that database was
+  removed, the owner-authorized local-socket replay passed, and its disposable
+  database was also removed.
+- GitHub reported no required checks for base-updated head
+  `92461f784c92bc291918e083b142c39c9eb5266c`; the optional Vercel status passed,
+  GitHub classified the PR as mergeable, and a fresh local merge-tree against
+  `origin/main` completed without conflict.
+Completed: 2026-08-20
