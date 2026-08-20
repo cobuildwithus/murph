@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-08-14
+Last verified: 2026-08-20
 
 ## Purpose
 
@@ -140,6 +140,24 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    what makes invariants 2 and 3 safe, and it is why an import-vs-skip
    optimization is unnecessary: re-fetching is cheap and correct, not a
    correctness risk.
+
+   Junction profile timestamp evolution has one closed replay-compatibility
+   case inside this same canonical owner. A stable-profile event marked by the
+   current created-at normalizer may supersede its generic-normalizer
+   predecessor at an equal provider revision only when the persisted provider
+   baseline used that revision as `occurredAt`, `recordedAt`, and raw observed
+   time, its `dayKey` was the revision's UTC day, the incoming created time is
+   earlier, source scope and external reference are unchanged, and replacing
+   only the predecessor timestamp makes the canonical content identical. Core
+   appends that migration once. A retained live member
+   revision adopts created-at only when its occurrence still matches the
+   provider predecessor; member-edited occurrence/day placement and member
+   revision time remain unchanged. A later stable-profile replay also retains
+   a member deletion whose delete time is strictly later than its provider
+   revision, while provider-owned tombstones remain eligible for ordinary
+   authoritative reassertion. A height, demographic, facet, source, identity,
+   or other semantic change at the same revision still fails closed as a
+   source-revision conflict.
 
    Compact Junction timeseries retain that same single-owner rule. Dense
    `glucose`, `blood_oxygen`, and `stress_level` reconcile and direct-resource
