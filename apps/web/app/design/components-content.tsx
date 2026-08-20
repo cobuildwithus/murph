@@ -167,7 +167,6 @@ import {
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import {
   HostedAccountDeletionErrorAlert,
-  HostedAccountDeletionStatus,
 } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
@@ -1398,15 +1397,6 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Account Deletion Status">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <HostedAccountDeletionStatus cleanupPending={false} />
-            <HostedAccountDeletionStatus cleanupPending />
-          </div>
-        </Section>
-
-        <Separator />
-
         <Section title="Account Deletion Recovery Alert">
           <div className="max-w-md">
             <HostedAccountDeletionErrorAlert
@@ -1641,8 +1631,8 @@ export function ComponentsContent() {
                 Keep the conversation going
               </p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Add one-time usage with a saved card or continue securely in
-                Stripe when needed.
+                Add usage with a saved card or continue securely in Stripe when
+                needed.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog

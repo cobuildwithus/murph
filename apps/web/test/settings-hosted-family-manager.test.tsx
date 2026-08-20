@@ -46,10 +46,16 @@ vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
     quietSuccessfulReturn?: boolean;
     scope?: string;
     targetLabel?: string;
+    triggerLabel?: string;
+    triggerVariant?: string;
   }) => {
     mocks.usageTopUpDialogProps(props);
     return props.offers.length > 0 || props.activePurchase || props.purchaseReturn
-      ? createElement("button", { type: "button" }, "Add usage")
+      ? createElement(
+          "button",
+          { type: "button" },
+          props.triggerLabel ?? "Add usage",
+        )
       : null;
   },
 }));
@@ -671,6 +677,88 @@ test("HostedFamilyManager locks row actions and ignores dialog dismissal while a
       await request;
     });
     assert.doesNotMatch(container.textContent ?? "", /Working\.\.\./);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager opens the eligible recurring owner recovery first", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      usageRecoveryAvailable: true,
+      usageRecoveryInitialOpen: true,
+      usageTopUpOffers: [
+        { amountLabel: "$5", offerCode: "usage_5_usd" },
+      ],
+    }),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
+
+  try {
+    assert.match(
+      container.textContent ?? "",
+      /Get more included usage each month/,
+    );
+    assert.match(container.textContent ?? "", /Upgrade your Family access/);
+    assert.match(
+      container.textContent ?? "",
+      /Edge includes more usage each month/,
+    );
+    assert.ok(buttonByText(container, "Upgrade to Edge"));
+    assert.ok(buttonByText(container, "Add usage"));
+    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkoutUrl:
+          "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+        offers: [{ amountLabel: "$5", offerCode: "usage_5_usd" }],
+        scope: "family",
+        targetLabel: "you",
+        triggerLabel: "Add usage",
+        triggerVariant: "outline",
+      }),
+    );
+
+    await clickLastButton(container, window, "Upgrade to Edge");
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: "edge" },
+      url: "/api/settings/billing/family/members/member_owner",
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager shows current owner recovery without auto-opening it", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      usageRecoveryAvailable: true,
+      usageTopUpOffers: [
+        { amountLabel: "$5", offerCode: "usage_5_usd" },
+      ],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(
+      container.textContent ?? "",
+      /Get more included usage each month/,
+    );
+    assert.ok(buttonByText(container, "Upgrade to Edge"));
+    assert.doesNotMatch(
+      container.textContent ?? "",
+      /Upgrade your Family access/,
+    );
   } finally {
     await cleanup();
   }

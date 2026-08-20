@@ -121,6 +121,9 @@ type FreshRuntimeStartPreparation =
 
 function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocationInput {
   return {
+    ...(input.assistantExecutionBlocked
+      ? { assistantExecutionBlocked: true as const }
+      : {}),
     ...(input.orchestration ? { orchestration: input.orchestration } : {}),
     orchestrationAttemptId: input.orchestrationAttemptId,
     ...(input.processingMode ? { processingMode: input.processingMode } : {}),
@@ -435,10 +438,10 @@ export class RuntimeProcessingController {
     }
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
+    const foregroundWaitingOnSystemMailbox =
+      activeFence.processingMode === "system_mailbox"
+      && requestedProcessingMode === "default";
     if (activeFence.processingMode !== requestedProcessingMode) {
-      const foregroundWaitingOnSystemMailbox =
-        activeFence.processingMode === "system_mailbox"
-        && requestedProcessingMode === "default";
       if (activeFence.processingMode === "inbox_media_retention") {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
           activeFence,
@@ -550,6 +553,15 @@ export class RuntimeProcessingController {
     });
 
     if (containerResult.kind === "accepted") {
+      if (foregroundWaitingOnSystemMailbox) {
+        // The active system child accepted the wake so it can checkpoint and
+        // release. It did not accept the requested default-mode processing.
+        return this.createRetryLater({
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
+          reason: "container_busy",
+          userId: input.input.userId,
+        });
+      }
       const action = containerResult.action === "already_running"
         ? "already_running"
         : "woken";

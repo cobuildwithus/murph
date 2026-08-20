@@ -12,6 +12,7 @@ import type {
   IntegrationIngestRecord,
   SampleRecord,
 } from "@murphai/contracts";
+import { isDeletedEventLifecycle } from "@murphai/contracts";
 
 import {
   compactIntegrationIngestReceipt,
@@ -94,6 +95,17 @@ function invalidTestValue<T>(value: unknown): T {
 
 function eventObservationValue(record: EventRecord | undefined): unknown {
   return record?.kind === "observation" ? record.value : undefined;
+}
+
+function collapseEventSpines(records: readonly EventRecord[]): EventRecord[] {
+  const latestById = new Map<string, EventRecord>();
+  for (const record of records) {
+    const current = latestById.get(record.id);
+    if ((record.lifecycle?.revision ?? 1) >= (current?.lifecycle?.revision ?? 0)) {
+      latestById.set(record.id, record);
+    }
+  }
+  return [...latestById.values()];
 }
 
 const DENSE_TELEMETRY_NOT_ALLOWED_CODE = "VAULT_DENSE_DEVICE_TELEMETRY_NOT_ALLOWED";
@@ -2043,6 +2055,143 @@ test("importDeviceBatch rejects changed content for immutable externalRefs while
   assert.equal(eventRecords.length, 1);
 });
 
+test("importDeviceBatch retracts omitted facets from a newer bounded authoritative snapshot", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-authoritative-facets");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const identity = {
+    system: "junction",
+    resourceType: "junction-apple-health-profile",
+    resourceId: "profile-stable-1",
+  } as const;
+  const facet = "profile-demographics";
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-01T09:00:00.000Z",
+    events: [{
+      kind: "note",
+      occurredAt: "2026-05-01T08:00:00.000Z",
+      recordedAt: "2026-05-01T09:00:00.000Z",
+      title: "Junction profile",
+      note: "Biological sex: female.",
+      externalRef: {
+        ...identity,
+        facet,
+        version: "2026-05-01T08:00:00.000Z",
+      },
+    }],
+    authoritativeEventSets: [{
+      ...identity,
+      version: "2026-05-01T08:00:00.000Z",
+      facetPrefixes: [facet],
+      currentFacets: [facet],
+    }],
+    evidenceParts: [{
+      role: "junction-summary-profile",
+      fileName: "profile.json",
+      content: { revision: 1 },
+    }],
+  });
+  const correctionInput = {
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-02T09:00:00.000Z",
+    events: [],
+    authoritativeEventSets: [{
+      ...identity,
+      version: "2026-05-02T08:00:00.000Z",
+      facetPrefixes: [facet],
+      currentFacets: [],
+    }],
+    evidenceParts: [{
+      role: "junction-summary-profile",
+      fileName: "profile.json",
+      content: { revision: 2 },
+    }],
+  };
+  const correction = await importDeviceBatch(correctionInput);
+  const replay = await importDeviceBatch(correctionInput);
+  const unversionedReplay = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-02T10:00:00.000Z",
+    events: [{
+      kind: "note",
+      occurredAt: "2026-05-01T08:00:00.000Z",
+      recordedAt: "2026-05-02T10:00:00.000Z",
+      dayKey: "2026-05-01",
+      title: "Junction profile",
+      note: "Biological sex: female.",
+      externalRef: { ...identity, facet },
+    }],
+  });
+  const eventShardPath = first.eventShardPaths[0];
+  assert.ok(eventShardPath);
+  const eventRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  })) as EventRecord[];
+  const tombstone = eventRecords.find((record) => record.lifecycle?.revision === 2);
+
+  assert.equal(correction.applied, true);
+  assert.equal(correction.events.length, 0);
+  assert.deepEqual(correction.eventShardPaths, [eventShardPath]);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.ingestId, null);
+  assert.equal(unversionedReplay.applied, false);
+  assert.equal(unversionedReplay.ingestId, null);
+  assert.equal(eventRecords.length, 2);
+  assert.equal(tombstone?.id, first.events[0]?.id);
+  assert.equal(tombstone?.lifecycle?.state, "deleted");
+});
+
+test("importDeviceBatch rejects authoritative resources above the composed 514-facet maximum", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-authoritative-facet-limit");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const identity = {
+    system: "junction",
+    resourceType: "junction-apple-health-menstrual-cycle",
+    resourceId: "cycle-over-limit",
+  } as const;
+  const version = "2026-05-02T08:00:00.000Z";
+  const facets = Array.from(
+    { length: 515 },
+    (_, index) => `menstrual-flow-2026-05-01-${String(index).padStart(3, "0")}`,
+  );
+  const before = await snapshotVaultFiles(vaultRoot);
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-05-02T09:00:00.000Z",
+      events: facets.map((facet, index) => ({
+        kind: "measurement",
+        occurredAt: "2026-05-01T12:00:00.000Z",
+        recordedAt: version,
+        title: "Junction menstrual flow",
+        externalRef: { ...identity, facet, version },
+        fields: {
+          measurements: [{
+            metric: "menstrual-flow",
+            value: (index % 3) + 1,
+            unit: "score",
+          }],
+        },
+      })),
+      authoritativeEventSets: [{
+        ...identity,
+        version,
+        facetPrefixes: ["menstrual-flow"],
+        currentFacets: facets,
+      }],
+    }),
+    (error) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
+  );
+
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
+});
+
 test("importDeviceBatch makes byte-identical overlap a storage no-op for one provider account", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-storage-idempotency");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -3331,6 +3480,7 @@ test("importDeviceBatch exact historical replay does not supersede a newer provi
 
   assert.equal(replay.applied, false);
   assert.equal(replay.auditPath, null);
+  assert.deepEqual(replay.events, []);
   assert.equal(eventRows.length, 2);
   const latest = eventRows.at(-1);
   assert.equal(latest?.kind, "activity_session");
@@ -7705,7 +7855,7 @@ test("importDeviceBatch lets Junction sleep summary stages supersede prior cycle
   assert.deepEqual(records.map((record) => record.externalRef?.version), [undefined, undefined]);
 });
 
-test("importDeviceBatch preserves explicit device dayKey without vault timezone backfill", async () => {
+test("importDeviceBatch preserves explicit Junction provider days without vault timezone backfill", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-explicit-day-no-timezone");
   await initializeVault({
     vaultRoot,
@@ -7724,18 +7874,17 @@ test("importDeviceBatch preserves explicit device dayKey without vault timezone 
         occurredAt: "2026-06-25T03:00:00.000Z",
         recordedAt: "2026-06-25T03:00:00.000Z",
         dayKey: "2026-06-24",
-        title: "Junction light sleep",
+        title: "Junction daily blood oxygen",
         externalRef: {
           system: "junction",
-          resourceType: "junction-whoop-sleep",
-          resourceId: "sleep-stage-window-1",
-          facet: "sleep-light-minutes",
+          resourceType: "junction-fitbit-blood-oxygen",
+          resourceId: "fitbit-blood-oxygen-2026-06-24",
         },
         fields: {
-          metric: "sleep-light-minutes",
+          metric: "spo2",
           observationGrain: "summary",
-          value: 30,
-          unit: "minutes",
+          value: 97,
+          unit: "percent",
         },
       },
     ],
@@ -8123,8 +8272,8 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   };
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
 
-  // A changed provider re-delivery must take revision 3, not collide with the
-  // edit's revision 2.
+  // This row is not marked manual, so the changed provider delivery takes
+  // revision 3 without colliding with revision 2.
   const updated = await importDeviceBatch({
     vaultRoot,
     provider: "junction",
@@ -8149,7 +8298,7 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   assert.deepEqual(revisions, [1, 2, 3]);
 });
 
-test("importDeviceBatch rejects primary provider refs after user-authored same-externalRef edits", async () => {
+test("importDeviceBatch advances provider refs behind user-authored same-externalRef edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-primary-ref-user-edit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -8173,35 +8322,428 @@ test("importDeviceBatch rejects primary provider refs after user-authored same-e
   } satisfies EventRecord;
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
 
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-04T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        recordedAt: "2026-06-04T07:00:00.000Z",
+        durationMinutes: 36,
+      }),
+    ],
+  });
+
+  const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const latestUserEdited = collapseEventSpines(records).find((record) => record.id === eventId);
+  assert.equal(latestUserEdited?.note, "user-added context");
+  assert.deepEqual(latestUserEdited?.tags, ["context"]);
+  assert.deepEqual(latestUserEdited?.links, [{ type: "related_to", targetId: eventId }]);
+  assert.equal(latestUserEdited?.source, "manual");
+  assert.ok(records.some((record) =>
+    record.id === eventId
+    && record.source === "device"
+    && record.recordedAt === "2026-06-04T07:00:00.000Z"
+  ));
+});
+
+test("importDeviceBatch retains member edits while advancing provider siblings atomically", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-member-edit-resolution-retained");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const resourceType = "junction-apple-health-profile";
+  const resourceId = "profile-stable";
+  const buildInput = (input: {
+    editedValue: number;
+    importedAt: string;
+    siblingValue: number;
+    version: string;
+  }) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-account",
+    importedAt: input.importedAt,
+    events: [
+      {
+        kind: "observation" as const,
+        occurredAt: "2026-06-01T00:00:00.000Z",
+        title: "Edited fact",
+        externalRef: {
+          system: "junction",
+          resourceType,
+          resourceId,
+          version: input.version,
+          facet: "edited-fact",
+        },
+        dataOrigin: {
+          version: 1 as const,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "apple-health",
+          sourceType: "phone",
+          observedAtRaw: input.version,
+          timestampSemantics: "utc" as const,
+        },
+        fields: {
+          metric: "edited-fact",
+          observationGrain: "summary" as const,
+          value: input.editedValue,
+          unit: "score",
+        },
+      },
+      {
+        kind: "observation" as const,
+        occurredAt: "2026-06-01T00:00:00.000Z",
+        title: "Sibling fact",
+        externalRef: {
+          system: "junction",
+          resourceType,
+          resourceId,
+          version: input.version,
+          facet: "sibling-fact",
+        },
+        fields: {
+          metric: "sibling-fact",
+          observationGrain: "summary" as const,
+          value: input.siblingValue,
+          unit: "score",
+        },
+      },
+    ],
+    authoritativeEventSets: [{
+      system: "junction",
+      resourceType,
+      resourceId,
+      version: input.version,
+      facetPrefixes: ["edited-fact", "sibling-fact"],
+      currentFacets: ["edited-fact", "sibling-fact"],
+    }],
+  });
+  const first = await importDeviceBatch(buildInput({
+    editedValue: 1,
+    importedAt: "2026-06-10T10:00:00.000Z",
+    siblingValue: 10,
+    version: "2026-06-10T09:00:00.000Z",
+  }));
+  const edited = first.events.find((event) =>
+    event.kind === "observation" && event.metric === "edited-fact"
+  );
+  assert.ok(edited);
+  await upsertEvent({
+    vaultRoot,
+    payload: { ...edited, note: "member correction", value: 7, source: "manual" },
+  });
+  const correction = buildInput({
+    editedValue: 2,
+    importedAt: "2026-06-11T10:00:00.000Z",
+    siblingValue: 11,
+    version: "2026-06-11T09:00:00.000Z",
+  });
+  const update = await importDeviceBatch(correction);
+  assert.ok(update.applied);
+  const shardPath = first.eventShardPaths[0] as string;
+  const keptRows = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const keptLive = collapseEventSpines(keptRows);
+  const keptEdited = keptLive.find((event) => event.id === edited.id);
+  const keptSibling = keptLive.find((event) =>
+    event.kind === "observation" && event.metric === "sibling-fact"
+  );
+  assert.equal(keptEdited?.source, "manual");
+  assert.equal(keptEdited?.note, "member correction");
+  assert.equal(eventObservationValue(keptEdited), 7);
+  assert.equal(eventObservationValue(keptSibling), 11);
+  assert.ok(keptRows.some((event) =>
+    event.id === edited.id
+    && event.source === "device"
+    && event.externalRef?.version === "2026-06-11T09:00:00.000Z"
+    && eventObservationValue(event) === 2
+  ));
+
+  const replay = await importDeviceBatch(correction);
+  assert.equal(replay.applied, false);
+  const later = await importDeviceBatch(buildInput({
+    editedValue: 3,
+    importedAt: "2026-06-12T10:00:00.000Z",
+    siblingValue: 12,
+    version: "2026-06-12T09:00:00.000Z",
+  }));
+  assert.ok(later.applied);
+  const finalRows = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const finalLive = collapseEventSpines(finalRows);
+  const finalEdited = finalLive.find((event) => event.id === edited.id);
+  assert.equal(finalEdited?.source, "manual");
+  assert.equal(eventObservationValue(finalEdited), 7);
+  assert.ok(finalRows.some((event) =>
+    event.id === edited.id
+    && event.source === "device"
+    && event.externalRef?.version === "2026-06-12T09:00:00.000Z"
+    && eventObservationValue(event) === 3
+  ));
+});
+
+test("importDeviceBatch scopes no-id Junction profile predecessor claims to one source instance", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-profile-predecessor-scope");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const resourceType = "junction-oura-profile";
+  const profileResourceId = (sourceInstanceId: string, occurredAt: string) =>
+    `profile-${createHash("sha256")
+      .update(JSON.stringify(["profile", "oura", "ring", sourceInstanceId, occurredAt]))
+      .digest("hex")
+      .slice(0, 16)}`;
+  const profileEvent = (input: {
+    normalizerVersion: string;
+    occurredAt: string;
+    sourceInstanceId: string;
+    value: number;
+    version?: string;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: input.occurredAt,
+    recordedAt: input.occurredAt,
+    dayKey: input.occurredAt.slice(0, 10),
+    title: "Junction height",
+    externalRef: {
+      system: "junction",
+      resourceType,
+      resourceId: profileResourceId(input.sourceInstanceId, input.occurredAt),
+      ...(input.version ? { version: input.version } : {}),
+      facet: "height",
+    },
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      sourceInstanceId: input.sourceInstanceId,
+      observedAtRaw: input.occurredAt,
+      timestampSemantics: "utc" as const,
+      normalizerVersion: input.normalizerVersion,
+    },
+    fields: {
+      metric: "height",
+      observationGrain: "summary" as const,
+      value: input.value,
+      unit: "cm",
+    },
+  });
+  const firstUpdatedAt = "2026-05-20T09:00:00.000Z";
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-20T10:00:00.000Z",
+    events: [profileEvent({
+      normalizerVersion: "junction-normalizer.v1",
+      occurredAt: firstUpdatedAt,
+      sourceInstanceId: "profile-source-a",
+      value: 180,
+    })],
+  });
+  const createdAt = "2026-05-01T09:00:00.000Z";
+  const second = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-22T10:00:00.000Z",
+    events: [profileEvent({
+      normalizerVersion: "junction-no-id-profile.v1",
+      occurredAt: createdAt,
+      sourceInstanceId: "profile-source-b",
+      value: 181,
+      version: "2026-05-22T09:00:00.000Z",
+    })],
+  });
+
+  assert.notEqual(second.events[0]?.id, first.events[0]?.id);
+  const rows = (
+    await Promise.all(
+      [...new Set([...first.eventShardPaths, ...second.eventShardPaths])].map((relativePath) =>
+        readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )
+  ).flat() as EventRecord[];
+  assert.equal(collapseEventSpines(rows).length, 2);
+});
+
+test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors atomically", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-profile-predecessor-ambiguity");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const resourceType = "junction-oura-profile";
+  const sourceInstanceId = "profile-source";
+  const profileResourceId = (occurredAt: string) =>
+    `profile-${createHash("sha256")
+      .update(JSON.stringify(["profile", "oura", "ring", sourceInstanceId, occurredAt]))
+      .digest("hex")
+      .slice(0, 16)}`;
+  const profileEvent = (input: {
+    normalizerVersion: string;
+    occurredAt: string;
+    value: number;
+    version?: string;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: input.occurredAt,
+    recordedAt: input.occurredAt,
+    dayKey: input.occurredAt.slice(0, 10),
+    title: "Junction height",
+    externalRef: {
+      system: "junction",
+      resourceType,
+      resourceId: profileResourceId(input.occurredAt),
+      ...(input.version ? { version: input.version } : {}),
+      facet: "height",
+    },
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      sourceInstanceId,
+      observedAtRaw: input.occurredAt,
+      timestampSemantics: "utc" as const,
+      normalizerVersion: input.normalizerVersion,
+    },
+    fields: {
+      metric: "height",
+      observationGrain: "summary" as const,
+      value: input.value,
+      unit: "cm",
+    },
+  });
+  const firstUpdatedAt = "2026-05-19T09:00:00.000Z";
+  const secondUpdatedAt = "2026-05-20T09:00:00.000Z";
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-20T10:00:00.000Z",
+    events: [
+      profileEvent({
+        normalizerVersion: "junction-normalizer.v1",
+        occurredAt: firstUpdatedAt,
+        value: 179,
+      }),
+      profileEvent({
+        normalizerVersion: "junction-normalizer.v1",
+        occurredAt: secondUpdatedAt,
+        value: 180,
+      }),
+    ],
+  });
+  const before = await snapshotVaultFiles(vaultRoot);
+  const createdAt = "2026-05-01T09:00:00.000Z";
+
   await assert.rejects(
     importDeviceBatch({
       vaultRoot,
       provider: "junction",
-      accountId: "jxn_acct_stable",
-      importedAt: "2026-06-04T21:00:00.000Z",
-      events: [
-        buildJunctionStyleWorkoutEvent({
-          recordedAt: "2026-06-04T07:00:00.000Z",
-          durationMinutes: 36,
-        }),
-      ],
+      importedAt: "2026-05-22T10:00:00.000Z",
+      events: [profileEvent({
+        normalizerVersion: "junction-no-id-profile.v1",
+        occurredAt: createdAt,
+        value: 181,
+        version: "2026-05-22T09:00:00.000Z",
+      })],
     }),
-    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+    (error: unknown) => error instanceof VaultError
+      && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
   );
-
-  const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
-  const latestUserEdited = records.find((record) => record.id === eventId && record.lifecycle?.revision === 2);
-  assert.equal(latestUserEdited?.note, "user-added context");
-  assert.deepEqual(latestUserEdited?.tags, ["context"]);
-  assert.deepEqual(latestUserEdited?.links, [{ type: "related_to", targetId: eventId }]);
-  assert.equal(
-    records.filter((record) => record.id === eventId).length,
-    2,
-    "provider re-import must not append a superseding revision over user edits",
-  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
 });
 
-test("importDeviceBatch rejects historical provider refs after user-authored no-externalRef edits", async () => {
+test("importDeviceBatch retains omitted member edits above provider tombstones", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-member-edit-resolution-omitted");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const resourceType = "junction-apple-health-menstrual-cycle";
+  const resourceId = "cycle-stable";
+  const editedFacet = "cervical-mucus-2026-06-03-fingerprint";
+  const buildEditedEvent = (version: string) => ({
+    kind: "observation" as const,
+    occurredAt: "2026-06-03T00:00:00.000Z",
+    title: "Edited cycle fact",
+    externalRef: {
+      system: "junction",
+      resourceType,
+      resourceId,
+      version,
+      facet: editedFacet,
+    },
+    fields: {
+      metric: "cycle-fact",
+      observationGrain: "summary" as const,
+      value: 1,
+      unit: "score",
+    },
+  });
+  const firstVersion = "2026-06-10T09:00:00.000Z";
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-06-10T10:00:00.000Z",
+    events: [buildEditedEvent(firstVersion)],
+    authoritativeEventSets: [{
+      system: "junction",
+      resourceType,
+      resourceId,
+      version: firstVersion,
+      facetPrefixes: ["cervical-mucus"],
+      currentFacets: [editedFacet],
+    }],
+  });
+  const edited = first.events[0];
+  assert.ok(edited);
+  await upsertEvent({
+    vaultRoot,
+    payload: { ...edited, note: "member context", source: "manual" },
+  });
+  const omission = (input: { version: string }) => ({
+    vaultRoot,
+    provider: "junction",
+    importedAt: input.version,
+    events: [{
+      kind: "observation" as const,
+      occurredAt: "2026-06-04T00:00:00.000Z",
+      title: "Unrelated update",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-apple-health-activity",
+        resourceId: "activity-2026-06-04",
+        version: input.version,
+        facet: "steps",
+      },
+      fields: {
+        metric: "steps",
+        observationGrain: "summary" as const,
+        value: 4000,
+        unit: "count",
+      },
+    }],
+    authoritativeEventSets: [{
+      system: "junction",
+      resourceType,
+      resourceId,
+      version: input.version,
+      facetPrefixes: ["cervical-mucus"],
+      currentFacets: [],
+    }],
+  });
+  const secondVersion = "2026-06-11T09:00:00.000Z";
+  const update = await importDeviceBatch(omission({ version: secondVersion }));
+  assert.ok(update.applied);
+  const rows = (
+    await Promise.all(update.eventShardPaths.map((relativePath) =>
+      readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat() as EventRecord[];
+  const keptEdited = collapseEventSpines(rows).find((event) => event.id === edited.id);
+  assert.equal(keptEdited?.note, "member context");
+  assert.equal(keptEdited?.source, "manual");
+  assert.ok(rows.some((event) =>
+    event.id === edited.id
+    && event.source === "device"
+    && isDeletedEventLifecycle(event.lifecycle)
+    && event.externalRef?.version === secondVersion
+  ));
+  assert.equal(await importDeviceBatch(omission({ version: secondVersion })).then((result) => result.applied), false);
+});
+
+test("importDeviceBatch advances historical provider refs behind user-authored no-externalRef edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-ref-edit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -8258,8 +8800,7 @@ test("importDeviceBatch rejects historical provider refs after user-authored no-
   };
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
 
-  await assert.rejects(
-    importDeviceBatch({
+  await importDeviceBatch({
       vaultRoot,
       provider: "junction",
       accountId: "jxn_acct_stable",
@@ -8283,15 +8824,17 @@ test("importDeviceBatch rejects historical provider refs after user-authored no-
           unit: "score",
         },
       }],
-    }),
-    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-  );
+    });
 
   const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
-  const latestUserEdited = records.find((record) => record.id === eventId && record.lifecycle?.revision === 2);
+  const latestUserEdited = collapseEventSpines(records).find((record) => record.id === eventId);
   assert.equal(latestUserEdited?.note, "user-added context");
   assert.deepEqual(latestUserEdited?.tags, ["context"]);
   assert.deepEqual(latestUserEdited?.links, [{ type: "related_to", targetId: eventId }]);
+  assert.ok(records.some((record) =>
+    record.id === eventId
+    && record.externalRef?.resourceId === currentExternalRef.resourceId
+  ));
 });
 
 test("importDeviceBatch does not claim cross-day legacy refs when observation values differ", async () => {
@@ -8450,7 +8993,7 @@ test("importDeviceBatch does not claim unscoped WHOOP body legacy refs across ac
   assert.equal(liveWeightIds.size, 2);
 });
 
-test("importDeviceBatch repairs proven legacy refs after no-externalRef edits move shards", async () => {
+test("importDeviceBatch advances legacy-ref repair beneath a member edit that moves shards", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-cross-shard");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -8510,7 +9053,7 @@ test("importDeviceBatch repairs proven legacy refs after no-externalRef edits mo
       unit: "score",
     } satisfies Record<string, unknown>,
   });
-  const repaired = await importDeviceBatch({
+  const providerCorrection = {
     vaultRoot,
     provider: "junction",
     accountId: "jxn_acct_stable",
@@ -8534,13 +9077,15 @@ test("importDeviceBatch repairs proven legacy refs after no-externalRef edits mo
         unit: "score",
       },
     }],
-  });
+  } as const;
+  const correction = await importDeviceBatch(providerCorrection);
+
   const records = (
     await Promise.all(
       [...new Set([
         ...first.eventShardPaths,
+        ...correction.eventShardPaths,
         edited.ledgerFile,
-        ...repaired.eventShardPaths,
       ])].map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
     )
   ).flat() as EventRecord[];
@@ -8550,10 +9095,14 @@ test("importDeviceBatch repairs proven legacy refs after no-externalRef edits mo
       .map((record) => record.id),
   );
 
-  assert.equal(repaired.events[0]?.id, eventId);
-  assert.equal(repaired.events[0]?.lifecycle?.revision, 3);
-  assert.equal(repaired.events[0]?.externalRef?.resourceId, currentExternalRef.resourceId);
   assert.deepEqual([...stressIds], [eventId]);
+  const memberRevision = collapseEventSpines(records).find((record) => record.id === eventId);
+  assert.equal(memberRevision?.source, "manual");
+  assert.equal(memberRevision?.occurredAt, "2026-05-31T23:30:00.000Z");
+  assert.equal(memberRevision?.dayKey, "2026-05-31");
+  assert.ok(records.some((record) =>
+    record.id === eventId && record.externalRef?.resourceId === currentExternalRef.resourceId
+  ));
 });
 
 test("findEventByExternalRef ignores historical refs after an event moves identity", async () => {

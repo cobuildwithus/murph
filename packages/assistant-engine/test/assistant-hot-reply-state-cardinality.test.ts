@@ -48,6 +48,9 @@ import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   runAssistantAutomationPass,
 } from '../src/assistant/automation/run-loop.ts'
+import {
+  maintainAssistantAutoReplyRouteState,
+} from '../src/assistant/runtime-residue.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const boundaries = vi.hoisted(() => ({
@@ -74,6 +77,11 @@ const cleanupPaths: string[] = []
 const assistantHotReplyProbe = {
   name: 'auto-reply through queue-only durable handoff ignores unrelated outbox state',
   prepare: prepareHotReply,
+} satisfies StateCardinalityProbe
+
+const linqMaterializedThreadProbe = {
+  name: 'unanchored Linq reply finds remapped provider-thread context without scanning the outbox',
+  prepare: prepareLinqMaterializedThreadReply,
 } satisfies StateCardinalityProbe
 
 beforeEach(() => {
@@ -140,6 +148,10 @@ afterEach(async () => {
 describeStateCardinality('assistant foreground state-cardinality invariant', () => {
   it(assistantHotReplyProbe.name, async () => {
     await assertStateCardinalityInvariant(assistantHotReplyProbe)
+  }, 180_000)
+
+  it(linqMaterializedThreadProbe.name, async () => {
+    await assertStateCardinalityInvariant(linqMaterializedThreadProbe)
   }, 180_000)
 })
 
@@ -541,6 +553,126 @@ async function prepareHotReply(unrelatedStateCount: number) {
   }
 }
 
+async function prepareLinqMaterializedThreadReply(
+  unrelatedStateCount: number,
+) {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    `assistant-linq-materialized-thread-${unrelatedStateCount}-`,
+  )
+  cleanupPaths.push(parentRoot)
+  await seedUnrelatedOutbox(vaultRoot, unrelatedStateCount)
+  await saveAssistantOutboxIntent(
+    vaultRoot,
+    createLinqMaterializedThreadIntent(),
+  )
+  await expect(maintainAssistantAutoReplyRouteState({ vault: vaultRoot }))
+    .resolves.toMatchObject({
+      trusted: true,
+    })
+
+  const target = createAssistantModelTarget({
+    approvalPolicy: 'never',
+    model: 'gpt-5.6-test',
+    provider: 'codex-cli',
+    sandbox: 'danger-full-access',
+  })
+  if (!target) {
+    throw new Error('Expected a test assistant target.')
+  }
+
+  await seedAssistantSession({
+    actorId: 'actor-linq-current',
+    channel: 'linq',
+    identityId: 'identity-linq-current',
+    target,
+    threadId: 'participant-route-before-materialization',
+    threadIsDirect: true,
+    vault: vaultRoot,
+  })
+  const storedInput = await upsertAssistantInputEvent({
+    event: createLinqMaterializedThreadInputEvent(),
+    vault: vaultRoot,
+  })
+  const candidate = assistantInputCandidateFromStoredEvent(storedInput)
+  const contextItem = {
+    inputCandidate: candidate,
+    summary: assistantAutomationInputSummaryFromCandidate(candidate),
+    telegramMetadata: null,
+  }
+
+  return {
+    root: vaultRoot,
+    async loadOperation() {
+      const {
+        createAssistantAutoReplyGroupContext,
+        createAssistantAutoReplyHistoryReader,
+        processAssistantAutoReplyGroup,
+      } = await import('../src/assistant/automation/reply.ts')
+      const context = createAssistantAutoReplyGroupContext([contextItem])
+      if (!context) {
+        throw new Error('Expected one unanchored Linq context.')
+      }
+      const historyReader = createAssistantAutoReplyHistoryReader({
+        vault: vaultRoot,
+      })
+
+      return async () => {
+        boundaries.executeProvider.mockClear()
+        const result = await processAssistantAutoReplyGroup({
+          allowSelfAuthored: false,
+          context,
+          deliveryDispatchMode: 'queue-only',
+          enabledChannels: ['linq'],
+          executionContext: {
+            hosted: {
+              defaultTarget: target,
+              memberId: 'member-test',
+              userEnvKeys: [],
+            },
+          },
+          historyReader,
+          inboxServices: createInboxServices(),
+          requestId: null,
+          sessionMaxAgeMs: null,
+          vault: vaultRoot,
+        })
+
+        expect(boundaries.executeProvider).toHaveBeenCalledOnce()
+        expect(
+          boundaries.executeProvider.mock.calls[0]?.[0].input.turnContext,
+        ).toContain('Prior reminder delivered before the Linq chat materialized.')
+        expect(result).toMatchObject({
+          failed: 0,
+          replied: 1,
+          skipped: 0,
+        })
+        const currentTurnDeliveryIntentId =
+          result.currentTurnDeliveryIntentIds?.[0]
+        expect(result.currentTurnDeliveryIntentIds).toEqual([
+          expect.any(String),
+        ])
+        if (!currentTurnDeliveryIntentId) {
+          throw new Error('Expected one queued Linq reply intent.')
+        }
+        await expect(readAssistantOutboxIntent(
+          vaultRoot,
+          currentTurnDeliveryIntentId,
+        )).resolves.toMatchObject({
+          bindingDelivery: {
+            kind: 'thread',
+            target: 'materialized-linq-thread',
+          },
+          channel: 'linq',
+          status: 'pending',
+        })
+        expect(historyReader.readMetrics()).toMatchObject({
+          outboxScanPerformed: false,
+        })
+      }
+    },
+  }
+}
+
 function createEmailInputEvent() {
   const text = 'Follow up on the reminder.'
   return {
@@ -633,6 +765,56 @@ function createLinqNativeReplyInputEvent() {
   }
 }
 
+function createLinqMaterializedThreadInputEvent() {
+  const text = 'What is this reminder about?'
+  return {
+    content: {
+      text,
+      transcriptText: text,
+      userMessageContent: [{
+        text,
+        type: 'text' as const,
+      }],
+    },
+    conversation: {
+      accountId: 'identity-linq-current',
+      actorId: 'actor-linq-current',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: 'participant-route-before-materialization',
+      threadIsDirect: true,
+    },
+    occurredAt: '2026-08-15T12:10:00.000Z',
+    receivedAt: '2026-08-15T12:10:00.500Z',
+    replyTarget: {
+      channel: 'linq',
+      messageId: 'incoming-materialized-thread-reply',
+      threadId: 'materialized-linq-thread',
+    },
+    sourceMetadata: {
+      externalThreadRouteAuthorityPresent: true,
+      kind: 'linq' as const,
+      partCount: 1,
+      reactionEligible: true,
+      replyToMessageId: null,
+      senderHandle: '+15550000000',
+      service: 'iMessage',
+    },
+    sourceRef: {
+      dedupeKey: 'dedupe-materialized-thread-reply',
+      eventId: 'event-materialized-thread-reply',
+      itemId: 'item-materialized-thread-reply',
+      kind: 'hosted-mailbox' as const,
+      lane: 'conversation' as const,
+      laneSeq: '1',
+      payloadSchema: 'payload-schema',
+      payloadSource: 'inline' as const,
+      source: 'hosted-mailbox' as const,
+      wakeSchema: 'wake-schema',
+    },
+  }
+}
+
 async function seedUnrelatedOutbox(
   vaultRoot: string,
   unrelatedStateCount: number,
@@ -689,6 +871,36 @@ async function seedNativeReplyRouteHistory(vaultRoot: string): Promise<void> {
       updatedAt: createdAt,
     }))
   }
+}
+
+function createLinqMaterializedThreadIntent(): AssistantOutboxIntent {
+  const base = createRetainedRouteIntent(0, false)
+  const message = 'Prior reminder delivered before the Linq chat materialized.'
+  return assistantOutboxIntentSchema.parse({
+    ...base,
+    actorId: null,
+    channel: 'linq',
+    dedupeKey: 'dedupe-linq-materialized-thread',
+    delivery: {
+      ...base.delivery,
+      channel: 'linq',
+      idempotencyKey: 'delivery-linq-materialized-thread',
+      messageLength: message.length,
+      providerMessageId: 'provider-linq-materialized-thread',
+      providerThreadId: 'materialized-linq-thread',
+      target: 'participant-route-before-materialization',
+      targetKind: 'participant',
+    },
+    deliveryIdempotencyKey: 'delivery-linq-materialized-thread',
+    explicitTarget: 'participant-route-before-materialization',
+    identityId: null,
+    intentId: 'outbox_linq_materialized_thread',
+    message,
+    sessionId: 'session_linq_materialized_thread',
+    targetFingerprint: 'target-linq-materialized-thread',
+    threadId: null,
+    turnId: 'turn_linq_materialized_thread',
+  })
 }
 
 function createRetainedRouteIntent(

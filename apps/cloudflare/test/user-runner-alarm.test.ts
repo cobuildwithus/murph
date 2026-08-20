@@ -2798,6 +2798,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await vi.waitFor(() => {
       expect(invoke).toHaveBeenCalledOnce();
+      expect(invoke.mock.calls[0]?.[0].job.request.assistantExecutionBlocked).toBe(true);
       expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
         "system_mailbox",
       );
@@ -2810,10 +2811,49 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("wakes a denied normalized invocation when foreground usage resumes", async () => {
+  it("forwards an orchestration-owned assistant block to system mailbox execution", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      platformAiUsageAllowed: true,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      assistantExecutionBlocked: true,
+      orchestrationAttemptId: "test-engagement-blocked-system-attempt",
+      processingMode: "system_mailbox",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledOnce();
+      expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+        assistantExecutionBlocked: true,
+        processingMode: "system_mailbox",
+      });
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        failure_count: 0,
+        last_error_code: null,
+        wake_at: null,
+      });
+    });
+  });
+
+  it("starts a default invocation on the restored-policy owner recheck", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const restoredInvocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
     >(async () => "accepted");
@@ -2827,7 +2867,7 @@ describe("HostedUserRunner execution coordination", () => {
     const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       abortWorkspaceInvocation,
       ensureProcessing,
-      invocationResults: [firstInvocationResult.promise],
+      invocationResults: [firstInvocationResult.promise, restoredInvocationResult.promise],
       platformAiUsageAllowed: () => platformAiUsageAllowed,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -2854,9 +2894,9 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-restored-foreground-attempt",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.050Z",
     });
 
     const firstRequest = invoke.mock.calls[0]?.[0].job.request;
@@ -2876,6 +2916,21 @@ describe("HostedUserRunner execution coordination", () => {
     expect(invoke).toHaveBeenCalledOnce();
 
     firstInvocationResult.resolve({ nextWakeAt: null, status: "idle" });
+    await flushWaitUntil();
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-restored-owner-recheck",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    const restoredRequest = invoke.mock.calls[1]?.[0].job.request;
+    expect(restoredRequest?.processingMode ?? "default").toBe("default");
+    expect(restoredRequest?.assistantExecutionBlocked).toBeUndefined();
+
+    restoredInvocationResult.resolve({ nextWakeAt: null, status: "idle" });
     await flushWaitUntil();
   });
 
@@ -3702,10 +3757,9 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-foreground-behind-system-mailbox",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      runtimeAttemptId: token.attemptId,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledWith({

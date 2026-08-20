@@ -23,7 +23,6 @@ import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "./client.ts";
-
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -42,6 +41,8 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
+export const HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH =
+  "/api/internal/device-sync/fitbit-migration/cutover";
 export const HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT = 64;
@@ -266,6 +267,15 @@ export interface HostedExecutionDeviceSyncReconcileResponse {
   status: "queued";
 }
 
+export interface HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
+  connectionId: string;
+}
+
+export interface HostedExecutionDeviceSyncFitbitMigrationCutoverResponse {
+  connectionId: string;
+  status: "complete" | "pending";
+}
+
 export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
   accessToken: string;
   accessTokenExpiresAt: string | null;
@@ -368,6 +378,8 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  /** Absent only during rolling deploys from a pre-epoch Web producer. */
+  lifecycleEpoch?: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload carrying this source's data; null until one has. */
@@ -441,6 +453,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   sourceInstanceKey: string;
   sourceProviderSlug: string;
   observedLastSeenAt: string | null;
+  observedLifecycleEpoch?: number;
   displayName?: string | null;
   status: DeviceConnectionSourceStatus;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
@@ -744,10 +757,14 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   occurredAt: "isoTimestamp",
   resource: "string",
   resourceCategory: "string",
+  sourceLifecycleEpoch: "number",
   resourceId: "string",
   resourceType: "string",
   sourceEventType: "string",
   sourceProviderSlug: "string",
+  summaryPhaseComplete: "boolean",
+  summaryResourceCursor: "string",
+  temporalAuthorityTimeZone: "string",
   timeseriesCursor: "isoTimestamp",
   timeseriesResourceCursor: "string",
   timeseriesWindowHours: "number",
@@ -759,6 +776,46 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
 
 export function buildHostedExecutionDeviceSyncConnectLinkPath(connectTarget: string): string {
   return `/api/internal/device-sync/connect-targets/${encodeURIComponent(connectTarget)}/connect-link`;
+}
+
+export function parseHostedExecutionDeviceSyncFitbitMigrationCutoverRequest(
+  value: unknown,
+): HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
+  const record = requireObject(value, "Hosted Fitbit migration cutover request");
+  assertSupportedFields(
+    record,
+    "Hosted Fitbit migration cutover request",
+    ["connectionId"],
+  );
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted Fitbit migration cutover request connectionId",
+    ),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncFitbitMigrationCutoverResponse {
+  const record = requireObject(value, "Hosted Fitbit migration cutover response");
+  assertSupportedFields(
+    record,
+    "Hosted Fitbit migration cutover response",
+    ["connectionId", "status"],
+  );
+  if (record.status !== "complete" && record.status !== "pending") {
+    throw new TypeError(
+      "Hosted Fitbit migration cutover response status must be complete or pending.",
+    );
+  }
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted Fitbit migration cutover response connectionId",
+    ),
+    status: record.status,
+  };
 }
 
 export function parseHostedExecutionDeviceSyncConnectLinkResponse(
@@ -1772,6 +1829,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
     lastErrorMessage: sanitizeHostedRuntimeErrorText(
       readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
     ),
+    ...(record.lifecycleEpoch === undefined
+      ? {}
+      : {
+          lifecycleEpoch: requirePositiveInteger(
+            record.lifecycleEpoch,
+            `${label}.lifecycleEpoch`,
+          ),
+        }),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
     // Absent means "produced before this field existed", which must stay
     // parseable: a runner-first deploy would otherwise reject every snapshot
@@ -1907,6 +1972,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
     "lastErrorCode",
     "lastErrorMessage",
     "lastSeenAt",
+    "observedLifecycleEpoch",
     "observedLastSeenAt",
     "resourceAvailabilitySummary",
     "sourceInstanceKey",
@@ -1936,6 +2002,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       record.observedLastSeenAt,
       `${label}.observedLastSeenAt`,
     ),
+    observedLifecycleEpoch: record.observedLifecycleEpoch === undefined
+      ? undefined
+      : requirePositiveInteger(
+          record.observedLifecycleEpoch,
+          `${label}.observedLifecycleEpoch`,
+        ),
     sourceInstanceKey: requireString(record.sourceInstanceKey, `${label}.sourceInstanceKey`),
     sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
     ...(record.displayName === undefined

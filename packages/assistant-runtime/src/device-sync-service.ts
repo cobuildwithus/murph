@@ -2,9 +2,12 @@ import path from "node:path";
 
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 import {
-  areJunctionDeviceConnectProviderSlugsEquivalent,
   buildJunctionProviderSourceInstanceKey,
+  canonicalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionProviderSlugsDataEquivalent,
+} from "@murphai/device-syncd/junction-inline-authority";
 
 import {
   createDefaultImporterPort,
@@ -78,19 +81,34 @@ function createHostedRuntimeDeviceSyncImporter(
       try {
         return await importer.importDeviceProviderSnapshot(input);
       } catch (error) {
-        if (!(error instanceof HostedRuntimeArtifactWriteError)) {
-          throw error;
-        }
-        throw deviceSyncError({
-          cause: error,
-          code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
-          httpStatus: error.retryable ? 503 : 500,
-          message: "Hosted device-sync artifact persistence failed. Retry shortly.",
-          retryable: error.retryable,
-        });
+        throw translateHostedRuntimeDeviceSyncImporterError(error);
       }
     },
+    ...(importer.resolveDeviceProviderSnapshotDefaultTimeZone
+      ? {
+          async resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+            try {
+              return await importer.resolveDeviceProviderSnapshotDefaultTimeZone?.(input);
+            } catch (error) {
+              throw translateHostedRuntimeDeviceSyncImporterError(error);
+            }
+          },
+        }
+      : {}),
   };
+}
+
+function translateHostedRuntimeDeviceSyncImporterError(error: unknown): unknown {
+  if (!(error instanceof HostedRuntimeArtifactWriteError)) {
+    return error;
+  }
+  return deviceSyncError({
+    cause: error,
+    code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
+    httpStatus: error.retryable ? 503 : 500,
+    message: "Hosted device-sync artifact persistence failed. Retry shortly.",
+    retryable: error.retryable,
+  });
 }
 
 async function listHostedJobConnectionSources(input: {
@@ -133,7 +151,7 @@ async function listHostedJobConnectionSources(input: {
   });
   const projectedSources = connection.sources
     .filter((source) =>
-      !input.sourceProviderSlug || areHostedJunctionSourcesEquivalent(
+      !input.sourceProviderSlug || areHostedDeviceSourcesDataEquivalent(
         input.provider,
         source.sourceProviderSlug,
         input.sourceProviderSlug,
@@ -143,14 +161,14 @@ async function listHostedJobConnectionSources(input: {
       const exactLocalSource = localSources.find(
         (candidate) => candidate.sourceInstanceKey === source.sourceInstanceKey,
       );
-      const routeEquivalentLocalSource = selectHostedJunctionSource(
+      const dataEquivalentLocalSource = selectHostedDataEquivalentSource(
         input.provider,
         localSources,
         source.sourceProviderSlug,
       );
       const localSource = input.provider === "junction"
-        ? routeEquivalentLocalSource ?? exactLocalSource
-        : exactLocalSource ?? routeEquivalentLocalSource;
+        ? dataEquivalentLocalSource ?? exactLocalSource
+        : exactLocalSource ?? dataEquivalentLocalSource;
       const sourceInstanceKey = localSource?.sourceInstanceKey
         ?? source.sourceInstanceKey
         ?? (
@@ -164,7 +182,7 @@ async function listHostedJobConnectionSources(input: {
 
       return {
         ...source,
-        firstSeenAt: localSource?.firstSeenAt ?? source.firstSeenAt,
+        firstSeenAt: source.firstSeenAt ?? localSource?.firstSeenAt,
         ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
         sourceProviderSlug: localSource?.sourceProviderSlug ?? source.sourceProviderSlug,
       };
@@ -178,7 +196,7 @@ async function listHostedJobConnectionSources(input: {
     : dedupedSources;
 }
 
-function areHostedJunctionSourcesEquivalent(
+function areHostedDeviceSourcesDataEquivalent(
   provider: string,
   left: string,
   right: string,
@@ -186,16 +204,16 @@ function areHostedJunctionSourcesEquivalent(
   if (provider !== "junction") {
     return left === right;
   }
-  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
+  return areJunctionProviderSlugsDataEquivalent(left, right);
 }
 
-function selectHostedJunctionSource(
+function selectHostedDataEquivalentSource(
   provider: string,
   sources: readonly ProviderJobConnectionSource[],
   sourceProviderSlug: string,
 ): ProviderJobConnectionSource | undefined {
   return sources
-    .filter((source) => areHostedJunctionSourcesEquivalent(
+    .filter((source) => areHostedDeviceSourcesDataEquivalent(
       provider,
       source.sourceProviderSlug,
       sourceProviderSlug,
@@ -217,11 +235,49 @@ function dedupeHostedJobConnectionSources(
   }
   return dedupeDeviceSyncSourcesByIdentity(
     sources,
-    (left, right) => areHostedJunctionSourcesEquivalent(
+    (left, right) => areHostedDeviceSourcesDataEquivalent(
       provider,
       left.sourceProviderSlug,
       right.sourceProviderSlug,
     ),
+    hostedSourceStateUnavailable,
+  );
+}
+
+type CanonicalizableHostedJunctionSource = Omit<
+  ProviderJobConnectionSource,
+  "lastDataAt" | "lastSeenAt"
+> & {
+  lastDataAt?: string | null;
+  lastSeenAt?: string;
+};
+
+export function canonicalizeHostedJunctionSources<
+  T extends CanonicalizableHostedJunctionSource,
+>(
+  sources: readonly T[],
+  connectionId?: string,
+): T[] {
+  const canonicalSources: T[] = [];
+  for (const source of sources) {
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(
+      source.sourceProviderSlug,
+    );
+    if (!sourceProviderSlug) {
+      continue;
+    }
+    const sourceInstanceKey = connectionId
+      ? buildJunctionProviderSourceInstanceKey({ connectionId, sourceProviderSlug })
+      : source.sourceInstanceKey;
+    canonicalSources.push({
+      ...source,
+      sourceProviderSlug,
+      ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
+    });
+  }
+  return dedupeDeviceSyncSourcesByIdentity(
+    canonicalSources,
+    (left, right) => left.sourceProviderSlug === right.sourceProviderSlug,
     hostedSourceStateUnavailable,
   );
 }

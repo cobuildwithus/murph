@@ -178,6 +178,10 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   backfill: {
     payload: {
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
+      historicalProofFirstSeenAt: stringJobField({ includeInHostedHint: true }),
+      historicalProofSourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
+      historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
@@ -190,6 +194,8 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   reconcile: {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      summaryPhaseComplete: booleanJobField({ includeInHostedHint: true }),
+      summaryResourceCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesResourceCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesWindowHours: numberJobField({ includeInHostedHint: true }),
@@ -222,9 +228,14 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       occurredAt: stringJobField({ includeInHostedHint: true }),
       resource: stringJobField({ includeInHostedHint: true }),
       resourceCategory: stringJobField({ includeInHostedHint: true }),
+      sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),
       sourceInstanceId: stringJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       sourceType: stringJobField({ includeInHostedHint: true }),
+      // Legacy field: retained so previously queued rows still validate; the
+      // day key is now derived from windowStart plus the authority timezone.
+      temporalAuthorityDayKey: stringJobField(),
+      temporalAuthorityTimeZone: stringJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),

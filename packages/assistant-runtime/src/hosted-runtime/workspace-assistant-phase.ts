@@ -3872,6 +3872,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   const afterCheckpointKeepsForegroundImportLoop =
     input.systemMailboxResult.afterCheckpointKeepsForegroundImportLoop === true
     || input.assistantResult.afterCheckpointKeepsForegroundImportLoop === true;
+  const foregroundPrioritySystemCompletionProcessed =
+    input.systemMailboxResult.foregroundPrioritySystemCompletionProcessed === true
+    || input.assistantResult.foregroundPrioritySystemCompletionProcessed === true;
   const afterCheckpoint = composeHostedAssistantPhaseAfterCheckpoint({
     callbacks: [
       input.systemMailboxResult.afterCheckpoint,
@@ -3902,6 +3905,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         : {}),
       checkpointReason: progressedResult.checkpointReason,
       ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
+      ...(foregroundPrioritySystemCompletionProcessed
+        ? { foregroundPrioritySystemCompletionProcessed: true }
+        : {}),
       ...(invocationLocalAssistantWakeAt
         ? { invocationLocalAssistantWakeAt }
         : {}),
@@ -3921,6 +3927,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
       : {}),
     ...(deviceSyncMaintenanceRan ? { deviceSyncMaintenanceRan: true } : {}),
     ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
+    ...(foregroundPrioritySystemCompletionProcessed
+      ? { foregroundPrioritySystemCompletionProcessed: true }
+      : {}),
     ...(invocationLocalAssistantWakeAt
       ? { invocationLocalAssistantWakeAt }
       : {}),
@@ -4346,6 +4355,17 @@ function isPhoneCallResultSystemMailboxPreparation(
     && preparation.item.wake.kind === "assistant.notification.requested"
     && preparation.item.mailboxDedupeKey.startsWith(
       HOSTED_PHONE_CALL_RESULT_MAILBOX_DEDUPE_KEY_PREFIX,
+    );
+}
+
+function isForegroundPrioritySystemCompletionProcessed(
+  preparation: HostedSystemMailboxPreparation,
+): boolean {
+  return preparation.status === "processed"
+    && preparation.item.routeAction === "dispatch-assistant-notification"
+    && preparation.item.wake.kind === "assistant.notification.requested"
+    && HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES.some(
+      (prefix) => preparation.item.mailboxDedupeKey.startsWith(prefix),
     );
 }
 
@@ -6051,6 +6071,8 @@ async function runSystemMailboxMaintenancePhase(input: {
     || systemMailboxPreparation.status === "recording";
   const browserVaultReplicaRefreshRequested =
     isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation);
+  const foregroundPrioritySystemCompletionProcessed =
+    isForegroundPrioritySystemCompletionProcessed(systemMailboxPreparation);
   const shouldRunPostSystemCheckpoint = shouldRecordSystemMailbox
     || cleanupPlan.requiresCheckpoint
     || (dirtyDeviceSyncMetrics?.postCheckpointRecord ?? null) !== null;
@@ -6113,6 +6135,9 @@ async function runSystemMailboxMaintenancePhase(input: {
     result: mergeMemberPreferencesPrePlanningResult({
       ...(browserVaultReplicaRefreshRequested
         ? { browserVaultReplicaRefreshRequested: true }
+        : {}),
+      ...(foregroundPrioritySystemCompletionProcessed
+        ? { foregroundPrioritySystemCompletionProcessed: true }
         : {}),
       ...(shouldRunPostSystemCheckpoint
         ? {

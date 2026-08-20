@@ -64,6 +64,7 @@ interface HostedUsageTopUpDialogProps {
   scope?: "family" | "group" | "personal";
   targetLabel?: string;
   triggerClassName?: string;
+  triggerLabel?: string;
   triggerSize?: VariantProps<typeof buttonVariants>["size"];
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
 }
@@ -297,7 +298,7 @@ function readStatusContent(input: {
       return input.scope === "group"
         ? content(
             "This group has more Murph",
-            "Your contribution landed. The group has more room to talk.",
+            "Your contribution is ready.",
           )
         : content(
             "Usage added",

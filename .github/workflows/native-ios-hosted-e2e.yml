@@ -11,13 +11,17 @@ on:
 # Secret-bearing jobs execute only this trusted default-branch workflow. PR code
 # is sent to the dedicated Vercel custom environment by exact SHA; it is never
 # checked out on a runner holding E2E credentials.
+# Workflow-file PRs intentionally self-select so this trusted controller proves
+# their exact candidate before any future required-status rollout.
 permissions:
   contents: read
   pull-requests: read
   statuses: write
 
 concurrency:
-  group: native-ios-hosted-e2e-${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.deployment.sha || github.run_id }}
+  # Keep only one running and one newest pending controller run per PR. The
+  # destructive live lane remains separately serialized repo-wide below.
+  group: native-ios-hosted-e2e-${{ github.event.workflow_run.pull_requests[0].number || github.event.deployment.sha || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -97,13 +101,16 @@ jobs:
           gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${STATUS_SHA}" \
             -f state=pending \
             -f context='Native iOS hosted E2E' \
-            -f description='Native iOS hosted E2E gate is evaluating this commit.' \
+            -f description='This controller run has not executed real native iOS hosted E2E yet.' \
             -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
 
   pr-live:
     name: Real hosted Web + native iOS lane
     needs: select-pr
-    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    if: ${{ github.run_attempt == 1 && github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
     environment: native-ios-hosted-e2e
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -112,6 +119,17 @@ jobs:
       queue: max
       cancel-in-progress: false
     steps:
+      - name: Revalidate exact PR head before runner setup
+        env:
+          EXPECTED_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          [[ "${current}" == "${EXPECTED_HEAD_SHA}" ]] || { echo "::error::PR head changed before live E2E setup."; exit 1; }
+
       - name: Checkout trusted control plane
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -129,16 +147,6 @@ jobs:
 
       - name: Install trusted control dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Revalidate exact PR head
-        env:
-          EXPECTED_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-        run: |
-          set -euo pipefail
-          current="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          [[ "${current}" == "${EXPECTED_HEAD_SHA}" ]] || { echo "::error::PR head changed before live E2E."; exit 1; }
 
       - name: Mint private iOS workflow token
         id: ios-app-token
@@ -168,20 +176,23 @@ jobs:
           NATIVE_IOS_E2E_VERCEL_TEAM_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_TEAM_ID }}
           NATIVE_IOS_E2E_VERCEL_TOKEN: ${{ secrets.NATIVE_IOS_E2E_VERCEL_TOKEN }}
           NATIVE_IOS_E2E_GITHUB_TOKEN: ${{ steps.ios-app-token.outputs.token }}
+          NATIVE_IOS_E2E_WEB_GITHUB_TOKEN: ${{ github.token }}
           NATIVE_IOS_E2E_IOS_REF: ${{ vars.NATIVE_IOS_E2E_IOS_REF }}
           NATIVE_IOS_E2E_IOS_EXPECTED_SHA: ${{ vars.NATIVE_IOS_E2E_IOS_EXPECTED_SHA }}
           NATIVE_IOS_E2E_IOS_REPOSITORY: ${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_OWNER }}/${{ vars.NATIVE_IOS_E2E_IOS_REPOSITORY_NAME }}
           NATIVE_IOS_E2E_IOS_WORKFLOW: ${{ vars.NATIVE_IOS_E2E_IOS_WORKFLOW }}
           PR_HEAD_REF: ${{ needs.select-pr.outputs.head_ref }}
           PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: >-
           node scripts/native-ios-hosted-e2e.mjs pr
           --sha "${PR_HEAD_SHA}"
           --ref "${PR_HEAD_REF}"
           --correlation-id "murph-pr-${PR_HEAD_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"
+          --pr-number "${PR_NUMBER}"
 
   pr-required:
-    name: Publish native iOS hosted E2E required status
+    name: Publish native iOS hosted E2E commit status
     needs:
       - select-pr
       - pr-live
@@ -189,10 +200,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Publish stable required commit status
+      - name: Publish stable commit status
         env:
           GH_TOKEN: ${{ github.token }}
           LIVE_RESULT: ${{ needs.pr-live.result }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
           SELECT_RESULT: ${{ needs.select-pr.result }}
           SELECTED: ${{ needs.select-pr.outputs.selected }}
           SOURCE_RESULT: ${{ github.event.workflow_run.conclusion }}
@@ -202,19 +215,21 @@ jobs:
         run: |
           set -euo pipefail
           state=failure
-          description='Native iOS hosted E2E control selection failed.'
-          if [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
-            description='Repo Hygiene must pass before native iOS hosted E2E.'
+          description='This controller run did not execute real native iOS hosted E2E: selection failed.'
+          if [[ "${RUN_ATTEMPT}" != 1 ]]; then
+            description="Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER}; native reruns do not enter the live queue."
+          elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
+            description='This controller run did not execute real native iOS hosted E2E: Repo Hygiene did not pass.'
           elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
             state=success
-            description='PR does not require the hosted Web native E2E lane.'
+            description='This controller run did not execute real native iOS hosted E2E: path filter did not select the commit.'
           elif [[ "${SELECT_RESULT}" == success && "${TRUSTED}" != true ]]; then
-            description='Selected PR requires a reviewed same-repository human-authored head.'
+            description='This controller run did not execute real native iOS hosted E2E: trusted same-repository human head required.'
           elif [[ "${SELECT_RESULT}" == success && "${LIVE_RESULT}" == success ]]; then
             state=success
-            description='Exact hosted Web and real private iOS E2E passed.'
+            description='This controller run passed real native iOS hosted E2E for the exact commit.'
           elif [[ "${SELECT_RESULT}" == success ]]; then
-            description='Selected native iOS hosted E2E lane did not pass.'
+            description='This status cannot determine whether real native iOS hosted E2E started; no passing proof was recorded.'
           fi
           gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${STATUS_SHA}" \
             -f state="${state}" \

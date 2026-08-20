@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 350,
+  "item": {
+    "id": "more-complete-body-composition",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More complete body-composition history",
+    "summary": "Murph can now retain connected bone, muscle, visceral-fat, body-water, weight, body-fat, BMI, lean-mass, and waist measurements.",
+    "details": "Murph accepts only documented units and valid dated records, keeps normal correction history, and does not retain provider timelines or raw sample arrays.",
+    "relevanceTags": ["wearables", "body-composition", "measurements", "privacy"],
+    "sourcePullRequests": [1706]
+  }
+}
