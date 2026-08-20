@@ -66,6 +66,7 @@ export {
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES,
   HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
+  HostedRuntimeCanonicalCheckpointError,
 } from "./hosted-runtime/platform.ts";
 export {
   HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,

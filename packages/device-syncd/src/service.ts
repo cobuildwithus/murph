@@ -48,6 +48,7 @@ import {
 } from "./shared.ts";
 import { SqliteDeviceSyncStore } from "./store.ts";
 import {
+  DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
 } from "./types.ts";
 
@@ -60,6 +61,7 @@ import type {
   DeviceJobExecutor,
   DeviceSyncAccountCredential,
   DeviceSyncAccount,
+  DeviceSyncCanonicalImportReceipt,
   DeviceSyncImporterPort,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
@@ -1192,6 +1194,7 @@ class DeviceSyncServiceController {
         }
       }
       ensureExecutionActive();
+      const canonicalImportReceipts = new Map<string, DeviceSyncCanonicalImportReceipt>();
       const jobContext: ProviderJobContext = {
         account: currentAccount,
         now,
@@ -1212,12 +1215,29 @@ class DeviceSyncServiceController {
             vaultRoot: this.vaultRoot,
             ...options,
           });
+          const canonicalEventCount = readCanonicalDeviceImportEventCount(importResult);
           const junctionCanonicalCoverage =
             readCanonicalDeviceImportJunctionCoverage(importResult);
+          if (junctionCanonicalCoverage && junctionCanonicalCoverage.length > 0) {
+            const importCompletedAt = currentNow();
+            for (const evidence of junctionCanonicalCoverage) {
+              const key = `${evidence.sourceProviderSlug}\u0000${evidence.resource}`;
+              if (
+                canonicalImportReceipts.has(key)
+                || canonicalImportReceipts.size < DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT
+              ) {
+                canonicalImportReceipts.set(key, {
+                  importCompletedAt,
+                  resource: evidence.resource,
+                  sourceProviderSlug: evidence.sourceProviderSlug,
+                });
+              }
+            }
+          }
           const canonicalSparseCalendarTargets =
             readCanonicalDeviceImportSparseCalendarTargets(importResult);
           const receipt: ProviderSnapshotImportReceipt = {
-            canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
+            canonicalEventCount,
             canonicalEventDayKeys: readCanonicalDeviceImportEventDayKeys(importResult),
             canonicalEventExternalRefResourceIds:
               readCanonicalDeviceImportEventExternalRefResourceIds(importResult),
@@ -1358,6 +1378,10 @@ class DeviceSyncServiceController {
       const scheduledJobs = this.normalizeJobsForEnqueue(storedAccount, result.scheduledJobs ?? []);
       const completed = this.store.completeJobsMarkSyncSucceededAndEnqueueJobs({
         accountId: storedAccount.id,
+        canonicalImportReceipts: [...canonicalImportReceipts.values()].sort((left, right) =>
+          left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+          || left.resource.localeCompare(right.resource)
+        ),
         completedAt: currentNow(),
         disconnectGeneration,
         jobIds: activeJobs.map((activeJob) => activeJob.id),

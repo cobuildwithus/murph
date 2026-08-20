@@ -137,6 +137,7 @@ const mocks = vi.hoisted(() => {
       workflowId: "hosted-user-runtime:member_123",
     })),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(async () => {}),
+    scheduleHostedSignupNotificationEmails: vi.fn(),
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     observeHostedUsageReferralInboundTx: vi.fn(async (): Promise<{
       isBoundReferralTarget: boolean;
@@ -293,6 +294,11 @@ vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
+  scheduleHostedSignupNotificationEmails:
+    mocks.scheduleHostedSignupNotificationEmails,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
@@ -2886,9 +2892,31 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     );
   });
 
-  it("sends the accepted family invite reply seeded by the accepted Telegram member id", async () => {
+  it("registers a newly activated Telegram Family member before postcommit work", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const acceptedMemberId = "member_telegram_family";
+    mocks.acceptHostedFamilyInviteFromTelegramTx.mockImplementationOnce(async (input: {
+      onAcceptedMemberActivated: (result: {
+        activated: boolean;
+        hostedExecutionEventId: string;
+        hostedExecutionMailboxItemId: string;
+        memberId: string;
+      }) => Promise<void> | void;
+    }) => {
+      await input.onAcceptedMemberActivated({
+        activated: true,
+        hostedExecutionEventId: "member.activated:family:member_telegram_family",
+        hostedExecutionMailboxItemId: "mailbox_member_telegram_family_activation",
+        memberId: acceptedMemberId,
+      });
+      return {
+        groupId: "hbag_telegram",
+        memberId: acceptedMemberId,
+        planCode: "pulse",
+        role: "member",
+        status: "active",
+      };
+    });
     const invite = {
       acceptedAt: null,
       acceptedByMemberId: null,
@@ -2916,6 +2944,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@alice_user"),
       updatedAt: new Date("2026-06-18T12:00:00.000Z"),
     };
+    mocks.readHostedMailboxItemOwnerById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => ({
+      id: input.mailboxItemId,
+      userId: acceptedMemberId,
+    }));
     const hostedAccountGroupInviteFindUnique = vi.fn(async () => invite);
     const hostedAccountGroupMembershipFindFirst = vi.fn().mockResolvedValue(null);
     const prisma = withPrismaTransaction({
@@ -3033,12 +3067,16 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       reason: "family-invite-accepted",
     });
 
-    expect(mocks.provisionActiveHostedDomainRootEnvelopeForUserOnly).toHaveBeenCalledWith({
-      domain: "control",
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: [acceptedMemberId],
       prisma,
-      reason: "hosted-family.telegram-routing",
-      userId: acceptedMemberId,
     });
+    expect(
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]
+      ?? Number.POSITIVE_INFINITY,
+    );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
