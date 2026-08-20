@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-08-10
+Last verified: 2026-08-20
 
 ## Decision
 
@@ -200,12 +200,12 @@ Ordinary participants see only whether the chat is sponsored. They do not see
 the payer, maximum, amount charged or pending, credit, percentage, message
 count, or automatic refill events. The exact payer privately sees the current
 period's fulfilled and pending amounts, maximum, period end, status, and
-management controls. A near-cap notice is private and revalidated against the
-current authorization. The room is notified only when the existing usage gate
-actually pauses work. Every exhausted room receives the ordinary pause copy and
-the current first-party funding link. The message does not branch on or expose
-the current funding setup; the funding page separately preserves any active
-automatic sponsor and the single-sponsor billing invariant.
+management controls. Automatic refill fulfillment does not send a near-cap
+notice. The room is notified only when the existing usage gate actually pauses
+work. Every exhausted room receives the ordinary pause copy and the current
+first-party funding link. The message does not branch on or expose the current
+funding setup; the funding page separately preserves any active automatic
+sponsor and the single-sponsor billing invariant.
 
 ## Group Sponsorship Moment
 
@@ -296,9 +296,9 @@ fulfilled group purchase, Web idempotently:
 Permanent schema validation failure in a decrypted optional creative envelope
 projects as no creative request at this notification boundary. Activation,
 including an otherwise valid running bit, commits and Stripe receipt completion
-continues through the independent near-cap owner. Creator recovery stays strict,
-and secure-box, decryption, database, and other operational failures continue to
-propagate for ordinary retry rather than being mislabeled as quiet content.
+continues. Creator recovery stays strict, and secure-box, decryption, database,
+and other operational failures continue to propagate for ordinary retry rather
+than being mislabeled as quiet content.
 
 A monthly activation is the actual `$5` purchase eligible for the optional
 social response. Its private monthly maximum never changes the public

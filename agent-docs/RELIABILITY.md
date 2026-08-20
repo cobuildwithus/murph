@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-16
+Last verified: 2026-08-20
 
 ## Local Frog autofix scheduling
 
@@ -1664,7 +1664,8 @@ Last verified: 2026-08-16
   bounded retry/reconciliation. Lazy month rollover never expires ledger
   credit, never clears recovery, and applies a deferred cap decrease only at
   the next anchored boundary. Activation owns the sole public sponsorship
-  moment; refill fulfillment is silent and private notices are period-deduped.
+  moment; refill fulfillment is silent and sends no near-cap notice. Payment
+  failure recovery notices remain purchase-deduped and direct-only.
   Payment authority rechecks the current payer suspension fence immediately
   before a bound automatic refill can be confirmed. Payer-owned cancellation
   remains available even when the beneficiary is inactive or the live funding
