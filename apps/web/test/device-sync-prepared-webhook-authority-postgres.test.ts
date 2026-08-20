@@ -536,6 +536,84 @@ function addHistoryCoverage(
 describe.skipIf(!runPostgresProof)(
   "prepared device-webhook authority revalidation (real PostgreSQL)",
   () => {
+    it("reconstructs a missing Junction source row only after live provider proof", async () => {
+      const sourceProviderSlug = "apple_health_kit";
+      const fixture = await createFixture({ sourceLastErrorCode: null });
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug,
+      });
+      if (!sourceInstanceKey) {
+        throw new TypeError("Expected a canonical Junction source identity.");
+      }
+      const providerFetch = vi.fn(async () => new Response(JSON.stringify({
+        data: [{ slug: sourceProviderSlug, status: "connected" }],
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }));
+      const registry = createJunctionRegistry(providerFetch);
+
+      try {
+        await fixture.prisma.deviceConnectionSource.delete({
+          where: { id: fixture.sourceId },
+        });
+        const prepared = await prepareRegistration({ fixture, registry });
+        const consumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        expect(providerFetch).toHaveBeenCalledOnce();
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: {
+            firstSeenAt: true,
+            lastErrorCode: true,
+            lastErrorMessage: true,
+            lastSeenAt: true,
+            lifecycleEpoch: true,
+            status: true,
+          },
+          where: {
+            connectionId_sourceInstanceKey: {
+              connectionId: fixture.connectionId,
+              sourceInstanceKey,
+            },
+          },
+        })).resolves.toEqual({
+          firstSeenAt: fixture.receivedAt,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: fixture.receivedAt,
+          lifecycleEpoch: 2,
+          status: "connected",
+        });
+        await expect(fixture.prisma.deviceWebhookTrace.findUniqueOrThrow({
+          select: { status: true },
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: prepared.traceId,
+            },
+          },
+        })).resolves.toEqual({ status: "processed" });
+        await expect(fixture.prisma.deviceSyncSignal.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
     it("keeps one established Apple lifecycle through native connect, webhook, disconnect, and reconnect", async () => {
       const fixture = await createFixture({ sourceLastErrorCode: null });
       const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({

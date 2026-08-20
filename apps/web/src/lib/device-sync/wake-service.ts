@@ -1987,19 +1987,43 @@ async function prepareHostedWebhookSourceObservation(input: {
           connectionId: input.account.id,
           sourceProviderSlug,
         });
-        const source = await input.store.resolveConnectionSourceAdmissionCandidate({
+        let source = await input.store.resolveConnectionSourceAdmissionCandidate({
           connectionId: input.account.id,
           ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
           sourceProviderSlug,
           tx,
         });
         if (!source) {
-          throw deviceSyncError({
-            code: "WEBHOOK_SOURCE_NOT_READY",
-            message: "Device source setup is not visible yet. Retry shortly.",
-            retryable: true,
-            httpStatus: 503,
+          if (!sourceInstanceKey) {
+            throw webhookSourceNotReadyError(
+              "Device source setup is not visible yet. Retry shortly.",
+            );
+          }
+          await input.store.upsertConnectionSource({
+            connectionId: input.account.id,
+            // The prepared receipt owns this candidate epoch. Using the later
+            // processing-attempt time would make the same encrypted event look
+            // stale on retry before provider proof can succeed.
+            firstSeenAt: input.now,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: input.now,
+            sourceInstanceKey,
+            sourceProviderSlug,
+            status: "disconnected",
+            tx,
           });
+          source = await input.store.resolveConnectionSourceAdmissionCandidate({
+            connectionId: input.account.id,
+            sourceInstanceKey,
+            sourceProviderSlug,
+            tx,
+          });
+          if (!source) {
+            throw webhookSourceNotReadyError(
+              "Device source setup is not visible yet. Retry shortly.",
+            );
+          }
         }
         if (
           source.status === "connected"

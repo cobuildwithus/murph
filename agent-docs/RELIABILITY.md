@@ -1247,6 +1247,12 @@ Last verified: 2026-08-20
   results retain only that encrypted message for retry and DLQ recovery.
   Current provider registration, connection epoch/status, consent, source
   lifecycle, and provider-application authority are revalidated at admission.
+  When an authenticated canonical Junction source attribution targets an active
+  shared connection whose exact source row is absent, Web creates only the
+  existing owner's disconnected candidate at the frozen receipt instant under
+  the health-data admission lock. It then follows the ordinary provider read
+  and final locked authority recheck; inactive or ambiguous provider state
+  leaves the candidate disconnected and the encrypted message retryable.
   Apple Health source-registration observation first captures an ephemeral
   exact authority proof under the existing member-plus-connection admission
   lock, releases the transaction before provider I/O, then re-enters the same

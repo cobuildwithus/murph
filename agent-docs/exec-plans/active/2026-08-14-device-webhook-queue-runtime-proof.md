@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-14
-Updated: 2026-08-14
+Updated: 2026-08-20
 
 ## Goal
 
@@ -21,6 +21,10 @@ Updated: 2026-08-14
   enabled.
 - Junction is enabled alone and live proof shows accepted queue traffic, clean
   Queue/DLQ health, and successful Web batch admission before later providers.
+- An authenticated source-attributed Junction webhook can recover an
+  established legacy connection whose canonical source row is absent, without
+  weakening source-disconnect fences or admitting provider data before live
+  provider proof.
 
 ## Scope
 
@@ -28,6 +32,21 @@ Updated: 2026-08-14
   tests, durable operations documentation, and the protected rollout proof.
 - Out of scope: a new queue owner, provider parser changes, database schema
   changes, or bypassing provider signature verification and required checks.
+
+## Product UX
+
+- Effort: Patch.
+- Outcome: Existing members with a live Junction source resume webhook imports
+  automatically when an older connection is missing its canonical source row.
+- Reaches: The existing provider webhook recovery journey only; connected
+  sources, explicit disconnects, unsupported providers, and member controls do
+  not change.
+- Proof: Production-faithful unit and PostgreSQL scenarios must show live
+  provider proof advances the reconstructed candidate, inactive provider state
+  remains disconnected and retryable, retained encrypted traffic drains, and
+  the five-hour Junction-only canary stays healthy.
+- Walkthrough: Pending the corrected live canary; candidate status is Hold
+  until retained traffic drains and the monitored production path completes.
 
 ## Constraints
 
@@ -57,6 +76,10 @@ Updated: 2026-08-14
 4. Run focused tests/typechecks, commit, push, and complete ReviewGPT/CI.
 5. Merge, deploy the Worker through the protected workflow, and re-run the
    one-provider production canary with Queue/DLQ/admission proof.
+6. Add the smallest existing-owner recovery for a missing Junction source row,
+   including focused unit and real-PostgreSQL race/authority proof.
+7. Deploy Web before redriving retained encrypted traffic, prove both Queues
+   drain cleanly, then re-enable Junction alone and repeat the monitored canary.
 
 ## Decisions
 
@@ -114,6 +137,21 @@ Updated: 2026-08-14
   platform-equivalent `d: undefined` public shape, and add a workerd
   open/reseal/reopen regression. This changes no diagnostic vocabulary, owner,
   state, compatibility path, or Queue behavior.
+- The 2026-08-20 production canary accepted ordinary Junction traffic but
+  retained source-attributed events for established connections whose exact
+  source row was absent. The direct path had already returned the same
+  retryable failure before rollout, but Queue acknowledgement makes that
+  longstanding owner gap a bounded encrypted Queue/DLQ obligation instead of
+  provider-owned redelivery. Web's provider gate was rolled back before the
+  Queue-health threshold, while the compatible consumer and retained encrypted
+  messages remained deployed.
+- Recover at the existing source-row owner: an authenticated canonical
+  Junction source attribution may create only a disconnected candidate row
+  under the existing health-data admission lock. Live provider proof and the
+  existing final locked connection/source revalidation remain required before
+  that row becomes connected or webhook effects commit. Do not accept a
+  missing row as connected, mutate provider payload semantics, add a second
+  lifecycle owner, or bypass a disconnect fence.
 
 ## Verification
 
@@ -128,4 +166,7 @@ Updated: 2026-08-14
   prepared Web typechecks pass. The first protected deploy and smoke passed;
   live main/DLQ metrics were both zero with 14-day retention and the alert
   bindings configured. The workerd reseal regression now passes; its follow-up
-  PR, protected redeploy, and corrected production canary remain pending.
+  PR and protected redeploy passed. The corrected transport canary accepted
+  Queue traffic, but the missing-source recovery, exact-head review/CI, Web
+  redeploy, bounded encrypted redrive, and repeated production canary remain
+  pending.
