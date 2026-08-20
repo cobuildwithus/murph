@@ -36,9 +36,6 @@ test('a held group draft keeps event admission open without reopening manual ste
   const controller = createAssistantActiveTurnInputController({
     admissionHook,
     allowPostResponseEventAdmission: true,
-    conversationKeys: [
-      'channel:telegram|identity:identity-1|audience:group|thread:thread-1',
-    ],
     sessionId: 'session-1',
     turnId: 'turn-1',
     vault: '/vaults/test',
@@ -57,13 +54,9 @@ test('a held group draft keeps event admission open without reopening manual ste
     releaseFirstProviderTurn()
 
     expect(steerAssistantActiveTurnInput({
-      conversation: {
-        channel: 'telegram',
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-      },
       expectedActiveTurnId: 'turn-1',
       prompt: 'Manual input after the held draft',
+      sessionId: 'session-1',
       vault: '/vaults/test',
     })).toBeNull()
 
@@ -103,13 +96,9 @@ test('a held group draft keeps event admission open without reopening manual ste
     })
     try {
       const completion = steerAssistantActiveTurnInput({
-        conversation: {
-          channel: 'telegram',
-          identityId: 'identity-1',
-          threadId: 'thread-1',
-        },
         expectedActiveTurnId: 'turn-1',
         prompt: 'Input while reconsideration is running',
+        sessionId: 'session-1',
         vault: '/vaults/test',
       })
       assert.ok(completion)
