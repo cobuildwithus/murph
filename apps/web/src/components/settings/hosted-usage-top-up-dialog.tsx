@@ -283,16 +283,16 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const confirmationIndicator =
     showGroupMessagesAction && statusContent ? (
       <div
-        className="flex items-center gap-3"
+        className="flex items-center gap-2.5"
         role="status"
         aria-live="polite"
         aria-label={`${statusContent.title}. ${statusContent.message}`}
       >
         <span
-          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
           aria-hidden="true"
         >
-          <CheckIcon className="size-5 stroke-[2.5]" />
+          <CheckIcon className="size-4 stroke-[2.5]" />
         </span>
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-primary">
           Nice one
@@ -324,115 +324,112 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           <FieldError>{purchase.checkoutError}</FieldError>
           <div className="flex flex-col gap-2">
             {showGroupMessagesAction ? (
-              <div className="grid gap-5 border-y border-border py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:py-6">
-                <div className="space-y-1.5">
-                  <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                    Back to the chat
-                  </p>
-                  <p className="text-pretty text-sm leading-6 text-foreground">
-                    Messages will open. Choose this group to keep going.
-                  </p>
-                </div>
+              <div className="flex flex-col gap-3 pt-1">
+                <p className="text-pretty text-sm leading-6 text-muted-foreground">
+                  Open Messages, then choose this group to keep going.
+                </p>
                 {/* Messages has no deep link into an existing group thread, so
                   the group follow-up can only open the app itself. */}
                 <a
                   href="sms:"
                   className={cn(
                     buttonVariants({ size: "xl" }),
-                    "w-full sm:w-auto",
+                    "w-full",
                   )}
                 >
                   <MessageCircle
-                    className="size-4 shrink-0"
+                    data-icon="inline-start"
                     aria-hidden="true"
                   />
                   Open Messages
                 </a>
               </div>
             ) : null}
-              {canResume ? (
-                <Button
-                  type="button"
-                  size="lg"
-                  className="w-full"
-                  disabled={controller.checkoutInFlight}
-                  onClick={() =>
-                    window.location.assign(purchase.checkoutUrl ?? "")
-                  }
-                >
-                  Resume checkout
-                </Button>
-              ) : null}
-              {canCancel ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  className="w-full"
-                  aria-busy={purchase.operation === "canceling_checkout"}
-                  disabled={controller.checkoutInFlight}
-                  onClick={() => {
-                    focusTitleAfterPurchaseActionRef.current = true;
-                    void controller.cancelRecoveredCheckout();
-                  }}
-                >
-                  {purchase.operation === "canceling_checkout"
-                    ? purchase.status === "payment_pending"
-                      ? "Canceling payment…"
-                      : "Canceling checkout…"
-                    : purchase.status === "payment_pending"
-                      ? "Cancel payment"
-                      : "Cancel checkout"}
-                </Button>
-              ) : null}
-              {canRetry ? (
-                <Button
-                  type="button"
-                  size="lg"
-                  className="w-full"
-                  aria-busy={purchase.operation === "opening_checkout"}
-                  disabled={controller.checkoutInFlight}
-                  onClick={() => {
-                    focusTitleAfterPurchaseActionRef.current = true;
-                    void controller.startCheckout(purchase.retryOfferCode);
-                  }}
-                >
-                  {purchase.operation === "opening_checkout"
-                    ? purchase.status === "payment_pending" || props.scope === "group"
-                      ? "Continuing payment…"
-                      : "Opening checkout…"
-                    : purchase.status === "payment_pending" || props.scope === "group"
-                      ? "Retry payment"
-                      : "Retry checkout"}
-                </Button>
-              ) : null}
-              {canCheckAgain ? (
-                <Button
-                  type="button"
-                  size="lg"
-                  className="w-full"
-                  disabled={controller.checkoutInFlight}
-                  onClick={() => {
-                    focusTitleAfterPurchaseActionRef.current = true;
-                    controller.retryStatusCheck();
-                  }}
-                >
-                  Check again
-                </Button>
-              ) : null}
+            {canResume ? (
+              <Button
+                type="button"
+                size="lg"
+                className="w-full"
+                disabled={controller.checkoutInFlight}
+                onClick={() =>
+                  window.location.assign(purchase.checkoutUrl ?? "")
+                }
+              >
+                Resume checkout
+              </Button>
+            ) : null}
+            {canCancel ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="w-full"
+                aria-busy={purchase.operation === "canceling_checkout"}
+                disabled={controller.checkoutInFlight}
+                onClick={() => {
+                  focusTitleAfterPurchaseActionRef.current = true;
+                  void controller.cancelRecoveredCheckout();
+                }}
+              >
+                {purchase.operation === "canceling_checkout"
+                  ? purchase.status === "payment_pending"
+                    ? "Canceling payment…"
+                    : "Canceling checkout…"
+                  : purchase.status === "payment_pending"
+                    ? "Cancel payment"
+                    : "Cancel checkout"}
+              </Button>
+            ) : null}
+            {canRetry ? (
+              <Button
+                type="button"
+                size="lg"
+                className="w-full"
+                aria-busy={purchase.operation === "opening_checkout"}
+                disabled={controller.checkoutInFlight}
+                onClick={() => {
+                  focusTitleAfterPurchaseActionRef.current = true;
+                  void controller.startCheckout(purchase.retryOfferCode);
+                }}
+              >
+                {purchase.operation === "opening_checkout"
+                  ? purchase.status === "payment_pending" ||
+                    props.scope === "group"
+                    ? "Continuing payment…"
+                    : "Opening checkout…"
+                  : purchase.status === "payment_pending" ||
+                      props.scope === "group"
+                    ? "Retry payment"
+                    : "Retry checkout"}
+              </Button>
+            ) : null}
+            {canCheckAgain ? (
+              <Button
+                type="button"
+                size="lg"
+                className="w-full"
+                disabled={controller.checkoutInFlight}
+                onClick={() => {
+                  focusTitleAfterPurchaseActionRef.current = true;
+                  controller.retryStatusCheck();
+                }}
+              >
+                Check again
+              </Button>
+            ) : null}
+            {showGroupMessagesAction ? null : (
               <Button
                 type="button"
                 variant="ghost"
                 size="lg"
-                className={cn(
-                  showGroupMessagesAction ? "mt-3 self-center px-8" : "w-full",
-                )}
+                className="w-full"
                 onClick={() => controller.handleOpenChange(false)}
               >
-                {showGroupMessagesAction ? "Done" : "Close"}
+                Close
               </Button>
-            </div>
+            )}
           </div>
+        </div>
         ) : capacityConflict ? (
           <div data-slot="usage-top-up-capacity-conflict">
             <Button
@@ -671,14 +668,18 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           <DrawerTrigger asChild>{drawerTriggerButton}</DrawerTrigger>
         ) : null}
         <DrawerContent
-          className="h-[calc(100dvh-0.75rem)] border-border data-[vaul-drawer-direction=bottom]:mt-3 data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-0.75rem)] data-[vaul-drawer-direction=bottom]:rounded-t-[2rem]"
+          className={cn(
+            "border-border data-[vaul-drawer-direction=bottom]:mt-3 data-[vaul-drawer-direction=bottom]:rounded-t-[2rem]",
+            !showGroupMessagesAction &&
+              "h-[calc(100dvh-0.75rem)] data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-0.75rem)]",
+          )}
           data-inert={props.inert ? "true" : undefined}
           inert={props.inert ? true : undefined}
         >
           <DrawerHeader
             className={cn(
               "relative items-start gap-2 px-6 pb-2 pt-2 text-left",
-              showGroupMessagesAction && "gap-4",
+              showGroupMessagesAction && "gap-3",
             )}
           >
             {confirmationIndicator}
@@ -688,7 +689,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               className={cn(
                 "pr-10 font-serif text-3xl font-semibold leading-[1.1] tracking-tight text-foreground outline-none",
                 showGroupMessagesAction &&
-                  "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em]",
+                  "max-w-md text-4xl leading-[1.05] tracking-[-0.03em]",
               )}
             >
               {headerTitle}
@@ -697,7 +698,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               className={cn(
                 "max-w-md text-left text-base leading-6",
                 showGroupMessagesAction &&
-                  "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
+                  "text-muted-foreground",
               )}
             >
               {headerDescription}
@@ -716,7 +717,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           </DrawerHeader>
           <div
             ref={scrollContentRef}
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pt-4"
+            className={cn(
+              "px-6 pt-4",
+              showGroupMessagesAction
+                ? "pb-[max(env(safe-area-inset-bottom),1.5rem)]"
+                : "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+            )}
           >
             {screenContent}
           </div>
@@ -777,13 +783,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           inert={props.inert ? true : undefined}
           className={cn(
             "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
-            showGroupMessagesAction && "sm:max-w-2xl sm:gap-8 sm:p-10",
+            showGroupMessagesAction && "gap-5 sm:max-w-lg",
             compactStatusPresentation && "sm:max-w-md",
           )}
           initialFocus={titleRef}
         >
           <DialogHeader
-            className={cn("pr-10", showGroupMessagesAction && "gap-4")}
+            className={cn("pr-10", showGroupMessagesAction && "gap-3")}
           >
             {confirmationIndicator}
             <DialogTitle
@@ -792,7 +798,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               className={cn(
                 "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
                 showGroupMessagesAction &&
-                  "max-w-lg text-[2.5rem] leading-[1.02] tracking-[-0.035em] sm:text-5xl",
+                  "max-w-md text-4xl leading-[1.05] tracking-[-0.03em]",
               )}
             >
               {headerTitle}
@@ -803,7 +809,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   ? cn(
                       "max-w-md text-base leading-6",
                       showGroupMessagesAction &&
-                        "max-w-lg text-[1.0625rem] leading-7 text-muted-foreground",
+                        "text-muted-foreground",
                     )
                   : "sr-only"
               }

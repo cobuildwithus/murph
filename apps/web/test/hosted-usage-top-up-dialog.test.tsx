@@ -2379,8 +2379,12 @@ test("removes frozen sponsor recovery details once group usage is fulfilled", as
       rendered.container.querySelectorAll('[role="status"]').length,
       1,
     );
-    await clickButton(rendered.container, rendered.window, "Done");
-    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+    assert.equal(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Done",
+      ),
+      false,
+    );
   } finally {
     await rendered.cleanup();
   }
@@ -5172,18 +5176,93 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
     );
     assert.match(
       rendered.container.textContent ?? "",
-      /Your contribution landed\. The group has more room to talk\./,
+      /Your contribution is ready\./,
     );
     assert.match(
       rendered.container.textContent ?? "",
-      /Messages will open\. Choose this group to keep going\./,
+      /Open Messages, then choose this group to keep going\./,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Back to the chat/,
     );
     const contactLink = rendered.container.querySelector("a");
     assert.ok(contactLink);
     assert.equal(contactLink.textContent, "Open Messages");
     assert.equal(contactLink.getAttribute("href"), "sms:");
+    assert.match(contactLink.className, /w-full/);
+    assert.ok(contactLink.querySelector('[data-icon="inline-start"]'));
+    const dialog = rendered.container.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    assert.match(dialog.className, /sm:max-w-lg/);
+    assert.doesNotMatch(dialog.className, /sm:max-w-2xl/);
+    const title = dialog.querySelector("h2");
+    assert.ok(title);
+    assert.match(title.className, /text-4xl/);
+    assert.doesNotMatch(title.className, /sm:text-5xl/);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
-    assert.equal(buttonByText(rendered.container, "Done").disabled, false);
+    assert.equal(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Done",
+      ),
+      false,
+    );
+    assert.equal(
+      rendered.container.querySelectorAll('[role="status"]').length,
+      1,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps the fulfilled group receipt content-height on mobile", async () => {
+  mocks.isMobile.mockReturnValue(true);
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_group_mobile_fulfilled",
+        retryAllowed: false,
+        status: "fulfilled",
+      },
+      initialOpen: true,
+      offers: [],
+      scope: "group",
+    }),
+    {
+      location: {
+        href: "https://example.test/groups/fund/group_join_code_1234",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    const drawer = rendered.container.querySelector(
+      '[data-slot="drawer-content"]',
+    );
+    assert.ok(drawer);
+    assert.doesNotMatch(drawer.className, /h-\[calc\(100dvh-0\.75rem\)\]/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Your contribution is ready/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Open Messages, then choose this group to keep going/,
+    );
+    assert.equal(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Done",
+      ),
+      false,
+    );
+    assert.equal(buttonByText(rendered.container, "Close").disabled, false);
     assert.equal(
       rendered.container.querySelectorAll('[role="status"]').length,
       1,
