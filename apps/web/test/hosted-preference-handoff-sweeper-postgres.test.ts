@@ -245,7 +245,7 @@ describe.skipIf(!runPostgresProof)(
       ]);
     });
 
-    it("selects an unconsumed device-sync wake for scheduled handoff recovery", async () => {
+    it("retains recovery when the imported frontier is malformed", async () => {
       const client = requirePrisma(prisma);
       const now = new Date();
       const memberId = createId("member_handoff_device_sync");
@@ -256,6 +256,14 @@ describe.skipIf(!runPostgresProof)(
         data: {
           billingStatus: "active",
           id: memberId,
+        },
+      });
+      await client.hostedWorkspace.create({
+        data: {
+          redactedStatusJson: {
+            hostedMailboxSystemImportedSeq: "not-a-sequence",
+          },
+          userId: memberId,
         },
       });
       await client.hostedMailboxItem.create({
@@ -299,6 +307,84 @@ describe.skipIf(!runPostgresProof)(
         `handoff:${memberId}`,
       ]);
     });
+
+    it("signals only system items beyond the persisted imported frontier", async () => {
+      const client = requirePrisma(prisma);
+      const now = new Date();
+      const memberId = createId("member_handoff_imported_frontier");
+      const importedMailboxItemId = createId("mailbox_handoff_imported");
+      const pendingMailboxItemId = createId("mailbox_handoff_pending");
+      memberIds.push(memberId);
+
+      await client.hostedMember.create({
+        data: {
+          billingStatus: "active",
+          id: memberId,
+        },
+      });
+      await client.hostedWorkspace.create({
+        data: {
+          redactedStatusJson: {
+            hostedMailboxSystemImportedSeq: "1",
+          },
+          userId: memberId,
+        },
+      });
+      await client.hostedMailboxItem.createMany({
+        data: [
+          mailboxItem({
+            createdAt: new Date(now.getTime() - 120_000),
+            id: importedMailboxItemId,
+            kind: "member.preferences.updated",
+            laneSeq: 1n,
+            userId: memberId,
+          }),
+          mailboxItem({
+            createdAt: new Date(now.getTime() - 60_000),
+            id: pendingMailboxItemId,
+            kind: "device-sync.wake",
+            laneSeq: 2n,
+            userId: memberId,
+          }),
+        ],
+      });
+      const order: string[] = [];
+      const hasActiveAccess = vi.fn(async (userId: string) => {
+        order.push(`access:${userId}`);
+        const active = await hasHostedRuntimeActiveAccess(userId, {
+          prisma: client,
+        });
+        order.push(`access-complete:${userId}`);
+        return active;
+      });
+      const requestHandoff = buildRequestHandoff(order);
+
+      await expect(runHostedPreferenceHandoffSweeper({
+        hasActiveAccess,
+        logger: buildLogger(),
+        now,
+        requestHandoff,
+      })).resolves.toMatchObject({
+        candidateUsers: 1,
+        handoffAccepted: 1,
+        handoffAttempted: 1,
+      });
+
+      expect(requestHandoff).toHaveBeenCalledTimes(1);
+      expect(requestHandoff).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: memberId,
+        mailboxItemId: pendingMailboxItemId,
+      });
+      expect(requestHandoff).not.toHaveBeenCalledWith(
+        expect.objectContaining({ mailboxItemId: importedMailboxItemId }),
+      );
+      expect(order).toEqual([
+        `access:${memberId}`,
+        `access-complete:${memberId}`,
+        `handoff:${memberId}`,
+      ]);
+    });
   },
 );
 
@@ -309,6 +395,7 @@ function mailboxItem(input: {
   dedupeKey?: string;
   id: string;
   kind: string;
+  laneSeq?: bigint;
   userId: string;
 }) {
   return {
@@ -317,7 +404,7 @@ function mailboxItem(input: {
     id: input.id,
     kind: input.kind,
     lane: "system",
-    laneSeq: 1n,
+    laneSeq: input.laneSeq ?? 1n,
     occurredAt: input.createdAt,
     payloadSchema: "murph.test.preference-handoff-postgres.v1",
     userId: input.userId,

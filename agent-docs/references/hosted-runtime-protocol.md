@@ -1592,16 +1592,18 @@ workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
 avoid harmless post-delivery no-op ensures. There is no direct
 Web-to-Cloudflare message path and no second durable wake authority. Temporal
 remains the sole durable retry and reconciliation owner. The existing
-Temporal scheduled-reconcile
-command also runs one bounded preference-handoff sweep. Web selects live
-`member.preferences.updated` rows above the authoritative system-lane
-`consumed_seq` for active person runtimes or synthetic room runtimes with an
-active owner or current participant, then rechecks canonical runtime access and
-reissues their pointer-only `signalWithStart`; the mailbox row remains the only
-work record and repeated sweeps are idempotent. This is a narrow backstop for
-already-committed hosted style writes from personal Settings or runtime-bound
-conversation controls, not a second queue or a generic mailbox-lag scheduler.
-Other missed post-commit signals still have no web cron backstop.
+Temporal scheduled-reconcile command also runs one bounded preference-handoff
+sweep. Web selects supported system-lane handoff rows above the workspace's
+authoritative imported frontier for active person runtimes or synthetic room
+runtimes with an active owner or current participant, then rechecks canonical
+runtime access and reissues their pointer-only `signalWithStart`. The supported
+rows include preferences, due device-sync work, daily metrics, browser-vault
+refresh, maintenance, and queued Clinical Records retrieval. Import transfers
+retry ownership to the runtime, so the sweep never uses the later
+handled-through frontier as signal authority. The mailbox row remains the only
+work record and repeated sweeps are idempotent. This is a narrow backstop for a
+missed first post-commit handoff, not a second queue or a generic mailbox-lag
+scheduler. Other missed post-commit signals still have no Web cron backstop.
 
 Hosted reply-latency telemetry records only boundaries observed by their owning
 process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL
@@ -1902,6 +1904,18 @@ encrypted-checkpoint compatibility for the exact flat ref
 writer closed. Only after that release reaches 100% traffic and the exact runner
 fingerprint converges may the producer release let initial `send_vault_file`
 preparation accept this ref.
+
+Cold snapshot construction first removes runtime-owned operator-home symlinks,
+then materializes every deferred skipped-inline file before state-aware
+quiescent cleanup. The generated-delivery pass runs independently before
+pending-input compaction and broad assistant-residue maintenance, so unrelated
+maintenance failures cannot block a successful terminal-file deletion while
+checkpoint publication continues. It evaluates the complete physical
+generated-delivery inventory against the complete trusted outbox, retains exact
+active obligations, and removes terminal, changed, or orphaned files before
+archive planning. Materialization must not run between that cleanup and archive
+planning because it could reintroduce residue that was absent during
+validation.
 
 The producer uses the runtime path only when the same assistant turn creates a
 file for an already-established delivery obligation and calls `send_vault_file`.
