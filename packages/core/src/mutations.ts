@@ -4024,14 +4024,55 @@ async function reconcileDeviceEventEntriesByExternalRef(
   const { index } = context;
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
   const appendRecordIdByPreparedRecordId = new Map<string, string>();
-  const records: EventRecord[] = [];
+  const recordsByEntryIndex = new Map<number, EventRecord>();
   const forceAppendIds = new Set<string>();
   const retainedPreparedIds = new Set<string>();
   let skippedDuplicateCount = 0;
   let supersededCount = 0;
   let retractedCount = 0;
 
-  for (const originalEntry of entries) {
+  const aliasRepairByEntryIndex = new Map<number, JunctionDailyAggregateAliasRepairPlan>();
+  for (const [entryIndex, entry] of entries.entries()) {
+    const aliasRepair = buildJunctionDailyAggregateAliasRepairPlan({
+      aliasRepairContext,
+      context,
+      entry,
+    });
+    if (aliasRepair) {
+      aliasRepairByEntryIndex.set(entryIndex, aliasRepair);
+    }
+  }
+  for (const [entryIndex, aliasRepair] of aliasRepairByEntryIndex) {
+    const entry = entries[entryIndex]!;
+    appendEntries.push(
+      { relativePath: aliasRepair.survivorPath, record: aliasRepair.providerSurvivor },
+      { relativePath: aliasRepair.loserPath, record: aliasRepair.loserTombstone },
+    );
+    if (aliasRepair.overlaySurvivor) {
+      appendEntries.push({
+        relativePath: aliasRepair.survivorPath,
+        record: aliasRepair.overlaySurvivor,
+      });
+    }
+    appendRecordIdByPreparedRecordId.set(
+      entry.record.id,
+      aliasRepair.providerSurvivor.id,
+    );
+    forceAppendIds.add(aliasRepair.providerSurvivor.id);
+    forceAppendIds.add(aliasRepair.loserTombstone.id);
+    recordsByEntryIndex.set(
+      entryIndex,
+      aliasRepair.overlaySurvivor ?? aliasRepair.providerSurvivor,
+    );
+    applyJunctionDailyAggregateAliasRepairToIndex(aliasRepair, index);
+    supersededCount += 1;
+    retractedCount += 1;
+  }
+
+  for (const [entryIndex, originalEntry] of entries.entries()) {
+    if (aliasRepairByEntryIndex.has(entryIndex)) {
+      continue;
+    }
     let entry = originalEntry;
     const externalRef = entry.record.externalRef;
 
@@ -4044,41 +4085,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
       ) {
         skippedDuplicateCount += 1;
         retainedPreparedIds.add(entry.record.id);
-        records.push(current);
+        recordsByEntryIndex.set(entryIndex, current);
         continue;
       }
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
-      records.push(entry.record);
-      continue;
-    }
-
-    const aliasRepair = buildJunctionDailyAggregateAliasRepairPlan({
-      aliasRepairContext,
-      context,
-      entry,
-    });
-    if (aliasRepair) {
-      appendEntries.push(
-        { relativePath: aliasRepair.survivorPath, record: aliasRepair.providerSurvivor },
-        { relativePath: aliasRepair.loserPath, record: aliasRepair.loserTombstone },
-      );
-      if (aliasRepair.overlaySurvivor) {
-        appendEntries.push({
-          relativePath: aliasRepair.survivorPath,
-          record: aliasRepair.overlaySurvivor,
-        });
-      }
-      appendRecordIdByPreparedRecordId.set(
-        entry.record.id,
-        aliasRepair.providerSurvivor.id,
-      );
-      forceAppendIds.add(aliasRepair.providerSurvivor.id);
-      forceAppendIds.add(aliasRepair.loserTombstone.id);
-      records.push(aliasRepair.overlaySurvivor ?? aliasRepair.providerSurvivor);
-      applyJunctionDailyAggregateAliasRepairToIndex(aliasRepair, index);
-      supersededCount += 1;
-      retractedCount += 1;
+      recordsByEntryIndex.set(entryIndex, entry.record);
       continue;
     }
 
@@ -4103,7 +4115,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(canonicalRecord, externalRef));
       appendEntries.push({ relativePath: entry.relativePath, record: canonicalRecord });
       appendRecordIdByPreparedRecordId.set(entry.record.id, canonicalRecord.id);
-      records.push(canonicalRecord);
+      recordsByEntryIndex.set(entryIndex, canonicalRecord);
       continue;
     }
 
@@ -4137,7 +4149,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
       if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
         skippedDuplicateCount += 1;
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       if (
@@ -4191,7 +4203,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -4246,14 +4258,14 @@ async function reconcileDeviceEventEntriesByExternalRef(
           record: retainedMemberRevision,
         });
         appendRecordIdByPreparedRecordId.set(entry.record.id, providerBaseline.id);
-        records.push(retainedMemberRevision);
+        recordsByEntryIndex.set(entryIndex, retainedMemberRevision);
         supersededCount += 1;
         continue;
       }
       if (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0) {
         skippedDuplicateCount += 1;
         retainedPreparedIds.add(entry.record.id);
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
     }
@@ -4296,7 +4308,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       if (sourceVersionComparison === 0) {
@@ -4321,7 +4333,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       const sleepTypeBaselineRevision = sourceVersionComparison === 0
@@ -4358,7 +4370,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
     }
@@ -4370,7 +4382,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
         retainedPreparedIds.add(entry.record.id);
       }
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -4384,7 +4396,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     if (replaysProviderOwnedRetractionWithoutSetAuthority) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -4395,13 +4407,13 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (authoritativeSet && indexedSourceVersionComparison === null) {
         skippedDuplicateCount += 1;
         retainedPreparedIds.add(entry.record.id);
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
-      records.push(entry.record);
+      recordsByEntryIndex.set(entryIndex, entry.record);
       continue;
     }
     // A member declared current by this batch's authoritative set falls
@@ -4412,7 +4424,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
         retainedPreparedIds.add(entry.record.id);
       }
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -4466,7 +4478,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       appendEntries.push({ relativePath: retainedMemberPath, record: retainedMemberRevision });
     }
     appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
-    records.push(retainedMemberRevision ?? superseding);
+    recordsByEntryIndex.set(entryIndex, retainedMemberRevision ?? superseding);
     supersededCount += 1;
   }
 
@@ -4554,6 +4566,17 @@ async function reconcileDeviceEventEntriesByExternalRef(
       retractedCount += 1;
     }
   }
+
+  const records = entries.map((entry, entryIndex) => {
+    const record = recordsByEntryIndex.get(entryIndex);
+    if (!record) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Device event reconciliation did not produce a result for "${entry.record.id}".`,
+      );
+    }
+    return record;
+  });
 
   return {
     appendEntries,

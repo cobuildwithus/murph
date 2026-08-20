@@ -1935,7 +1935,10 @@ test("malformed Junction workout metric cardinality cannot supersede a complete 
   }
 });
 
-function junctionDailyAliasSnapshot(value = 44) {
+function junctionDailyAliasSnapshot(
+  value = 44,
+  options: { precedingDayValue?: number } = {},
+) {
   return {
     accountId: "junction-user-legacy-days",
     importedAt: "2026-06-25T12:00:00.000Z",
@@ -1944,6 +1947,15 @@ function junctionDailyAliasSnapshot(value = 44) {
         groups: {
           garmin: [{
             data: [
+              ...(options.precedingDayValue === undefined
+                ? []
+                : [{
+                    calendar_date: "2026-06-24",
+                    timestamp: "2026-06-24T10:00:00.000Z",
+                    timestamp_semantics: "offset",
+                    timezone_offset: -14_400,
+                    value: options.precedingDayValue,
+                  }]),
               {
                 calendar_date: "2026-06-25",
                 timestamp: "2026-06-25T00:30:00.000Z",
@@ -2150,6 +2162,99 @@ test("Junction daily aggregate alias repair converges under the primary owner an
     assert.equal(updatedLive.length, 1);
     assert.equal(updatedLive[0]?.id, fixture.primaryOwner.id);
     assert.equal(updatedLive[0]?.value, 47);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair composes with a preceding-day aggregate", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    const snapshot = junctionDailyAliasSnapshot(44, { precedingDayValue: 31 });
+    const repaired = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.equal(repaired.applied, true);
+    assert.ok(repaired.ingestId);
+    assert.ok(repaired.persistedEvidencePartCount > 0);
+    assert.equal(
+      repaired.events.some((event) =>
+        event.kind === "measurement" && event.externalRef?.facet === "features"
+      ),
+      true,
+    );
+    const returnedStress = repaired.events.filter(
+      (event) => event.kind === "observation" && event.metric === "stress-level",
+    );
+    assert.deepEqual(
+      returnedStress.map((event) => event.dayKey),
+      ["2026-06-24", "2026-06-25"],
+    );
+    const afterRepair = await readJunctionDailyAliasRecords(
+      fixture,
+      repaired.eventShardPaths,
+    );
+    assert.equal(
+      latestLiveRecords(afterRepair).some(
+        (record) => storedExternalRefFacet(record) === "features",
+      ),
+      true,
+    );
+    const repairedLive = liveJunctionStressRecords(afterRepair)
+      .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    const preceding = repairedLive[0];
+    const current = repairedLive[1];
+    assert.equal(repairedLive.length, 2);
+    assert.equal(preceding?.dayKey, "2026-06-24");
+    assert.equal(preceding?.value, 31);
+    assert.notEqual(preceding?.id, fixture.legacyOwner.id);
+    assert.equal(current?.dayKey, "2026-06-25");
+    assert.equal(current?.id, fixture.primaryOwner.id);
+    assert.equal(returnedStress[0]?.id, preceding?.id);
+    assert.equal(returnedStress[1]?.id, current?.id);
+    const loserHistory = afterRepair.filter((record) => record.id === fixture.legacyOwner.id);
+    assert.equal(isDeletedEventLifecycle(loserHistory.at(-1)?.lifecycle), true);
+
+    const replay = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      await readJunctionDailyAliasRecords(fixture, [
+        ...repaired.eventShardPaths,
+        ...replay.eventShardPaths,
+      ]),
+      afterRepair,
+    );
+
+    const updated = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: junctionDailyAliasSnapshot(47, { precedingDayValue: 31 }),
+      },
+      { corePort: coreRuntime },
+    );
+    const updatedLive = liveJunctionStressRecords(
+      await readJunctionDailyAliasRecords(fixture, [
+        ...repaired.eventShardPaths,
+        ...updated.eventShardPaths,
+      ]),
+    ).sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    assert.equal(updatedLive[0]?.id, preceding?.id);
+    assert.equal(updatedLive[0]?.value, 31);
+    assert.equal(updatedLive[1]?.id, fixture.primaryOwner.id);
+    assert.equal(updatedLive[1]?.value, 47);
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true });
   }
