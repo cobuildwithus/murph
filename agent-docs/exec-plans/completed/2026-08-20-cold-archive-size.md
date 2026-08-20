@@ -1,6 +1,6 @@
 # Reduce oversized hosted cold archives
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -117,3 +117,4 @@ Updated: 2026-08-20
   evidence. Its compressed checkpoint cost is materially smaller than its raw
   size, while the original one-vCPU measurement avoids a multi-second cold
   foreground query rebuild. Do not add an eager competing rebuild owner.
+Completed: 2026-08-20
