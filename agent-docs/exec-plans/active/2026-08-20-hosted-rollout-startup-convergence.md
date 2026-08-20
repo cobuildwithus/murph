@@ -112,8 +112,10 @@ handling; both were remediated. Final round two required the retrospective
 above after finding stale readiness evidence across status-only replacement.
 That finding was remediated. Final round three found the replacement-first and
 stale async-completion variants described in the renewed retrospective; both
-are accepted, reproduced, and remediated locally. A fresh exact-head review and
-CI remain.
+were remediated. Final round four found that the captured start record was still
+dropped before the destructive call and its settlement loop, allowing old-shell
+cleanup to invalidate a running replacement. That finding is accepted,
+reproduced, and remediated locally. A fresh exact-head review and CI remain.
 
 ## Evidence
 
@@ -166,7 +168,20 @@ CI remain.
 - Deferred old-health success and failure regressions now leave the
   platform-started replacement pending, preserve its own fast HTTP 503, and
   reach health 58 seconds after its one start without a destroy.
-- Focused Cloudflare verification passes after remediation: 418 tests across
+- ReviewGPT round four found that old-shell cleanup lost exact-start ownership
+  before the status-gated destroy and during destroy settlement. A replacement
+  could therefore inherit an unsettled-cleanup flag and be destroyed on the
+  next retry even though its own health had not failed.
+- The remediation carries the exact current-start record through readiness
+  cleanup, revalidates Cloudflare's platform `lastChange` before destroy, and
+  settles an issued old destroy as superseded when a newer running start is
+  observed. It neither clears nor invalidates the replacement record.
+- Parameterized production-order regressions prove both replacement arrival
+  during the pre-destroy status read and replacement arrival after destroy
+  issuance but before old-stop settlement. In both orderings the replacement's
+  startup 503 is retained and the same start reaches health at 58 seconds with
+  no replacement destroy.
+- Focused Cloudflare verification passes after remediation: 420 tests across
   five files plus package typecheck.
 
 ## Working Set

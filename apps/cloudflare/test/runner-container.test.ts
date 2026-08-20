@@ -1987,6 +1987,134 @@ describe("RunnerContainer", () => {
     },
   );
 
+  it.each([
+    { expectedDestroyCalls: 0, gatedStatusRead: 3, timing: "before destroy" },
+    { expectedDestroyCalls: 1, gatedStatusRead: 4, timing: "during destroy settlement" },
+  ] as const)(
+    "preserves a replacement that starts $timing for its old shell",
+    async ({ expectedDestroyCalls, gatedStatusRead }) => {
+      const fixedNowMs = Date.parse("2026-08-20T19:00:00.000Z");
+      let nowMs = fixedNowMs;
+      const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+      let healthChecks = 0;
+      let statusReads = 0;
+      let lastChange = fixedNowMs;
+      const gatedStateRead = createDeferred<void>();
+      const destroyIssued = createDeferred<void>();
+      const destroyResolved = createDeferred<void>();
+      const getState = vi.fn(async () => {
+        statusReads += 1;
+        if (statusReads === gatedStatusRead) {
+          await gatedStateRead.promise;
+        }
+        return { lastChange, status: "running" as const };
+      });
+      const containerFetch = vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        if (healthChecks === 2) {
+          return new Response(JSON.stringify({ error: "old shell failed" }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+        if (healthChecks === 3) {
+          return new Response("Failed to connect to local container transport", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      const destroy = vi.fn(async () => {
+        destroyIssued.resolve(undefined);
+        await destroyResolved.promise;
+      });
+      const startAndWaitForPorts = vi.fn(async () => {
+        throw new DOMException("Timed out", "TimeoutError");
+      });
+      const containerOptions: CreateContainerDoubleInput = {
+        containerFetch,
+        destroy,
+        env: {
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "90000",
+        },
+        getState,
+        initialStatus: "running",
+        platformRunning: true,
+        startAndWaitForPorts,
+      };
+      const { container } = createContainerDouble(containerOptions);
+
+      try {
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toMatchObject({ kind: "ready" });
+
+        nowMs += 6_000;
+        const oldShellReadiness = container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        });
+        if (expectedDestroyCalls === 1) {
+          await destroyIssued.promise;
+        }
+        await vi.waitFor(() => expect(statusReads).toBe(gatedStatusRead));
+
+        nowMs += 1_000;
+        const replacementStartedAtMs = nowMs;
+        lastChange = replacementStartedAtMs;
+        container.onStart();
+        if (expectedDestroyCalls === 1) {
+          container.onStop({ exitCode: 0, reason: "exit" });
+          destroyResolved.resolve(undefined);
+        }
+        gatedStateRead.resolve(undefined);
+
+        await expect(oldShellReadiness).rejects.toMatchObject({ name: "TimeoutError" });
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+        expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(false);
+
+        nowMs += 10_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).rejects.toMatchObject({
+          name: "HostedRunnerContainerMetadataResponseError",
+          statusCode: 503,
+        });
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+
+        nowMs = replacementStartedAtMs + 58_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toEqual({
+          action: "already_warm",
+          kind: "ready",
+        });
+
+        expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+        expect(healthChecks).toBe(4);
+      } finally {
+        now.mockRestore();
+      }
+    },
+  );
+
   it("restarts an unobserved container after the readiness window elapses", async () => {
     const timeoutControllers: AbortController[] = [];
     const timeout = vi.spyOn(AbortSignal, "timeout")
@@ -2117,6 +2245,7 @@ describe("RunnerContainer", () => {
     }>();
     let secondDestroyRequested = false;
     let stateReads = 0;
+    let runningLastChange = Date.now();
     const getState = vi.fn(() => {
       stateReads += 1;
       if (secondDestroyRequested) {
@@ -2135,7 +2264,7 @@ describe("RunnerContainer", () => {
         return cleanupStatus.promise;
       }
       return Promise.resolve({
-        lastChange: Date.now(),
+        lastChange: runningLastChange,
         status: "running" as const,
       });
     });
@@ -2212,8 +2341,9 @@ describe("RunnerContainer", () => {
       );
 
       await vi.advanceTimersByTimeAsync(4_000);
+      runningLastChange = Date.now() - 90_001;
       cleanupStatus.resolve({
-        lastChange: Date.now() - 90_001,
+        lastChange: runningLastChange,
         status: "running",
       });
       await vi.advanceTimersByTimeAsync(0);
@@ -9868,11 +9998,15 @@ function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   }));
   const startAndWaitForPorts = input.startAndWaitForPorts ?? vi.fn(async () => {
     currentStatus = "running";
-    currentLastChange = Date.now();
+    const currentStart = Reflect.get(container, "currentContainerStart");
+    const startedAtMs = isRecord(currentStart) ? currentStart.startedAtMs : null;
+    currentLastChange = typeof startedAtMs === "number" ? startedAtMs : Date.now();
   });
   const start = input.start ?? vi.fn(async () => {
     currentStatus = "running";
-    currentLastChange = Date.now();
+    const currentStart = Reflect.get(container, "currentContainerStart");
+    const startedAtMs = isRecord(currentStart) ? currentStart.startedAtMs : null;
+    currentLastChange = typeof startedAtMs === "number" ? startedAtMs : Date.now();
   });
 
   Object.assign(container, {
