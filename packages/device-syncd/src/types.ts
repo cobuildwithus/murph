@@ -90,10 +90,8 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   normalizationFailureReason?: string;
   normalizationRowOrdinal?: number;
   normalizationSourceProvider?: string;
-  normalizationStage?: string;
   normalizationTimestampKind?: string;
   normalizationTimestampSemantics?: string;
-  normalizationValueKind?: string;
   providerHttpStatus?: number;
   providerHttpStatusText?: string;
   providerRequestAuthKind?: string;

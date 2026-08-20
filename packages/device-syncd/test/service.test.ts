@@ -11722,13 +11722,11 @@ test("device sync service preserves structured Junction normalization diagnostic
       createFakeProvider({
         async executeJob() {
           throw new JunctionSparseCalendarRepairNormalizationError({
-            reason: "timestamp_invalid",
+            reason: "temporal.timestamp_invalid",
             rowOrdinal: 3,
             sourceProvider: "garmin",
-            stage: "temporal_instant",
             timestampKind: "invalid",
             timestampSemantics: "unknown",
-            valueKind: "number",
           });
         },
       }),
@@ -11747,13 +11745,11 @@ test("device sync service preserves structured Junction normalization diagnostic
     const [diagnostic] = service.listJobFailureDiagnostics();
     assert.ok(diagnostic);
     assert.deepEqual(diagnostic.details, {
-      normalizationFailureReason: "timestamp_invalid",
+      normalizationFailureReason: "temporal.timestamp_invalid",
       normalizationRowOrdinal: 3,
       normalizationSourceProvider: "garmin",
-      normalizationStage: "temporal_instant",
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
-      normalizationValueKind: "number",
     });
   } finally {
     close();

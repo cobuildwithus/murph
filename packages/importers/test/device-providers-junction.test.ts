@@ -1369,61 +1369,57 @@ test("Junction complete source days reject lossy rows before the canonical write
 test.each([
   {
     dayKey: "2026-04-22",
-    expectedReason: "value_missing_or_non_numeric",
-    expectedStage: "daily_aggregate",
+    expectedReason: "daily.value_missing",
     expectedTimestampKind: "absolute",
     expectedTimestampSemantics: "utc",
-    expectedValueKind: "missing",
     row: { timestamp: "2026-04-22T07:00:00.000Z" },
     timeZone: "UTC",
   },
   {
     dayKey: "2026-04-22",
-    expectedReason: "value_out_of_range",
-    expectedStage: "daily_aggregate",
+    expectedReason: "daily.value_non_numeric",
     expectedTimestampKind: "absolute",
     expectedTimestampSemantics: "utc",
-    expectedValueKind: "number",
+    row: { timestamp: "2026-04-22T07:00:00.000Z", value: "unusable" },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "daily.value_out_of_range",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
     row: { timestamp: "2026-04-22T07:00:00.000Z", value: 150 },
     timeZone: "UTC",
   },
   {
     dayKey: "2026-04-22",
-    expectedReason: "timestamp_invalid",
-    expectedStage: "temporal_instant",
+    expectedReason: "temporal.timestamp_invalid",
     expectedTimestampKind: "invalid",
     expectedTimestampSemantics: "unknown",
-    expectedValueKind: "number",
     row: { timestamp: "not-a-timestamp", value: 97 },
     timeZone: "UTC",
   },
   {
     dayKey: "2026-04-22",
-    expectedReason: "timestamp_missing_or_non_string",
-    expectedStage: "temporal_instant",
+    expectedReason: "temporal.timestamp_missing_or_non_string",
     expectedTimestampKind: "missing",
     expectedTimestampSemantics: undefined,
-    expectedValueKind: "number",
     row: { value: 97 },
     timeZone: "UTC",
   },
   {
     dayKey: "2026-04-22",
-    expectedReason: "outside_authorized_day",
-    expectedStage: "source_day_membership",
+    expectedReason: "source_day.outside_authorized_day",
     expectedTimestampKind: "absolute",
     expectedTimestampSemantics: "utc",
-    expectedValueKind: "number",
     row: { timestamp: "2026-04-23T00:30:00.000Z", value: 97 },
     timeZone: "UTC",
   },
   {
     dayKey: "2026-03-08",
-    expectedReason: "local_time_ambiguous_or_nonexistent",
-    expectedStage: "temporal_instant",
+    expectedReason: "temporal.local_time_ambiguous_or_nonexistent",
     expectedTimestampKind: "floating",
     expectedTimestampSemantics: "floating",
-    expectedValueKind: "number",
     row: { timestamp: "2026-03-08 02:30", value: 97 },
     timeZone: "America/Chicago",
   },
@@ -1432,10 +1428,8 @@ test.each([
   ({
     dayKey,
     expectedReason,
-    expectedStage,
     expectedTimestampKind,
     expectedTimestampSemantics,
-    expectedValueKind,
     row,
     timeZone,
   }) => {
@@ -1458,10 +1452,8 @@ test.each([
         assert.equal(error.diagnostic.reason, expectedReason);
         assert.equal(error.diagnostic.rowOrdinal, 1);
         assert.equal(error.diagnostic.sourceProvider, "garmin");
-        assert.equal(error.diagnostic.stage, expectedStage);
         assert.equal(error.diagnostic.timestampKind, expectedTimestampKind);
         assert.equal(error.diagnostic.timestampSemantics, expectedTimestampSemantics);
-        assert.equal(error.diagnostic.valueKind, expectedValueKind);
 
         const serializedDiagnostic = JSON.stringify(error.diagnostic);
         assert.doesNotMatch(serializedDiagnostic, /2026-|not-a-timestamp|"value"/u);

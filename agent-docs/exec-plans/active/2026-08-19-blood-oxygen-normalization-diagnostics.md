@@ -11,10 +11,10 @@ Updated: 2026-08-19
 
 ## Success criteria
 
-- Every importer rejection branch emits a stable stage and reason.
+- Every importer rejection branch emits one stable, stage-qualified reason.
 - Complete-day row failures include useful structural context: one-based row
-  ordinal, underlying provider slug, matched value/timestamp fields, value
-  kind, timestamp kind, and timestamp semantics when known.
+  ordinal, underlying provider slug, timestamp kind, and timestamp semantics
+  when known.
 - The device-sync failure diagnostic preserves those fields and the hosted
   runtime emits them on `device-sync.job_failed`.
 - Focused importer, device-sync, hosted-runtime, and type checks pass.
@@ -64,8 +64,8 @@ Updated: 2026-08-19
 - `pnpm --filter @murphai/importers typecheck` — passed.
 - `pnpm --filter @murphai/device-syncd typecheck` — passed.
 - `pnpm --filter @murphai/assistant-runtime typecheck` — passed.
-- Full affected Vitest files — 228 importer, 136 device-sync service, and 85
+- Full affected Vitest files — 229 importer, 136 device-sync service, and 85
   hosted-runtime tests passed.
-- Focused blood-oxygen diagnostics — six distinct rejection shapes passed;
+- Focused blood-oxygen diagnostics — seven distinct rejection shapes passed;
   assertions prove the diagnostic excludes the raw fixture value and timestamp.
 - `git diff --check` — passed.
