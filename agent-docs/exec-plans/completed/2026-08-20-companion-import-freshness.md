@@ -1,6 +1,6 @@
 # Project Canonical Imports Into Companion Freshness
 
-Status: active
+Status: completed
 Updated: 2026-08-20
 
 ## Goal
@@ -120,7 +120,12 @@ artifacts.
   retained as speculative complexity. The production pass now has one explicit
   authoritative dirty-state fetch owner, while a cold retry refetches the Web
   source of truth.
-- The focused runtime and production-pass tests passed 205 tests. The full
-  assistant-runtime suite again passed 2,422 tests with five skipped, and
-  assistant-runtime typecheck passed. ReviewGPT round four, required CI, and
-  final deployment compatibility proof: pending.
+- The focused runtime and production-pass tests passed 212 tests on current
+  main. The full assistant-runtime suite passed 2,422 tests with five skipped,
+  and assistant-runtime typecheck passed.
+- The clean follow-up PR full-snapshot ReviewGPT audit returned PASS with no
+  findings. It independently confirmed the single authoritative fetch, cold
+  refetch and relinking, exact receipt gate, staged acknowledgements, retries,
+  and checkpoint promotion. Required CI and production rollout remain release
+  gates outside this completed implementation plan.
+Completed: 2026-08-20
