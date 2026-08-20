@@ -332,6 +332,22 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
     allowedRouteActions: input.allowedRouteActions ?? null,
     state: selectionState,
   });
+  const readyItem = findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: input.allowedRouteActions ?? null,
+    now,
+    state: selectionState,
+  });
+  if (
+    input.allowedRouteActions == null
+    && input.allowedWakeKinds == null
+    && readyItem !== null
+    && isHostedApprovedContinuationSystemMailboxItem(readyItem)
+  ) {
+    return createHostedRuntimeWakeCandidate(
+      resolveSystemMailboxItemNextWakeAt(readyItem, now),
+      "assistant",
+    );
+  }
   return selectHostedRuntimeWakeCandidate(
     items.map((item) =>
       createHostedRuntimeWakeCandidate(
@@ -348,6 +364,7 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
   const blockedSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
+  let oldestDueItem: HostedSystemMailboxPendingItem | null = null;
   for (const item of input.state.pending) {
     if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
       continue;
@@ -357,12 +374,26 @@ export function findNextHostedSystemMailboxQueueItem(input: {
       continue;
     }
     if (systemMailboxItemIsDue(item, input.now)) {
-      return item;
+      oldestDueItem ??= item;
+      if (
+        input.allowedRouteActions == null
+        && isHostedApprovedContinuationSystemMailboxItem(item)
+      ) {
+        return item;
+      }
+      continue;
     }
     blockedSerializationKeys.add(serializationKey);
   }
 
-  return null;
+  return oldestDueItem;
+}
+
+function isHostedApprovedContinuationSystemMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.routeAction === "apply-runtime-control-request"
+    && item.wake.kind === "runtime.pending-effects-reconcile-requested";
 }
 
 export function mergeHostedSystemMailboxRollbackItems(input: {

@@ -4714,7 +4714,10 @@ function shouldRunIdleDeviceSyncMaintenance(input: {
   }
 
   const preparation = input.systemMailboxPreparation;
-  if (preparation?.status === "retryable_failed") {
+  if (
+    preparation?.status === "retryable_failed"
+    || (preparation && isCausalPendingEffectsReconciliation(preparation))
+  ) {
     return false;
   }
 
@@ -5741,12 +5744,6 @@ async function runSystemMailboxMaintenancePhase(input: {
         : {}),
       executionContext: input.executionContext,
       operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
-      ...(!hasBackgroundSelection && !hasExclusiveSelection
-        ? {
-            preferredRouteActions: HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS,
-            preferredWakeKinds: HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS,
-          }
-        : {}),
       runtime: phaseInput.runtime,
       runtimeEnv: phaseInput.runtimeEnv,
       signal: phaseInput.signal ?? null,

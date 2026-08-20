@@ -97,6 +97,19 @@ Updated: 2026-08-20
 - The remediation deletes that hint and derives an approval-only preference
   from durable mailbox state on every ordinary maintenance selection. The
   unchanged oldest-first selector remains the fallback when no approval is due.
+- Final ReviewGPT round 2 proved that the remediation remained selector-local:
+  a projected due device alarm could still run before a second selected
+  approval's delivery on the successor pass. The accepted repeated-mechanism
+  finding triggered the required anomaly retrospective.
+- Retrospective decision: preserve the explicit every-ready-approval guarantee
+  and redesign persisted system-mailbox ordering as the single authority for
+  both the next runnable item and its projected workspace wake. Delete the
+  preferred-selector plumbing; reuse the existing approval-continuation
+  classification to keep idle device maintenance out of that selected pass,
+  without changing unrelated mailbox/device concurrency or adding another
+  state owner or reconciliation mechanism. Require an outer-runtime checkpoint
+  proof plus a production-phase successor proof with a configured device
+  runtime and no fresh second-pass import.
 
 ## Product UX Walkthrough
 
@@ -116,16 +129,18 @@ Updated: 2026-08-20
 ## Verification
 
 - Completed local proof:
-  - `pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-entrypoint.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts`
-    passed 642 tests across both files after the round 1 remediation.
+  - `pnpm exec vitest run test/hosted-runtime-mailbox-state.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts test/hosted-runtime-workspace-entrypoint.test.ts`
+    passed 655 tests across all three files after the round 2 redesign.
   - `pnpm typecheck` in `packages/assistant-runtime` passed.
   - Focused changelog fragment, registry, and route tests passed 49 tests.
   - Web typecheck passed after generating the changelog fragments.
 - Preliminary ReviewGPT `completion-specialists` passed on the first reviewed
   head with Product UX and coverage marked applicable and complete.
-- Final ReviewGPT round 1 produced one accepted original-PR finding; the local
-  remediation proof is green. Round 2 and exact corrected-head CI remain
-  pending.
+- Final ReviewGPT round 1 produced one accepted original-PR finding. Round 2
+  returned `RETROSPECTIVE_REQUIRED` for the repeated projected-device-alarm
+  path; its finding is accepted and the requirement-level continuation decision
+  is recorded above. The redesigned local proof is green; round 3 and new
+  exact-head CI remain pending.
 - Expected outcome: synthetic approval delivery wins the first post-checkpoint
   selection; device work remains pending; all focused and exact-head checks are
   green; both ReviewGPT stages finish with no unresolved accepted findings.

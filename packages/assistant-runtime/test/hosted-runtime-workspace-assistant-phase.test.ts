@@ -16075,13 +16075,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       }));
 
-      expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          preferredRouteActions: ["apply-runtime-control-request"],
-          preferredWakeKinds: ["runtime.pending-effects-reconcile-requested"],
-        }),
-      );
+      expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+      expect(mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0])
+        .not.toHaveProperty("allowedRouteActions");
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: true,
@@ -16175,13 +16171,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           vaultRoot,
         }));
 
-        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenNthCalledWith(
-          1,
-          expect.objectContaining({
-            preferredRouteActions: ["apply-runtime-control-request"],
-            preferredWakeKinds: ["runtime.pending-effects-reconcile-requested"],
-          }),
-        );
+        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+        expect(mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[0]?.[0])
+          .not.toHaveProperty("allowedRouteActions");
         expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
         expect(result).toEqual(expect.objectContaining({
           checkpointReason: "system_mailbox_receipt",
@@ -16201,6 +16193,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("drains every approved continuation before older device maintenance", async () => {
     const now = "2026-04-27T00:00:00.000Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(now));
     const parentRoot = await mkdtemp(
       path.join(tmpdir(), "hosted-durable-approval-priority-"),
     );
@@ -16210,6 +16204,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "vault-file-send:effect_durable_approval_a",
       "vault-file-send:effect_durable_approval_b",
     ];
+    const events: string[] = [];
 
     try {
       await initializeVault({ createdAt: now, vaultRoot });
@@ -16272,15 +16267,47 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           effectId,
         }]);
       }
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(async (input) => {
+        for (const effect of input.assistantDeliveryEffects) {
+          events.push(`delivery:${effect.effectId}`);
+        }
+        return [];
+      });
+      mocks.runHostedDeviceSyncWakeLane.mockImplementation(async () => {
+        events.push("device-sync");
+        return {
+          deviceSyncProcessed: 1,
+          deviceSyncSkipped: false,
+          nextWakeAt: null,
+          parserProcessed: 0,
+          postCheckpointRecord: null,
+        };
+      });
+
+      let workspace = createDueAssistantWorkspace({
+        nextWakeAt: now,
+        nextWakeReason: "device-sync.reconcile",
+      });
 
       for (const [index, effectId] of effectIds.entries()) {
         const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
           assistantInputIds: [],
           conversationImportedCount: 0,
-          importedCount: admissions.length,
+          importedCount: 0,
           now: () => now,
           operatorHomeRoot,
+          resolvedDeviceSync: {
+            providerConfigs: {
+              whoop: {
+                clientId: "synthetic-whoop-client",
+                clientSecret: "synthetic-whoop-secret",
+              },
+            },
+            publicBaseUrl: "https://device-sync.example.test",
+            secret: "synthetic-device-sync-secret",
+          },
           vaultRoot,
+          workspace,
         }));
 
         expect(mocks.collectHostedAssistantDeliverySideEffects)
@@ -16292,7 +16319,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           checkpointReason: "outbox_sending",
           progressed: true,
         }));
-        await result.afterCheckpoint?.();
+        const postCheckpoint = await result.afterCheckpoint?.();
+        expect(postCheckpoint).toEqual(expect.objectContaining({
+          nextWakeAt: now,
+          nextWakeReason: index === 0 ? "assistant" : "device-sync.reconcile",
+        }));
+        workspace = createDueAssistantWorkspace({
+          nextWakeAt: postCheckpoint?.nextWakeAt ?? now,
+          nextWakeReason: postCheckpoint?.nextWakeReason ?? null,
+        });
       }
 
       expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({
@@ -16304,8 +16339,37 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }),
         ],
       });
+      expect(events).toEqual(effectIds.map((effectId) => `delivery:${effectId}`));
+
+      const deviceResult = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [],
+        conversationImportedCount: 0,
+        importedCount: 0,
+        now: () => now,
+        operatorHomeRoot,
+        resolvedDeviceSync: {
+          providerConfigs: {
+            whoop: {
+              clientId: "synthetic-whoop-client",
+              clientSecret: "synthetic-whoop-secret",
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "synthetic-device-sync-secret",
+        },
+        vaultRoot,
+        workspace,
+      }));
+
+      expect(events).toEqual([
+        ...effectIds.map((effectId) => `delivery:${effectId}`),
+        "device-sync",
+      ]);
+      await deviceResult.afterCheckpoint?.();
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([]);
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
+      vi.useRealTimers();
     }
   });
 
