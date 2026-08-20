@@ -53,6 +53,7 @@ import {
 } from '../src/assistant/generated-delivery-files.ts'
 import {
   maintainAssistantAutoReplyRouteState,
+  pruneAssistantGeneratedDeliveryResidue,
   pruneAssistantRuntimeResidue,
 } from '../src/assistant/runtime-residue.ts'
 import {
@@ -143,10 +144,7 @@ describe('assistant runtime residue pruning', () => {
     await writeFile(legacyPrefixPath, 'ordinary legacy-path file', 'utf8')
     await writeFile(prefixSiblingPath, 'prefix sibling', 'utf8')
 
-    const result = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
 
@@ -200,10 +198,7 @@ describe('assistant runtime residue pruning', () => {
       })
     }
 
-    const result = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
 
@@ -239,10 +234,7 @@ describe('assistant runtime residue pruning', () => {
       vaultRoot,
     })
 
-    await expect(pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    await expect(pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })).rejects.toThrow(
       'An active assistant generated delivery must have exactly one hard link.',
@@ -270,10 +262,7 @@ describe('assistant runtime residue pruning', () => {
       vaultRoot,
     })
     await writeFile(file.filePath, 'payload-b', 'utf8')
-    const result = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
 
@@ -315,10 +304,7 @@ describe('assistant runtime residue pruning', () => {
       vaultRoot,
     })
 
-    const result = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
 
@@ -351,10 +337,7 @@ describe('assistant runtime residue pruning', () => {
       vaultRoot,
     })
 
-    await expect(pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    await expect(pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })).rejects.toThrow(
       'An active assistant generated delivery is missing from runtime staging.',
@@ -377,10 +360,7 @@ describe('assistant runtime residue pruning', () => {
       'utf8',
     )
 
-    const firstResult = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    const firstResult = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
 
@@ -390,10 +370,7 @@ describe('assistant runtime residue pruning', () => {
     ).toBe(true)
     await expectPathExists(file.filePath)
 
-    const secondResult = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    const secondResult = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
     expect(secondResult.generatedDeliveryFilesPruned).toBe(1)
@@ -415,10 +392,7 @@ describe('assistant runtime residue pruning', () => {
     const unexpectedPath = path.join(paths.outboxDirectory, 'unexpected.txt')
     await writeFile(unexpectedPath, 'unexpected outbox entry', 'utf8')
 
-    const result = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
 
@@ -426,26 +400,6 @@ describe('assistant runtime residue pruning', () => {
     expect(result.generatedDeliveryCleanupSkippedUntrustedOutbox).toBe(true)
     await expectPathExists(file.filePath)
     await expectPathExists(unexpectedPath)
-  })
-
-  it('does not reconcile generated deliveries without an explicit quiescent boundary', async () => {
-    const { vaultRoot } = await createAssistantVault(
-      'assistant-runtime-residue-generated-not-quiescent-',
-    )
-    const file = await writeGeneratedDeliveryFile({
-      contents: 'in-flight creation',
-      refSuffix: 'in-flight.zip',
-      vaultRoot,
-    })
-
-    const result = await pruneAssistantRuntimeResidue({
-      now: PRUNE_NOW,
-      pendingInputIds: [],
-      vault: vaultRoot,
-    })
-
-    expect(result.generatedDeliveryFilesPruned).toBe(0)
-    await expectPathExists(file.filePath)
   })
 
   it('prunes an orphan staging hardlink without changing its ordinary vault file', async () => {
@@ -465,10 +419,7 @@ describe('assistant runtime residue pruning', () => {
     await chmod(ordinaryPath, 0o666)
     await link(ordinaryPath, stagingPath)
 
-    const result = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    const result = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
 
@@ -498,10 +449,7 @@ describe('assistant runtime residue pruning', () => {
     )
     await symlink(targetPath, symlinkPath)
 
-    await expect(pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    await expect(pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })).rejects.toThrow(
       /generated-delivery paths must not contain symlinks|resolves outside the vault root/u,
@@ -529,10 +477,7 @@ describe('assistant runtime residue pruning', () => {
     await mkdir(path.dirname(nestedPath), { recursive: true })
     await writeFile(nestedPath, 'invalid nested delivery', 'utf8')
 
-    await expect(pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    await expect(pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })).rejects.toThrow(
       'Assistant generated-delivery staging must remain flat.',
@@ -557,10 +502,7 @@ describe('assistant runtime residue pruning', () => {
     )
     await writeFile(unsafePath, 'unsafe hidden delivery', 'utf8')
 
-    await expect(pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      now: PRUNE_NOW,
-      pendingInputIds: [],
+    await expect(pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })).rejects.toThrow(
       'Assistant generated-delivery staging contains an unsafe filename.',

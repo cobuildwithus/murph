@@ -69,6 +69,12 @@ supplement that proof, but it cannot establish runtime cleanup behavior.
 
 Native companion auth/control/device-sync PRs additionally use the
 `Native iOS hosted E2E` status described in `agent-docs/references/testing-ci-map.md`.
+A canceled native workflow must not be rerun directly because the rerun retains
+its original queue identity. From an authenticated operator checkout, use
+`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number>`; it revalidates the
+open same-repository human-authored PR and exact current head before rerunning a
+successful exact-head Repo Hygiene owner, whose completion creates a fresh
+native waiter without widening the protected environment or secret boundary.
 A status description that records a real pass is production-shaped evidence:
 exact hosted PR Web deployment plus real Privy/Junction/HealthKit native flow.
 Path-filtered informational success explicitly records that no real journey ran
@@ -837,6 +843,14 @@ When that fast path applies:
 
 ## Current Command Meaning
 
+Repository package-test memory: `pnpm test` and `pnpm test:packages` preserve
+root `vitest.config.ts` as the curated repo lane, but execute that lane in two
+serial invocations. Every project except `assistant-engine` retains the caller's
+ordinary Node heap; only the `assistant-engine` root project receives
+`--max-old-space-size=6144`. Package-local focused test commands remain
+unchanged. The release workflow intentionally leaves job-wide `NODE_OPTIONS`
+unset so package and build-phase owners apply only their proven ceilings.
+
 Hosted-web production build memory: on Linux CI, `apps/web verify` defaults to
 wrapping its production `next build` step with
 `apps/web/scripts/build-memory-guard.sh`. The guard creates a root-level
@@ -963,7 +977,7 @@ the advisory budget.
   already typechecks touched owners and reverse dependents, do not pair it with
   a separate root `pnpm typecheck` for narrow changes.
 - `pnpm test`: runs the fast deterministic behavior loop under the artifact lock: warm-safe incremental contracts artifact verification, the root multi-project Vitest lane, and fixture/scenario-manifest verification without coverage. Full acceptance and release lanes retain clean contracts builds. Package projects share one bounded pool; the four independent CLI buckets share the next phase, while the five explicit `fileParallelism: false` smoke buckets remain isolated. Shared Vitest global setup places every ordinary package/app/repo-tool process beneath one marked private temp root inside a dedicated Murph owner directory, removes it on teardown even after test failures, and sweeps only old dead-owner marked roots before a later run without enumerating unrelated host temp entries. `MURPH_VITEST_MAX_WORKERS` now actually controls the root and ordinary package configs, defaulting to `75%` locally or `50%` in CI. Local runs overlap repo Vitest with scenario-manifest verification when `MURPH_TEST_LANES_PARALLEL` allows it; CI stays sequential by default.
-- `pnpm docs:drift`: runs the manual durable-doc drift check. Use it when a task intentionally changes `agent-docs/**`, `ARCHITECTURE.md`, or other durable repo docs and you want the old index/truthfulness guard explicitly, without making every default `pnpm test` run sensitive to unrelated dirty-tree doc work. Doc gardening intersects unindexed findings with Git's tracked-file inventory, so ignored or otherwise untracked local documents cannot block acceptance. It also excludes immutable `agent-docs/exec-plans/completed/**` snapshots from live index enforcement; active plans and durable current docs remain governed.
+- `pnpm docs:drift`: runs the manual durable-doc drift check. Use it when a task intentionally changes `agent-docs/**`, `ARCHITECTURE.md`, or other durable repo docs and you want the old index/truthfulness guard explicitly, without making every default `pnpm test` run sensitive to unrelated dirty-tree doc work. In pull-request CI mode, the wrapper resolves immutable base and checked-out candidate SHAs from the GitHub event (with `MURPH_DOCS_DRIFT_BASE_SHA` / `MURPH_DOCS_DRIFT_CANDIDATE_SHA` overrides), compares those exact trees, and delegates the unchanged upstream policy through an alternate index; it never rewrites `origin/<base>` or shortens existing shallow history. Doc gardening intersects unindexed findings with Git's tracked-file inventory, so ignored or otherwise untracked local documents cannot block acceptance. It also excludes immutable `agent-docs/exec-plans/completed/**` snapshots from live index enforcement; active plans and durable current docs remain governed.
 - `pnpm test:packages`: uses the same incremental contracts prerequisite and bounded root multi-project Vitest suite as `pnpm test`, without fixture smoke. It covers every root-wired package project plus all nine CLI buckets, with the four independent CLI buckets sharing one phase and the five explicit serial buckets retaining separate phases. It leaves app verification and prepared CLI package-shape acceptance to their dedicated commands.
 - `pnpm test:apps`: holds one parent artifact lock, prepares Health Commons output and the hosted-web Prisma client once, then executes `apps/web verify` and `apps/cloudflare verify` concurrently by default locally (serially in CI unless overridden). Both children consume the prepared inputs instead of racing their own generation and therefore realize the intended parallel app lane. Their existing internal parallelism, app-local worker caps, and acceptance skip flags remain unchanged.
 - `pnpm test:packages:coverage`: prepares the built CLI/runtime inputs, enforces each package's coverage command, and runs built package-boundary checks. Standalone local outer fanout is CPU-aware and capped at six processes; the default per-process Vitest cap is the available CPU count divided by that outer fanout, avoiding the former multiplication of six 75%-of-machine pools. The capable-host acceptance composition protects subprocess-heavy CLI coverage with four workers and one concurrent two-worker package process, then refills to at most five two-worker package processes after CLI releases the two app pools. On the standard 16-vCPU profile that bounds the scheduled Vitest total at 14 workers after the protected phase instead of multiplying per-process percentages. On a resource-qualified static worker, the executor-owned profile instead protects CLI coverage with three workers and one concurrent two-worker package process, then refills to three two-worker package processes. Smaller or memory-unobservable static workers retain the two-process, two-worker serial fallback. Source environment overrides cannot change either static plan. CI remains one outer process with a 50% inner cap. `MURPH_PACKAGE_COVERAGE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS`, and `MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS` remain explicit overrides for the default profile. Contracts and CLI artifact ordering, failure aggregation, and prepared acceptance behavior are unchanged.

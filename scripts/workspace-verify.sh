@@ -945,7 +945,14 @@ run_repo_vitest() {
   # Keep worker selection centralized in the Vitest configs so local runs use
   # the faster 75% default while CI stays at 50%, with the same env override
   # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
-  pnpm exec vitest run --config "vitest.config.ts" "$@"
+  pnpm exec vitest run --config "vitest.config.ts" \
+    --project="!assistant-engine" "$@" || return $?
+
+  # The curated Assistant Engine project has a proven 6 GiB requirement. Keep
+  # that ceiling at this owner instead of lifting every repo test and build.
+  NODE_OPTIONS=--max-old-space-size=6144 \
+    pnpm exec vitest run --config "vitest.config.ts" \
+      --project="assistant-engine" "$@"
 }
 
 run_workspace_package_coverage() {
@@ -992,65 +999,46 @@ mark_acceptance_cli_coverage_complete() {
 
 run_all_package_coverage() {
   local contracts_artifacts_prepared="${1:-0}"
-  local package_coverage_dirs=(
-    "packages/cli"
-    "packages/assistant-engine"
-    "packages/assistant-runtime"
-    "packages/core"
-    "packages/setup-cli"
-    "packages/assistant-cli"
-    "packages/assistantd"
-    "packages/cloudflare-hosted-control"
+  # Keep each executable owner and its assertion label in one entry so package
+  # removals cannot leave every later release-coverage failure mislabeled.
+  local package_coverage_plan=(
+    "packages/cli|CLI package coverage"
+    "packages/assistant-engine|Assistant engine package coverage"
+    "packages/assistant-runtime|Assistant runtime package coverage"
+    "packages/core|Core owner coverage"
+    "packages/setup-cli|Setup CLI package coverage"
+    "packages/assistant-cli|Assistant CLI package coverage"
+    "packages/assistantd|Assistantd package coverage"
+    "packages/cloudflare-hosted-control|Cloudflare hosted control package coverage"
     # In non-prepared coverage, the launch guard below keeps contracts out of
     # the active CLI window because contracts artifact verification rebuilds
     # shared dist outputs that CLI built-runtime tests import.
-    "packages/contracts"
-    "packages/clinical-records"
-    "packages/device-syncd"
-    "packages/exercise-library"
-    "packages/gateway-core"
-    "packages/health-metrics"
-    "packages/hosted-execution"
-    "packages/importers"
-    "packages/inbox-services"
-    "packages/inboxd"
-    "packages/messaging-ingress"
-    "packages/openclaw-plugin"
-    "packages/operator-config"
-    "packages/parsers"
-    "packages/query"
-    "packages/runtime-state"
-    "packages/vault-usecases"
+    "packages/contracts|Contracts package coverage"
+    "packages/clinical-records|Clinical records package coverage"
+    "packages/device-syncd|Device syncd package coverage"
+    "packages/exercise-library|Exercise library package coverage"
+    "packages/gateway-core|Gateway core package coverage"
+    "packages/health-metrics|Health metrics package coverage"
+    "packages/hosted-execution|Hosted execution owner coverage"
+    "packages/importers|Importers owner coverage"
+    "packages/inbox-services|Inbox services package coverage"
+    "packages/inboxd|Inboxd package coverage"
+    "packages/messaging-ingress|Messaging ingress package coverage"
+    "packages/openclaw-plugin|OpenClaw package coverage"
+    "packages/operator-config|Operator config package coverage"
+    "packages/parsers|Parsers package coverage"
+    "packages/query|Query owner coverage"
+    "packages/runtime-state|Runtime state package coverage"
+    "packages/vault-usecases|Vault usecases package coverage"
   )
-  local package_coverage_labels=(
-    "CLI package coverage"
-    "Assistant engine package coverage"
-    "Assistant runtime package coverage"
-    "Core owner coverage"
-    "Setup CLI package coverage"
-    "Assistant CLI package coverage"
-    "Assistantd package coverage"
-    "Cloudflare hosted control package coverage"
-    "Contracts package coverage"
-    "Clinical records package coverage"
-    "Device syncd package coverage"
-    "Exercise library package coverage"
-    "Gateway core package coverage"
-    "Health metrics package coverage"
-    "Hosted execution owner coverage"
-    "Hosted Temporal orchestrator package coverage"
-    "Importers owner coverage"
-    "Inbox services package coverage"
-    "Inboxd package coverage"
-    "Messaging ingress package coverage"
-    "OpenClaw package coverage"
-    "Operator config package coverage"
-    "Parsers package coverage"
-    "Query owner coverage"
-    "Runtime state package coverage"
-    "Vault usecases package coverage"
-  )
-  local package_count="${#package_coverage_dirs[@]}"
+  local package_coverage_dirs=()
+  local package_coverage_labels=()
+  local package_coverage_entry
+  for package_coverage_entry in "${package_coverage_plan[@]}"; do
+    package_coverage_dirs+=("${package_coverage_entry%%|*}")
+    package_coverage_labels+=("${package_coverage_entry#*|}")
+  done
+  local package_count="${#package_coverage_plan[@]}"
   local package_coverage_concurrency="$package_coverage_concurrency_limit"
   local package_coverage_cli_active_concurrency="$package_coverage_cli_active_concurrency_limit"
   local package_index=0

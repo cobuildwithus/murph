@@ -56,8 +56,8 @@ function createHarness() {
 set -euo pipefail
 if [[ "$*" == "pr view --json number --jq .number" ]]; then
   printf '%s\\n' '42'
-elif [[ "$*" == "pr view 42 --json headRefOid --jq .headRefOid" ]]; then
-  printf '%s\\n' "\${STUB_PR_HEAD}"
+elif [[ "$*" == "pr view 42 --json baseRefName,baseRefOid,headRefOid --jq [.baseRefName, .baseRefOid, .headRefOid] | @tsv" ]]; then
+  printf 'main\\t%s\\t%s\\n' "\${STUB_PR_BASE}" "\${STUB_PR_HEAD}"
 else
   printf 'unexpected gh invocation: %s\\n' "$*" >&2
   exit 2
@@ -95,6 +95,7 @@ set -euo pipefail
     REVIEW_GPT_PR_URL: '',
     REVIEW_GPT_REVIEW_PHASE: '',
     REVIEW_GPT_TEST_CAPTURE: capturePath,
+    STUB_PR_BASE: head,
     STUB_PR_HEAD: head,
   }
   return { capturePath, env, harnessRoot, head }

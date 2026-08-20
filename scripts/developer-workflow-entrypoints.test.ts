@@ -266,6 +266,22 @@ describe("pre-commit fixture identity", () => {
 });
 
 describe("pre-commit CLI schema generation", () => {
+  it("documents the narrow ordinary merge-commit exception", () => {
+    const agents = readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
+    const workflowRouting = readFileSync(
+      path.join(repoRoot, "agent-docs", "operations", "agent-workflow-routing.md"),
+      "utf8",
+    );
+
+    expect(agents).toContain("`scripts/committer` intentionally rejects an active `MERGE_HEAD`");
+    expect(agents).toContain("ordinary `git commit` without path arguments or hook bypass");
+    expect(workflowRouting).toContain("Narrow merge-commit exception");
+    expect(workflowRouting).toContain("`git diff --name-only --diff-filter=U`");
+    expect(workflowRouting).toContain("ordinary `git commit` without path arguments");
+    expect(workflowRouting).toContain("Do not pass `--no-verify`");
+    expect(workflowRouting).toContain("does not authorize starting a merge");
+  });
+
   it("skips generation for a CLI test-only change", () => {
     const harness = createPreCommitHarness();
     const testPath = path.join(
