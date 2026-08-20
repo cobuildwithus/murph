@@ -56,9 +56,11 @@ export async function runPrLifecycle({ cleanup, deploy, dispatch, now, postcondi
     }
   }
   if (finalizationError) {
-    throw new Error(primaryError
+    const message = primaryError
       ? `Native iOS E2E failed at ${primaryStage}; fail-closed finalization failed at ${finalizationStage}.`
-      : `Native iOS E2E finalization failed at ${finalizationStage}.`);
+      : `Native iOS E2E finalization failed at ${finalizationStage}.`;
+    if (primaryError) throw new AggregateError([primaryError, finalizationError], message);
+    throw new Error(message, { cause: finalizationError });
   }
   if (primaryError) throw primaryError;
 }

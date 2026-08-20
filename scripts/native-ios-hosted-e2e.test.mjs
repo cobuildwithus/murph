@@ -437,6 +437,10 @@ test("destructive database reset assumes the canonical schema owner", () => {
   const ownedConnectionString = withDedicatedDatabaseOwner(
     "postgresql://credential@db.example.test/native_ios_e2e?sslmode=require&options=-c%20statement_timeout%3D10000",
   );
+  assert.equal(
+    ownedConnectionString,
+    "postgresql://credential@db.example.test/native_ios_e2e?sslmode=require&options=-c%20statement_timeout%3D10000%20-c%20role%3Dpostgres",
+  );
   const ownedUrl = new URL(ownedConnectionString);
   assert.equal(ownedUrl.searchParams.get("sslmode"), "require");
   assert.equal(
@@ -902,36 +906,45 @@ test("PR lifecycle proves backend state before retirement and cleans in fail-clo
 
 test("PR lifecycle stays red when final cleanup fails", async () => {
   let cleanupCalls = 0;
+  const cleanupError = new Error("cleanup failed");
   await assert.rejects(() => runPrLifecycle({
     cleanup: async () => {
       cleanupCalls += 1;
-      if (cleanupCalls === 2) throw new Error("cleanup failed");
+      if (cleanupCalls === 2) throw cleanupError;
     },
     deploy: async () => "https://candidate.example",
     dispatch: async () => undefined,
     now: () => 123,
     postconditions: async () => undefined,
     retire: async () => undefined,
-  }), /finalization failed at cleanup_after_run/u);
+  }), (error) => {
+    assert.equal(error.message, "Native iOS E2E finalization failed at cleanup_after_run.");
+    assert.equal(error.cause, cleanupError);
+    return true;
+  });
 });
 
-test("PR lifecycle retains secret-safe primary and finalization stage names", async () => {
+test("PR lifecycle retains secret-safe stages and both failure causes", async () => {
   let cleanupCalls = 0;
+  const primaryError = new Error("candidate payload must stay hidden");
+  const cleanupError = new Error("provider payload must stay hidden");
   await assert.rejects(() => runPrLifecycle({
     cleanup: async () => {
       cleanupCalls += 1;
-      if (cleanupCalls === 2) throw new Error("provider payload must stay hidden");
+      if (cleanupCalls === 2) throw cleanupError;
     },
-    deploy: async () => { throw new Error("candidate payload must stay hidden"); },
+    deploy: async () => { throw primaryError; },
     dispatch: async () => undefined,
     now: () => 123,
     postconditions: async () => undefined,
     retire: async () => undefined,
   }), (error) => {
+    assert.ok(error instanceof AggregateError);
     assert.equal(
       error.message,
       "Native iOS E2E failed at deploy; fail-closed finalization failed at cleanup_after_run.",
     );
+    assert.deepEqual(error.errors, [primaryError, cleanupError]);
     assert.doesNotMatch(error.message, /provider payload|candidate payload/u);
     return true;
   });
