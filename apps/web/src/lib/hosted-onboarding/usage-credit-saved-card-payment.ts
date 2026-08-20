@@ -29,6 +29,7 @@ import {
   decryptHostedUsageCreditPurchaseStripeField,
   encryptHostedUsageCreditPurchaseStripeField,
   HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS,
+  isDefinitiveHostedUsageCreditStripeRequestRejection,
   requireHostedUsageCreditEncryptedValue,
   requireHostedUsageCreditLookupKey,
   requireHostedUsageCreditPurchasePayerMemberId,
@@ -843,7 +844,10 @@ async function confirmOrRecoverHostedUsageCreditPaymentIntent(input: {
         "paymentIntents.retrieve.saved-card-confirm-recovery",
       );
     }
-    if (recovered.status === "requires_confirmation") {
+    if (
+      recovered.status === "requires_confirmation" &&
+      !isDefinitiveHostedUsageCreditStripeRequestRejection(error)
+    ) {
       throw buildHostedUsageCreditStripeUnavailableError(
         error,
         "paymentIntents.confirm.saved-card",
