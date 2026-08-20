@@ -1,6 +1,6 @@
 # Restore hosted memory maintenance through a host-owned tool
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -136,3 +136,24 @@ Updated: 2026-08-20
   `rustPanic`, `bubblewrap`, `syntheticMount`, and `mount`, with no ordinary
   permission, missing-file, module, or seccomp error. This confirms the
   file-as-directory sandbox construction rather than a CLI or vault-data bug.
+- Exact-head CI result: every PR-owned gate passed at
+  `e165694e7645c83f2c0bdb81ca0c639e0b0de650`, including native AMD64 runner
+  sandbox proof, both host matrices, release build and app verification, all
+  four coverage lanes, billing and Stripe boundaries, reply cardinality,
+  repository hygiene, PR evidence, and Vercel's intentional ignored build.
+- Review result: the preliminary specialist and final round 1 both found the
+  missing downstream expectation required by the first `/app` candidate. The
+  finding was valid for that reviewed baseline and was superseded by the
+  host-owned-tool architecture, which deletes `/app` and shell mutation. The
+  specialist artifact was test-only and had its declared hash, but correctly
+  failed `git apply --check` on the current head because it would assert the
+  deleted permission. Final round 2 received a full guarded snapshot of the
+  current head, explicitly verified the prior finding as resolved, and returned
+  `ROUND_OUTCOME: PASS` with no qualifying findings. Parent final review found
+  no remaining correctness, security, reliability, privacy, or complexity
+  defect.
+- Closure boundary: this execution plan closes on the reviewed merge candidate.
+  The live incident workflow continues to own the single current-base
+  reconciliation, required exact-head CI, merge, protected production deploy,
+  post-deploy convergence proof, incident transition, and worktree retirement.
+Completed: 2026-08-20
