@@ -1131,6 +1131,43 @@ printf 'clean\\n'
       .toBeLessThan(runNextBuild!.indexOf('"${next_build_command[@]}"'));
   });
 
+  it("gives only the Assistant Engine root project the repository-owned heap", () => {
+    const runRepoVitest = extractWorkspaceVerifyFunction("run_repo_vitest");
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+pnpm() {
+  printf 'heap=%s command=%s\n' "\${NODE_OPTIONS-unset}" "$*"
+}
+
+unset NODE_OPTIONS
+
+${runRepoVitest}
+
+run_repo_vitest --no-coverage
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "heap=unset command=exec vitest run --config vitest.config.ts --project=!assistant-engine --no-coverage\n" +
+        "heap=--max-old-space-size=6144 command=exec vitest run --config vitest.config.ts --project=assistant-engine --no-coverage\n",
+    );
+  });
+
+  it("keeps release checks free of a process-wide Node heap", () => {
+    const releaseWorkflow = readFileSync(
+      path.join(repoRoot, ".github", "workflows", "release.yml"),
+      "utf8",
+    );
+    const releaseCheckStep = releaseWorkflow.match(
+      /^      - name: Run release checks[\s\S]*?(?=^      - name: )/m,
+    )?.[0];
+
+    expect(releaseCheckStep).toBeTruthy();
+    expect(releaseCheckStep).toContain("run: pnpm release:check");
+    expect(releaseWorkflow).not.toContain("NODE_OPTIONS");
+  });
+
   it("gives only Assistant Engine package coverage the repository-owned heap", () => {
     const runWorkspacePackageCoverage = extractWorkspaceVerifyFunction(
       "run_workspace_package_coverage",
