@@ -14,6 +14,7 @@ import {
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   claimHostedLinqDeliveryProviderDispatchTx,
+  HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   readHostedLinqDeliveryProviderDispatchIntentTx,
@@ -829,6 +830,7 @@ async function sendHostedLinqSideEffect(
   let deliveryEffect = effect;
   let providerIdempotencyKey = effect.effectId;
   let providerRequestCompleted = false;
+  let replayingRichLinkPartial = false;
   let usageLimitDispatchClaimed = false;
 
   try {
@@ -945,6 +947,8 @@ async function sendHostedLinqSideEffect(
       }
       usageLimitDispatchClaimed = true;
       providerIdempotencyKey = dispatch.providerIdempotencyKey;
+      replayingRichLinkPartial =
+        dispatch.replayingRichLinkPartial === true;
       deliveryEffect = dispatch.idempotencyKey === effect.effectId
         ? effect
         : { ...effect, effectId: dispatch.idempotencyKey };
@@ -976,6 +980,9 @@ async function sendHostedLinqSideEffect(
       messageId: result.messageId,
       messageIds: result.providerMessageIds,
       prisma: options.prisma,
+      ...(replayingRichLinkPartial
+        ? { replayingRichLinkPartial: true }
+        : {}),
       throwOnError:
         deliveryEffect.payload.template === "ai_usage_quota"
         || options.completeProviderOutcomeBeforeReturn,
@@ -1037,7 +1044,22 @@ async function sendHostedLinqSideEffect(
                 linqChatId: partialDelivery.linqChatId,
                 messageIds: partialDelivery.messageIds,
                 prisma: options.prisma,
+                ...(replayingRichLinkPartial
+                  ? { replayingRichLinkPartial: true }
+                  : {}),
               }
+            : replayingRichLinkPartial
+              ? {
+                  expectedAttemptedAt: new Date(
+                    usageLimitPayload.claimToken.sentAt,
+                  ),
+                  failureCode:
+                    HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
+                  failureReason: error instanceof Error ? error.message : null,
+                  idempotencyKey: deliveryEffect.effectId,
+                  prisma: options.prisma,
+                  replayingRichLinkPartial: true,
+                }
             : {
                 expectedAttemptedAt: new Date(
                   usageLimitPayload.claimToken.sentAt,
@@ -1884,6 +1906,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
   messageId: string | null;
   messageIds?: readonly string[];
   prisma: HostedLinqTransportPersistenceClient;
+  replayingRichLinkPartial?: boolean;
   throwOnError?: boolean;
 }): Promise<void> {
   const template = input.effect.payload.template;
@@ -1901,6 +1924,9 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
         messageId: input.messageId,
         ...(input.messageIds ? { messageIds: input.messageIds } : {}),
         prisma,
+        ...(input.replayingRichLinkPartial
+          ? { replayingRichLinkPartial: true }
+          : {}),
       });
       if (milestone.reopenOnboardingLink) {
         const groupJoinReplyContext =

@@ -9,6 +9,7 @@ import {
   parseHostedRuntimeReconciliationFacts,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
   type HostedRuntimeReconciliationBlockedReason,
   type HostedRuntimeReconciliationFacts,
@@ -409,6 +410,13 @@ function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): boolean {
+  if (
+    input.workspace.nextWakeReason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+    && isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
+  ) {
+    return false;
+  }
+
   if (input.freshConversationMailboxLag) {
     return true;
   }
@@ -447,6 +455,9 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
   return earliestHostedRuntimeReconciliationTimestamp([
     input.noticeRetryAt?.toISOString() ?? null,
     input.aiRetryAt,
+    input.workspace.nextWakeReason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+      ? readHostedRuntimeFutureTimestamp(input.workspace.nextWakeAt, input.now)
+      : null,
     readHostedRuntimeFutureTimestamp(input.workspace.inboxMediaRetentionWakeAt, input.now),
   ]);
 }
@@ -699,6 +710,7 @@ function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | 
     case "alarm":
     case "assistant":
     case "assistant_due":
+    case HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON:
     case "device-sync.reconcile":
     case "mailbox":
       return reason;
@@ -710,6 +722,9 @@ function describeHostedRuntimeWakeReasonForLog(reason: string | null): string | 
 function isHostedRuntimeModelCapableWorkspaceWakeReason(
   reason: string | null,
 ): boolean {
+  if (reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON) {
+    return false;
+  }
   return reason === "assistant" || reason === "assistant_due";
 }
 

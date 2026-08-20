@@ -1,7 +1,7 @@
 # Retire Persistent Hosted Runtime Wakes
 
 Status: active
-Updated: 2026-08-19
+Updated: 2026-08-20
 
 ## Goal
 
@@ -40,6 +40,31 @@ boundaries between Web, Temporal, and the Cloudflare runtime.
 
 All evidence is aggregate and contains no production identifiers.
 
+## Residual Production Evidence
+
+- The first public/private rollout removed the one-to-three-second checkpoint
+  loop, but production retained roughly 15 to 30 successful no-op system
+  imports per minute across 15 to 18 runtimes.
+- Those invocations fetched and imported zero items, did not change runtime
+  state, and repeatedly reported the same mailbox and workspace frontiers.
+- The shared recovery schedule runs every minute. Its mailbox-handoff query
+  compared system item sequence numbers with the lane counter `consumed_seq`,
+  even though system handoff ownership transfers at the workspace's imported
+  frontier and `consumed_seq` does not represent that boundary.
+- The live query selected nineteen runtime-control candidates. All nineteen
+  first candidates were already imported, while an imported-frontier version
+  of the query retained only one genuinely unimported handoff candidate.
+- Imported-but-unhandled items remain durable in runtime state with their own
+  retry timestamp. Re-signaling them from Web bypassed that owner and recreated
+  the minute-level no-op loop.
+- After the imported-frontier correction reached the exact production domain,
+  the handoff sweep fell from roughly twenty candidates per minute to one. A
+  second bounded source remained: about twenty long-running Junction schedules
+  retained the same canonical due tuple, and every five-minute recovery bucket
+  re-signaled their duplicate mailbox items. Those signals produced another
+  delayed wave of successful zero-fetch, zero-import invocations even though
+  the runtime already owned the imported work.
+
 ## Product UX Patch
 
 - Runnable scheduled work must continue to execute promptly.
@@ -76,13 +101,24 @@ All evidence is aggregate and contains no production identifiers.
 7. Merge and deploy in compatibility order, then verify multiple complete
    production windows until churn collapses and the retained system gap drains
    without lost assistant wakes or shifted errors.
+8. Retire the Web recovery sweep's ownership at the persisted system imported
+   frontier, preserve recovery for never-imported items, and verify production
+   quiescence after the follow-up Web deployment.
+9. Keep the direct Temporal signal on the first scheduled device-sync mailbox
+   append, but do not signal a duplicate append from a later recovery bucket.
+   Let the imported-frontier handoff sweep recover a missed first signal and the
+   runtime's persisted retry timestamp own imported continuation work.
 
 ## Verification
 
-- Root cause: proven from current production aggregates, authoritative Web
-  reconciliation logs, exact deployed code, and the existing runtime guard
-  regression.
-- Independent ReviewGPT root-cause audit: running.
-- Public contract/Cloudflare tests, private Temporal/replay tests, typechecks,
-  bundle proof, exact-head ReviewGPT gates, CI, deploy, and production
-  convergence: pending.
+- Initial cross-runtime ownership correction: merged and deployed.
+- Residual root cause: proven from current production aggregates, the exact
+  minute-sweep query, persisted workspace frontiers, and repeated no-op runtime
+  logs.
+- Follow-up focused regressions, real-PostgreSQL imported-frontier proof, Web
+  typecheck, and focused lint: passed.
+- Imported-frontier PR, exact-head ReviewGPT gates, required CI, merge, and Web
+  deployment: passed. The production handoff candidate count converged from
+  roughly twenty per minute to one with no warning/error shift.
+- Duplicate due-reconcile signal retirement, exact-head gates, deploy, and final
+  production convergence: pending.

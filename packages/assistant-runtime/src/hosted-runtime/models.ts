@@ -220,6 +220,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationCronStatusElapsedMs?: number | null;
   assistantAutomationCurrentTurnDeliveryIntentIds?: string[] | null;
   assistantAutomationElapsedMs?: number | null;
+  assistantAutomationOutboxOnlyNextWakeAt?: string | null;
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationPostScanTailElapsedMs?: number | null;
   assistantAutomationProductFeedbackCandidates?:

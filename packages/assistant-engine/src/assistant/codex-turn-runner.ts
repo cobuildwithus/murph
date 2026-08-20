@@ -148,7 +148,7 @@ const ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
   'features.request_permissions_tool': false,
   'skills.include_instructions': false,
 } as const
-const ASSISTANT_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+const ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
   ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
@@ -570,6 +570,8 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.input.maintenanceProfile === 'member-memory' &&
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+    const toolOnlyMaintenanceTurn =
+      groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
     const restrictedOneShotTurn =
       groupRoomModelMaintenanceTurn ||
       memberMemoryMaintenanceTurn ||
@@ -636,15 +638,15 @@ async function executeAssistantCodexAttempt(input: {
           nativeCapabilitiesRestrictedTurn:
             hostedImageCompletionNativeCapabilitiesRestrictedTurn,
           shellPreservingCapabilitiesRestrictedTurn:
-            memberMemoryMaintenanceTurn || readOnlyAutomationTurn,
+            readOnlyAutomationTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
         codexThreadConfig:
           nativeCapabilitiesRestrictedTurn
             ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
-            : groupRoomModelMaintenanceTurn
-              ? ASSISTANT_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG
-              : memberMemoryMaintenanceTurn || readOnlyAutomationTurn
+            : toolOnlyMaintenanceTurn
+              ? ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG
+              : readOnlyAutomationTurn
                 ? ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG
                 : null,
         conversationHistoryMessages:
@@ -654,7 +656,9 @@ async function executeAssistantCodexAttempt(input: {
           ? []
           : attemptPlan.routePlan.dynamicTools,
         environments:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          nativeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
@@ -666,12 +670,17 @@ async function executeAssistantCodexAttempt(input: {
           : {}),
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
+        memberMemoryMaintenanceAuthorized: memberMemoryMaintenanceTurn,
         hostedToolContext:
-          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
         materializeWorkspaceArtifacts:
-          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onboardingFirstReadCompletionTransitionAvailable:
@@ -710,7 +719,9 @@ async function executeAssistantCodexAttempt(input: {
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
         progressDelivery:
-          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn
           ? null
           : executionPlan.progressDelivery ?? null,
         permissions:
@@ -741,12 +752,14 @@ async function executeAssistantCodexAttempt(input: {
         publicInternetFetch:
           outputOnlyTurn ||
           readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn ||
           hostedImageCompletionNativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
           !hostedRuntimeCapabilitiesRestrictedTurn &&
           !readOnlyAutomationTurn &&
+          !toolOnlyMaintenanceTurn &&
           Boolean(executionPlan.executionContext?.hosted),
         runtimeWorkspaceRoots:
           restrictedOneShotTurn || ordinaryHostedWorkspaceTurn

@@ -73,6 +73,7 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
         JUNCTION_API_KEY: "sk_us_test_runtime",
         JUNCTION_CLIENT_USER_ID_SECRET: "runtime-client-user-secret",
         JUNCTION_ENV: "sandbox",
+        JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED: "true",
         JUNCTION_REGION: "us",
       },
     );
@@ -81,6 +82,7 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
       apiKey: "sk_us_test_runtime",
       clientUserIdSecret: "runtime-client-user-secret",
       environment: "sandbox",
+      pushSourceRecoveryEnabled: true,
       region: "us",
     });
     expect(resolved.junction).not.toHaveProperty("timeseriesResources");

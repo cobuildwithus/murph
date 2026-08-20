@@ -23,6 +23,10 @@ import {
   detectWorkspacePackageCycles,
   formatWorkspacePackageCycles,
 } from '../../../scripts/check-workspace-package-cycles.mjs'
+import {
+  PACKAGE_COVERAGE_PLAN,
+  packageCoverageDirsForShard,
+} from '../../../scripts/release-verification-plan.mjs'
 import { withoutNodeV8Coverage } from './cli-test-helpers.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -1117,6 +1121,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
     expect(rootPackageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
     expect(rootPackageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
+    expect(rootPackageJson.scripts?.['release:check:preflight']).toBe(
+      'bash scripts/release-check.sh --preflight',
+    )
     expect(rootPackageJson.scripts?.['release:trust:github']).toBe(
       'node scripts/configure-trusted-publishing.mjs',
     )
@@ -1193,13 +1200,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.134')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.136')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.134'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.136'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1383,7 +1390,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
     expect(reviewGptReadme).toContain('after at least 5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
-      'A marked concrete-model response shorter than the trust threshold fails closed as untrusted',
+      'A marked concrete-model response may complete before the trust threshold only when the same snapshot exposes compatible concrete platform-model metadata',
     )
     expect(reviewGptReadme).toContain(
       'The threshold defaults to 5 minutes and can be raised or lowered',
@@ -1592,7 +1599,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
     expect(reviewGptConfig).toContain(
-      'if [[ ! -x "$review_gpt_installed_browser_binary" && ! -d "$review_gpt_selected_browser_app" ]]',
+      'if [[ -z "${browser_binary_path:-}" \\',
+    )
+    expect(reviewGptConfig).toContain(
+      '&& "$review_gpt_selected_browser_lane" != "main" \\',
+    )
+    expect(reviewGptConfig).toContain(
+      '&& ! -x "$review_gpt_installed_browser_binary" \\',
+    )
+    expect(reviewGptConfig).toContain(
+      '&& ! -d "$review_gpt_selected_browser_app" ]]; then',
     )
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
@@ -1636,7 +1652,7 @@ describe('monorepo release flow coverage audit', () => {
       'managed_browser_display_mode="${managed_browser_display_mode:-headful}"',
     )
     expect(reviewGptConfig).toContain(
-      'review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"',
+      'review_gpt_installed_browser_binary="${review_gpt_installed_browser_binary:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"',
     )
     expect(reviewGptConfig).toContain(
       'browser_binary_path="${browser_binary_path:-$review_gpt_installed_browser_binary}"',
@@ -2239,7 +2255,7 @@ describe('monorepo release flow coverage audit', () => {
       'Brave Browser',
     )
     const installedBrowserAssignment =
-      'review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"'
+      'review_gpt_installed_browser_binary="${review_gpt_installed_browser_binary:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"'
     const controlledConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
       'utf8',
@@ -5295,8 +5311,12 @@ printf 'ZIP: %s (%s bytes)\n' \
     )
 
     expect(releaseCheck).toContain('bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh')
+    expect(releaseCheck).toContain('node scripts/release-verification-plan.mjs --check')
     expect(releaseCheck).toContain('node scripts/verify-release-target.mjs')
     expect(releaseCheck).toContain('corepack pnpm build:workspace:clean')
+    expect(releaseCheck).toContain('if [[ "$release_check_mode" == "--preflight" ]]')
+    expect(releaseCheck).toContain('corepack pnpm typecheck')
+    expect(releaseCheck).toContain('bash scripts/doc-gardening.sh --fail-on-issues')
     expect(releaseCheck).toContain('corepack pnpm verify:acceptance')
     expect(releaseCheck).not.toContain('pnpm install --frozen-lockfile')
     expect(releaseCheck).not.toContain('pnpm verify:repo')
@@ -5449,13 +5469,24 @@ printf 'ZIP: %s (%s bytes)\n' \
     const cliCoverageBranch = workspaceVerify.match(
       /run_workspace_package_coverage\(\) \{[\s\S]*?^\}/m,
     )?.[0]
-    const packageCoverageDirs = workspaceVerify.match(
-      /local package_coverage_dirs=\([\s\S]*?^  \)/m,
-    )?.[0]
+    const packageCoverageDirs = packageCoverageDirsForShard('all', repoRoot)
 
     expect(runTimedStep).toBeTruthy()
     expect(cliCoverageBranch).toBeTruthy()
-    expect(packageCoverageDirs).toBeTruthy()
+    expect(packageCoverageDirs).toEqual(PACKAGE_COVERAGE_PLAN.map(({ dir }) => dir))
+    expect(() => packageCoverageDirsForShard('missing-release-shard', repoRoot)).toThrow(
+      "Package coverage shard 'missing-release-shard' matched zero packages.",
+    )
+    expect(workspaceVerify).toContain(
+      'node scripts/release-verification-plan.mjs --package-dirs "$package_coverage_shard"',
+    )
+    expect(workspaceVerify).toContain(
+      'MURPH_PACKAGE_COVERAGE_SHARD is only valid with test:packages:coverage',
+    )
+    expect(workspaceVerify).not.toContain('local package_coverage_labels=(')
+    expect(workspaceVerify).toContain(
+      'local package_label="Package coverage for ${package_dir}"',
+    )
     expect(cliCoverageBranch).toContain(
       'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
     )
@@ -5468,11 +5499,11 @@ printf 'ZIP: %s (%s bytes)\n' \
     expect(workspaceVerify).toContain('failure_labels_dir="$failure_dir/failures"')
     expect(workspaceVerify).toContain('status_dir="$failure_dir/status"')
     expect(workspaceVerify).toContain('reap_finished_package_coverage()')
-    expect(packageCoverageDirs!.indexOf('"packages/cli"')).toBeLessThan(
-      packageCoverageDirs!.indexOf('"packages/contracts"'),
+    expect(packageCoverageDirs.indexOf('packages/cli')).toBeLessThan(
+      packageCoverageDirs.indexOf('packages/contracts'),
     )
-    expect(packageCoverageDirs!.indexOf('"packages/contracts"')).toBeLessThan(
-      packageCoverageDirs!.indexOf('"packages/device-syncd"'),
+    expect(packageCoverageDirs.indexOf('packages/contracts')).toBeLessThan(
+      packageCoverageDirs.indexOf('packages/device-syncd'),
     )
     expect(cliCoverageBranch).toContain('return $?')
     const harnessDir = mkdtempSync(

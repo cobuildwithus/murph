@@ -293,6 +293,8 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.maintenance_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.module_load_failed");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.pass_finished");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.pass_started");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.wake_projection_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
@@ -3060,6 +3062,42 @@ describe("hosted runtime control contracts", () => {
       skippedCount: 1,
       tombstonedDenseRawArtifactCount: 2,
     });
+    expect(parseHostedRuntimeLogRequest({
+      entries: [{
+        ...entry,
+        attemptId: "attempt_device_sync_lifecycle",
+        component: "device-sync",
+        eventCode: "device-sync.pass_finished",
+        leaseGeneration: "15",
+        phase: "invoke",
+        redactedJson: {
+          configured: true,
+          elapsedMs: 45000,
+          lifecycle: "finished",
+          nextWakeAtPresent: true,
+          outcome: "yielded",
+          passStage: "worker_drain",
+          postCheckpointRecordPresent: true,
+          processedJobs: 3,
+          retainFollowUpWakeUntilCheckpoint: true,
+          skipped: true,
+          stagedDirtyAckCount: 1,
+          timeoutMs: 45000,
+          wakeKind: "device-sync.wake",
+          wakeReason: "reconcile_due",
+          yieldReason: "timeout",
+        },
+        workspaceVersion: "16",
+      }],
+    }).entries[0]).toEqual(expect.objectContaining({
+      attemptId: "attempt_device_sync_lifecycle",
+      eventCode: "device-sync.pass_finished",
+      redactedJson: expect.objectContaining({
+        outcome: "yielded",
+        passStage: "worker_drain",
+        yieldReason: "timeout",
+      }),
+    }));
     expect(parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

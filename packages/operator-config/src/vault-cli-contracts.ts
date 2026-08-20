@@ -186,6 +186,8 @@ const workoutExerciseResultSchema = z.object({
     .optional(),
   unitOverride: z.enum(['lb', 'kg']).optional(),
   note: z.string().min(1).optional(),
+  memberRepsPerSet: z.number().int().min(1).max(999).optional(),
+  setPlanIsFinite: z.boolean().optional(),
   sets: z.array(workoutSetResultSchema).min(1).max(150),
 })
 

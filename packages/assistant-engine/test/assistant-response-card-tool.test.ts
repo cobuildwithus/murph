@@ -852,7 +852,13 @@ describe('murph.attach_response_card', () => {
       'Occurrence authority alone is not card intent',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'verified initial card after starting or resuming one canonical live workout',
+      'verified initial card after starting or exact-reading one canonical workout',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'including the just-completed final snapshot',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'the same exact open or just-finished workout',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'with multiple plausible workouts, do not infer authority',
@@ -1398,7 +1404,7 @@ describe('murph.attach_response_card', () => {
     })
   })
 
-  it('hydrates active workout cards with trusted exact editor state', async () => {
+  it('hydrates exact open workout cards with trusted editor state', async () => {
     const fixture = await createLiveWorkoutCardVault()
     const result = await executeCardTool({
       request: {

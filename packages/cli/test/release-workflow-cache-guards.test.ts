@@ -144,9 +144,55 @@ describe('GitHub Actions cache trust-boundary guards', () => {
       isAllowedNativeIosHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
         workflow.replace(
+          " && needs.select-pr.outputs.trusted == 'true'",
+          '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        removeWorkflowStep(workflow, 'Revalidate exact PR head before runner setup'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow.replace(
+          '      pull-requests: read\n',
+          '      pull-requests: read\n      statuses: write\n',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow.replace('      contents: read\n', '      contents: write\n'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow.replace(
           'ref: ${{ github.event.repository.default_branch }}',
           () => 'ref: ${{ needs.select-pr.outputs.head_ref }}',
         ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeIosHostedE2eHandoff(
+        'native-ios-hosted-e2e.yml',
+        workflow.replace('persist-credentials: false', 'persist-credentials: true'),
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
@@ -261,19 +307,64 @@ function isAllowedNativeIosHostedE2eHandoff(
   }
 
   const prLive = jobs['pr-live']
-  if (!isRecord(prLive) || !hasTrustedControlPlaneCheckout(prLive.steps)) {
+  if (
+    !isRecord(prLive)
+    || !hasTrustedPrLiveAdmission(prLive)
+    || !hasExactReadOnlyPrLivePermissions(prLive.permissions)
+    || !hasEarlyExactPrHeadRevalidation(prLive.steps)
+    || !hasTrustedControlPlaneCheckout(prLive.steps)
+  ) {
     return false
   }
 
   return (
     isStringArray(workflowRun.workflows, ['Repo Hygiene'])
     && isStringArray(workflowRun.types, ['completed'])
-    && workflow.includes('PR head changed before live E2E.')
     && workflow.includes('node scripts/native-ios-hosted-e2e.mjs pr')
     && workflow.includes('PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}')
     && workflow.includes('NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}')
-    && workflow.includes("description='Selected PR requires a reviewed same-repository human-authored head.'")
   )
+}
+
+function hasExactReadOnlyPrLivePermissions(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return Object.keys(value).sort().join(',') === 'contents,pull-requests'
+    && value.contents === 'read'
+    && value['pull-requests'] === 'read'
+}
+
+function hasTrustedPrLiveAdmission(prLive: Record<string, unknown>): boolean {
+  return prLive.if === "${{ github.run_attempt == 1 && github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
+}
+
+function hasEarlyExactPrHeadRevalidation(value: unknown): boolean {
+  if (!Array.isArray(value)) {
+    return false
+  }
+
+  const checkoutIndex = value.findIndex((step) =>
+    isRecord(step) && step.name === 'Checkout trusted control plane'
+  )
+  const revalidationIndex = value.findIndex((step) => {
+    if (!isRecord(step) || !isRecord(step.env) || typeof step.run !== 'string') {
+      return false
+    }
+
+    return step.shell === 'bash'
+      && step.env.EXPECTED_HEAD_SHA === '${{ needs.select-pr.outputs.head_sha }}'
+      && step.env.GH_TOKEN === '${{ github.token }}'
+      && step.env.PR_NUMBER === '${{ github.event.workflow_run.pull_requests[0].number }}'
+      && step.run.includes('gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"')
+      && step.run.includes("--jq '.head.sha'")
+      && step.run.includes('[[ "${current}" == "${EXPECTED_HEAD_SHA}" ]]')
+  })
+
+  return revalidationIndex >= 0
+    && checkoutIndex >= 0
+    && revalidationIndex < checkoutIndex
 }
 
 function hasTrustedControlPlaneCheckout(value: unknown): boolean {
@@ -292,6 +383,19 @@ function hasTrustedControlPlaneCheckout(value: unknown): boolean {
   return isRecord(checkoutWith)
     && checkoutWith.ref === '${{ github.event.repository.default_branch }}'
     && checkoutWith['persist-credentials'] === false
+}
+
+function removeWorkflowStep(workflow: string, stepName: string): string {
+  const marker = `      - name: ${stepName}\n`
+  const start = workflow.indexOf(marker)
+  if (start < 0) {
+    throw new Error(`Workflow step ${stepName} was not found.`)
+  }
+  const nextStep = workflow.indexOf('\n      - name:', start + marker.length)
+  if (nextStep < 0) {
+    throw new Error(`Workflow step after ${stepName} was not found.`)
+  }
+  return `${workflow.slice(0, start)}${workflow.slice(nextStep + 1)}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

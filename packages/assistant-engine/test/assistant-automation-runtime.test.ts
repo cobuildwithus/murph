@@ -13809,6 +13809,52 @@ describe('assistant automation run loop', () => {
     )
   })
 
+  it('marks the selected wake as outbox-only unless model-capable work ties it', async () => {
+    const wakeAt = '2026-04-08T00:00:30.000Z'
+    const buildScanResult = (replyWakeAt: string | null) => ({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: replyWakeAt,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    runLoopMocks.buildAssistantOutboxSummary.mockResolvedValue({
+      nextAttemptAt: wakeAt,
+    })
+    runLoopMocks.scanAssistantAutomationOnce
+      .mockResolvedValueOnce(buildScanResult(null))
+      .mockResolvedValueOnce(buildScanResult(wakeAt))
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    await expect(runLoop.runAssistantAutomationPass({
+      requestId: 'request-outbox-only-wake',
+      vault: '/tmp/assistant-automation-vault',
+    })).resolves.toMatchObject({
+      nextWakeAt: wakeAt,
+      outboxOnlyNextWakeAt: wakeAt,
+    })
+
+    const tied = await runLoop.runAssistantAutomationPass({
+      requestId: 'request-tied-model-wake',
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(tied.nextWakeAt).toBe(wakeAt)
+    expect(tied).not.toHaveProperty('outboxOnlyNextWakeAt')
+  })
+
   it('can finish a document-preservation retry pass without replying or outbox work', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],

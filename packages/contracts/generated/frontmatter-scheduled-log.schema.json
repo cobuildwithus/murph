@@ -656,6 +656,14 @@
                         "minLength": 1,
                         "maxLength": 4000
                       },
+                      "memberRepsPerSet": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 999
+                      },
+                      "setPlanIsFinite": {
+                        "type": "boolean"
+                      },
                       "sets": {
                         "minItems": 1,
                         "maxItems": 150,

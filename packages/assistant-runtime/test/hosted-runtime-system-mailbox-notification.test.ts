@@ -3164,10 +3164,24 @@ describe("hosted system mailbox notification execution context", () => {
         now: () => FIXED_NOW,
         retainProcessedItemUntilRecorded: true,
         runtime,
+        runtimeLogContext: {
+          attemptId: "attempt_device_sync_mailbox",
+          leaseGeneration: "13",
+          workspaceVersion: "14",
+        },
         runtimeEnv: {},
         vaultRoot: workspace.vaultRoot,
       });
       assert.equal(prepared?.status, "processed");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runtimeLogContext: {
+            attemptId: "attempt_device_sync_mailbox",
+            leaseGeneration: "13",
+            workspaceVersion: "14",
+          },
+        }),
+      );
 
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         item: prepared.item,

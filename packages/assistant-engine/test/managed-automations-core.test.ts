@@ -1112,7 +1112,12 @@ describe('applyMurphManagedAutomations core integration', () => {
       'bounded committed user and assistant conversation messages from the last 7 days',
     )
     expect(automation.instructions).toContain('supplied conversation evidence')
-    expect(automation.instructions).toContain('Do not read transcript files or session storage')
+    expect(automation.instructions).toContain(
+      '`murph.member_memory` with `action="show"`',
+    )
+    expect(automation.instructions).toContain(
+      'Do not use the shell or read transcript files, session storage',
+    )
     expect(automation.instructions).toContain('Do not save assistant speculation')
   })
 
