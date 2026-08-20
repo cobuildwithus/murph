@@ -1346,6 +1346,7 @@ Opt-in runtime integrations:
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
 - `JUNCTION_PROVIDER_FILTER`
+- `JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED`
 - `JUNCTION_SUMMARY_RESOURCES`
 - `JUNCTION_SUMMARY_BACKFILL_DAYS`
 - `JUNCTION_TIMESERIES_BACKFILL_DAYS`
@@ -1370,6 +1371,17 @@ Correct the callback hostname before either Web or Worker deployment, and ship
 the Web start/build guard with the Cloudflare preflight change. During a skewed
 rollout the Web start guard still fails closed before OAuth state or provider
 authorization; do not bypass it to recover an invalid split-host environment.
+
+`JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED` is an explicit production rollout gate
+for the bounded Garmin push-source recovery ladder. Leave it unset until a
+scoped operator recovery proves Junction enabled Bulk Trigger Historical Pull
+for the team; the vendor disables that Link Migration endpoint by default.
+After that proof, set the GitHub `production` environment variable to exactly
+`true`, deploy Cloudflare, and confirm aggregate recovery attempt/status
+metadata appears before relying on the ladder. A gated endpoint must remain an
+`unavailable` operational result, not a reason to reset or deregister a shared
+Junction connection. Disabling the variable and redeploying stops new automatic
+attempts without changing existing connection state.
 
 Device-webhook burst transport requires a main Queue and DLQ named from the
 deployed Worker (`<worker>-device-webhooks` and

@@ -1056,6 +1056,15 @@ Last verified: 2026-08-20
   for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- Hosted Web Google Cloud KMS decrypts are replay-safe and use at most two
+  whole-operation attempts. Each attempt retains the ten-second bound across
+  Workload Identity authentication and the KMS RPC, while one 25-second
+  aggregate deadline and the caller abort signal own the full operation. Only
+  a local/provider deadline or provider `UNAVAILABLE` result may trigger the
+  second attempt, after 100–300 ms of abortable jitter. Encrypt, sign, MAC,
+  permission/authentication, quota, input, and integrity failures remain
+  single-attempt and fail closed; the official SDK's broad default retry budget
+  stays disabled.
 - Hosted artifact uploads are content-addressed and replay-safe. Transport failures
   plus HTTP 408, 429, and 5xx responses carry typed retryability into the existing
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
