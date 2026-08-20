@@ -300,7 +300,8 @@ test("screenshot categories keep the production studies available without one gi
     new URL("../app/design/group-usage-funding-study.tsx", import.meta.url),
     "utf8",
   );
-  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(4);
+  expect(groupFundingStudySource.match(/\binitialOpen\b/gu)).toHaveLength(5);
+  expect(groupFundingStudySource).toContain('"#group-funding-receipt"');
   expect(groupFundingStudySource).toContain('returnPreview === "failed"');
   expect(groupFundingStudySource).toContain('returnPreview === "family"');
   expect(groupFundingStudySource).toContain('returnPreview === "inactive"');

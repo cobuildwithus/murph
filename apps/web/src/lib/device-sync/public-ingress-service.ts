@@ -3,6 +3,9 @@ import {
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
 import {
+  canonicalizeJunctionProviderSlug,
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   normalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
@@ -10,6 +13,7 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncSourceDisconnectFenced,
 } from "@murphai/device-syncd/public-account";
 import {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
@@ -57,6 +61,7 @@ import {
   handleHostedDeviceSyncWebhookAccepted,
   prepareHostedDeviceSyncConnectionSourceStart,
 } from "./wake-service";
+import { completeHostedGoogleHealthFitbitMigration } from "./fitbit-migration-cutover";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 import {
@@ -106,7 +111,7 @@ export class HostedDeviceSyncPublicIngressService {
         // confirms access under the consent/app/connection/source fences.
         onConnectionSourceObserved: ({ account, sourceProviderSlug }) =>
           account.provider === "junction"
-            && normalizeJunctionProviderSlug(sourceProviderSlug) !== null
+            && canonicalizeJunctionProviderSlug(sourceProviderSlug) !== null
             ? { sourceAdmissionDeferred: true }
             : undefined,
         onConnectionEstablished: async ({
@@ -126,9 +131,46 @@ export class HostedDeviceSyncPublicIngressService {
             });
           }
 
+          let connectionWork = connection;
+          if (
+            account.provider === "junction"
+            && normalizeJunctionProviderSlug(sourceProviderSlug)
+              === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+          ) {
+            const legacy = (await this.context.store.listConnectionSources(account.id))
+              .find((source) =>
+                normalizeJunctionProviderSlug(source.sourceProviderSlug)
+                  === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+                && source.status !== "disconnected"
+                && !isDeviceSyncSourceDisconnectFenced(source)
+              );
+            const legacyWork = legacy
+              ? provider.connectionHandler?.buildSourceConnectionWork?.({
+                  historicalProofAuthorization: {
+                    firstSeenAt: now,
+                    sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+                  },
+                  now,
+                  sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+                })
+              : null;
+            const legacyBackfillJobs = legacyWork?.initialJobs?.filter(
+              (job) => job.kind === "backfill",
+            ) ?? [];
+            if (legacyBackfillJobs.length > 0) {
+              connectionWork = {
+                ...connection,
+                initialJobs: [
+                  ...(connection.initialJobs ?? []),
+                  ...legacyBackfillJobs,
+                ],
+              };
+            }
+          }
+
           await handleHostedDeviceSyncConnectionEstablished({
             account,
-            connection,
+            connection: connectionWork,
             connectionStartedAt: connectionStartedAt ?? null,
             now,
             sourceProviderSlug: sourceProviderSlug ?? null,
@@ -714,6 +756,30 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+  async completeGoogleHealthFitbitMigration(
+    userId: string,
+    connectionId: string,
+  ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+    const registry = await this.resolveRegistryForConnection(userId, connectionId);
+    return completeHostedGoogleHealthFitbitMigration({
+      connectionId,
+      registry,
+      store: this.context.store,
+      userId,
+    });
+  }
+
+  async completeBrowserGoogleHealthFitbitMigration(
+    userId: string,
+    publicConnectionId: string,
+  ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+    const connection = await this.requireOwnedBrowserConnection(
+      userId,
+      publicConnectionId,
+    );
+    return this.completeGoogleHealthFitbitMigration(userId, connection.id);
+  }
+
   async disconnectAllConnections(userId: string): Promise<{
     attemptedCount: number;
     disconnectedCount: number;
@@ -837,7 +903,7 @@ function buildPreparedSourceLifecycleKey(
   provider: string,
   sourceProviderSlug: string | null,
 ): string | null {
-  const normalizedSourceProviderSlug = normalizeJunctionProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   return provider === "junction" && normalizedSourceProviderSlug
     ? `${userId}\u0000${normalizedSourceProviderSlug}`
     : null;

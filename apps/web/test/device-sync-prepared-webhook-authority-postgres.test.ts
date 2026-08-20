@@ -3,20 +3,36 @@ import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import {
   createDeviceSyncRegistry,
-  createJunctionDeviceSyncProvider,
   createStravaDeviceSyncProvider,
 } from "@murphai/device-syncd/public-ingress";
+import { createConfiguredDeviceSyncRegistryFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 import type { DeviceSyncRegistry } from "@murphai/device-syncd/types";
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostedDeviceSyncControlPlaneContext } from "@/src/lib/device-sync/control-plane-context";
-import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import { completeHostedGoogleHealthFitbitMigration } from "@/src/lib/device-sync/fitbit-migration-cutover";
+import {
+  mapHostedConnectionRecord,
+  PrismaDeviceSyncControlPlaneStore,
+} from "@/src/lib/device-sync/prisma-store";
 import { HostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
+import {
+  beginHostedDeviceSyncConnectionSourceReconnect,
+  captureHostedDeviceSyncConnectionSourceReconnect,
+  disconnectHostedDeviceSyncConnectionSource,
+} from "@/src/lib/device-sync/wake-service";
 import { HostedDeviceSyncWebhookAdminService } from "@/src/lib/device-sync/webhook-admin-service";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
@@ -181,16 +197,16 @@ async function createFixture(input: {
 function createJunctionRegistry(
   fetchImpl: typeof fetch,
 ): DeviceSyncRegistry {
-  return createDeviceSyncRegistry([
-    createJunctionDeviceSyncProvider({
+  return createConfiguredDeviceSyncRegistryFromConfigs({
+    junction: {
       apiKey: "sk_us_test_123",
       clientUserIdSecret: "prepared-webhook-client-user-secret",
       environment: "sandbox",
       fetchImpl,
       region: "us",
       webhookSecret: junctionWebhookSecret,
-    }),
-  ]);
+    },
+  });
 }
 
 function createIngressService(input: {
@@ -322,16 +338,21 @@ async function prepareRegistration(input: {
 }
 
 async function prepareDailyData(input: {
+  eventAt?: Date;
   fixture: Fixture;
+  messageId?: string;
+  receivedAt?: Date;
   registry: DeviceSyncRegistry;
   sourceProviderSlug: string;
 }): Promise<PreparedDeviceSyncWebhookV1> {
+  const eventAt = input.eventAt ?? input.fixture.receivedAt;
+  const receivedAt = input.receivedAt ?? input.fixture.receivedAt;
   const signed = signJunctionWebhook({
     body: {
       data: {
         data: [{
-          end: input.fixture.receivedAt.toISOString(),
-          start: new Date(input.fixture.receivedAt.getTime() - 60_000).toISOString(),
+          end: eventAt.toISOString(),
+          start: new Date(eventAt.getTime() - 60_000).toISOString(),
           unit: "count",
           value: 321,
         }],
@@ -344,8 +365,9 @@ async function prepareDailyData(input: {
       event_type: "daily.data.steps.created",
       user_id: input.fixture.externalAccountId,
     },
-    messageId: `msg_prepared_daily_${randomUUID().replaceAll("-", "")}`,
-    receivedAt: input.fixture.receivedAt,
+    messageId: input.messageId
+      ?? `msg_prepared_daily_${randomUUID().replaceAll("-", "")}`,
+    receivedAt,
   });
   const service = createIngressService({
     headers: signed.headers,
@@ -355,7 +377,46 @@ async function prepareDailyData(input: {
   const prepared = await service.prepareWebhookForDurableEnqueue(
     "junction",
     signed.rawBody,
-    input.fixture.receivedAt,
+    receivedAt,
+  );
+  input.fixture.traceIds.push(prepared.traceId);
+  return prepared;
+}
+
+async function prepareTimestampLessDailyHint(input: {
+  fixture: Fixture;
+  messageId?: string;
+  objectId?: string;
+  receivedAt: Date;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+}): Promise<PreparedDeviceSyncWebhookV1> {
+  const signed = signJunctionWebhook({
+    body: {
+      data: {
+        id: input.objectId ?? `sleep-hint-${randomUUID().replaceAll("-", "")}`,
+        source: {
+          provider: input.sourceProviderSlug,
+          type: "watch",
+        },
+        user_id: input.fixture.externalAccountId,
+      },
+      event_type: "daily.data.sleep.created",
+      user_id: input.fixture.externalAccountId,
+    },
+    messageId: input.messageId
+      ?? `msg_prepared_daily_hint_${randomUUID().replaceAll("-", "")}`,
+    receivedAt: input.receivedAt,
+  });
+  const service = createIngressService({
+    headers: signed.headers,
+    registry: input.registry,
+    store: input.fixture.store,
+  });
+  const prepared = await service.prepareWebhookForDurableEnqueue(
+    "junction",
+    signed.rawBody,
+    input.receivedAt,
   );
   input.fixture.traceIds.push(prepared.traceId);
   return prepared;
@@ -446,9 +507,291 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
   fixture.restoreCryptoEnvironment();
 }
 
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
+
+function addHistoryCoverage(
+  metadata: Record<string, unknown>,
+  providerSlug: string,
+  resource: string,
+  version: number,
+): Record<string, unknown> {
+  const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    metadata,
+    providerSlug,
+    resource,
+    version,
+  });
+  if (!update) {
+    throw new TypeError("Expected representable Junction history coverage.");
+  }
+  return { ...metadata, [update.metadataKey]: update.value };
+}
+
 describe.skipIf(!runPostgresProof)(
   "prepared device-webhook authority revalidation (real PostgreSQL)",
   () => {
+    it("keeps one established Apple lifecycle through native connect, webhook, disconnect, and reconnect", async () => {
+      const fixture = await createFixture({ sourceLastErrorCode: null });
+      const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "apple_health_kit",
+      });
+      const siblingSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "garmin",
+      });
+      if (!canonicalSourceInstanceKey || !siblingSourceInstanceKey) {
+        throw new TypeError("Expected canonical Junction source identities.");
+      }
+      const opaqueSourceInstanceKey = "opaque-established-apple-health";
+      let metadata: Record<string, unknown> = {};
+      for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+        metadata = addHistoryCoverage(metadata, "apple_health_kit", resource, version);
+      }
+      metadata = addHistoryCoverage(
+        metadata,
+        "apple_health_kit",
+        "blood_pressure",
+        historyCoverageVersion("blood_pressure"),
+      );
+      metadata = addHistoryCoverage(
+        metadata,
+        "garmin",
+        "weight",
+        historyCoverageVersion("weight"),
+      );
+      expect(JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS).toHaveLength(12);
+
+      const providerFetch = vi.fn(async (requestInput: string | URL | Request, init?: RequestInit) => {
+        const request = requestInput instanceof Request
+          ? requestInput
+          : new Request(requestInput, init);
+        if (request.method === "DELETE") {
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({
+          data: [{ slug: "apple_health_kit", status: "connected" }],
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      });
+      const registry = createJunctionRegistry(providerFetch);
+
+      try {
+        await fixture.store.syncDurableConnectionMetadata(fixture.connectionId, metadata);
+        await fixture.prisma.deviceConnectionSource.update({
+          data: {
+            firstSeenAt: new Date(fixture.receivedAt.getTime() - 120_000),
+            sourceInstanceKey: opaqueSourceInstanceKey,
+            status: "connected",
+          },
+          where: { id: fixture.sourceId },
+        });
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          firstSeenAt: fixture.receivedAt.toISOString(),
+          lastSeenAt: fixture.receivedAt.toISOString(),
+          sourceInstanceKey: siblingSourceInstanceKey,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        });
+
+        const firstParentBefore = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { updatedAt: true },
+          where: { id: fixture.connectionId },
+        });
+        const firstReconnect = await captureHostedDeviceSyncConnectionSourceReconnect({
+          connectionId: fixture.connectionId,
+          sourceProviderSlug: "apple_health_kit",
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        await beginHostedDeviceSyncConnectionSourceReconnect({
+          proof: firstReconnect,
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        const firstParentAfter = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { updatedAt: true },
+          where: { id: fixture.connectionId },
+        });
+        expect(firstParentAfter.updatedAt.getTime()).toBeGreaterThan(
+          firstParentBefore.updatedAt.getTime(),
+        );
+
+        fixture.receivedAt = new Date(Date.now() + 1_000);
+        const firstPrepared = await prepareRegistration({ fixture, registry });
+        await expect(createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        }).handlePreparedWebhook(firstPrepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        let rows = await fixture.prisma.deviceConnectionSource.findMany({
+          orderBy: { sourceInstanceKey: "asc" },
+          where: { connectionId: fixture.connectionId },
+        });
+        expect(rows).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            lifecycleEpoch: 2,
+            sourceInstanceKey: opaqueSourceInstanceKey,
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+          }),
+          expect.objectContaining({
+            sourceInstanceKey: siblingSourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          }),
+        ]));
+        expect(rows).toHaveLength(2);
+
+        await expect(disconnectHostedDeviceSyncConnectionSource({
+          connectionId: fixture.connectionId,
+          registry,
+          sourceProviderSlug: "apple_health_kit",
+          store: fixture.store,
+          userId: fixture.memberId,
+        })).resolves.toEqual({
+          sourceProviderSlug: "apple_health_kit",
+          status: "disconnected",
+        });
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          firstSeenAt: fixture.receivedAt.toISOString(),
+          lastSeenAt: fixture.receivedAt.toISOString(),
+          lifecycleEpoch: 1,
+          sourceInstanceKey: canonicalSourceInstanceKey,
+          sourceProviderSlug: "apple_health_kit",
+          status: "connected",
+        });
+        await expect(fixture.store.resolveConnectionSourceAdmissionCandidate({
+          connectionId: fixture.connectionId,
+          sourceProviderSlug: "apple_health_kit",
+        })).resolves.toEqual(expect.objectContaining({
+          lifecycleEpoch: 2,
+          sourceInstanceKey: canonicalSourceInstanceKey,
+          status: "disconnected",
+        }));
+
+        const secondParentBefore = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { updatedAt: true },
+          where: { id: fixture.connectionId },
+        });
+        const secondReconnect = await captureHostedDeviceSyncConnectionSourceReconnect({
+          connectionId: fixture.connectionId,
+          sourceProviderSlug: "apple_health_kit",
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        await beginHostedDeviceSyncConnectionSourceReconnect({
+          proof: secondReconnect,
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        const secondParentAfter = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { updatedAt: true },
+          where: { id: fixture.connectionId },
+        });
+        expect(secondParentAfter.updatedAt.getTime()).toBeGreaterThan(
+          secondParentBefore.updatedAt.getTime(),
+        );
+
+        const currentRecord = await fixture.store.getConnectionRecordForUser(
+          fixture.memberId,
+          fixture.connectionId,
+        );
+        if (!currentRecord) {
+          throw new TypeError("Expected the Junction account before reconnect admission.");
+        }
+        let reopenedMetadata = mapHostedConnectionRecord(currentRecord).metadata;
+        for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+          reopenedMetadata = addHistoryCoverage(
+            reopenedMetadata,
+            "apple_health_kit",
+            resource,
+            version,
+          );
+        }
+        await fixture.store.syncDurableConnectionMetadata(
+          fixture.connectionId,
+          reopenedMetadata,
+        );
+
+        fixture.receivedAt = new Date(Date.now() + 3_000);
+        const secondPrepared = await prepareRegistration({ fixture, registry });
+        await expect(createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        }).handlePreparedWebhook(secondPrepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        rows = await fixture.prisma.deviceConnectionSource.findMany({
+          orderBy: { sourceInstanceKey: "asc" },
+          where: { connectionId: fixture.connectionId },
+        });
+        expect(rows).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            lifecycleEpoch: 3,
+            sourceInstanceKey: canonicalSourceInstanceKey,
+            status: "connected",
+          }),
+          expect.objectContaining({
+            sourceInstanceKey: siblingSourceInstanceKey,
+            status: "connected",
+          }),
+        ]));
+        expect(rows).toHaveLength(2);
+
+        const finalRecord = await fixture.store.getConnectionRecordForUser(
+          fixture.memberId,
+          fixture.connectionId,
+        );
+        if (!finalRecord) {
+          throw new TypeError("Expected the Junction account after reconnect admission.");
+        }
+        const finalMetadata = mapHostedConnectionRecord(finalRecord).metadata;
+        for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+          expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            finalMetadata,
+            "apple_health_kit",
+            resource,
+            version,
+          )).toBe(false);
+        }
+        expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          finalMetadata,
+          "apple_health_kit",
+          "blood_pressure",
+          historyCoverageVersion("blood_pressure"),
+        )).toBe(true);
+        expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          finalMetadata,
+          "garmin",
+          "weight",
+          historyCoverageVersion("weight"),
+        )).toBe(true);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
     it("confirms pending setup and recovers a missed runtime handoff from durable mailbox state", async () => {
       const sourceProviderSlug = "garmin";
       const fixture = await createFixture({
@@ -529,6 +872,7 @@ describe.skipIf(!runPostgresProof)(
             lastDataAt: true,
             lastErrorCode: true,
             lastErrorMessage: true,
+            lifecycleEpoch: true,
             lastSeenAt: true,
             status: true,
           },
@@ -537,6 +881,7 @@ describe.skipIf(!runPostgresProof)(
           lastDataAt: fixture.receivedAt,
           lastErrorCode: null,
           lastErrorMessage: null,
+          lifecycleEpoch: 2,
           lastSeenAt: fixture.receivedAt,
           status: "connected",
         });
@@ -856,6 +1201,386 @@ describe.skipIf(!runPostgresProof)(
             },
           },
         })).resolves.toEqual({ status: "processed" });
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("does not let a repeated pre-reauthorization Google daily fact certify the new source epoch", async () => {
+      const sourceProviderSlug = "google_health";
+      const fixture = await createFixture({
+        sourceLastErrorCode: null,
+        sourceProviderSlug,
+      });
+      let cutoverEnabled = false;
+      const cutoverRequests: Array<{ method: string; url: string }> = [];
+      const providerFetch = vi.fn(async (input, init) => {
+        if (!cutoverEnabled) {
+          throw new Error("An admitted exact source must not require a provider read.");
+        }
+        const request = new Request(input, init);
+        cutoverRequests.push({ method: request.method, url: request.url });
+        if (
+          request.method === "GET"
+          && request.url.endsWith(`/v2/user/providers/${fixture.externalAccountId}`)
+        ) {
+          return new Response(JSON.stringify({
+            data: [
+              { slug: "fitbit", status: "connected" },
+              { slug: sourceProviderSlug, status: "connected" },
+            ],
+          }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        if (
+          request.method === "DELETE"
+          && request.url.endsWith(`/v2/user/${fixture.externalAccountId}/fitbit`)
+        ) {
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        throw new Error(`Unexpected migration cutover request: ${request.method}`);
+      });
+      const registry = createJunctionRegistry(providerFetch);
+      const firstMessageId = `msg_google_replay_${randomUUID().replaceAll("-", "")}`;
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug,
+      });
+      const fitbitInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "fitbit",
+      });
+      if (!sourceInstanceKey || !fitbitInstanceKey) {
+        throw new Error("Expected exact Google Health and Fitbit source keys.");
+      }
+      const initialSourceAt = new Date(fixture.receivedAt.getTime() - 72 * 60 * 60_000);
+      const logicalEventAt = new Date(fixture.receivedAt.getTime() - 48 * 60 * 60_000);
+
+      try {
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          firstSeenAt: initialSourceAt.toISOString(),
+          lastSeenAt: fixture.receivedAt.toISOString(),
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+        });
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          firstSeenAt: new Date(fixture.receivedAt.getTime() - 120_000).toISOString(),
+          lastSeenAt: fixture.receivedAt.toISOString(),
+          sourceInstanceKey: fitbitInstanceKey,
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        });
+        const firstPrepared = await prepareDailyData({
+          eventAt: logicalEventAt,
+          fixture,
+          messageId: firstMessageId,
+          receivedAt: fixture.receivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        const consumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(firstPrepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceWebhookTrace.findUnique({
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: firstPrepared.traceId,
+            },
+          },
+        })).resolves.toBeNull();
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual({
+          lastDataAt: logicalEventAt,
+        });
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: new Date(fixture.receivedAt.getTime() + 1).toISOString(),
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "disconnected",
+        });
+        const reconnectProof = await captureHostedDeviceSyncConnectionSourceReconnect({
+          connectionId: fixture.connectionId,
+          sourceProviderSlug,
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        await beginHostedDeviceSyncConnectionSourceReconnect({
+          proof: reconnectProof,
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        const reconnectingSource = await fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        });
+        expect(reconnectingSource.lastDataAt).toBeNull();
+        expect(reconnectingSource.firstSeenAt.getTime()).toBeGreaterThan(
+          fixture.receivedAt.getTime(),
+        );
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: reconnectingSource.firstSeenAt.toISOString(),
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+        });
+        const reauthorizedSource = await fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        });
+
+        const timestampLessReceivedAt = new Date(
+          reauthorizedSource.firstSeenAt.getTime() + 500,
+        );
+        const timestampLessObjectId = `sleep-hint-${randomUUID().replaceAll("-", "")}`;
+        const timestampLessPrepared = await prepareTimestampLessDailyHint({
+          fixture,
+          objectId: timestampLessObjectId,
+          receivedAt: timestampLessReceivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        expect(timestampLessPrepared.occurredAt).toBeUndefined();
+        expect(timestampLessPrepared.jobs).toHaveLength(1);
+        expect(timestampLessPrepared.jobs[0]).toMatchObject({
+          kind: "resource",
+          payload: {
+            eventType: "daily.data.sleep.created",
+            resource: "sleep",
+            sourceProviderSlug,
+          },
+        });
+        await expect(
+          consumeService.handlePreparedWebhook(timestampLessPrepared),
+        ).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(reauthorizedSource);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+
+        const migrationMailboxItemBeforeRestart =
+          await fixture.prisma.hostedMailboxItem.findFirstOrThrow({
+            select: { id: true },
+            where: { userId: fixture.memberId },
+          });
+        await fixture.prisma.hostedMailboxItem.update({
+          data: { consumedAt: timestampLessReceivedAt },
+          where: { id: migrationMailboxItemBeforeRestart.id },
+        });
+        const restartedTimestampLessConsumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+        const repeatedTimestampLessPrepared = await prepareTimestampLessDailyHint({
+          fixture,
+          objectId: timestampLessObjectId,
+          receivedAt: new Date(timestampLessReceivedAt.getTime() + 1_000),
+          registry,
+          sourceProviderSlug,
+        });
+        expect(repeatedTimestampLessPrepared.traceId).not.toBe(
+          timestampLessPrepared.traceId,
+        );
+        expect(
+          repeatedTimestampLessPrepared.jobs.map((job) => job.dedupeKey),
+        ).not.toEqual(timestampLessPrepared.jobs.map((job) => job.dedupeKey));
+        await expect(
+          restartedTimestampLessConsumeService.handlePreparedWebhook(
+            repeatedTimestampLessPrepared,
+          ),
+        ).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(reauthorizedSource);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+
+        const retryReceivedAt = new Date(reauthorizedSource.firstSeenAt.getTime() + 1_000);
+        const retryPrepared = await prepareDailyData({
+          eventAt: logicalEventAt,
+          fixture,
+          receivedAt: retryReceivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        expect(retryPrepared.traceId).not.toBe(firstPrepared.traceId);
+        expect(retryPrepared.jobs.map((job) => job.dedupeKey)).toEqual(
+          firstPrepared.jobs.map((job) => job.dedupeKey),
+        );
+        await expect(consumeService.handlePreparedWebhook(retryPrepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(reauthorizedSource);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+
+        const migrationMailboxItem = await fixture.prisma.hostedMailboxItem.findFirstOrThrow({
+          select: { id: true },
+          where: { userId: fixture.memberId },
+        });
+        await fixture.prisma.hostedMailboxItem.update({
+          data: { consumedAt: retryReceivedAt },
+          where: { id: migrationMailboxItem.id },
+        });
+        const restartedConsumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+        const consumedRetryPrepared = await prepareDailyData({
+          eventAt: logicalEventAt,
+          fixture,
+          receivedAt: new Date(retryReceivedAt.getTime() + 1_000),
+          registry,
+          sourceProviderSlug,
+        });
+        expect(consumedRetryPrepared.jobs.map((job) => job.dedupeKey)).toEqual(
+          firstPrepared.jobs.map((job) => job.dedupeKey),
+        );
+        await expect(
+          restartedConsumeService.handlePreparedWebhook(consumedRetryPrepared),
+        ).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(reauthorizedSource);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+        await expect(completeHostedGoogleHealthFitbitMigration({
+          connectionId: fixture.connectionId,
+          registry,
+          store: fixture.store,
+          userId: fixture.memberId,
+        })).resolves.toMatchObject({ status: "pending" });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { status: true },
+          where: {
+            connectionId_sourceInstanceKey: {
+              connectionId: fixture.connectionId,
+              sourceInstanceKey: fitbitInstanceKey,
+            },
+          },
+        })).resolves.toEqual({ status: "connected" });
+        expect(providerFetch).not.toHaveBeenCalled();
+
+        const currentEventAt = new Date(reauthorizedSource.firstSeenAt.getTime() + 120_000);
+        const currentReceivedAt = new Date(currentEventAt.getTime() + 1_000);
+        const currentPrepared = await prepareDailyData({
+          eventAt: currentEventAt,
+          fixture,
+          receivedAt: currentReceivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        await expect(
+          restartedConsumeService.handlePreparedWebhook(currentPrepared),
+        ).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, lastDataAt: true },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual({
+          firstSeenAt: reauthorizedSource.firstSeenAt,
+          lastDataAt: currentEventAt,
+        });
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(2);
+        expect(providerFetch).not.toHaveBeenCalled();
+
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: currentReceivedAt.toISOString(),
+          resourceAvailabilitySummary: {
+            historicalBackfillCompletedAt: currentReceivedAt.toISOString(),
+          },
+          sourceInstanceKey: fitbitInstanceKey,
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        });
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          lastSeenAt: currentReceivedAt.toISOString(),
+          resourceAvailabilitySummary: {
+            historicalBackfillCompletedAt: currentReceivedAt.toISOString(),
+            steps: true,
+          },
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+        });
+        cutoverEnabled = true;
+        await expect(completeHostedGoogleHealthFitbitMigration({
+          connectionId: fixture.connectionId,
+          registry,
+          store: fixture.store,
+          userId: fixture.memberId,
+        })).resolves.toMatchObject({ status: "complete" });
+        await expect(completeHostedGoogleHealthFitbitMigration({
+          connectionId: fixture.connectionId,
+          registry,
+          store: fixture.store,
+          userId: fixture.memberId,
+        })).resolves.toMatchObject({ status: "complete" });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { lastErrorCode: true, status: true },
+          where: {
+            connectionId_sourceInstanceKey: {
+              connectionId: fixture.connectionId,
+              sourceInstanceKey: fitbitInstanceKey,
+            },
+          },
+        })).resolves.toEqual({
+          lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+          status: "disconnected",
+        });
+        expect(cutoverRequests.filter((request) => request.method === "DELETE")).toHaveLength(1);
       } finally {
         await cleanupFixture(fixture);
       }
@@ -1390,6 +2115,174 @@ describe.skipIf(!runPostgresProof)(
           expectedSource: supersededSource,
           traceId: prepared.traceId,
         });
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("admits a registration when the source owner physically canonicalizes the same Apple lifecycle during provider I/O", async () => {
+      const fixture = await createFixture({ sourceLastErrorCode: null });
+      const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "apple_health_kit",
+      });
+      const siblingSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "garmin",
+      });
+      if (!canonicalSourceInstanceKey || !siblingSourceInstanceKey) {
+        throw new TypeError("Expected canonical Junction source identities.");
+      }
+
+      let metadata: Record<string, unknown> = {};
+      for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+        metadata = addHistoryCoverage(metadata, "apple_health_kit", resource, version);
+      }
+      metadata = addHistoryCoverage(
+        metadata,
+        "apple_health_kit",
+        "blood_pressure",
+        historyCoverageVersion("blood_pressure"),
+      );
+      metadata = addHistoryCoverage(
+        metadata,
+        "garmin",
+        "weight",
+        historyCoverageVersion("weight"),
+      );
+
+      await fixture.store.syncDurableConnectionMetadata(fixture.connectionId, metadata);
+      await fixture.prisma.deviceConnectionSource.update({
+        data: {
+          sourceInstanceKey: "jxn_src_legacy_apple_health",
+          sourceProviderSlug: "apple_health",
+        },
+        where: { id: fixture.sourceId },
+      });
+      await fixture.store.upsertConnectionSource({
+        connectionId: fixture.connectionId,
+        firstSeenAt: fixture.receivedAt.toISOString(),
+        lastSeenAt: fixture.receivedAt.toISOString(),
+        sourceInstanceKey: siblingSourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      });
+
+      const providerFetch = vi.fn(async () => {
+        await fixture.store.withHealthDataAdmissionLock(
+          fixture.memberId,
+          fixture.connectionId,
+          async (tx) => {
+            const sources = await fixture.store.listConnectionSources(
+              fixture.connectionId,
+              tx,
+            );
+            expect(sources).toEqual(expect.arrayContaining([
+              expect.objectContaining({
+                lifecycleEpoch: 1,
+                sourceInstanceKey: canonicalSourceInstanceKey,
+                sourceProviderSlug: "apple_health_kit",
+                status: "disconnected",
+              }),
+            ]));
+          },
+        );
+        await expect(fixture.prisma.deviceConnectionSource.findUnique({
+          where: { id: fixture.sourceId },
+        })).resolves.toBeNull();
+        return new Response(JSON.stringify({
+          data: [{ slug: "apple_health_kit", status: "connected" }],
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      });
+      const registry = createJunctionRegistry(providerFetch);
+
+      try {
+        const prepared = await prepareRegistration({ fixture, registry });
+        const consumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        expect(providerFetch).toHaveBeenCalledOnce();
+        const sources = await fixture.prisma.deviceConnectionSource.findMany({
+          orderBy: { sourceProviderSlug: "asc" },
+          where: { connectionId: fixture.connectionId },
+        });
+        expect(sources).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            lifecycleEpoch: 2,
+            sourceInstanceKey: canonicalSourceInstanceKey,
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+          }),
+          expect.objectContaining({
+            sourceInstanceKey: siblingSourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          }),
+        ]));
+        expect(sources).toHaveLength(2);
+
+        const connectionRecord = await fixture.store.getConnectionRecordForUser(
+          fixture.memberId,
+          fixture.connectionId,
+        );
+        if (!connectionRecord) {
+          throw new TypeError("Expected the Junction account after webhook admission.");
+        }
+        const durableMetadata = mapHostedConnectionRecord(connectionRecord).metadata;
+        for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+          expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            durableMetadata,
+            "apple_health_kit",
+            resource,
+            version,
+          )).toBe(false);
+        }
+        expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          durableMetadata,
+          "apple_health_kit",
+          "blood_pressure",
+          historyCoverageVersion("blood_pressure"),
+        )).toBe(true);
+        expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          durableMetadata,
+          "garmin",
+          "weight",
+          historyCoverageVersion("weight"),
+        )).toBe(true);
+        await expect(fixture.prisma.deviceWebhookTrace.findUniqueOrThrow({
+          select: { claimToken: true, processingExpiresAt: true, status: true },
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: prepared.traceId,
+            },
+          },
+        })).resolves.toEqual({
+          claimToken: null,
+          processingExpiresAt: null,
+          status: "processed",
+        });
+        await expect(fixture.prisma.deviceSyncDirtyConnection.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.deviceSyncSignal.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+        expect(runtimeMocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledOnce();
       } finally {
         await cleanupFixture(fixture);
       }

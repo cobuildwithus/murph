@@ -23,6 +23,11 @@ export type ConnectSource = {
   historicalResetIncomplete?: boolean;
   id: string;
   logo: LogoAsset;
+  migrationState?:
+    | "authorization_required"
+    | "verifying_successor"
+    | "cutover_ready";
+  migrationRetryRequired?: boolean;
   name: string;
   recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;

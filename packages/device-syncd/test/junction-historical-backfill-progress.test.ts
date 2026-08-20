@@ -8,11 +8,13 @@ import {
   canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage,
   encodeJunctionHistoricalBackfillStatus,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   mergeHostedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
   removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
 } from "../src/junction-historical-backfill-progress.ts";
 import { JUNCTION_CONNECT_SOURCE_TARGETS } from "../src/config/junction-connect-sources.ts";
 import {
@@ -39,7 +41,7 @@ describe("Junction extended-history coverage reset", () => {
       metadata,
       providerSlug: "apple_health_kit",
       resource: "weight",
-      version: 1,
+      version: historyCoverageVersion("weight"),
     });
 
     expect(reset).not.toBeNull();
@@ -50,19 +52,19 @@ describe("Junction extended-history coverage reset", () => {
       reset,
       "apple_health_kit",
       "weight",
-      1,
+      historyCoverageVersion("weight"),
     )).toBe(false);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       reset,
       "withings",
       "weight",
-      1,
+      historyCoverageVersion("weight"),
     )).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       reset,
       "apple_health_kit",
       "caffeine",
-      1,
+      historyCoverageVersion("caffeine"),
     )).toBe(true);
   });
 
@@ -76,7 +78,7 @@ describe("Junction extended-history coverage reset", () => {
     }
     const future = {
       ...current,
-      [matrixKey]: matrixValue.replace(/^m1\|/u, "m2|"),
+      [matrixKey]: matrixValue.replace(/^m2\|/u, "m3|"),
     };
     const malformed = { [matrixKey]: "not-a-coverage-matrix" };
 
@@ -84,15 +86,15 @@ describe("Junction extended-history coverage reset", () => {
       metadata: future,
       providerSlug: "apple_health_kit",
       resource: "weight",
-      version: 1,
+      version: historyCoverageVersion("weight"),
     })).toBeNull();
     expect(removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata: malformed,
       providerSlug: "apple_health_kit",
       resource: "weight",
-      version: 1,
+      version: historyCoverageVersion("weight"),
     })).toBeNull();
-    expect(future[matrixKey]).toBe(matrixValue.replace(/^m1\|/u, "m2|"));
+    expect(future[matrixKey]).toBe(matrixValue.replace(/^m2\|/u, "m3|"));
     expect(malformed[matrixKey]).toBe("not-a-coverage-matrix");
   });
 });
@@ -206,40 +208,114 @@ describe("Junction extended timeseries history coverage", () => {
     if (typeof encoded !== "string") {
       throw new TypeError("Expected encoded Junction extended-history coverage.");
     }
+    expect(encoded.startsWith("m2|")).toBe(true);
     expect(encoded).toHaveLength(211);
     expect(encoded.length).toBeLessThanOrEqual(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       coverage,
       "omron",
       "afib_burden",
-      1,
+      historyCoverageVersion("afib_burden"),
     )).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       coverage,
       "oura",
       "caffeine",
-      1,
+      historyCoverageVersion("caffeine"),
     )).toBe(false);
     expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      { junctionBloodPressureHistoryBackfillCoverage: `m2|${"0".repeat(192)}` },
+      { junctionBloodPressureHistoryBackfillCoverage: `m3|${"0".repeat(192)}` },
       "caffeine",
-      1,
+      historyCoverageVersion("caffeine"),
     )).toBe(false);
   });
 
-  it("reopens legacy note v1 while accepting the deployed v2 generation", () => {
-    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      { junctionNoteHistoryBackfillCoverage: "v1|oura" },
-      "oura",
-      "note",
-      2,
-    )).toBe(false);
+  it("reopens prior legacy generations while accepting current resource generations", () => {
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       { junctionNoteHistoryBackfillCoverage: "v2|oura" },
       "oura",
       "note",
-      2,
+      historyCoverageVersion("note"),
+    )).toBe(false);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      { junctionNoteHistoryBackfillCoverage: "v3|oura" },
+      "oura",
+      "note",
+      historyCoverageVersion("note"),
     )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+      "omron",
+      "blood_pressure",
+      historyCoverageVersion("blood_pressure"),
+    )).toBe(false);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      { junctionBloodPressureHistoryBackfillCoverage: "v2|omron" },
+      "omron",
+      "blood_pressure",
+      historyCoverageVersion("blood_pressure"),
+    )).toBe(true);
+  });
+
+  it("reopens every current resource when coverage uses the prior packed generation", () => {
+    expect(JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS).toEqual([
+      ["blood_pressure", 2],
+      ["note", 3],
+      ["afib_burden", 2],
+      ["basal_body_temperature", 2],
+      ["body_temperature", 2],
+      ["body_temperature_delta", 2],
+      ["caffeine", 2],
+      ["heart_rate_recovery_one_minute", 2],
+      ["mindfulness_minutes", 2],
+      ["sleep_breathing_disturbance", 2],
+      ["vo2_max", 2],
+      ["water", 2],
+      ["weight", 2],
+    ]);
+
+    let current: Record<string, unknown> = {};
+    for (const [resource] of JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS) {
+      current = addCoverage(current, "garmin", resource);
+    }
+    const matrixKey = Object.keys(current)[0];
+    const currentValue = matrixKey ? current[matrixKey] : null;
+    expect(typeof currentValue).toBe("string");
+    if (!matrixKey || typeof currentValue !== "string") {
+      throw new TypeError("Expected current packed Junction history coverage.");
+    }
+    const prior = {
+      [matrixKey]: currentValue.replace(/^m2\|/u, "m1|"),
+    };
+
+    for (const [resource, version] of JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS) {
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        prior,
+        "garmin",
+        resource,
+        version,
+      )).toBe(false);
+      expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        prior,
+        resource,
+        version,
+      )).toBe(true);
+    }
+
+    const currentCaffeine = addCoverage(prior, "garmin", "caffeine");
+    expect(String(currentCaffeine[matrixKey]).startsWith("m2|")).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      currentCaffeine,
+      "garmin",
+      "caffeine",
+      historyCoverageVersion("caffeine"),
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      currentCaffeine,
+      "garmin",
+      "water",
+      historyCoverageVersion("water"),
+    )).toBe(false);
   });
 
   it("unions unpublished local resource bits without losing hosted coverage", () => {
@@ -263,7 +339,7 @@ describe("Junction extended timeseries history coverage", () => {
         result.metadata,
         providerSlug,
         resource,
-        1,
+        historyCoverageVersion(resource),
       )).toBe(true);
     }
   });
@@ -282,6 +358,7 @@ describe("Junction extended timeseries history coverage", () => {
       "sleep_breathing_disturbance",
       "vo2_max",
       "water",
+      "weight",
     ] as const;
     let metadata: Record<string, unknown> = {};
 
@@ -321,6 +398,7 @@ describe("Junction extended timeseries history coverage", () => {
       "sleep_breathing_disturbance",
       "vo2_max",
       "water",
+      "weight",
     ] as const;
     let hostedMetadata: Record<string, unknown> = {};
     let localMetadata: Record<string, unknown> = {};
@@ -362,7 +440,7 @@ describe("Junction extended timeseries history coverage", () => {
       junctionHistoricalBackfillWindowStart: WINDOW_START,
       junctionHistoricalBackfillWindowEnd: WINDOW_END,
       junctionHistoricalBackfillEvidence: `e2|${WINDOW_START}|${WINDOW_END}|omron:1`,
-      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+      junctionBloodPressureHistoryBackfillCoverage: "v2|omron",
       junctionNoteHistoryBackfillCoverage: "v1|oura",
       junctionProfileSummaryCheckedAt: WINDOW_END,
       junctionSkippedResourceTotal: 1,
@@ -385,20 +463,20 @@ describe("Junction extended timeseries history coverage", () => {
       merged,
       "omron",
       "blood_pressure",
-      1,
+      historyCoverageVersion("blood_pressure"),
     )).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       merged,
       "oura",
       "note",
-      2,
+      historyCoverageVersion("note"),
     )).toBe(false);
     expect(merged.junctionNoteHistoryBackfillCoverage).toBe("v1|oura");
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       merged,
       "omron",
       "caffeine",
-      1,
+      historyCoverageVersion("caffeine"),
     )).toBe(true);
   });
 
@@ -411,13 +489,13 @@ describe("Junction extended timeseries history coverage", () => {
       metadata,
       "omron",
       "caffeine",
-      1,
+      historyCoverageVersion("caffeine"),
     )).toBe(false);
     expect(addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata,
       providerSlug: "omron",
       resource: "caffeine",
-      version: 1,
+      version: historyCoverageVersion("caffeine"),
     })).toBeNull();
   });
 
@@ -436,7 +514,7 @@ describe("Junction extended timeseries history coverage", () => {
       merged,
       "omron",
       "caffeine",
-      1,
+      historyCoverageVersion("caffeine"),
     )).toBe(true);
   });
 });
@@ -469,5 +547,9 @@ function requireCoverageUpdate(
 }
 
 function historyCoverageVersion(resource: string): number {
-  return resource === "note" ? 2 : 1;
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected Junction extended-history version for ${resource}.`);
+  }
+  return version;
 }
