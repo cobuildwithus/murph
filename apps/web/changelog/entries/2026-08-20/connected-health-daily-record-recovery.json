@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 200,
+  "item": {
+    "id": "connected-health-daily-record-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected health days stay together",
+    "summary": "When a connected source corrects which local day owns a daily reading, Murph now keeps one canonical record instead of leaving duplicates.",
+    "details": "The recovery preserves compatible member notes, tags, and links. If the saved history is ambiguous, Murph leaves it unchanged rather than guessing.",
+    "relevanceTags": ["connected-health", "data-integrity", "reliability"],
+    "sourcePullRequests": [2089]
+  }
+}
