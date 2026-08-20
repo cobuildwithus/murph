@@ -80,14 +80,40 @@ converges without restart thrash while the second group retains bounded recovery
   existing UserRunner retry-to-acceptance proof plus fatal/stale/ready-shell
   cleanup coverage.
 
+## Round 3 renewed retrospective
+
+- Trigger: round three found the same generation-ownership mechanism when a
+  platform replacement's `onStart` precedes both the old callback and every
+  stopped-state read, and when an old warm-health request finishes after that
+  replacement is installed.
+- Shape comparison: the immutable first-reviewed head changed 419 lines across
+  nine files; the round-two head changed 623 across eleven; the round-three
+  head changed 919 lines in total. The round-three correction combined three
+  scalar facts into one record but left a policy Boolean and unqualified async
+  writes, so the intended owner boundary was not yet complete.
+- Decision: continue the indivisible rollout fix without another owner or
+  lifecycle concept. Make `onStart` replace a ready prior record, use a newer
+  platform `lastChange` to replace any older record, preserve a deadline only
+  for the same still-pending record, and bind every warm/cold health completion
+  and readiness proof to that record's object identity. Delete the replacement
+  policy Boolean and reject stale completions before they can authorize,
+  mutate, or destroy the current replacement.
+- Required proof: install a newer running replacement before any stopped read,
+  deliver the old delayed `onStop`, and exercise both success and failure of an
+  older deferred warm-health request. Neither completion may publish readiness,
+  clear the replacement window, or destroy it; the replacement's own 503 must
+  retain one start until health at roughly 58 seconds.
+
 ## State
 
 Active. Initial exact-head CI passed. Preliminary and final ReviewGPT found two
 connected high gaps in lifecycle ordering and immediate startup-transport
 handling; both were remediated. Final round two required the retrospective
 above after finding stale readiness evidence across status-only replacement.
-That finding is accepted, reproduced, and remediated locally. A fresh
-exact-head review and CI remain.
+That finding was remediated. Final round three found the replacement-first and
+stale async-completion variants described in the renewed retrospective; both
+are accepted, reproduced, and remediated locally. A fresh exact-head review and
+CI remain.
 
 ## Evidence
 
@@ -129,7 +155,18 @@ exact-head review and CI remain.
   shell, settles destroy by status without `onStop`, ignores a delayed old stop
   callback, survives timeout and fast HTTP 503 callers, and reaches health at
   58 seconds with one replacement start and no second destroy.
-- Focused Cloudflare verification passes after remediation: 416 tests across
+- ReviewGPT round three found that a replacement `onStart` arriving before any
+  stopped observation could retain the old ready record, while an older
+  in-flight health result could authorize, mutate, or destroy that replacement.
+  Both success and failure reproductions failed against the reviewed head.
+- The remediation makes a new `onStart` replace a ready record, accepts newer
+  platform `lastChange` evidence, removes the replacement-policy Boolean, and
+  binds readiness proof, ready marking, pending-window clearing, and cleanup to
+  the exact captured start object.
+- Deferred old-health success and failure regressions now leave the
+  platform-started replacement pending, preserve its own fast HTTP 503, and
+  reach health 58 seconds after its one start without a destroy.
+- Focused Cloudflare verification passes after remediation: 418 tests across
   five files plus package typecheck.
 
 ## Working Set

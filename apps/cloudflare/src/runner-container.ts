@@ -319,7 +319,7 @@ interface RunnerContainerShellPrewarmOperation {
 
 interface RunnerContainerReadinessProof {
   checkedAtMs: number;
-  stopGeneration: number;
+  currentStart: RunnerContainerCurrentStart;
   userId: string;
 }
 
@@ -1712,7 +1712,6 @@ export class RunnerContainer extends Container {
     this.recordContainerStartIssued(
       Date.now(),
       readRunnerReadyTimeoutMs(this.environment),
-      false,
     );
     const context = this.currentLogContext;
     emitHostedExecutionStructuredLog({
@@ -1766,7 +1765,7 @@ export class RunnerContainer extends Container {
   override onError(error: unknown): never {
     const context = this.currentLogContext;
     this.clearRecentReadinessProof();
-    this.clearCurrentContainerPendingWindow();
+    this.clearContainerPendingWindow(this.currentContainerStart);
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -2247,11 +2246,15 @@ export class RunnerContainer extends Container {
       !isRunnerContainerStopped(status)
       && !options.completeSupersededShellPrewarm
     ) {
-      this.observeRecentPlatformStart(initialState, readyTimeoutMs);
+      const observedStart = this.observeRecentPlatformStart(
+        initialState,
+        readyTimeoutMs,
+      );
       if (isRunnerContainerRunning(status)) {
         const recentReadinessProof = this.readRecentReadinessProof(
           Date.now(),
           input.userId,
+          observedStart,
         );
         if (recentReadinessProof) {
           emitHostedExecutionStructuredLog({
@@ -2281,8 +2284,17 @@ export class RunnerContainer extends Container {
           this.environment,
           operationAbortSignal,
         );
-        this.recordRecentReadinessProof(input.userId);
-        this.recordContainerReady("cold-start-ready", initialState);
+        const readyStart = this.recordContainerReady(
+          "cold-start-ready",
+          initialState,
+          observedStart,
+        );
+        if (!readyStart) {
+          throw new Error(
+            "Hosted runner container changed while warm readiness was recorded.",
+          );
+        }
+        this.recordRecentReadinessProof(input.userId, readyStart);
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -2297,8 +2309,12 @@ export class RunnerContainer extends Container {
         });
         return "already_warm";
       } catch (error) {
+        if (this.currentContainerStart !== observedStart) {
+          throw error;
+        }
         const pendingColdStart = this.readPendingColdStart({
           error,
+          expectedStart: observedStart,
           maxAgeMs: readyTimeoutMs,
           operationAbortSignal,
           state: initialState,
@@ -2314,7 +2330,7 @@ export class RunnerContainer extends Container {
           });
           throw error;
         }
-        this.clearCurrentContainerPendingWindow();
+        this.clearContainerPendingWindow(observedStart);
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -2368,7 +2384,6 @@ export class RunnerContainer extends Container {
     const currentStart = this.recordContainerStartIssued(
       coldStartWaitStartedAtMs,
       readyTimeoutMs,
-      true,
     );
     try {
       await this.startAndWaitForPorts({
@@ -2382,18 +2397,31 @@ export class RunnerContainer extends Container {
           waitInterval: RUNNER_WAIT_INTERVAL_MS,
         },
       });
-      this.clearCurrentContainerPendingWindow();
+      this.clearContainerPendingWindow(currentStart);
       await assertRunnerHealthy(
         this,
         readinessTimeoutMs,
         this.environment,
         operationAbortSignal,
       );
-      this.recordRecentReadinessProof(input.userId);
-      this.recordContainerReady("cold-start-ready", undefined, currentStart);
+      const readyStart = this.recordContainerReady(
+        "cold-start-ready",
+        undefined,
+        currentStart,
+      );
+      if (!readyStart) {
+        throw new Error(
+          "Hosted runner container changed while cold readiness was recorded.",
+        );
+      }
+      this.recordRecentReadinessProof(input.userId, readyStart);
     } catch (error) {
+      if (this.currentContainerStart !== currentStart) {
+        throw error;
+      }
       const pendingColdStart = this.readPendingColdStart({
         error,
+        expectedStart: currentStart,
         maxAgeMs: readyTimeoutMs,
         operationAbortSignal,
         state: {
@@ -2412,7 +2440,7 @@ export class RunnerContainer extends Container {
         });
         throw error;
       }
-      this.clearCurrentContainerPendingWindow();
+      this.clearContainerPendingWindow(currentStart);
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -2464,14 +2492,16 @@ export class RunnerContainer extends Container {
 
   private readPendingColdStart(input: {
     error: unknown;
+    expectedStart: RunnerContainerCurrentStart | null;
     maxAgeMs: number;
     operationAbortSignal: AbortSignal;
     state: unknown;
   }): { ageMs: number } | null {
-    const currentStart = this.currentContainerStart;
+    const currentStart = input.expectedStart;
     if (
       isRunnerContainerFatalReadinessError(input.error)
       || currentStart === null
+      || this.currentContainerStart !== currentStart
       || currentStart.readyObservedBy !== null
       || currentStart.pendingUntilMs === null
       || (
@@ -2535,8 +2565,17 @@ export class RunnerContainer extends Container {
       const state = await this.getState();
       const status = readContainerStatus(state);
       if (!isRunnerContainerStopped(status)) {
+        const observedStart = this.observeRecentPlatformStart(state, timeoutMs);
         await assertRunnerHealthy(this, timeoutMs, this.environment);
-        this.recordContainerReady("deploy-smoke-ready", state);
+        if (!this.recordContainerReady(
+          "deploy-smoke-ready",
+          state,
+          observedStart,
+        )) {
+          throw new Error(
+            "Hosted runner container changed while smoke readiness was checked.",
+          );
+        }
         return;
       }
       this.recordCurrentContainerStopped();
@@ -2545,7 +2584,6 @@ export class RunnerContainer extends Container {
     const currentStart = this.recordContainerStartIssued(
       Date.now(),
       timeoutMs,
-      true,
     );
     await this.startAndWaitForPorts({
       cancellationOptions: {
@@ -2555,7 +2593,15 @@ export class RunnerContainer extends Container {
         waitInterval: RUNNER_WAIT_INTERVAL_MS,
       },
     });
-    this.recordContainerReady("deploy-smoke-ready", undefined, currentStart);
+    if (!this.recordContainerReady(
+      "deploy-smoke-ready",
+      undefined,
+      currentStart,
+    )) {
+      throw new Error(
+        "Hosted runner container changed while smoke readiness was recorded.",
+      );
+    }
   }
 
   private async destroyIfRunning(input: {
@@ -2967,38 +3013,43 @@ export class RunnerContainer extends Container {
     state: unknown,
     maxAgeMs: number,
   ): RunnerContainerCurrentStart | null {
-    if (this.currentContainerStart) {
-      return this.currentContainerStart;
-    }
     const recentStart = readRecentContainerStart(state, Date.now(), maxAgeMs);
     const startedAtMs = readContainerLastChangeMs(state);
     if (!recentStart || startedAtMs === null) {
-      return null;
+      return this.currentContainerStart;
     }
-    return this.recordContainerStartIssued(startedAtMs, maxAgeMs, false);
+    const existing = this.currentContainerStart;
+    if (existing && startedAtMs <= existing.startedAtMs) {
+      return existing;
+    }
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs);
   }
 
   private recordContainerStartIssued(
     startedAtMs: number,
     maxAgeMs: number,
-    replaceReadyStart: boolean,
   ): RunnerContainerCurrentStart {
     const existing = this.currentContainerStart;
-    if (
-      existing
-      && (!replaceReadyStart || existing.readyObservedBy === null)
-    ) {
+    if (existing?.readyObservedBy === null) {
       this.recordContainerActivityObserved("onStart");
       this.lastActivityExpiryAtMs = null;
       this.lastDestroyRequest = null;
       return existing;
     }
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs);
+  }
+
+  private replaceCurrentContainerStart(
+    startedAtMs: number,
+    maxAgeMs: number,
+  ): RunnerContainerCurrentStart {
     const currentStart: RunnerContainerCurrentStart = {
       pendingUntilMs: startedAtMs + maxAgeMs,
       readyObservedBy: null,
       startedAtMs,
     };
     this.currentContainerStart = currentStart;
+    this.clearRecentReadinessProof();
     this.recordContainerActivityObserved("onStart");
     this.lastActivityExpiryAtMs = null;
     this.lastDestroyRequest = null;
@@ -3007,32 +3058,36 @@ export class RunnerContainer extends Container {
 
   private recordContainerReady(
     observedBy: RunnerContainerReadinessObservation,
-    state?: unknown,
-    expectedStart?: RunnerContainerCurrentStart,
-  ): void {
-    if (
-      expectedStart
-      && this.currentContainerStart !== expectedStart
-    ) {
-      return;
+    state: unknown,
+    expectedStart: RunnerContainerCurrentStart | null,
+  ): RunnerContainerCurrentStart | null {
+    if (this.currentContainerStart !== expectedStart) {
+      return null;
     }
-    const startedAtMs = this.currentContainerStart?.startedAtMs
-      ?? readContainerLastChangeMs(state)
-      ?? Date.now();
-    this.currentContainerStart = {
+    const currentStart: RunnerContainerCurrentStart = expectedStart ?? {
       pendingUntilMs: null,
-      readyObservedBy: observedBy,
-      startedAtMs,
+      readyObservedBy: null,
+      startedAtMs: readContainerLastChangeMs(state) ?? Date.now(),
     };
+    currentStart.pendingUntilMs = null;
+    currentStart.readyObservedBy = observedBy;
+    this.currentContainerStart = currentStart;
     this.recordContainerActivityObserved(observedBy);
     this.lastActivityExpiryAtMs = null;
     this.lastDestroyRequest = null;
+    return currentStart;
   }
 
-  private clearCurrentContainerPendingWindow(): void {
-    if (this.currentContainerStart) {
-      this.currentContainerStart.pendingUntilMs = null;
+  private clearContainerPendingWindow(
+    expectedStart: RunnerContainerCurrentStart | null,
+  ): void {
+    if (
+      expectedStart === null
+      || this.currentContainerStart !== expectedStart
+    ) {
+      return;
     }
+    expectedStart.pendingUntilMs = null;
   }
 
   private recordCurrentContainerStopped(): boolean {
@@ -3235,10 +3290,16 @@ export class RunnerContainer extends Container {
     );
   }
 
-  private recordRecentReadinessProof(userId: string): void {
+  private recordRecentReadinessProof(
+    userId: string,
+    currentStart: RunnerContainerCurrentStart,
+  ): void {
+    if (this.currentContainerStart !== currentStart) {
+      return;
+    }
     this.recentReadinessProof = {
       checkedAtMs: Date.now(),
-      stopGeneration: this.stopGeneration,
+      currentStart,
       userId,
     };
   }
@@ -3247,9 +3308,19 @@ export class RunnerContainer extends Container {
     this.recentReadinessProof = null;
   }
 
-  private readRecentReadinessProof(nowMs: number, userId: string): { ageMs: number } | null {
+  private readRecentReadinessProof(
+    nowMs: number,
+    userId: string,
+    currentStart: RunnerContainerCurrentStart | null,
+  ): { ageMs: number } | null {
     const proof = this.recentReadinessProof;
-    if (!proof || proof.stopGeneration !== this.stopGeneration || proof.userId !== userId) {
+    if (
+      !proof
+      || currentStart === null
+      || proof.currentStart !== currentStart
+      || this.currentContainerStart !== currentStart
+      || proof.userId !== userId
+    ) {
       this.clearRecentReadinessProof();
       return null;
     }
