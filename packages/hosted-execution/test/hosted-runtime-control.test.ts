@@ -1725,6 +1725,32 @@ describe("hosted runtime control contracts", () => {
       },
     });
 
+    const oldRunnerProviderBreakdown = {
+      schemaVersion: 1,
+      preProvider: {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+      },
+    };
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        phaseBreakdown: oldRunnerProviderBreakdown,
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1"],
+        at: "2026-04-26T00:00:01.000Z",
+        phaseBreakdown: oldRunnerProviderBreakdown,
+        providerRequestOrdinal: 0,
+        source: "linq",
+        type: "provider_started",
+      },
+    });
+
     // Secret-safety + robustness: a malformed phaseBreakdown is DROPPED (never
     // reaches storage) while the core latency event still parses. phaseBreakdown is
     // best-effort telemetry, so an unsafe/unknown shape must not poison the event
