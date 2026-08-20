@@ -18,8 +18,7 @@ import {
 } from '../commands/query-record-command-helpers.js'
 import { loadWorkoutCoreRuntime } from './workout-core.js'
 import {
-  editWorkoutRecord,
-  editWorkoutRecordAfterValidatedSetRemoval,
+  editWorkoutRecordAfterValidatedExerciseReplacement,
 } from './workout.js'
 import { showWorkoutRecord, workoutLookupSchema } from './workout-read.js'
 import {
@@ -32,7 +31,6 @@ import {
 } from './workout-live-model.js'
 import { toVaultCliError } from './vault-usecase-helpers.js'
 
-const EXERCISES_PATCH_PREFIX = 'workout.exercises='
 const LIVE_WORKOUT_RESOURCE_PREFIX = 'events/live-workout-session'
 
 export type WorkoutShowResult = Awaited<ReturnType<typeof showWorkoutRecord>>
@@ -166,39 +164,7 @@ export async function updateLiveWorkoutExercises(
     exercises,
     options,
   )
-  const set = [
-    `${EXERCISES_PATCH_PREFIX}${JSON.stringify(update.exercises)}`,
-  ]
-  if (update.endedAt !== undefined) {
-    set.push(`workout.endedAt=${JSON.stringify(update.endedAt)}`)
-  }
-  if (update.durationMinutes !== undefined) {
-    set.push(`durationMinutes=${update.durationMinutes}`)
-  }
-  if (options.lastMemberActionId !== undefined) {
-    set.push(`workout.lastMemberActionId=${options.lastMemberActionId}`)
-  }
-
-  return editWorkoutRecord({
-    vault: shown.vault,
-    lookup: shown.entity.id,
-    set,
-  })
-}
-
-export async function updateLiveWorkoutExercisesAfterValidatedSetRemoval(
-  shown: WorkoutShowResult,
-  workout: WorkoutSession,
-  exercises: WorkoutExercise[],
-  options: LiveWorkoutExerciseUpdateOptions & { lastMemberActionId: string },
-) {
-  const update = validateLiveWorkoutExerciseUpdate(
-    shown,
-    workout,
-    exercises,
-    options,
-  )
-  return editWorkoutRecordAfterValidatedSetRemoval({
+  return editWorkoutRecordAfterValidatedExerciseReplacement({
     durationMinutes: update.durationMinutes,
     endedAt: update.endedAt,
     exercises: update.exercises,

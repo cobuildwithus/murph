@@ -54,7 +54,6 @@ import {
   resolveExerciseIndex,
   resolveLiveWorkout,
   updateLiveWorkoutExercises,
-  updateLiveWorkoutExercisesAfterValidatedSetRemoval,
   withLiveWorkoutMutationLock,
   type WorkoutShowResult,
 } from './workout-live-state.js'
@@ -272,10 +271,7 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
       !== JSON.stringify(workout.exercises)
     || endedAt !== undefined
 
-  const persistExercises = removeMutations.length > 0
-    ? updateLiveWorkoutExercisesAfterValidatedSetRemoval
-    : updateLiveWorkoutExercises
-  await persistExercises(shown, workout, parsed.data.exercises, {
+  await updateLiveWorkoutExercises(shown, workout, parsed.data.exercises, {
     ...(endedAt === undefined ? {} : { endedAt }),
     lastMemberActionId: input.actionId,
     observedAt: acceptedAt,

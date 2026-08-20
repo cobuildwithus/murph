@@ -172,13 +172,16 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain(
       'Starting a new workout is independent of every older unfinished workout',
     )
+    expect(skill).toContain(
+      'Presentation order never proves exercise identity.',
+    )
     expect(skill).toContain('Saved target values remain in the workout format')
     expect(skill).toContain('no planned target value is copied into an actual set field')
     expect(skill).toContain(
       'Do not reconstruct and replace the complete nested exercise/set array',
     )
     expect(skill).toContain(
-      'refuses a structured replacement that omits a saved exercise or set',
+      'refuses a structured replacement that omits, ambiguously matches, or semantically replaces a saved exercise',
     )
     expect(skill).toContain(
       'After completing all ordinary free-form workout mutations requested by the current message',

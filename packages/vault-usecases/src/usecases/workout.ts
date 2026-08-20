@@ -606,28 +606,31 @@ function findReplacementExerciseIndex(
   replacement: WorkoutExercises,
   usedIndexes: ReadonlySet<number>,
 ): number | null {
-  const findUnused = (
+  const findUniqueUnused = (
     predicate: (candidate: WorkoutExercise) => boolean,
   ): number | null => {
-    const index = replacement.findIndex(
-      (candidate, candidateIndex) =>
-        !usedIndexes.has(candidateIndex) && predicate(candidate),
-    )
-    return index >= 0 ? index : null
+    let match: number | null = null
+    for (const [candidateIndex, candidate] of replacement.entries()) {
+      if (usedIndexes.has(candidateIndex) || !predicate(candidate)) {
+        continue
+      }
+      if (match !== null) {
+        return null
+      }
+      match = candidateIndex
+    }
+    return match
   }
 
   if (existing.sourceExerciseId) {
-    const sourceIndex = findUnused(
+    return findUniqueUnused(
       (candidate) => candidate.sourceExerciseId === existing.sourceExerciseId,
     )
-    if (sourceIndex !== null) {
-      return sourceIndex
-    }
   }
 
   const normalizedName = normalizeWorkoutExerciseName(existing.name)
   if (existing.groupId) {
-    const groupedNameIndex = findUnused(
+    const groupedNameIndex = findUniqueUnused(
       (candidate) =>
         candidate.groupId === existing.groupId &&
         normalizeWorkoutExerciseName(candidate.name) === normalizedName,
@@ -637,14 +640,9 @@ function findReplacementExerciseIndex(
     }
   }
 
-  const nameIndex = findUnused(
+  return findUniqueUnused(
     (candidate) => normalizeWorkoutExerciseName(candidate.name) === normalizedName,
   )
-  if (nameIndex !== null) {
-    return nameIndex
-  }
-
-  return findUnused((candidate) => candidate.order === existing.order)
 }
 
 const WORKOUT_STRUCTURE_REPAIR =
@@ -654,7 +652,7 @@ async function normalizeWorkoutExerciseReplacement(input: {
   vault: string
   lookup: string
   set?: string[]
-}, preserveSavedSets: boolean): Promise<string[] | undefined> {
+}): Promise<string[] | undefined> {
   const replacement = parseWorkoutExerciseReplacement(input.set)
   if (replacement === null) {
     return input.set
@@ -710,10 +708,6 @@ async function normalizeWorkoutExerciseReplacement(input: {
       replacementExercise.setPlanIsFinite = existingExercise.setPlanIsFinite
     }
 
-    if (!preserveSavedSets) {
-      continue
-    }
-
     for (const existingSet of existingExercise.sets ?? []) {
       if (!replacementExercise.sets.some(
         (candidate) => candidate.order === existingSet.order,
@@ -747,17 +741,13 @@ interface EditWorkoutRecordInput {
   dayKeyPolicy?: 'keep' | 'recompute'
 }
 
-async function editWorkoutRecordWithStructurePolicy(
-  input: EditWorkoutRecordInput,
-  preserveSavedSets: boolean,
-) {
-  const set = await normalizeWorkoutExerciseReplacement(input, preserveSavedSets)
+async function persistWorkoutRecordEdit(input: EditWorkoutRecordInput) {
   const result = await editEventRecord({
     vault: input.vault,
     lookup: input.lookup,
     entityLabel: 'workout',
     inputFile: input.inputFile,
-    set,
+    set: input.set,
     clear: input.clear,
     dayKeyPolicy: input.dayKeyPolicy,
     expectedKinds: ['activity_session'],
@@ -766,22 +756,22 @@ async function editWorkoutRecordWithStructurePolicy(
   return showWorkoutRecord(input.vault, result.lookupId)
 }
 
-export function editWorkoutRecord(input: EditWorkoutRecordInput) {
-  return editWorkoutRecordWithStructurePolicy(input, true)
+export async function editWorkoutRecord(input: EditWorkoutRecordInput) {
+  const set = await normalizeWorkoutExerciseReplacement(input)
+  return persistWorkoutRecordEdit({ ...input, set })
 }
 
 /**
- * Persists a live-workout replacement after the member-action owner has
- * validated the exact canonical set snapshot and retained every exercise.
- * Other workout writes must use editWorkoutRecord so accidental set loss
- * remains fail-closed.
+ * Persists a live-workout replacement after its exact-record owner validates
+ * the complete next exercise snapshot. Generic workout edits must use
+ * editWorkoutRecord so omissions and ambiguous exercise identity fail closed.
  */
-export function editWorkoutRecordAfterValidatedSetRemoval(
+export function editWorkoutRecordAfterValidatedExerciseReplacement(
   input: {
     durationMinutes?: number
     endedAt?: string
     exercises: WorkoutExercise[]
-    lastMemberActionId: string
+    lastMemberActionId?: string
     lookup: string
     vault: string
   },
@@ -795,12 +785,14 @@ export function editWorkoutRecordAfterValidatedSetRemoval(
   if (input.durationMinutes !== undefined) {
     set.push(`durationMinutes=${input.durationMinutes}`)
   }
-  set.push(`workout.lastMemberActionId=${input.lastMemberActionId}`)
-  return editWorkoutRecordWithStructurePolicy({
+  if (input.lastMemberActionId !== undefined) {
+    set.push(`workout.lastMemberActionId=${input.lastMemberActionId}`)
+  }
+  return persistWorkoutRecordEdit({
     lookup: input.lookup,
     set,
     vault: input.vault,
-  }, false)
+  })
 }
 
 export async function deleteWorkoutRecord(input: {

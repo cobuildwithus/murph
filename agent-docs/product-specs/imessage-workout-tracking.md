@@ -175,6 +175,17 @@ Every mutation carries the exact canonical workout id and uses that workout's
 record-scoped lock. Multiple unfinished workouts are valid; there is no global
 active or focused singleton.
 
+Generic full-structure edits preserve exercise-owned repetition and finite-plan
+facts only across proven exercise continuity. An existing stable
+`sourceExerciseId` must match exactly and may support a label change or reorder;
+otherwise the exact normalized name must identify one unique replacement, with
+the existing group plus name disambiguating grouped duplicates. Presentation
+order is never identity. A changed existing source id or different exercise is
+a semantic replacement, not continuity, and the generic editor rejects it
+alongside exercise or set deletion. This surface remains limited to
+identity-preserving reorder, additions, and coordinated field edits; it does
+not own arbitrary routine replacement or another exercise lifecycle.
+
 Logging the last pending set of an explicitly finite workout writes the actual
 result and `endedAt` atomically. The accepted completion timestamp is the
 observed end boundary; no separate “I am done” language or finish command is

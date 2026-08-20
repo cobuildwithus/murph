@@ -24,8 +24,6 @@ vi.mock("../src/usecases/workout-live-state.js", async (importOriginal) => ({
   findLiveWorkoutActionTargets: mocks.findLiveWorkoutActionTargets,
   resolveLiveWorkout: mocks.resolveLiveWorkout,
   updateLiveWorkoutExercises: mocks.updateLiveWorkoutExercises,
-  updateLiveWorkoutExercisesAfterValidatedSetRemoval:
-    mocks.updateLiveWorkoutExercises,
   withLiveWorkoutMutationLock: mocks.withLiveWorkoutMutationLock,
 }));
 

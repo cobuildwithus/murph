@@ -136,6 +136,43 @@ Result: Ready.
   companion text, canonical nine-repetition actuals, atomic `endedAt`, and a
   new completed workout while the unrelated older record remains open.
 
+## Round 2 anomaly retrospective
+
+Decision: shrink the ambiguous generic replacement mechanism before another
+review round. The first-reviewed patch had 682 authored-source lines of churn
+(+472/-210); the round-two head had 736 (+524/-212). Review remediation added
+52 source lines and removed 2, far below the size-growth trigger. The
+retrospective is required because the same omission-restoration mechanism that
+exposed `set-reps --clear` can transfer exercise-owned facts across an
+order-only semantic replacement.
+
+- Retained owners: canonical workout exercises own `memberRepsPerSet` and
+  `setPlanIsFinite`; targeted live-workout commands own ordinary mutations; the
+  generic workout editor owns only deliberate full-structure edits that retain
+  every saved exercise and set.
+- Prior correction: the exact nested clear path correctly bypassed generic
+  replacement normalization for a targeted field deletion, but did not resolve
+  the generic matcher's separate identity ambiguity.
+- Identity rule: an unchanged exercise is proven by the same stable
+  `sourceExerciseId`, by the same group plus exact normalized name, or by one
+  unique exact normalized name when no stable source id exists. Presentation
+  order is never identity. A label rename requires the stable source id; a
+  source-id change is not implicit continuity; and a different name plus
+  different source id is a semantic replacement.
+- Scope decision: remove order-only matching and narrow the Assistant promise
+  from arbitrary full routine replacement to identity-preserving reorder,
+  additions, and field edits. The generic editor rejects removal or semantic
+  replacement of an existing exercise instead of inventing continuity. No new
+  command mode, state, owner, compatibility path, or operation-specific bypass
+  is added.
+- Landed proof: a stable-source-id reorder plus label cleanup retains the
+  fixed-repetition and finite-plan facts on the same exercise, while an
+  order-colliding different exercise is rejected and cannot inherit either
+  fact. Ambiguous duplicate-name reorders are rejected without mutation. All
+  targeted live-workout replacements now pass through one exact-record
+  validation owner and persist that validated snapshot directly; the prior
+  set-removal-only branch and the generic editor's order fallback are deleted.
+
 ## Verification
 
 - ReviewGPT's preliminary findings are resolved at their existing owners. One
@@ -154,6 +191,17 @@ Result: Ready.
   email, parameter-based webmail, wrapped-mailto webmail, two simultaneous open
   workouts, exact handoff polling, and the rendered CTA href without adding
   focus state or another selector.
+- Final ReviewGPT round two found that the generic structural editor still used
+  presentation order as an exercise-identity fallback. That could transfer the
+  newly durable repetition and finite-plan facts to a different exercise. The
+  editor now accepts only unique stable-source-id or canonical-name continuity,
+  rejects ambiguous or semantic replacements, and always protects saved sets.
+  Targeted live mutations no longer re-enter that generic matcher: their one
+  exact-record owner validates and persists the complete snapshot for every
+  mutation, replacing the special set-removal path with one simpler boundary.
+- Round-two correction verification passes: 78 real/in-memory live-workout
+  assertions, 8 tracked-workout skill assertions, 13 CLI workout assertions,
+  and the Vault Usecases, Assistant Engine, and CLI package typechecks.
 - Focused contracts, operator-config, Assistant Engine, assistant-runtime,
   vault-usecase, and CLI suites pass: 152 behavioral assertions across the
   directly changed paths, plus all 324 contract tests and generated-schema

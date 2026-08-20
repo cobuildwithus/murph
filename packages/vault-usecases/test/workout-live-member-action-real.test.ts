@@ -567,65 +567,23 @@ test.each([
   }
 });
 
-test.each([
-  {
-    label: "write a colliding set on the wrong exercise",
-    leftReps: [8, 10],
-    rightReps: [8, 12],
-  },
-  {
-    label: "report false unchanged success for a colliding exercise",
-    leftReps: [8, 10],
-    rightReps: [12, 8],
-  },
-])("an ambiguous duplicate-exercise card cannot $label", async ({
-  leftReps,
-  rightReps,
-}) => {
-  const fixture = await createAmbiguousSameNameWorkout(leftReps, rightReps);
+test("a generic edit refuses an ambiguous duplicate-exercise reorder", async () => {
+  const fixture = await createAmbiguousSameNameWorkout([8, 10], [8, 12]);
   try {
-    const originalBinding = deriveWorkoutActionBinding(
-      fixture.workoutId,
-      fixture.workout,
-    );
     const [left, right] = fixture.workout.exercises;
-    await editWorkoutRecord({
+    await expect(editWorkoutRecord({
       lookup: fixture.workoutId,
       set: [`workout.exercises=${JSON.stringify([
         { ...right, order: 1 },
         { ...left, order: 2 },
       ])}`],
       vault: fixture.vault,
-    });
-    const reordered = parseShownWorkout(
-      await showWorkoutRecord(fixture.vault, fixture.workoutId),
-    );
-    expect(deriveWorkoutActionBinding(
-      fixture.workoutId,
-      reordered,
-    )).toBe(originalBinding);
-
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action: putSameNameExerciseAction({
-        actionBinding: originalBinding,
-        exercisePosition: 1,
-        reps: 12,
-        setCount: 2,
-      }),
-      actionId: SECOND_ACTION_ID,
-      vault: fixture.vault,
-    })).resolves.toEqual({
-      reason: "workout_changed",
-      status: "rejected",
-    });
+    })).rejects.toThrow(/would remove saved exercise 1 \(Single-arm row\)/iu);
 
     const stored = parseShownWorkout(
       await showWorkoutRecord(fixture.vault, fixture.workoutId),
     );
-    expect(stored.exercises.map((exercise) =>
-      exercise.sets.map((set) => set.reps),
-    )).toEqual([rightReps, leftReps]);
+    expect(stored.exercises).toEqual(fixture.workout.exercises);
     expect(stored.lastMemberActionId).toBeUndefined();
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
@@ -789,6 +747,108 @@ test("generic structural edits retain exercise-owned live tracking facts", async
     });
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("generic structural edits preserve facts only across stable exercise identity", async () => {
+  const vault = await mkdtemp(
+    path.join(os.tmpdir(), "murph-exercise-identity-real-"),
+  );
+  try {
+    await initializeVault({
+      vaultRoot: vault,
+      createdAt: "2026-08-13T13:00:00.000Z",
+      timezone: "UTC",
+    });
+    const started = await startLiveWorkout({
+      name: "Exercise identity",
+      startedAt: STARTED_AT,
+      vault,
+    });
+    await addLiveWorkoutExercise({
+      name: "Bench press",
+      order: 1,
+      setCount: 2,
+      sourceExerciseId: "exercise_bench",
+      vault,
+      workoutId: started.eventId,
+    });
+    await setLiveWorkoutExerciseReps({
+      exerciseOrder: 1,
+      reps: 8,
+      vault,
+      workoutId: started.eventId,
+    });
+    await addLiveWorkoutExercise({
+      name: "Push-up",
+      order: 2,
+      sourceExerciseId: "exercise_push_up",
+      vault,
+      workoutId: started.eventId,
+    });
+
+    const before = parseShownWorkout(
+      await showWorkoutRecord(vault, started.eventId),
+    );
+    const bench = before.exercises[0]!;
+    const pushUp = before.exercises[1]!;
+    await editWorkoutRecord({
+      lookup: started.eventId,
+      set: [`workout.exercises=${JSON.stringify([
+        {
+          name: pushUp.name,
+          order: 1,
+          sets: pushUp.sets,
+          sourceExerciseId: pushUp.sourceExerciseId,
+        },
+        {
+          name: "Barbell bench press",
+          order: 2,
+          sets: bench.sets,
+          sourceExerciseId: bench.sourceExerciseId,
+        },
+      ])}`],
+      vault,
+    });
+
+    const reordered = parseShownWorkout(
+      await showWorkoutRecord(vault, started.eventId),
+    );
+    expect(reordered.exercises).toMatchObject([
+      {
+        name: "Push-up",
+        order: 1,
+        setPlanIsFinite: false,
+        sourceExerciseId: "exercise_push_up",
+      },
+      {
+        memberRepsPerSet: 8,
+        name: "Barbell bench press",
+        order: 2,
+        setPlanIsFinite: true,
+        sourceExerciseId: "exercise_bench",
+      },
+    ]);
+
+    await expect(editWorkoutRecord({
+      lookup: started.eventId,
+      set: [`workout.exercises=${JSON.stringify([
+        reordered.exercises[0],
+        {
+          name: "Squat",
+          order: 2,
+          sets: reordered.exercises[1]?.sets,
+          sourceExerciseId: "exercise_squat",
+        },
+      ])}`],
+      vault,
+    })).rejects.toThrow(/would remove saved exercise 2 \(Barbell bench press\)/iu);
+
+    expect(parseShownWorkout(
+      await showWorkoutRecord(vault, started.eventId),
+    ).exercises).toEqual(reordered.exercises);
+  } finally {
+    await rm(vault, { force: true, recursive: true });
   }
 });
 
