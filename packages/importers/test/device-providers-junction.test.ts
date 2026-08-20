@@ -226,6 +226,18 @@ function storedDataOriginObservedAtRaw(record: StoredJsonlRecord | undefined): s
   return typeof dataOrigin.observedAtRaw === "string" ? dataOrigin.observedAtRaw : undefined;
 }
 
+function storedDataOriginNormalizerVersion(
+  record: StoredJsonlRecord | undefined,
+): string | undefined {
+  const dataOrigin = record?.dataOrigin;
+  if (!dataOrigin || typeof dataOrigin !== "object" || Array.isArray(dataOrigin)) {
+    return undefined;
+  }
+  return typeof dataOrigin.normalizerVersion === "string"
+    ? dataOrigin.normalizerVersion
+    : undefined;
+}
+
 function storedObservationValue(record: StoredJsonlRecord | undefined): unknown {
   if (!record || typeof record !== "object" || !("value" in record)) {
     return undefined;
@@ -10022,6 +10034,172 @@ test("Junction explicit profile replays migrate the updated-at predecessor times
     );
     assert.equal(storedObservationValue(liveHeightAfterConflict), 179);
     assert.equal(liveDemographicsAfterConflict?.note, "member-corrected demographics");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction explicit profile replays keep a created-at generic-marker predecessor as a canonical no-op", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-explicit-profile-marker-noop");
+  const createdAt = "2026-05-01T09:00:00.000Z";
+  const updatedAt = "2026-05-20T09:00:00.000Z";
+  const snapshot = {
+    importedAt: "2026-05-20T10:00:00.000Z",
+    summaries: {
+      profile: {
+        id: "stable-explicit-profile",
+        created_at: createdAt,
+        updated_at: updatedAt,
+        birth_date: "1980-01-01",
+        gender: "other",
+        height: 180,
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const currentPayload = normalizeJunctionSnapshot(snapshot);
+    const predecessorEvents = (currentPayload.events ?? []).map((event) => {
+      const { evidenceRoles: _evidenceRoles, ...eventWithoutEvidence } = event;
+      return {
+        ...eventWithoutEvidence,
+        dataOrigin: {
+          ...event.dataOrigin,
+          normalizerVersion: "junction-normalizer.v1",
+        },
+      };
+    });
+    const predecessor = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: snapshot.importedAt,
+      events: predecessorEvents,
+    });
+    const predecessorHeight = predecessor.events.find((event) =>
+      event.kind === "observation" && event.metric === "height"
+    );
+    const predecessorDemographics = predecessor.events.find((event) =>
+      event.kind === "note" && event.title === "Junction profile"
+    );
+    const predecessorGender = predecessor.events.find((event) =>
+      event.externalRef?.facet === "gender"
+    );
+    assert.ok(predecessorHeight);
+    assert.ok(predecessorDemographics);
+    assert.ok(predecessorGender);
+    const memberHeightRecordedAt = "2026-05-20T10:30:00.000Z";
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: {
+        ...predecessorHeight,
+        recordedAt: memberHeightRecordedAt,
+        source: "manual",
+        value: 179,
+      },
+    });
+    await coreRuntime.deleteEvent({ vaultRoot, eventId: predecessorDemographics.id });
+
+    const firstReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    const secondReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    const records = (
+      await Promise.all(
+        predecessor.eventShardPaths.map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveHeight = latestLiveRecords(records).find((event) =>
+      event.kind === "observation" && event.metric === "height"
+    );
+    const liveGender = latestLiveRecords(records).find((event) =>
+      storedExternalRefField(event, "facet") === "gender"
+    );
+
+    // The first replay stores new raw evidence, but neither replay appends a
+    // canonical event revision for the diagnostic-marker-only difference.
+    assert.equal(firstReplay.applied, true);
+    assert.equal(secondReplay.applied, false);
+    assert.equal(latestLiveRecords(records).length, 2);
+    assert.equal(records.filter((event) => event.id === predecessorHeight.id).length, 2);
+    assert.equal(records.filter((event) => event.id === predecessorGender.id).length, 1);
+    assert.equal(records.filter((event) => event.id === predecessorDemographics.id).length, 2);
+    assert.equal(
+      records.some((event) =>
+        storedDataOriginNormalizerVersion(event) === "junction-stable-profile-created-at.v1"
+      ),
+      false,
+    );
+    assert.equal(liveHeight?.id, predecessorHeight.id);
+    assert.equal(liveHeight?.source, "manual");
+    assert.equal(liveHeight?.occurredAt, createdAt);
+    assert.equal(liveHeight?.recordedAt, memberHeightRecordedAt);
+    assert.equal(storedObservationValue(liveHeight), 179);
+    assert.equal(
+      storedDataOriginNormalizerVersion(liveHeight),
+      "junction-normalizer.v1",
+    );
+    assert.equal(liveGender?.id, predecessorGender.id);
+    assert.equal(
+      storedDataOriginNormalizerVersion(liveGender),
+      "junction-normalizer.v1",
+    );
+    assert.ok(records.some((event) =>
+      event.id === predecessorDemographics.id && isDeletedEventLifecycle(event.lifecycle)
+    ));
+
+    await assert.rejects(
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "junction",
+          vaultRoot,
+          snapshot: {
+            ...snapshot,
+            summaries: {
+              profile: {
+                ...snapshot.summaries.profile,
+                height: 181,
+              },
+            },
+          },
+        },
+        { corePort: coreRuntime },
+      ),
+      (error: unknown) => (error as { code?: unknown }).code === "EVENT_SOURCE_REVISION_CONFLICT",
+    );
+    const recordsAfterConflict = (
+      await Promise.all(
+        predecessor.eventShardPaths.map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveAfterConflict = latestLiveRecords(recordsAfterConflict);
+    const heightAfterConflict = liveAfterConflict.find((event) =>
+      event.kind === "observation" && event.metric === "height"
+    );
+    assert.equal(storedObservationValue(heightAfterConflict), 179);
+    assert.equal(heightAfterConflict?.source, "manual");
+    assert.equal(
+      liveAfterConflict.some((event) => event.id === predecessorDemographics.id),
+      false,
+    );
+    assert.equal(recordsAfterConflict.length, records.length);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

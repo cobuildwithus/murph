@@ -84,12 +84,24 @@ Updated: 2026-08-20
 - Parent review further narrowed the released predecessor proof: its
   `recordedAt` must equal the provider revision and its `dayKey` must equal that
   revision's UTC day. Focused negative cases reject either altered field.
+- Rollout review raised a second released cohort: explicit profiles already
+  stored with created-at timestamps but the generic marker. A direct regression
+  proved that equal-revision replay is already a canonical semantic no-op for
+  this cohort because normalizer metadata is excluded from the content key. The
+  generic diagnostic marker therefore remains unchanged; adding a marker-only
+  canonical rewrite would create event-spine churn without changing health data
+  or repairing an invariant. Regression coverage now proves the no-op preserves
+  member edits and tombstones while a real same-revision semantic change still
+  rejects atomically.
 
 ## Verification
 
-- Focused Junction explicit-profile migration run passed: 1 file, 4 tests
-  (including both malformed-predecessor negative cases), 242 skipped.
-- `pnpm --filter @murphai/importers test` passed: 19 files, 551 tests.
+- Focused Junction explicit-profile migration run passed after rollout
+  remediation: 1 file, 5 tests (the exact old timestamp migration, the
+  created-at generic-marker no-op, both malformed-predecessor negatives, and
+  deletion retention), 242 skipped.
+- `pnpm --filter @murphai/importers test` passed after rollout remediation: 19
+  files, 552 tests.
 - `pnpm --filter @murphai/core test` passed: 46 files, 810 tests.
 - `pnpm --filter @murphai/core typecheck` passed.
 - `pnpm --filter @murphai/importers typecheck` passed.
@@ -105,5 +117,8 @@ Updated: 2026-08-20
   registry and Prisma client.
 - The read-only diff reviewer confirmed its member-deletion and member-time
   findings are resolved in the corrected code and regressions.
+- ReviewGPT runs started against the pre-regression head are non-authoritative
+  for the corrected candidate; the new pushed head requires the normal fresh
+  exact-head review gate.
 - ReviewGPT, exact-head CI, merge, deploy, and production convergence remain
   pending under the parent task.
