@@ -54,12 +54,11 @@ artifacts.
 ## Constraints
 
 - Web/Postgres remains the durable control-plane and companion-status owner.
-- Persist import evidence on the exact local job only after the canonical
-  importer returns at least one event, then expose it only after job success
-  and the existing checkpoint boundary.
-- Preserve exact dirty-payload ownership through one-at-a-time scheduled
-  continuations and cold-restored wake hints until the owning job reaches a
-  terminal decision.
+- Persist only bounded exact source/resource identities derived from committed
+  canonical events on the local job, then expose a matching receipt only after
+  job success and the existing checkpoint boundary.
+- Never infer payload ownership from job success, child cardinality, scheduled
+  verification, reconciliation, or broad backfill work.
 - Make callback replay idempotent by coupling receipt creation to deletion of
   the exact acknowledged dirty payload in one short database transaction.
 - Keep callback fields bounded, closed, member-bound, and free of health values
@@ -69,14 +68,13 @@ artifacts.
 
 ## Plan
 
-1. Persist the true data-bearing canonical importer completion time on the exact
-   local job, then extend the shared dirty-ack contract with bounded per-payload
-   receipts carrying only payload id, normalized resource/source, and
-   completion time.
-2. Preserve those receipts through hosted runtime checkpoint state and the
-   signed Cloudflare callback; when a no-import job schedules one continuation,
-   transfer its exact payload ownership to that child and retain the transfer
-   in cold-restore hints.
+1. Persist the true data-bearing canonical importer completion time and exact
+   normalized source/resource identities on the local job, then extend the
+   shared dirty-ack contract with bounded per-payload receipts carrying only
+   payload id, normalized resource/source, and completion time.
+2. Preserve exact matching receipts through hosted runtime checkpoint state and
+   the signed Cloudflare callback. A scheduled child is independent work and
+   never inherits the original payload's freshness authority.
 3. In the Web dirty-ack transaction, create canonical-import signal rows only
    for exact payload rows that still exist, then delete those rows. Exact retry
    therefore cannot create a second receipt.
@@ -94,20 +92,27 @@ artifacts.
   runtime completion path, primary control-plane state, and redacted runtime
   completion evidence.
 - Shared protocol parser: 100 focused tests passed.
-- Runtime checkpoint, replay, and mailbox flow: 2,419 tests passed with five
-  skipped; assistant-runtime typecheck passed.
-- Web authority, exact-payload idempotency, signal read, and companion status:
-  227 focused tests passed; prepared Web typecheck and focused lint passed with
-  two unrelated existing test warnings.
-- Cloudflare callback forwarding: one focused test passed with 191 unrelated
-  cases skipped; Cloudflare typecheck passed.
-- Changelog generation and archive/feed/page coverage: 57 focused tests passed.
-- Preliminary specialist review found that generic job success also includes
-  zero-record and source-fenced no-ops. The correction now records a nullable
-  SQLite v11 job receipt only when `importSnapshot` returns at least one
-  canonical event, leaves no-op job acknowledgement independent, carries exact
-  ownership through a single scheduled continuation and cold restore, and uses
-  that receipt's timestamp downstream.
-- Corrected device-syncd coverage: 1,255 tests passed. Corrected
-  assistant-runtime coverage: 2,420 passed with five expected skips. ReviewGPT
-  round 2, required CI, and final deployment compatibility proof: pending.
+- Runtime checkpoint, replay, and mailbox flow: the full assistant-runtime
+  suite passed 2,422 tests with five skipped; assistant-runtime typecheck
+  passed.
+- Web authority, exact-payload idempotency, signal read, companion status, and
+  changelog coverage passed 288 focused tests with nine skipped; prepared Web
+  typecheck passed.
+- The full Cloudflare node suite passed 2,601 tests with two skipped;
+  Cloudflare typecheck passed.
+- Preliminary specialist and final round-one review found that generic job
+  success includes zero-record and source-fenced no-ops. Final round two then
+  proved that the first remediation still inferred exact payload truth from any
+  positive import in a sole scheduled child.
+- The required anomaly retrospective chose deletion and redesign: remove the
+  continuation relation, child-owner traversal, and dirty-payload wake hints;
+  replace the job-global timestamp with one bounded SQLite v11 exact receipt
+  set derived from the existing committed importer result. Scheduled children
+  acknowledge no-import parents without freshness and unrelated identities
+  never match.
+- Regression proof first failed under the continuation design, then passed
+  after deletion. The full device-syncd suite passed 1,255 tests, including the
+  exact-identity and scheduled-child regression, and both production-shaped
+  Junction late-sleep recovery paths passed. Device-syncd typecheck passed.
+  ReviewGPT round 3, required CI, and final deployment compatibility proof:
+  pending.

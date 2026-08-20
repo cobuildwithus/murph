@@ -205,10 +205,12 @@ only when the provider-owned webhook parser identifies the source of an actual
 data-bearing event. Data-less historical completions, lifecycle events, and
 legacy rows keep that field null. When a historical completion instead leads
 to a successful canonical import, the exact dirty-payload acknowledgement adds
-a source- and resource-scoped import receipt after checkpoint. Source-scoped
-status filters connected-source availability and both receipt kinds, so
-null-source rows never satisfy Android status and failed, zero-record,
-source-fenced, or merely accepted pulls never look synced.
+a source- and resource-scoped import receipt after checkpoint only when that
+same normalized identity appears in the committed importer result. Scheduled
+verification or broad backfill children never inherit freshness authority.
+Source-scoped status filters connected-source availability and both receipt
+kinds, so null-source rows never satisfy Android status and failed, zero-record,
+source-fenced, unrelated-resource, or merely accepted pulls never look synced.
 
 The client keeps its Junction resource request centralized and starts with four
 minimum-necessary groups: sleep, workouts, steps, and active calories. The

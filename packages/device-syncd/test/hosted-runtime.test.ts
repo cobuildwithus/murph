@@ -3080,26 +3080,13 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(normalizeHostedDeviceSyncJobHints(null)).toEqual([]);
   });
 
-  it("parses the hosted wake hint owner shape once", () => {
+  it("parses the hosted wake hint shape once", () => {
     const parsed = parseHostedExecutionDeviceSyncWakeHint({
       eventType: "sleep.updated",
       jobs: [
         {
           availableAt: "2026-04-09T00:00:00Z",
           dedupeKey: null,
-          dirtyPayloads: [{
-            connectionId: "connection-123",
-            dirtyPayloadId: "payload-123",
-            processedRevision: "7",
-            resource: "glucose",
-            sourceProviderSlug: "dexcom_v3",
-            timing: {
-              eventToProviderSendBucket: "under_5_minutes",
-              firstWebhookReceivedAt: "2026-04-09T00:00:45Z",
-              providerSendToWebhookMs: 15_000,
-              sourceProvider: "dexcom_v3",
-            },
-          }],
           kind: "resource",
           maxAttempts: 3,
           payload: {
@@ -3131,19 +3118,6 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         {
           availableAt: "2026-04-09T00:00:00.000Z",
           dedupeKey: null,
-          dirtyPayloads: [{
-            connectionId: "connection-123",
-            dirtyPayloadId: "payload-123",
-            processedRevision: "7",
-            resource: "glucose",
-            sourceProviderSlug: "dexcom_v3",
-            timing: {
-              eventToProviderSendBucket: "under_5_minutes",
-              firstWebhookReceivedAt: "2026-04-09T00:00:45.000Z",
-              providerSendToWebhookMs: 15_000,
-              sourceProvider: "dexcom_v3",
-            },
-          }],
           kind: "resource",
           maxAttempts: 3,
           payload: {
@@ -3170,7 +3144,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
-  it("feeds the parsed owner shape into job-hint normalization", () => {
+  it("feeds the parsed wake shape into job-hint normalization", () => {
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {

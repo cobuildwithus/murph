@@ -20,7 +20,9 @@ import {
 } from "../hosted-runtime.ts";
 import { isJunctionRetainedAcceptedWorkJob } from "../junction-resources.ts";
 import {
+  DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT,
   JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX,
+  type DeviceSyncCanonicalImportReceipt,
   type DeviceSyncJobFailureDisposition,
   type DeviceSyncJobFailureTransition,
   type DeviceSyncJobInput,
@@ -52,12 +54,58 @@ interface StoredJobRow {
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
-  canonical_import_completed_at: string | null;
+  canonical_import_receipts_json: string;
 }
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
 export const DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT = 396;
+
+function readCanonicalImportReceipts(value: string): DeviceSyncCanonicalImportReceipt[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed) || parsed.length > DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT) {
+    return [];
+  }
+
+  const receipts = new Map<string, DeviceSyncCanonicalImportReceipt>();
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record.importCompletedAt !== "string"
+      || !Number.isFinite(Date.parse(record.importCompletedAt))
+      || new Date(record.importCompletedAt).toISOString() !== record.importCompletedAt
+      || typeof record.resource !== "string"
+      || !/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(record.resource)
+      || typeof record.sourceProviderSlug !== "string"
+      || !/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(record.sourceProviderSlug)
+    ) {
+      return [];
+    }
+    const receipt: DeviceSyncCanonicalImportReceipt = {
+      importCompletedAt: record.importCompletedAt,
+      resource: record.resource,
+      sourceProviderSlug: record.sourceProviderSlug,
+    };
+    const key = `${receipt.sourceProviderSlug}\u0000${receipt.resource}`;
+    const current = receipts.get(key);
+    if (!current || current.importCompletedAt < receipt.importCompletedAt) {
+      receipts.set(key, receipt);
+    }
+  }
+
+  return [...receipts.values()].sort((left, right) =>
+    left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    || left.resource.localeCompare(right.resource)
+  );
+}
 
 function requireJobRowString(
   row: Record<string, unknown>,
@@ -110,10 +158,7 @@ function decodeStoredJobRow(row: Record<string, unknown>): StoredJobRow {
     created_at: requireJobRowString(row, "created_at"),
     dedupe_key: readJobRowNullableString(row, "dedupe_key"),
     finished_at: readJobRowNullableString(row, "finished_at"),
-    canonical_import_completed_at: readJobRowNullableString(
-      row,
-      "canonical_import_completed_at",
-    ),
+    canonical_import_receipts_json: requireJobRowString(row, "canonical_import_receipts_json"),
     id: requireJobRowString(row, "id"),
     kind: requireJobRowString(row, "kind"),
     last_error_code: readJobRowNullableString(row, "last_error_code"),
@@ -187,7 +232,7 @@ function mapJobRow(row: StoredJobRow | undefined): DeviceSyncJobRecord | null {
     updatedAt: row.updated_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
-    canonicalImportCompletedAt: row.canonical_import_completed_at,
+    canonicalImportReceipts: readCanonicalImportReceipts(row.canonical_import_receipts_json),
   };
 }
 
@@ -584,7 +629,7 @@ export function completeDeviceSyncJobIfOwned(
 export function completeDeviceSyncJobsIfOwnedInTransaction(
   database: DatabaseSync,
   input: {
-    canonicalImportCompletedAt?: string | null;
+    canonicalImportReceipts?: readonly DeviceSyncCanonicalImportReceipt[];
     jobIds: readonly string[];
     now: string;
     workerId: string;
@@ -619,7 +664,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
     set status = 'succeeded',
         lease_owner = null,
         lease_expires_at = null,
-        canonical_import_completed_at = ?,
+        canonical_import_receipts_json = ?,
         finished_at = ?,
         updated_at = ?
     where id in (${placeholders})
@@ -628,7 +673,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
       and lease_expires_at is not null
       and lease_expires_at > ?
   `).run(
-    input.canonicalImportCompletedAt ?? null,
+    stringifyJson(input.canonicalImportReceipts ?? []),
     input.now,
     input.now,
     ...jobIds,
@@ -642,7 +687,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
 export function completeDeviceSyncJobsIfOwned(
   database: DatabaseSync,
   input: {
-    canonicalImportCompletedAt?: string | null;
+    canonicalImportReceipts?: readonly DeviceSyncCanonicalImportReceipt[];
     jobIds: readonly string[];
     now: string;
     workerId: string;
@@ -650,34 +695,6 @@ export function completeDeviceSyncJobsIfOwned(
 ): boolean {
   return withImmediateTransaction(database, () =>
     completeDeviceSyncJobsIfOwnedInTransaction(database, input)
-  );
-}
-
-export function linkDeviceSyncJobContinuationInTransaction(
-  database: DatabaseSync,
-  input: { childJobId: string; parentJobIds: readonly string[] },
-): void {
-  const statement = database.prepare(`
-    insert or ignore into device_job_continuation (parent_job_id, child_job_id)
-    values (?, ?)
-  `);
-  for (const parentJobId of new Set(input.parentJobIds)) {
-    statement.run(parentJobId, input.childJobId);
-  }
-}
-
-export function listDeviceSyncJobContinuations(
-  database: DatabaseSync,
-  parentJobId: string,
-): DeviceSyncJobRecord[] {
-  return (database.prepare(`
-    select child.*
-    from device_job_continuation
-    join device_job as child on child.id = device_job_continuation.child_job_id
-    where device_job_continuation.parent_job_id = ?
-    order by child.created_at asc, child.id asc
-  `).all(parentJobId) as Record<string, unknown>[]).map((row) =>
-    mapJobRow(decodeStoredJobRow(row))!
   );
 }
 

@@ -66,7 +66,6 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT =
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 export const HOSTED_EXECUTION_DEVICE_SYNC_COMPLETED_IMPORT_LIMIT = 500;
-export const HOSTED_EXECUTION_DEVICE_SYNC_JOB_HINT_DIRTY_PAYLOAD_LIMIT = 100;
 
 export const HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS = [
   "under_5_minutes",
@@ -716,25 +715,10 @@ export function didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(
 export interface HostedExecutionDeviceSyncJobHint {
   availableAt?: string;
   dedupeKey?: string | null;
-  dirtyPayloads?: HostedExecutionDeviceSyncJobHintDirtyPayload[];
   kind: string;
   maxAttempts?: number;
   payload?: Record<string, unknown>;
   priority?: number;
-}
-
-export interface HostedExecutionDeviceSyncJobHintDirtyPayload {
-  connectionId: string;
-  dirtyPayloadId: string | null;
-  processedRevision: string;
-  resource: string | null;
-  sourceProviderSlug: string | null;
-  timing?: {
-    eventToProviderSendBucket: HostedDeviceSyncEventToProviderSendBucket | null;
-    firstWebhookReceivedAt: string | null;
-    providerSendToWebhookMs: number | null;
-    sourceProvider: string | null;
-  };
 }
 
 export interface HostedExecutionDeviceSyncWakeHint {
@@ -1393,16 +1377,6 @@ export function normalizeHostedDeviceSyncJobHints(
         kind: job.kind,
         ...(job.availableAt ? { availableAt: job.availableAt } : {}),
         ...(job.dedupeKey !== undefined ? { dedupeKey: job.dedupeKey ?? null } : {}),
-        ...(job.dirtyPayloads
-          ? {
-              dirtyPayloads: job.dirtyPayloads.map((dirtyPayload) => ({
-                ...dirtyPayload,
-                ...(dirtyPayload.timing
-                  ? { timing: { ...dirtyPayload.timing } }
-                  : {}),
-              })),
-            }
-          : {}),
         ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),
         ...(job.payload ? { payload: { ...job.payload } } : {}),
         ...(typeof job.priority === "number" ? { priority: job.priority } : {}),
@@ -1512,19 +1486,6 @@ function parseHostedExecutionDeviceSyncJobHint(
     );
   }
 
-  if (record.dirtyPayloads !== undefined) {
-    next.dirtyPayloads = requireBoundedArray(
-      record.dirtyPayloads,
-      `Hosted execution device-sync.wake hint jobs[${index}].dirtyPayloads`,
-      HOSTED_EXECUTION_DEVICE_SYNC_JOB_HINT_DIRTY_PAYLOAD_LIMIT,
-    ).map((entry, dirtyPayloadIndex) =>
-      parseHostedExecutionDeviceSyncJobHintDirtyPayload(
-        entry,
-        `Hosted execution device-sync.wake hint jobs[${index}].dirtyPayloads[${dirtyPayloadIndex}]`,
-      )
-    );
-  }
-
   if (record.maxAttempts !== undefined) {
     next.maxAttempts = requireNumber(
       record.maxAttempts,
@@ -1544,55 +1505,6 @@ function parseHostedExecutionDeviceSyncJobHint(
   }
 
   return next;
-}
-
-function parseHostedExecutionDeviceSyncJobHintDirtyPayload(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncJobHintDirtyPayload {
-  const record = requireObject(value, label);
-  const timingRecord = record.timing === undefined
-    ? null
-    : requireObject(record.timing, `${label}.timing`);
-
-  return {
-    connectionId: requireString(record.connectionId, `${label}.connectionId`),
-    dirtyPayloadId: readNullableStringValue(
-      record.dirtyPayloadId,
-      `${label}.dirtyPayloadId`,
-    ),
-    processedRevision: requireString(
-      record.processedRevision,
-      `${label}.processedRevision`,
-    ),
-    resource: readNullableStringValue(record.resource, `${label}.resource`),
-    sourceProviderSlug: readNullableStringValue(
-      record.sourceProviderSlug,
-      `${label}.sourceProviderSlug`,
-    ),
-    ...(timingRecord
-      ? {
-          timing: {
-            eventToProviderSendBucket: readNullableHostedDeviceSyncEventToProviderSendBucket(
-              timingRecord.eventToProviderSendBucket,
-              `${label}.timing.eventToProviderSendBucket`,
-            ),
-            firstWebhookReceivedAt: readNullableIsoTimestamp(
-              timingRecord.firstWebhookReceivedAt,
-              `${label}.timing.firstWebhookReceivedAt`,
-            ),
-            providerSendToWebhookMs: readNullableHostedDeviceSyncDurationMs(
-              timingRecord.providerSendToWebhookMs,
-              `${label}.timing.providerSendToWebhookMs`,
-            ),
-            sourceProvider: readNullableStringValue(
-              timingRecord.sourceProvider,
-              `${label}.timing.sourceProvider`,
-            ),
-          },
-        }
-      : {}),
-  };
 }
 
 function parseHostedExecutionDeviceSyncJobHintPayload(

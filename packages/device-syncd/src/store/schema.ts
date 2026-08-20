@@ -5,7 +5,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v11: canonical import receipts and durable scheduled-job continuation links.
+// v11: exact canonical source/resource import receipts on completed jobs.
 export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 11;
 
 interface SqliteTableColumn {
@@ -189,11 +189,13 @@ function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
   }
 }
 
-function ensureDeviceJobCanonicalImportCompletedAtColumn(database: DatabaseSync): void {
+function ensureDeviceJobCanonicalImportReceiptsColumn(database: DatabaseSync): void {
   const names = columnNames(readDeviceJobColumns(database));
 
-  if (!names.has("canonical_import_completed_at")) {
-    database.exec("alter table device_job add column canonical_import_completed_at text");
+  if (!names.has("canonical_import_receipts_json")) {
+    database.exec(
+      "alter table device_job add column canonical_import_receipts_json text not null default '[]'",
+    );
   }
 }
 
@@ -394,7 +396,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         updated_at text not null,
         started_at text,
         finished_at text,
-        canonical_import_completed_at text
+        canonical_import_receipts_json text not null default '[]'
       );
 
       create index if not exists device_job_claim_idx
@@ -405,15 +407,6 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
 
       create index if not exists device_job_account_running_idx
       on device_job (account_id, status, lease_expires_at);
-
-      create table if not exists device_job_continuation (
-        parent_job_id text not null references device_job(id) on delete cascade,
-        child_job_id text not null references device_job(id) on delete cascade,
-        primary key (parent_job_id, child_job_id)
-      );
-
-      create index if not exists device_job_continuation_child_idx
-      on device_job_continuation (child_job_id, parent_job_id);
 
       create table if not exists webhook_trace (
         provider text not null,
@@ -439,6 +432,6 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   ensureWebhookTraceClaimTokenColumn(database);
   ensureConnectionSourceLastDataColumn(database);
   ensureConnectionSourceLifecycleEpochColumn(database);
-  ensureDeviceJobCanonicalImportCompletedAtColumn(database);
+  ensureDeviceJobCanonicalImportReceiptsColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

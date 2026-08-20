@@ -693,7 +693,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   close();
 });
 
-test("device sync service persists the canonical import boundary separately from job completion", async () => {
+test("device sync service persists exact canonical import identities separately from job completion", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-import-boundary");
   let now = new Date("2026-08-20T10:00:00.000Z");
   let finishAt = new Date("2026-08-20T10:01:00.000Z");
@@ -717,7 +717,16 @@ test("device sync service persists the canonical import boundary separately from
     })],
     importer: {
       async importDeviceProviderSnapshot() {
-        return { events: importedEvents };
+        return {
+          events: importedEvents,
+          junctionCanonicalCoverage: importedEvents.length > 0
+            ? [{
+                coverageBoundary: "2026-08-20T08:00:00.000Z",
+                resource: "sleep",
+                sourceProviderSlug: "apple-health-kit",
+              }]
+            : [],
+        };
       },
     },
   });
@@ -747,12 +756,16 @@ test("device sync service persists the canonical import boundary separately from
     assert.equal(importedJob?.id, imported.id);
     assert.deepEqual(
       {
-        canonicalImportCompletedAt:
-          store.getJobById(importedJob.id)?.canonicalImportCompletedAt,
+        canonicalImportReceipts:
+          store.getJobById(importedJob.id)?.canonicalImportReceipts,
         finishedAt: store.getJobById(importedJob.id)?.finishedAt,
       },
       {
-        canonicalImportCompletedAt: "2026-08-20T10:00:00.000Z",
+        canonicalImportReceipts: [{
+          importCompletedAt: "2026-08-20T10:00:00.000Z",
+          resource: "sleep",
+          sourceProviderSlug: "apple-health-kit",
+        }],
         finishedAt: "2026-08-20T10:01:00.000Z",
       },
     );
@@ -770,12 +783,12 @@ test("device sync service persists the canonical import boundary separately from
     assert.equal((await service.runWorkerOnce())?.id, zeroRecordJob.id);
     assert.deepEqual(
       {
-        canonicalImportCompletedAt:
-          store.getJobById(zeroRecordJob.id)?.canonicalImportCompletedAt,
+        canonicalImportReceipts:
+          store.getJobById(zeroRecordJob.id)?.canonicalImportReceipts,
         finishedAt: store.getJobById(zeroRecordJob.id)?.finishedAt,
       },
       {
-        canonicalImportCompletedAt: null,
+        canonicalImportReceipts: [],
         finishedAt: "2026-08-20T10:03:00.000Z",
       },
     );
@@ -13088,11 +13101,7 @@ test("sqlite store splits connection, credential, and observation state into exp
     "updated_at",
     "started_at",
     "finished_at",
-    "canonical_import_completed_at",
-  ]);
-  assert.deepEqual(readTableColumnsForTesting(store, "device_job_continuation"), [
-    "parent_job_id",
-    "child_job_id",
+    "canonical_import_receipts_json",
   ]);
   assert.deepEqual(readTableColumnsForTesting(store, "device_observation_state"), [
     "account_id",

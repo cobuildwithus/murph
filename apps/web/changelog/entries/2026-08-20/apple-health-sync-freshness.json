@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Apple Health freshness catches up",
     "summary": "After Murph successfully imports Apple Health data, the app's freshness status catches up on its next online refresh.",
-    "details": "A provider notice or completed check by itself still does not count as synced. The timestamp advances only after the canonical importer succeeds, so zero-record, source-fenced, and failed pulls keep the existing recovery state.",
+    "details": "A provider notice or completed check by itself still does not count as synced. The timestamp advances only when the canonical importer accepts the matching Apple Health data type, so empty, unrelated, source-fenced, and failed pulls keep the existing recovery state.",
     "relevanceTags": ["apple-health", "device-sync", "ios"],
     "sourcePullRequests": [2079]
   }

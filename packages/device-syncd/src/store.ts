@@ -52,9 +52,7 @@ import {
   failDeviceSyncJobIfOwned,
   findActiveDeviceSyncJobDedupeKeys,
   getDeviceSyncJobById,
-  linkDeviceSyncJobContinuationInTransaction,
   listDueDeviceSyncJobBatchCandidates,
-  listDeviceSyncJobContinuations,
   listPendingDeviceSyncJobsForAccount,
   markPendingDeviceSyncJobsDeadForAccount,
   markPendingDeviceSyncJobsDeadForAccountIfCurrent,
@@ -103,6 +101,7 @@ import type {
   DiscardUnconsumedOAuthStateResult,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncAccountStatus,
+  DeviceSyncCanonicalImportReceipt,
   DeviceSyncJobFailureTransition,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
@@ -723,7 +722,7 @@ export class SqliteDeviceSyncStore {
 
   completeJobsMarkSyncSucceededAndEnqueueJobs(input: {
     accountId: string;
-    canonicalImportCompletedAt?: string | null;
+    canonicalImportReceipts?: readonly DeviceSyncCanonicalImportReceipt[];
     completedAt: string;
     disconnectGeneration: number | null;
     jobIds: readonly string[];
@@ -741,7 +740,7 @@ export class SqliteDeviceSyncStore {
     try {
       return withImmediateTransaction(this.database, () => {
         const completed = completeDeviceSyncJobsIfOwnedInTransaction(this.database, {
-          canonicalImportCompletedAt: input.canonicalImportCompletedAt ?? null,
+          canonicalImportReceipts: input.canonicalImportReceipts ?? [],
           jobIds: input.jobIds,
           now: input.completedAt,
           workerId: input.workerId,
@@ -764,7 +763,7 @@ export class SqliteDeviceSyncStore {
         }
 
         for (const job of input.jobs) {
-          const scheduled = enqueueDeviceSyncJobInTransaction(this.database, {
+          enqueueDeviceSyncJobInTransaction(this.database, {
             provider: input.provider,
             accountId: input.accountId,
             kind: job.kind,
@@ -773,10 +772,6 @@ export class SqliteDeviceSyncStore {
             availableAt: job.availableAt,
             maxAttempts: job.maxAttempts,
             dedupeKey: job.dedupeKey,
-          });
-          linkDeviceSyncJobContinuationInTransaction(this.database, {
-            childJobId: scheduled.id,
-            parentJobIds: input.jobIds,
           });
         }
 
@@ -789,10 +784,6 @@ export class SqliteDeviceSyncStore {
 
       throw error;
     }
-  }
-
-  listJobContinuations(parentJobId: string): DeviceSyncJobRecord[] {
-    return listDeviceSyncJobContinuations(this.database, parentJobId);
   }
 
   releaseJobIfOwned(jobId: string, workerId: string, now: string): boolean {

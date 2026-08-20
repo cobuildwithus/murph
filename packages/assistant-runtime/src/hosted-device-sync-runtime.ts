@@ -30,6 +30,7 @@ import {
 } from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
+  DeviceSyncCanonicalImportReceipt,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   StoredDeviceConnectionSource,
@@ -842,7 +843,6 @@ async function applyHostedDeviceSyncWakeHint(input: {
     return { pendingDirtyPayloadJobs: [], superseded: false };
   }
 
-  const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   for (const [index, hint] of jobHints.entries()) {
     const job = hostedJobHintToDeviceSyncJobInput(
       {
@@ -855,7 +855,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       },
       input.wake.occurredAt,
     );
-    const enqueued = store.enqueueJob({
+    store.enqueueJob({
       accountId: localAccountId,
       availableAt: job.availableAt,
       dedupeKey: job.dedupeKey,
@@ -865,10 +865,6 @@ async function applyHostedDeviceSyncWakeHint(input: {
       priority: job.priority ?? 0,
       provider: account.provider,
     });
-    pendingDirtyPayloadJobs.push(...(hint.dirtyPayloads ?? []).map((dirtyPayload) => ({
-      ...dirtyPayload,
-      jobId: enqueued.id,
-    })));
   }
 
   const wakePatch = buildHostedDeviceSyncWakeAccountPatch(account, wake.hint);
@@ -876,7 +872,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
     store.patchAccount(localAccountId, wakePatch);
   }
 
-  return { pendingDirtyPayloadJobs, superseded: false };
+  return { pendingDirtyPayloadJobs: [], superseded: false };
 }
 
 export function resolveHostedDeviceSyncWakeLocalAccountId(input: {
@@ -952,16 +948,12 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
         ? job.leaseExpiresAt ?? job.availableAt
         : job.availableAt;
       const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
-      const dirtyPayloads = input.state.pendingDirtyPayloadJobs
-        .filter((pending) => pending.jobId === job.id)
-        .map(({ jobId: _jobId, ...pending }) => pending);
       retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
         ? jobRetryAt
         : retryAt;
       retryHints.push({
         availableAt: jobRetryAt,
         dedupeKey,
-        ...(dirtyPayloads.length > 0 ? { dirtyPayloads } : {}),
         kind: job.kind,
         maxAttempts: remainingAttempts,
         ...(Object.keys(payload).length > 0 ? { payload } : {}),
@@ -1522,11 +1514,8 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     Map<string, HostedExecutionDeviceSyncCompletedImport>
   >();
   const remaining: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
-  for (const originalPending of input.state.pendingDirtyPayloadJobs) {
-    const { job, pending } = resolveHostedDirtyPayloadJobOwner({
-      pending: originalPending,
-      store,
-    });
+  for (const pending of input.state.pendingDirtyPayloadJobs) {
+    const job = store.getJobById(pending.jobId);
     const isCompanionHrv = job ? isJunctionCompanionHrvRmssdJob(job) : false;
     const completed = job?.status === "dead"
       ? !isCompanionHrv
@@ -1567,9 +1556,11 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     const ids = completedByAck.get(ackKey) ?? new Set<string>();
     if (pending.dirtyPayloadId) {
       ids.add(pending.dirtyPayloadId);
+      const exactImportReceipt = job?.status === "succeeded"
+        ? findExactCanonicalImportReceipt(job.canonicalImportReceipts ?? [], pending)
+        : null;
       if (
-        job?.status === "succeeded"
-        && job.canonicalImportCompletedAt
+        exactImportReceipt
         && isHostedDeviceSyncImportReceiptKey(pending.resource)
         && isHostedDeviceSyncImportReceiptKey(pending.sourceProviderSlug)
       ) {
@@ -1579,7 +1570,7 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
         >();
         receipts.set(pending.dirtyPayloadId, {
           dirtyPayloadId: pending.dirtyPayloadId,
-          importCompletedAt: job.canonicalImportCompletedAt,
+          importCompletedAt: exactImportReceipt.importCompletedAt,
           resource: pending.resource,
           sourceProviderSlug: pending.sourceProviderSlug,
         });
@@ -1619,35 +1610,22 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
   return [...completedImportsByJobId.values()];
 }
 
-function resolveHostedDirtyPayloadJobOwner(input: {
-  pending: HostedDeviceSyncRuntimeDirtyPayloadJob;
-  store: HostedRuntimeDeviceSyncStore;
-}): {
-  job: DeviceSyncJobRecord | null;
-  pending: HostedDeviceSyncRuntimeDirtyPayloadJob;
-} {
-  let pending = input.pending;
-  let job = input.store.getJobById(pending.jobId);
-  const visited = new Set<string>();
-
-  while (
-    job?.status === "succeeded"
-    && !job.canonicalImportCompletedAt
-    && !visited.has(job.id)
-  ) {
-    visited.add(job.id);
-    const continuations = input.store.listJobContinuations(job.id);
-    if (continuations.length !== 1) {
-      break;
-    }
-    job = continuations[0] ?? null;
-    if (!job) {
-      break;
-    }
-    pending = { ...pending, jobId: job.id };
+function findExactCanonicalImportReceipt(
+  receipts: readonly DeviceSyncCanonicalImportReceipt[],
+  pending: HostedDeviceSyncRuntimeDirtyPayloadJob,
+): DeviceSyncCanonicalImportReceipt | null {
+  if (!pending.resource || !pending.sourceProviderSlug) {
+    return null;
+  }
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(pending.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    return null;
   }
 
-  return { job, pending };
+  return receipts.find((receipt) =>
+    receipt.resource === pending.resource
+    && canonicalizeJunctionProviderSlug(receipt.sourceProviderSlug) === sourceProviderSlug
+  ) ?? null;
 }
 
 function isHostedDeviceSyncImportReceiptKey(value: string | null): value is string {

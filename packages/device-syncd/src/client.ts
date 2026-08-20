@@ -153,6 +153,12 @@ export interface ListDeviceSyncAccountsInput {
   sourceProviderSlug?: string | null;
 }
 
+export interface DeviceSyncCanonicalImportReceipt {
+  importCompletedAt: string;
+  resource: string;
+  sourceProviderSlug: string;
+}
+
 export interface DeviceSyncJobRecord {
   id: string;
   provider: string;
@@ -173,8 +179,8 @@ export interface DeviceSyncJobRecord {
   updatedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
-  /** Durable proof that this job imported at least one canonical event. */
-  canonicalImportCompletedAt?: string | null;
+  /** Exact canonical source/resource identities accepted while this job ran. */
+  canonicalImportReceipts?: readonly DeviceSyncCanonicalImportReceipt[];
 }
 
 export interface DeviceSyncErrorPayload {
