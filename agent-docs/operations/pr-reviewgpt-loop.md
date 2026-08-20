@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-17
+Last verified: 2026-08-19
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -75,6 +75,38 @@ Changing the launch mode does not reconfigure a browser process that is already
 running. Never restart a shared lane merely to apply this setting while it has
 pending reviews; let the new flags take effect on the lane's next normal
 restart.
+
+## Wait And Wake Ownership
+
+Give every ReviewGPT run one completion owner. For a normal active review run,
+use `--wait` and let that invocation own response capture until it returns on
+completion, timeout, or failure. Waiting on that completion-returning process is
+not status polling. Do not spend the active agent turn repeatedly reopening the
+thread, querying the process, or otherwise asking whether the review is done.
+
+When an accepted ReviewGPT request must outlive the active turn, prefer a
+detached `cobuild-review-gpt thread wake` handoff. Bind it to the exact thread,
+capture metadata, owning Codex session, repository checkout, and managed browser
+lane. The detached watcher owns the wait and resumes Codex only after the
+response is complete; the active agent does not remain in a progress-check
+loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
+every five minutes. Unless an explicit caller- or user-supplied per-run bound
+already applies, use `--poll-timeout 240m`; preserve any explicit bound. That
+wake timeout is independent of the normal ReviewGPT response-capture timeout,
+which defaults to 180 minutes.
+
+Manual status polling is a fallback only when neither a completion-returning
+wait nor a completion watcher can notify the owning model and the task cannot
+safely proceed without a check. In that case, leave at least five minutes
+between checks and stop polling as soon as one completion owner is available.
+Do not stack a manual polling loop on top of a live `--wait` process or detached
+wake watcher.
+
+The completion watcher does not relax exact-head, exact-thread, attachment,
+artifact, model, timeout, or response-marker validation. In particular, keep
+the preliminary coverage-patch download and application boundary in
+`agent-docs/operations/completion-workflow.md` § Preliminary ReviewGPT Packet;
+do not use a generic wake handoff as authority to apply an artifact.
 
 ## Preliminary Specialist Pass
 

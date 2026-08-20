@@ -1,5 +1,9 @@
 import type { PublicProviderDescriptor } from "@murphai/device-syncd/types";
 import type { ConfiguredDeviceSyncProviderKey } from "@murphai/device-syncd/connect-config";
+import {
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+} from "@murphai/device-syncd/fitbit-migration";
 
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
 import {
@@ -70,6 +74,12 @@ export interface HostedDeviceSyncSettingsUpstreamSource {
   connectProvider?: ConfiguredDeviceSyncProviderKey | null;
   connectSourceId?: string | null;
   connectTarget?: string | null;
+  firstSeenAt?: string;
+  fitbitMigrationCoverageReady?: true;
+  historicalBackfillComplete?: true;
+  lastDataAt?: string | null;
+  lastErrorCode?: string | null;
+  lastSeenAt?: string;
   providerLabel: string;
   recoveryKind?: HostedBrowserDeviceSyncConnectionSource["recoveryKind"];
   requiresReconnect?: boolean;
@@ -763,7 +773,9 @@ function findHostedDeviceSyncConnectTargetForUpstreamSources(input: {
   upstreamSources: readonly Pick<HostedDeviceSyncSettingsUpstreamSource, "sourceProviderSlug">[];
 }): HostedDeviceSyncSettingsConnectTarget | null {
   for (const upstreamSource of input.upstreamSources) {
-    const sourceProviderSlug = normalizeProviderKey(upstreamSource.sourceProviderSlug);
+    const sourceProviderSlug = resolveHostedReconnectSourceProviderSlug(
+      upstreamSource.sourceProviderSlug,
+    );
     const target = input.targets.find((candidate) =>
       normalizeProviderKey(candidate.provider) === input.provider
       && normalizeProviderKey(candidate.sourceProviderSlug ?? null) === sourceProviderSlug
@@ -775,6 +787,13 @@ function findHostedDeviceSyncConnectTargetForUpstreamSources(input: {
   }
 
   return null;
+}
+
+function resolveHostedReconnectSourceProviderSlug(value: string): string | null {
+  const sourceProviderSlug = normalizeProviderKey(value);
+  return sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    ? JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    : sourceProviderSlug;
 }
 
 function withUpstreamSourceConnectTargets(input: {
@@ -805,7 +824,26 @@ function withUpstreamSourceConnectTargets(input: {
 function toSettingsUpstreamSource(
   source: HostedBrowserDeviceSyncConnectionSource,
 ): HostedDeviceSyncSettingsUpstreamSource {
+  const sourceProviderSlug = normalizeProviderKey(source.sourceProviderSlug);
+  const includeMigrationTimeline =
+    sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    || sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
+
   return {
+    ...(includeMigrationTimeline
+      ? {
+          firstSeenAt: source.firstSeenAt,
+          ...(source.fitbitMigrationCoverageReady
+            ? { fitbitMigrationCoverageReady: true as const }
+            : {}),
+          ...(source.historicalBackfillComplete
+            ? { historicalBackfillComplete: true as const }
+            : {}),
+          lastDataAt: source.lastDataAt ?? null,
+          lastSeenAt: source.lastSeenAt,
+        }
+      : {}),
+    ...(source.lastErrorCode ? { lastErrorCode: source.lastErrorCode } : {}),
     providerLabel: formatHostedDeviceSyncSourceLabel(source.sourceProviderSlug),
     ...(source.recoveryKind ? { recoveryKind: source.recoveryKind } : {}),
     ...(source.requiresReconnect ? { requiresReconnect: true } : {}),
