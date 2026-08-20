@@ -112,9 +112,6 @@ jobs:
 
       - name: Run release checks
         env:
-          # Assistant-engine coverage is serialized in CI but exceeds Node's
-          # default heap near the end of its 2,000-test suite.
-          NODE_OPTIONS: --max-old-space-size=6144
           MURPH_TEST_LANES_PARALLEL: "1"
           MURPH_APP_VERIFY_PARALLEL: "1"
           MURPH_VERIFY_STEP_PARALLEL: "1"

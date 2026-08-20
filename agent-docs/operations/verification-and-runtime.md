@@ -824,6 +824,14 @@ When that fast path applies:
 
 ## Current Command Meaning
 
+Repository package-test memory: `pnpm test` and `pnpm test:packages` preserve
+root `vitest.config.ts` as the curated repo lane, but execute that lane in two
+serial invocations. Every project except `assistant-engine` retains the caller's
+ordinary Node heap; only the `assistant-engine` root project receives
+`--max-old-space-size=6144`. Package-local focused test commands remain
+unchanged. The release workflow intentionally leaves job-wide `NODE_OPTIONS`
+unset so package and build-phase owners apply only their proven ceilings.
+
 Hosted-web production build memory: on Linux CI, `apps/web verify` defaults to
 wrapping its production `next build` step with
 `apps/web/scripts/build-memory-guard.sh`. The guard creates a root-level
