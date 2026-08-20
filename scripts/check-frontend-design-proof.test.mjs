@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -9,7 +10,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import {
+  isFrontendUiChange,
   isFrontendUiPath,
+  isStaticMetadataOnlyRouteChange,
   validateFrontendDesignProof,
 } from "./check-frontend-design-proof.mjs";
 
@@ -28,6 +31,17 @@ const COMPLETE_HTML = `
 const UI_PATHS = ["apps/web/app/settings/page.tsx"];
 const DESTINATION_ERROR =
   "The Design proof section must include an absolute HTTP(S) link with a fragment to `/design?tab=components`, `/design?tab=consent`, or `/screenshots/<category>`.";
+const FRONTEND_GUIDE = readFileSync(
+  new URL("../agent-docs/FRONTEND.md", import.meta.url),
+  "utf8",
+);
+const HOSTED_WORKTREE_GUIDE = readFileSync(
+  new URL(
+    "../agent-docs/operations/hosted-local-worktree-dev.md",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("detects user-facing UI and excludes reference pages", () => {
   assert.equal(isFrontendUiPath("apps/web/app/home/page.tsx"), true);
@@ -42,6 +56,191 @@ test("detects user-facing UI and excludes reference pages", () => {
   assert.equal(isFrontendUiPath("apps/web/app/screenshots/page.tsx"), false);
   assert.equal(isFrontendUiPath("apps/web/test/hosted-settings.test.tsx"), false);
 });
+
+test("frontend guidance names installed skills without checkout-local paths", () => {
+  assert.match(FRONTEND_GUIDE, /installed `impeccable` skill/u);
+  assert.match(FRONTEND_GUIDE, /installed `shadcn` skill/u);
+  assert.doesNotMatch(FRONTEND_GUIDE, /\.agents\/skills\/(?:impeccable|shadcn)/u);
+});
+
+test("frontend-only worktree guidance pins every hosted public URL locally", () => {
+  for (const expected of [
+    "DEVICE_SYNC_PUBLIC_BASE_URL='http://localhost:3101/api/device-sync'",
+    "HOSTED_ONBOARDING_PUBLIC_BASE_URL='http://localhost:3101'",
+    "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='http://localhost:3101,http://127.0.0.1:3101'",
+    "HOSTED_WEB_BASE_URL='http://localhost:3101'",
+  ]) {
+    assert.match(HOSTED_WORKTREE_GUIDE, new RegExp(
+      expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
+      "u",
+    ));
+  }
+});
+
+test("exempts only isolated static route metadata from rendered proof", () => {
+  const baseSource = `import { PitchDeck } from "./pitch-deck";
+
+export default function Page() {
+  return <PitchDeck />;
+}
+`;
+  const headSource = `import type { Metadata } from "next";
+import { PitchDeck } from "./pitch-deck";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/pitch-deck" },
+  description: "A public pitch deck.",
+  title: "Pitch deck",
+};
+
+export default function Page() {
+  return <PitchDeck />;
+}
+`;
+  const change = {
+    baseSource,
+    headSource,
+    path: "apps/web/app/pitch-deck/page.tsx",
+  };
+
+  assert.equal(isStaticMetadataOnlyRouteChange(change), true);
+  assert.equal(isFrontendUiChange(change), false);
+  assert.deepEqual(
+    validateFrontendDesignProof({ changedFiles: [change], prBodyHtml: "" }),
+    { required: false },
+  );
+
+  assert.equal(
+    isStaticMetadataOnlyRouteChange({
+      baseSource: headSource,
+      headSource: headSource.replace("Pitch deck", "Pitch deck for teams"),
+      path: change.path,
+    }),
+    true,
+  );
+});
+
+test("keeps rendered, shared, dynamic, and viewport metadata changes in proof", () => {
+  const path = "apps/web/app/pitch-deck/page.tsx";
+  const baseSource = `export const metadata = { title: "Before" };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`;
+  const cases = [
+    `export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>After</h1>;
+}
+`,
+    `export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>{metadata.title}</h1>;
+}
+`,
+    String.raw`export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>{metad\u0061ta.title}</h1>;
+}
+`,
+    `export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>{eval("meta" + "data").title}</h1>;
+}
+`,
+    `export const metadata = buildMetadata("After");
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `export const metadata = { themeColor: "black", title: "After" };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `export const metadata = { formatDetection: { telephone: false } };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `const pageTitle = "After";
+export const metadata = { title: pageTitle };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `export const metadata = { "theme\\u0043olor": "black", title: "After" };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `export const metadata = { title: "After" };
+export const viewport = { width: "device-width" };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `import * as self from "./page";
+export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>{self["meta" + "data"].title}</h1>;
+}
+`,
+  ];
+
+  for (const headSource of cases) {
+    const change = { baseSource, headSource, path };
+    assert.equal(isStaticMetadataOnlyRouteChange(change), false);
+    assert.equal(isFrontendUiChange(change), true);
+  }
+
+  assert.equal(
+    isStaticMetadataOnlyRouteChange({
+      baseSource: null,
+      headSource: `export const metadata = { title: "New" };\n`,
+      path,
+    }),
+    false,
+  );
+});
+
+test("does not strip type-import text from rendered route source", () => {
+  const path = "apps/web/app/pitch-deck/page.tsx";
+  const baseSource = `export const metadata = { title: "Before" };
+
+const example = \`import type { Before } from "example";\`;
+
+export default function Page() {
+  return <pre>{example}</pre>;
+}
+`;
+  const headSource = `export const metadata = { title: "After" };
+
+const example = \`import type { After } from "example";\`;
+
+export default function Page() {
+  return <pre>{example}</pre>;
+}
+`;
+
+  assert.equal(
+    isStaticMetadataOnlyRouteChange({ baseSource, headSource, path }),
+    false,
+  );
+});
+
 
 test("requires dedicated proof while accepting an existing representation link", () => {
   assert.deepEqual(

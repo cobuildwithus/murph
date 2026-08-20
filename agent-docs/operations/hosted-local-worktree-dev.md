@@ -1,6 +1,6 @@
 # Hosted Local Worktree Dev
 
-Last verified: 2026-08-13
+Last verified: 2026-08-20
 
 ## Purpose
 
@@ -165,7 +165,12 @@ uses `vercel env run`, so it cannot start without that project metadata.
 
 ```bash
 cd apps/web
-NEXT_DIST_DIR_MODE=smoke NEXT_DIST_DIR_SUFFIX='<slug>' \
+DEVICE_SYNC_PUBLIC_BASE_URL='http://localhost:3101/api/device-sync' \
+HOSTED_ONBOARDING_PUBLIC_BASE_URL='http://localhost:3101' \
+HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='http://localhost:3101,http://127.0.0.1:3101' \
+HOSTED_WEB_BASE_URL='http://localhost:3101' \
+NEXT_DIST_DIR_MODE=smoke \
+NEXT_DIST_DIR_SUFFIX='<slug>' \
 pnpm dev -- --hostname 127.0.0.1 --port 3101
 ```
 
