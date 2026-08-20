@@ -1,6 +1,6 @@
 # iMessage workout entry reliability
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -75,9 +75,9 @@ Updated: 2026-08-20
    path without changing mutation ownership, and withhold public release copy
    until the repaired companion build is available.
 4. [completed] Capture exact-head simulator evidence and run focused verification.
-5. [pending] Commit, push, open both PRs, and run ReviewGPT with exact counterpart
+5. [completed] Commit, push, open both PRs, and run ReviewGPT with exact counterpart
    heads while CI runs.
-6. [pending] Resolve findings, close the plan, and prove current-base mergeability.
+6. [completed] Resolve findings, close the plan, and prove current-base mergeability.
 
 ## Verification
 
@@ -86,3 +86,4 @@ Updated: 2026-08-20
 - Murph contracts/operator/vault-usecase focused tests and affected typechecks.
 - Exact-head simulator screenshots for entry, saved, and wrapped-title states.
 - ReviewGPT on both pushed PR heads and required exact-head CI.
+Completed: 2026-08-20
