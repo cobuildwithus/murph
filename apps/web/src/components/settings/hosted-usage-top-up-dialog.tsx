@@ -718,10 +718,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           <div
             ref={scrollContentRef}
             className={cn(
-              "px-6 pt-4",
+              "min-h-0 overflow-y-auto overscroll-contain px-6 pt-4",
               showGroupMessagesAction
                 ? "pb-[max(env(safe-area-inset-bottom),1.5rem)]"
-                : "min-h-0 flex-1 overflow-y-auto overscroll-contain",
+                : "flex-1",
             )}
           >
             {screenContent}

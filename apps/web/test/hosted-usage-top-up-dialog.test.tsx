@@ -5256,6 +5256,12 @@ test("keeps the fulfilled group receipt content-height on mobile", async () => {
       rendered.container.textContent ?? "",
       /Open Messages, then choose this group to keep going/,
     );
+    const contactLink = rendered.container.querySelector('a[href="sms:"]');
+    assert.ok(contactLink);
+    const scrollBody = contactLink.closest(".overflow-y-auto");
+    assert.ok(scrollBody);
+    assert.match(scrollBody.className, /min-h-0/);
+    assert.match(scrollBody.className, /overscroll-contain/);
     assert.equal(
       Array.from(rendered.container.querySelectorAll("button")).some(
         (button) => button.textContent?.trim() === "Done",
