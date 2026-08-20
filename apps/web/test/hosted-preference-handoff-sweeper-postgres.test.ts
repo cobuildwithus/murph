@@ -245,7 +245,7 @@ describe.skipIf(!runPostgresProof)(
       ]);
     });
 
-    it("selects an unconsumed device-sync wake for scheduled handoff recovery", async () => {
+    it("retains recovery when the imported frontier is malformed", async () => {
       const client = requirePrisma(prisma);
       const now = new Date();
       const memberId = createId("member_handoff_device_sync");
@@ -256,6 +256,14 @@ describe.skipIf(!runPostgresProof)(
         data: {
           billingStatus: "active",
           id: memberId,
+        },
+      });
+      await client.hostedWorkspace.create({
+        data: {
+          redactedStatusJson: {
+            hostedMailboxSystemImportedSeq: "not-a-sequence",
+          },
+          userId: memberId,
         },
       });
       await client.hostedMailboxItem.create({

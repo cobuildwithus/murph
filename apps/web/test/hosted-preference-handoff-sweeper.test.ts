@@ -244,7 +244,7 @@ describe("hosted preference handoff sweeper", () => {
     const sql = query?.strings?.join("?") ?? "";
     expect(sql).not.toContain('"lane_counter"."consumed_seq"');
     expect(sql.match(/LEFT JOIN "hosted_workspace" AS "workspace"/gu)).toHaveLength(3);
-    expect(sql.match(/"item"\."lane_seq" > CASE/gu)).toHaveLength(3);
+    expect(sql.match(/"item"\."lane_seq" >\s+CASE/gu)).toHaveLength(3);
     expect(sql.match(/hostedMailboxSystemImportedSeq/gu)).toHaveLength(6);
   });
 
@@ -283,7 +283,7 @@ describe("hosted preference handoff sweeper", () => {
     expect(sql).toContain(
       '\'clinical-records:sync:v1:\' || "run"."id" || \':\' || "run"."generation"::text',
     );
-    expect(sql).toContain('"item"."lane_seq" > CASE');
+    expect(sql).toMatch(/"item"\."lane_seq" >\s+CASE/u);
     expect(sql).toContain("hostedMailboxSystemImportedSeq");
     expect(sql).toContain('"item"."expires_at" IS NULL OR "item"."expires_at" > ?');
     expect(sql).toContain('"item"."created_at" > ?');
@@ -330,9 +330,7 @@ describe("hosted preference handoff sweeper", () => {
     expect(sql).toContain(
       "'health.daily-metric.reported'",
     );
-    expect(sql).toContain(
-      '"item"."lane_seq" > CASE',
-    );
+    expect(sql).toMatch(/"item"\."lane_seq" >\s+CASE/u);
     expect(sql).toContain("hostedMailboxSystemImportedSeq");
     expect(requestHandoff).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),

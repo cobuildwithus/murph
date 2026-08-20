@@ -151,6 +151,20 @@ export async function runHostedPreferenceHandoffSweeper(input: {
 function createHostedPreferenceHandoffCandidateStore(
   prisma: PrismaClient,
 ): HostedPreferenceHandoffCandidateStore {
+  const systemMailboxImportedSeq = Prisma.sql`
+    CASE
+      WHEN (
+        "workspace"."redacted_status_json"
+          ->> 'hostedMailboxSystemImportedSeq'
+      ) ~ '^(0|[1-9][0-9]*)$'
+        THEN (
+          "workspace"."redacted_status_json"
+            ->> 'hostedMailboxSystemImportedSeq'
+        )::bigint
+      ELSE 0
+    END
+  `;
+
   return {
     async listCandidates(input) {
       const retainedAt = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
@@ -177,17 +191,7 @@ function createHostedPreferenceHandoffCandidateStore(
             -- Import transfers retry ownership from this handoff sweep to the
             -- runtime. Handled-through can remain behind while runtime-owned
             -- work waits for its persisted retry timestamp.
-            AND "item"."lane_seq" > CASE
-              WHEN (
-                "workspace"."redacted_status_json"
-                  ->> 'hostedMailboxSystemImportedSeq'
-              ) ~ '^(0|[1-9][0-9]*)$'
-                THEN (
-                  "workspace"."redacted_status_json"
-                    ->> 'hostedMailboxSystemImportedSeq'
-                )::bigint
-              ELSE 0
-            END
+            AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
@@ -207,17 +211,7 @@ function createHostedPreferenceHandoffCandidateStore(
               'runtime.browser-vault-refresh-requested',
               'runtime.maintenance-requested'
             )
-            AND "item"."lane_seq" > CASE
-              WHEN (
-                "workspace"."redacted_status_json"
-                  ->> 'hostedMailboxSystemImportedSeq'
-              ) ~ '^(0|[1-9][0-9]*)$'
-                THEN (
-                  "workspace"."redacted_status_json"
-                    ->> 'hostedMailboxSystemImportedSeq'
-                )::bigint
-              ELSE 0
-            END
+            AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
@@ -244,17 +238,7 @@ function createHostedPreferenceHandoffCandidateStore(
             ON "workspace"."user_id" = "item"."user_id"
           WHERE "run"."status" = 'queued'
             AND "run"."completed_at" IS NULL
-            AND "item"."lane_seq" > CASE
-              WHEN (
-                "workspace"."redacted_status_json"
-                  ->> 'hostedMailboxSystemImportedSeq'
-              ) ~ '^(0|[1-9][0-9]*)$'
-                THEN (
-                  "workspace"."redacted_status_json"
-                    ->> 'hostedMailboxSystemImportedSeq'
-                )::bigint
-              ELSE 0
-            END
+            AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" > ${retainedAt}
         ),
