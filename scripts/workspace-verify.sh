@@ -102,6 +102,7 @@ readonly node_syntax_check_scripts=(
   "scripts/run-with-host-verification-slot.mjs"
   "scripts/run-with-workspace-artifact-lock.mjs"
   "scripts/check-workspace-package-cycles.mjs"
+  "scripts/check-runner-bundle-budget-ci.mjs"
   "scripts/check-hosted-crypto-hardcut.mjs"
   "scripts/release-artifact-secret-guard.mjs"
   "scripts/release-helpers.mjs"
