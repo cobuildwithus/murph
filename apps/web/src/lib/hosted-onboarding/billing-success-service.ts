@@ -20,6 +20,9 @@ import {
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 import {
+  sendHostedSignupNotificationEmailForMemberBestEffort,
+} from "./signup-notification-email";
+import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
@@ -120,6 +123,12 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     memberId: activationOutcome.welcomeEmailMemberId,
     prisma,
   });
+  for (const memberId of activationOutcome.newlyActivatedMemberIds) {
+    await sendHostedSignupNotificationEmailForMemberBestEffort({
+      memberId,
+      prisma,
+    });
+  }
 
   return getHostedInviteStatus({
     authenticatedMember: input.member,
@@ -141,6 +150,7 @@ type HostedCheckoutSessionSuccessOutcome = {
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
+  newlyActivatedMemberIds: string[];
   welcomeEmailMemberId: string | null;
 };
 
@@ -171,6 +181,7 @@ async function applyHostedCheckoutSessionSuccessWithinUnwrapCache(
   let activationOutcome: HostedCheckoutSessionSuccessOutcome = {
     activatedMemberId: null,
     hostedExecutionEventId: null,
+    newlyActivatedMemberIds: [],
     welcomeEmailMemberId: null,
   };
 

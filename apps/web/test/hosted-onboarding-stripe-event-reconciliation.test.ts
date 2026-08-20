@@ -377,6 +377,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.applyStripeCheckoutExpired.mockResolvedValue(undefined);
@@ -385,6 +386,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: "member_123",
       hostedExecutionEventId: "dispatch_123",
       hostedExecutionMailboxItemId: "mailbox_dispatch_123",
+      newlyActivatedMemberIds: ["member_123"],
       welcomeEmailMemberId: "member_123",
     });
     mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
@@ -393,6 +395,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValue({
@@ -2194,12 +2197,7 @@ describe("hosted Stripe event reconciliation", () => {
       memberId: "member_123",
       prisma: prisma.client,
     });
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: prisma.client,
-      sourceEventId: event.id,
-      sourceEventType: event.type,
-    });
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
   it("defers Pulse Trial provider authority to the locked checkout owner", async () => {
@@ -2750,6 +2748,10 @@ describe("hosted Stripe event reconciliation", () => {
         },
       ],
       hostedExecutionEventId: "member.activated:family:owner",
+      newlyActivatedMemberIds: [
+        "member_family_owner",
+        "member_family_child",
+      ],
       welcomeEmailMemberId: null,
     });
 
@@ -2818,6 +2820,23 @@ describe("hosted Stripe event reconciliation", () => {
       },
       status: HostedStripeEventStatus.completed,
     }));
+    expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
+      .toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
+      .toHaveBeenNthCalledWith(1, {
+        memberId: "member_family_owner",
+        prisma: prisma.client,
+        sourceEventId: event.id,
+        sourceEventType: event.type,
+      });
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
+      .toHaveBeenNthCalledWith(2, {
+        memberId: "member_family_child",
+        prisma: prisma.client,
+        sourceEventId: event.id,
+        sourceEventType: event.type,
+      });
   });
 
   it("prepares Family candidates when a reused subscription still resolves its direct owner", async () => {

@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => {
     prepareHostedStripeCheckoutCompletion: vi.fn(),
     preparedCryptoDomainRoots: new Map(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
+    sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
     readHostedMemberCoreState: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
@@ -83,6 +84,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", () => ({
   sendHostedSignupWelcomeEmailForMemberBestEffort:
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
+  sendHostedSignupNotificationEmailForMemberBestEffort:
+    mocks.sendHostedSignupNotificationEmailForMemberBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
@@ -162,12 +168,14 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.cleanupHostedFamilySponsoredDirectSubscription.mockResolvedValue(undefined);
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
     mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mockResolvedValue(undefined);
+    mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mockResolvedValue(undefined);
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
       stage: "activating",
     }));
@@ -427,6 +435,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
@@ -444,6 +453,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       activatedMemberId: null,
       cleanupPulseTrialStripeSubscriptionId: "sub_delayed_trial",
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription
@@ -502,6 +512,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         subscriptionId: "sub_superseded",
       },
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -540,6 +551,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         subscriptionId: "sub_loser",
       },
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -625,6 +637,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -641,6 +654,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       memberId: "member_123",
       prisma,
     });
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
   });
 
@@ -655,6 +669,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      newlyActivatedMemberIds: ["member_123"],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -671,6 +686,10 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       memberId: "member_123",
       prisma,
     });
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+    });
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledWith({
       hostedExecutionEventId: "wake_123",
       memberId: "member_123",
@@ -682,6 +701,43 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     ).toBeLessThan(
       mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mock.invocationCallOrder[0],
     );
+    expect(
+      mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not send a signup notification when Checkout only reuses a pending activation wake", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+      newlyActivatedMemberIds: [],
+      welcomeEmailMemberId: "member_123",
+    });
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).resolves.toEqual(createStatus({
+      stage: "activating",
+    }));
+
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledOnce();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .toHaveBeenCalledOnce();
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
   });
 
   it("only writes the durable billing reference when the checkout session has no subscription object", async () => {

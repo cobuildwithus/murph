@@ -36,6 +36,9 @@ import {
 } from "./member-activation-runtime-wake";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
+  sendHostedSignupNotificationEmailForMemberBestEffort,
+} from "./signup-notification-email";
+import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
@@ -112,6 +115,7 @@ type HostedStarterUsagePostCommitEffects = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
+  signupNotificationEmailMemberId: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -433,6 +437,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
           hostedExecutionMailboxItemId: shouldWakeActivationRuntime
             ? activation?.hostedExecutionMailboxItemId ?? null
             : null,
+          signupNotificationEmailMemberId:
+            activation?.activated ? invite.member.id : null,
           welcomeEmailMemberId:
             activation?.activated && !policy.suppressSignupWelcomeEmail
               ? invite.member.id
@@ -722,6 +728,12 @@ async function runHostedStarterUsagePostCommitEffects(
   if (input.welcomeEmailMemberId) {
     await sendHostedSignupWelcomeEmailForMemberBestEffort({
       memberId: input.welcomeEmailMemberId,
+      prisma: input.prisma,
+    });
+  }
+  if (input.signupNotificationEmailMemberId) {
+    await sendHostedSignupNotificationEmailForMemberBestEffort({
+      memberId: input.signupNotificationEmailMemberId,
       prisma: input.prisma,
     });
   }

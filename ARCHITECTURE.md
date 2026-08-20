@@ -1578,9 +1578,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   delivery, but never for account lookup, direct-public sender authorization,
   or email-linked channel state until Privy verifies it. Welcome, internal
   signup, and cancellation-feedback mail retain their existing bounded,
-  idempotent Resend ownership; later successful payments must not repeat
-  activation side effects, and email paths must not persist provider payloads
-  or expose recipients in logs.
+  idempotent Resend ownership. The internal signup email follows a committed
+  member activation across Starter enrollment, Checkout success, and Stripe
+  reconciliation; a welcome-only or later paid-billing event is not signup
+  evidence. Later successful payments must not repeat activation side effects,
+  and email paths must not persist provider payloads or expose recipients in
+  logs.
 
   Reserved support escalation uses the existing product-feedback callback as a
   one-turn explicit action. A verified-private request for Murph human support
