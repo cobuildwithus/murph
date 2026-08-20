@@ -37459,7 +37459,7 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointTrustedCompletion: false,
       checkpointSystemControl: false,
       generatedImageRetention: false,
-      handoff: "fresh terminal conversation without borrowed quiet window",
+      handoff: "fresh terminal conversation quiet window",
     },
   ])("older due assistant carry honors $handoff before persisting a later reminder", async (
     {
@@ -38027,6 +38027,20 @@ describe("hosted workspace runtime entrypoint", () => {
           15_000,
           () => events.join(","),
         );
+        await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+        await waitForFakeTimerScheduled(() => events.join(","));
+        assert.equal(
+          events.some((event) => event.startsWith("snapshot:2:")),
+          false,
+          events.join(","),
+        );
+        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+        assert.equal(
+          events.some((event) => event.startsWith("snapshot:2:")),
+          false,
+          events.join(","),
+        );
+        await vi.advanceTimersByTimeAsync(1);
       }
       if (generatedImageRetention) {
         assert.deepEqual(
@@ -38260,7 +38274,9 @@ describe("hosted workspace runtime entrypoint", () => {
       if (checkpointFreshTerminalConversation) {
         assert.equal(
           events[secondSnapshotIndex],
-          `snapshot:2:idle_shutdown:${Date.parse(TEST_NOW) + idleCheckpointDelayMs}`,
+          `snapshot:2:idle_shutdown:${
+            Date.parse(TEST_NOW) + 2 * idleCheckpointDelayMs
+          }`,
         );
         assert.ok(
           requireEventIndex(

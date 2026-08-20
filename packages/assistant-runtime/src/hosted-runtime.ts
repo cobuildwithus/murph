@@ -3200,7 +3200,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantInputId: string | null = null;
-        const acceptedForegroundPriorityAssistantInputIds = new Set<string>();
         let acceptedForegroundPriorityInputNeedsOpaqueQuietWindow = false;
         const initialMailboxAssistantInputIds =
           passInput.initialMailboxImport?.importResult.assistantInputIds ?? [];
@@ -3215,26 +3214,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ): boolean =>
           unresolvedForegroundConversationInputOrdinals.has(inputId)
           || exactInitialConversationInputIds.has(inputId);
-        const resolveAcceptedForegroundConversationInputs = async (
-          inputIds: readonly string[],
-        ): Promise<void> => {
-          for (const inputId of inputIds) {
-            if (!hasExactForegroundConversationInputIdentity(inputId)) {
-              continue;
-            }
-            try {
-              if (await hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
-                inputId,
-                vault: restored.vaultRoot,
-              })) {
-                unresolvedForegroundConversationInputOrdinals.delete(inputId);
-              }
-            } catch {
-              // Keep the unresolved identity token when terminal evidence is
-              // temporarily unreadable.
-            }
-          }
-        };
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
@@ -3348,9 +3327,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   }
                   if (acceptedInputContext.foregroundPriorityInputAccepted) {
                     for (const assistantInputId of assistantInputIds) {
-                      acceptedForegroundPriorityAssistantInputIds.add(
-                        assistantInputId,
-                      );
                       if (
                         !hasExactForegroundConversationInputIdentity(
                           assistantInputId,
@@ -3382,12 +3358,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               // Release invocation-local image status from that durable truth in
               // both success and failure paths; evidence read errors retain it.
               await releaseAcceptedImageGenerationInputs(
-                [...acceptedAssistantInputIds],
-              );
-              // Resolve completed fresh conversation identity before the
-              // workspace runner can service another due assistant pass. The
-              // outer pass result arrives too late for that barrier decision.
-              await resolveAcceptedForegroundConversationInputs(
                 [...acceptedAssistantInputIds],
               );
             }
@@ -3427,11 +3397,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             current: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
             result: passResult,
             workspace: passInput.workspace,
-          });
+        });
         recordBrowserVaultReplicaRefreshIntent(passResult);
-        await resolveAcceptedForegroundConversationInputs(
-          [...acceptedForegroundPriorityAssistantInputIds],
-        );
         if (
           passResult.runtimeStateDirty
           && (

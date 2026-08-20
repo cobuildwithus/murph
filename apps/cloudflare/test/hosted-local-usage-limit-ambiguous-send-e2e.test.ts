@@ -171,7 +171,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     requireLinqStub().armNextPostAcceptLostAcknowledgment({
       expectedPath: replyPath,
       matchRequest: usageNoticeLinkMatcher,
-      responseCount: 1,
+      responseCount: 2,
     });
     requireScenario().queueAssistantResponses([firstAssistantReply], {
       matchInputContains: firstInboundText,
@@ -214,8 +214,45 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenario: requireScenario(),
       userId,
     });
+    const usageNoticeTextMessageId = requireAcceptedLinqMessageId(
+      chatId,
+      usageNoticeTextMatcher,
+    );
+    requireLinqStub().armNextRequestDelay({
+      delayMs: 10_000,
+      expectedMethod: "POST",
+      expectedPath: replyPath,
+      matchRequest: usageNoticeTextMatcher,
+    });
     await requireLinqStub().waitForMatchingSendCount({
       expectedCount: observedBaseline + 2,
+      expectedPath: replyPath,
+      matchRequest: usageNoticeLinkMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: observedTextBaseline + 2,
+      expectedPath: replyPath,
+      matchRequest: usageNoticeTextMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    const receiptResponse = await postSignedLinqWebhook(
+      buildHostedLinqDeliveryReceiptEvent({
+        chatId,
+        eventId: `evt_usage_limit_primary_delivered_${runId}`,
+        messageId: usageNoticeTextMessageId,
+        phoneNumber: buildLinqHomePhoneNumber(userId),
+      }),
+    );
+    expect(receiptResponse.status).toBe(202);
+    await expect(receiptResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "recorded-linq-provider-event:message.delivered",
+    });
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: observedBaseline + 3,
       expectedPath: replyPath,
       matchRequest: usageNoticeLinkMatcher,
       scenario: requireScenario(),
@@ -231,13 +268,13 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     const firstCompletedStatus = await requireScenario().waitForHostedIdle(userId);
 
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 1,
+      observedTextBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 2,
+      observedBaseline + 3,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
@@ -333,13 +370,13 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       secondReplyBaseline,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 1,
+      observedTextBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 2,
+      observedBaseline + 3,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
@@ -395,13 +432,13 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline + 2);
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 1,
+      observedTextBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 2,
+      observedBaseline + 3,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
@@ -675,6 +712,29 @@ function buildCurrentUtcCalendarMonthPeriod(): {
   };
 }
 
+function buildHostedLinqDeliveryReceiptEvent(input: {
+  chatId: string;
+  eventId: string;
+  messageId: string;
+  phoneNumber: string;
+}): Record<string, unknown> {
+  const createdAt = new Date().toISOString();
+  return {
+    api_version: "v3",
+    created_at: createdAt,
+    data: {
+      chat_id: input.chatId,
+      message_id: input.messageId,
+      phone_number: input.phoneNumber,
+      service: "SMS",
+    },
+    event_id: input.eventId,
+    event_type: "message.delivered",
+    trace_id: `trace_${input.eventId}`,
+    webhook_version: "2026-02-03",
+  };
+}
+
 function countAssistantResponseRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
@@ -682,17 +742,25 @@ function countAssistantResponseRequests(): number {
 }
 
 function requireAcceptedLinqMessageIdByText(chatId: string, text: string): string {
+  return requireAcceptedLinqMessageId(
+    chatId,
+    (request) => requireLinqStub().readObservedMessageText(request) === text,
+  );
+}
+
+function requireAcceptedLinqMessageId(
+  chatId: string,
+  matchRequest: (request: ObservedLinqRequest) => boolean,
+): string {
   const acceptedGroupSends = requireLinqStub().acceptedSendRequests.filter(
     (request) =>
       request.method === "POST"
       && request.url === `/chats/${encodeURIComponent(chatId)}/messages`,
   );
-  const acceptedIndex = acceptedGroupSends.findIndex((request) =>
-    requireLinqStub().readObservedMessageText(request) === text
-  );
+  const acceptedIndex = acceptedGroupSends.findIndex(matchRequest);
   const messageId = requireLinqStub().listObservedMessageIds(chatId)[acceptedIndex];
   if (acceptedIndex < 0 || !messageId) {
-    throw new Error(`Missing accepted Linq message id for ${text}.`);
+    throw new Error("Missing accepted Linq message id for the expected request.");
   }
   return messageId;
 }

@@ -83,7 +83,7 @@ export type HostedAiUsageLimitNoticeDeliveryClaim =
   | {
     idempotencyKey: string;
     providerIdempotencyKey: string;
-    resumeRichLinkAfterAcceptedText?: true;
+    replayingRichLinkPartial?: true;
     status: "claimed";
   }
   | {
@@ -324,7 +324,7 @@ export type HostedLinqDeliveryProviderDispatchClaim = {
   failureCode?: string | null;
   id: string | null;
   outcome?: "completed" | "incompatible";
-  resumeRichLinkAfterAcceptedText?: true;
+  replayingRichLinkPartial?: true;
   retryAt?: Date;
 };
 
@@ -807,8 +807,8 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
         idempotencyKey,
         providerIdempotencyKey:
           buildHostedAiUsageNoticeProviderIdempotencyKey(claim.id),
-        ...(claim.resumeRichLinkAfterAcceptedText
-          ? { resumeRichLinkAfterAcceptedText: true as const }
+        ...(claim.replayingRichLinkPartial
+          ? { replayingRichLinkPartial: true as const }
           : {}),
         status: "claimed",
       };
@@ -934,7 +934,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   messageId?: string | null;
   messageIds?: readonly string[];
   prisma: HostedLinqDeliveryClient;
-  recoveredRichLinkPrimary?: boolean;
+  replayingRichLinkPartial?: boolean;
 }): Promise<{
   deliveryStatus: HostedLinqAcceptedMilestoneStatus;
   reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
@@ -957,9 +957,11 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   const finalMessageId =
     providerMessageIds.at(-1) ?? normalizeNullable(input.messageId);
   const messageLookupKey = createHostedLinqMessageLookupKey(finalMessageId);
-  const recoveredRichLinkPrimary =
-    input.recoveredRichLinkPrimary === true
-    && providerMessageIds.length === 1;
+  const replayedRichLinkPrimaryMessageLookupKey =
+    input.replayingRichLinkPartial === true
+    && providerMessageIds.length === 2
+      ? createHostedLinqMessageLookupKey(providerMessageIds[0] ?? null)
+      : null;
   return runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     const signupAttempt = parseHostedLinqInviteSignupEffectId(
       input.idempotencyKey,
@@ -971,11 +973,11 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
       where: {
         deliveredAt: null,
         idempotencyKey,
-        lastReceiptAt: null,
         skippedAt: null,
         OR: [
           {
             failedAt: null,
+            lastReceiptAt: null,
             OR: [
               { messageLookupKey: null },
               ...(messageLookupKey ? [{ messageLookupKey }] : []),
@@ -984,15 +986,16 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
           {
             acceptedAt: null,
             failedAt: { not: null },
+            lastReceiptAt: null,
             messageLookupKey: null,
           },
-          ...(recoveredRichLinkPrimary
+          ...(replayedRichLinkPrimaryMessageLookupKey
             ? [{
                 acceptedAt: null,
                 failedAt: { not: null },
                 failureCode:
                   HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
-                messageLookupKey: { not: null },
+                messageLookupKey: replayedRichLinkPrimaryMessageLookupKey,
                 status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
               }]
             : []),
@@ -1033,15 +1036,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
         template: true,
       },
     });
-    if (delivery && recoveredRichLinkPrimary) {
-      await recordHostedLinqDeliveryMessagesTx({
-        acceptedAt,
-        deliveryId: delivery.id,
-        messageIds: providerMessageIds,
-        ordinalOffset: 1,
-        prisma,
-      });
-    } else if (delivery && providerMessageIds.length > 1) {
+    if (delivery && providerMessageIds.length > 1) {
       await recordHostedLinqDeliveryMessagesTx({
         acceptedAt,
         deliveryId: delivery.id,
@@ -1056,10 +1051,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
       messageLookupKey,
       messageLookupKeyCandidates:
         createHostedLinqMessageLookupKeyReadCandidates(finalMessageId),
-      messageIds:
-        recoveredRichLinkPrimary || providerMessageIds.length > 1
-          ? providerMessageIds
-          : undefined,
+      messageIds: providerMessageIds.length > 1 ? providerMessageIds : undefined,
       prisma,
     });
     if (!replay.advanced || !replay.receipt) {
@@ -1532,7 +1524,7 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   linqChatId?: string | null;
   messageIds?: readonly string[];
   prisma: HostedLinqDeliveryClient;
-  recoveredRichLinkPrimary?: boolean;
+  replayingRichLinkPartial?: boolean;
   retryAfterAt?: Date | null;
 }): Promise<void> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
@@ -1558,10 +1550,9 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
           ? { attemptedAt: input.expectedAttemptedAt }
           : {}),
         idempotencyKey,
-        lastReceiptAt: null,
         OR: [
-          { messageLookupKey: null },
-          ...(input.recoveredRichLinkPrimary === true
+          { lastReceiptAt: null, messageLookupKey: null },
+          ...(input.replayingRichLinkPartial === true
             && failureCode
               === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
             ? [{
@@ -2278,7 +2269,6 @@ async function recordHostedLinqDeliveryMessagesTx(input: {
   acceptedAt: Date;
   deliveryId: string;
   messageIds: readonly string[];
-  ordinalOffset?: number;
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
   const messageIds = normalizeHostedLinqProviderMessageIds(input.messageIds, null);
@@ -2286,18 +2276,15 @@ async function recordHostedLinqDeliveryMessagesTx(input: {
     return;
   }
   await input.prisma.hostedLinqDeliveryMessage.createMany({
-    data: messageIds.map((messageId, index) => {
-      const ordinal = (input.ordinalOffset ?? 0) + index;
-      return {
-        acceptedAt: input.acceptedAt,
-        deliveryId: input.deliveryId,
-        id: buildHostedLinqDeliveryMessageId(input.deliveryId, ordinal),
-        messageIdSuffix: toHostedOnboardingLogIdSuffix(messageId),
-        messageLookupKey: requireHostedLinqMessageLookupKey(messageId),
-        ordinal,
-        status: "accepted",
-      };
-    }),
+    data: messageIds.map((messageId, ordinal) => ({
+      acceptedAt: input.acceptedAt,
+      deliveryId: input.deliveryId,
+      id: buildHostedLinqDeliveryMessageId(input.deliveryId, ordinal),
+      messageIdSuffix: toHostedOnboardingLogIdSuffix(messageId),
+      messageLookupKey: requireHostedLinqMessageLookupKey(messageId),
+      ordinal,
+      status: "accepted",
+    })),
     skipDuplicates: true,
   });
 }
@@ -2306,7 +2293,12 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
   deliveryId: string;
   prisma: HostedLinqDeliveryClient;
 }): Promise<{
-  status: "accepted" | "delivered" | "failed" | "sent_no_receipt_expected";
+  status:
+    | "accepted"
+    | "delivered"
+    | "failed"
+    | "sent_no_receipt_expected"
+    | typeof HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS;
   terminalStatusChanged: boolean;
 }> {
   const delivery = await input.prisma.hostedLinqDelivery.findUnique({
@@ -2341,8 +2333,16 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
     },
   });
   const failedMessages = messages.filter((message) => message.status === "failed");
+  const partialReplayInFlight =
+    delivery.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+    && delivery.failureCode
+      === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
+    && messages.length < 2;
   const incompletePartialDelivery =
-    delivery.status === "failed"
+    (
+      delivery.status === "failed"
+      || partialReplayInFlight
+    )
     && delivery.failureCode
       === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
     && messages.length < 2;
@@ -2361,12 +2361,14 @@ async function recomputeHostedLinqDeliveryFromMessagesTx(input: {
   const threadIsDirect = delivery.threadIsDirect ?? (
     legacyGroupPolicy ? false : null
   );
-  const status = aggregateStatus === "accepted"
-    ? resolveHostedLinqRuntimeAcceptedStatus({
-        targetKind: delivery.targetKind ?? (legacyGroupPolicy ? "thread" : null),
-        threadIsDirect,
-      })
-    : aggregateStatus;
+  const status = partialReplayInFlight
+    ? HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+    : aggregateStatus === "accepted"
+      ? resolveHostedLinqRuntimeAcceptedStatus({
+          targetKind: delivery.targetKind ?? (legacyGroupPolicy ? "thread" : null),
+          threadIsDirect,
+        })
+      : aggregateStatus;
   const latestMessage = selectLatestHostedLinqDeliveryMessageProgress(messages);
   const latestFailedMessage =
     selectLatestHostedLinqDeliveryMessageProgress(failedMessages);
@@ -2833,7 +2835,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     && input.delivery.failedAt !== null
     && input.delivery.failureCode
       === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE
-    && input.delivery.lastReceiptAt === null
     && input.delivery.messageLookupKey !== null
     && input.delivery.skippedAt === null
     && (
@@ -2866,7 +2867,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
         failedAt: input.delivery.failedAt,
         failureCode: HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE,
         id: input.delivery.id,
-        lastReceiptAt: null,
+        lastReceiptAt: input.delivery.lastReceiptAt,
         linqChatLookupKey: input.delivery.linqChatLookupKey,
         messageLookupKey: input.delivery.messageLookupKey,
         skippedAt: null,
@@ -2890,8 +2891,8 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       claimed: updated.count === 1,
       id: input.delivery.id,
       ...(updated.count === 1
-        ? { resumeRichLinkAfterAcceptedText: true as const }
-        : {}),
+        ? { replayingRichLinkPartial: true as const }
+        : { retryAt: input.attemptedAt }),
     };
   }
 

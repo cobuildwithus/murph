@@ -191,33 +191,9 @@ export async function sendHostedLinqChatMessage(input: {
   idempotencyKey?: string | null;
   message: string;
   replyToMessageId?: string | null;
-  resumeRichLinkAfterAcceptedText?: boolean;
   signal?: AbortSignal;
 }): Promise<HostedLinqSendResult> {
   const split = splitTrailingHttpsLink(input.message);
-  if (input.resumeRichLinkAfterAcceptedText === true) {
-    if (!split.linkUrl || !split.message.trim()) {
-      throw new TypeError(
-        "A resumed Linq rich-link delivery requires accepted text and a trailing link.",
-      );
-    }
-    try {
-      return await sendHostedLinqRichLinkWithTextFallback({
-        chatId: input.chatId,
-        idempotencyKey: buildHostedLinqRichLinkIdempotencyKey(
-          input.idempotencyKey,
-        ),
-        linkUrl: split.linkUrl,
-        signal: input.signal,
-      });
-    } catch (error) {
-      throw createHostedLinqRichLinkPartialDeliveryFailure({
-        chatId: input.chatId,
-        error,
-        providerMessageIds: [],
-      });
-    }
-  }
   if (!split.linkUrl) {
     return sendHostedLinqTextMessage(input);
   }

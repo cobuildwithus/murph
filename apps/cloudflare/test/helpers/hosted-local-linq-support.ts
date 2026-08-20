@@ -83,6 +83,7 @@ interface HostedLocalLinqArmedRequestDelay {
   delayMs: number;
   expectedMethod: string;
   expectedPath: string;
+  matchRequest?: ObservedLinqRequestMatcher;
 }
 
 type HostedLinqInboundPartInput =
@@ -112,6 +113,7 @@ export interface HostedLocalLinqStub {
     delayMs: number;
     expectedMethod: string;
     expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
   }): void;
   armNextPostAcceptLostAcknowledgment(input: {
     expectedPath: string;
@@ -284,6 +286,10 @@ export async function startHostedLocalLinqStub(input: {
       nextRequestDelay
       && observedRequest.method === nextRequestDelay.expectedMethod
       && observedRequest.url === nextRequestDelay.expectedPath
+      && (
+        !nextRequestDelay.matchRequest
+        || nextRequestDelay.matchRequest(observedRequest)
+      )
     ) {
       const delayMs = nextRequestDelay.delayMs;
       nextRequestDelay = null;
@@ -587,7 +593,12 @@ export async function startHostedLocalLinqStub(input: {
 
   return {
     acceptedSendRequests,
-    armNextRequestDelay({ delayMs, expectedMethod, expectedPath }) {
+    armNextRequestDelay({
+      delayMs,
+      expectedMethod,
+      expectedPath,
+      matchRequest,
+    }) {
       if (!Number.isSafeInteger(delayMs) || delayMs < 1) {
         throw new TypeError("A Linq request delay requires a positive integer delayMs.");
       }
@@ -595,6 +606,7 @@ export async function startHostedLocalLinqStub(input: {
         delayMs,
         expectedMethod,
         expectedPath,
+        ...(matchRequest ? { matchRequest } : {}),
       };
     },
     armNextPostAcceptLostAcknowledgment: ({

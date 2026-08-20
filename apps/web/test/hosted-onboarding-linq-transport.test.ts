@@ -1872,7 +1872,7 @@ describe("hosted Linq webhook transport", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("resumes only the missing rich link after the usage-limit text was accepted", async () => {
+  it("replays a usage-limit rich-link partial with the same provider keys", async () => {
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member-1",
       periodStart: "2026-03-01T00:00:00.000Z",
@@ -1881,8 +1881,16 @@ describe("hosted Linq webhook transport", () => {
     vi.mocked(startHostedAiUsageLimitNoticeDispatchTx).mockResolvedValueOnce({
       idempotencyKey: expectedIdempotencyKey,
       providerIdempotencyKey: "ai-usage-attempt:hld_usage_notice",
-      resumeRichLinkAfterAcceptedText: true,
+      replayingRichLinkPartial: true,
       status: "claimed",
+    });
+    vi.mocked(sendHostedLinqChatMessage).mockResolvedValueOnce({
+      chatId: "chat-1",
+      messageId: "provider-message-link",
+      providerMessageIds: [
+        "provider-message-text",
+        "provider-message-link",
+      ],
     });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -1910,15 +1918,18 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         idempotencyKey: "ai-usage-attempt:hld_usage_notice",
-        resumeRichLinkAfterAcceptedText: true,
       }),
     );
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
       linqChatId: "chat-1",
-      messageId: "provider-message-1",
+      messageId: "provider-message-link",
+      messageIds: [
+        "provider-message-text",
+        "provider-message-link",
+      ],
       prisma: expect.anything(),
-      recoveredRichLinkPrimary: true,
+      replayingRichLinkPartial: true,
     });
   });
 
