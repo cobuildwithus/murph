@@ -151,6 +151,13 @@ const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
   "waistCircumference",
   "weightKg",
 ]);
+const CANONICAL_SPARSE_BODY_OBSERVATION_METRIC_KEYS = new Set([
+  "bmi",
+  "bodyFatPercentage",
+  "leanBodyMassKg",
+  "waistCircumference",
+  "weightKg",
+]);
 const CANONICAL_SYSTOLIC_BLOOD_PRESSURE_METRIC_KEY =
   "systolic-blood-pressure";
 const CANONICAL_DIASTOLIC_BLOOD_PRESSURE_METRIC_KEY =
@@ -1500,15 +1507,20 @@ function canonicalEventContainsBodyMeasurement(
   providerBodyObservation = false,
 ): boolean {
   if (record.kind === "observation") {
-    return isReadableCanonicalBodyMeasurement(
+    const canonicalMetricKey = readableCanonicalBodyMeasurementMetricKey(
       record.metric,
       record.value,
       record.unit,
-    )
+    );
+    return canonicalMetricKey !== null
       && (providerBodyObservation || record.externalRef !== undefined)
       && (
         record.observationGrain === undefined
-        || record.observationGrain === "summary"
+        || STORED_DAY_GRAIN_OBSERVATION_ALIASES.has(record.observationGrain)
+        || (
+          record.observationGrain === "sample"
+          && CANONICAL_SPARSE_BODY_OBSERVATION_METRIC_KEYS.has(canonicalMetricKey)
+        )
       );
   }
   if (record.kind === "measurement") {
@@ -1529,9 +1541,19 @@ function isReadableCanonicalBodyMeasurement(
   value: number,
   unit: string | null | undefined,
 ): boolean {
+  return readableCanonicalBodyMeasurementMetricKey(metric, value, unit) !== null;
+}
+
+function readableCanonicalBodyMeasurementMetricKey(
+  metric: string,
+  value: number,
+  unit: string | null | undefined,
+): string | null {
   const normalizedMetric = normalizeWearableMetricValue(metric, value, unit);
   return normalizedMetric !== null
-    && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(normalizedMetric.key);
+    && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(normalizedMetric.key)
+    ? normalizedMetric.key
+    : null;
 }
 
 function isLaterCanonicalAvailabilityEvent(
