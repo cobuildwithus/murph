@@ -50,10 +50,10 @@ zero-finding ReviewGPT round, and merge it.
 13. [x] Push the round-9 correction and run the explicitly authorized round 10.
 14. [x] Resolve round 10's cross-trace logical-fact replay finding through the
     existing provider-job identity and mailbox item with focused direct proof.
-15. [ ] Push the exact head, obtain the user's explicit post-cap continuation
-    before another ReviewGPT round, resolve or report the consumed base-update
-    budget, archive this plan, and merge only after the required zero-finding
-    confirmation.
+15. [x] Push the exact head, obtain the user's explicit post-cap continuation,
+    correct round 11's timestamp-less successor-proof finding, obtain a
+    zero-finding round 12, prove the current-base merge tree is clean without
+    spending another base update, and reach the authorized merge boundary.
 
 ## ReviewGPT ledger
 
@@ -119,6 +119,18 @@ zero-finding ReviewGPT round, and merge it.
   be strictly after the effective current source epoch. No finding was rejected;
   no schema, query, queue, ledger, lifecycle owner, or reconciliation process is
   being added.
+- Final round 11: accepted that a timestamp-less Google daily fetch hint could
+  use local receipt time as provider occurrence, create a migration-successor
+  identity, advance freshness, and eventually permit Fitbit revoke. The
+  correction keeps receipt time for operational fetch/dirty work but requires
+  a provider-owned occurrence before migration identity, wake, or freshness
+  can advance. No finding was rejected; no schema, query, queue, job, state
+  owner, or reconciliation process was added.
+- Final round 12: PASS. The exact-head full-snapshot review verified the
+  timestamp-less retry/restart path, timestamped logical-fact path, mailbox
+  transaction boundary, source epoch, and eventual cutover composition. It
+  reported no qualifying Critical, High, Material UX Failure, Purpose Drift,
+  Complexity Collapse, or Experience Collapse finding.
 
 The first round-8 invocation rejected a malformed PR-body hash token before
 review. Correcting the packaging metadata and retrying the same invocation was
@@ -254,12 +266,26 @@ a tooling retry, not an additional substantive ReviewGPT round.
   proofs pass. Round-8 provider-timezone proof covers IANA and offset precedence,
   DST, invalid and absent provenance, mixed same-day provenance, mutable vault
   timezone changes, and the UTC-12 convergence boundary. The round-10
-  correction still requires an exact-head push, the explicitly authorized
-  post-cap ReviewGPT confirmation, exact-head required CI, and a merge path that
-  does not reset the already-consumed base-update budget.
+  correction remained intact through the explicitly authorized post-cap review
+  and current-base merge-tree proof.
+- Round 11 first reproduced the defect against real PostgreSQL: a timestamp-less
+  Google sleep hint advanced `lastDataAt` to receipt time. The corrected exact
+  head passes all 10 prepared-webhook authority tests, 195 adjacent Web wake and
+  cutover tests, the timestamp-less Junction sleep-fetch fallback, Web prepared
+  typecheck, scoped lint, diff whitespace, and identifier-leak scanning.
+- Round 12 returned `ROUND_OUTCOME: PASS` and `REVIEW_COMPLETE` for exact head
+  `db985483180de2953669e87181ddb16dd6be6cec`; response SHA-256
+  `42d1ae664053d04a7dc35366a9cfca17b1faeac2a94f20d1e1edd88757aec029`.
+  All routed GitHub checks on that head passed. The previously waived native
+  iOS evaluator remained non-blocking. A fresh current-base
+  `git merge-tree --write-tree` proof passed after the base advanced, so the
+  already-reviewed patch needs no second base update.
 
 ## Deployment concern
 
 Deploy importer and Device Sync consumers before hosted runtime and Web so a
 temporarily mixed release continues to keep Fitbit active rather than cutting
 over before the new terminal-history proof is understood.
+Status: completed
+Updated: 2026-08-20
+Completed: 2026-08-20
