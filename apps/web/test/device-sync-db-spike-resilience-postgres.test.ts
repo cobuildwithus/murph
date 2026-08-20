@@ -153,6 +153,7 @@ describe.skipIf(!runPostgresProof)(
             firstSeenAt: connectedAt,
             id: sourceId,
             lastSeenAt: connectedAt,
+            lifecycleEpoch: 2,
             resourceAvailabilitySummaryJson: {},
             sourceInstanceKey,
             sourceProviderSlug: "garmin",
@@ -297,6 +298,7 @@ describe.skipIf(!runPostgresProof)(
           expect(snapshot.connections[0]?.connection.id).toBe(connectionId);
           expect(snapshot.connections[0]?.sources).toEqual([
             expect.objectContaining({
+              lifecycleEpoch: 2,
               sourceProviderSlug: "garmin",
             }),
           ]);
@@ -356,10 +358,12 @@ describe.skipIf(!runPostgresProof)(
         expect(operationCounts.get("DeviceConnection.updateMany") ?? 0).toBe(
           INCIDENT_WEBHOOK_RECEIPTS,
         );
-        // Each source-attributed webhook deliberately rechecks live source
-        // admission in both locked passes. Admission is one exact raw resolver
-        // per pass; snapshots retain their independent bounded raw set query.
-        expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(0);
+        // Each source-attributed webhook deliberately rechecks live semantic
+        // source authority in both locked passes. Each pass uses one bounded
+        // alias-group read; snapshots retain their independent raw set query.
+        expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(
+          INCIDENT_WEBHOOK_RECEIPTS * 2,
+        );
         expect(operationCounts.get("$queryRaw") ?? 0).toBeGreaterThanOrEqual(
           INCIDENT_WEBHOOK_RECEIPTS * 2 + INCIDENT_SNAPSHOT_READS + 1,
         );
@@ -664,6 +668,7 @@ describe.skipIf(!runPostgresProof)(
               firstSeenAt: connectedAt,
               id: `dcs_device_sync_deferred_source_${suffix}`,
               lastSeenAt: connectedAt,
+              lifecycleEpoch: 2,
               resourceAvailabilitySummaryJson: {},
               sourceInstanceKey,
               sourceProviderSlug: "garmin",
@@ -695,8 +700,8 @@ describe.skipIf(!runPostgresProof)(
           sourceInstanceKey: blockedSourceInstanceKey,
           sourceProviderSlug: "garmin",
         })).resolves.toMatchObject({
-          lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
-          sourceInstanceKey: blockedSourceInstanceKey,
+          lastErrorCode: null,
+          sourceInstanceKey,
           status: "connected",
         });
         await expect(store.resolveConnectionSourceAdmissionCandidate({
@@ -1580,6 +1585,124 @@ describe.skipIf(!runPostgresProof)(
         }).catch(() => undefined);
         await prisma.$disconnect();
         await observer.$disconnect();
+        controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
+      }
+    }, 60_000);
+
+    it("reuses one source collection read for a maximum Junction runtime apply", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const prisma = createPrismaClient({
+        databaseUrl: withApplicationName(
+          databaseUrl,
+          `murph_device_sync_apply_sources_${suffix}`,
+        ),
+        poolMax: 4,
+      });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const memberId = `hbm_device_sync_apply_sources_${suffix}`;
+      const connectionId = `dsc_device_sync_apply_sources_${suffix}`;
+      const connectedAt = new Date("2026-08-11T12:00:00.000Z");
+      const sourceObservedAt = new Date("2026-08-11T12:01:00.000Z");
+      const sourceUpdatedAt = "2026-08-11T12:02:00.000Z";
+      const configuredSources = [...new Set(
+        listJunctionDeviceConnectRouteEntries().map(
+          ({ route }) => route.sourceProviderSlug,
+        ),
+      )].sort().map((sourceProviderSlug, index) => {
+        const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+          connectionId,
+          sourceProviderSlug,
+        });
+        if (!sourceInstanceKey) {
+          throw new Error("Expected a canonical Junction source instance key.");
+        }
+        return { index, sourceInstanceKey, sourceProviderSlug };
+      });
+
+      controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+        store,
+      });
+
+      try {
+        expect(configuredSources).toHaveLength(33);
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        const connection = await prisma.deviceConnection.create({
+          data: {
+            connectedAt,
+            credentialKind: "none",
+            credentialMetadataJson: {},
+            id: connectionId,
+            metadataJson: {},
+            provider: "junction",
+            providerAccountBlindIndex:
+              `blind_device_sync_apply_sources_${suffix}`,
+            scopesJson: [],
+            setupPhase: "source_confirmed",
+            status: "active",
+            userId: memberId,
+          },
+        });
+        await prisma.deviceConnectionSource.createMany({
+          data: configuredSources.map((source) => ({
+            connectionId,
+            firstSeenAt: sourceObservedAt,
+            id: `dcs_device_sync_apply_sources_${suffix}_${String(source.index).padStart(2, "0")}`,
+            lastSeenAt: sourceObservedAt,
+            lifecycleEpoch: 2,
+            resourceAvailabilitySummaryJson: { activity: true },
+            sourceInstanceKey: source.sourceInstanceKey,
+            sourceProviderSlug: source.sourceProviderSlug,
+            status: "connected",
+          })),
+        });
+
+        const operationTimings: PrismaOperationTiming[] = [];
+        const response = await runWithPrismaOperationTimings(
+          operationTimings,
+          async () => applyHostedDeviceSyncRuntimeResult({
+            request: new Request(
+              "https://control.example.test/api/internal/device-sync/runtime/apply",
+              {
+                body: JSON.stringify({
+                  updates: [{
+                    connectionId,
+                    observedConnectedAt: connection.connectedAt.toISOString(),
+                    observedUpdatedAt: connection.updatedAt.toISOString(),
+                    sources: configuredSources.map((source) => ({
+                      lastSeenAt: sourceUpdatedAt,
+                      observedLastSeenAt: sourceObservedAt.toISOString(),
+                      observedLifecycleEpoch: 2,
+                      resourceAvailabilitySummary: {
+                        activity: true,
+                        sleep: true,
+                      },
+                      sourceInstanceKey: source.sourceInstanceKey,
+                      sourceProviderSlug: source.sourceProviderSlug,
+                      status: "connected",
+                    })),
+                  }],
+                  userId: memberId,
+                }),
+                method: "POST",
+              },
+            ),
+            trustedUserId: memberId,
+          }),
+        );
+        const operationCounts = countPrismaOperations(operationTimings);
+
+        expect(response.updates).toHaveLength(1);
+        expect(response.updates[0]?.writeUpdate).toBe("applied");
+        expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(1);
+        expect(operationCounts.get("DeviceConnectionSource.upsert") ?? 0).toBe(33);
+      } finally {
+        await prisma.deviceConnection.deleteMany({
+          where: { id: connectionId },
+        }).catch(() => undefined);
+        await prisma.hostedMember.deleteMany({
+          where: { id: memberId },
+        }).catch(() => undefined);
+        await prisma.$disconnect();
         controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
       }
     }, 60_000);
