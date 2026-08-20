@@ -101,6 +101,12 @@ Updated: 2026-08-20
 - Its changelog finding was an evidence-packaging gap, not a product defect. The
   already-verified mobile and desktop artifacts will be named in the corrected
   head's fresh full-snapshot review packet; no UI or copy rewrite is required.
+- The old-head final review found a production reachability gap: the importer
+  and Core migration could not run for accounts whose one-shot profile marker
+  was already current at normalization revision 1. The accepted correction
+  advances that existing scalar to revision 2 and strengthens the existing
+  reconcile regression to prove a revision-1 account fetches once, records
+  revision 2 only after import, and then skips the profile again.
 
 ## Verification
 
@@ -112,6 +118,9 @@ Updated: 2026-08-20
   files, 552 tests.
 - The focused five-test run and the full 552-test importer suite passed again
   after adding cross-month and untouched-provider-facet proof.
+- Focused device-sync admission proof passed: 1 file, 2 tests, 319 skipped.
+- `pnpm --filter @murphai/device-syncd test` passed: 49 files, 1,255 tests.
+- `pnpm --filter @murphai/device-syncd typecheck` passed.
 - `pnpm --filter @murphai/core test` passed: 46 files, 810 tests.
 - `pnpm --filter @murphai/core typecheck` passed.
 - `pnpm --filter @murphai/importers typecheck` passed.

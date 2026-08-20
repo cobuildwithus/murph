@@ -5376,7 +5376,7 @@ test("Junction profile-only historical backfill has no historical completion obl
 
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
-    junctionProfileSummaryNormalizationRevision: 1,
+    junctionProfileSummaryNormalizationRevision: 2,
     junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
@@ -5398,7 +5398,7 @@ test("Junction profile-only historical backfill has no historical completion obl
   assert.equal(profileSearchParams.has("end_date"), false);
 });
 
-test("Junction reconcile refreshes a legacy profile marker once", async () => {
+test("Junction reconcile refreshes a revision-1 profile marker once", async () => {
   const importedSnapshots: unknown[] = [];
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -5435,6 +5435,7 @@ test("Junction reconcile refreshes a legacy profile marker once", async () => {
   const legacyAccount = createAccount({
     metadata: {
       junctionProfileSummaryCheckedAt: "2026-04-02T00:00:00.000Z",
+      junctionProfileSummaryNormalizationRevision: 1,
     },
   });
   const job = createJob("reconcile", {
@@ -5456,7 +5457,7 @@ test("Junction reconcile refreshes a legacy profile marker once", async () => {
 
   assert.deepEqual(firstResult.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
-    junctionProfileSummaryNormalizationRevision: 1,
+    junctionProfileSummaryNormalizationRevision: 2,
   });
   const firstSnapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
@@ -5526,7 +5527,7 @@ test("Junction scheduled polling skips profile after the current normalization m
       account: createAccount({
         metadata: {
           junctionProfileSummaryCheckedAt: "2026-04-02T00:00:00.000Z",
-          junctionProfileSummaryNormalizationRevision: 1,
+          junctionProfileSummaryNormalizationRevision: 2,
         },
       }),
       importSnapshot: async (snapshot) => {
@@ -16199,7 +16200,7 @@ test("Junction polling skips optional unavailable resource collections", async (
   );
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
-    junctionProfileSummaryNormalizationRevision: 1,
+    junctionProfileSummaryNormalizationRevision: 2,
     junctionSkippedResourceTotal: 13,
     junctionSkippedSummaryTotal: 5,
     junctionSkippedTimeseriesTotal: 8,
@@ -16290,7 +16291,7 @@ test("Junction polling skips ambiguous optional resource responses and records t
   ]);
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
-    junctionProfileSummaryNormalizationRevision: 1,
+    junctionProfileSummaryNormalizationRevision: 2,
     junctionSkippedResourceTotal: 1,
     junctionSkippedSummaryTotal: 1,
     junctionSkippedTimeseriesTotal: 0,
@@ -16471,7 +16472,7 @@ test("Junction polling treats missing profile summary as a one-shot optional ski
   }]);
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
-    junctionProfileSummaryNormalizationRevision: 1,
+    junctionProfileSummaryNormalizationRevision: 2,
     junctionSkippedResourceTotal: 1,
     junctionSkippedSummaryTotal: 1,
     junctionSkippedTimeseriesTotal: 0,

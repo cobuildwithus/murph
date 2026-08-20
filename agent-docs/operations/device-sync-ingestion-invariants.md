@@ -141,6 +141,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    optimization is unnecessary: re-fetching is cheap and correct, not a
    correctness risk.
 
+   Junction profile admission and canonical replay stay coupled. Whenever the
+   stable profile representation changes, advance the existing device-syncd
+   profile normalization revision so a previously checked account receives one
+   bounded refresh before returning to one-shot behavior; never rely on the
+   importer migration alone to make an already-admitted profile reachable.
+
    Junction profile timestamp evolution has one closed replay-compatibility
    case inside this same canonical owner. A stable-profile event marked by the
    current created-at normalizer may supersede its generic-normalizer
