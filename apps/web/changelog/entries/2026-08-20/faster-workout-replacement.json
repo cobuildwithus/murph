@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 100,
+  "item": {
+    "id": "faster-workout-replacement",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Faster live workout replacement",
+    "summary": "After you approve replacing an old active workout, Murph can now create the complete new workout in one step.",
+    "details": "The replacement still checks the exact active workout before deleting it, keeps the change atomic, and stops safely if the workout changed or another active workout appears.",
+    "relevanceTags": ["assistant", "workouts", "messaging", "performance", "reliability"],
+    "sourcePullRequests": [2070]
+  }
+}

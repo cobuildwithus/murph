@@ -83,6 +83,8 @@ set write are intentionally outside this patch.
 - Passed the focused CLI live-workout tests, including explicit confirmation,
   exact replacement, and competing-active failure.
 - Passed the tracked-table skill regression tests.
+- Passed the changelog-fragment generation and focused validation tests for the
+  member-visible performance item.
 - Passed the incremental workspace build, generated CLI artifact refresh, and
   CLI package-shape verification.
 - Passed a direct built-CLI journey: start the old workout, replace it once with
