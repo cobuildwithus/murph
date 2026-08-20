@@ -92,6 +92,7 @@ class AssistantActiveTurnInputController {
   private liveProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
   private liveProviderTurnEnded = false
   private completedProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
+  private postResponseEventAdmissionOpen = false
   private pending: QueuedAssistantActiveTurnInputAdmission[] = []
   private manualCompletions: AssistantActiveTurnManualInputCompletion[] = []
   private availableInputIds = new Set<string>()
@@ -102,6 +103,7 @@ class AssistantActiveTurnInputController {
       acceptedInputValidator?: (input: {
         acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
       }) => Promise<void>
+      allowPostResponseEventAdmission?: boolean
       beforeProviderSteer?: (input: {
         acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
       }) => Promise<AssistantProviderAcceptedInputsRelease | void>
@@ -161,7 +163,7 @@ class AssistantActiveTurnInputController {
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     if (
       this.input.eventAdmissionEnabled === false ||
-      this.liveProviderTurnEnded
+      !this.canAdmitEventInput()
     ) {
       return Promise.resolve(undefined)
     }
@@ -193,17 +195,25 @@ class AssistantActiveTurnInputController {
     this.liveProviderTurnKey = null
     this.completedProviderTurnKey = null
     this.liveProviderTurnEnded = true
+    this.postResponseEventAdmissionOpen = false
   }
 
-  closeInputAdmission(): void {
-    this.closed = true
-    // First-response closure blocks every new admission, but the exact provider
-    // turn key remains necessary until a steer already started under it settles.
+  closeInputAdmission(): boolean {
+    // A completed provider response always ends steering into that provider
+    // request. Eligible group turns may keep only durable event admission open
+    // for one bounded reconsideration request.
     this.completedProviderTurnKey =
       this.liveProviderTurnKey ?? this.completedProviderTurnKey
     this.liveProviderTurn = null
     this.liveProviderTurnKey = null
     this.liveProviderTurnEnded = true
+    this.postResponseEventAdmissionOpen =
+      this.input.allowPostResponseEventAdmission === true
+    if (this.postResponseEventAdmissionOpen) {
+      return false
+    }
+    this.closed = true
+    return true
   }
 
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void {
@@ -222,6 +232,7 @@ class AssistantActiveTurnInputController {
     this.liveProviderTurnKey = liveProviderTurnKey
     this.liveProviderTurnEnded = false
     this.completedProviderTurnKey = null
+    this.postResponseEventAdmissionOpen = false
     this.tryStartLiveSteers()
 
     return () => {
@@ -326,15 +337,26 @@ class AssistantActiveTurnInputController {
     this.liveProviderTurnKey = null
     this.completedProviderTurnKey = null
     this.liveProviderTurnEnded = true
+    this.postResponseEventAdmissionOpen = false
     for (const completion of this.manualCompletions) {
       completion.reject(error)
     }
   }
 
+  private canAdmitEventInput(): boolean {
+    return (
+      !this.closed &&
+      (
+        !this.liveProviderTurnEnded ||
+        this.postResponseEventAdmissionOpen
+      )
+    )
+  }
+
   private async admitAvailableInput(input: {
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-    if (!this.input.admissionHook || this.closed) {
+    if (!this.input.admissionHook || !this.canAdmitEventInput()) {
       return undefined
     }
 
@@ -381,7 +403,7 @@ class AssistantActiveTurnInputController {
       }
     } while (
       this.inputAvailableAdmissionRerunRequested &&
-      !this.closed &&
+      this.canAdmitEventInput() &&
       this.input.admissionHook
     )
 
@@ -401,7 +423,7 @@ class AssistantActiveTurnInputController {
     await previous.catch(() => undefined)
 
     try {
-      if (!this.input.admissionHook || this.closed) {
+      if (!this.input.admissionHook || !this.canAdmitEventInput()) {
         return undefined
       }
 
@@ -458,7 +480,7 @@ class AssistantActiveTurnInputController {
       return true
     }
 
-    if (this.liveProviderTurnEnded && !this.liveProviderTurn) {
+    if (!this.canAdmitEventInput()) {
       return false
     }
 
@@ -677,6 +699,7 @@ export function createAssistantActiveTurnInputController(input: {
   acceptedInputValidator?: (validatorInput: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
   }) => Promise<void>
+  allowPostResponseEventAdmission?: boolean
   beforeProviderSteer?: (steerInput: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
   }) => Promise<AssistantProviderAcceptedInputsRelease | void>
@@ -708,6 +731,7 @@ export function createAssistantActiveTurnInputController(input: {
   const keys = resolveAssistantActiveTurnInputControllerKeys(input)
   const controller = new AssistantActiveTurnInputController({
     acceptedInputValidator: input.acceptedInputValidator,
+    allowPostResponseEventAdmission: input.allowPostResponseEventAdmission,
     beforeProviderSteer: input.beforeProviderSteer,
     admissionHook: input.admissionHook,
     eventAdmissionEnabled: input.eventAdmissionEnabled,
@@ -732,8 +756,9 @@ export function createAssistantActiveTurnInputController(input: {
   }
 
   const closeInputAdmission = () => {
-    controller.closeInputAdmission()
-    dispose()
+    if (controller.closeInputAdmission()) {
+      dispose()
+    }
   }
 
   return {
