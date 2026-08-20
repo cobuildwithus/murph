@@ -1,6 +1,6 @@
 # Group funding success receipt redesign
 
-Status: active
+Status: completed
 Created: 2026-08-19
 Updated: 2026-08-20
 
@@ -27,7 +27,7 @@ Updated: 2026-08-20
 
 - In scope: the fulfilled group presentation in
   `HostedUsageTopUpDialog`, its focused tests, the matching design-system
-  guidance, a public changelog item, and the task-owned Frog entry.
+  guidance, a public changelog item, and the existing Frog registry review.
 - Out of scope: Stripe/payment state, purchase polling, sponsorship selection,
   billing authority, group deep-link capability, and non-group success states.
 
@@ -106,9 +106,9 @@ Updated: 2026-08-20
 - Intermediate-width contributor: a 700×900 Playwright viewport still selected
   the drawer and directly proved that the mark and headline content share the
   same horizontal center.
-- Direct proof: 101 focused component tests passed; the fulfilled state retained
-  one live status announcement and the semantic `sms:` link. Web typecheck,
-  focused ESLint, Playwright desktop/mobile capture, and diff hygiene passed.
+- Direct proof: the fulfilled state retained one live status announcement and
+  the semantic `sms:` link. Web typecheck, focused ESLint, Playwright responsive
+  capture, and diff hygiene passed.
 - Preliminary ReviewGPT returned two accepted findings: the mark crossed to
   left alignment before the drawer ended, and the icon-only status semantics
   were under-asserted. The drawer now owns centering throughout its range, the
@@ -117,5 +117,10 @@ Updated: 2026-08-20
 - Remediation proof: 108 focused component and changelog tests, Web typecheck,
   focused ESLint, diff hygiene, and Playwright captures at 1440×900, 700×900,
   and 390×844 passed.
-- Result: Ready. The follow-up removes repeated success copy without changing
-  payment, routing, dismissal, or recovery behavior.
+- Shipping proof: the preview reached Ready and its authenticated design-study
+  route returned HTTP 200. All required checks passed on the exact code head;
+  the parent review found no remaining product issue, and the current-base
+  merge-tree was clean.
+- Result: Complete. The follow-up removes repeated success copy without
+  changing payment, routing, dismissal, or recovery behavior.
+Completed: 2026-08-20
