@@ -650,16 +650,19 @@ supported provider credential.
   continued evaluation of available signals, positive 5432 and 6432 deltas,
   and independent reset/new-series suppression across complete and partial
   samples. They also prove per-port baseline advancement with omitted-port
-  retention, one bounded confirmation when the whole connection-error family
-  is absent, confirmation-only port baseline advancement, transient diagnostic
-  port evidence with legacy-reader-compatible durable normalization,
+  retention, one bounded confirmation for any safe usable partial observation,
+  complete transient recovery, persistent-omission retention,
+  confirmation-only port baseline advancement, transient diagnostic port
+  evidence with legacy-reader-compatible durable normalization,
+  in-run reset increments and first-scrape-only sparse-series retention,
   alternating sparse-port observations, legacy single-port obligation parsing,
   and
   conservative legacy-plus-detailed window formatting,
   retention of an all-family-missing parsed observation across retry transport
   failure with exact window ratios and immutable restart delivery,
-  multi-family confirmation rejection, cross-scrape port composition,
-  immediate unsafe-signal paging before that confirmation, unsafe confirmation
+  safe multi-family confirmation with truthful persistent omission,
+  cross-scrape port composition, immediate unsafe-signal paging before that
+  confirmation, unsafe confirmation
   paging without losing the complementary baseline, failed-confirmation
   retention, positive recovered-counter deltas, persistent-gap telemetry
   paging, and the scheduled Durable Object boundary for that retry,

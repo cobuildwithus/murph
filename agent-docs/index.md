@@ -305,8 +305,8 @@ specified by `agent-docs/RELIABILITY.md` and
 Independent partial PlanetScale metric normalization, sparse connection-error
 port acceptance without false monitoring pages, continued evaluation of
 available database signals, per-port baseline advancement with new/reset
-suppression, bounded confirmation when the whole connection-error family is
-absent, transient diagnostic missing-port evidence with rollback-compatible
+suppression, bounded confirmation for safe usable partial observations,
+transient diagnostic missing-port evidence with rollback-compatible
 durable normalization, conservative legacy-window provenance,
 parsed-observation retention across later retry failure, and
 one-shot telemetry-only operator paging with unresolved-window coalescing,
