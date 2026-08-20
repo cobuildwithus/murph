@@ -139,7 +139,10 @@ describe('assistant tracked workout table skill', () => {
       'An ordinary request to start a workout does not itself authorize deletion',
     )
     expect(skill).toContain(
-      'the command returns that existing record without another write',
+      'does the command return that existing record without another write',
+    )
+    expect(skill).toContain(
+      'canonically deleted at exactly the approved lifecycle revision plus one',
     )
     expect(skill).toContain(
       'say that no new replacement was performed and ask a fresh bounded replacement question',

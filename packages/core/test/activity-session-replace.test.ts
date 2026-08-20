@@ -10,6 +10,7 @@ import {
   applyHostedCanonicalWriteReceipt,
   initializeVault,
   readJsonlRecords,
+  readExpectedActivitySessionReplacement,
   replaceActivitySession,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePersistenceInput,
@@ -173,6 +174,30 @@ test('activity-session replacement emits one hosted atomic write', async () => {
     ),
     true,
   )
+  assert.equal((await readExpectedActivitySessionReplacement({
+    vaultRoot,
+    replacedEventId: oldWorkout.eventId,
+    replacementEventId: replacement.eventId,
+    expectedRevision: requireRevision(oldWorkout.event),
+  }))?.id, replacement.eventId)
+  assert.equal((await readExpectedActivitySessionReplacement({
+    vaultRoot: replicaRoot,
+    replacedEventId: oldWorkout.eventId,
+    replacementEventId: replacement.eventId,
+    expectedRevision: requireRevision(oldWorkout.event),
+  }))?.id, replacement.eventId)
+  assert.equal(await readExpectedActivitySessionReplacement({
+    vaultRoot,
+    replacedEventId: oldWorkout.eventId,
+    replacementEventId: replacement.eventId,
+    expectedRevision: requireRevision(oldWorkout.event) + 1,
+  }), null)
+  assert.equal(await readExpectedActivitySessionReplacement({
+    vaultRoot,
+    replacedEventId: 'evt_00000000000000000000000000',
+    replacementEventId: replacement.eventId,
+    expectedRevision: 1,
+  }), null)
 })
 
 test('failed hosted persistence rolls back both sides of replacement', async () => {

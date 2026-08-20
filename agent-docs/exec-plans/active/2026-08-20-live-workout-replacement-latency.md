@@ -135,6 +135,14 @@ replacement-plus-completed-set write are intentionally outside this patch.
   then returned the mandatory `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` gate before
   an ordinary audit. It reported no tactical code finding. The requirement-level
   decision below is recorded on the PR before the next substantive round.
+- Final ReviewGPT round 4 accepted one review-induced consent finding: an exact
+  active replacement candidate alone did not prove that the approved old workout
+  was deleted. The correction now also requires the old event's latest canonical
+  lifecycle to be `deleted` at exactly the approved revision plus one. Focused
+  CLI proof rejects a merely completed old workout, a missing old event, a
+  wrong-revision tombstone, and multiple active workouts even when the candidate
+  looks exact, without adding event or audit rows. Core proof covers the expected
+  tombstone after ordinary replacement and hosted receipt restoration.
 - Final ReviewGPT `PASS`, exact-head CI, and plan closure remain pending.
 
 ## Round 3 Architecture Retrospective

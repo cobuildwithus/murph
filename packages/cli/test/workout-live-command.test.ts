@@ -8,6 +8,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   addActivitySession,
   applyHostedCanonicalWriteReceipt,
+  deleteEvent,
   readJsonlRecords,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePersistenceInput,
@@ -99,6 +100,28 @@ function requireShownRevision(shown: ShowResult): number {
   const revision = shown.entity.data.lifecycle?.revision
   assert.equal(typeof revision, 'number')
   return revision!
+}
+
+async function startSingleExerciseWorkout(input: {
+  cli: Cli.Cli
+  startedAt: string
+  title: string
+  vaultRoot: string
+}) {
+  const started = requireData((await run<WorkoutResult>(input.cli, [
+    'workout', 'start', input.title,
+    '--started-at', input.startedAt,
+    '--vault', input.vaultRoot,
+  ])).envelope)
+  const added = await run<ShowResult>(input.cli, [
+    'workout', 'exercise', 'add', 'Pull-up',
+    '--workout-id', started.eventId,
+    '--order', '1',
+    '--sets', '2',
+    '--vault', input.vaultRoot,
+  ])
+  assert.equal(added.envelope.ok, true)
+  return started
 }
 
 test('live workout commands keep one canonical session and target one set', async () => {
@@ -450,6 +473,150 @@ test('replacement preserves ordered duplicate exercises and comma-bearing names'
   assert.equal(active.entity.id, replacement.eventId)
 })
 
+test('replacement replay requires the exact approved tombstone revision', async () => {
+  const completedContext = await createTempVaultContext(
+    'murph-live-workout-replace-completed-old-',
+  )
+  cleanupPaths.push(completedContext.parentRoot)
+  const completedCli = createWorkoutCli()
+  assert.equal(requireData((await run<{ created: boolean }>(completedCli, [
+    'init', '--vault', completedContext.vaultRoot, '--timezone', 'UTC',
+  ])).envelope).created, true)
+  const completedOld = requireData((await run<WorkoutResult>(completedCli, [
+    'workout', 'start', 'Old workout',
+    '--started-at', '2026-08-20T06:30:00.000Z',
+    '--vault', completedContext.vaultRoot,
+  ])).envelope)
+  const completedApproval = requireData((await run<ShowResult>(completedCli, [
+    'workout', 'active', '--workout-id', completedOld.eventId,
+    '--vault', completedContext.vaultRoot,
+  ])).envelope)
+  const completed = await run<ShowResult>(completedCli, [
+    'workout', 'finish', '--workout-id', completedOld.eventId,
+    '--ended-at', '2026-08-20T06:45:00.000Z',
+    '--vault', completedContext.vaultRoot,
+  ])
+  assert.equal(completed.envelope.ok, true)
+  const completedCandidate = await startSingleExerciseWorkout({
+    cli: completedCli,
+    startedAt: '2026-08-20T07:00:00.000Z',
+    title: 'Replacement workout',
+    vaultRoot: completedContext.vaultRoot,
+  })
+  const completedLedgerBefore = await readJsonlRecords({
+    vaultRoot: completedContext.vaultRoot,
+    relativePath: completedCandidate.ledgerFile,
+  })
+  const completedAuditBefore = await readJsonlRecords({
+    vaultRoot: completedContext.vaultRoot,
+    relativePath: 'audit/2026/2026-08.jsonl',
+  })
+  const completedReplay = await run<WorkoutResult>(completedCli, [
+    'workout', 'replace', 'Replacement workout',
+    '--workout-id', completedOld.eventId,
+    '--expected-revision', String(requireShownRevision(completedApproval)),
+    '--confirm-delete',
+    '--exercise', 'name=Pull-up;sets=2',
+    '--vault', completedContext.vaultRoot,
+  ])
+  assert.equal(completedReplay.envelope.ok, false)
+  assert.deepEqual(await readJsonlRecords({
+    vaultRoot: completedContext.vaultRoot,
+    relativePath: completedCandidate.ledgerFile,
+  }), completedLedgerBefore)
+  assert.deepEqual(await readJsonlRecords({
+    vaultRoot: completedContext.vaultRoot,
+    relativePath: 'audit/2026/2026-08.jsonl',
+  }), completedAuditBefore)
+  const completedOldRevisions = completedLedgerBefore.filter(
+    (record) => (record as { id?: string }).id === completedOld.eventId,
+  ) as Array<{
+    lifecycle: { revision: number; state?: string }
+    workout?: { endedAt?: string }
+  }>
+  assert.equal(completedOldRevisions.at(-1)?.lifecycle.state, undefined)
+  assert.equal(
+    completedOldRevisions.at(-1)?.workout?.endedAt,
+    '2026-08-20T06:45:00.000Z',
+  )
+
+  const wrongRevisionContext = await createTempVaultContext(
+    'murph-live-workout-replace-wrong-tombstone-',
+  )
+  cleanupPaths.push(wrongRevisionContext.parentRoot)
+  const wrongRevisionCli = createWorkoutCli()
+  assert.equal(requireData((await run<{ created: boolean }>(wrongRevisionCli, [
+    'init', '--vault', wrongRevisionContext.vaultRoot, '--timezone', 'UTC',
+  ])).envelope).created, true)
+  const revisedOld = requireData((await run<WorkoutResult>(wrongRevisionCli, [
+    'workout', 'start', 'Old workout',
+    '--started-at', '2026-08-20T06:30:00.000Z',
+    '--vault', wrongRevisionContext.vaultRoot,
+  ])).envelope)
+  const revisedApproval = requireData((await run<ShowResult>(wrongRevisionCli, [
+    'workout', 'active', '--workout-id', revisedOld.eventId,
+    '--vault', wrongRevisionContext.vaultRoot,
+  ])).envelope)
+  await addLiveWorkoutExercise({
+    vault: wrongRevisionContext.vaultRoot,
+    workoutId: revisedOld.eventId,
+    name: 'Late edit',
+    order: 1,
+    setCount: 1,
+  })
+  await deleteEvent({
+    vaultRoot: wrongRevisionContext.vaultRoot,
+    eventId: revisedOld.eventId,
+  })
+  const wrongRevisionCandidate = await startSingleExerciseWorkout({
+    cli: wrongRevisionCli,
+    startedAt: '2026-08-20T07:00:00.000Z',
+    title: 'Replacement workout',
+    vaultRoot: wrongRevisionContext.vaultRoot,
+  })
+  const wrongRevisionLedgerBefore = await readJsonlRecords({
+    vaultRoot: wrongRevisionContext.vaultRoot,
+    relativePath: wrongRevisionCandidate.ledgerFile,
+  })
+  const wrongRevisionAuditBefore = await readJsonlRecords({
+    vaultRoot: wrongRevisionContext.vaultRoot,
+    relativePath: 'audit/2026/2026-08.jsonl',
+  })
+  const wrongTombstoneReplay = await run<WorkoutResult>(wrongRevisionCli, [
+    'workout', 'replace', 'Replacement workout',
+    '--workout-id', revisedOld.eventId,
+    '--expected-revision', String(requireShownRevision(revisedApproval)),
+    '--confirm-delete',
+    '--exercise', 'name=Pull-up;sets=2',
+    '--vault', wrongRevisionContext.vaultRoot,
+  ])
+  assert.equal(wrongTombstoneReplay.envelope.ok, false)
+  const missingOldReplay = await run<WorkoutResult>(wrongRevisionCli, [
+    'workout', 'replace', 'Replacement workout',
+    '--workout-id', 'evt_00000000000000000000000000',
+    '--expected-revision', '1',
+    '--confirm-delete',
+    '--exercise', 'name=Pull-up;sets=2',
+    '--vault', wrongRevisionContext.vaultRoot,
+  ])
+  assert.equal(missingOldReplay.envelope.ok, false)
+  assert.deepEqual(await readJsonlRecords({
+    vaultRoot: wrongRevisionContext.vaultRoot,
+    relativePath: wrongRevisionCandidate.ledgerFile,
+  }), wrongRevisionLedgerBefore)
+  assert.deepEqual(await readJsonlRecords({
+    vaultRoot: wrongRevisionContext.vaultRoot,
+    relativePath: 'audit/2026/2026-08.jsonl',
+  }), wrongRevisionAuditBefore)
+  const revisedOldRevisions = wrongRevisionLedgerBefore.filter(
+    (record) => (record as { id?: string }).id === revisedOld.eventId,
+  ) as Array<{ lifecycle: { revision: number; state?: string } }>
+  assert.deepEqual(revisedOldRevisions.at(-1)?.lifecycle, {
+    revision: requireShownRevision(revisedApproval) + 2,
+    state: 'deleted',
+  })
+})
+
 test('replacement fails closed when a competing live workout exists', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-replace-conflict-',
@@ -474,13 +641,18 @@ test('replacement fails closed when a competing live workout exists', async () =
     draft: {
       occurredAt: '2026-08-20T07:00:00.000Z',
       source: 'manual',
-      title: 'Competing workout',
+      title: 'Replacement workout',
+      note: 'Replacement workout',
       activityType: 'strength-training',
       durationMinutes: 1,
       workout: {
         sourceApp: 'murph-live',
         startedAt: '2026-08-20T07:00:00.000Z',
-        exercises: [],
+        exercises: [{
+          name: 'Pull-up',
+          order: 1,
+          sets: [{ order: 1 }, { order: 2 }],
+        }],
       },
     },
   })

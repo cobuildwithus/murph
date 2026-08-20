@@ -173,10 +173,12 @@ replacement. An ordinary request to start a workout is not deletion consent.
 The write revalidates the proposal-time id and revision under the canonical
 boundary and atomically commits the old tombstone and complete replacement. A
 hosted retry that restores that commit but loses its command result converges
-to the existing replacement when the sole active record exactly matches the
-approved request, without another event or audit write. A missing, completed,
-changed, different, nonmatching, or non-sole active workout produces no mutation
-and requires a fresh bounded proposal. Saved-format starts and
+to the existing replacement only when the old event is canonically deleted at
+exactly the approved lifecycle revision plus one and the sole active record
+exactly matches the approved request, without another event or audit write. A
+missing, merely completed, wrong-revision, changed, different, nonmatching, or
+non-sole active workout produces no mutation and requires a fresh bounded
+proposal. Saved-format starts and
 exact-reference reminder replies never use this ad-hoc replacement path; their
 specialized routine-identity and exact-end-time flows retain precedence.
 

@@ -1,4 +1,5 @@
 import {
+  type ActivitySessionEventRecord,
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutExercise,
   type WorkoutMemberActionExpectedSetResultV1,
@@ -20,6 +21,7 @@ import {
 } from '@murphai/operator-config/workout-action-binding'
 
 import { showWorkoutFormat } from './workout-format.js'
+import { loadWorkoutCoreRuntime } from './workout-core.js'
 import {
   addStructuredWorkoutRecord,
   editWorkoutRecord,
@@ -563,15 +565,25 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
   })
   const shown = active[0]!
   if (shown.entity.id !== workoutId) {
-    if (liveWorkoutMatchesRequestedReplacement({
-      activityType,
-      explicitStartedAt: input.startedAt !== undefined,
-      note: note ?? title,
-      shown,
-      title,
-      workout,
-    })) {
-      return liveWorkoutReplacementReplayResult(shown)
+    const canonicalReplacement = await (await loadWorkoutCoreRuntime())
+      .readExpectedActivitySessionReplacement({
+        vaultRoot: input.vault,
+        replacedEventId: workoutId,
+        replacementEventId: shown.entity.id,
+        expectedRevision: input.expectedRevision,
+      })
+    if (
+      canonicalReplacement
+      && liveWorkoutMatchesRequestedReplacement({
+        activityType,
+        candidate: canonicalReplacement,
+        explicitStartedAt: input.startedAt !== undefined,
+        note: note ?? title,
+        title,
+        workout,
+      })
+    ) {
+      return liveWorkoutReplacementReplayResult(shown, canonicalReplacement)
     }
     throw new VaultCliError(
       'invalid_operation',
@@ -607,32 +619,30 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
 
 function liveWorkoutMatchesRequestedReplacement(input: {
   activityType: string
+  candidate: ActivitySessionEventRecord
   explicitStartedAt: boolean
   note: string
-  shown: Awaited<ReturnType<typeof showActiveLiveWorkout>>
   title: string
   workout: WorkoutSession
 }): boolean {
-  let activeWorkout: WorkoutSession
-  try {
-    activeWorkout = parseShownWorkout(input.shown)
-  } catch {
+  const parsedWorkout = workoutSessionSchema.safeParse(input.candidate.workout)
+  if (!parsedWorkout.success) {
     return false
   }
-  const activeData = input.shown.entity.data
+  const activeWorkout = parsedWorkout.data
   if (
-    input.shown.entity.title !== input.title
-    || optionalString(activeData.source) !== 'manual'
-    || optionalString(activeData.activityType) !== input.activityType
-    || optionalString(activeData.note) !== input.note
-    || typeof activeData.distanceKm === 'number'
+    input.candidate.title !== input.title
+    || input.candidate.source !== 'manual'
+    || input.candidate.activityType !== input.activityType
+    || input.candidate.note !== input.note
+    || typeof input.candidate.distanceKm === 'number'
   ) {
     return false
   }
   if (
     input.explicitStartedAt
     && (
-      input.shown.entity.occurredAt !== input.workout.startedAt
+      input.candidate.occurredAt !== input.workout.startedAt
       || activeWorkout.startedAt !== input.workout.startedAt
     )
   ) {
@@ -652,9 +662,9 @@ function liveWorkoutMatchesRequestedReplacement(input: {
 
 function liveWorkoutReplacementReplayResult(
   shown: Awaited<ReturnType<typeof showActiveLiveWorkout>>,
+  event: ActivitySessionEventRecord,
 ) {
-  const data = shown.entity.data
-  const durationMinutes = data.durationMinutes
+  const durationMinutes = event.durationMinutes
   if (
     typeof durationMinutes !== 'number'
     || !Number.isInteger(durationMinutes)
@@ -666,7 +676,7 @@ function liveWorkoutReplacementReplayResult(
     )
   }
   const title = requireString(
-    shown.entity.title,
+    event.title,
     `Workout ${shown.entity.id} is missing its title.`,
   )
 
@@ -680,20 +690,20 @@ function liveWorkoutReplacementReplayResult(
     ),
     created: false,
     occurredAt: requireString(
-      shown.entity.occurredAt,
+      event.occurredAt,
       `Workout ${shown.entity.id} is missing its occurrence time.`,
     ),
     kind: 'activity_session' as const,
     title,
     activityType: requireString(
-      data.activityType,
+      event.activityType,
       `Workout ${shown.entity.id} is missing its activity type.`,
     ),
     durationMinutes,
-    distanceKm: typeof data.distanceKm === 'number' ? data.distanceKm : null,
-    workout: parseShownWorkout(shown),
+    distanceKm: typeof event.distanceKm === 'number' ? event.distanceKm : null,
+    workout: workoutSessionSchema.parse(event.workout),
     manifestFile: null,
-    note: optionalString(data.note) ?? title,
+    note: optionalString(event.note) ?? title,
   }
 }
 

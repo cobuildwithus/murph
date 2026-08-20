@@ -174,6 +174,9 @@ export {
   upsertWorkoutFormat,
   validateVault,
 } from "./public-mutations.ts";
+export {
+  readExpectedActivitySessionReplacement,
+} from "./domains/events.ts";
 export type {
   ExperimentMediaRepairBlocker,
   RepairExperimentMediaInput,

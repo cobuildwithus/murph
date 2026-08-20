@@ -15,6 +15,7 @@ export {
   addCaptureWithLookup,
   addMeasurement,
   findCaptureByLookup,
+  readExpectedActivitySessionReplacement,
   replaceActivitySession,
 } from "./events/attachment-backed.ts";
 export type {
@@ -29,6 +30,7 @@ export type {
   AddMeasurementInput,
   AddMeasurementResult,
   FindCaptureByLookupResult,
+  ReadExpectedActivitySessionReplacementInput,
   ReplaceActivitySessionInput,
   ReplaceActivitySessionResult,
 } from "./events/attachment-backed.ts";

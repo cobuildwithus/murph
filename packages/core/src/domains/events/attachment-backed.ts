@@ -85,6 +85,13 @@ export interface ReplaceActivitySessionInput {
   draft: Omit<AttachmentBackedEventDraft<"activity_session">, "id">;
 }
 
+export interface ReadExpectedActivitySessionReplacementInput {
+  vaultRoot: string;
+  replacedEventId: string;
+  replacementEventId: string;
+  expectedRevision: number;
+}
+
 export interface AddBodyMeasurementInput {
   vaultRoot: string;
   draft: AttachmentBackedEventDraft<"body_measurement">;
@@ -831,6 +838,33 @@ export async function replaceActivitySession(
         };
       },
     });
+  });
+}
+
+export async function readExpectedActivitySessionReplacement(
+  input: ReadExpectedActivitySessionReplacementInput,
+): Promise<EventRecordByKind<"activity_session"> | null> {
+  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    return null;
+  }
+
+  return withCanonicalWriteLock(input.vaultRoot, async () => {
+    const [replacedShards, replacementShards] = await Promise.all([
+      loadEventLedgerShardsById(input.vaultRoot, input.replacedEventId),
+      loadEventLedgerShardsById(input.vaultRoot, input.replacementEventId),
+    ]);
+    const replaced = selectLatestMatchedEvent(replacedShards)?.record ?? null;
+    const replacement = selectLatestMatchedEvent(replacementShards)?.record ?? null;
+    if (
+      replaced?.kind !== "activity_session"
+      || !isDeletedEventSpineRecord(replaced)
+      || eventSpineRevision(replaced) !== input.expectedRevision + 1
+      || replacement?.kind !== "activity_session"
+      || isDeletedEventSpineRecord(replacement)
+    ) {
+      return null;
+    }
+    return replacement;
   });
 }
 
