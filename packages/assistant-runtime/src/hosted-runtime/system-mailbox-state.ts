@@ -369,18 +369,20 @@ export function findNextHostedSystemMailboxQueueItem(input: {
     if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
       continue;
     }
+    const isDue = systemMailboxItemIsDue(item, input.now);
+    if (
+      input.allowedRouteActions == null
+      && isDue
+      && isHostedApprovedContinuationSystemMailboxItem(item)
+    ) {
+      return item;
+    }
     const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
     if (blockedSerializationKeys.has(serializationKey)) {
       continue;
     }
-    if (systemMailboxItemIsDue(item, input.now)) {
+    if (isDue) {
       oldestDueItem ??= item;
-      if (
-        input.allowedRouteActions == null
-        && isHostedApprovedContinuationSystemMailboxItem(item)
-      ) {
-        return item;
-      }
       continue;
     }
     blockedSerializationKeys.add(serializationKey);

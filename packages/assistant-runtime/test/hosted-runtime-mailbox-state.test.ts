@@ -421,24 +421,55 @@ describe("hosted runtime system mailbox state", () => {
   });
 
   it("uses the ready approved continuation as the default item and wake authority", async () => {
+    const codexRetry = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_codex_retry",
+      mailboxDedupeKey: "runtime-control:codex-auth:retry",
+      mailboxLaneSeq: "1",
+      nextAttemptAt: "2026-04-27T00:01:00.000Z",
+      postCheckpointRecord: {
+        attemptId: "hca_abcdefghijklmnop",
+        kind: "codex-auth.updated",
+        phase: "connected",
+      },
+      wakeKind: "runtime.codex-auth-requested",
+    });
     const deviceWake = buildPendingDeviceSyncMailboxItem({
       itemId: "pending_device_sync",
-      mailboxLaneSeq: "1",
-    });
-    const approvedContinuation = buildPendingApprovalContinuationMailboxItem({
-      effectId: "effect_approved_export",
-      itemId: "pending_approved_continuation",
       mailboxLaneSeq: "2",
     });
+    const approvedContinuationA = buildPendingApprovalContinuationMailboxItem({
+      effectId: "effect_approved_export_a",
+      itemId: "pending_approved_continuation_a",
+      mailboxLaneSeq: "3",
+    });
+    const approvedContinuationB = buildPendingApprovalContinuationMailboxItem({
+      effectId: "effect_approved_export_b",
+      itemId: "pending_approved_continuation_b",
+      mailboxLaneSeq: "4",
+    });
     const state = {
-      pending: [deviceWake, approvedContinuation],
+      pending: [
+        codexRetry,
+        deviceWake,
+        approvedContinuationA,
+        approvedContinuationB,
+      ],
     };
 
     expect(findNextHostedSystemMailboxQueueItem({
       allowedRouteActions: null,
       now: "2026-04-27T00:00:00.000Z",
       state,
-    })).toEqual(approvedContinuation);
+    })).toEqual(approvedContinuationA);
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: null,
+      now: "2026-04-27T00:00:00.000Z",
+      state: {
+        pending: state.pending.filter((item) =>
+          item.itemId !== approvedContinuationA.itemId
+        ),
+      },
+    })).toEqual(approvedContinuationB);
     expect(findNextHostedSystemMailboxQueueItem({
       allowedRouteActions: ["run-device-sync-wake", "apply-runtime-control-request"],
       now: "2026-04-27T00:00:00.000Z",
@@ -458,6 +489,17 @@ describe("hosted runtime system mailbox state", () => {
       });
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         allowedRouteActions: ["run-device-sync-wake"],
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        at: "2026-04-27T00:00:00.000Z",
+        reason: "device-sync.reconcile",
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [codexRetry, deviceWake],
+      }));
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => "2026-04-27T00:00:00.000Z",
         vaultRoot,
       })).resolves.toEqual({

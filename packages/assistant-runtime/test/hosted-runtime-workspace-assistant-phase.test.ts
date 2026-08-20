@@ -16204,6 +16204,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "vault-file-send:effect_durable_approval_a",
       "vault-file-send:effect_durable_approval_b",
     ];
+    const codexRetryAt = "2026-04-27T00:01:00.000Z";
     const events: string[] = [];
 
     try {
@@ -16229,7 +16230,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           item: createResolvedForegroundAdmissionMailboxItem({
             idSuffix: "durable_device",
             kind: deviceWake.kind,
-            laneSeq: "1",
+            laneSeq: "2",
             occurredAt: deviceWake.occurredAt,
             routeAction: "run-device-sync-wake",
           }),
@@ -16239,7 +16240,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           item: createResolvedForegroundAdmissionMailboxItem({
             idSuffix: `durable_approval_${index + 1}`,
             kind: wake.kind,
-            laneSeq: String(index + 2),
+            laneSeq: String(index + 3),
             occurredAt: wake.occurredAt,
           }),
           wake,
@@ -16251,6 +16252,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           vaultRoot,
         })).toEqual(expect.objectContaining({ status: "imported" }));
       }
+      const codexRetryItem = {
+        ...createCodexAuthSystemMailboxItem(),
+        attemptCount: 1,
+        lastAttemptAt: now,
+        lastErrorCode: "codex_auth_update_failed",
+        lastErrorMessage: "redacted",
+        mailboxLaneSeq: "1",
+        nextAttemptAt: codexRetryAt,
+        status: "recording" as const,
+      };
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: [codexRetryItem, ...state.pending],
+      }));
 
       mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
         systemMailbox.prepareHostedSystemMailboxItemForCheckpoint,
@@ -16333,6 +16347,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({
         pending: [
           expect.objectContaining({
+            itemId: codexRetryItem.itemId,
+            nextAttemptAt: codexRetryAt,
+            status: "recording",
+          }),
+          expect.objectContaining({
             itemId: expect.stringContaining("durable_device"),
             status: "pending",
             wake: deviceWake,
@@ -16366,7 +16385,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "device-sync",
       ]);
       await deviceResult.afterCheckpoint?.();
-      expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([]);
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([
+        expect.objectContaining({
+          itemId: codexRetryItem.itemId,
+          nextAttemptAt: codexRetryAt,
+          status: "recording",
+        }),
+      ]);
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
       vi.useRealTimers();

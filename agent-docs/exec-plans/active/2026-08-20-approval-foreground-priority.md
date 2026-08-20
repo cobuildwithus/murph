@@ -110,6 +110,11 @@ Updated: 2026-08-20
   state owner or reconciliation mechanism. Require an outer-runtime checkpoint
   proof plus a production-phase successor proof with a configured device
   runtime and no fresh second-pass import.
+- Final ReviewGPT round 3 found a due approval could still be hidden behind an
+  earlier backed-off runtime-control item because the broad serialization key
+  was checked before the exact due-approval predicate. The finding was
+  accepted. The shared default selector now checks the exact approval first;
+  explicit selectors and ordinary runtime-control serialization are unchanged.
 
 ## Product UX Walkthrough
 
@@ -139,8 +144,9 @@ Updated: 2026-08-20
 - Final ReviewGPT round 1 produced one accepted original-PR finding. Round 2
   returned `RETROSPECTIVE_REQUIRED` for the repeated projected-device-alarm
   path; its finding is accepted and the requirement-level continuation decision
-  is recorded above. The redesigned local proof is green; round 3 and new
-  exact-head CI remain pending.
+  is recorded above. Round 3 produced one accepted backed-off-runtime-control
+  finding; its reordered shared-selector fix passes the full 655-test proof and
+  typecheck. Round 4 and new exact-head CI remain pending.
 - Expected outcome: synthetic approval delivery wins the first post-checkpoint
   selection; device work remains pending; all focused and exact-head checks are
   green; both ReviewGPT stages finish with no unresolved accepted findings.
