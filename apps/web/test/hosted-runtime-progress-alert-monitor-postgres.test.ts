@@ -482,13 +482,13 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$transaction(async (tx) => {
           const futureDeviceRetry = `${prefix}-future-device`;
           const overdueDeviceRetry = `${prefix}-overdue-device`;
-          const unrelatedFutureWake = `${prefix}-unrelated-future`;
+          const earlierAssistantWake = `${prefix}-earlier-assistant`;
           const unrelatedSystemHead = `${prefix}-unrelated-system-head`;
           await tx.hostedMember.createMany({
             data: [
               futureDeviceRetry,
               overdueDeviceRetry,
-              unrelatedFutureWake,
+              earlierAssistantWake,
               unrelatedSystemHead,
             ].map((id) => member(id, HostedBillingStatus.active)),
           });
@@ -496,7 +496,7 @@ describe.skipIf(!runPostgresProof)(
           for (const userId of [
             futureDeviceRetry,
             overdueDeviceRetry,
-            unrelatedFutureWake,
+            earlierAssistantWake,
           ]) {
             await seedProgressLane({
               createdAt: staleAt,
@@ -527,7 +527,7 @@ describe.skipIf(!runPostgresProof)(
               {
                 nextWakeAt: futureWakeAt,
                 nextWakeReason: "assistant",
-                userId: unrelatedFutureWake,
+                userId: earlierAssistantWake,
               },
               {
                 nextWakeAt: futureWakeAt,
@@ -543,10 +543,65 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toMatchObject({
             anomalous: true,
             oldestStalledAgeMs: 60 * 60_000,
-            pendingItemCount: 3,
-            stalledLaneCount: 3,
-            stalledRuntimeCount: 3,
-            stalledSystemLaneCount: 3,
+            pendingItemCount: 2,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
+          });
+
+          proofCompleted = true;
+          throw rollback;
+        }, {
+          maxWait: 10_000,
+          timeout: 30_000,
+        }).catch((error: unknown) => {
+          if (error !== rollback) {
+            throw error;
+          }
+        });
+        expect(proofCompleted).toBe(true);
+      } finally {
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("starts an overdue device retry stall at its scheduled wake", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rollback = new Error("Rollback overdue device retry progress proof.");
+      const userId = `progress-overdue-device-proof-${randomUUID()}`;
+      const now = new Date("2026-08-10T16:00:00.000Z");
+      const scheduledWakeAt = new Date(now.getTime() - 20 * 60_000);
+      let proofCompleted = false;
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.hostedMember.create({
+            data: member(userId, HostedBillingStatus.active),
+          });
+          await seedProgressLane({
+            createdAt: new Date(now.getTime() - 60 * 60_000),
+            lane: "system",
+            tx,
+            userId,
+          });
+          await tx.hostedWorkspace.create({
+            data: {
+              nextWakeAt: scheduledWakeAt,
+              nextWakeReason: "device-sync.reconcile",
+              userId,
+            },
+          });
+
+          await expect(readHostedRuntimeProgressHealth({
+            now,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            oldestStalledAgeMs: 20 * 60_000,
+            pendingItemCount: 1,
+            stalledLaneCount: 1,
+            stalledRuntimeCount: 1,
+            stalledSystemLaneCount: 1,
           });
 
           proofCompleted = true;

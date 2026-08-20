@@ -332,8 +332,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           evidence.has_pre_denial_evidence,
           FALSE
         ) AS has_pre_denial_evidence,
-        workspace.next_wake_at AS workspace_next_wake_at,
-        workspace.next_wake_reason AS workspace_next_wake_reason
+        workspace.next_wake_at AS workspace_next_wake_at
       FROM lagging_lane
       LEFT JOIN hosted_workspace AS workspace
         ON workspace.user_id = lagging_lane.user_id
@@ -375,8 +374,6 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         CASE
           WHEN progress_evidence.lane = 'system'
             AND progress_evidence.head_kind = 'device-sync.wake'
-            AND progress_evidence.workspace_next_wake_reason
-              = 'device-sync.reconcile'
             AND progress_evidence.workspace_next_wake_at IS NOT NULL
             THEN GREATEST(
               progress_evidence.head_created_at,

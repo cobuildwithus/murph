@@ -13,9 +13,9 @@ remain unhandled after their scheduled execution time.
 
 - The remaining Junction dirty connections are imported into their hosted
   workspaces and retained behind the system handled-through frontier.
-- Each affected workspace has a typed `device-sync.reconcile` wake scheduled in
-  the future. One checkpointed within the current observation window; the
-  others are on the bounded device-provider retry ladder.
+- Each affected workspace has a canonical runtime wake scheduled in the future.
+  The runtime stores the earlier of its model-free and assistant candidates, so
+  an assistant reason can legitimately win before the retained device retry.
 - The progress monitor currently ages every system-lane head from mailbox
   creation and does not consult the workspace's canonical scheduled wake.
 - This makes legitimate multi-hour device retries alert after fifteen minutes,
@@ -29,15 +29,16 @@ identifiers.
 - The hosted workspace remains the canonical owner of scheduled wake facts.
 - Do not advance mailbox cursors, acknowledge dirty state, or create another
   retry owner.
-- Suppress only the proven typed device retry case.
+- Suppress only an exact device-sync system head with a canonical future runtime
+  wake.
 - Once a scheduled retry is fifteen minutes overdue, the monitor must alert.
 
 ## Plan
 
-1. Add PostgreSQL boundary coverage for a future typed device retry, an overdue
-   typed device retry, and an unrelated future wake reason.
-2. For system-lane `device-sync.reconcile` work, age progress from the later of
-   mailbox creation and the canonical workspace wake time.
+1. Add PostgreSQL boundary coverage for a future device retry, an earlier
+   assistant wake, an overdue device retry, and a non-device system head.
+2. For an exact system-lane device head, age progress from the later of mailbox
+   creation and the canonical workspace wake time.
 3. Run the focused unit and PostgreSQL proofs plus Web typecheck.
 4. Push an exact candidate, run the required preliminary coverage review and
    final cross-cutting ReviewGPT gate with CI, then resolve all findings.
