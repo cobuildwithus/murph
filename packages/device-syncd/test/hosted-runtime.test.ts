@@ -1198,6 +1198,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyAckRequest(
         {
+          completedImports: [{
+            dirtyPayloadId: "dsp_current",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "heart_rate",
+            sourceProviderSlug: "apple_health_kit",
+          }],
           connectionId: "dsc_current",
           processedDirtyPayloadIds: ["dsp_current"],
           processedRevision: "21",
@@ -1213,6 +1219,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         "trusted-user",
       ),
     ).toEqual({
+      completedImports: [{
+        dirtyPayloadId: "dsp_current",
+        importCompletedAt: "2026-08-20T09:00:00.000Z",
+        resource: "heart_rate",
+        sourceProviderSlug: "apple_health_kit",
+      }],
       connectionId: "dsc_current",
       processedDirtyPayloadIds: ["dsp_current"],
       processedRevision: "21",
@@ -1225,6 +1237,54 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ],
       userId: "trusted-user",
     });
+  });
+
+  it("rejects canonical import receipts outside the exact processed payload set", () => {
+    expect(() =>
+      parseHostedExecutionDeviceSyncDirtyAckRequest(
+        {
+          completedImports: [{
+            dirtyPayloadId: "dsp_other",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "steps",
+            sourceProviderSlug: "apple_health_kit",
+          }],
+          connectionId: "dsc_current",
+          processedDirtyPayloadIds: ["dsp_current"],
+          processedRevision: "21",
+          userId: "trusted-user",
+        },
+        "trusted-user",
+      )
+    ).toThrowError(/must reference processed dirty payload ids/u);
+  });
+
+  it("rejects duplicate and unnormalized canonical import receipts", () => {
+    const receipt = {
+      dirtyPayloadId: "dsp_current",
+      importCompletedAt: "2026-08-20T09:00:00.000Z",
+      resource: "steps",
+      sourceProviderSlug: "apple_health_kit",
+    };
+    const request = {
+      completedImports: [receipt, receipt],
+      connectionId: "dsc_current",
+      processedDirtyPayloadIds: ["dsp_current"],
+      processedRevision: "21",
+      userId: "trusted-user",
+    };
+
+    expect(() => parseHostedExecutionDeviceSyncDirtyAckRequest(request, "trusted-user"))
+      .toThrowError(/must not repeat a dirty payload id/u);
+    expect(() =>
+      parseHostedExecutionDeviceSyncDirtyAckRequest(
+        {
+          ...request,
+          completedImports: [{ ...receipt, resource: "Heart Rate" }],
+        },
+        "trusted-user",
+      )
+    ).toThrowError(/resource must be a normalized device-sync key/u);
   });
 
   it("parses hosted runtime link and snapshot payloads with normalized timestamps", () => {

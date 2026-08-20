@@ -62,6 +62,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
   HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot as HostedDeviceSyncRuntimeWritableCredentialSnapshot,
+  HostedExecutionDeviceSyncCompletedImport,
   HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -99,6 +100,7 @@ export interface HostedDeviceSyncRuntimeSyncState {
 }
 
 export interface HostedDeviceSyncRuntimeDirtyAck {
+  completedImports?: HostedExecutionDeviceSyncCompletedImport[];
   connectionId: string;
   nextWakeAt: string | null;
   processedDirtyPayloadIds?: string[];
@@ -110,6 +112,8 @@ export interface HostedDeviceSyncRuntimeDirtyPayloadJob {
   dirtyPayloadId: string | null;
   jobId: string;
   processedRevision: string;
+  resource: string | null;
+  sourceProviderSlug: string | null;
   timing?: HostedDeviceSyncImportTiming;
 }
 
@@ -1271,6 +1275,8 @@ function admitHostedDirtyDeviceSyncJobsForAccount(input: {
         dirtyPayloadId: job.dirtyPayloadId,
         jobId,
         processedRevision: input.processedRevision,
+        resource: job.resource.resource,
+        sourceProviderSlug: job.resource.sourceProviderSlug,
         ...timing,
       });
     }
@@ -1389,6 +1395,10 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     HostedDeviceSyncCompletedImportTiming
   >();
   const completedByAck = new Map<string, Set<string>>();
+  const importReceiptsByAck = new Map<
+    string,
+    Map<string, HostedExecutionDeviceSyncCompletedImport>
+  >();
   const remaining: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   for (const pending of input.state.pendingDirtyPayloadJobs) {
     const job = store.getJobById(pending.jobId);
@@ -1432,6 +1442,24 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     const ids = completedByAck.get(ackKey) ?? new Set<string>();
     if (pending.dirtyPayloadId) {
       ids.add(pending.dirtyPayloadId);
+      if (
+        job?.status === "succeeded"
+        && job.finishedAt
+        && isHostedDeviceSyncImportReceiptKey(pending.resource)
+        && isHostedDeviceSyncImportReceiptKey(pending.sourceProviderSlug)
+      ) {
+        const receipts = importReceiptsByAck.get(ackKey) ?? new Map<
+          string,
+          HostedExecutionDeviceSyncCompletedImport
+        >();
+        receipts.set(pending.dirtyPayloadId, {
+          dirtyPayloadId: pending.dirtyPayloadId,
+          importCompletedAt: job.finishedAt,
+          resource: pending.resource,
+          sourceProviderSlug: pending.sourceProviderSlug,
+        });
+        importReceiptsByAck.set(ackKey, receipts);
+      }
     }
     completedByAck.set(ackKey, ids);
   }
@@ -1449,9 +1477,25 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
         ...completedIds,
       ]),
     ];
+    const receipts = importReceiptsByAck.get(
+      buildHostedDirtyAckKey(ack.connectionId, ack.processedRevision),
+    );
+    if (receipts && receipts.size > 0) {
+      const merged = new Map(
+        (ack.completedImports ?? []).map((receipt) => [receipt.dirtyPayloadId, receipt]),
+      );
+      for (const receipt of receipts.values()) {
+        merged.set(receipt.dirtyPayloadId, receipt);
+      }
+      ack.completedImports = [...merged.values()];
+    }
   }
   input.state.pendingDirtyPayloadJobs = remaining;
   return [...completedImportsByJobId.values()];
+}
+
+function isHostedDeviceSyncImportReceiptKey(value: string | null): value is string {
+  return Boolean(value && /^[a-z0-9][a-z0-9_-]{0,127}$/u.test(value));
 }
 
 function mergeHostedDeviceSyncImportTiming(

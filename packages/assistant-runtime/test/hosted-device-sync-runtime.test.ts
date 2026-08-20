@@ -5280,6 +5280,8 @@ describe("hosted device-sync runtime", () => {
         dirtyPayloadId: null,
         jobId: jobs[0]?.id,
         processedRevision: "42",
+        resource: "steps",
+        sourceProviderSlug: "garmin",
         timing: {
           eventToProviderSendBucket: "under_5_minutes",
           firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
@@ -5451,6 +5453,8 @@ describe("hosted device-sync runtime", () => {
           dirtyPayloadId: "dsp_deduped_1",
           jobId: firstJob.id,
           processedRevision: "9",
+          resource: null,
+          sourceProviderSlug: null,
           timing: {
             eventToProviderSendBucket: "under_5_minutes",
             firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
@@ -5462,6 +5466,8 @@ describe("hosted device-sync runtime", () => {
           dirtyPayloadId: "dsp_deduped_2",
           jobId: secondJob.id,
           processedRevision: "9",
+          resource: null,
+          sourceProviderSlug: null,
           timing: {
             eventToProviderSendBucket: "5_to_30_minutes",
             firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
@@ -6544,6 +6550,8 @@ describe("hosted device-sync runtime", () => {
         dirtyPayloadId,
         jobId: retryJob?.id,
         processedRevision: "7",
+        resource: "activity",
+        sourceProviderSlug: "strava",
       }]);
 
       const [ack] = state.pendingDirtyAcks;
@@ -6585,11 +6593,22 @@ describe("hosted device-sync runtime", () => {
       });
       assert.equal(restoredState.pendingDirtyPayloadJobs.length, 1);
       assert.equal(await restoredService.drainWorker(1), 1);
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
       promoteHostedCompletedDirtyPayloadAcks({
         service: restoredService,
         state: restoredState,
       });
+      const restoredImportCompletedAt = restoredState.pendingDirtyAcks[0]
+        ?.completedImports?.[0]?.importCompletedAt;
+      assert.ok(restoredImportCompletedAt);
       assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        completedImports: [{
+          dirtyPayloadId,
+          importCompletedAt: restoredImportCompletedAt,
+          resource: "activity",
+          sourceProviderSlug: "strava",
+        }],
         connectionId,
         nextWakeAt: null,
         processedDirtyPayloadIds: [dirtyPayloadId],
@@ -6613,8 +6632,6 @@ describe("hosted device-sync runtime", () => {
         },
       );
       assert.equal(pendingPayloadIds.size, 0);
-      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
-      assert.ok(restoredAccountId);
       assert.equal(
         readJobsForAccount(restoredService, restoredAccountId).length,
         1,
@@ -6706,9 +6723,11 @@ describe("hosted device-sync runtime", () => {
           dirtyPayloadId: "dsp_retryable",
           jobId: job.id,
           processedRevision: "7",
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          sourceProviderSlug: "whoop",
         }],
         snapshot: null,
-      };
+      } satisfies HostedDeviceSyncRuntimeSyncState;
 
       assert.equal(await service.drainWorker(1), 1);
       assert.equal(getStore(service).getJobById(job.id)?.status, "queued");
@@ -6724,6 +6743,8 @@ describe("hosted device-sync runtime", () => {
         dirtyPayloadId: "dsp_retryable",
         jobId: job.id,
         processedRevision: "7",
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        sourceProviderSlug: "whoop",
       }]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -6841,7 +6862,16 @@ describe("hosted device-sync runtime", () => {
       assert.ok(firstAccountId);
       assert.equal(await firstService.drainWorker(1, firstAccountId), 1);
       promoteHostedCompletedDirtyPayloadAcks({ service: firstService, state: firstState });
+      const childImportCompletedAt = firstState.pendingDirtyAcks[0]
+        ?.completedImports?.[0]?.importCompletedAt;
+      assert.ok(childImportCompletedAt);
       assert.deepEqual(firstState.pendingDirtyAcks, [{
+        completedImports: [{
+          dirtyPayloadId: "dsp_dirty_child",
+          importCompletedAt: childImportCompletedAt,
+          resource: "activity",
+          sourceProviderSlug: "strava",
+        }],
         connectionId,
         nextWakeAt: null,
         processedDirtyPayloadIds: ["dsp_dirty_child"],
@@ -6948,7 +6978,7 @@ describe("hosted device-sync runtime", () => {
         },
         provider: "junction",
       });
-      const state = {
+      const state: HostedDeviceSyncRuntimeSyncState = {
         hostedToLocalAccountIds: new Map([["hosted_invalid", account.id]]),
         localToHostedAccountIds: new Map([[account.id, "hosted_invalid"]]),
         observedTokenVersions: new Map<string, number | null>(),
@@ -6962,6 +6992,8 @@ describe("hosted device-sync runtime", () => {
           dirtyPayloadId: "dsp_invalid",
           jobId: job.id,
           processedRevision: "8",
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          sourceProviderSlug: "whoop",
         }],
         snapshot: null,
       };
@@ -7012,6 +7044,8 @@ describe("hosted device-sync runtime", () => {
         dirtyPayloadId: "dsp_lease_expired",
         jobId: retainedJob.id,
         processedRevision: "8",
+        resource: null,
+        sourceProviderSlug: null,
       });
 
       promoteHostedCompletedDirtyPayloadAcks({ service, state });
@@ -7028,6 +7062,8 @@ describe("hosted device-sync runtime", () => {
         dirtyPayloadId: "dsp_lease_expired",
         jobId: retainedJob.id,
         processedRevision: "8",
+        resource: null,
+        sourceProviderSlug: null,
       }]);
       assert.equal(readJobsForAccount(service, account.id).length, 2);
     } finally {
@@ -7169,19 +7205,33 @@ describe("hosted device-sync runtime", () => {
       closeHostedRuntimeDeviceSyncService(firstService);
       firstClosed = true;
 
-      const restoredState = await syncFreshRuntime(restoredService);
+      const restoredState: HostedDeviceSyncRuntimeSyncState = await syncFreshRuntime(
+        restoredService,
+      );
       assert.equal(fetchCount, 2);
-      assert.deepEqual(restoredState.pendingDirtyAcks, [{
-        connectionId,
-        nextWakeAt: null,
-        processedRevision: "9",
-      }]);
+      assert.equal(restoredState.pendingDirtyAcks.length, 1);
+      assert.deepEqual(
+        Object.keys(restoredState.pendingDirtyAcks[0] ?? {}).sort(),
+        ["connectionId", "nextWakeAt", "processedRevision"],
+      );
+      assert.equal(restoredState.pendingDirtyAcks[0]?.connectionId, connectionId);
+      assert.equal(restoredState.pendingDirtyAcks[0]?.nextWakeAt, null);
+      assert.equal(restoredState.pendingDirtyAcks[0]?.processedRevision, "9");
       assert.equal(await restoredService.drainWorker(1), 1);
       promoteHostedCompletedDirtyPayloadAcks({
         service: restoredService,
         state: restoredState,
       });
+      const restoredImportCompletedAt = restoredState.pendingDirtyAcks[0]
+        ?.completedImports?.[0]?.importCompletedAt;
+      assert.ok(restoredImportCompletedAt);
       assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        completedImports: [{
+          dirtyPayloadId: "dsp_cold_restore",
+          importCompletedAt: restoredImportCompletedAt,
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          sourceProviderSlug: "whoop",
+        }],
         connectionId,
         nextWakeAt: null,
         processedDirtyPayloadIds: ["dsp_cold_restore"],
@@ -7237,6 +7287,8 @@ describe("hosted device-sync runtime", () => {
           dirtyPayloadId: "dsp_skipped",
           jobId: job.id,
           processedRevision: "8",
+          resource: "steps",
+          sourceProviderSlug: null,
         }],
         snapshot: null,
       };
@@ -7255,6 +7307,8 @@ describe("hosted device-sync runtime", () => {
         dirtyPayloadId: "dsp_skipped",
         jobId: job.id,
         processedRevision: "8",
+        resource: "steps",
+        sourceProviderSlug: null,
       }]);
 
       const recoveredState = await syncHostedDeviceSyncControlPlaneState({
@@ -7307,7 +7361,16 @@ describe("hosted device-sync runtime", () => {
       assert.equal(recoveredState.pendingDirtyPayloadJobs.length, 1);
       assert.equal(await service.drainWorker(1), 1);
       promoteHostedCompletedDirtyPayloadAcks({ service, state: recoveredState });
+      const recoveredImportCompletedAt = recoveredState.pendingDirtyAcks[0]
+        ?.completedImports?.[0]?.importCompletedAt;
+      assert.ok(recoveredImportCompletedAt);
       assert.deepEqual(recoveredState.pendingDirtyAcks, [{
+        completedImports: [{
+          dirtyPayloadId: "dsp_skipped",
+          importCompletedAt: recoveredImportCompletedAt,
+          resource: "steps",
+          sourceProviderSlug: "demo",
+        }],
         connectionId: "hosted_skipped",
         nextWakeAt: null,
         processedDirtyPayloadIds: ["dsp_skipped"],
@@ -8603,7 +8666,16 @@ describe("hosted device-sync runtime", () => {
       assert.equal(await service.drainWorker(1), 1);
       promoteHostedCompletedDirtyPayloadAcks({ service, state: replayState });
 
+      const replayImportCompletedAt = replayState.pendingDirtyAcks[0]
+        ?.completedImports?.[0]?.importCompletedAt;
+      assert.ok(replayImportCompletedAt);
       assert.deepEqual(replayState.pendingDirtyAcks, [{
+        completedImports: [{
+          dirtyPayloadId,
+          importCompletedAt: replayImportCompletedAt,
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          sourceProviderSlug: "whoop",
+        }],
         connectionId,
         nextWakeAt: null,
         processedDirtyPayloadIds: [dirtyPayloadId],
@@ -9579,6 +9651,8 @@ describe("hosted device-sync runtime", () => {
         dirtyPayloadId,
         jobId: epochADelete.id,
         processedRevision: "11",
+        resource: null,
+        sourceProviderSlug: null,
       }]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);

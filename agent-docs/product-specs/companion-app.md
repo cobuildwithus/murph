@@ -203,9 +203,12 @@ waiting, synced, delayed, needs-attention, and relative-time claims until one
 explicit check succeeds. Webhook receipt rows retain a normalized source slug
 only when the provider-owned webhook parser identifies the source of an actual
 data-bearing event. Data-less historical completions, lifecycle events, and
-legacy rows keep that field null. Source-scoped status filters both
-connected-source availability and receipt timestamps, so those null-source rows
-intentionally do not satisfy Android status.
+legacy rows keep that field null. When a historical completion instead leads
+to a successful canonical import, the exact dirty-payload acknowledgement adds
+a source- and resource-scoped import receipt after checkpoint. Source-scoped
+status filters connected-source availability and both receipt kinds, so
+null-source rows never satisfy Android status and failed or merely accepted
+pulls never look synced.
 
 The client keeps its Junction resource request centralized and starts with four
 minimum-necessary groups: sleep, workouts, steps, and active calories. The
