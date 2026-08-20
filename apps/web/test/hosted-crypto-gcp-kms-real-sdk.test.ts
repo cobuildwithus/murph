@@ -150,12 +150,114 @@ describe("installed Google Cloud KMS SDK boundary", () => {
         workloadIdentityRefreshObserved: true,
       }),
     );
+    const details = failureLog.mock.calls[0]?.[1];
+    if (!isRecord(details)) {
+      throw new Error("Expected structured KMS failure details.");
+    }
+    expect(Number(details.stsExchangeElapsedMs)).toBeGreaterThan(0);
+    expect(Number(details.stsExchangeElapsedMs)).toBeLessThanOrEqual(10_000);
+    expect(Number(details.stsExchangeElapsedMs)).toBeLessThanOrEqual(
+      Number(details.attemptElapsedMs),
+    );
     const serializedLogs = JSON.stringify(failureLog.mock.calls);
     expect(serializedLogs).not.toContain(SECRET_PROVIDER_DETAIL);
     expect(serializedLogs).not.toContain("synthetic-signature");
     expect(serializedLogs).not.toContain(KMS_KEY_NAME);
     },
   );
+
+  it("retains shared cold-auth timings when the initiating caller cancels before a survivor reaches KMS", async () => {
+    const authRequests: CapturedAuthRequest[] = [];
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const heldSts = createDeferred<void>();
+    let authHeaderRequests = 0;
+
+    installPrototypeStub(
+      requireConstructorPrototype(requireFromGoogleAuth("gaxios"), "Gaxios"),
+      "_defaultAdapter",
+      async (config: unknown) => {
+        if (!isRecord(config)) {
+          throw new TypeError("Expected a prepared Gaxios request.");
+        }
+        authRequests.push(config);
+        if (authRequests.length === 1) {
+          await heldSts.promise;
+          return createGaxiosResponse(config, {
+            access_token: "federated-token",
+            expires_in: 3600,
+            token_type: "Bearer",
+          });
+        }
+        if (authRequests.length === 2) {
+          return createGaxiosResponse(config, {
+            accessToken: "impersonated-token",
+            expireTime: "2099-01-01T00:00:00Z",
+          });
+        }
+        throw new Error("Unexpected authentication request.");
+      },
+    );
+    installRealKmsClientStub(
+      () => {
+        authHeaderRequests += 1;
+      },
+      Object.assign(new Error(SECRET_PROVIDER_DETAIL), { code: 14 }),
+    );
+
+    const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+    const initiatingCaller = new AbortController();
+    const initiatingOperation = client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([1]),
+      signal: initiatingCaller.signal,
+    });
+    await vi.waitFor(() => expect(authRequests).toHaveLength(1));
+    const survivingOperation = client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([2]),
+    });
+    await vi.waitFor(() => expect(authHeaderRequests).toBe(2));
+    initiatingCaller.abort(new Error("synthetic caller-only cancellation"));
+    await expect(initiatingOperation).rejects.toMatchObject({ name: "AbortError" });
+    expect(failureLog).not.toHaveBeenCalled();
+    await delay(10);
+    heldSts.resolve();
+
+    await expect(survivingOperation).rejects.toMatchObject({
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "UNAVAILABLE",
+    });
+    expect(authHeaderRequests).toBe(2);
+    expect(authRequests).toHaveLength(2);
+    expect(failureLog).toHaveBeenCalledTimes(1);
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        failureStage: "kms_rpc",
+        operation: "encrypt",
+        outcome: "failed",
+        providerReason: "UNAVAILABLE",
+        workloadIdentityRefreshObserved: true,
+      }),
+    );
+    const details = failureLog.mock.calls[0]?.[1];
+    if (!isRecord(details)) {
+      throw new Error("Expected structured KMS failure details.");
+    }
+    expect(Number(details.stsExchangeElapsedMs)).toBeGreaterThan(0);
+    expect(Number(details.stsExchangeElapsedMs)).toBeLessThanOrEqual(10_000);
+    expect(Number(details.stsExchangeElapsedMs)).toBeLessThanOrEqual(
+      Number(details.attemptElapsedMs),
+    );
+    const serializedLogs = JSON.stringify(failureLog.mock.calls);
+    expect(serializedLogs).not.toContain("federated-token");
+    expect(serializedLogs).not.toContain("impersonated-token");
+    expect(serializedLogs).not.toContain(SECRET_PROVIDER_DETAIL);
+    expect(serializedLogs).not.toContain("synthetic-signature");
+    expect(serializedLogs).not.toContain(KMS_KEY_NAME);
+  });
 
   it.each([
     {
@@ -539,7 +641,10 @@ function installPrototypeStub(
   });
 }
 
-function installRealKmsClientStub(onAuthHeaderRequest?: () => void): void {
+function installRealKmsClientStub(
+  onAuthHeaderRequest?: () => void,
+  kmsFailure?: unknown,
+): void {
   installPrototypeStub(
     requireConstructorPrototype(requireFromKms("google-gax"), "GrpcClient"),
     "createStub",
@@ -573,7 +678,11 @@ function installRealKmsClientStub(onAuthHeaderRequest?: () => void): void {
           .then(
             () => {
               if (!canceled) {
-                Reflect.apply(callback, undefined, [null, {}]);
+                Reflect.apply(
+                  callback,
+                  undefined,
+                  kmsFailure === undefined ? [null, {}] : [kmsFailure],
+                );
               }
             },
             (error: unknown) => {

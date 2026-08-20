@@ -377,7 +377,7 @@ describe("official Google Cloud KMS SDK boundary", () => {
   it("retries one transient Decrypt call without repeating cold Workload Identity refresh", async () => {
     const random = vi.spyOn(Math, "random").mockReturnValue(0);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const recoveryLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const responseLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
     let decryptCalls = 0;
     googleSdkMocks.kmsCall = async (call) => {
       if (call.method !== "decrypt") {
@@ -416,18 +416,109 @@ describe("official Google Cloud KMS SDK boundary", () => {
           workloadIdentityRefreshObserved: true,
         }),
       );
-      expect(recoveryLog).toHaveBeenCalledWith(
-        "Hosted Google Cloud KMS decrypt recovered after retry.",
+      expect(responseLog).toHaveBeenCalledTimes(1);
+      expect(responseLog).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS decrypt provider response received after retry.",
         expect.objectContaining({
-          outcome: "recovered",
-          providerReason: "RECOVERED",
+          attempt: 2,
+          completionStage: "kms_rpc",
+          maxAttempts: 2,
+          operation: "decrypt",
+          outcome: "provider_response_received",
+          providerReason: "RESPONSE_RECEIVED",
         }),
       );
-      expect(recoveryLog.mock.calls[0]?.[1]).not.toHaveProperty("failureStage");
-      expect(recoveryLog.mock.calls[0]?.[1]).not.toHaveProperty("completionStage");
+      expect(responseLog.mock.calls[0]?.[1]).not.toHaveProperty("failureStage");
+      const serializedLogs = JSON.stringify([
+        ...warning.mock.calls,
+        ...responseLog.mock.calls,
+      ]);
+      expect(serializedLogs).not.toContain("Hosted Google Cloud KMS decrypt recovered after retry.");
+      expect(serializedLogs).not.toContain("RECOVERED");
+      expect(serializedLogs).not.toContain('"outcome":"recovered"');
+      expect(serializedLogs).not.toContain(KMS_KEY_NAME);
+      expect(serializedLogs).not.toContain("synthetic-signature");
     } finally {
       random.mockRestore();
-      recoveryLog.mockRestore();
+      responseLog.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  it("does not claim recovery before a retried Decrypt response passes integrity checks", async () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const responseLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const secretPlaintext = new TextEncoder().encode("secret-retried-plaintext");
+    let decryptCalls = 0;
+    googleSdkMocks.kmsCall = async (call) => {
+      if (call.method !== "decrypt") {
+        return defaultKmsResponse(call);
+      }
+      decryptCalls += 1;
+      if (decryptCalls === 1) {
+        throw Object.assign(new Error("secret transient provider detail"), { code: 14 });
+      }
+      return {
+        plaintext: secretPlaintext,
+        plaintextCrc32c: {
+          high: 0,
+          low: (crc32c(secretPlaintext) ^ 1) | 0,
+        },
+        usedPrimary: true,
+      };
+    };
+
+    try {
+      const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+      const failure = client.decrypt({
+        additionalAuthenticatedData: "domain=control",
+        ciphertext: Buffer.from(new Uint8Array([7, 8, 9])).toString("base64"),
+        keyName: KMS_KEY_NAME,
+      });
+
+      await expect(failure).rejects.toMatchObject({
+        check: "plaintext_crc32c",
+        name: "HostedGcpKmsIntegrityError",
+        operation: "decrypt",
+      });
+      expect(decryptCalls).toBe(2);
+      expect(warning).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS decrypt retrying after a transient failure.",
+        expect.objectContaining({
+          failureStage: "kms_rpc",
+          outcome: "retrying",
+          providerReason: "UNAVAILABLE",
+        }),
+      );
+      expect(responseLog).toHaveBeenCalledTimes(1);
+      expect(responseLog).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS decrypt provider response received after retry.",
+        expect.objectContaining({
+          attempt: 2,
+          completionStage: "kms_rpc",
+          maxAttempts: 2,
+          operation: "decrypt",
+          outcome: "provider_response_received",
+          providerReason: "RESPONSE_RECEIVED",
+        }),
+      );
+      expect(responseLog.mock.calls[0]?.[1]).not.toHaveProperty("failureStage");
+      const serializedLogs = JSON.stringify([
+        ...warning.mock.calls,
+        ...responseLog.mock.calls,
+      ]);
+      expect(serializedLogs).not.toContain("secret transient provider detail");
+      expect(serializedLogs).not.toContain("secret-retried-plaintext");
+      expect(serializedLogs).not.toContain(Buffer.from(secretPlaintext).toString("base64"));
+      expect(serializedLogs).not.toContain(KMS_KEY_NAME);
+      expect(serializedLogs).not.toContain("synthetic-signature");
+      expect(serializedLogs).not.toContain("RECOVERED");
+      expect(serializedLogs).not.toContain('"outcome":"recovered"');
+    } finally {
+      secretPlaintext.fill(0);
+      random.mockRestore();
+      responseLog.mockRestore();
       warning.mockRestore();
     }
   });

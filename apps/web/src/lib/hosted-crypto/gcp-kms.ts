@@ -98,9 +98,10 @@ type HostedGcpKmsInnerAuthFailureStage = Extract<
   HostedGcpKmsFailureStage,
   "service_account_impersonation" | "sts_exchange" | "subject_token"
 >;
-const HOSTED_GCP_KMS_ACTIVE_AUTH_FAILURE_STAGES: readonly HostedGcpKmsFailureStage[] = [
-  "auth_refresh_wait",
-];
+type HostedGcpKmsAttemptFailureStage = Exclude<
+  HostedGcpKmsFailureStage,
+  HostedGcpKmsInnerAuthFailureStage
+>;
 const HOSTED_GCP_KMS_INNER_AUTH_FAILURE_STAGES:
   readonly HostedGcpKmsInnerAuthFailureStage[] = [
   "subject_token",
@@ -329,12 +330,11 @@ interface HostedGcpKmsAttemptContext {
 }
 
 interface HostedGcpKmsAttemptDiagnostics {
-  lastFailureStage: HostedGcpKmsFailureStage | null;
+  lastFailureStage: HostedGcpKmsAttemptFailureStage | null;
   sharedAuthRefreshContext: HostedGcpAuthRefreshContext | null;
-  stageDurationsMs: Record<HostedGcpKmsFailureStage, number>;
-  stageStartedAtMs: Record<HostedGcpKmsFailureStage, number[]>;
+  stageDurationsMs: Record<HostedGcpKmsAttemptFailureStage, number>;
+  stageStartedAtMs: Record<HostedGcpKmsAttemptFailureStage, number[]>;
   startedAtMs: number;
-  workloadIdentityRefreshObserved: boolean;
 }
 
 interface HostedGcpKmsRequestMetrics {
@@ -342,9 +342,10 @@ interface HostedGcpKmsRequestMetrics {
   providerPayloadBytes: number;
 }
 
-interface HostedGcpKmsSharedFailureDiagnostics {
-  failureStage: HostedGcpKmsFailureStage;
-  workloadIdentityRefreshObserved: boolean;
+interface HostedGcpAuthStageTiming {
+  completedAtMs: number | null;
+  generation: number;
+  startedAtMs: number;
 }
 
 interface HostedGcpAuthRefreshContext {
@@ -352,8 +353,13 @@ interface HostedGcpAuthRefreshContext {
   activeInnerStageGeneration: number;
   activeInnerStageStartedAtMs: number | null;
   deadlineAtMs: number;
+  innerStageTimings: Record<
+    HostedGcpKmsInnerAuthFailureStage,
+    HostedGcpAuthStageTiming | null
+  >;
   owner: object;
   signal: AbortSignal;
+  terminalInnerStage: HostedGcpKmsInnerAuthFailureStage | null;
 }
 
 interface HostedGcpAuthStageToken {
@@ -375,8 +381,6 @@ interface HostedGcpKmsEndpointConfiguration {
 const hostedGcpAuthRefreshContext = new AsyncLocalStorage<HostedGcpAuthRefreshContext>();
 const hostedGcpKmsAttemptDiagnosticsContext =
   new AsyncLocalStorage<HostedGcpKmsAttemptDiagnostics>();
-const hostedGcpKmsSharedFailureDiagnostics =
-  new WeakMap<object, HostedGcpKmsSharedFailureDiagnostics>();
 const hostedGcpAuthRequestStageTokens = new WeakMap<object, HostedGcpAuthStageToken>();
 const defaultHostedGcpKmsDependencies: HostedGcpKmsClientDependencies = {
   createSdkTransport: createOfficialGcpKmsSdkTransport,
@@ -739,18 +743,22 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         );
         throwIfProviderAttemptAborted(context, attemptContext);
         if (attempt > 1) {
-          console.info("Hosted Google Cloud KMS decrypt recovered after retry.", {
-            ...buildHostedGcpKmsAttemptLogDetails({
-              attempt,
-              attemptContext,
-              context,
-              maxAttempts,
-              operation,
-              providerReason: "RECOVERED",
-              requestMetrics,
-            }),
-            outcome: "recovered",
-          });
+          console.info(
+            "Hosted Google Cloud KMS decrypt provider response received after retry.",
+            {
+              ...buildHostedGcpKmsAttemptLogDetails({
+                attempt,
+                attemptContext,
+                context,
+                maxAttempts,
+                operation,
+                providerReason: "RESPONSE_RECEIVED",
+                requestMetrics,
+              }),
+              completionStage: "kms_rpc",
+              outcome: "provider_response_received",
+            },
+          );
         }
         return response;
       } catch (error) {
@@ -763,7 +771,6 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
           || isTimeoutError(error);
         const failureStage = readHostedGcpKmsFailureStage({
           attemptContext,
-          error,
           preferActiveAuthStage: aggregateTimedOut || attemptDeadlineTimedOut,
         });
         if (context.deadlineSignal.aborted) {
@@ -1233,7 +1240,7 @@ class HostedGcpIdentityPoolClient extends IdentityPoolClient {
       if (this.activeRefreshContext === context) {
         this.activeRefreshContext = null;
       }
-      clearHostedGcpKmsSharedAuthStage(context);
+      finishHostedGcpKmsAuthRefreshContext(context);
     });
   }
 }
@@ -1350,22 +1357,26 @@ function addBoundedGoogleAuthTransportInterceptor(
       const sharedStageToken = startHostedGcpKmsSharedAuthStage(failureStage);
       if (sharedStageToken) {
         hostedGcpAuthRequestStageTokens.set(request, sharedStageToken);
+      } else if (isHostedGcpKmsAttemptFailureStage(failureStage)) {
+        startHostedGcpKmsStage(failureStage);
       }
-      startHostedGcpKmsStage(failureStage);
       return request;
     },
   });
   transport.interceptors.response.add({
     rejected: (error) => {
-      finishHostedGcpKmsStage(failureStage);
-      finishHostedGcpKmsTransportSharedAuthStage(error);
-      rememberHostedGcpKmsSharedFailureStage(error, failureStage);
-      markHostedGcpKmsFailureStage(failureStage);
+      if (isHostedGcpKmsAttemptFailureStage(failureStage)) {
+        finishHostedGcpKmsStage(failureStage);
+        markHostedGcpKmsAttemptFailureStage(failureStage);
+      }
+      finishHostedGcpKmsTransportSharedAuthStage(error, failureStage, true);
       throw error;
     },
     resolved: async (response) => {
-      finishHostedGcpKmsStage(failureStage);
-      finishHostedGcpKmsTransportSharedAuthStage(response);
+      if (isHostedGcpKmsAttemptFailureStage(failureStage)) {
+        finishHostedGcpKmsStage(failureStage);
+      }
+      finishHostedGcpKmsTransportSharedAuthStage(response, failureStage, false);
       return response;
     },
   });
@@ -1442,8 +1453,6 @@ function readHostedGcpKmsCredentialConfiguration(
         }
         return requireCompactJwt(token, "Vercel OIDC subject token");
       } catch (error) {
-        rememberHostedGcpKmsSharedFailureStage(error, "subject_token");
-        markHostedGcpKmsFailureStage("subject_token");
         if (signal?.aborted) {
           throw createCallerAbortError();
         }
@@ -1563,21 +1572,14 @@ function createHostedGcpKmsAttemptDiagnostics(): HostedGcpKmsAttemptDiagnostics 
       kms_rpc: 0,
       retry_backoff: 0,
       sdk_initialize: 0,
-      service_account_impersonation: 0,
-      sts_exchange: 0,
-      subject_token: 0,
     },
     stageStartedAtMs: {
       auth_refresh_wait: [],
       kms_rpc: [],
       retry_backoff: [],
       sdk_initialize: [],
-      service_account_impersonation: [],
-      sts_exchange: [],
-      subject_token: [],
     },
     startedAtMs,
-    workloadIdentityRefreshObserved: false,
   };
 }
 
@@ -1590,22 +1592,29 @@ async function runHostedGcpKmsFailureStage<T>(
     return operation();
   }
   const sharedAuthStageToken = startHostedGcpKmsSharedAuthStage(stage);
-  startHostedGcpKmsStage(stage);
+  const attemptStage = isHostedGcpKmsAttemptFailureStage(stage)
+    ? stage
+    : null;
+  if (attemptStage) {
+    startHostedGcpKmsStage(attemptStage);
+  }
+  let sharedAuthStageFailed = false;
   try {
     return await operation();
   } catch (error) {
-    // The innermost failing stage wins, so an STS or impersonation failure is
-    // not replaced by the surrounding auth-refresh or SDK initialization wait.
-    diagnostics.lastFailureStage ??=
-      readHostedGcpKmsSharedFailureStage(error) ?? stage;
-    // google-auth-library may wrap a transport error after its response
-    // interceptors run. Carry only the bounded stage provenance onto each
-    // wrapper so another waiter on the shared refresh sees the same diagnosis.
-    rememberHostedGcpKmsSharedFailureStage(error, diagnostics.lastFailureStage);
+    sharedAuthStageFailed = sharedAuthStageToken !== null;
+    if (attemptStage) {
+      diagnostics.lastFailureStage ??= attemptStage;
+    }
     throw error;
   } finally {
-    finishHostedGcpKmsStage(stage);
-    finishHostedGcpKmsSharedAuthStage(sharedAuthStageToken);
+    if (attemptStage) {
+      finishHostedGcpKmsStage(attemptStage);
+    }
+    finishHostedGcpKmsSharedAuthStage(
+      sharedAuthStageToken,
+      sharedAuthStageFailed,
+    );
   }
 }
 
@@ -1626,6 +1635,12 @@ function isHostedGcpKmsInnerAuthFailureStage(
   );
 }
 
+function isHostedGcpKmsAttemptFailureStage(
+  stage: HostedGcpKmsFailureStage,
+): stage is HostedGcpKmsAttemptFailureStage {
+  return !isHostedGcpKmsInnerAuthFailureStage(stage);
+}
+
 function startHostedGcpKmsSharedAuthStage(
   stage: HostedGcpKmsFailureStage,
 ): HostedGcpAuthStageToken | null {
@@ -1637,51 +1652,86 @@ function startHostedGcpKmsSharedAuthStage(
     return null;
   }
   const generation = context.activeInnerStageGeneration + 1;
+  const startedAtMs = Date.now();
   context.activeInnerStage = stage;
   context.activeInnerStageGeneration = generation;
-  context.activeInnerStageStartedAtMs = Date.now();
+  context.activeInnerStageStartedAtMs = startedAtMs;
+  context.innerStageTimings[stage] = {
+    completedAtMs: null,
+    generation,
+    startedAtMs,
+  };
   return { context, generation, stage };
 }
 
 function finishHostedGcpKmsSharedAuthStage(
   token: HostedGcpAuthStageToken | null,
+  failed: boolean,
 ): void {
+  if (!token) {
+    return;
+  }
+  const timing = token.context.innerStageTimings[token.stage];
+  if (timing?.generation === token.generation) {
+    timing.completedAtMs ??= Date.now();
+  }
   if (
-    !token
-    || token.context.activeInnerStage !== token.stage
+    token.context.activeInnerStage !== token.stage
     || token.context.activeInnerStageGeneration !== token.generation
   ) {
     return;
+  }
+  if (failed) {
+    token.context.terminalInnerStage = token.stage;
   }
   token.context.activeInnerStage = null;
   token.context.activeInnerStageStartedAtMs = null;
 }
 
-function clearHostedGcpKmsSharedAuthStage(
+function finishHostedGcpKmsAuthRefreshContext(
   context: HostedGcpAuthRefreshContext,
 ): void {
+  const activeStage = context.activeInnerStage;
+  if (activeStage) {
+    const timing = context.innerStageTimings[activeStage];
+    if (timing?.generation === context.activeInnerStageGeneration) {
+      timing.completedAtMs ??= Date.now();
+    }
+  }
   context.activeInnerStage = null;
   context.activeInnerStageStartedAtMs = null;
 }
 
-function finishHostedGcpKmsTransportSharedAuthStage(value: unknown): void {
-  if (!isRecord(value)) {
-    return;
-  }
-  const config = Reflect.get(value, "config");
-  if (!isRecord(config)) {
-    return;
-  }
-  const token = hostedGcpAuthRequestStageTokens.get(config);
+function finishHostedGcpKmsTransportSharedAuthStage(
+  value: unknown,
+  stage: HostedGcpKmsFailureStage,
+  failed: boolean,
+): void {
+  const config = isRecord(value) ? Reflect.get(value, "config") : null;
+  const pairedToken = isRecord(config)
+    ? hostedGcpAuthRequestStageTokens.get(config)
+    : undefined;
+  const context = hostedGcpAuthRefreshContext.getStore();
+  const activeToken = isHostedGcpKmsInnerAuthFailureStage(stage)
+    && context?.activeInnerStage === stage
+    ? {
+        context,
+        generation: context.activeInnerStageGeneration,
+        stage,
+      }
+    : null;
+  const token = pairedToken ?? activeToken;
   if (!token) {
     return;
   }
-  hostedGcpAuthRequestStageTokens.delete(config);
-  finishHostedGcpKmsSharedAuthStage(token);
+  if (isRecord(config)) {
+    hostedGcpAuthRequestStageTokens.delete(config);
+  }
+  finishHostedGcpKmsSharedAuthStage(token, failed);
 }
 
-function markHostedGcpKmsFailureStage(
-  stage: HostedGcpKmsFailureStage,
+function markHostedGcpKmsAttemptFailureStage(
+  stage: HostedGcpKmsAttemptFailureStage,
 ): void {
   const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
   if (diagnostics) {
@@ -1689,42 +1739,8 @@ function markHostedGcpKmsFailureStage(
   }
 }
 
-function rememberHostedGcpKmsSharedFailureStage(
-  error: unknown,
-  stage: HostedGcpKmsFailureStage,
-): void {
-  if (error && typeof error === "object") {
-    hostedGcpKmsSharedFailureDiagnostics.set(error, {
-      failureStage: stage,
-      workloadIdentityRefreshObserved:
-        hostedGcpKmsAttemptDiagnosticsContext.getStore()
-          ?.workloadIdentityRefreshObserved ?? false,
-    });
-  }
-}
-
-function readHostedGcpKmsSharedFailureStage(
-  error: unknown,
-): HostedGcpKmsFailureStage | null {
-  if (!error || typeof error !== "object") {
-    return null;
-  }
-  const sharedDiagnostics = hostedGcpKmsSharedFailureDiagnostics.get(error);
-  if (!sharedDiagnostics) {
-    return null;
-  }
-  if (sharedDiagnostics.workloadIdentityRefreshObserved) {
-    const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
-    if (diagnostics) {
-      diagnostics.workloadIdentityRefreshObserved = true;
-    }
-  }
-  return sharedDiagnostics.failureStage;
-}
-
 function readHostedGcpKmsFailureStage(input: {
   attemptContext: HostedGcpKmsAttemptContext;
-  error: unknown;
   preferActiveAuthStage: boolean;
 }): HostedGcpKmsFailureStage {
   if (input.preferActiveAuthStage) {
@@ -1735,8 +1751,9 @@ function readHostedGcpKmsFailureStage(input: {
       return activeAuthStage;
     }
   }
-  return input.attemptContext.diagnostics.lastFailureStage
-    ?? readHostedGcpKmsSharedFailureStage(input.error)
+  return input.attemptContext.diagnostics.sharedAuthRefreshContext
+    ?.terminalInnerStage
+    ?? input.attemptContext.diagnostics.lastFailureStage
     ?? "kms_rpc";
 }
 
@@ -1744,19 +1761,6 @@ function readHostedGcpKmsActiveAuthFailureStage(
   diagnostics: HostedGcpKmsAttemptDiagnostics,
 ): HostedGcpKmsFailureStage | null {
   const now = Date.now();
-  let latestStage: HostedGcpKmsFailureStage | null = null;
-  let latestStartedAtMs = -1;
-  for (const stage of HOSTED_GCP_KMS_INNER_AUTH_FAILURE_STAGES) {
-    for (const startedAtMs of diagnostics.stageStartedAtMs[stage]) {
-      if (startedAtMs >= latestStartedAtMs) {
-        latestStartedAtMs = startedAtMs;
-        latestStage = stage;
-      }
-    }
-  }
-  if (latestStage) {
-    return latestStage;
-  }
   const sharedContext = diagnostics.sharedAuthRefreshContext;
   const sharedStageAgeMs = sharedContext?.activeInnerStageStartedAtMs === null
       || sharedContext?.activeInnerStageStartedAtMs === undefined
@@ -1771,34 +1775,23 @@ function readHostedGcpKmsActiveAuthFailureStage(
     && sharedStageAgeMs <= HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS
     && now <= sharedContext.deadlineAtMs + HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS
   ) {
-    const sharedStage = sharedContext.activeInnerStage;
-    diagnostics.stageStartedAtMs[sharedStage].push(Math.max(
-      sharedContext.activeInnerStageStartedAtMs,
-      diagnostics.startedAtMs,
-    ));
-    diagnostics.workloadIdentityRefreshObserved = true;
-    return sharedStage;
+    return sharedContext.activeInnerStage;
   }
-  for (const stage of HOSTED_GCP_KMS_ACTIVE_AUTH_FAILURE_STAGES) {
-    if (diagnostics.stageStartedAtMs[stage].length > 0) {
-      return stage;
-    }
+  if (diagnostics.stageStartedAtMs.auth_refresh_wait.length > 0) {
+    return "auth_refresh_wait";
   }
-  return latestStage;
+  return null;
 }
 
-function startHostedGcpKmsStage(stage: HostedGcpKmsFailureStage): void {
+function startHostedGcpKmsStage(stage: HostedGcpKmsAttemptFailureStage): void {
   const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
   if (!diagnostics) {
     return;
   }
   diagnostics.stageStartedAtMs[stage].push(Date.now());
-  if (stage === "subject_token") {
-    diagnostics.workloadIdentityRefreshObserved = true;
-  }
 }
 
-function finishHostedGcpKmsStage(stage: HostedGcpKmsFailureStage): void {
+function finishHostedGcpKmsStage(stage: HostedGcpKmsAttemptFailureStage): void {
   const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
   if (!diagnostics) {
     return;
@@ -1825,11 +1818,15 @@ function buildHostedGcpKmsAttemptLogDetails(input: {
   const stageDurationsMs = {
     ...input.attemptContext.diagnostics.stageDurationsMs,
   };
-  for (const stage of Object.keys(stageDurationsMs) as HostedGcpKmsFailureStage[]) {
+  for (
+    const stage of Object.keys(stageDurationsMs) as HostedGcpKmsAttemptFailureStage[]
+  ) {
     for (const startedAtMs of input.attemptContext.diagnostics.stageStartedAtMs[stage]) {
       stageDurationsMs[stage] += readHostedGcpKmsBoundedElapsedMs(startedAtMs, now);
     }
   }
+  const sharedAuthRefreshContext =
+    input.attemptContext.diagnostics.sharedAuthRefreshContext;
   return {
     additionalAuthenticatedDataBytes:
       input.requestMetrics.additionalAuthenticatedDataBytes ?? 0,
@@ -1852,12 +1849,44 @@ function buildHostedGcpKmsAttemptLogDetails(input: {
     retryBackoffElapsedMs: stageDurationsMs.retry_backoff,
     sdkInitializeElapsedMs: stageDurationsMs.sdk_initialize,
     serviceAccountImpersonationElapsedMs:
-      stageDurationsMs.service_account_impersonation,
-    stsExchangeElapsedMs: stageDurationsMs.sts_exchange,
-    subjectTokenElapsedMs: stageDurationsMs.subject_token,
+      readHostedGcpKmsSharedAuthStageElapsedMs({
+        attemptStartedAtMs: input.attemptContext.diagnostics.startedAtMs,
+        context: sharedAuthRefreshContext,
+        now,
+        stage: "service_account_impersonation",
+      }),
+    stsExchangeElapsedMs: readHostedGcpKmsSharedAuthStageElapsedMs({
+      attemptStartedAtMs: input.attemptContext.diagnostics.startedAtMs,
+      context: sharedAuthRefreshContext,
+      now,
+      stage: "sts_exchange",
+    }),
+    subjectTokenElapsedMs: readHostedGcpKmsSharedAuthStageElapsedMs({
+      attemptStartedAtMs: input.attemptContext.diagnostics.startedAtMs,
+      context: sharedAuthRefreshContext,
+      now,
+      stage: "subject_token",
+    }),
     workloadIdentityRefreshObserved:
-      input.attemptContext.diagnostics.workloadIdentityRefreshObserved,
+      (sharedAuthRefreshContext?.activeInnerStageGeneration ?? 0) > 0,
   };
+}
+
+function readHostedGcpKmsSharedAuthStageElapsedMs(input: {
+  attemptStartedAtMs: number;
+  context: HostedGcpAuthRefreshContext | null;
+  now: number;
+  stage: HostedGcpKmsInnerAuthFailureStage;
+}): number {
+  const timing = input.context?.innerStageTimings[input.stage];
+  if (!timing) {
+    return 0;
+  }
+  const startedAtMs = Math.max(timing.startedAtMs, input.attemptStartedAtMs);
+  const completedAtMs = Math.min(timing.completedAtMs ?? input.now, input.now);
+  return completedAtMs > startedAtMs
+    ? readHostedGcpKmsBoundedElapsedMs(startedAtMs, completedAtMs)
+    : 0;
 }
 
 function readHostedGcpKmsBoundedElapsedMs(startedAtMs: number, now: number): number {
@@ -1874,8 +1903,14 @@ function createAuthRefreshContext(owner: object): HostedGcpAuthRefreshContext {
     activeInnerStageGeneration: 0,
     activeInnerStageStartedAtMs: null,
     deadlineAtMs: Date.now() + HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+    innerStageTimings: {
+      service_account_impersonation: null,
+      sts_exchange: null,
+      subject_token: null,
+    },
     owner,
     signal,
+    terminalInnerStage: null,
   };
 }
 

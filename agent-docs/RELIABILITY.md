@@ -1064,11 +1064,14 @@ Last verified: 2026-08-20
   second attempt, after 100–300 ms of abortable jitter. Encrypt, sign, MAC,
   permission/authentication, quota, input, and integrity failures remain
   single-attempt and fail closed; the official SDK's broad default retry budget
-  stays disabled. Retry, recovery, and terminal-failure logs contain only the
-  operation and outcome, normalized provider reason, exact bounded auth/RPC
-  stage, attempt and aggregate budget state, per-stage elapsed milliseconds,
-  workload-refresh presence, and provider-payload/AAD byte counts. They never
-  contain credentials, resource names, AAD, ciphertext, or plaintext.
+  stays disabled. Retry, provider-response, and terminal-failure logs contain
+  only the operation and outcome, normalized provider reason, exact bounded
+  auth/RPC stage, attempt and aggregate budget state, per-stage elapsed
+  milliseconds, workload-refresh presence, and provider-payload/AAD byte
+  counts. A provider-response event records transport completion only; it does
+  not claim decrypt recovery before plaintext and CRC integrity checks pass.
+  These logs never contain credentials, resource names, AAD, ciphertext, or
+  plaintext.
 - Hosted workspace checkpoint session-start and completion failures preserve
   cancellation reasons and extensible `Error` identity while adding allowlisted
   phases for write-fence acquisition, deadline-bound request/response decode,
