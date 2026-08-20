@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict'
-import { rm } from 'node:fs/promises'
+import { cp, rm } from 'node:fs/promises'
+import path from 'node:path'
 
 import { Cli } from 'incur'
 import { afterAll } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { addActivitySession, readJsonlRecords } from '@murphai/core'
+import {
+  addActivitySession,
+  applyHostedCanonicalWriteReceipt,
+  readJsonlRecords,
+  withHostedCanonicalWritePort,
+  type HostedCanonicalWritePersistenceInput,
+} from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import {
   addLiveWorkoutExercise,
@@ -56,6 +63,7 @@ function isVaultCliErrorCode(error: unknown, code: string): boolean {
 }
 
 interface WorkoutResult {
+  created: boolean
   eventId: string
   ledgerFile: string
   activityType: string
@@ -329,17 +337,27 @@ test('replacement preserves ordered duplicate exercises and comma-bearing names'
     'workout', 'active', '--workout-id', oldWorkout.eventId,
     '--vault', vaultRoot,
   ])).envelope)
+  const replicaRoot = path.join(parentRoot, 'replica-vault')
+  await cp(vaultRoot, replicaRoot, { recursive: true })
+  const persisted: HostedCanonicalWritePersistenceInput[] = []
 
-  const replacement = requireData((await run<WorkoutResult>(cli, [
-    'workout', 'replace', 'Ordered blocks',
-    '--workout-id', oldWorkout.eventId,
-    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
-    '--confirm-delete',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
-    '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
-    '--vault', vaultRoot,
-  ])).envelope)
+  const replacement = requireData((await withHostedCanonicalWritePort(
+    {
+      async persistCanonicalWrite(input) {
+        persisted.push(input)
+      },
+    },
+    () => run<WorkoutResult>(cli, [
+      'workout', 'replace', 'Ordered blocks',
+      '--workout-id', oldWorkout.eventId,
+      '--expected-revision', String(requireShownRevision(approvedSnapshot)),
+      '--confirm-delete',
+      '--exercise', 'name=Run;sets=1;mode=cardio',
+      '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
+      '--exercise', 'name=Run;sets=1;mode=cardio',
+      '--vault', vaultRoot,
+    ]),
+  )).envelope)
 
   assert.deepEqual(
     replacement.workout?.exercises.map((exercise) => ({
@@ -353,8 +371,81 @@ test('replacement preserves ordered duplicate exercises and comma-bearing names'
       { name: 'Run', order: 3, setCount: 1 },
     ],
   )
+  assert.equal(persisted.length, 1)
+  const hostedWrite = persisted[0]!
+  await applyHostedCanonicalWriteReceipt({
+    vaultRoot: replicaRoot,
+    receipt: hostedWrite.receipt,
+    async readPayload(ref) {
+      return hostedWrite.payloads.find(
+        (payload) => payload.sha256 === ref.sha256,
+      )?.bytes ?? null
+    },
+  })
+  const ledgerBeforeReplay = await readJsonlRecords({
+    vaultRoot: replicaRoot,
+    relativePath: replacement.ledgerFile,
+  })
+  const auditBeforeReplay = await readJsonlRecords({
+    vaultRoot: replicaRoot,
+    relativePath: 'audit/2026/2026-08.jsonl',
+  })
+  const replay = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'replace', 'Ordered blocks',
+    '--workout-id', oldWorkout.eventId,
+    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
+    '--confirm-delete',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--vault', replicaRoot,
+  ])).envelope)
+  assert.equal(replay.eventId, replacement.eventId)
+  assert.equal(replay.created, false)
+  assert.deepEqual(await readJsonlRecords({
+    vaultRoot: replicaRoot,
+    relativePath: replacement.ledgerFile,
+  }), ledgerBeforeReplay)
+  assert.deepEqual(await readJsonlRecords({
+    vaultRoot: replicaRoot,
+    relativePath: 'audit/2026/2026-08.jsonl',
+  }), auditBeforeReplay)
+
+  const differentWorkout = await run<WorkoutResult>(cli, [
+    'workout', 'replace', 'Ordered blocks',
+    '--workout-id', oldWorkout.eventId,
+    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
+    '--confirm-delete',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--exercise', 'name=Row, neutral grip;sets=3;mode=weight_reps',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--vault', replicaRoot,
+  ])
+  assert.equal(differentWorkout.envelope.ok, false)
+
+  const differentStart = await run<WorkoutResult>(cli, [
+    'workout', 'replace', 'Ordered blocks',
+    '--workout-id', oldWorkout.eventId,
+    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
+    '--confirm-delete',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--started-at', '2026-08-20T00:00:00.000Z',
+    '--vault', replicaRoot,
+  ])
+  assert.equal(differentStart.envelope.ok, false)
+  assert.deepEqual(await readJsonlRecords({
+    vaultRoot: replicaRoot,
+    relativePath: replacement.ledgerFile,
+  }), ledgerBeforeReplay)
+  assert.deepEqual(await readJsonlRecords({
+    vaultRoot: replicaRoot,
+    relativePath: 'audit/2026/2026-08.jsonl',
+  }), auditBeforeReplay)
+
   const active = requireData((await run<ShowResult>(cli, [
-    'workout', 'active', '--vault', vaultRoot,
+    'workout', 'active', '--vault', replicaRoot,
   ])).envelope)
   assert.equal(active.entity.id, replacement.eventId)
 })

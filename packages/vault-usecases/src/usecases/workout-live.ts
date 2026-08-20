@@ -490,6 +490,12 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
       'An exact active workout id is required for replacement.',
     )
   }
+  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    throw new VaultCliError(
+      'conflict',
+      'The confirmed workout changed after approval; replacement was not performed.',
+    )
+  }
 
   const active = await findActiveLiveWorkouts(input.vault)
   if (active.length === 0) {
@@ -503,24 +509,6 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
     )
   }
 
-  const shown = active[0]!
-  if (shown.entity.id !== workoutId) {
-    throw new VaultCliError(
-      'invalid_operation',
-      'The confirmed workout is no longer the active live workout.',
-    )
-  }
-  const currentRevision = requireWorkoutEventRevision(shown)
-  if (
-    !Number.isInteger(input.expectedRevision)
-    || input.expectedRevision < 1
-    || currentRevision !== input.expectedRevision
-  ) {
-    throw new VaultCliError(
-      'conflict',
-      'The confirmed workout changed after approval; replacement was not performed.',
-    )
-  }
   if (input.exercises.length > MAX_LIVE_WORKOUT_EXERCISES) {
     throw new VaultCliError(
       'invalid_option',
@@ -534,7 +522,10 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
   )
   const title = requireNonEmptyText(input.name, 'Workout name is required.')
   const note = normalizeOptionalText(input.note)
-  const activityType = normalizeOptionalText(input.activityType)
+  const activityTypeOverride = normalizeOptionalText(input.activityType)
+  const activityType = activityTypeOverride
+    ? normalizeLiveWorkoutActivityType(activityTypeOverride)
+    : 'strength-training'
   const exercises = input.exercises.map((exercise, index) => {
     const setCount = exercise.setCount ?? 1
     if (
@@ -570,6 +561,30 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
     ...(note ? { sessionNote: note } : {}),
     exercises,
   })
+  const shown = active[0]!
+  if (shown.entity.id !== workoutId) {
+    if (liveWorkoutMatchesRequestedReplacement({
+      activityType,
+      explicitStartedAt: input.startedAt !== undefined,
+      note: note ?? title,
+      shown,
+      title,
+      workout,
+    })) {
+      return liveWorkoutReplacementReplayResult(shown)
+    }
+    throw new VaultCliError(
+      'invalid_operation',
+      'The confirmed workout is no longer the active live workout.',
+    )
+  }
+  const currentRevision = requireWorkoutEventRevision(shown)
+  if (currentRevision !== input.expectedRevision) {
+    throw new VaultCliError(
+      'conflict',
+      'The confirmed workout changed after approval; replacement was not performed.',
+    )
+  }
 
   return replaceStructuredWorkoutRecord({
     vault: input.vault,
@@ -580,9 +595,7 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
       source: 'manual',
       title,
       note: note ?? title,
-      activityType: activityType
-        ? normalizeLiveWorkoutActivityType(activityType)
-        : 'strength-training',
+      activityType,
       durationMinutes: elapsedDurationMinutes(
         startedAt,
         new Date().toISOString(),
@@ -590,6 +603,98 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
       workout,
     },
   })
+}
+
+function liveWorkoutMatchesRequestedReplacement(input: {
+  activityType: string
+  explicitStartedAt: boolean
+  note: string
+  shown: Awaited<ReturnType<typeof showActiveLiveWorkout>>
+  title: string
+  workout: WorkoutSession
+}): boolean {
+  let activeWorkout: WorkoutSession
+  try {
+    activeWorkout = parseShownWorkout(input.shown)
+  } catch {
+    return false
+  }
+  const activeData = input.shown.entity.data
+  if (
+    input.shown.entity.title !== input.title
+    || optionalString(activeData.source) !== 'manual'
+    || optionalString(activeData.activityType) !== input.activityType
+    || optionalString(activeData.note) !== input.note
+    || typeof activeData.distanceKm === 'number'
+  ) {
+    return false
+  }
+  if (
+    input.explicitStartedAt
+    && (
+      input.shown.entity.occurredAt !== input.workout.startedAt
+      || activeWorkout.startedAt !== input.workout.startedAt
+    )
+  ) {
+    return false
+  }
+
+  const {
+    startedAt: _activeStartedAt,
+    ...activeComparable
+  } = activeWorkout
+  const {
+    startedAt: _requestedStartedAt,
+    ...requestedComparable
+  } = input.workout
+  return JSON.stringify(activeComparable) === JSON.stringify(requestedComparable)
+}
+
+function liveWorkoutReplacementReplayResult(
+  shown: Awaited<ReturnType<typeof showActiveLiveWorkout>>,
+) {
+  const data = shown.entity.data
+  const durationMinutes = data.durationMinutes
+  if (
+    typeof durationMinutes !== 'number'
+    || !Number.isInteger(durationMinutes)
+    || durationMinutes < 1
+  ) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Workout ${shown.entity.id} has an invalid duration.`,
+    )
+  }
+  const title = requireString(
+    shown.entity.title,
+    `Workout ${shown.entity.id} is missing its title.`,
+  )
+
+  return {
+    vault: shown.vault,
+    eventId: shown.entity.id,
+    lookupId: shown.entity.id,
+    ledgerFile: requireString(
+      shown.entity.path,
+      `Workout ${shown.entity.id} is missing its ledger path.`,
+    ),
+    created: false,
+    occurredAt: requireString(
+      shown.entity.occurredAt,
+      `Workout ${shown.entity.id} is missing its occurrence time.`,
+    ),
+    kind: 'activity_session' as const,
+    title,
+    activityType: requireString(
+      data.activityType,
+      `Workout ${shown.entity.id} is missing its activity type.`,
+    ),
+    durationMinutes,
+    distanceKm: typeof data.distanceKm === 'number' ? data.distanceKm : null,
+    workout: parseShownWorkout(shown),
+    manifestFile: null,
+    note: optionalString(data.note) ?? title,
+  }
 }
 
 function requireWorkoutEventRevision(

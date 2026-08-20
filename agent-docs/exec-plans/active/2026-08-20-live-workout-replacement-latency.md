@@ -73,8 +73,10 @@ revalidates the proposal-time sole active id and revision, commits the old
 tombstone and complete new workout together, and returns the new canonical
 record for the ordinary workout-card response. Missing confirmation,
 a different or changed active workout, and multiple active workouts remain
-fail-closed. Saved-routine replacement and a combined replacement-plus-completed-
-set write are intentionally outside this patch.
+fail-closed. If hosted recovery restores the atomic commit but loses the command
+result, an identical approved replay returns the existing exact replacement
+without another event or audit write. Saved-routine replacement and a combined
+replacement-plus-completed-set write are intentionally outside this patch.
 
 ## Verification
 
@@ -122,4 +124,11 @@ set write are intentionally outside this patch.
   exercise names. The correction passes the CLI typecheck, package-shape check,
   and seven focused CLI tests, including exact ordered duplicates and a comma-
   bearing name on the sole replacement event.
-- Final ReviewGPT round 2, exact-head CI, and plan closure remain pending.
+- Final ReviewGPT round 2 found that a committed replacement restored after
+  result loss could reject the identical approved replay because the old id was
+  no longer active. The correction recognizes only an exact sole-active match,
+  returns its canonical id with `created: false`, performs no additional event
+  or audit write, and still rejects a same-title request with different exercise
+  state. The focused CLI suite also applies the captured hosted receipt to a
+  pre-commit replica before replaying the original command.
+- Final ReviewGPT round 3, exact-head CI, and plan closure remain pending.
