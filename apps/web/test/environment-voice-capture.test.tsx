@@ -78,7 +78,7 @@ const SCRIPT: EnvironmentVoiceScript = {
           aspectId: "sleep-environment",
           indicatorId: "night_temp_c",
           label: "Your bedroom temperature at night",
-          valueType: "number",
+          valueType: { kind: "number" },
         },
       ],
       focus: ["Your bedroom temperature at night"],
@@ -93,7 +93,7 @@ const SCRIPT: EnvironmentVoiceScript = {
           aspectId: "workspace",
           indicatorId: "work_mode",
           label: "Whether you work at home, an office, or both",
-          valueType: "string",
+          valueType: { kind: "text" },
         },
       ],
       focus: ["Whether you work at home, an office, or both"],
@@ -221,7 +221,7 @@ async function clickButton(window: Window, label: string) {
   const button = [...window.document.querySelectorAll("button")].find(
     (candidate) => candidate.textContent?.includes(label),
   );
-  assert.ok(button instanceof window.HTMLButtonElement, `Missing button: ${label}`);
+  assert.ok(button, `Missing button: ${label}`);
   await act(async () => {
     button.click();
     await Promise.resolve();
