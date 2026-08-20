@@ -107,6 +107,9 @@ Updated: 2026-08-20
 - Preserve runtime-owned operator-home symlink pruning before materialization;
   only the state-aware cleanup that requires a complete physical inventory
   moves after materialization.
+- Run the existing generated-delivery policy through a narrow residue entrypoint
+  before unrelated pending-input compaction and broad residue maintenance, so a
+  later best-effort failure cannot retain already-proved-terminal bytes.
 - Retain the query SQLite snapshot exception unless ReviewGPT produces stronger
   evidence. Its compressed checkpoint cost is materially smaller than its raw
   size, while the original one-vCPU measurement avoids a multi-second cold

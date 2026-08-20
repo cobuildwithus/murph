@@ -60,14 +60,18 @@ const ASSISTANT_RUNTIME_RESIDUE_RETENTION_LIMIT = 100
 const ASSISTANT_INPUT_EVENT_RETENTION_LIMIT = 1_000
 const ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 
-export interface AssistantRuntimeResiduePruneResult {
+export interface AssistantGeneratedDeliveryResiduePruneResult {
+  generatedDeliveryCleanupSkippedUntrustedOutbox: boolean
+  generatedDeliveryBytesPruned: number
+  generatedDeliveryFilesPruned: number
+}
+
+export interface AssistantRuntimeResiduePruneResult
+  extends AssistantGeneratedDeliveryResiduePruneResult {
   acceptedTurnInputJournalsPruned: number
   autoReplyEvidenceFilesPruned: number
   autoReplyEvidenceGroupsPruned: number
   autoReplyIntentProvenancePruned: number
-  generatedDeliveryCleanupSkippedUntrustedOutbox: boolean
-  generatedDeliveryBytesPruned: number
-  generatedDeliveryFilesPruned: number
   hostedMailboxInputItemMappingsPruned: number
   inputEventsPruned: number
   receiptsPruned: number
@@ -153,6 +157,46 @@ export async function pruneAssistantRuntimeResidue(input: {
         signal: input.signal,
         vault: input.vault,
       })
+    },
+    input.signal,
+  )
+  input.signal?.throwIfAborted()
+  return result
+}
+
+export async function pruneAssistantGeneratedDeliveryResidue(input: {
+  generatedDeliveryFilesQuiescent: true
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<AssistantGeneratedDeliveryResiduePruneResult> {
+  input.signal?.throwIfAborted()
+  const result = await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      input.signal?.throwIfAborted()
+      const outbox = await readOutboxInventory(
+        paths.outboxDirectory,
+        input.vault,
+        input.signal,
+      )
+      const plan = await planAssistantGeneratedDeliveryPrune({
+        outbox,
+        signal: input.signal,
+        vault: input.vault,
+      })
+      input.signal?.throwIfAborted()
+      const pruneResult = await applyAssistantGeneratedDeliveryPrunePlan({
+        plan,
+        signal: input.signal,
+        vault: input.vault,
+      })
+      return {
+        generatedDeliveryCleanupSkippedUntrustedOutbox:
+          plan.skippedUntrustedOutbox,
+        generatedDeliveryBytesPruned: pruneResult.bytesPruned,
+        generatedDeliveryFilesPruned: pruneResult.filesPruned,
+      }
     },
     input.signal,
   )

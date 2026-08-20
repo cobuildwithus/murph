@@ -1905,12 +1905,15 @@ preparation accept this ref.
 
 Cold snapshot construction first removes runtime-owned operator-home symlinks,
 then materializes every deferred skipped-inline file before state-aware
-quiescent runtime-residue cleanup. Cleanup therefore evaluates the complete
-physical generated-delivery inventory against the complete trusted outbox,
-retains exact active obligations, and removes terminal, changed, or orphaned
-files before archive planning. Materialization must not run between that
-cleanup and archive planning because it could reintroduce residue that was
-absent during validation.
+quiescent cleanup. The generated-delivery pass runs independently before
+pending-input compaction and broad assistant-residue maintenance, so unrelated
+maintenance failures cannot block a successful terminal-file deletion while
+checkpoint publication continues. It evaluates the complete physical
+generated-delivery inventory against the complete trusted outbox, retains exact
+active obligations, and removes terminal, changed, or orphaned files before
+archive planning. Materialization must not run between that cleanup and archive
+planning because it could reintroduce residue that was absent during
+validation.
 
 The producer uses the runtime path only when the same assistant turn creates a
 file for an already-established delivery obligation and calls `send_vault_file`.

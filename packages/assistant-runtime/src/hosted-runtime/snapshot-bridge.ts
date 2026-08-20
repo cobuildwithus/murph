@@ -11,6 +11,7 @@ import {
   withCanonicalWriteLock,
 } from "@murphai/core";
 import {
+  pruneAssistantGeneratedDeliveryResidue,
   pruneAssistantRuntimeResidue,
   type AssistantRuntimeResiduePruneResult,
 } from "@murphai/assistant-engine/assistant-runtime-residue";
@@ -321,6 +322,7 @@ async function createHostedWorkspaceV2Snapshot(
   let prunedRuntimeSymlinkCount = 0;
   let terminalWriteOperationPruneResult: PruneTerminalWriteOperationRecordsResult | null = null;
   let assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null = null;
+  let assistantRuntimeGeneratedDeliveryPruneFailed = false;
   let snapshotFailureObserved = false;
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
@@ -427,29 +429,29 @@ async function createHostedWorkspaceV2Snapshot(
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     try {
-      const pendingInputIds = await compactHostedUnresolvedAssistantInputIds({
-        signal: input.signal,
-        vaultRoot: input.vaultRoot,
-      });
-      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-      assistantRuntimeResiduePruneResult = await pruneAssistantRuntimeResidue({
-        generatedDeliveryFilesQuiescent: true,
-        now: new Date(),
-        pendingInputIds,
-        protectPendingProviderCleanupEvidence:
-          !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot)),
-        signal: input.signal,
-        vault: input.vaultRoot,
-      });
+      const generatedDeliveryPruneResult =
+        await pruneAssistantGeneratedDeliveryResidue({
+          generatedDeliveryFilesQuiescent: true,
+          signal: input.signal,
+          vault: input.vaultRoot,
+        });
+      assistantRuntimeResiduePruneResult = {
+        acceptedTurnInputJournalsPruned: 0,
+        autoReplyEvidenceFilesPruned: 0,
+        autoReplyEvidenceGroupsPruned: 0,
+        autoReplyIntentProvenancePruned: 0,
+        ...generatedDeliveryPruneResult,
+        hostedMailboxInputItemMappingsPruned: 0,
+        inputEventsPruned: 0,
+        receiptsPruned: 0,
+      };
       if (
-        hasAssistantRuntimeResiduePrunedFiles(
-          assistantRuntimeResiduePruneResult,
-        ) ||
-        assistantRuntimeResiduePruneResult
+        generatedDeliveryPruneResult.generatedDeliveryFilesPruned > 0 ||
+        generatedDeliveryPruneResult
           .generatedDeliveryCleanupSkippedUntrustedOutbox
       ) {
         const generatedDeliveryCleanupSkipped =
-          assistantRuntimeResiduePruneResult
+          generatedDeliveryPruneResult
             .generatedDeliveryCleanupSkippedUntrustedOutbox;
         emitHostedExecutionStructuredLog({
           component: "runner",
@@ -462,7 +464,68 @@ async function createHostedWorkspaceV2Snapshot(
           level: generatedDeliveryCleanupSkipped ? "warn" : "info",
           message: generatedDeliveryCleanupSkipped
             ? "Hosted workspace generated-delivery cleanup retained files because outbox inventory was untrusted."
-            : "Hosted workspace snapshot pruned assistant runtime residue.",
+            : "Hosted workspace snapshot pruned assistant generated-delivery residue.",
+          phase: "checkpoint",
+          userId: input.userId,
+        });
+      }
+    } catch (cleanupError) {
+      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+      assistantRuntimeGeneratedDeliveryPruneFailed = true;
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          assistantRuntimeGeneratedDeliveryPruneFailed: true,
+          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+        },
+        error: cleanupError,
+        level: "warn",
+        message: "Hosted workspace assistant generated-delivery cleanup failed.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+    try {
+      const pendingInputIds = await compactHostedUnresolvedAssistantInputIds({
+        signal: input.signal,
+        vaultRoot: input.vaultRoot,
+      });
+      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+      const runtimeResiduePruneResult = await pruneAssistantRuntimeResidue({
+        generatedDeliveryFilesQuiescent: false,
+        now: new Date(),
+        pendingInputIds,
+        protectPendingProviderCleanupEvidence:
+          !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot)),
+        signal: input.signal,
+        vault: input.vaultRoot,
+      });
+      assistantRuntimeResiduePruneResult = {
+        ...runtimeResiduePruneResult,
+        generatedDeliveryCleanupSkippedUntrustedOutbox:
+          assistantRuntimeResiduePruneResult
+            ?.generatedDeliveryCleanupSkippedUntrustedOutbox ??
+          runtimeResiduePruneResult
+            .generatedDeliveryCleanupSkippedUntrustedOutbox,
+        generatedDeliveryBytesPruned:
+          assistantRuntimeResiduePruneResult?.generatedDeliveryBytesPruned ??
+          runtimeResiduePruneResult.generatedDeliveryBytesPruned,
+        generatedDeliveryFilesPruned:
+          assistantRuntimeResiduePruneResult?.generatedDeliveryFilesPruned ??
+          runtimeResiduePruneResult.generatedDeliveryFilesPruned,
+      };
+      if (hasAssistantRuntimeResiduePrunedFiles(runtimeResiduePruneResult)) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            ...createAssistantRuntimeResiduePruneLogDetails(
+              runtimeResiduePruneResult,
+            ),
+            snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+          },
+          level: "info",
+          message: "Hosted workspace snapshot pruned assistant runtime residue.",
           phase: "checkpoint",
           userId: input.userId,
         });
@@ -809,6 +872,7 @@ async function createHostedWorkspaceV2Snapshot(
   }
 
   await writeHostedCheckpointSnapshotFinishedLog({
+    assistantRuntimeGeneratedDeliveryPruneFailed,
     assistantRuntimeResiduePruneResult,
     encryptedByteSize,
     fileCount: workspaceSnapshotFileCount,
@@ -1214,6 +1278,7 @@ function createAssistantRuntimeResiduePruneLogDetails(
 }
 
 async function writeHostedCheckpointSnapshotFinishedLog(input: {
+  assistantRuntimeGeneratedDeliveryPruneFailed: boolean;
   assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null;
   encryptedByteSize: number;
   fileCount: number;
@@ -1232,6 +1297,9 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
 }): Promise<void> {
   const redactedJson: HostedRuntimeRedactedJson = {
     ...createHostedCheckpointSnapshotRequestLogDetails(input.request),
+    ...(input.assistantRuntimeGeneratedDeliveryPruneFailed
+      ? { assistantRuntimeGeneratedDeliveryPruneFailed: true }
+      : {}),
     browserVaultReplicaState: "omitted",
     leaseCheckCount: input.leaseCheckCount,
     ...(input.prunedRuntimeSymlinkCount > 0

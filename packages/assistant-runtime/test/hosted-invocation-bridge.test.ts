@@ -1703,17 +1703,80 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     )).toBe(true);
   });
 
-  it("continues checkpoint publication when assistant runtime residue pruning fails", async () => {
+  it("prunes terminal deliveries when unrelated assistant residue cleanup fails", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
-    const pendingInputsPath = path.join(
-      vaultRoot,
-      ".runtime",
-      "operations",
-      "assistant",
-      "hosted-pending-inputs.json",
-    );
+    const terminalRef =
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/terminal.pdf`;
+    const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/active.pdf`;
+    const terminalContents = Buffer.from("terminal generated delivery\n");
+    const activeContents = Buffer.from("active generated delivery\n");
+    await mkdir(path.dirname(path.join(vaultRoot, terminalRef)), {
+      recursive: true,
+    });
+    await writeFile(path.join(vaultRoot, terminalRef), terminalContents);
+    await writeFile(path.join(vaultRoot, activeRef), activeContents);
+    const terminalIntent = await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-terminal-generated-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/pdf",
+        filename: "terminal.pdf",
+        kind: "vault_file",
+        ref: terminalRef,
+        sha256: createHash("sha256").update(terminalContents).digest("hex"),
+        sizeBytes: terminalContents.byteLength,
+      }],
+      message: "Terminal generated delivery",
+      sessionId: "session-terminal-generated-delivery",
+      threadId: "thread-terminal-generated-delivery",
+      threadIsDirect: true,
+      turnId: "turn-terminal-generated-delivery",
+      vault: vaultRoot,
+    });
+    await expect(markAssistantOutboxIntentSentById({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "terminal-generated-delivery",
+        messageLength: terminalIntent.message.length,
+        providerMessageId: "message-terminal-generated-delivery",
+        providerThreadId: "thread-terminal-generated-delivery",
+        sentAt: "2026-06-10T00:00:00.000Z",
+        target: "thread-terminal-generated-delivery",
+        targetKind: "thread",
+      },
+      intentId: terminalIntent.intentId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      deliveryConfirmationPending: false,
+      status: "sent",
+    });
+    await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-active-generated-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/pdf",
+        filename: "active.pdf",
+        kind: "vault_file",
+        ref: activeRef,
+        sha256: createHash("sha256").update(activeContents).digest("hex"),
+        sizeBytes: activeContents.byteLength,
+      }],
+      message: "Active generated delivery",
+      sessionId: "session-active-generated-delivery",
+      threadId: "thread-active-generated-delivery",
+      threadIsDirect: true,
+      turnId: "turn-active-generated-delivery",
+      vault: vaultRoot,
+    });
+    const pendingInputsRef =
+      ".runtime/operations/assistant/hosted-pending-inputs.json";
+    const pendingInputsPath = path.join(vaultRoot, pendingInputsRef);
     await mkdir(path.dirname(pendingInputsPath), { recursive: true });
     await writeFile(pendingInputsPath, "{ not-json", "utf8");
     const options = createBridgeOptions({
@@ -1725,10 +1788,75 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
 
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) => entry.relativePath === terminalRef))
+      .toBe(false);
+    expect(archiveEntries.some((entry) => entry.relativePath === activeRef))
+      .toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === pendingInputsRef))
+      .toBe(true);
+    await expectMissing(path.join(vaultRoot, terminalRef));
+    await expectPresent(path.join(vaultRoot, activeRef));
     expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === terminalContents.byteLength
+    )).toBe(true);
+  });
+
+  it("continues checkpoint publication when generated-delivery cleanup fails", async () => {
+    const vaultRoot = await createVaultRoot();
+    const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/missing.pdf`;
+    const activeContents = Buffer.from("missing active generated delivery\n");
+    await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-missing-generated-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/pdf",
+        filename: "missing.pdf",
+        kind: "vault_file",
+        ref: activeRef,
+        sha256: createHash("sha256").update(activeContents).digest("hex"),
+        sizeBytes: activeContents.byteLength,
+      }],
+      message: "Missing active generated delivery",
+      sessionId: "session-missing-generated-delivery",
+      threadId: "thread-missing-generated-delivery",
+      threadIsDirect: true,
+      turnId: "turn-missing-generated-delivery",
+      vault: vaultRoot,
+    });
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneFailed === true
+    )).toBe(true);
   });
 
   it("continues checkpoint publication when terminal write-operation pruning fails", async () => {
