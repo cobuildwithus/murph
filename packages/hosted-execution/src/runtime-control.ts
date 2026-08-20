@@ -2375,6 +2375,12 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // provider-start path. The other leaves are nested diagnostics.
   preProvider?: {
     mailboxImportDoneToAssistantPhaseMs?: number;
+    // These adjacent nested leaves exactly partition
+    // mailboxImportDoneToAssistantPhaseMs when all are present.
+    mailboxImportDoneToForegroundPassMs?: number;
+    foregroundPassToWorkspaceForegroundPassMs?: number;
+    workspaceForegroundPassToAssistantPhaseCallbackMs?: number;
+    assistantPhaseCallbackToAssistantPhaseMs?: number;
     workspaceAssistantPreAutomationMs?: number;
     automationLaneToAssistantServiceMs?: number;
     // These adjacent nested leaves exactly partition
@@ -2435,6 +2441,76 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     preProviderSetupMs?: number;
     providerPlanAndGateMs?: number;
     linqEgressGuardMs?: number;
+  };
+}
+
+export const HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS = [
+  "mailboxImportDoneToForegroundPassMs",
+  "foregroundPassToWorkspaceForegroundPassMs",
+  "workspaceForegroundPassToAssistantPhaseCallbackMs",
+  "assistantPhaseCallbackToAssistantPhaseMs",
+] as const;
+
+type HostedRuntimeMailboxToAssistantTimingSubdivision = Required<Pick<
+  NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+  (typeof HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS)[number]
+>>;
+
+export type HostedRuntimeMailboxToAssistantTimingSubdivisionInspection =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | {
+      kind: "complete";
+      subdivision: HostedRuntimeMailboxToAssistantTimingSubdivision;
+    };
+
+export function inspectHostedRuntimeMailboxToAssistantTimingSubdivision(
+  preProvider: NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+): HostedRuntimeMailboxToAssistantTimingSubdivisionInspection {
+  const {
+    assistantPhaseCallbackToAssistantPhaseMs,
+    foregroundPassToWorkspaceForegroundPassMs,
+    mailboxImportDoneToForegroundPassMs,
+    workspaceForegroundPassToAssistantPhaseCallbackMs,
+  } = preProvider;
+  if (
+    assistantPhaseCallbackToAssistantPhaseMs === undefined
+    && foregroundPassToWorkspaceForegroundPassMs === undefined
+    && mailboxImportDoneToForegroundPassMs === undefined
+    && workspaceForegroundPassToAssistantPhaseCallbackMs === undefined
+  ) {
+    return { kind: "absent" };
+  }
+  if (
+    assistantPhaseCallbackToAssistantPhaseMs === undefined
+    || foregroundPassToWorkspaceForegroundPassMs === undefined
+    || mailboxImportDoneToForegroundPassMs === undefined
+    || workspaceForegroundPassToAssistantPhaseCallbackMs === undefined
+  ) {
+    return { kind: "invalid" };
+  }
+
+  const subdivision = {
+    mailboxImportDoneToForegroundPassMs,
+    foregroundPassToWorkspaceForegroundPassMs,
+    workspaceForegroundPassToAssistantPhaseCallbackMs,
+    assistantPhaseCallbackToAssistantPhaseMs,
+  };
+  const values = Object.values(subdivision);
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    return { kind: "invalid" };
+  }
+  const sum = values.reduce<number>((total, value) => total + value, 0);
+  if (
+    !Number.isSafeInteger(sum)
+    || !Number.isSafeInteger(preProvider.mailboxImportDoneToAssistantPhaseMs)
+    || preProvider.mailboxImportDoneToAssistantPhaseMs !== sum
+  ) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "complete",
+    subdivision,
   };
 }
 
@@ -2653,6 +2729,10 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   ],
   preProvider: [
     "mailboxImportDoneToAssistantPhaseMs",
+    "mailboxImportDoneToForegroundPassMs",
+    "foregroundPassToWorkspaceForegroundPassMs",
+    "workspaceForegroundPassToAssistantPhaseCallbackMs",
+    "assistantPhaseCallbackToAssistantPhaseMs",
     "workspaceAssistantPreAutomationMs",
     "automationLaneToAssistantServiceMs",
     "automationReadinessMs",

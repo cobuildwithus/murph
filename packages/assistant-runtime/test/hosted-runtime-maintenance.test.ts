@@ -4912,6 +4912,7 @@ describe("runHostedAssistantAutomationLane", () => {
       codexAppServerThreadResumeMs: 9,
       codexAppServerWarmReuseMs: 0,
       providerStartCriticalPath: {
+        assistantPhaseCallbackToAssistantPhaseMs: 6,
         assistantServicePreLockMs: 5,
         automationCandidateScanMs: 1,
         automationCrossSessionContextMs: 0,
@@ -4926,10 +4927,13 @@ describe("runHostedAssistantAutomationLane", () => {
         automationTerminalEvidenceMs: 1,
         codexAppServerPreProviderMs: 19,
         codexProcessPreparationMs: 3,
+        foregroundPassToWorkspaceForegroundPassMs: 7,
         mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 5,
         preProviderSetupMs: 11,
         providerPlanAndGateMs: 13,
         turnLockWaitMs: 2,
+        workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
         workspaceAssistantPreAutomationMs: 17,
       },
       providerRequestOrdinal: 0,
@@ -4943,6 +4947,7 @@ describe("runHostedAssistantAutomationLane", () => {
         at: "2026-04-08T00:00:01.000Z",
         phaseBreakdown: {
           preProvider: {
+            assistantPhaseCallbackToAssistantPhaseMs: 6,
             automationCandidateScanMs: 1,
             automationCrossSessionContextMs: 0,
             automationGroupAndOperationScopeMs: 1,
@@ -4963,7 +4968,10 @@ describe("runHostedAssistantAutomationLane", () => {
             automationServiceHandoffMs: 0,
             automationSessionPreflightMs: 1,
             automationTerminalEvidenceMs: 1,
+            foregroundPassToWorkspaceForegroundPassMs: 7,
             mailboxImportDoneToAssistantPhaseMs: 29,
+            mailboxImportDoneToForegroundPassMs: 5,
+            workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
             workspaceAssistantPreAutomationMs: 17,
           },
           provider: {
@@ -5106,6 +5114,29 @@ describe("runHostedAssistantAutomationLane", () => {
     });
     await Promise.resolve();
     expect(latencyTraceRecord).toHaveBeenCalledTimes(6);
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: expect.objectContaining({
+        phaseBreakdown: expect.objectContaining({
+          preProvider: {
+            automationLaneToAssistantServiceMs: 7,
+            mailboxImportDoneToAssistantPhaseMs: 29,
+            workspaceAssistantPreAutomationMs: 17,
+          },
+        }),
+      }),
+    });
+    automationPassInput.onProviderRequestStarted?.({
+      assistantInputIds: ["input_partial_mailbox_subdivision"],
+      providerRequestOrdinal: 3,
+      providerStartCriticalPath: {
+        ...canonicalCriticalPath,
+        mailboxImportDoneToForegroundPassMs: 29,
+      },
+      source: "linq",
+      startedAt: "2026-04-08T00:00:05.000Z",
+    });
+    await Promise.resolve();
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(7);
     expect(latencyTraceRecord).toHaveBeenLastCalledWith({
       event: expect.objectContaining({
         phaseBreakdown: expect.objectContaining({

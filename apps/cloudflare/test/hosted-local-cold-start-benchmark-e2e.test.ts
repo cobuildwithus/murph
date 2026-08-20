@@ -91,6 +91,7 @@ const execFileAsync = promisify(execFile);
 interface ColdStartSample {
   acceptedToProviderMs?: number;
   acceptedToRunnerAcceptedMs?: number;
+  assistantPhaseCallbackToAssistantPhaseMs?: number;
   assistantAutoReplyBootstrapMs?: number;
   automationBootstrapMs?: number;
   archiveExtractMs?: number;
@@ -101,6 +102,9 @@ interface ColdStartSample {
   encryptedBytes?: number;
   executionTargetHydrateMs?: number;
   extractMs?: number;
+  foregroundPassToWorkspaceForegroundPassMs?: number;
+  mailboxImportDoneToAssistantPhaseMs?: number;
+  mailboxImportDoneToForegroundPassMs?: number;
   nodeStartupMs?: number;
   objectFetchMs?: number;
   preparedRestore?: boolean;
@@ -112,6 +116,7 @@ interface ColdStartSample {
   stagedToProviderMs?: number;
   systemMailboxMaintenanceMs?: number;
   workspaceReadMs?: number;
+  workspaceForegroundPassToAssistantPhaseCallbackMs?: number;
   workspaceAssistantPreAutomationMs?: number;
   workspaceRestoreDoneToStagedMs?: number;
   webhookToDeliveryMs: number;
@@ -463,6 +468,10 @@ async function runColdStartTrial(
       trace.acceptedAt,
       requireIso(trace.runnerJobAcceptedAt),
     ),
+    assistantPhaseCallbackToAssistantPhaseMs: requireTiming(
+      preProviderBreakdown?.assistantPhaseCallbackToAssistantPhaseMs,
+      "assistantPhaseCallbackToAssistantPhaseMs",
+    ),
     assistantAutoReplyBootstrapMs: elapsedEpochMs(
       requireTiming(importBreakdown?.decodeDoneAtEpochMs, "decodeDoneAtEpochMs"),
       requireTiming(
@@ -488,6 +497,18 @@ async function runColdStartTrial(
       "executionTargetHydrateMs",
     ),
     extractMs: requireTiming(restore.extractMs, "extractMs"),
+    foregroundPassToWorkspaceForegroundPassMs: requireTiming(
+      preProviderBreakdown?.foregroundPassToWorkspaceForegroundPassMs,
+      "foregroundPassToWorkspaceForegroundPassMs",
+    ),
+    mailboxImportDoneToAssistantPhaseMs: requireTiming(
+      preProviderBreakdown?.mailboxImportDoneToAssistantPhaseMs,
+      "mailboxImportDoneToAssistantPhaseMs",
+    ),
+    mailboxImportDoneToForegroundPassMs: requireTiming(
+      preProviderBreakdown?.mailboxImportDoneToForegroundPassMs,
+      "mailboxImportDoneToForegroundPassMs",
+    ),
     nodeStartupMs: requireTiming(phaseBreakdown.boot?.nodeStartupMs, "nodeStartupMs"),
     objectFetchMs: requireTiming(restore.objectFetchMs, "objectFetchMs"),
     preparedRestore: preparation.preparedSnapshotRestorePresent,
@@ -520,6 +541,10 @@ async function runColdStartTrial(
     workspaceReadMs: requireTiming(
       phaseBreakdown.orchestration?.workspaceReadElapsedMs,
       "workspaceReadElapsedMs",
+    ),
+    workspaceForegroundPassToAssistantPhaseCallbackMs: requireTiming(
+      preProviderBreakdown?.workspaceForegroundPassToAssistantPhaseCallbackMs,
+      "workspaceForegroundPassToAssistantPhaseCallbackMs",
     ),
     workspaceRestoreDoneToStagedMs: elapsedIso(
       requireIso(trace.workspaceRestoreDoneAt),
@@ -945,6 +970,7 @@ function buildSamplePercentileRecord(
   const fields = [
     "acceptedToProviderMs",
     "acceptedToRunnerAcceptedMs",
+    "assistantPhaseCallbackToAssistantPhaseMs",
     "assistantAutoReplyBootstrapMs",
     "automationBootstrapMs",
     "archiveExtractMs",
@@ -954,6 +980,9 @@ function buildSamplePercentileRecord(
     "durableRootReplaceMs",
     "executionTargetHydrateMs",
     "extractMs",
+    "foregroundPassToWorkspaceForegroundPassMs",
+    "mailboxImportDoneToAssistantPhaseMs",
+    "mailboxImportDoneToForegroundPassMs",
     "nodeStartupMs",
     "objectFetchMs",
     "presignGetMs",
@@ -964,6 +993,7 @@ function buildSamplePercentileRecord(
     "stagedToProviderMs",
     "systemMailboxMaintenanceMs",
     "workspaceAssistantPreAutomationMs",
+    "workspaceForegroundPassToAssistantPhaseCallbackMs",
     "workspaceReadMs",
     "workspaceRestoreDoneToStagedMs",
   ] as const;

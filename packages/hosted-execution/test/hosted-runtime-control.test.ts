@@ -1653,6 +1653,10 @@ describe("hosted runtime control contracts", () => {
       },
       preProvider: {
         mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 5,
+        foregroundPassToWorkspaceForegroundPassMs: 7,
+        workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
+        assistantPhaseCallbackToAssistantPhaseMs: 6,
         workspaceAssistantPreAutomationMs: 11,
         automationLaneToAssistantServiceMs: 7,
         automationReadinessMs: 1,
@@ -1774,6 +1778,17 @@ describe("hosted runtime control contracts", () => {
       { receiptScanBytesRead: -1 }, // counts must be non-negative
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
       { automationSessionPreflightMs: "2" }, // nested durations must stay numeric
+      {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 29,
+      }, // a partial mailbox-to-assistant subdivision is ambiguous
+      {
+        mailboxImportDoneToAssistantPhaseMs: 29,
+        mailboxImportDoneToForegroundPassMs: 5,
+        foregroundPassToWorkspaceForegroundPassMs: 7,
+        workspaceForegroundPassToAssistantPhaseCallbackMs: 11,
+        assistantPhaseCallbackToAssistantPhaseMs: 7,
+      }, // all mailbox-to-assistant leaves must sum exactly to their parent
       {
         automationLaneToAssistantServiceMs: 7,
         automationReadinessMs: 7,

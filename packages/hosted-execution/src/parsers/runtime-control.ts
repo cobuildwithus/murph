@@ -55,6 +55,7 @@ import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
+  inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
@@ -6276,6 +6277,10 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     );
     const parsedPreProvider = {
       ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToForegroundPassMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "foregroundPassToWorkspaceForegroundPassMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "workspaceForegroundPassToAssistantPhaseCallbackMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "assistantPhaseCallbackToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationReadinessMs", preProviderLabel),
@@ -6302,6 +6307,14 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanLockWaitMs", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "receiptScanPerformed", preProviderLabel),
     };
+    if (
+      inspectHostedRuntimeMailboxToAssistantTimingSubdivision(parsedPreProvider).kind
+        === "invalid"
+    ) {
+      throw new TypeError(
+        `${preProviderLabel} mailbox-to-assistant timing subdivision must be absent or contain all four leaves summing to mailboxImportDoneToAssistantPhaseMs`,
+      );
+    }
     if (
       inspectHostedRuntimeAutomationLaneTimingSubdivision(parsedPreProvider).kind
         === "invalid"

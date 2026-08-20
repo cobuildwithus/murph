@@ -36,7 +36,9 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS,
+  HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
+  inspectHostedRuntimeMailboxToAssistantTimingSubdivision,
   readHostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -810,6 +812,11 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
         input.providerStartCriticalPath,
       )
     : { kind: "absent" } as const;
+  const mailboxToAssistantSubdivision = input.providerStartCriticalPath
+    ? inspectHostedRuntimeMailboxToAssistantTimingSubdivision(
+        input.providerStartCriticalPath,
+      )
+    : { kind: "absent" } as const;
   const preProvider: NonNullable<
     HostedRuntimeLatencyPhaseBreakdown["preProvider"]
   > = {
@@ -824,11 +831,22 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
             : {}),
           mailboxImportDoneToAssistantPhaseMs:
             input.providerStartCriticalPath.mailboxImportDoneToAssistantPhaseMs,
+          ...(mailboxToAssistantSubdivision.kind === "complete"
+            ? mailboxToAssistantSubdivision.subdivision
+            : {}),
           workspaceAssistantPreAutomationMs:
             input.providerStartCriticalPath.workspaceAssistantPreAutomationMs,
         }
       : {}),
   };
+  if (
+    inspectHostedRuntimeMailboxToAssistantTimingSubdivision(preProvider).kind
+      === "invalid"
+  ) {
+    for (const key of HOSTED_RUNTIME_MAILBOX_TO_ASSISTANT_TIMING_SUBDIVISION_KEYS) {
+      delete preProvider[key];
+    }
+  }
   if (
     inspectHostedRuntimeAutomationLaneTimingSubdivision(preProvider).kind
       === "invalid"

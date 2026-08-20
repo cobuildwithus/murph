@@ -1420,6 +1420,23 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           async runAssistantPhase(input) {
+            if (input.providerStartCriticalPath) {
+              assert.equal(
+                typeof input.providerStartCriticalPath
+                  .foregroundPassStartedAtMonotonicMs,
+                "number",
+              );
+              assert.equal(
+                typeof input.providerStartCriticalPath
+                  .workspaceForegroundPassStartedAtMonotonicMs,
+                "number",
+              );
+              assert.equal(
+                typeof input.providerStartCriticalPath
+                  .assistantPhaseCallbackStartedAtMonotonicMs,
+                "number",
+              );
+            }
             observedCriticalPathPresence.push(
               input.providerStartCriticalPath !== null
                 && input.providerStartCriticalPath !== undefined,
