@@ -16,8 +16,8 @@ remain unhandled after their scheduled execution time.
 - Each affected workspace has a canonical runtime wake scheduled in the future.
   The runtime stores the earlier of its model-free and assistant candidates, so
   an assistant reason can legitimately win before the retained device retry.
-- The progress monitor currently ages every system-lane head from mailbox
-  creation and does not consult the workspace's canonical scheduled wake.
+- Before this correction, the progress monitor aged every system-lane head from
+  mailbox creation and did not consult the workspace's canonical scheduled wake.
 - This makes legitimate multi-hour device retries alert after fifteen minutes,
   even though the runtime has a concrete future owner and execution time.
 - A workspace wake covers only the checkpoint-imported system prefix. Applying
@@ -56,5 +56,11 @@ identifiers.
 
 - Root cause: proven from current production workspace/mailbox state and the
   progress-monitor SQL.
-- Focused tests, typecheck, ReviewGPT, CI, deploy, and post-deploy production
-  monitor proof: pending.
+- Completed locally: focused unit tests, the behavior-focused PostgreSQL cases,
+  focused ESLint, and Web typecheck.
+- The preliminary specialist's coverage findings are resolved. The complete
+  six-case PostgreSQL file passes, including 20,001 qualifying imported device
+  heads with live suffixes under an explicit 180-second statement timeout and
+  proof that PostgreSQL uses the existing mailbox lane-sequence index.
+- Final ReviewGPT, exact-head CI, deploy, and post-deploy production monitor
+  proof: pending.
