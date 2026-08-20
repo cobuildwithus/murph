@@ -195,6 +195,21 @@ export interface JunctionRefreshUserDataInput {
 type JunctionSdkProvider = DeregisterProviderUserRequest["provider"];
 type JunctionSdkOAuthProvider = BulkTriggerHistoricalPullBody["provider"];
 
+interface JunctionSdkProviderSlugRewrite {
+  from: JunctionSdkProvider;
+  to: string;
+}
+
+interface JunctionSdkProviderTransport {
+  provider: JunctionSdkProvider;
+  providerSlugRewrite?: JunctionSdkProviderSlugRewrite;
+}
+
+interface JunctionSdkOAuthProviderTransport {
+  provider: JunctionSdkOAuthProvider;
+  providerSlugRewrite?: JunctionSdkProviderSlugRewrite;
+}
+
 const JUNCTION_SDK_PROVIDERS = Object.freeze([
   "oura", "fitbit", "garmin", "whoop", "strava", "renpho", "peloton", "wahoo",
   "zwift", "freestyle_libre", "abbott_libreview", "tandem_source", "freestyle_libre_ble",
@@ -306,9 +321,29 @@ export class JunctionClient {
     signal?: AbortSignal | null;
   }): Promise<JunctionLinkToken> {
     const provider = normalizeJunctionProviderSlug(input.provider);
-    const sdkProvider = provider ? requireJunctionSdkProvider(provider) : undefined;
-    const providerFilter = input.providerFilter?.map((candidate) =>
-      requireJunctionSdkProvider(normalizeRequiredProviderSlug(candidate))
+    const providerTransport = provider
+      ? requireJunctionSdkProviderTransport(provider)
+      : undefined;
+    const sdkProvider = providerTransport?.provider;
+    const providerFilterTransports = input.providerFilter?.map((candidate) =>
+      requireJunctionSdkProviderTransport(normalizeRequiredProviderSlug(candidate))
+    );
+    const providerFilterRewrite = providerFilterTransports
+      ?.find((candidate) => candidate.providerSlugRewrite)
+      ?.providerSlugRewrite;
+    if (
+      providerFilterRewrite
+      && providerFilterTransports?.some((candidate) =>
+        candidate.provider === providerFilterRewrite.from
+        && candidate.providerSlugRewrite === undefined
+      )
+    ) {
+      throw new TypeError(
+        "Junction provider filters cannot combine a compatibility provider with its legacy transport placeholder.",
+      );
+    }
+    const providerFilter = providerFilterTransports?.map((candidate) =>
+      candidate.provider
     );
     const bodyFieldNames = ["user_id", "redirect_url"];
     if (sdkProvider) {
@@ -322,6 +357,8 @@ export class JunctionClient {
       {
         bodyFieldNames,
         endpointKind: "junction_link_token_create",
+        providerSlugRewrite:
+          providerTransport?.providerSlugRewrite ?? providerFilterRewrite,
         signal: input.signal ?? null,
       },
       (clientOptions, requestOptions) => {
@@ -427,12 +464,17 @@ export class JunctionClient {
     if (!userId) {
       throw new TypeError("Junction provider deregistration requires a Junction user id.");
     }
+    const providerTransport = requireJunctionSdkProviderTransport(providerSlug);
 
     await this.requestSdkResource<unknown>(
       "DELETE",
-      { endpointKind: "junction_user_provider_deregister", signal: input.signal ?? null },
+      {
+        endpointKind: "junction_user_provider_deregister",
+        providerSlugRewrite: providerTransport.providerSlugRewrite,
+        signal: input.signal ?? null,
+      },
       (clientOptions, requestOptions) => new UserClient(clientOptions).deregisterProvider({
-        provider: requireJunctionSdkProvider(providerSlug),
+        provider: providerTransport.provider,
         userId,
       }, requestOptions),
     );
@@ -463,11 +505,15 @@ export class JunctionClient {
   }
 
   async listProfileSummary(input: JunctionProfileSummaryInput): Promise<unknown[]> {
-    const provider = optionalJunctionSdkProvider(input.sourceProviderSlug);
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
     const payload = await this.requestSdkResource<unknown>(
       "GET",
       {
         endpointKind: "junction_summary_collection",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
         queryParameterNames: provider ? ["provider"] : [],
         signal: input.signal ?? null,
         ...(input.collectionWorkLimit
@@ -537,11 +583,15 @@ export class JunctionClient {
   }
 
   async introspectResources(input: JunctionIntrospectionInput): Promise<unknown> {
-    const provider = optionalJunctionSdkProvider(input.sourceProviderSlug);
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
     return this.requestSdkResource<unknown>(
       "GET",
       {
         endpointKind: "junction_introspect_resources",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
         queryParameterNames: ["user_id", "user_limit", ...(provider ? ["provider"] : [])],
         signal: input.signal ?? null,
       },
@@ -561,11 +611,15 @@ export class JunctionClient {
   async introspectHistoricalPull(
     input: JunctionIntrospectionInput,
   ): Promise<JunctionHistoricalPullSnapshot> {
-    const provider = optionalJunctionSdkProvider(input.sourceProviderSlug);
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
     const payload = await this.requestSdkResource<unknown>(
       "GET",
       {
         endpointKind: "junction_introspect_historical_pull",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
         queryParameterNames: ["user_id", "user_limit", ...(provider ? ["provider"] : [])],
         signal: input.signal ?? null,
       },
@@ -613,15 +667,19 @@ export class JunctionClient {
     }
 
     try {
+      const providerTransport = requireJunctionSdkOAuthProviderTransport(
+        sourceProviderSlug,
+      );
       await this.requestSdkResource<unknown>(
         "POST",
         {
           bodyFieldNames: ["provider", "user_ids"],
           endpointKind: "junction_bulk_trigger_historical_pull",
+          providerSlugRewrite: providerTransport.providerSlugRewrite,
           signal: input.signal ?? null,
         },
         (clientOptions, requestOptions) => new LinkClient(clientOptions).bulkTriggerHistoricalPull({
-          provider: requireJunctionSdkOAuthProvider(sourceProviderSlug),
+          provider: providerTransport.provider,
           userIds,
         }, requestOptions),
       );
@@ -699,7 +757,10 @@ export class JunctionClient {
 
   private requestSummaryPage(input: JunctionWindowInput, cursor: string | null): Promise<unknown> {
     const format = resolveJunctionSummaryDateQueryFormat(input);
-    const provider = optionalJunctionSdkProvider(input.sourceProviderSlug);
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
     const request: GetActivityRequest = {
       userId: input.userId,
       startDate: toDateParameter(input.windowStart, format, "start"),
@@ -718,6 +779,7 @@ export class JunctionClient {
       "GET",
       {
         endpointKind: "junction_summary_collection",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
         queryParameterNames,
         signal: input.signal ?? null,
         ...(input.collectionWorkLimit
@@ -747,7 +809,10 @@ export class JunctionClient {
   }
 
   private requestTimeseriesPage(input: JunctionWindowInput, cursor: string | null): Promise<unknown> {
-    const provider = optionalJunctionSdkProvider(input.sourceProviderSlug);
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
     const request: StepsGroupedVitalsRequest = {
       userId: input.userId,
       startDate: toDateParameter(input.windowStart, input.dateQueryFormat ?? "datetime", "start"),
@@ -769,6 +834,7 @@ export class JunctionClient {
       "GET",
       {
         endpointKind: "junction_timeseries_collection",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
         queryParameterNames,
         signal: input.signal ?? null,
       },
@@ -836,6 +902,7 @@ export class JunctionClient {
       maxAttempts?: number;
       maxResponseBytes?: number;
       optional404?: boolean;
+      providerSlugRewrite?: JunctionSdkProviderSlugRewrite;
       queryParameterNames?: readonly string[];
       signal?: AbortSignal | null;
       timeoutMs?: number;
@@ -871,8 +938,13 @@ export class JunctionClient {
       let capturedResponse: JunctionSdkResponseCapture | null = null;
       let observedOptionalNotFound = false;
       const sdkFetch: typeof fetch = async (input, init) => {
-        const response = await this.fetchImpl(input, {
-          ...init,
+        const rewrittenRequest = rewriteJunctionSdkProviderRequest(
+          input,
+          init,
+          options.providerSlugRewrite,
+        );
+        const response = await this.fetchImpl(rewrittenRequest.input, {
+          ...rewrittenRequest.init,
           signal: requestAbort.signal,
         });
         if (options.optional404 && response.status === 404) {
@@ -1329,6 +1401,58 @@ function normalizeJunctionRefreshTimeoutSeconds(value: number | null | undefined
   return Math.max(5, Math.min(60, Math.trunc(value)));
 }
 
+function rewriteJunctionSdkProviderRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  rewrite: JunctionSdkProviderSlugRewrite | undefined,
+): { init: RequestInit | undefined; input: RequestInfo | URL } {
+  if (!rewrite) {
+    return { init, input };
+  }
+
+  const url = new URL(input instanceof Request ? input.url : input.toString());
+  if (url.searchParams.get("provider") === rewrite.from) {
+    url.searchParams.set("provider", rewrite.to);
+  }
+  url.pathname = url.pathname
+    .split("/")
+    .map((segment) => segment === rewrite.from ? rewrite.to : segment)
+    .join("/");
+
+  let body = init?.body;
+  if (typeof body === "string") {
+    try {
+      const parsed = readPlainObject(JSON.parse(body));
+      if (parsed) {
+        const filterOnProviders = Array.isArray(parsed.filter_on_providers)
+          ? parsed.filter_on_providers.map((provider) =>
+              provider === rewrite.from ? rewrite.to : provider
+            )
+          : parsed.filter_on_providers;
+        if (
+          parsed.provider === rewrite.from
+          || filterOnProviders !== parsed.filter_on_providers
+        ) {
+          body = JSON.stringify({
+            ...parsed,
+            ...(parsed.provider === rewrite.from
+              ? { provider: rewrite.to }
+              : {}),
+            ...(filterOnProviders === undefined ? {} : { filter_on_providers: filterOnProviders }),
+          });
+        }
+      }
+    } catch {
+      // The generated SDK owns body validation; leave non-JSON bodies intact.
+    }
+  }
+
+  return {
+    init: body === init?.body ? init : { ...init, body },
+    input: input instanceof Request ? new Request(url, input) : url,
+  };
+}
+
 function normalizeRequiredProviderSlug(value: unknown): string {
   const provider = normalizeJunctionProviderSlug(value);
   if (!provider) {
@@ -1337,9 +1461,35 @@ function normalizeRequiredProviderSlug(value: unknown): string {
   return provider;
 }
 
-function optionalJunctionSdkProvider(value: unknown): JunctionSdkProvider | undefined {
+function optionalJunctionSdkProviderTransport(
+  value: unknown,
+): JunctionSdkProviderTransport | undefined {
   const normalized = normalizeJunctionProviderSlug(value);
-  return normalized ? requireJunctionSdkProvider(normalized) : undefined;
+  return normalized ? requireJunctionSdkProviderTransport(normalized) : undefined;
+}
+
+function requireJunctionSdkProviderTransport(
+  value: string,
+): JunctionSdkProviderTransport {
+  if (value === "google_health") {
+    return {
+      provider: "fitbit",
+      providerSlugRewrite: { from: "fitbit", to: value },
+    };
+  }
+  return { provider: requireJunctionSdkProvider(value) };
+}
+
+function requireJunctionSdkOAuthProviderTransport(
+  value: string,
+): JunctionSdkOAuthProviderTransport {
+  if (value === "google_health") {
+    return {
+      provider: "fitbit",
+      providerSlugRewrite: { from: "fitbit", to: value },
+    };
+  }
+  return { provider: requireJunctionSdkOAuthProvider(value) };
 }
 
 function requireJunctionSdkProvider(value: string): JunctionSdkProvider {

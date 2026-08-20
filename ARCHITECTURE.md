@@ -3738,3 +3738,7 @@ opaque claim. This release must converge and drain before the first claim writer
 deploys, after which it is the Web rollback floor. The operational sequence and
 removal condition are defined in
 `agent-docs/operations/stripe-effect-compatibility-cutover.md`.
+
+### Fitbit / Google Health source replacement
+
+Fitbit migration is a boundary transition inside the existing Junction connection. Importers own canonical daily/interval evidence, device-syncd owns source identities and provider calls, hosted runtime owns continuation, and Web owns the persisted connection lock and one-card projection. The public card may combine Fitbit and Pixel Watch, but stored authorities remain truthful as `fitbit` and `google_health`.

@@ -31,6 +31,7 @@ import {
   JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY,
   JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT,
   classifyJunctionSummaryNormalizationEvidence,
+  deriveJunctionCanonicalCoverageEvidence,
   identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
   JunctionSparseCalendarRepairNormalizationError,
@@ -1364,6 +1365,168 @@ test("Junction complete source days reject lossy rows before the canonical write
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+test.each([
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "daily.value_missing",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
+    row: { timestamp: "2026-04-22T07:00:00.000Z" },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "daily.value_non_numeric",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
+    row: { timestamp: "2026-04-22T07:00:00.000Z", value: "unusable" },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "daily.value_out_of_range",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
+    row: { timestamp: "2026-04-22T07:00:00.000Z", value: 150 },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "temporal.timestamp_invalid",
+    expectedTimestampKind: "invalid",
+    expectedTimestampSemantics: "unknown",
+    row: { timestamp: "not-a-timestamp", value: 97 },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "temporal.timestamp_missing_or_non_string",
+    expectedTimestampKind: "missing",
+    expectedTimestampSemantics: undefined,
+    row: { value: 97 },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "temporal.timestamp_semantics_mismatch",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "floating",
+    row: {
+      timestamp: "2026-04-22T07:00:00.000Z",
+      timestampSemantics: "floating",
+      value: 97,
+    },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "source_day.outside_authorized_day",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
+    row: { timestamp: "2026-04-23T00:30:00.000Z", value: 97 },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-03-08",
+    expectedReason: "temporal.local_time_ambiguous_or_nonexistent",
+    expectedTimestampKind: "floating",
+    expectedTimestampSemantics: "floating",
+    row: { timestamp: "2026-03-08 02:30", value: 97 },
+    timeZone: "America/Chicago",
+  },
+] as const)(
+  "Junction blood oxygen rejection exposes $expectedReason without raw health data",
+  ({
+    dayKey,
+    expectedReason,
+    expectedTimestampKind,
+    expectedTimestampSemantics,
+    row,
+    timeZone,
+  }) => {
+    assert.throws(
+      () => normalizeCompleteTemporalSourceDay({
+        importedAt: "2026-04-24T12:00:00.000Z",
+        timeseries: {
+          blood_oxygen: {
+            groups: {
+              garmin: [{
+                data: [row],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          },
+        },
+      }, dayKey, "2026-04-24T12:00:00.000Z", timeZone),
+      (error: unknown) => {
+        assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+        assert.equal(error.diagnostic.reason, expectedReason);
+        assert.equal(error.diagnostic.rowOrdinal, 1);
+        assert.equal(error.diagnostic.sourceProvider, "garmin");
+        assert.equal(error.diagnostic.timestampKind, expectedTimestampKind);
+        assert.equal(error.diagnostic.timestampSemantics, expectedTimestampSemantics);
+
+        const serializedDiagnostic = JSON.stringify(error.diagnostic);
+        assert.doesNotMatch(serializedDiagnostic, /2026-|not-a-timestamp|"value"/u);
+        if ("value" in row) {
+          assert.equal(serializedDiagnostic.includes(String(row.value)), false);
+        }
+        return true;
+      },
+    );
+  },
+);
+
+test("Junction blood oxygen rejection identifies an unresolved source without payload data", () => {
+  assert.throws(
+    () => normalizeCompleteTemporalSourceDay({
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        blood_oxygen: [{ timestamp: "2026-04-22T07:00:00.000Z", value: 97 }],
+      },
+    }, "2026-04-22"),
+    (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.deepEqual(error.diagnostic, {
+        reason: "source_context.unresolved",
+        rowOrdinal: 1,
+        timestampKind: "absolute",
+        timestampSemantics: "utc",
+      });
+      return true;
+    },
+  );
+});
+
+test.each([
+  "member-12345",
+  "person@example.test",
+  "00000000-0000-4000-8000-000000000003",
+])("Junction normalization diagnostics omit unrecognized provider text (%s)", (provider) => {
+  assert.throws(
+    () => normalizeCompleteTemporalSourceDay({
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        blood_oxygen: {
+          groups: {
+            [provider]: [{
+              data: [{ timestamp: "not-a-timestamp", value: 97 }],
+              source: { provider, type: "watch" },
+            }],
+          },
+        },
+      },
+    }, "2026-04-22"),
+    (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.diagnostic.reason, "temporal.timestamp_invalid");
+      assert.equal(error.diagnostic.sourceProvider, undefined);
+      assert.equal(JSON.stringify(error.diagnostic).includes(provider), false);
+      return true;
+    },
+  );
 });
 
 test.each([
@@ -6813,10 +6976,17 @@ test("Junction strict sparse calendar repairs reject mixed valid and malformed r
         }],
       },
     }),
-    (error: unknown) =>
-      error instanceof JunctionSparseCalendarRepairNormalizationError
-      && error.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
-      && error.retryable,
+    (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.code, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+      assert.equal(error.retryable, true);
+      assert.equal(error.diagnostic.reason, "sparse_interval.row_incomplete");
+      assert.equal(error.diagnostic.rowOrdinal, 2);
+      assert.equal(error.diagnostic.sourceProvider, "garmin");
+      assert.equal(error.diagnostic.timestampKind, "missing");
+      assert.equal(error.diagnostic.timestampSemantics, undefined);
+      return true;
+    },
   );
   await assert.rejects(
     prepareDeviceProviderSnapshotImport({
@@ -6833,7 +7003,15 @@ test("Junction strict sparse calendar repairs reject mixed valid and malformed r
         },
       },
     }),
-    JunctionSparseCalendarRepairNormalizationError,
+    (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.diagnostic.reason, "sparse_interval.row_incomplete");
+      assert.equal(error.diagnostic.rowOrdinal, 2);
+      assert.equal(error.diagnostic.sourceProvider, "garmin");
+      assert.equal(error.diagnostic.timestampKind, "absolute");
+      assert.equal(error.diagnostic.timestampSemantics, "utc");
+      return true;
+    },
   );
 
   const complete = normalizeJunctionSnapshot({
@@ -14943,4 +15121,455 @@ test("Junction normalizer ignores aggregator provider and ambiguous type provena
     sourceProviderSlug: "oura",
     sourceType: "cloud-provider",
   });
+});
+
+test("Junction migration daily coverage finalizes only after the provider-local day closes", () => {
+  const event = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+    timeZone: "America/New_York",
+  };
+  const cases = [
+    {
+      expectedFinalizedAt: undefined,
+      name: "inline accepted fact has no provider pull proof",
+      options: {},
+    },
+    {
+      expectedFinalizedAt: undefined,
+      name: "pre-close pull",
+      options: {
+        providerPulledAt: "2026-08-12T03:59:59.999Z",
+      },
+    },
+    {
+      expectedFinalizedAt: "2026-08-12T04:00:00.000Z",
+      name: "first post-close pull",
+      options: {
+        providerPulledAt: "2026-08-12T04:00:00.000Z",
+      },
+    },
+    {
+      dayKey: "2026-11-01",
+      expectedFinalizedAt: undefined,
+      name: "DST fall-back day before its 25-hour close",
+      options: {
+        providerPulledAt: "2026-11-02T04:59:59.999Z",
+      },
+    },
+    {
+      dayKey: "2026-11-01",
+      expectedFinalizedAt: "2026-11-02T05:00:00.000Z",
+      name: "DST fall-back day at close",
+      options: {
+        providerPulledAt: "2026-11-02T05:00:00.000Z",
+      },
+    },
+  ] as const;
+
+  for (const value of cases) {
+    const dayKey = "dayKey" in value ? value.dayKey : event.dayKey;
+    assert.deepEqual(
+      deriveJunctionCanonicalCoverageEvidence([{ ...event, dayKey }], value.options),
+      [{
+        coverageBoundary: dayKey,
+        ...(value.expectedFinalizedAt
+          ? { coverageFinalizedAt: value.expectedFinalizedAt }
+          : {}),
+        resource: "activity",
+        sourceProviderSlug: "fitbit",
+      }],
+      value.name,
+    );
+  }
+});
+
+test("Junction migration uses the accepted provider timezone instead of the mutable vault timezone", () => {
+  const event = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+    timeZone: "America/Los_Angeles",
+  };
+
+  for (const providerPulledAt of [
+    "2026-08-12T04:00:00.000Z",
+    "2026-08-12T05:00:00.000Z",
+    "2026-08-12T06:59:59.999Z",
+  ]) {
+    assert.deepEqual(
+      deriveJunctionCanonicalCoverageEvidence([event], {
+        providerPulledAt,
+      }),
+      [{
+        coverageBoundary: "2026-08-11",
+        resource: "activity",
+        sourceProviderSlug: "fitbit",
+      }],
+      providerPulledAt,
+    );
+  }
+
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([event], {
+      providerPulledAt: "2026-08-12T07:00:00.000Z",
+    }),
+    [{
+      coverageBoundary: "2026-08-11",
+      coverageFinalizedAt: "2026-08-12T07:00:00.000Z",
+      resource: "activity",
+      sourceProviderSlug: "fitbit",
+    }],
+  );
+});
+
+test("Junction migration resolves provider day close from IANA, offset, and conservative provenance", () => {
+  const event = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+  };
+  const evidenceAt = (
+    candidate: typeof event & {
+      dataOrigin: typeof event.dataOrigin & { timeZoneOffsetMinutes?: number | null };
+      timeZone?: string;
+    },
+    providerPulledAt: string,
+  ) => deriveJunctionCanonicalCoverageEvidence([candidate], { providerPulledAt });
+
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: -420,
+        },
+        timeZone: "America/New_York",
+      },
+      "2026-08-12T04:00:00.000Z",
+    )[0]?.coverageFinalizedAt,
+    "2026-08-12T04:00:00.000Z",
+    "The accepted IANA zone must outrank a conflicting fixed offset.",
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: -420,
+        },
+      },
+      "2026-08-12T06:59:59.999Z",
+    )[0]?.coverageFinalizedAt,
+    undefined,
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: -420,
+        },
+      },
+      "2026-08-12T07:00:00.000Z",
+    )[0]?.coverageFinalizedAt,
+    "2026-08-12T07:00:00.000Z",
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: -420,
+        },
+        timeZone: "not/a-zone",
+      },
+      "2026-08-12T07:00:00.000Z",
+    )[0]?.coverageFinalizedAt,
+    "2026-08-12T07:00:00.000Z",
+    "An invalid IANA label must fall back to the accepted provider offset.",
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: null,
+        },
+        timeZone: "not/a-zone",
+      },
+      "2026-08-12T11:59:59.999Z",
+    )[0]?.coverageFinalizedAt,
+    undefined,
+  );
+  assert.equal(
+    evidenceAt(
+      {
+        ...event,
+        dataOrigin: {
+          ...event.dataOrigin,
+          timeZoneOffsetMinutes: null,
+        },
+        timeZone: "not/a-zone",
+      },
+      "2026-08-12T12:00:00.000Z",
+    )[0]?.coverageFinalizedAt,
+    "2026-08-12T12:00:00.000Z",
+    "Date-only records converge at the existing globally closed UTC-12 boundary.",
+  );
+});
+
+test("Junction migration waits for the latest accepted provider close on one source day", () => {
+  const event = {
+    dataOrigin: { sourceProviderSlug: "fitbit" },
+    dayKey: "2026-08-11",
+    externalRef: { resourceType: "junction-fitbit-activity" },
+    kind: "observation",
+    occurredAt: "2026-08-11T00:00:00.000Z",
+  };
+  const events = [
+    { ...event, timeZone: "America/New_York" },
+    { ...event, occurredAt: "2026-08-11T01:00:00.000Z", timeZone: "America/Los_Angeles" },
+  ];
+
+  assert.equal(
+    deriveJunctionCanonicalCoverageEvidence(events, {
+      providerPulledAt: "2026-08-12T04:00:00.000Z",
+    })[0]?.coverageFinalizedAt,
+    undefined,
+  );
+  assert.equal(
+    deriveJunctionCanonicalCoverageEvidence(events, {
+      providerPulledAt: "2026-08-12T07:00:00.000Z",
+    })[0]?.coverageFinalizedAt,
+    "2026-08-12T07:00:00.000Z",
+  );
+});
+
+test("Junction canonical import keeps provider day close independent of vault timezone mutation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-provider-day-time-zone");
+  const input = {
+    provider: "junction",
+    vaultRoot,
+    snapshot: {
+      canonicalCoverageProviderPulledAt: "2026-08-12T05:00:00.000Z",
+      importedAt: "2026-08-12T05:00:00.000Z",
+      summaries: {
+        activity: [{
+          date: "2026-08-11",
+          id: "fitbit-provider-day-time-zone",
+          sourceProviderSlug: "fitbit",
+          steps: 4_000,
+          timeZone: "America/Los_Angeles",
+        }],
+      },
+      timeseries: {
+        blood_oxygen: [{
+          source: { provider: "fitbit", type: "watch" },
+          timestamp: "2026-08-11T12:00:00.000Z",
+          timeZoneOffsetMinutes: -420,
+          value: 97,
+        }],
+      },
+    },
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-08-11T00:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const beforeVaultChange = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>> & {
+        junctionCanonicalCoverage?: readonly {
+          coverageFinalizedAt?: string;
+          resource: string;
+        }[];
+      }
+    >(input, { corePort: coreRuntime });
+    assert.deepEqual(
+      beforeVaultChange.junctionCanonicalCoverage?.map((evidence) => ({
+        coverageFinalizedAt: evidence.coverageFinalizedAt,
+        resource: evidence.resource,
+      })),
+      [
+        { coverageFinalizedAt: undefined, resource: "activity" },
+        { coverageFinalizedAt: undefined, resource: "blood_oxygen" },
+      ],
+    );
+
+    await coreRuntime.updateVaultSummary({
+      timezone: "Pacific/Honolulu",
+      vaultRoot,
+    });
+    const afterVaultChange = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>> & {
+        junctionCanonicalCoverage?: readonly {
+          coverageFinalizedAt?: string;
+          resource: string;
+        }[];
+      }
+    >(
+      {
+        ...input,
+        snapshot: {
+          ...input.snapshot,
+          canonicalCoverageProviderPulledAt: "2026-08-12T07:00:00.000Z",
+          importedAt: "2026-08-12T07:00:00.000Z",
+        },
+      },
+      { corePort: coreRuntime },
+    );
+    assert.deepEqual(
+      afterVaultChange.junctionCanonicalCoverage?.map((evidence) => ({
+        coverageFinalizedAt: evidence.coverageFinalizedAt,
+        resource: evidence.resource,
+      })),
+      [
+        {
+          coverageFinalizedAt: "2026-08-12T07:00:00.000Z",
+          resource: "activity",
+        },
+        {
+          coverageFinalizedAt: "2026-08-12T07:00:00.000Z",
+          resource: "blood_oxygen",
+        },
+      ],
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("Junction migration preserves daily facts before close", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-08-12T04:00:00.000Z",
+    summaries: {
+      activity: [{
+        date: "2026-08-12",
+        id: "fitbit-day-without-time-zone",
+        sourceProviderSlug: "fitbit",
+        steps: 500,
+      }],
+    },
+  });
+
+  const activity = payload.events?.find((event) =>
+    event.externalRef?.resourceType === "junction-fitbit-activity"
+  );
+  assert.equal(activity?.dayKey, "2026-08-12");
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence(payload.events ?? [], {
+      providerPulledAt: "2026-08-12T04:00:00.000Z",
+    }),
+    [{
+      coverageBoundary: "2026-08-12",
+      resource: "activity",
+      sourceProviderSlug: "fitbit",
+    }],
+  );
+});
+
+test("Junction migration interval coverage uses the accepted canonical end", () => {
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence([{
+      dataOrigin: { sourceProviderSlug: "fitbit" },
+      endAt: "2026-08-12T10:00:00.000Z",
+      externalRef: { resourceType: "junction-fitbit-sleep" },
+      kind: "sleep_session",
+      occurredAt: "2026-08-12T02:00:00.000Z",
+    }]),
+    [{
+      coverageBoundary: "2026-08-12T10:00:00.000Z",
+      resource: "sleep",
+      sourceProviderSlug: "fitbit",
+    }],
+  );
+});
+
+test("Junction migration keeps active Fitbit facts and admits successor only after each fence", () => {
+  const payload = normalizeJunctionSnapshot({
+    canonicalCoverageFence: {
+      coverageBoundaryByResource: {
+        activity: "2026-08-11",
+        sleep: "2026-08-12T10:00:00.000Z",
+      },
+      sourceProviderSlug: "google_health",
+    },
+    canonicalCoverageProviderPulledAt: "2026-08-12T04:00:00.000Z",
+    importedAt: "2026-08-12T04:00:00.000Z",
+    summaries: {
+      activity: [
+        {
+          date: "2026-08-11",
+          id: "fitbit-closed-day",
+          sourceProviderSlug: "fitbit",
+          steps: 4000,
+        },
+        {
+          date: "2026-08-12",
+          id: "fitbit-open-day",
+          sourceProviderSlug: "fitbit",
+          steps: 500,
+        },
+        {
+          date: "2026-08-11",
+          id: "successor-equal-day",
+          sourceProviderSlug: "google_health",
+          steps: 1000,
+        },
+        {
+          date: "2026-08-12",
+          id: "successor-next-day",
+          sourceProviderSlug: "google_health",
+          steps: 2000,
+        },
+      ],
+      sleep: [
+        {
+          bedtime_start: "2026-08-12T02:00:00.000Z",
+          bedtime_stop: "2026-08-12T10:00:00.000Z",
+          duration: 28_800,
+          id: "successor-equal-session",
+          sourceProviderSlug: "google_health",
+          total: 25_200,
+        },
+        {
+          bedtime_start: "2026-08-13T02:00:00.000Z",
+          bedtime_stop: "2026-08-13T10:00:00.000Z",
+          duration: 28_800,
+          id: "successor-next-session",
+          sourceProviderSlug: "google_health",
+          total: 25_200,
+        },
+      ],
+    },
+  }, { defaultTimeZone: "America/New_York" });
+
+  const activityDays = payload.events
+    ?.filter((event) => event.externalRef?.resourceType.includes("activity"))
+    .map((event) => [event.dataOrigin?.sourceProviderSlug, event.dayKey]);
+  assert.deepEqual(activityDays, [
+    ["fitbit", "2026-08-11"],
+    ["fitbit", "2026-08-12"],
+    ["google-health", "2026-08-12"],
+  ]);
+
+  const sleepEnds = payload.events
+    ?.filter((event) => event.kind === "sleep_session")
+    .map((event) => event.fields?.endAt);
+  assert.deepEqual(sleepEnds, ["2026-08-13T10:00:00.000Z"]);
 });

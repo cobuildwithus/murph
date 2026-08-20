@@ -7491,6 +7491,14 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.deviceSyncPort!.applyUpdates(applyInput)),
             createConnectLink: (connectInput) =>
               guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
+            ...(platform.deviceSyncPort.completeFitbitMigration
+              ? {
+                  completeFitbitMigration: (cutoverInput) =>
+                    guard(() =>
+                      platform.deviceSyncPort!.completeFitbitMigration!(cutoverInput)
+                    ),
+                }
+              : {}),
             ...(platform.deviceSyncPort.reconcileAccount
               ? {
                   reconcileAccount: (reconcileInput) =>

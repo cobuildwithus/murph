@@ -882,6 +882,7 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
     createJobContext({
       account: createAccount({
         metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|omron" },
+        sources: [createSourceSummary("omron")],
       }),
     }),
     toJobRecord(backfill, 1),
@@ -949,7 +950,7 @@ test("covered Link reconnects retain the configured bounded window for ordinary 
       connectedAt: "2026-03-20T23:55:00.000Z",
       metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|omron" },
       now: callbackAt,
-      sources: [createSourceSummary("omron", "2026-03-20T23:55:00.000Z")],
+      sources: [createSourceSummary("omron", callbackAt)],
     });
 
     const context = createJobContext({ account, importedSnapshots, now: callbackAt });

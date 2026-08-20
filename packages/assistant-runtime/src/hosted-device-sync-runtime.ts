@@ -7,9 +7,11 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import {
-  areJunctionDeviceConnectProviderSlugsEquivalent,
   canonicalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionProviderSlugsDataEquivalent,
+} from "@murphai/device-syncd/junction-inline-authority";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
@@ -266,6 +268,17 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         continue;
       }
 
+      const isJunctionSource = entry.connection.provider.trim().toLowerCase()
+        === "junction";
+      const semanticLocalSource = isJunctionSource
+        ? selectHostedJunctionSource(localSources, source.sourceProviderSlug)
+        : undefined;
+      const hostedSourceEpochAdvanced = Boolean(
+        isJunctionSource
+        && semanticLocalSource
+        && Date.parse(source.firstSeenAt)
+          > Date.parse(semanticLocalSource.firstSeenAt),
+      );
       const sourceInstanceKey = resolveHostedHydrationSourceInstanceKey({
         entry,
         localSources,
@@ -273,13 +286,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         sourceInstanceKey: source.sourceInstanceKey,
       });
       const localSource = localSourcesByKey.get(sourceInstanceKey);
-      const establishedLocalSource = localSource ?? (
-        entry.connection.provider.trim().toLowerCase() === "junction"
-          ? selectHostedJunctionSource(localSources, source.sourceProviderSlug)
-          : undefined
-      );
-      const isJunctionSource = entry.connection.provider.trim().toLowerCase()
-        === "junction";
+      const establishedLocalSource = localSource ?? semanticLocalSource;
       if (
         !isJunctionSource
         && !terminalStatus
@@ -308,12 +315,16 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
             status: establishedLocalSource.status,
           }
         : null;
-      const consolidatedState = (
-        isJunctionSource
+      const shouldConsolidateHostedSource = isJunctionSource
         && localLifecycleSource
         && !terminalStatus
-        && !hostedConnectionEpochChanged
-      )
+        && !hostedConnectionEpochChanged;
+      const consolidatedState = hostedSourceEpochAdvanced
+        ? {
+            lastDataAt: source.lastDataAt,
+            lifecycleSource: source,
+          }
+        : shouldConsolidateHostedSource
         ? resolveHostedJunctionHydrationSourceState({
             hostedSource: source,
             localSource: localLifecycleSource,
@@ -353,7 +364,10 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         ...(source.lifecycleEpoch === undefined
           ? {}
           : { lifecycleEpoch: lifecycleSource.lifecycleEpoch ?? 1 }),
-        firstSeenAt: establishedLocalSource?.firstSeenAt ?? source.firstSeenAt,
+        firstSeenAt: hostedSourceEpochAdvanced
+          ? source.firstSeenAt
+          : establishedLocalSource?.firstSeenAt ?? source.firstSeenAt,
+        ...(hostedSourceEpochAdvanced ? { replaceFirstSeenAt: true } : {}),
         lastSeenAt: lifecycleSource.lastSeenAt,
         lastDataAt: consolidatedState.lastDataAt,
       });
@@ -463,10 +477,6 @@ function resolveHostedHydrationSourceInstanceKey(input: {
   return matchingSource?.sourceInstanceKey ?? input.sourceInstanceKey;
 }
 
-function areHostedJunctionSourceSlugsEquivalent(left: string, right: string): boolean {
-  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
-}
-
 function dedupeHostedHydrationConnectionSources(
   provider: string,
   sources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
@@ -476,7 +486,7 @@ function dedupeHostedHydrationConnectionSources(
   }
   return dedupeDeviceSyncSourcesByIdentity(
     sources,
-    (left, right) => areHostedJunctionSourceSlugsEquivalent(
+    (left, right) => areJunctionProviderSlugsDataEquivalent(
       left.sourceProviderSlug,
       right.sourceProviderSlug,
     ),
@@ -541,7 +551,7 @@ function selectHostedJunctionSource(
   sourceProviderSlug: string,
 ): StoredDeviceConnectionSource | undefined {
   return sources
-    .filter((source) => areHostedJunctionSourceSlugsEquivalent(
+    .filter((source) => areJunctionProviderSlugsDataEquivalent(
       source.sourceProviderSlug,
       sourceProviderSlug,
     ))
