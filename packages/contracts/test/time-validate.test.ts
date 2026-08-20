@@ -13,6 +13,8 @@ import {
   normalizeIanaTimeZone,
   normalizeStrictIsoTimestamp,
   parseDailyTime,
+  reinterpretIsoTimestampInTimeZone,
+  resolveFloatingIsoTimestampInTimeZone,
   resolveLocalDateAtNoon,
   toLocalDayKey,
 } from "../src/time.ts";
@@ -109,6 +111,49 @@ describe("time helpers", () => {
     expect(() => formatTimeZoneDateTimeParts("not-a-date", "UTC")).toThrow(
       "Invalid ISO date-time",
     );
+  });
+
+  it("resolves floating timestamps independently across timezone transitions", () => {
+    expect(
+      resolveFloatingIsoTimestampInTimeZone(
+        "2026-03-08T01:58:00+00:00",
+        "America/New_York",
+      ),
+    ).toEqual({
+      dayKey: "2026-03-08",
+      timestamp: "2026-03-08T06:58:00.000Z",
+    });
+    expect(
+      resolveFloatingIsoTimestampInTimeZone(
+        "2026-03-08T03:03:00+00:00",
+        "America/New_York",
+      ),
+    ).toEqual({
+      dayKey: "2026-03-08",
+      timestamp: "2026-03-08T07:03:00.000Z",
+    });
+    expect(
+      reinterpretIsoTimestampInTimeZone(
+        "2026-03-08T10:03:00.125Z",
+        "America/Phoenix",
+        "America/New_York",
+      ),
+    ).toEqual({
+      dayKey: "2026-03-08",
+      timestamp: "2026-03-08T07:03:00.125Z",
+    });
+    expect(
+      resolveFloatingIsoTimestampInTimeZone(
+        "2026-03-08T02:30:00+00:00",
+        "America/New_York",
+      ),
+    ).toBeNull();
+    expect(
+      resolveFloatingIsoTimestampInTimeZone(
+        "2026-11-01T01:30:00+00:00",
+        "America/New_York",
+      ),
+    ).toBeNull();
   });
 
   it("adds days across month boundaries", () => {

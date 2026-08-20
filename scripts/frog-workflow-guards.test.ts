@@ -426,6 +426,18 @@ fi
     );
     expect(normalizedBody.match(/^## Why and outcome$/gmu)).toHaveLength(1);
     expect(normalizedBody.match(/^## Evidence$/gmu)).toHaveLength(1);
+    expect(
+      normalizedBody.match(/^## Non-obvious affected surfaces$/gmu),
+    ).toHaveLength(1);
+    expect(normalizedBody.match(/^## Architecture and reuse$/gmu)).toHaveLength(
+      1,
+    );
+    expect(normalizedBody.match(/^## Hot reply path impact$/gmu)).toHaveLength(
+      1,
+    );
+    expect(
+      normalizedBody.match(/^## Murph initial provider input impact$/gmu),
+    ).toHaveLength(1);
     expect(normalizedBody.match(/^## Deployment concerns$/gmu)).toHaveLength(1);
     expect(normalizedBody.match(/^## Changelog$/gmu)).toHaveLength(1);
     expect(

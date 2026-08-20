@@ -265,6 +265,46 @@ test("browser-vault replica surfaces custom observation metrics without catalog 
   assert.equal(heightRow.sourceKind, "observation");
 });
 
+test("browser-vault metric points normalize body-composition observations", async () => {
+  const observations = [
+    ["bone-mass-percentage", 4.2, "%"],
+    ["muscle-mass-percentage", 63.4, "%"],
+    ["visceral-fat-index", 7, "index"],
+    ["body-water-percentage", 51.8, "%"],
+  ] as const;
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-05-02T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: observations.map(([metric, value, unit], index) =>
+        createEvent(`evt_body_composition_${index}`, "observation", {
+          occurredAt: `2026-05-01T0${index + 8}:00:00.000Z`,
+          title: "Junction body composition",
+          attributes: {
+            dayKey: "2026-05-01",
+            metric,
+            observationGrain: "summary",
+            source: "device",
+            unit,
+            value,
+          },
+        })
+      ),
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  for (const [metric, value, unit] of observations) {
+    const selection = client.metricSelections.get(metric);
+    assert.ok(selection);
+    assert.equal(selection.value, value);
+    assert.equal(selection.unit, unit === "%" ? "percent" : "index");
+    assert.deepEqual(client.metrics.series({ metricKey: metric }).map((point) => point.value), [value]);
+  }
+});
+
 test("browser-vault metric rows preserve same-day lab record ids for anchored experiment lookups", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-24T12:00:00.000Z",

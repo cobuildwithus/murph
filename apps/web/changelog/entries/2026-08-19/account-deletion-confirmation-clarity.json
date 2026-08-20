@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-08-19",
+  "order": 90,
+  "item": {
+    "id": "account-deletion-confirmation-clarity",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer delete-account confirmation",
+    "summary": "The phrase you have to type to delete your account now reads as a distinct value instead of repeating itself inside the empty field, and when deletion is waiting on provider access, each named provider links to its own site.",
+    "details": "Removing Murph's access happens in the provider's account, not in Murph, so the confirmation checkbox and the exact typed phrase still gate the retry.",
+    "relevanceTags": [
+      "account",
+      "privacy",
+      "settings"
+    ],
+    "sourcePullRequests": [
+      2014
+    ]
+  }
+}
